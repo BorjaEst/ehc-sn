@@ -60,27 +60,24 @@ class HierarchicalGenerativeModel(nn.Module):
         """Inference function."""
         raise NotImplementedError
 
-    def get_sequence(
-        self, items: List[Item], δ: float = 0.7  # fmt: skip
-    ) -> Sequence:
-        """Return the hidden code for sequence."""
-        if δ < 0 or δ > 1:
-            raise ValueError("The δ value should be in [0, 1].")
-        T = len(items)
-        discounted = [x * δ ** (T - t) for t, x in enumerate(items, 1)]
-        return np.array(discounted).sum(axis=0)
 
-    def p_sequence(
-        self, y: List[Sequence], pΘ: List[Callable], p: List[float]
-    ) -> float:
-        """Return the probability of sequence."""
-        probability_array = [fΘ(y) * p[k] for k, fΘ in enumerate(pΘ)]
-        return np.array(probability_array).sum(axis=0)
+def get_sequence(items: List[Item], δ: float = 0.7) -> Sequence:
+    """Return the hidden code for sequence."""
+    if δ < 0 or δ > 1:
+        raise ValueError("The δ value should be in [0, 1].")
+    T = len(items)
+    discounted = [x * δ ** (T - t) for t, x in enumerate(items, 1)]
+    return np.array(discounted).sum(axis=0)
 
-    def calculate_pΘ(
-        self, sequence: Sequence, map: Map  # fmt: skip
-    ) -> float:
-        """Calculate the probability of sequence given a map."""
-        lnpΘ = sequence @ np.log(map)
-        # Note lnp(y|Θ_k) actually proportional to y·ln(θ_k)
-        return np.exp(lnpΘ)
+
+def p_sequence(y: Sequence, Θ: dict[Map, float]) -> float:
+    """Return the probability of a sequence."""
+    a = [_p_sequence(y, θ) * p for θ, p in Θ.items()]
+    return np.array(a).sum(axis=0)
+
+
+def _p_sequence(y: Sequence, θ: Map) -> float:
+    """Calculate the probability of sequence given a map."""
+    lnpΘ = y @ np.log(θ)
+    # Note lnp(y|Θ_k) actually proportional to y·ln(θ_k)
+    return np.exp(lnpΘ)
