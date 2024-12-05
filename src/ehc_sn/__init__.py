@@ -9,9 +9,9 @@ import numpy as np
 import numpy.typing as npt
 
 # Type alias for integer space arrays
-Item = npt.NDArray[np.float32]
-Sequence = npt.NDArray[np.float32]
-Map = npt.NDArray[np.float32]
+Item = npt.NDArray[np.float32]  # Navigation Item
+Sequence = npt.NDArray[np.float32]  # Navigation Sequence
+Map = npt.NDArray[np.float32]  # Cognitive Map
 
 
 @dataclass
@@ -60,10 +60,19 @@ class HierarchicalGenerativeModel(nn.Module):
         """Inference function."""
         raise NotImplementedError
 
-    def get_sequence(self, items: Item, δ: float = 0.7) -> Sequence:
+    def get_sequence(
+        self, items: List[Item], δ: float = 0.7  # fmt: skip
+    ) -> Sequence:
         """Return the hidden code for sequence."""
         if δ < 0 or δ > 1:
             raise ValueError("The δ value should be in [0, 1].")
         T = len(items)
         discounted = [x * δ ** (T - t) for t, x in enumerate(items, 1)]
         return np.array(discounted).sum(axis=0)
+
+    def p_sequence(
+        self, y: List[Sequence], pΘ: List[Callable], p: List[float]
+    ) -> float:
+        """Return the probability of sequence."""
+        probability_array = [fΘ(y) * p[k] for k, fΘ in enumerate(pΘ)]
+        return np.array(probability_array).sum(axis=0)
