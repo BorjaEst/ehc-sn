@@ -63,7 +63,7 @@ class BaseModel:
 class HierarchicalGenerativeModel(BaseModel):
     """Model for representing hierarchical spatiotemporal data."""
 
-    def __init__(self, shape: List[int], parameters: HGModelParams):
+    def __init__(self, shape: Tuple[int], parameters: HGModelParams):
         super().__init__(parameters)
         self.ξ: Observation = np.zeros(shape, dtype=np.float32)
         self.v: Velocity = np.zeros(shape, dtype=np.float32)
