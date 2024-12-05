@@ -76,3 +76,11 @@ class HierarchicalGenerativeModel(nn.Module):
         """Return the probability of sequence."""
         probability_array = [fΘ(y) * p[k] for k, fΘ in enumerate(pΘ)]
         return np.array(probability_array).sum(axis=0)
+
+    def calculate_pΘ(
+        self, sequence: Sequence, map: Map  # fmt: skip
+    ) -> float:
+        """Calculate the probability of sequence given a map."""
+        lnpΘ = sequence @ np.log(map)
+        # Note lnp(y|Θ_k) actually proportional to y·ln(θ_k)
+        return np.exp(lnpΘ)
