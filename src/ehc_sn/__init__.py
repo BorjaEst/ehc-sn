@@ -1,9 +1,17 @@
 """Sequential Navigation (SN) module for the Entorhinal–Hippocampal circuit (EHC)"""
 
 from dataclasses import dataclass
+from typing import List, Callable
 
 import torch
 from torch import nn
+import numpy as np
+import numpy.typing as npt
+
+# Type alias for integer space arrays
+Item = npt.NDArray[np.float32]
+Sequence = npt.NDArray[np.float32]
+Map = npt.NDArray[np.float32]
 
 
 @dataclass
@@ -18,7 +26,12 @@ class HGModelParams:
 class HierarchicalGenerativeModel(nn.Module):
     """Model for representing hierarchical spatiotemporal data."""
 
-    def __init__(self, observation_size, n_maps=1, config=None):
+    def __init__(
+        self,
+        observation_size: int,
+        n_maps: int = 1,
+        config: HGModelParams | None = None,
+    ):
         """Construct for model."""
         config = config or HGModelParams()  # default params
         super().__init__()
@@ -46,3 +59,11 @@ class HierarchicalGenerativeModel(nn.Module):
     def forward(self, observation: torch.Tensor):
         """Inference function."""
         raise NotImplementedError
+
+    def get_sequence(self, items: Item, δ: float = 0.7) -> Sequence:
+        """Return the hidden code for sequence."""
+        if δ < 0 or δ > 1:
+            raise ValueError("The δ value should be in [0, 1].")
+        T = len(items)
+        discounted = [x * δ ** (T - t) for t, x in enumerate(items, 1)]
+        return np.array(discounted).sum(axis=0)
