@@ -10,7 +10,7 @@ import numpy.typing as npt
 
 # Type alias for integer space arrays
 Item = npt.NDArray[np.float32]  # Navigation Item
-Sequence = npt.NDArray[np.float32]  # Navigation Sequence
+Trajectory = npt.NDArray[np.float32]  # Navigation Trajectory
 Map = npt.NDArray[np.float32]  # Cognitive Map
 
 
@@ -19,7 +19,7 @@ class HGModelParams:
     """The param set class example for model configuration."""
 
     items_size: int = 32
-    sequences_size: int = 32
+    trajectorys_size: int = 32
     maps_size: int = 32
 
 
@@ -40,13 +40,13 @@ class HierarchicalGenerativeModel(nn.Module):
             out_features=config.items_size,
             bias=True,
         )
-        self.sequences_layer = nn.Linear(
+        self.trajectorys_layer = nn.Linear(
             in_features=config.items_size,
-            out_features=config.sequences_size,
+            out_features=config.trajectorys_size,
             bias=True,
         )
         self.maps_layer = nn.Linear(
-            in_features=config.sequences_size,
+            in_features=config.trajectorys_size,
             out_features=config.maps_size,
             bias=True,
         )
@@ -61,8 +61,8 @@ class HierarchicalGenerativeModel(nn.Module):
         raise NotImplementedError
 
 
-def get_sequence(items: List[Item], δ: float = 0.7) -> Sequence:
-    """Return the hidden code for sequence."""
+def get_trajectory(items: List[Item], δ: float = 0.7) -> Trajectory:
+    """Return the hidden code for trajectory."""
     if δ < 0 or δ > 1:
         raise ValueError("The δ value should be in [0, 1].")
     T = len(items)
@@ -70,14 +70,14 @@ def get_sequence(items: List[Item], δ: float = 0.7) -> Sequence:
     return np.array(discounted).sum(axis=0)  # Eq. (2)
 
 
-def p_sequence(y: Sequence, Θ: dict[Map, float]) -> float:
-    """Return the probability of a sequence."""
-    a = [_p_sequence(y, θ) * p for θ, p in Θ.items()]
+def p_trajectory(y: Trajectory, Θ: dict[Map, float]) -> float:
+    """Return the probability of a trajectory."""
+    a = [_p_trajectory(y, θ) * p for θ, p in Θ.items()]
     return np.array(a).sum(axis=0)  # Eq. (3)
 
 
-def _p_sequence(y: Sequence, θ: Map) -> float:
-    """Calculate the probability of sequence given a map."""
+def _p_trajectory(y: Trajectory, θ: Map) -> float:
+    """Calculate the probability of trajectory given a map."""
     lnpΘ = y @ np.log(θ)  # Eq. (5)
     # Note lnp(y|Θ_k) actually proportional to y·ln(θ_k)
     return np.exp(lnpΘ)
