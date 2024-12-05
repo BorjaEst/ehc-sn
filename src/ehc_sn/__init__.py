@@ -36,13 +36,11 @@ class HGModelParams:
 class BaseModel:
     """Base class for sequential navigation models."""
 
-    def __init__(self, shape: List[int], parameters: HGModelParams):
+    def __init__(self, parameters: HGModelParams):
         if not isinstance(parameters, HGModelParams):
             raise TypeError("Expecting instance of HGModelParams.")
         parameters.validate()  # Validate the parameters
         self.parameters = parameters
-        self.ξ: Observation = np.zeros(shape, dtype=np.float32)
-        self.v: Velocity = np.zeros(shape, dtype=np.float32)
 
     def get_trajectory(self, items: List[Item]) -> Trajectory:
         """Return the hidden code for trajectory."""
@@ -65,26 +63,35 @@ class BaseModel:
 class HierarchicalGenerativeModel(BaseModel):
     """Model for representing hierarchical spatiotemporal data."""
 
-    def p_mixing(self, y: Trajectory, Θ: MapSet) -> Tuple[MapSet, Map]:
+    def __init__(self, shape: List[int], parameters: HGModelParams):
+        super().__init__(parameters)
+        self.ξ: Observation = np.zeros(shape, dtype=np.float32)
+        self.v: Velocity = np.zeros(shape, dtype=np.float32)
+
+    def inference(
+        self, x: Item, y: Trajectory, Θ: MapSet
+    ) -> Tuple[Item, Trajectory, MapSet]:
+        """Inference function."""
+        Θ, θ = self.f_mixing(y, Θ)  # Update mixing distributions
+        x, ξ = self.f_item(x, y, θ)  # Predict the item code and observation
+        self.v, self.ξ = ξ - self.ξ, ξ  # Update v(t) and ξ(t)
+        y = self.f_trajectory(y, θ, ξ)  # Update the trajectory
+        return x, y, Θ
+
+    def f_mixing(self, y: Trajectory, Θ: MapSet) -> Tuple[MapSet, Map]:
         """Estimate the posterior mixing probability distribution."""
         τ = self.parameters.τ  # Extract parameters
         Θ = {θ: z**τ * self.likelihood(y, θ) ** (1 - τ) for θ, z in Θ.items()}
         return Θ, max(Θ, key=Θ.__getitem__)  # Eq. (6) and Eq. (7)
 
-    def p_item(self, x: Item, y: Trajectory, θ: Map) -> Tuple[Item, Observation]:
+    def f_item(self, x: Item, y: Trajectory, θ: Map) -> Tuple[Item, Observation]:
         """Estimate the posterior hidden item code."""
         c = self.parameters.c  # Extract parameters
         μ, Σ = self.ξ + c * self.v, self.v  # Using ξ(t-1) and v(t-1)
         x = np.random.normal(μ, Σ) * θ - y
         return x, np.argmax(x, axis=0)  # Eq. (8) and Eq. (9)
 
-    def inference(
-        self, x: Item, y: Trajectory, Θ: MapSet
-    ) -> Tuple[Item, Trajectory, MapSet]:
-        """Inference function."""
-        Θ, θ = self.p_mixing(y, Θ)  # Eq. (6) and Eq. (7)
-        x, ξ = self.p_item(x, y, θ)  # Eq. (8) and Eq. (9)
-        self.v, self.ξ = ξ - self.ξ, ξ  # Update v(t) and ξ(t)
-        # Third estimate the posterior of the hidden trajectory code y
-        raise NotImplementedError
-        return x, y, Θ
+    def f_trajectory(self, y: Trajectory, θ: Map, ξ: Observation) -> Trajectory:
+        """Estimate the posterior sequence code."""
+        δ = self.parameters.δ  # Extract parameters
+        return δ * y + (1 - δ) * θ + ξ  # Eq. (10)
