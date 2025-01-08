@@ -8,6 +8,12 @@ from ehc_sn import HGModelParams, HierarchicalGenerativeModel
 
 
 @pytest.fixture(scope="module")
+def alpha(request):
+    """Return the Dirichlet hyperparameters for mixing initialization."""
+    return request.param if hasattr(request, "param") else [0.1, 0.1]
+
+
+@pytest.fixture(scope="module")
 def shape(request):
     """Return the shape for the HierarchicalGenerativeModel."""
     return request.param if hasattr(request, "param") else (10,)
@@ -19,15 +25,37 @@ def parameters():
     return HGModelParams(δ=0.5, τ=0.5, c=0.5)
 
 
+@pytest.fixture(scope="module")
+def model(alpha, shape, parameters):
+    """Return the HierarchicalGenerativeModel instance."""
+    return HierarchicalGenerativeModel(alpha, shape, parameters)
+
+
 @pytest.mark.parametrize("shape", [(10,), (20,)], indirect=True)
-def test_1d_instantiation(shape, parameters):
-    """Test instantiation of the HierarchicalGenerativeModel class."""
-    model = HierarchicalGenerativeModel(shape, parameters)
-    assert model is not None
+class Test1DInstance:
+    """Test the HierarchicalGenerativeModel class for 1D data"""
+
+    def test_instantiation(self, model):
+        """Test instantiation of the HierarchicalGenerativeModel class."""
+        assert model is not None
+
+    def test_inference(self, model):
+        """Test inference using the HierarchicalGenerativeModel class."""
+        x, y = model.inference(0, [0, 1, 2, 3, 4])
+        assert x is not None
+        assert y is not None
 
 
 @pytest.mark.parametrize("shape", [(10, 6)], indirect=True)
-def test_2d_instantiation(shape, parameters):
-    """Test instantiation of the HierarchicalGenerativeModel class."""
-    model = HierarchicalGenerativeModel(shape, parameters)
-    assert model is not None
+class Test2DInstance:
+    """Test the HierarchicalGenerativeModel class for 1D data"""
+
+    def test_instantiation(self, model):
+        """Test instantiation of the HierarchicalGenerativeModel class."""
+        assert model is not None
+
+    def test_inference(self, model):
+        """Test inference using the HierarchicalGenerativeModel class."""
+        x, y = model.inference(0, [0, 1, 2, 3, 4])
+        assert x is not None
+        assert y is not None
