@@ -12,7 +12,7 @@ Velocity = npt.NDArray[np.float32]  # Velocity
 Item = npt.NDArray[np.float32]  # Navigation Item
 Trajectory = npt.NDArray[np.float32]  # Navigation Trajectory
 Map = npt.NDArray[np.float32]  # Cognitive Map
-MapSet = dict[Map, float]  # Set of cognitive maps
+MapSet = List[Tuple[Map, float]]  # Set of cognitive maps
 
 
 @dataclass
@@ -33,14 +33,14 @@ class HGModelParams:
             raise ValueError(f"c: {self.c}. Must be a float between 0 and 1.")
 
 
-class SpatiotemporalModel:
+class SpatiotemporalBases:
     """Hierarchical spatiotemporal model for sequential navigation."""
 
     def __init__(self, parameters: HGModelParams):
         if not isinstance(parameters, HGModelParams):
             raise TypeError("Expecting instance of HGModelParams.")
         parameters.validate()  # Validate the parameters
-        self.parameters = parameters
+        self.parameters = parameters  # Store the parameters
 
     def get_trajectory(self, items: List[Item]) -> Trajectory:
         """Return the hidden code for trajectory."""
@@ -60,38 +60,41 @@ class SpatiotemporalModel:
         return np.exp(lnpΘ)
 
 
-class HierarchicalInference(SpatiotemporalModel):
-    """Hierarchical inference model for sequential navigation."""
+class HierarchicalGenerativeModel(SpatiotemporalBases):
+    """Hierarchical generative model for sequential navigation."""
 
-    def __init__(self, shape: Tuple[int], parameters: HGModelParams):
+    def __init__(self, α: List[float], shape: Tuple[int], parameters: HGModelParams):
         super().__init__(parameters)
+        # Initialize prior mixing distribution using the Dirichlet distribution
+        π = np.random.dirichlet(α)  # Draw π from Dirichlet(α)
+        # Initialize map set using the Dirichlet distribution
+        self.Θ: MapSet = [(np.ones(shape) / np.prod(shape), z) for z in π]
+        # Initialize observation and velocity arrays with zeros
         self.ξ: Observation = np.zeros(shape, dtype=np.float32)
         self.v: Velocity = np.zeros(shape, dtype=np.float32)
 
-    def inference(
-        self, x: Item, y: Trajectory, Θ: MapSet
-    ) -> Tuple[Item, Trajectory, MapSet]:
+    def inference(self, x: Item, y: Trajectory) -> Tuple[Item, Trajectory]:
         """Inference function."""
-        Θ, θ = self.f_mixing(y, Θ)  # Update mixing distributions
-        x, ξ = self.f_item(x, y, θ)  # Predict the item code and observation
+        θ = self.estimate_mixing(y)  # Update mixing distributions
+        x, ξ = self.estimate_item(x, y, θ)  # Predict the item code and observation
         self.v, self.ξ = ξ - self.ξ, ξ  # Update v(t) and ξ(t)
-        y = self.f_trajectory(y, θ, ξ)  # Update the trajectory
-        return x, y, Θ
+        y = self.estimate_trajectory(y, θ, ξ)  # Update the trajectory
+        return x, y
 
-    def f_mixing(self, y: Trajectory, Θ: MapSet) -> Tuple[MapSet, Map]:
+    def estimate_mixing(self, y: Trajectory) -> Map:
         """Estimate the posterior mixing probability distribution."""
         τ = self.parameters.τ  # Extract parameters
-        Θ = {θ: z**τ * self.likelihood(y, θ) ** (1 - τ) for θ, z in Θ.items()}
-        return Θ, max(Θ, key=Θ.__getitem__)  # Eq. (6) and Eq. (7)
+        self.Θ = [(θ, z**τ * self.likelihood(y, θ) ** (1 - τ)) for θ, z in self.Θ]
+        return max(self.Θ, key=lambda item: item[1])[0]  # Eq. (6) and Eq. (7)
 
-    def f_item(self, x: Item, y: Trajectory, θ: Map) -> Tuple[Item, Observation]:
+    def estimate_item(self, x: Item, y: Trajectory, θ: Map) -> Tuple[Item, Observation]:
         """Estimate the posterior hidden item code."""
         c = self.parameters.c  # Extract parameters
         μ, Σ = self.ξ + c * self.v, self.v  # Using ξ(t-1) and v(t-1)
         x = np.random.normal(μ, Σ) * θ - y
         return x, np.argmax(x, axis=0)  # Eq. (8) and Eq. (9)
 
-    def f_trajectory(self, y: Trajectory, θ: Map, ξ: Observation) -> Trajectory:
+    def estimate_trajectory(self, y: Trajectory, θ: Map, ξ: Observation) -> Trajectory:
         """Estimate the posterior sequence code."""
         δ = self.parameters.δ  # Extract parameters
         return δ * y + (1 - δ) * θ + ξ  # Eq. (10)
