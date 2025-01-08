@@ -33,8 +33,8 @@ class HGModelParams:
             raise ValueError(f"c: {self.c}. Must be a float between 0 and 1.")
 
 
-class BaseModel:
-    """Base class for sequential navigation models."""
+class SpatiotemporalModel:
+    """Hierarchical spatiotemporal model for sequential navigation."""
 
     def __init__(self, parameters: HGModelParams):
         if not isinstance(parameters, HGModelParams):
@@ -60,8 +60,8 @@ class BaseModel:
         return np.exp(lnpΘ)
 
 
-class HierarchicalGenerativeModel(BaseModel):
-    """Model for representing hierarchical spatiotemporal data."""
+class HierarchicalInference(SpatiotemporalModel):
+    """Hierarchical inference model for sequential navigation."""
 
     def __init__(self, shape: Tuple[int], parameters: HGModelParams):
         super().__init__(parameters)
