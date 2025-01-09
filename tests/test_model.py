@@ -2,6 +2,7 @@
 
 # pylint: disable=redefined-outer-name
 
+import numpy as np
 import pytest
 
 from ehc_sn import HGModelParams, HierarchicalGenerativeModel
@@ -10,13 +11,18 @@ from ehc_sn import HGModelParams, HierarchicalGenerativeModel
 @pytest.fixture(scope="module")
 def alpha(request):
     """Return the Dirichlet hyperparameters for mixing initialization."""
-    return request.param if hasattr(request, "param") else [0.1, 0.1]
+    if hasattr(request, "param"):
+        return request.param
+    k = 3  # Number of clusters for the Dirichlet distribution
+    return np.random.rand(k)
 
 
 @pytest.fixture(scope="module")
 def shape(request):
     """Return the shape for the HierarchicalGenerativeModel."""
-    return request.param if hasattr(request, "param") else (10,)
+    if hasattr(request, "param"):
+        return request.param
+    return (10, 6)  # Default shape for the mazes
 
 
 @pytest.fixture(scope="module")
@@ -31,31 +37,40 @@ def model(alpha, shape, parameters):
     return HierarchicalGenerativeModel(alpha, shape, parameters)
 
 
-@pytest.mark.parametrize("shape", [(10,), (20,)], indirect=True)
-class Test1DInstance:
-    """Test the HierarchicalGenerativeModel class for 1D data"""
-
-    def test_instantiation(self, model):
-        """Test instantiation of the HierarchicalGenerativeModel class."""
-        assert model is not None
-
-    def test_inference(self, model):
-        """Test inference using the HierarchicalGenerativeModel class."""
-        x, y = model.inference(0, [0, 1, 2, 3, 4])
-        assert x is not None
-        assert y is not None
+@pytest.fixture(scope="function", name="ξ")
+def observation(request, shape):
+    """Return the observation input."""
+    if hasattr(request, "param"):
+        return request.param
+    default = np.zeros(shape, dtype=np.float32)  # Initialize with zeros
+    pos = np.random.randint(0, shape[0]), np.random.randint(0, shape[1])
+    default[pos] = 1.0  # Set random position to 1.0
+    return default
 
 
-@pytest.mark.parametrize("shape", [(10, 6)], indirect=True)
-class Test2DInstance:
-    """Test the HierarchicalGenerativeModel class for 1D data"""
+@pytest.fixture(scope="function", name="x")
+def item(request, shape):
+    """Return the item input."""
+    if hasattr(request, "param"):
+        return request.param
+    return np.random.rand(*shape)  # Random item code
 
-    def test_instantiation(self, model):
-        """Test instantiation of the HierarchicalGenerativeModel class."""
-        assert model is not None
 
-    def test_inference(self, model):
-        """Test inference using the HierarchicalGenerativeModel class."""
-        x, y = model.inference(0, [0, 1, 2, 3, 4])
-        assert x is not None
-        assert y is not None
+@pytest.fixture(scope="function", name="y")
+def trajectory(request, shape):
+    """Return the trajectory input."""
+    if hasattr(request, "param"):
+        return request.param
+    return np.random.rand(*shape)  # Random trajectory
+
+
+def test_instantiation(model):
+    """Test instantiation of the HierarchicalGenerativeModel class."""
+    assert model is not None
+
+
+def test_inference(model, ξ, x, y):
+    """Test inference using the HierarchicalGenerativeModel class."""
+    x, y = model(ξ, x, y)
+    assert x is not None
+    assert y is not None
