@@ -1,5 +1,6 @@
 """Utility functions and classes for EHC-SN"""
 
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 
@@ -23,3 +24,8 @@ class NeuralNetwork:
     def __call__(self, y: npt.NDArray[np.float32]) -> float:
         """Normalized likelihood of trajectory given a map."""
         return np.exp(self.__likelihood(y))
+
+    def plot(self, ax: plt.Axes):
+        """Plot the cognitive map"""
+        ax.imshow(self.map, cmap="viridis")
+        ax.set_title("Cognitive Map")
