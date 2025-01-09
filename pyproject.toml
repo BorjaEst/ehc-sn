@@ -24,3 +24,6 @@ disable = ["non-ascii-name", "invalid-name"]
 
 [tool.mypy]
 plugins = "numpy.typing.mypy_plugin"
+
+[tool.black]
+line-length = 100
