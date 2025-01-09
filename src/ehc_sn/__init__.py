@@ -6,13 +6,15 @@ from typing import List, Tuple
 import numpy as np
 import numpy.typing as npt
 
+from ehc_sn.utils import NeuralNetwork
+
 # Type alias for integer space arrays
 Observation = npt.NDArray[np.float32]  # Observation
 Velocity = npt.NDArray[np.float32]  # Velocity
 Item = npt.NDArray[np.float32]  # Navigation Item
 Trajectory = npt.NDArray[np.float32]  # Navigation Trajectory
 Map = npt.NDArray[np.float32]  # Cognitive Map
-MapSet = List[Tuple[Map, float]]  # Set of cognitive maps
+MapSet = dict[NeuralNetwork, float]  # Set of cognitive maps
 
 
 @dataclass
@@ -56,7 +58,7 @@ class SpatiotemporalBases:
     def likelihood(self, y: Trajectory, θ: Map) -> float:
         """Calculate the likelihood of trajectory given a map."""
         lnpΘ = y @ np.log(θ)  # Eq. (5)
-        # Note lnp(y|Θ_k) actually proportional to y·ln(θ_k)
+        # Note ln[p(y|Θ_k)] actually proportional to y·ln[θ_k]
         return np.exp(lnpΘ)
 
 
@@ -68,7 +70,7 @@ class HierarchicalGenerativeModel(SpatiotemporalBases):
         # Initialize prior mixing distribution using the Dirichlet distribution
         π = np.random.dirichlet(α)  # Draw π from Dirichlet(α)
         # Initialize map set using the Dirichlet distribution
-        self.Θ: MapSet = [(np.ones(shape) / np.prod(shape), z) for z in π]
+        self.Θ: MapSet = {NeuralNetwork(shape): z for z in π}
         # Initialize observation and velocity arrays with zeros
         self.ξ: Observation = np.zeros(shape, dtype=np.float32)
         self.v: Velocity = np.zeros(shape, dtype=np.float32)
