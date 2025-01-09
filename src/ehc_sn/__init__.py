@@ -13,7 +13,7 @@ Observation = npt.NDArray[np.float32]  # Observation
 Velocity = npt.NDArray[np.float32]  # Velocity
 Item = npt.NDArray[np.float32]  # Navigation Item
 Trajectory = npt.NDArray[np.float32]  # Navigation Trajectory
-Map = npt.NDArray[np.float32]  # Cognitive Map
+Map = NeuralNetwork  # Cognitive Map
 MapSet = dict[NeuralNetwork, float]  # Set of cognitive maps
 
 
@@ -35,38 +35,26 @@ class HGModelParams:
             raise ValueError(f"c: {self.c}. Must be a float between 0 and 1.")
 
 
-class SpatiotemporalBases:
-    """Hierarchical spatiotemporal model for sequential navigation."""
-
-    def __init__(self, parameters: HGModelParams):
-        if not isinstance(parameters, HGModelParams):
-            raise TypeError("Expecting instance of HGModelParams.")
-        parameters.validate()  # Validate the parameters
-        self.parameters = parameters  # Store the parameters
-
-    def get_trajectory(self, items: List[Item]) -> Trajectory:
-        """Return the hidden code for trajectory."""
-        T, δ = len(items), self.parameters.δ  # Extract parameters
-        discounted = [x * δ ** (T - t) for t, x in enumerate(items, 1)]
-        return np.array(discounted).sum(axis=0)  # Eq. (2)
-
-    def p_trajectory(self, y: Trajectory, Θ: dict[Map, float]) -> float:
-        """Return the probability of a trajectory."""
-        p_dist = [self.likelihood(y, θ) * p for θ, p in Θ.items()]
-        return np.array(p_dist).sum(axis=0)  # Eq. (3)
-
-    def likelihood(self, y: Trajectory, θ: Map) -> float:
-        """Calculate the likelihood of trajectory given a map."""
-        lnpΘ = y @ np.log(θ)  # Eq. (5)
-        # Note ln[p(y|Θ_k)] actually proportional to y·ln[θ_k]
-        return np.exp(lnpΘ)
+def get_trajectory(items: List[Item], δ: float = 0.7) -> Trajectory:
+    """Return the hidden code for trajectory."""  # Eq. (2)
+    T = len(items)  # Number of items
+    discounted = [x * δ ** (T - t) for t, x in enumerate(items, 1)]
+    return np.array(discounted).sum(axis=0)
 
 
-class HierarchicalGenerativeModel(SpatiotemporalBases):
+def p_trajectory(y: Trajectory, Θ: MapSet) -> float:
+    """Return the probability of a trajectory."""  # Eq. (3)
+    p_dist = [θ(y) * p for θ, p in Θ.items()]
+    return np.array(p_dist).sum(axis=0)
+
+
+class HierarchicalGenerativeModel:
     """Hierarchical generative model for sequential navigation."""
 
     def __init__(self, α: List[float], shape: Tuple[int], parameters: HGModelParams):
-        super().__init__(parameters)
+        # Store and validate the parameters
+        self.parameters = parameters  # Automatically validated
+        self.__shape = shape
         # Initialize prior mixing distribution using the Dirichlet distribution
         π = np.random.dirichlet(α)  # Draw π from Dirichlet(α)
         # Initialize map set using the Dirichlet distribution
@@ -75,28 +63,49 @@ class HierarchicalGenerativeModel(SpatiotemporalBases):
         self.ξ: Observation = np.zeros(shape, dtype=np.float32)
         self.v: Velocity = np.zeros(shape, dtype=np.float32)
 
-    def inference(self, x: Item, y: Trajectory) -> Tuple[Item, Trajectory]:
-        """Inference function."""
-        θ = self.estimate_mixing(y)  # Update mixing distributions
-        x, ξ = self.estimate_item(x, y, θ)  # Predict the item code and observation
+    @property
+    def parameters(self) -> HGModelParams:
+        """Return the parameters of the model."""
+        return self.__parameters
+
+    @parameters.setter
+    def parameters(self, params: HGModelParams):
+        """Set the parameters of the model."""
+        if not isinstance(params, HGModelParams):
+            raise ValueError("parameters must be instance of HGModelParams.")
+        params.validate()  # Validate the parameters
+        self.__parameters = params
+
+    @property
+    def shape(self) -> Tuple[int]:
+        """Return the shape of the model."""
+        return self.__shape
+
+    def __call__(self, ξ: Observation, x: Item, y: Trajectory) -> Tuple[Item, Trajectory]:
+        """Inference function, returns predicted next item and trajectory."""
+        self.Θ = self.estimate_mixing(y)  # Update mixing with trajectory
+        θ = max(self.Θ, key=self.Θ.__getitem__)  # Get map with max probability
+        x = self.estimate_item(θ, y)  # Predict item code
         self.v, self.ξ = ξ - self.ξ, ξ  # Update v(t) and ξ(t)
-        y = self.estimate_trajectory(y, θ, ξ)  # Update the trajectory
+        y = self.estimate_trajectory(θ, ξ, y)  # Update the trajectory
         return x, y
 
-    def estimate_mixing(self, y: Trajectory) -> Map:
-        """Estimate the posterior mixing probability distribution."""
-        τ = self.parameters.τ  # Extract parameters
-        self.Θ = [(θ, z**τ * self.likelihood(y, θ) ** (1 - τ)) for θ, z in self.Θ]
-        return max(self.Θ, key=lambda item: item[1])[0]  # Eq. (6) and Eq. (7)
+    def estimate_mixing(self, y: Trajectory) -> MapSet:
+        """Estimate posterior mixing probabilities."""  # Eq. (6) and Eq. (7)
+        τ = self.parameters.τ  # Extract exponential decay for mixing
+        return {θ: z**τ * θ(y) ** (1 - τ) for θ, z in self.Θ.items()}
 
-    def estimate_item(self, x: Item, y: Trajectory, θ: Map) -> Tuple[Item, Observation]:
-        """Estimate the posterior hidden item code."""
-        c = self.parameters.c  # Extract parameters
+    def estimate_item(self, θ: Map, y: Trajectory) -> Item:
+        """Estimate the posterior hidden item code."""  # Eq. (8) and Eq. (9)
+        c = self.parameters.c  # Extract velocity rate for item code
         μ, Σ = self.ξ + c * self.v, self.v  # Using ξ(t-1) and v(t-1)
-        x = np.random.normal(μ, Σ) * θ - y
-        return x, np.argmax(x, axis=0)  # Eq. (8) and Eq. (9)
+        return np.random.normal(μ, Σ) * θ.map - y  # Random movement probability
 
-    def estimate_trajectory(self, y: Trajectory, θ: Map, ξ: Observation) -> Trajectory:
-        """Estimate the posterior sequence code."""
+    def estimate_trajectory(self, θ: Map, ξ: Observation, y: Trajectory) -> Trajectory:
+        """Estimate the posterior sequence code."""  # Eq. (10)
         δ = self.parameters.δ  # Extract parameters
-        return δ * y + (1 - δ) * θ + ξ  # Eq. (10)
+        return δ * y + (1 - δ) * θ.map + ξ
+
+    def estimate_observation(self, x: Item) -> Observation:
+        """Estimate the posterior observation code."""
+        return np.argmax(x, axis=0)
