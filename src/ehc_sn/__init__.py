@@ -34,17 +34,17 @@ class HGModelParams:
             raise ValueError(f"c: {self.c}. Must be a float between 0 and 1.")
 
 
-# def get_trajectory(items: List[Item], δ: float = 0.7) -> Trajectory:
-#     """Return the hidden code for trajectory."""  # Eq. (2)
-#     T = len(items)  # Number of items
-#     discounted = [x * δ ** (T - t) for t, x in enumerate(items, 1)]
-#     return np.array(discounted).sum(axis=0)
+def get_trajectory(items: List[Item], δ: float = 0.7) -> Trajectory:
+    """Return the hidden code for trajectory."""  # Eq. (2)
+    T = len(items)  # Number of items
+    discounted = [x * δ ** (T - t) for t, x in enumerate(items, 1)]
+    return np.array(discounted).sum(axis=0)
 
 
-# def p_trajectory(y: Trajectory, Θ: List[CognitiveMap], z: Mixing) -> float:
-#     """Return the probability of a trajectory."""  # Eq. (3)
-#     p_dist = [θ(y) * z_i for θ, z_i in zip(Θ, z)]
-#     return np.array(p_dist).sum(axis=0)
+def p_trajectory(y: Trajectory, Θ: List[CognitiveMap], z: Mixing) -> float:
+    """Return the probability of a trajectory."""  # Eq. (3)
+    p_dist = [θ(y) * z_i for θ, z_i in zip(Θ, z)]
+    return np.array(p_dist).sum(axis=0)
 
 
 class HierarchicalGenerativeModel:
