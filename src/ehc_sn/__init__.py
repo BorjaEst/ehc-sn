@@ -6,7 +6,7 @@ from typing import List, Tuple
 import numpy as np
 import numpy.typing as npt
 
-from ehc_sn.utils import NeuralNetwork
+from ehc_sn.utils import NeuralNetwork, kronecker
 
 # Type alias for integer space arrays
 Observation = npt.NDArray[np.float32]  # Observation
@@ -81,31 +81,31 @@ class HierarchicalGenerativeModel:
         """Return the shape of the model."""
         return self.__shape
 
-    def __call__(self, ξ: Observation, x: Item, y: Trajectory) -> Tuple[Item, Trajectory]:
+    def inference(self, ξ: Observation, x: Item, y: Trajectory) -> Tuple[Item, Trajectory]:
         """Inference function, returns predicted next item and trajectory."""
-        self.Θ = self.estimate_mixing(y)  # Update mixing with trajectory
+        self.Θ = self._estimate_mixing(y)  # Update mixing with trajectory
         θ = max(self.Θ, key=self.Θ.__getitem__)  # Get map with max probability
-        x = self.estimate_item(θ, y)  # Predict item code
+        x = self._estimate_item(θ, y)  # Predict item code
         self.v, self.ξ = ξ - self.ξ, ξ  # Update v(t) and ξ(t)
-        y = self.estimate_trajectory(θ, ξ, y)  # Update the trajectory
+        y = self._estimate_trajectory(θ, ξ, y)  # Update the trajectory
         return x, y
 
-    def estimate_mixing(self, y: Trajectory) -> MapSet:
+    def _estimate_mixing(self, y: Trajectory) -> MapSet:
         """Estimate posterior mixing probabilities."""  # Eq. (6) and Eq. (7)
         τ = self.parameters.τ  # Extract exponential decay for mixing
         return {θ: z**τ * θ(y) ** (1 - τ) for θ, z in self.Θ.items()}
 
-    def estimate_item(self, θ: Map, y: Trajectory) -> Item:
+    def _estimate_item(self, θ: Map, y: Trajectory) -> Item:
         """Estimate the posterior hidden item code."""  # Eq. (8) and Eq. (9)
         c = self.parameters.c  # Extract velocity rate for item code
         μ, Σ = self.ξ + c * self.v, self.v  # Using ξ(t-1) and v(t-1)
         return np.random.normal(μ, Σ) * θ.map - y  # Random movement probability
 
-    def estimate_trajectory(self, θ: Map, ξ: Observation, y: Trajectory) -> Trajectory:
+    def _estimate_trajectory(self, θ: Map, ξ: Observation, y: Trajectory) -> Trajectory:
         """Estimate the posterior sequence code."""  # Eq. (10)
         δ = self.parameters.δ  # Extract parameters
         return δ * y + (1 - δ) * θ.map + ξ
 
-    def estimate_observation(self, x: Item) -> Observation:
+    def _estimate_observation(self, x: Item) -> Observation:
         """Estimate the posterior observation code."""
         return np.argmax(x, axis=0)
