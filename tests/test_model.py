@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from ehc_sn import HGModelParams, HierarchicalGenerativeModel
+from ehc_sn.utils import NeuralNetwork
 
 
 @pytest.fixture(scope="module")
@@ -55,6 +56,15 @@ def trajectory(request, size):
     return np.random.rand(size)  # Random trajectory
 
 
+@pytest.fixture(scope="function", name="Θ")
+def cognitive_maps(request, alpha, size):
+    """Return the cognitive maps."""
+    if hasattr(request, "param"):
+        return request.param
+    k, N = len(alpha), size
+    return [NeuralNetwork(θ=np.random.rand(N)) for _ in range(k)]
+
+
 @pytest.mark.parametrize("size", [10])
 def test_instantiation(model):
     """Test instantiation of the HierarchicalGenerativeModel class."""
@@ -62,8 +72,10 @@ def test_instantiation(model):
 
 
 @pytest.mark.parametrize("size", [10])
-def test_inference(model, ξ, x, y):
+def test_inference(model, size, ξ, x, y, Θ):
     """Test inference using the HierarchicalGenerativeModel class."""
-    x, y = model.inference(ξ, x, y)
-    assert x is not None
-    assert y is not None
+    x, y, z, k = model.inference(ξ, x, y, Θ, z=None)
+    assert isinstance(x, np.ndarray) and x.shape == (size,)
+    assert isinstance(y, np.ndarray) and y.shape == (size,)
+    assert isinstance(z, np.ndarray) and z.shape == (len(Θ),)
+    assert isinstance(k, np.int64) and 0 <= k < len(Θ)

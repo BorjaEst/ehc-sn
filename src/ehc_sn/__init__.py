@@ -1,7 +1,7 @@
 """Sequential Navigation (SN) module for the Entorhinal–Hippocampal circuit (EHC)"""
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -9,12 +9,13 @@ import numpy.typing as npt
 from ehc_sn.utils import NeuralNetwork, kronecker
 
 # Type alias for integer space arrays
-Observation = npt.NDArray[np.float32]  # Observation
-Velocity = npt.NDArray[np.float32]  # Velocity
-Item = npt.NDArray[np.float32]  # Navigation Item
-Trajectory = npt.NDArray[np.float32]  # Navigation Trajectory
+Observation = npt.NDArray[np.float64]  # Observation
+Velocity = npt.NDArray[np.float64]  # Velocity
+Item = npt.NDArray[np.float64]  # Navigation Item
+Trajectory = npt.NDArray[np.float64]  # Navigation Trajectory
 Map = NeuralNetwork  # Cognitive Map
 MapSet = dict[NeuralNetwork, float]  # Set of cognitive maps
+Mixing = npt.NDArray[np.float64]  # Mixing probabilities
 
 
 @dataclass
@@ -55,15 +56,13 @@ class HierarchicalGenerativeModel:
         # Store and validate the parameters
         if not isinstance(N, int) or N <= 0:
             raise ValueError("N must be a positive integer.")
-        self.__N = N
         self.parameters = parameters  # Automatically validated
-        # Initialize prior mixing distribution using the Dirichlet distribution
-        π = np.random.dirichlet(α)  # Draw π from Dirichlet(α)
-        # Initialize map set using the Dirichlet distribution
-        self.Θ: MapSet = {NeuralNetwork(size=N): z for z in π}
-        # Initialize observation and velocity arrays with zeros
-        self.ξ: Observation = np.zeros(N, dtype=np.float32)
-        self.v: Velocity = np.zeros(N, dtype=np.float32)
+        # Initialize mixing probabilities and structural parameters
+        self.π = np.random.dirichlet(α)  # Belief degree for each map
+        self.ρ = [np.random.dirichlet(np.ones(N)) for _ in range(len(α))]
+        # Initialize private and auxiliary variables
+        self._ξ: Observation = np.zeros(N, dtype=np.float32)
+        self._v: Velocity = np.zeros(N, dtype=np.float32)
 
     @property
     def parameters(self) -> HGModelParams:
@@ -81,26 +80,44 @@ class HierarchicalGenerativeModel:
     @property
     def shape(self) -> Tuple[int, int]:
         """Return the shape of the model (k, N)."""
-        return len(self.Θ), self.__N
+        return len(self.π), len(self.ρ[0])
 
-    def inference(self, ξ: Observation, x: Item, y: Trajectory) -> Tuple[Item, Trajectory]:
+    # @property
+    # def cognitive_maps(self) -> MapSet:
+    #     """Return a dictionary of cognitive maps."""
+    #     return {NeuralNetwork(θ): z for z, θ in zip(self.π, self.ρ)}
+
+    # @property
+    # def best(self) -> Tuple[Map, float]:
+    #     """Return the best cognitive map."""
+    #     return max(self.cognitive_maps.items(), key=lambda x: x[1])
+
+    def inference(  # pylint: disable=too-many-arguments
+        self,
+        ξ: Observation,
+        x: Item,
+        y: Trajectory,
+        Θ: List[Map],
+        z: Optional[Mixing] = None,
+    ) -> Tuple[Item, Trajectory, Mixing, np.int64]:
         """Inference function, returns predicted next item and trajectory."""
-        self.Θ = self._estimate_mixing(y)  # Update mixing with trajectory
-        θ = max(self.Θ, key=self.Θ.__getitem__)  # Get map with max probability
-        x = self._estimate_item(θ, y)  # Predict item code
-        self.v, self.ξ = ξ - self.ξ, ξ  # Update v(t) and ξ(t)
-        y = self._estimate_trajectory(θ, ξ, y)  # Update the trajectory
-        return x, y
+        # Update mixing probabilities or use the provided ones
+        z = self.π if z is None else self._estimate_mixing(z, y, Θ)
+        k = np.argmax(z)  # Get the best map index
+        x = self._estimate_item(Θ[k], y)  # Predict item code
+        self._v, self._ξ = ξ - self._ξ, ξ  # Update v(t) and ξ(t)
+        y = self._estimate_trajectory(Θ[k], ξ, y)  # Update the trajectory
+        return x, y, z, k
 
-    def _estimate_mixing(self, y: Trajectory) -> MapSet:
+    def _estimate_mixing(self, z: Mixing, y: Trajectory, Θ: List[Map]) -> Mixing:
         """Estimate posterior mixing probabilities."""  # Eq. (6) and Eq. (7)
         τ = self.parameters.τ  # Extract exponential decay for mixing
-        return {θ: z**τ * θ(y) ** (1 - τ) for θ, z in self.Θ.items()}
+        return np.array([z_i**τ * θ(y) ** (1 - τ) for θ, z_i in zip(Θ, z)])
 
     def _estimate_item(self, θ: Map, y: Trajectory) -> Item:
         """Estimate the posterior hidden item code."""  # Eq. (8) and Eq. (9)
         c = self.parameters.c  # Extract velocity rate for item code
-        μ, Σ = self.ξ + c * self.v, self.v  # Using ξ(t-1) and v(t-1)
+        μ, Σ = self._ξ + c * self._v, self._v  # Using ξ(t-1) and v(t-1)
         return np.random.normal(μ, Σ) * θ.map - y  # Random movement probability
 
     def _estimate_trajectory(self, θ: Map, ξ: Observation, y: Trajectory) -> Trajectory:
