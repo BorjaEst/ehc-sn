@@ -51,17 +51,19 @@ def p_trajectory(y: Trajectory, Θ: MapSet) -> float:
 class HierarchicalGenerativeModel:
     """Hierarchical generative model for sequential navigation."""
 
-    def __init__(self, α: List[float], shape: Tuple[int], parameters: HGModelParams):
+    def __init__(self, α: List[float], N: int, parameters: HGModelParams):
         # Store and validate the parameters
+        if not isinstance(N, int) or N <= 0:
+            raise ValueError("N must be a positive integer.")
+        self.__N = N
         self.parameters = parameters  # Automatically validated
-        self.__shape = shape
         # Initialize prior mixing distribution using the Dirichlet distribution
         π = np.random.dirichlet(α)  # Draw π from Dirichlet(α)
         # Initialize map set using the Dirichlet distribution
-        self.Θ: MapSet = {NeuralNetwork(shape): z for z in π}
+        self.Θ: MapSet = {NeuralNetwork(size=N): z for z in π}
         # Initialize observation and velocity arrays with zeros
-        self.ξ: Observation = np.zeros(shape, dtype=np.float32)
-        self.v: Velocity = np.zeros(shape, dtype=np.float32)
+        self.ξ: Observation = np.zeros(N, dtype=np.float32)
+        self.v: Velocity = np.zeros(N, dtype=np.float32)
 
     @property
     def parameters(self) -> HGModelParams:
@@ -77,9 +79,9 @@ class HierarchicalGenerativeModel:
         self.__parameters = params
 
     @property
-    def shape(self) -> Tuple[int]:
-        """Return the shape of the model."""
-        return self.__shape
+    def shape(self) -> Tuple[int, int]:
+        """Return the shape of the model (k, N)."""
+        return len(self.Θ), self.__N
 
     def inference(self, ξ: Observation, x: Item, y: Trajectory) -> Tuple[Item, Trajectory]:
         """Inference function, returns predicted next item and trajectory."""
