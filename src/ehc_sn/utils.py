@@ -4,21 +4,16 @@ import numpy as np
 import numpy.typing as npt
 
 
-class CognitiveMap:
+class CognitiveMap:  # pylint: disable=too-few-public-methods
     """Neural Network class for EHC-SN"""
 
     def __init__(self, θ: npt.NDArray[np.float64]):
         # Initialize the synaptic weights (structural parameters)
         self.θ: npt.NDArray[np.float64] = θ  # Cat(ρ) == ρ
 
-    @property
-    def map(self):
-        """Cognitive map representation"""  # w_i = ln[θ_i]
-        return np.exp(self.θ)
-
     def __likelihood(self, y: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        # Note ln[p(y|Θ_k)] actually proportional to y·ln[θ_k] = y·w
-        return y @ self.θ  # Eq. (5)
+        # Note ln[p(y|Θ_k)] actually proportional to y·ln[θ_k]
+        return y @ np.log(self.θ)  # Eq. (5)
 
     def __call__(self, y: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         """Normalized likelihood of trajectory given a map."""
