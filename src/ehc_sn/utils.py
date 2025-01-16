@@ -4,7 +4,7 @@ import numpy as np
 import numpy.typing as npt
 
 
-class NeuralNetwork:
+class CognitiveMap:
     """Neural Network class for EHC-SN"""
 
     def __init__(self, θ: npt.NDArray[np.float64]):
@@ -25,7 +25,7 @@ class NeuralNetwork:
         return np.exp(self.__likelihood(y))
 
 
-def kronecker(ξ: int, N: int) -> npt.NDArray[np.bool_]:
+def kronecker(ξ: np.int64, N: int) -> npt.NDArray[np.bool_]:
     """Return the Kronecker delta matrix."""
     Δ = np.zeros([N] * 2, dtype=np.bool_)
     Δ[ξ, ξ] = True
