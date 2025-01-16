@@ -29,3 +29,10 @@ class NeuralNetwork:
         """Plot the cognitive map"""
         ax.imshow(self.map, cmap="viridis")
         ax.set_title("Cognitive Map")
+
+
+def kronecker(ξ, N):
+    """Return the Kronecker delta matrix."""
+    Δ = np.zeros([N] * 2)
+    Δ[ξ, ξ] = 1
+    return Δ
