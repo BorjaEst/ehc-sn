@@ -14,6 +14,9 @@ Velocity = npt.NDArray[np.float64]  # Velocity
 Item = npt.NDArray[np.float64]  # Navigation Item
 Trajectory = npt.NDArray[np.float64]  # Navigation Trajectory
 Mixing = npt.NDArray[np.float64]  # Mixing probabilities
+PrioritizedMap = CognitiveMap  # Prioritized cognitive map
+PriorMixing = npt.NDArray[np.float64]  # Prioritized mixing probabilities
+PriorMaps = List[npt.NDArray[np.float64]]  # Prioritized cognitive maps
 
 
 @dataclass
@@ -137,26 +140,26 @@ class HierarchicalGenerativeModel:
         δ = self.parameters.δ  # Extract parameters
         return δ * y + θ * (1 - δ) + ξ
 
-    def learning(
+    def learning(  # pylint: disable=too-many-arguments
         self,
         episode: List[List[Observation]],
         γ: float = 0.01,
         λ: float = 0.1,
-    ) -> Tuple[
-        npt.NDArray[np.float64],
-        List[npt.NDArray[np.float64]],
-        List[CognitiveMap],
-    ]:
+    ) -> List[PrioritizedMap]:
         """Learning function for the model."""
         _, N = self.shape  # Get the number of items
         z = None  # Initialize mixing probabilities
         for sequence in episode:
-            Θ = [CognitiveMap(θ) for θ in self.ρ]  # Initialize cognitive maps
-            x, y = np.zeros(N), np.zeros(N)
+            Θ = self.maps_inference()  # Priority maps
+            x, y = np.zeros(N), np.zeros(N)  # First item and trajectory
             for ξ in sequence:
                 x, y, z, k = self.inference(ξ, x, y, Θ, z)
                 self.π[k] = (1 - γ) * self.π[k] + z[k]  # Eq. (11)
                 self.ρ[k] = self.ρ[k] + z[k] * y  # Eq. (12)
                 ξ_i = np.argmax(ξ)  # Get the observation index
                 Θ[k].θ = (1 - λ) * Θ[k].θ - kronecker(ξ_i, N) @ np.log(x)  # Eq. (13)
-        return self.π, self.ρ, Θ
+        return Θ  # Return the updated prioritized maps
+
+    def maps_inference(self):
+        """Generates a list of CognitiveMap instances."""
+        return [CognitiveMap(θ) for θ in self.ρ]  # Priority maps
