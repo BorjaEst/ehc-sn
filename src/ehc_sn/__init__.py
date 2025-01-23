@@ -34,17 +34,24 @@ class HGModelParams:
             raise ValueError(f"c: {self.c}. Must be a float between 0 and 1.")
 
 
-def get_trajectory(items: List[Item], δ: float = 0.7) -> Trajectory:
-    """Return the hidden code for trajectory."""  # Eq. (2)
+def get_trajectory(items: List[Item], δ: float = 0.7) -> Trajectory:  # Eq. (2)
+    """Return the hidden code for trajectory."""
     T = len(items)  # Number of items
     discounted = [x * δ ** (T - t) for t, x in enumerate(items, 1)]
     return np.array(discounted).sum(axis=0)
 
 
-def p_trajectory(y: Trajectory, Θ: List[CognitiveMap], z: Mixing) -> float:
-    """Return the probability of a trajectory."""  # Eq. (3)
+def prob_trajectory(  # Eq. (3)
+    y: Trajectory, Θ: List[CognitiveMap], z: Mixing
+) -> float:
+    """Return the probability of a trajectory."""
     p_dist = [θ(y) * z_i for θ, z_i in zip(Θ, z)]
     return np.array(p_dist).sum(axis=0)
+
+
+def pred_observation(x: Item) -> Observation:  # Eq. (9)
+    """Return the predicted observation code."""
+    return (x * np.eye(x.size))[x.argmax()]
 
 
 class HierarchicalGenerativeModel:
@@ -60,7 +67,6 @@ class HierarchicalGenerativeModel:
         self.ρ = [np.random.dirichlet(np.ones(N)) for _ in range(len(α))]
         # Initialize private and auxiliary variables
         self._ξ: Observation = np.zeros(N, dtype=np.float32)
-        self._v: Velocity = np.zeros(N, dtype=np.float32)
 
     @property
     def parameters(self) -> HGModelParams:
@@ -92,9 +98,9 @@ class HierarchicalGenerativeModel:
 
     def inference(  # pylint: disable=too-many-arguments
         self,
-        ξ: Observation,
-        x: Item,
-        y: Trajectory,
+        ξ: Observation,  # ξ(t-1)
+        x: Item,  # x(t-1)  TODO: This variable seems to not be used
+        y: Trajectory,  # y(t-1)
         Θ: List[CognitiveMap],
         z: Optional[Mixing] = None,
     ) -> Tuple[Item, Trajectory, Mixing, np.int64]:
@@ -102,34 +108,34 @@ class HierarchicalGenerativeModel:
         # Update mixing probabilities or use the provided ones
         z = self.π if z is None else self._estimate_mixing(z, y, Θ)
         k = np.argmax(z)  # Get the best map index
-        x = self._estimate_item(Θ[k], y)  # Predict item code
-        self._v, self._ξ = ξ - self._ξ, ξ  # Update v(t) and ξ(t)
-        y = self._estimate_trajectory(Θ[k], ξ, y)  # Update the trajectory
+        x = self._estimate_item(ξ, y, Θ[k])  # Predict item code
+        # TODO: Check: ξ = pred_observation(x)  # Predict the next observation
+        y = self._estimate_trajectory(ξ, y, Θ[k])  # Update the trajectory
         return x, y, z, k
 
-    def _estimate_mixing(
+    def _estimate_mixing(  # Eq. (6) and Eq. (7)
         self, z: Mixing, y: Trajectory, Θ: List[CognitiveMap]
     ) -> Mixing:
-        """Estimate posterior mixing probabilities."""  # Eq. (6) and Eq. (7)
+        """Estimate posterior mixing probabilities."""
         τ = self.parameters.τ  # Extract exponential decay for mixing
         return np.array([z_i**τ * θ(y) ** (1 - τ) for θ, z_i in zip(Θ, z)])
 
-    def _estimate_item(self, θ: CognitiveMap, y: Trajectory) -> Item:
-        """Estimate the posterior hidden item code."""  # Eq. (8) and Eq. (9)
+    def _estimate_item(  # Eq. (8) and Eq. (9)
+        self, ξ: Observation, y: Trajectory, θ: CognitiveMap
+    ) -> Item:
+        """Estimate the posterior hidden item code."""
         c = self.parameters.c  # Extract velocity rate for item code
-        μ, Σ = self._ξ + c * self._v, self._v  # Using ξ(t-1) and v(t-1)
-        return np.random.normal(μ, Σ) * θ.map - y  # Random movement probability
+        v = ξ - self._ξ  # velocity v(t-1) = ξ(t-1) - ξ(t-2)
+        μ, Σ = ξ + c * v, v  # Using ξ(t-1) and v(t-1)
+        self._ξ = ξ  # Update the observation code
+        return θ * np.random.normal(μ, abs(Σ)) - y  # Random movement probability
 
-    def _estimate_trajectory(
-        self, θ: CognitiveMap, ξ: Observation, y: Trajectory
+    def _estimate_trajectory(  # Eq. (10)
+        self, ξ: Observation, y: Trajectory, θ: CognitiveMap
     ) -> Trajectory:
-        """Estimate the posterior sequence code."""  # Eq. (10)
+        """Estimate the posterior sequence code."""
         δ = self.parameters.δ  # Extract parameters
-        return δ * y + (1 - δ) * θ.map + ξ
-
-    def _estimate_observation(self, x: Item) -> Observation:
-        """Estimate the posterior observation code."""
-        return np.argmax(x, axis=0)
+        return δ * y + θ * (1 - δ) + ξ
 
     def learning(
         self,
@@ -142,15 +148,15 @@ class HierarchicalGenerativeModel:
         List[CognitiveMap],
     ]:
         """Learning function for the model."""
-        K, N = self.shape
-        z = np.zeros(K)  # Initialize mixing probabilities
+        _, N = self.shape  # Get the number of items
+        z = None  # Initialize mixing probabilities
         for sequence in episode:
             Θ = [CognitiveMap(θ) for θ in self.ρ]  # Initialize cognitive maps
             x, y = np.zeros(N), np.zeros(N)
             for ξ in sequence:
                 x, y, z, k = self.inference(ξ, x, y, Θ, z)
-                self.π[k] = (1 - γ) * self.π[k] + z  # Eq. (11)
+                self.π[k] = (1 - γ) * self.π[k] + z[k]  # Eq. (11)
                 self.ρ[k] = self.ρ[k] + z[k] * y  # Eq. (12)
                 ξ_i = np.argmax(ξ)  # Get the observation index
-                Θ[k].θ = (1 - λ) * Θ[k].θ - kronecker(ξ_i, N) * np.log(x)  # Eq. (13)
+                Θ[k].θ = (1 - λ) * Θ[k].θ - kronecker(ξ_i, N) @ np.log(x)  # Eq. (13)
         return self.π, self.ρ, Θ

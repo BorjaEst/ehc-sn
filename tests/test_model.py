@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from ehc_sn import HGModelParams, HierarchicalGenerativeModel
-from ehc_sn.utils import NeuralNetwork
+from ehc_sn.utils import CognitiveMap
 
 
 @pytest.fixture(scope="module")
@@ -62,7 +62,7 @@ def cognitive_maps(request, alpha, size):
     if hasattr(request, "param"):
         return request.param
     k, N = len(alpha), size
-    return [NeuralNetwork(θ=np.random.rand(N)) for _ in range(k)]
+    return [CognitiveMap(θ=np.random.rand(N)) for _ in range(k)]
 
 
 @pytest.mark.parametrize("size", [10])
@@ -79,3 +79,16 @@ def test_inference(model, size, ξ, x, y, Θ):
     assert isinstance(y, np.ndarray) and y.shape == (size,)
     assert isinstance(z, np.ndarray) and z.shape == (len(Θ),)
     assert isinstance(k, np.int64) and 0 <= k < len(Θ)
+
+
+@pytest.mark.parametrize("episode", [np.random.rand(2, 6, 10)])
+@pytest.mark.parametrize("size", [10])
+def test_learning(model, episode, size, alpha):
+    """Test learning using the HierarchicalGenerativeModel class."""
+    π, ρ, Θ = model.learning(episode)
+    assert isinstance(π, np.ndarray) and π.shape == (len(alpha),)
+    assert isinstance(ρ, list)
+    assert all(isinstance(ρ_k, np.ndarray) for ρ_k in ρ)
+    assert all(p_k.shape == (size,) for p_k in ρ)
+    assert isinstance(Θ, list)
+    assert all(isinstance(Θ_k, CognitiveMap) for Θ_k in Θ)
