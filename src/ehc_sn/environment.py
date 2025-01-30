@@ -152,7 +152,7 @@ class _LoggerEnv(MiniGridEnv, ABC):
     def observation(self):
         """Return the observation of the agent."""
         width, height = self.grid.width, self.grid.height
-        observation = np.zeros((1, width, height), dtype=np.uint8)
+        observation = np.zeros((width, height), dtype=np.uint8)
         observation[0, *self.agent_pos] = 1
         return observation
 
