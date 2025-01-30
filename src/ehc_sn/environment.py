@@ -16,7 +16,9 @@ Usage:
 """
 
 import dataclasses as dc
+from abc import ABC
 from typing import Type
+import numpy as np
 
 from minigrid.core.grid import Grid
 from minigrid.core.mission import MissionSpace
@@ -91,12 +93,34 @@ class Environment:
             name (str): The name of the environment to generate.
 
         Returns:
-            _EnvironGen: An instance of the _EnvironGen class initialized with the given name and default settings.
+            EnvironGen: An instance of the EnvironGen class initialized
         """
-        return _EnvironGen(name, self.defaults)
+        return EnvironGen(name, self.defaults)
 
 
-class _EnvironGen:  # pylint: disable=too-few-public-methods
+class EnvironGen:  # pylint: disable=too-few-public-methods
+    """
+    A class used to generate an environment with a specific mission space and
+    default settings.
+
+    Attributes:
+    ----------
+    mission_space : MissionSpace
+        An instance of MissionSpace initialized with a mission function that
+        returns the given name.
+    defaults : Type[BaseSettings]
+        Default settings for the environment.
+
+    Methods:
+    -------
+    __init__(name: str, defaults: Type[BaseSettings])
+        Initializes the EnvironGen with a mission space and default settings.
+
+    __call__(func)
+        Creates and returns an environment using the provided function,
+        mission space, and default settings.
+    """
+
     def __init__(self, name: str, defaults: Type[BaseSettings]):
         self.mission_space = MissionSpace(mission_func=lambda: name)
         self.defaults = defaults
@@ -105,9 +129,37 @@ class _EnvironGen:  # pylint: disable=too-few-public-methods
         return _create_env(func, self.mission_space, self.defaults)
 
 
+class _LoggerEnv(MiniGridEnv, ABC):
+    def __init__(self, *args, **kwds):
+        super().__init__(*args, **kwds)
+        self.trajectories = []  # Collect all trajectories
+        self.observations = None
+
+    def step(self, action):
+        result = obs, reward, _, _, info = super().step(action)
+        # _, _, _ = self.grid.encode().swapaxes(0, -1)  # Grid info
+        self.observations.append(self.observation)
+        return result
+
+    def reset(self, **kwds):
+        if self.observations is not None:
+            observations_arr = np.array(self.observations)
+            self.trajectories.append(observations_arr)
+        self.observations = []
+        return super().reset(**kwds)
+
+    @property
+    def observation(self):
+        """Return the observation of the agent."""
+        width, height = self.grid.width, self.grid.height
+        observation = np.zeros((1, width, height), dtype=np.uint8)
+        observation[0, *self.agent_pos] = 1
+        return observation
+
+
 def _create_env(func, mission_space, defaults):
 
-    class _BaseEnvironment(MiniGridEnv):
+    class _BaseEnvironment(_LoggerEnv, MiniGridEnv):
         def __init__(self, **kwds):
             super().__init__(mission_space, **defaults(**kwds).__dict__)
 
