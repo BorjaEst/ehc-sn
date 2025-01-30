@@ -51,6 +51,7 @@ llnl
 lxml
 manylinux
 markupsafe
+minigrid
 momepy
 moto
 mpmath
