@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 import numpy.typing as npt
 
-from ehc_sn.utils import CognitiveMap, kronecker
+from ehc_sn.utils import CognitiveMap, kron_delta
 
 # Type alias for integer space arrays
 Observation = npt.NDArray[np.float64]  # Observation
@@ -157,7 +157,7 @@ class HierarchicalGenerativeModel:
                 self.π[k] = (1 - γ) * self.π[k] + z[k]  # Eq. (11)
                 self.ρ[k] = self.ρ[k] + z[k] * y  # Eq. (12)
                 ξ_i = np.argmax(ξ)  # Get the observation index
-                Θ[k].θ = (1 - λ) * Θ[k].θ - kronecker(ξ_i, N) @ np.log(x)  # Eq. (13)
+                Θ[k].θ = (1 - λ) * Θ[k].θ - kron_delta(ξ_i, np.log(x))  # Eq. (13)
         return Θ  # Return the updated prioritized maps
 
     def maps_inference(self):

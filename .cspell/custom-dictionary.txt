@@ -47,6 +47,7 @@ isort
 itertools
 jaraco
 kerchunk
+kron
 llnl
 lxml
 manylinux

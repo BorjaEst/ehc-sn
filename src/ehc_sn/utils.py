@@ -1,6 +1,6 @@
 """Utility functions and classes for EHC-SN"""
 
-from typing import Tuple
+from typing import Any, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -35,11 +35,11 @@ class CognitiveMap:  # pylint: disable=too-few-public-methods
         return self.θ
 
 
-def kronecker(ξ: np.int64, N: int) -> npt.NDArray[np.bool_]:
+def kron_delta(ξ: np.int64, x: npt.NDArray[Any]) -> npt.NDArray[Any]:
     """Return the Kronecker delta matrix."""
-    Δ = np.zeros([N] * 2, dtype=np.bool_)
-    Δ[ξ, ξ] = True
-    return Δ
+    y = np.zeros_like(x, dtype=x.dtype)
+    y[ξ] = x[ξ]
+    return y
 
 
 def rand_episode(
