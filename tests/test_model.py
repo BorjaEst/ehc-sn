@@ -85,10 +85,10 @@ def test_inference(model, size, ξ, x, y, Θ):
 @pytest.mark.parametrize("size", [10])
 def test_learning(model, episode, size, alpha):
     """Test learning using the HierarchicalGenerativeModel class."""
-    π, ρ, Θ = model.learning(episode)
-    assert isinstance(π, np.ndarray) and π.shape == (len(alpha),)
-    assert isinstance(ρ, list)
-    assert all(isinstance(ρ_k, np.ndarray) for ρ_k in ρ)
-    assert all(p_k.shape == (size,) for p_k in ρ)
+    Θ = model.learning(episode)
+    assert isinstance(model.π, np.ndarray) and model.π.shape == (len(alpha),)
+    assert isinstance(model.ρ, list)
+    assert all(isinstance(ρ_k, np.ndarray) for ρ_k in model.ρ)
+    assert all(p_k.shape == (size,) for p_k in model.ρ)
     assert isinstance(Θ, list)
     assert all(isinstance(Θ_k, CognitiveMap) for Θ_k in Θ)
