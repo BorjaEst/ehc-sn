@@ -3,6 +3,7 @@ abfs
 adlfs
 aiobotocore
 aiohttp
+allclose
 asyncio
 autodoc
 autopep
