@@ -30,19 +30,26 @@ Y0 = np.array([0.331, 0.815, 1.059])  # Trajectory δ = 0.3
 @pytest.mark.parametrize("Ξ, desired", [(Ξ1, X0[1])])
 def test_equation_01(Ξ, desired):
     """Test the observation code for item."""
-    result = equations.get_item(Ξ)
+    result = equations.item(Ξ)
     assert_allclose(result, desired, 1e-3)
 
 
 @pytest.mark.parametrize("X, desired", [(X0, Y0)])
 def test_equation_02(X, desired):
     """Test the hidden code for trajectory."""
-    result = equations.get_trajectory(X, 0.3)
+    result = equations.trajectory(X, 0.3)
     assert_allclose(result, desired, 1e-3)
 
 
 @pytest.mark.parametrize("y, Θ,  desired", [(Y0, {θ1: 0.5}, 0.1084)])
 def test_equation_03(y, Θ, desired):
     """Test the probability of a trajectory."""
-    result = equations.prob_trajectory(y, Θ)
+    result = equations.p_trajectory(y, Θ)
+    assert_allclose(result, desired, 1e-3)
+
+
+@pytest.mark.parametrize("y, θ, desired", [(Y0, θ1, 0.2169)])
+def test_equation_04(y, θ, desired):
+    """Test the probability of a trajectory in a map."""
+    result = equations.p(y, θ, γ=1.0)
     assert_allclose(result, desired, 1e-3)

@@ -30,7 +30,7 @@ class CognitiveMap:  # pylint: disable=too-few-public-methods
         return self.θ + other
 
     @property
-    def params(self) -> npt.NDArray[np.float64]:
+    def values(self) -> npt.NDArray[np.float64]:
         """Return the structural parameters."""
         return self.θ
 
