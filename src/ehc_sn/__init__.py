@@ -147,7 +147,7 @@ class HierarchicalGenerativeModel:
     def learning(  # pylint: disable=too-many-arguments
         self,
         episode: List[List[Observation]],
-        γ: float = 0.01,
+        γ: float = 0.1,
         λ: float = 0.1,
     ) -> List[PrioritizedMap]:
         """Learning function for the model."""
