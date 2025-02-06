@@ -11,6 +11,7 @@ from numpy.testing import assert_allclose
 ξ1_0 = np.array([0.5, 0.0, 0.0])  # Observation at i=0
 ξ1_1 = np.array([0.0, 0.9, 0.0])  # Observation at i=1
 ξ1_2 = np.array([0.0, 0.0, 0.5])  # Observation at i=2
+ξ_ns = np.array([0.7, 0.5, 0.2])  # Noisy observation
 Ξ1 = np.stack([ξ1_0, ξ1_1, ξ1_2])  # Observations t=1
 
 x0 = np.array([0.9, 0.5, 0.1])  # Item at t=0
@@ -23,50 +24,81 @@ Y1 = np.array([0.331, 0.815, 1.059])  # Trajectory 1, δ = 0.3
 Θ1 = {θ1: 0.5}  # Mixing probabilities
 
 
-@pytest.mark.parametrize("Ξ, desired", [(Ξ1, X1[1])])
+@pytest.mark.parametrize(
+    "Ξ, desired",
+    [(Ξ1, x1)],
+)
 def test_equation_01(Ξ, desired):
     """Test the observation code for item."""
-    result = equations.item(Ξ)
+    result = equations.get_item(Ξ)
     assert_allclose(result, desired, 1e-3)
 
 
-@pytest.mark.parametrize("X, desired", [(X1, Y1)])
+@pytest.mark.parametrize(
+    "X, desired",
+    [(X1, Y1)],
+)
 def test_equation_02(X, desired):
     """Test the hidden code for trajectory."""
-    result = equations.trajectory(X, 0.3)
+    result = equations.get_trajectory(X, 0.3)
     assert_allclose(result, desired, 1e-3)
 
 
-@pytest.mark.parametrize("y, Θ,  desired", [(Y1, Θ1, 0.1084)])
+@pytest.mark.parametrize(
+    "y, Θ,  desired",
+    [(Y1, Θ1, 0.1084)],
+)
 def test_equation_03(y, Θ, desired):
     """Test the probability of a trajectory."""
     result = equations.p_trajectory(y, Θ)
     assert_allclose(result, desired, 1e-3)
 
 
-@pytest.mark.parametrize("y, θ, desired", [(Y1, θ1, 0.2169)])
+@pytest.mark.parametrize(
+    "y, θ, desired",
+    [(Y1, θ1, 0.2169)],
+)
 def test_equation_04(y, θ, desired):
     """Test the probability of a trajectory in a map."""
     result = equations.p(y, θ)
     assert_allclose(result, desired, 1e-3)
 
 
-@pytest.mark.parametrize("y, θ, desired", [(Y1, θ1, -1.5284)])
+@pytest.mark.parametrize(
+    "y, θ, desired",
+    [(Y1, θ1, -1.5284)],
+)
 def test_equation_05(y, θ, desired):
     """Test the log probability of a trajectory in a map."""
     result = equations.lnp(y, θ)
     assert_allclose(result, desired, 1e-3)
 
 
-@pytest.mark.parametrize("y, Θ, desired", [(Y1, Θ1, 0.460)])
+@pytest.mark.parametrize(
+    "y, Θ, desired",
+    [(Y1, Θ1, 0.460)],
+)
 def test_equation_06(y, Θ, desired):
     """Test the mixing probabilities."""
     result = equations.z(Θ, y, τ=0.9)
     assert_allclose(result, desired, 1e-3)
 
 
-@pytest.mark.parametrize("y, Θ, desired", [(Y1, Θ1, -0.777)])
+@pytest.mark.parametrize(
+    "y, Θ, desired",
+    [(Y1, Θ1, -0.777)],
+)
 def test_equation_07(y, Θ, desired):
     """Test the mixing probabilities."""
     result = equations.lnz(Θ, y, τ=0.9)
+    assert_allclose(result, desired, 1e-3)
+
+
+@pytest.mark.parametrize(
+    "ξ, y, θ, desired",
+    [(ξ_ns, Y1, θ1, [0.019, -0.565, -0.959])],
+)
+def test_equation_08(ξ, y, θ, desired):
+    """Test the hidden code for item."""
+    result = equations.item(ξ, y, θ)
     assert_allclose(result, desired, 1e-3)

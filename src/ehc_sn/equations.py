@@ -22,19 +22,19 @@ Map = CognitiveMap  # Cognitive map
 
 
 # Custom.
-def observation(x: Item, i: int) -> Observation:  # Eq. (0)
+def get_observation(x: Item, i: int) -> Observation:  # Eq. (0)
     """Return the observation code for item."""
     return (x * np.eye(x.size))[i]
 
 
 # Eq. (1)
-def item(Ξ: List[Observation]) -> Item:
+def get_item(Ξ: List[Observation]) -> Item:
     """Return the hidden code for item."""
     return np.array(Ξ).sum(axis=0)
 
 
 # Eq. (2)
-def trajectory(X: List[Item], δ: float = 0.7) -> Trajectory:
+def get_trajectory(X: List[Item], δ: float = 0.7) -> Trajectory:
     """Return the hidden code for trajectory."""
     T = len(X)  # Number of items
     discounted = [x * δ ** (T - t) for t, x in enumerate(X, 1)]
@@ -72,3 +72,10 @@ def z(Θ: Mixing, y: Trajectory, τ: float = 0.9) -> list[float]:
 def lnz(Θ: Mixing, y: Trajectory, τ: float = 0.9) -> list[float]:
     """Return ln of mixing probability values."""
     return [τ * np.log(z) + (1 - τ) * lnp(y, θ) for θ, z in Θ.items()]
+
+
+# Eq. (8)
+def item(ξ: Observation, y: Trajectory, θ: Map) -> Item:
+    """Return the hidden code for item."""
+    # ξ here is a noisy prediction about the observation
+    return ξ * θ.values - y
