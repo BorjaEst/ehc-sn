@@ -4,19 +4,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import numpy as np
-import numpy.typing as npt
-
+from ehc_sn.equations import CognitiveMap, Item, Mixing, Observation, Trajectory, PrioritizedMap
 from ehc_sn.utils import CognitiveMap, kron_delta
-
-# Type alias for integer space arrays
-Observation = npt.NDArray[np.float64]  # Observation
-Velocity = npt.NDArray[np.float64]  # Velocity
-Item = npt.NDArray[np.float64]  # Navigation Item
-Trajectory = npt.NDArray[np.float64]  # Navigation Trajectory
-Mixing = npt.NDArray[np.float64]  # Mixing probabilities
-PrioritizedMap = CognitiveMap  # Prioritized cognitive map
-PriorMixing = npt.NDArray[np.float64]  # Prioritized mixing probabilities
-PriorMaps = List[npt.NDArray[np.float64]]  # Prioritized cognitive maps
 
 
 @dataclass
@@ -35,6 +24,16 @@ class HGModelParams:
             raise ValueError(f"τ: {self.τ}. Must be a float between 0 and 1.")
         if not isinstance(self.c, float) or not 0 <= self.c <= 1:
             raise ValueError(f"c: {self.c}. Must be a float between 0 and 1.")
+
+
+def get_observation(x: Item, i: int) -> Observation:  # Eq. (0)
+    """Return the observation code for item."""
+    return (x * np.eye(x.size))[i]
+
+
+def get_item(Ξ: List[Observation]) -> Item:  # Eq. (1)
+    """Return the hidden code for item."""
+    return np.array(Ξ).sum(axis=0)
 
 
 def get_trajectory(items: List[Item], δ: float = 0.7) -> Trajectory:  # Eq. (2)
