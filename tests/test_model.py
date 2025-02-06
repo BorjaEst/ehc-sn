@@ -49,11 +49,11 @@ def item(request, size):
 
 
 @pytest.fixture(scope="function", name="y")
-def trajectory(request, size):
-    """Return the trajectory input."""
+def sequence(request, size):
+    """Return the sequence input."""
     if hasattr(request, "param"):
         return request.param
-    return np.random.rand(size)  # Random trajectory
+    return np.random.rand(size)  # Random sequence
 
 
 @pytest.fixture(scope="function", name="Θ")

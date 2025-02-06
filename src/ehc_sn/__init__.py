@@ -4,7 +4,14 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import numpy as np
-from ehc_sn.equations import CognitiveMap, Item, Mixing, Observation, Trajectory, PrioritizedMap
+from ehc_sn.equations import (
+    CognitiveMap,
+    Item,
+    Mixing,
+    Observation,
+    Sequence,
+    PrioritizedMap,
+)
 from ehc_sn.utils import CognitiveMap, kron_delta
 
 
@@ -12,7 +19,7 @@ from ehc_sn.utils import CognitiveMap, kron_delta
 class HGModelParams:
     """The param set class example for model configuration."""
 
-    δ: float = 0.7  # Discount factor for trajectory
+    δ: float = 0.7  # Discount factor for sequence
     τ: float = 0.9  # Exponential decay for mixing categorical distribution
     c: float = 0.4  # Velocity rate for item code update
 
@@ -36,17 +43,15 @@ def get_item(Ξ: List[Observation]) -> Item:  # Eq. (1)
     return np.array(Ξ).sum(axis=0)
 
 
-def get_trajectory(items: List[Item], δ: float = 0.7) -> Trajectory:  # Eq. (2)
-    """Return the hidden code for trajectory."""
+def get_sequence(items: List[Item], δ: float = 0.7) -> Sequence:  # Eq. (2)
+    """Return the hidden code for sequence."""
     T = len(items)  # Number of items
     discounted = [x * δ ** (T - t) for t, x in enumerate(items, 1)]
     return np.array(discounted).sum(axis=0)
 
 
-def prob_trajectory(  # Eq. (3)
-    y: Trajectory, Θ: List[CognitiveMap], z: Mixing
-) -> float:
-    """Return the probability of a trajectory."""
+def prob_sequence(y: Sequence, Θ: List[CognitiveMap], z: Mixing) -> float:  # Eq. (3)
+    """Return the probability of a sequence."""
     p_dist = [θ(y) * z_i for θ, z_i in zip(Θ, z)]
     return np.array(p_dist).sum(axis=0)
 
@@ -102,28 +107,28 @@ class HierarchicalGenerativeModel:
         self,
         ξ: Observation,  # ξ(t-1)
         x: Item,  # x(t-1)  TODO: This variable seems to not be used
-        y: Trajectory,  # y(t-1)
+        y: Sequence,  # y(t-1)
         Θ: List[CognitiveMap],
         z: Optional[Mixing] = None,
-    ) -> Tuple[Item, Trajectory, Mixing, np.int64]:
-        """Inference function, returns predicted next item and trajectory."""
+    ) -> Tuple[Item, Sequence, Mixing, np.int64]:
+        """Inference function, returns predicted next item and sequence."""
         # Update mixing probabilities or use the provided ones
         z = self.π if z is None else self._estimate_mixing(z, y, Θ)
         k = np.argmax(z)  # Get the best map index
         x = self._estimate_item(ξ, y, Θ[k])  # Predict item code
         # TODO: Check: ξ = pred_observation(x)  # Predict the next observation
-        y = self._estimate_trajectory(ξ, y, Θ[k])  # Update the trajectory
+        y = self._estimate_sequence(ξ, y, Θ[k])  # Update the sequence
         return x, y, z, k
 
     def _estimate_mixing(  # Eq. (6) and Eq. (7)
-        self, z: Mixing, y: Trajectory, Θ: List[CognitiveMap]
+        self, z: Mixing, y: Sequence, Θ: List[CognitiveMap]
     ) -> Mixing:
         """Estimate posterior mixing probabilities."""
         τ = self.parameters.τ  # Extract exponential decay for mixing
         return np.array([z_i**τ * θ(y) ** (1 - τ) for θ, z_i in zip(Θ, z)])
 
     def _estimate_item(  # Eq. (8) and Eq. (9)
-        self, ξ: Observation, y: Trajectory, θ: CognitiveMap
+        self, ξ: Observation, y: Sequence, θ: CognitiveMap
     ) -> Item:
         """Estimate the posterior hidden item code."""
         c = self.parameters.c  # Extract velocity rate for item code
@@ -132,9 +137,9 @@ class HierarchicalGenerativeModel:
         self._ξ = ξ  # Update the observation code
         return θ * np.random.normal(μ, abs(Σ)) - y  # Random movement probability
 
-    def _estimate_trajectory(  # Eq. (10)
-        self, ξ: Observation, y: Trajectory, θ: CognitiveMap
-    ) -> Trajectory:
+    def _estimate_sequence(  # Eq. (10)
+        self, ξ: Observation, y: Sequence, θ: CognitiveMap
+    ) -> Sequence:
         """Estimate the posterior sequence code."""
         δ = self.parameters.δ  # Extract parameters
         return δ * y + θ * (1 - δ) + ξ
@@ -150,7 +155,7 @@ class HierarchicalGenerativeModel:
         z = None  # Initialize mixing probabilities
         for sequence in episode:
             Θ = self.maps_inference()  # Priority maps
-            x, y = np.zeros(N), np.zeros(N)  # First item and trajectory
+            x, y = np.zeros(N), np.zeros(N)  # First item and sequence
             for ξ in sequence:
                 x, y, z, k = self.inference(ξ, x, y, Θ, z)
                 self.π[k] = (1 - γ) * self.π[k] + z[k]  # Eq. (11)

@@ -20,7 +20,7 @@ class CognitiveMap:  # pylint: disable=too-few-public-methods
         return y @ np.log(self.θ)  # Eq. (5)
 
     def __call__(self, y: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Normalized likelihood of trajectory given a map."""
+        """Normalized likelihood of sequence given a map."""
         return np.exp(self._likelihood(y))
 
     def __mul__(self, other) -> npt.NDArray[np.float64]:
