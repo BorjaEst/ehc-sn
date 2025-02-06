@@ -122,3 +122,13 @@ def test_equation_10(ξ, y, θ, desired):
     """Test the predicted observation code."""
     result = equations.sequence(ξ, y, θ, δ=0.9)
     assert_allclose(result, desired, 1e-3)
+
+
+@pytest.mark.parametrize(
+    "π, z, k, desired",
+    [([0.8], list(Θ1.values()), 0, 1.22)],
+)
+def test_equation_11(π, z, k, desired):
+    """Test the mixing hyperparameters."""
+    result = equations.π_update(π[k], z[k], γ=0.1)
+    assert_allclose(result, desired, 1e-3)

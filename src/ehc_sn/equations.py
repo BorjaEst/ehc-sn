@@ -7,6 +7,7 @@ from ehc_sn.utils import CognitiveMap, kron_delta
 
 # pylint: disable=non-ascii-name
 # pylint: disable=invalid-name
+# pylint: disable=redefined-outer-name
 
 # Type alias for integer space arrays
 Observation = npt.NDArray[np.float64]  # Observation
@@ -92,3 +93,9 @@ def observation(x: Item) -> Observation:
 def sequence(ξ: Observation, y: Sequence, θ: Map, δ: float = 0.9) -> Sequence:
     """Return the predicted sequence code."""
     return δ * y + (1 - δ) * θ.values + ξ
+
+
+# Eq. (11)
+def π_update(π_k: float, z_k: float, γ: float = 0.1) -> float:
+    """Return mixing hyperparameters."""
+    return (1 - γ) * π_k + z_k
