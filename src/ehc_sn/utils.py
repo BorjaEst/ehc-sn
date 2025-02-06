@@ -13,7 +13,7 @@ class CognitiveMap:  # pylint: disable=too-few-public-methods
 
     def __init__(self, ρ: list[float]):
         # Initialize the synaptic weights (structural parameters)
-        self.θ: npt.NDArray[np.float64] = np.array(ρ, dtype=np.float64)
+        self.θ = np.array(ρ, dtype=np.float64) / sum(ρ)  # ~Cat(ρ)
 
     def _likelihood(self, y: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         # Note ln[p(y|Θ_k)] actually proportional to y·ln[θ_k]
