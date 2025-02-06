@@ -79,3 +79,9 @@ def item(ξ: Observation, y: Trajectory, θ: Map) -> Item:
     """Return the hidden code for item."""
     # ξ here is a noisy prediction about the observation
     return ξ * θ.values - y
+
+
+# Eq. (9)
+def observation(x: Item) -> Observation:
+    """Return the predicted observation code."""
+    return (x * np.eye(x.size))[x.argmax()]
