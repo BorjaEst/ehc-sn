@@ -49,14 +49,20 @@ def p_trajectory(y: Trajectory, Θ: Mixing) -> float:
 
 
 # Eq. (4)
-def p(y: Trajectory, θ: Map, γ: float = 1.0) -> float:
+def p(y: Trajectory, θ: Map) -> float:
     """Return the probability of a trajectory in a map."""
     p_dist = θ.values**y
-    return γ * np.array(p_dist).prod(axis=0)
+    return np.array(p_dist).prod(axis=0)
 
 
 # Eq. (5)
-def lnp(y: Trajectory, θ: Map, γ: float = 1.0) -> float:
+def lnp(y: Trajectory, θ: Map) -> float:
     """Return the log-likelihood of a trajectory in a map."""
     p_dist = y @ np.log(θ.values)
-    return γ * np.array(p_dist).sum(axis=0)
+    return np.array(p_dist).sum(axis=0)
+
+
+# Eq. (6)
+def mixing(Θ: Mixing, y: Trajectory, τ: float = 0.9) -> Mixing:
+    """Return the mixing probabilities."""
+    return {θ: (z**τ) * (p(y, θ) ** (1 - τ)) for θ, z in Θ.items()}

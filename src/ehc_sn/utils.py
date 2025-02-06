@@ -5,13 +5,15 @@ from typing import Any, Tuple
 import numpy as np
 import numpy.typing as npt
 
+# pylint: disable=non-ascii-name
+
 
 class CognitiveMap:  # pylint: disable=too-few-public-methods
     """Neural Network class for EHC-SN"""
 
-    def __init__(self, θ: npt.NDArray[np.float64]):
+    def __init__(self, ρ: list[float]):
         # Initialize the synaptic weights (structural parameters)
-        self.θ: npt.NDArray[np.float64] = θ  # Cat(ρ) == ρ
+        self.θ: npt.NDArray[np.float64] = np.array(ρ, dtype=np.float64)
 
     def _likelihood(self, y: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         # Note ln[p(y|Θ_k)] actually proportional to y·ln[θ_k]
