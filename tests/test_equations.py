@@ -58,8 +58,15 @@ def test_equation_05(y, θ, desired):
     assert_allclose(result, desired, 1e-3)
 
 
-@pytest.mark.parametrize("y, Θ, desired", [(Y1, Θ1, 0.46)])
+@pytest.mark.parametrize("y, Θ, desired", [(Y1, Θ1, 0.460)])
 def test_equation_06(y, Θ, desired):
     """Test the mixing probabilities."""
-    result = list(equations.mixing(Θ, y, τ=0.9).values())
+    result = equations.z(Θ, y, τ=0.9)
+    assert_allclose(result, desired, 1e-3)
+
+
+@pytest.mark.parametrize("y, Θ, desired", [(Y1, Θ1, -0.777)])
+def test_equation_07(y, Θ, desired):
+    """Test the mixing probabilities."""
+    result = equations.lnz(Θ, y, τ=0.9)
     assert_allclose(result, desired, 1e-3)

@@ -63,6 +63,12 @@ def lnp(y: Trajectory, θ: Map) -> float:
 
 
 # Eq. (6)
-def mixing(Θ: Mixing, y: Trajectory, τ: float = 0.9) -> Mixing:
-    """Return the mixing probabilities."""
-    return {θ: (z**τ) * (p(y, θ) ** (1 - τ)) for θ, z in Θ.items()}
+def z(Θ: Mixing, y: Trajectory, τ: float = 0.9) -> list[float]:
+    """Return the mixing probability values."""
+    return [z**τ * p(y, θ) ** (1 - τ) for θ, z in Θ.items()]
+
+
+# Eq. (7)
+def lnz(Θ: Mixing, y: Trajectory, τ: float = 0.9) -> list[float]:
+    """Return ln of mixing probability values."""
+    return [τ * np.log(z) + (1 - τ) * lnp(y, θ) for θ, z in Θ.items()]
