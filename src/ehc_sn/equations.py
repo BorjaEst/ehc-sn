@@ -99,3 +99,9 @@ def sequence(ξ: Observation, y: Sequence, θ: Map, δ: float = 0.9) -> Sequence
 def π_update(π_k: float, z_k: float, γ: float = 0.1) -> float:
     """Return mixing hyperparameters."""
     return (1 - γ) * π_k + z_k
+
+
+# Eq. (12)
+def ρ_update(ρ_k: list[float], z_k: float, y: Sequence) -> list[float]:
+    """Return map hyperparameters."""
+    return [float(ρ_ki) for ρ_ki in ρ_k + z_k * y]
