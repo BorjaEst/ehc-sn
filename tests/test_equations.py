@@ -53,3 +53,10 @@ def test_equation_04(y, θ, desired):
     """Test the probability of a trajectory in a map."""
     result = equations.p(y, θ, γ=1.0)
     assert_allclose(result, desired, 1e-3)
+
+
+@pytest.mark.parametrize("y, θ, desired", [(Y0, θ1, -1.5284)])
+def test_equation_05(y, θ, desired):
+    """Test the log probability of a trajectory in a map."""
+    result = equations.lnp(y, θ, γ=1.0)
+    assert_allclose(result, desired, 1e-3)

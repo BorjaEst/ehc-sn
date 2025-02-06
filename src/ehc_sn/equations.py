@@ -53,3 +53,10 @@ def p(y: Trajectory, θ: Map, γ: float = 1.0) -> float:
     """Return the probability of a trajectory in a map."""
     p_dist = θ.values**y
     return γ * np.array(p_dist).prod(axis=0)
+
+
+# Eq. (5)
+def lnp(y: Trajectory, θ: Map, γ: float = 1.0) -> float:
+    """Return the log-likelihood of a trajectory in a map."""
+    p_dist = y @ np.log(θ.values)
+    return γ * np.array(p_dist).sum(axis=0)
