@@ -1,6 +1,7 @@
 """Equations for the EHC-SN model."""
 
 import numpy as np
+from ehc_sn import utils
 from numpy import typing as npt
 
 # pylint: disable=non-ascii-name
@@ -106,3 +107,11 @@ def π_update(π_k: float, z_k: float, γ: float = 0.1) -> float:
 def ρ_update(ρ_k: Array, z_k: float, y: Sequence) -> Array:
     """Return map hyperparameters."""
     return np.array([ρ_ki for ρ_ki in ρ_k + z_k * y])
+
+
+# Eq. (13)
+def pmap_update(θ_k: Map, ξ: Observation, x: Item, λ: float = 0.1) -> Map:
+    """Return the updated map."""
+    ξ_index = ξ != 0  # Index of the observations
+    δ = utils.kronecker_delta(ξ_index, np.log(x))  # Kronecker delta
+    return (1 - λ) * θ_k - δ

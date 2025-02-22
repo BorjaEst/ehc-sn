@@ -1,15 +1,22 @@
+"""Tests for the utility functions."""
+
 import numpy as np
-from ehc_sn.utils import kron_delta
 import pytest
+from ehc_sn.utils import kronecker_delta
+from numpy.testing import assert_allclose
+
+# pylint: disable=non-ascii-name
 
 
 @pytest.mark.parametrize(
-    "ξ, x, expected",
+    "ξ_index, x, desired",
     [
-        (0, np.array([1, 2, np.inf]), [1, 0, 0]),
-        (1, np.array([1, 2, np.inf]), [0, 2, 0]),
-        (2, np.array([1, 2, np.inf]), [0, 0, np.inf]),
+        (np.array([1, 0, 0], dtype=bool), [1, 2, np.inf], [1, 0, 0]),
+        (np.array([1, 1, 0], dtype=bool), [1, 2, np.inf], [1, 2, 0]),
+        (np.array([1, 0, 1], dtype=bool), [1, 2, np.inf], [1, 0, np.inf]),
     ],
 )
-def test_kron_delta(ξ, x, expected):
-    assert all(kron_delta(ξ, x) == expected)
+def test_kronecker_delta(ξ_index, x, desired):
+    """Test the Kronecker delta calculation."""
+    result = kronecker_delta(ξ_index, x)
+    assert_allclose(result, desired, 1e-3)

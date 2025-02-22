@@ -147,3 +147,13 @@ def test_equation_12(ρ, z, y, k, desired):
     """Test the mixing hyperparameters."""
     result = equations.ρ_update(ρ[k], z[k], y)
     assert_allclose(result, desired, 1e-3)
+
+
+@pytest.mark.parametrize(
+    "Θ, ξ, x, k, desired",
+    [(Θ1, ξ1_1 + ξ1_2, x1, 0, [0.0, 0.555, 1.143])],
+)
+def test_equation_13(Θ, ξ, x, k, desired):
+    """Test the mixing hyperparameters."""
+    result = equations.pmap_update(Θ[k], ξ, x, λ=0.1)
+    assert_allclose(result, desired, 1e-3)
