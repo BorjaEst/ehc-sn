@@ -20,7 +20,8 @@ PrioritizedMap = CognitiveMap  # Prioritized cognitive map
 Map = CognitiveMap  # Cognitive map
 
 
-LOG_LIMIT = -100.0  # Logarithm limit for numerical stability
+LOG_LIMIT = -1e12  # Logarithm limit for numerical stability
+LNP_LIMIT = -1e10  # Logarithm probability limit
 
 
 # Custom.
@@ -61,7 +62,8 @@ def p(y: Sequence, θ: Map) -> float:
 def lnp(y: Sequence, θ: Map) -> float:
     """Return the log-likelihood of a sequence in a map."""
     p_dist = y @ np.maximum(np.log(θ.values), LOG_LIMIT)
-    return np.array(p_dist).sum(axis=0)
+    result = np.array(p_dist).sum(axis=0)  # Nan protection
+    return result if result > LNP_LIMIT else -np.inf
 
 
 # Eq. (6)
