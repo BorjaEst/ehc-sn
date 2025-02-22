@@ -19,9 +19,11 @@ x1 = np.array([0.5, 0.9, 0.5])  # Item at t=1
 x2 = np.array([0.1, 0.5, 0.9])  # Item at t=2
 X1 = np.stack([x0, x1, x2])  # Items episode 1
 
-Y1 = np.array([0.331, 0.815, 1.059])  # Sequence 1, δ = 0.3
-θ1 = CognitiveMap([0.5, 0.5, 0.5])  # Cognitive map 1
-Θ1 = {θ1: 0.5}  # Mixing probabilities
+Y1 = np.array([0.0, 0.5, 1.0])  # Sequence 1, δ = 0.3
+θ1 = CognitiveMap([0.0, 0.5, 0.5])  # Cognitive map 1
+θ2 = CognitiveMap([0.2, 0.0, 0.8])  # Cognitive map 2
+Θ1 = [θ1, θ2]  # Cognitive maps 1
+z1 = np.array([0.5, 0.5])  # Mixing probabilities 1
 
 
 @pytest.mark.parametrize(
@@ -36,7 +38,7 @@ def test_equation_01(Ξ, desired):
 
 @pytest.mark.parametrize(
     "X, desired",
-    [(X1, Y1)],
+    [(X1, [0.331, 0.815, 1.059])],
 )
 def test_equation_02(X, desired):
     """Test the hidden code for sequence."""
@@ -45,18 +47,18 @@ def test_equation_02(X, desired):
 
 
 @pytest.mark.parametrize(
-    "y, Θ,  desired",
-    [(Y1, Θ1, 0.1084)],
+    "y, Θ, z, desired",
+    [(Y1, Θ1, z1, 0.1768)],
 )
-def test_equation_03(y, Θ, desired):
+def test_equation_03(y, Θ, z, desired):
     """Test the probability of a sequence."""
-    result = equations.p_sequence(y, Θ)
+    result = equations.p_sequence(y, Θ, z)
     assert_allclose(result, desired, 1e-3)
 
 
 @pytest.mark.parametrize(
     "y, θ, desired",
-    [(Y1, θ1, 0.2169)],
+    [(Y1, θ1, 0.3536), (Y1, θ2, 0.0)],
 )
 def test_equation_04(y, θ, desired):
     """Test the probability of a sequence in a map."""
@@ -66,7 +68,7 @@ def test_equation_04(y, θ, desired):
 
 @pytest.mark.parametrize(
     "y, θ, desired",
-    [(Y1, θ1, -1.5284)],
+    [(Y1, θ1, -1.040), (Y1, θ2, -np.inf)],
 )
 def test_equation_05(y, θ, desired):
     """Test the log probability of a sequence in a map."""
@@ -75,22 +77,22 @@ def test_equation_05(y, θ, desired):
 
 
 @pytest.mark.parametrize(
-    "y, Θ, desired",
-    [(Y1, Θ1, 0.460)],
+    "y, Θ, z, desired",
+    [(Y1, Θ1, z1, 0.460)],
 )
-def test_equation_06(y, Θ, desired):
+def test_equation_06(y, Θ, z, desired):
     """Test the mixing probabilities."""
-    result = equations.z(Θ, y, τ=0.9)
+    result = equations.mixing(y, Θ, z, τ=0.9)
     assert_allclose(result, desired, 1e-3)
 
 
 @pytest.mark.parametrize(
-    "y, Θ, desired",
-    [(Y1, Θ1, -0.777)],
+    "y, Θ, z, desired",
+    [(Y1, Θ1, z1, -0.777)],
 )
-def test_equation_07(y, Θ, desired):
+def test_equation_07(y, Θ, z, desired):
     """Test the mixing probabilities."""
-    result = equations.lnz(Θ, y, τ=0.9)
+    result = equations.lnz(Θ, y, z, τ=0.9)
     assert_allclose(result, desired, 1e-3)
 
 
@@ -126,7 +128,7 @@ def test_equation_10(ξ, y, θ, desired):
 
 @pytest.mark.parametrize(
     "π, z, k, desired",
-    [([0.8], list(Θ1.values()), 0, 1.22)],
+    [([0.8], Θ1, 0, 1.22)],
 )
 def test_equation_11(π, z, k, desired):
     """Test the mixing hyperparameters."""

@@ -1,30 +1,30 @@
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+"""Equations for the EHC-SN model."""
+
+from typing import List
 
 import numpy as np
-import numpy.typing as npt
-from ehc_sn.utils import CognitiveMap, kron_delta
+from ehc_sn.utils import CognitiveMap
+from numpy.typing import NDArray
 
 # pylint: disable=non-ascii-name
 # pylint: disable=invalid-name
 # pylint: disable=redefined-outer-name
 
 # Type alias for integer space arrays
-Observation = npt.NDArray[np.float64]  # Observation
-Velocity = npt.NDArray[np.float64]  # Velocity
-Item = npt.NDArray[np.float64]  # Navigation Item
-Sequence = npt.NDArray[np.float64]  # Navigation Sequence
-# Mixing = npt.NDArray[np.float64]  # Mixing probabilities
+Observation = NDArray[np.float64]  # Observation
+Velocity = NDArray[np.float64]  # Velocity
+Item = NDArray[np.float64]  # Navigation Item
+Sequence = NDArray[np.float64]  # Navigation Sequence
+Mixing = NDArray[np.float64]  # Mixing probabilities
 PrioritizedMap = CognitiveMap  # Prioritized cognitive map
-PriorMixing = npt.NDArray[np.float64]  # Prioritized mixing probabilities
-PriorMaps = List[npt.NDArray[np.float64]]  # Prioritized cognitive maps
-
-Mixing = Dict[CognitiveMap, np.float64]  # Mixing probabilities
 Map = CognitiveMap  # Cognitive map
 
 
+LOG_LIMIT = -100.0  # Logarithm limit for numerical stability
+
+
 # Custom.
-def get_observation(x: Item, i: int) -> Observation:  # Eq. (0)
+def get_observation(x: Item, i: int) -> Observation:
     """Return the observation code for item."""
     return (x * np.eye(x.size))[i]
 
@@ -44,9 +44,9 @@ def get_sequence(X: List[Item], δ: float = 0.7) -> Sequence:
 
 
 # Eq. (3)
-def p_sequence(y: Sequence, Θ: Mixing) -> float:
+def p_sequence(y: Sequence, Θ: list[Map], z: Mixing) -> float:
     """Return the probability of a sequence in a mixing."""
-    p_dist = [p(y, θ) * z_i for θ, z_i in Θ.items()]
+    p_dist = [p(y, θ) * z_i for θ, z_i in zip(Θ, z)]
     return np.array(p_dist).sum(axis=0)
 
 
@@ -60,20 +60,22 @@ def p(y: Sequence, θ: Map) -> float:
 # Eq. (5)
 def lnp(y: Sequence, θ: Map) -> float:
     """Return the log-likelihood of a sequence in a map."""
-    p_dist = y @ np.log(θ.values)
+    p_dist = y @ np.maximum(np.log(θ.values), LOG_LIMIT)
     return np.array(p_dist).sum(axis=0)
 
 
 # Eq. (6)
-def z(Θ: Mixing, y: Sequence, τ: float = 0.9) -> list[float]:
+def mixing(y: Sequence, Θ: list[Map], z: Mixing, τ: float = 0.9) -> Mixing:
     """Return the mixing probability values."""
-    return [z**τ * p(y, θ) ** (1 - τ) for θ, z in Θ.items()]
+    _z = [z_i**τ * p(y, θ) ** (1 - τ) for θ, z_i in zip(Θ, z)]
+    return np.array(_z, dtype=np.float64)
 
 
 # Eq. (7)
-def lnz(Θ: Mixing, y: Sequence, τ: float = 0.9) -> list[float]:
+def lnz(y: Sequence, Θ: list[Map], z: Mixing, τ: float = 0.9) -> Mixing:
     """Return ln of mixing probability values."""
-    return [τ * np.log(z) + (1 - τ) * lnp(y, θ) for θ, z in Θ.items()]
+    _lnz = [τ * np.log(z_i) + (1 - τ) * lnp(y, θ) for θ, z_i in zip(Θ, z)]
+    return np.array(_lnz, dtype=np.float64)
 
 
 # Eq. (8)
