@@ -23,7 +23,10 @@ Y1 = np.array([0.0, 0.5, 1.0])  # Sequence 1, δ = 0.3
 θ1 = CognitiveMap([0.0, 0.5, 0.5])  # Cognitive map 1
 θ2 = CognitiveMap([0.2, 0.0, 0.8])  # Cognitive map 2
 Θ1 = [θ1, θ2]  # Cognitive maps 1
+
 z1 = np.array([0.5, 0.5])  # Mixing probabilities 1
+π1 = np.array([0.5, 0.1])  # Mixing hyperparameters 1
+ρ1 = np.array([[0.5, 0.5, 0.5]] * 2)  # Mixing hyperparameters 1
 
 
 @pytest.mark.parametrize(
@@ -78,7 +81,7 @@ def test_equation_05(y, θ, desired):
 
 @pytest.mark.parametrize(
     "y, Θ, z, desired",
-    [(Y1, Θ1, z1, 0.460)],
+    [(Y1, Θ1, z1, [0.483, 0.0])],
 )
 def test_equation_06(y, Θ, z, desired):
     """Test the mixing probabilities."""
@@ -88,17 +91,17 @@ def test_equation_06(y, Θ, z, desired):
 
 @pytest.mark.parametrize(
     "y, Θ, z, desired",
-    [(Y1, Θ1, z1, -0.777)],
+    [(Y1, Θ1, z1, [-0.728, -np.inf])],
 )
 def test_equation_07(y, Θ, z, desired):
     """Test the mixing probabilities."""
-    result = equations.lnz(Θ, y, z, τ=0.9)
+    result = equations.lnz(y, Θ, z, τ=0.9)
     assert_allclose(result, desired, 1e-3)
 
 
 @pytest.mark.parametrize(
     "ξ, y, θ, desired",
-    [(ξ_ns, Y1, θ1, [0.019, -0.565, -0.959])],
+    [(ξ_ns, Y1, θ1, [0.0, -0.25, -0.9])],
 )
 def test_equation_08(ξ, y, θ, desired):
     """Test the hidden code for item."""
@@ -118,7 +121,7 @@ def test_equation_09(x, desired):
 
 @pytest.mark.parametrize(
     "ξ, y, θ, desired",
-    [(ξ_ns, Y1, θ1, [1.048, 1.283, 1.203])],
+    [(ξ_ns, Y1, θ1, [0.7, 1.0, 1.15])],
 )
 def test_equation_10(ξ, y, θ, desired):
     """Test the predicted observation code."""
@@ -128,7 +131,7 @@ def test_equation_10(ξ, y, θ, desired):
 
 @pytest.mark.parametrize(
     "π, z, k, desired",
-    [([0.8], Θ1, 0, 1.22)],
+    [(π1, z1, 0, 0.95)],
 )
 def test_equation_11(π, z, k, desired):
     """Test the mixing hyperparameters."""
@@ -137,10 +140,10 @@ def test_equation_11(π, z, k, desired):
 
 
 @pytest.mark.parametrize(
-    "ρ_k, z_k, y, desired",
-    [([0.5, 0.5, 0.5], 0.5, Y1, [0.6655, 0.9075, 1.0295])],
+    "ρ, z, y, k, desired",
+    [(ρ1, z1, Y1, 0, [0.50, 0.75, 1.00])],
 )
-def test_equation_12(ρ_k, z_k, y, desired):
+def test_equation_12(ρ, z, y, k, desired):
     """Test the mixing hyperparameters."""
-    result = equations.ρ_update(ρ_k, z_k, y)
+    result = equations.ρ_update(ρ[k], z[k], y)
     assert_allclose(result, desired, 1e-3)
