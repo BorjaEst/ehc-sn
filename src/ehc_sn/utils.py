@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 class CognitiveMap:  # pylint: disable=too-few-public-methods
     """Neural Network class for EHC-SN"""
 
-    def __init__(self, ρ: list[float]):
+    def __init__(self, ρ: NDArray[np.floating]):
         # Initialize the synaptic weights (structural parameters)
         self._param = np.array(ρ, dtype=np.float64) / sum(ρ)  # ~Cat(ρ)
 

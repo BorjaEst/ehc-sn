@@ -47,6 +47,10 @@ class HierarchicalGenerativeModel:
         """Call the model for inference."""
         return inference(self, *args, **kwargs)
 
+    def sample_maps(self) -> List[CognitiveMap]:
+        """Return a list of generated cognitive maps."""
+        return [CognitiveMap(ρ) for ρ in self.ρ]
+
 
 def inference(  # pylint: disable=too-many-arguments
     model: HierarchicalGenerativeModel,
@@ -61,7 +65,8 @@ def inference(  # pylint: disable=too-many-arguments
     k = z.argmax()  # Convert to list and get best
     x = eq.item(ξ, y, Θ[k])  # Predict item code
     y = eq.sequence(ξ, y, Θ[k])  # Update the sequence
-    return x, y, z / z.sum(), k  # z ~ Cat(π)
+    return x, y, z, k  # z ~ Cat(π)
+    # return x, y, z / z.sum(), k  # z ~ Cat(π)
 
 
 def learning(  # pylint: disable=too-many-arguments
@@ -74,12 +79,10 @@ def learning(  # pylint: disable=too-many-arguments
     _, N = model.shape  # Get the number of items
     z = None  # Initialize mixing probabilities
     for trajectory in episode:
-        Θ = model.maps_inference()  # Priority maps
+        Θ = model.sample_maps()  # Get the cognitive maps
         x, y = np.zeros(N), np.zeros(N)  # First item and sequence
         for ξ in trajectory:
-            x, y, z, k = model.inference(ξ, y, Θ)
-            model.π[k] = (1 - γ) * self.π[k] + z[k]  # Eq. (11)
-            model.ρ[k] = model.ρ[k] + z[k] * y  # Eq. (12)
-            ξ_i = np.argmax(ξ)  # Get the observation index
-            Θ[k].θ = (1 - λ) * Θ[k].θ - kron_delta(ξ_i, np.log(x))  # Eq. (13)
-    return Θ  # Return the updated prioritized maps
+            x, y, z, k = inference(model, ξ, y, Θ)
+            model.π[k] = eq.π_update(model.π[k], z[k], γ)
+            model.ρ[k] = eq.ρ_update(model.ρ[k], z[k], y)
+    # TODO: Implement priority map
