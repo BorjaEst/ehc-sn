@@ -6,6 +6,8 @@ import numpy as np
 from ehc_sn import equations as eq
 from ehc_sn.config import HGMSettings
 from ehc_sn.equations import Item, Mixing, Observation, Sequence
+from ehc_sn.equations import get_item as item  # noqa: F401
+from ehc_sn.equations import get_sequence as sequence  # noqa: F401
 from ehc_sn.utils import CognitiveMap
 from numpy.typing import NDArray
 
