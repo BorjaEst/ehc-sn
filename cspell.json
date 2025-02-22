@@ -1,17 +1,12 @@
 {
     "version": "0.2",
     "ignorePaths": [],
-    "dictionaryDefinitions": [
-        {
-            "name": "custom-dictionary",
-            "path": "./.cspell/custom-dictionary.txt",
-            "addWords": true
-        }
+    "dictionaryDefinitions": [],
+    "dictionaries": [],
+    "words": [
+        "Entorhinal",
+        "Hippocampal"
     ],
-    "dictionaries": [
-        "custom-dictionary"
-    ],
-    "words": [],
     "ignoreWords": [],
     "import": []
 }
