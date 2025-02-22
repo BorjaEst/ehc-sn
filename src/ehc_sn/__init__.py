@@ -4,7 +4,7 @@ from typing import Any, List, Optional, Tuple
 
 import numpy as np
 from ehc_sn import equations as eq
-from ehc_sn.config import HGModelSettings
+from ehc_sn.config import HGMSettings
 from ehc_sn.equations import Item, Mixing, Observation, Sequence
 from ehc_sn.utils import CognitiveMap
 from numpy.typing import NDArray
@@ -21,13 +21,20 @@ Episode = List[Trajectory]  # List of trajectories
 class HierarchicalGenerativeModel:
     """Hierarchical generative model for sequential navigation."""
 
-    def __init__(self, α: List[float], N: int, settings: HGModelSettings):
-        # Store and validate the parameters
+    def __init__(
+        self,
+        α: List[float],  # Mixing hyperparameters
+        N: int,  # Number of items in the maps
+        settings: Optional[HGMSettings] = None,
+    ):
         if not isinstance(N, int) or N <= 0:
             raise ValueError("N must be a positive integer.")
-        self.settings = settings
+        if settings and not isinstance(settings, HGMSettings):
+            raise ValueError(f"Settings must be {HGMSettings}.")
+        self.settings = settings or HGMSettings()  # type: ignore
+        ρh, size = np.ones(N), len(α)
         self.π = np.random.dirichlet(α)  # Mixing hyperparameter
-        self.ρ = [np.random.dirichlet(np.ones(N)) for _ in range(len(α))]
+        self.ρ = [np.random.dirichlet(ρh) for _ in range(size)]
 
     @property
     def shape(self) -> Tuple[int, int]:

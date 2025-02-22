@@ -2,10 +2,14 @@
 
 # pylint: disable=redefined-outer-name
 
+import ehc_sn
 import numpy as np
 import pytest
-from ehc_sn import HGModelSettings, HierarchicalGenerativeModel
+from ehc_sn import HierarchicalGenerativeModel
+from ehc_sn.config import HGMSettings
 from ehc_sn.utils import CognitiveMap
+
+# pylint: disable=non-ascii-name
 
 
 @pytest.fixture(scope="module")
@@ -18,15 +22,15 @@ def alpha(request):
 
 
 @pytest.fixture(scope="module")
-def parameters():
-    """Return the parameters for the HierarchicalGenerativeModel."""
-    return HGModelSettings(δ=0.5, τ=0.5, c=0.5)
+def settings():
+    """Return the settings for the Hierarchical Generative Model."""
+    return HGMSettings(δ=0.5, τ=0.5, c=0.5)
 
 
 @pytest.fixture(scope="function")
-def model(alpha, parameters, size):
+def model(alpha, settings, size):
     """Return the HierarchicalGenerativeModel instance."""
-    return HierarchicalGenerativeModel(alpha, size, parameters)
+    return HierarchicalGenerativeModel(alpha, size, settings)
 
 
 @pytest.fixture(scope="function", name="ξ")
@@ -73,7 +77,7 @@ def test_instantiation(model):
 @pytest.mark.parametrize("size", [10])
 def test_inference(model, size, ξ, x, y, Θ):
     """Test inference using the HierarchicalGenerativeModel class."""
-    x, y, z, k = model.inference(ξ, x, y, Θ, z=None)
+    x, y, z, k = ehc_sn.inference(model, ξ, x, y, Θ, z=None)
     assert isinstance(x, np.ndarray) and x.shape == (size,)
     assert isinstance(y, np.ndarray) and y.shape == (size,)
     assert isinstance(z, np.ndarray) and z.shape == (len(Θ),)
@@ -84,7 +88,7 @@ def test_inference(model, size, ξ, x, y, Θ):
 @pytest.mark.parametrize("size", [10])
 def test_learning(model, episode, size, alpha):
     """Test learning using the HierarchicalGenerativeModel class."""
-    Θ = model.learning(episode)
+    Θ = ehc_sn.learning(model, episode)
     assert isinstance(model.π, np.ndarray) and model.π.shape == (len(alpha),)
     assert isinstance(model.ρ, list)
     assert all(isinstance(ρ_k, np.ndarray) for ρ_k in model.ρ)
