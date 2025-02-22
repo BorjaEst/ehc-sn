@@ -106,7 +106,7 @@ def π_update(π_k: float, z_k: float, γ: float = 0.1) -> float:
 # Eq. (12)
 def ρ_update(ρ_k: Array, z_k: float, y: Sequence) -> Array:
     """Return map hyperparameters."""
-    return np.array([ρ_ki for ρ_ki in ρ_k + z_k * y])
+    return ρ_k + z_k * y
 
 
 # Eq. (13)
