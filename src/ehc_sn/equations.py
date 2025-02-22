@@ -1,25 +1,22 @@
 """Equations for the EHC-SN model."""
 
-from typing import List
-
 import numpy as np
-from ehc_sn.utils import CognitiveMap
-from numpy.typing import NDArray
+from numpy import typing as npt
 
 # pylint: disable=non-ascii-name
 # pylint: disable=invalid-name
 # pylint: disable=redefined-outer-name
 
-# Type alias for integer space arrays
-Observation = NDArray[np.float64]  # Observation
-Velocity = NDArray[np.float64]  # Velocity
-Item = NDArray[np.float64]  # Navigation Item
-Sequence = NDArray[np.float64]  # Navigation Sequence
-Mixing = NDArray[np.float64]  # Mixing probabilities
-PrioritizedMap = CognitiveMap  # Prioritized cognitive map
-Map = CognitiveMap  # Cognitive map
+# Type aliases for the EHC-SN model
+Array = npt.NDArray[np.floating]  # Alias for array of floats
+Observation = npt.NDArray[np.floating]  # Observation
+Velocity = npt.NDArray[np.floating]  # Velocity
+Item = npt.NDArray[np.floating]  # Navigation Item
+Sequence = npt.NDArray[np.floating]  # Navigation Sequence
+Mixing = npt.NDArray[np.floating]  # Mixing probabilities
+Map = npt.NDArray[np.floating]  # Navigation Map
 
-
+# Constant limits for numerical stability
 LOG_LIMIT = -1e12  # Logarithm limit for numerical stability
 LNP_LIMIT = -1e10  # Logarithm probability limit
 
@@ -31,13 +28,13 @@ def get_observation(x: Item, i: int) -> Observation:
 
 
 # Eq. (1)
-def get_item(Ξ: List[Observation]) -> Item:
+def get_item(Ξ: list[Observation]) -> Item:
     """Return the hidden code for item."""
     return np.array(Ξ).sum(axis=0)
 
 
 # Eq. (2)
-def get_sequence(X: List[Item], δ: float = 0.7) -> Sequence:
+def get_sequence(X: list[Item], δ: float = 0.7) -> Sequence:
     """Return the hidden code for sequence."""
     T = len(X)  # Number of items
     discounted = [x * δ ** (T - t) for t, x in enumerate(X, 1)]
@@ -54,14 +51,14 @@ def p_sequence(y: Sequence, Θ: list[Map], z: Mixing) -> float:
 # Eq. (4)
 def p(y: Sequence, θ: Map) -> float:
     """Return the probability of a sequence in a map."""
-    p_dist = θ.values**y
+    p_dist = θ**y
     return np.array(p_dist).prod(axis=0)
 
 
 # Eq. (5)
 def lnp(y: Sequence, θ: Map) -> float:
     """Return the log-likelihood of a sequence in a map."""
-    p_dist = y @ np.maximum(np.log(θ.values), LOG_LIMIT)
+    p_dist = y @ np.maximum(np.log(θ), LOG_LIMIT)
     result = np.array(p_dist).sum(axis=0)  # Nan protection
     return result if result > LNP_LIMIT else -np.inf
 
@@ -84,7 +81,7 @@ def lnz(y: Sequence, Θ: list[Map], z: Mixing, τ: float = 0.9) -> Mixing:
 def item(ξ: Observation, y: Sequence, θ: Map) -> Item:
     """Return the hidden code for item."""
     # ξ here is a noisy prediction about the observation
-    return ξ * θ.values - y
+    return ξ * θ - y
 
 
 # Eq. (9)
@@ -96,7 +93,7 @@ def observation(x: Item) -> Observation:
 # Eq. (10)
 def sequence(ξ: Observation, y: Sequence, θ: Map, δ: float = 0.9) -> Sequence:
     """Return the predicted sequence code."""
-    return δ * y + (1 - δ) * θ.values + ξ
+    return δ * y + (1 - δ) * θ + ξ
 
 
 # Eq. (11)
@@ -106,8 +103,6 @@ def π_update(π_k: float, z_k: float, γ: float = 0.1) -> float:
 
 
 # Eq. (12)
-def ρ_update(
-    ρ_k: NDArray[np.floating], z_k: float, y: Sequence
-) -> NDArray[np.floating]:
+def ρ_update(ρ_k: Array, z_k: float, y: Sequence) -> Array:
     """Return map hyperparameters."""
     return np.array([ρ_ki for ρ_ki in ρ_k + z_k * y])

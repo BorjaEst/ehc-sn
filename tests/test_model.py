@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 from ehc_sn import HierarchicalGenerativeModel
 from ehc_sn.config import HGMSettings
-from ehc_sn.utils import CognitiveMap
 
 # pylint: disable=non-ascii-name
+# pylint: disable=too-many-arguments
 
 
 @pytest.fixture(scope="module")
@@ -60,12 +60,11 @@ def sequence(request, size):
 
 
 @pytest.fixture(scope="function", name="Θ")
-def cognitive_maps(request, alpha, size):
+def cognitive_maps(request, model):
     """Return the cognitive maps."""
     if hasattr(request, "param"):
         return request.param
-    k, N = len(alpha), size
-    return [CognitiveMap(ρ=np.random.rand(N)) for _ in range(k)]
+    return model.sample_maps()
 
 
 @pytest.mark.parametrize("size", [10])
@@ -75,23 +74,25 @@ def test_instantiation(model):
 
 
 @pytest.mark.parametrize("size", [10])
-def test_inference(model, size, ξ, x, y, Θ):
+def test_inference(model, alpha, size, ξ, x, y, Θ):
     """Test inference using the HierarchicalGenerativeModel class."""
-    x, y, z, k = ehc_sn.inference(model, ξ, x, y, Θ, z=None)
+    x, y, z, k = ehc_sn.inference(model, ξ, y, Θ, z=None)
+    n_clusters = len(alpha)  # Number of clusters
     assert isinstance(x, np.ndarray) and x.shape == (size,)
     assert isinstance(y, np.ndarray) and y.shape == (size,)
-    assert isinstance(z, np.ndarray) and z.shape == (len(Θ),)
-    assert isinstance(k, np.int64) and 0 <= k < len(Θ)
+    assert isinstance(z, np.ndarray) and z.shape == (n_clusters,)
+    assert isinstance(k, np.int64) and 0 <= k < n_clusters
 
 
 @pytest.mark.parametrize("episode", [np.random.rand(2, 6, 10)])
 @pytest.mark.parametrize("size", [10])
 def test_learning(model, episode, size, alpha):
     """Test learning using the HierarchicalGenerativeModel class."""
-    Θ = ehc_sn.learning(model, episode)
-    assert isinstance(model.π, np.ndarray) and model.π.shape == (len(alpha),)
+    Θ = ehc_sn.learning(model, episode, γ=0.1, λ=0.1)
+    n_clusters = len(alpha)
+    assert isinstance(model.π, np.ndarray) and model.π.shape == (n_clusters,)
     assert isinstance(model.ρ, list)
     assert all(isinstance(ρ_k, np.ndarray) for ρ_k in model.ρ)
     assert all(p_k.shape == (size,) for p_k in model.ρ)
     assert isinstance(Θ, list)
-    assert all(isinstance(Θ_k, CognitiveMap) for Θ_k in Θ)
+    assert all(isinstance(Θ_k, np.ndarray) for Θ_k in Θ)

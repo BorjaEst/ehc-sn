@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from ehc_sn import CognitiveMap, equations
+from ehc_sn import equations
 from numpy.testing import assert_allclose
 
 # pylint: disable=non-ascii-name
@@ -20,8 +20,8 @@ x2 = np.array([0.1, 0.5, 0.9])  # Item at t=2
 X1 = np.stack([x0, x1, x2])  # Items episode 1
 
 Y1 = np.array([0.0, 0.5, 1.0])  # Sequence 1, δ = 0.3
-θ1 = CognitiveMap([0.0, 0.5, 0.5])  # Cognitive map 1
-θ2 = CognitiveMap([0.2, 0.0, 0.8])  # Cognitive map 2
+θ1 = np.array([0.0, 0.5, 0.5])  # Cognitive map 1
+θ2 = np.array([0.2, 0.0, 0.8])  # Cognitive map 2
 Θ1 = [θ1, θ2]  # Cognitive maps 1
 
 z1 = np.array([0.5, 0.5])  # Mixing probabilities 1

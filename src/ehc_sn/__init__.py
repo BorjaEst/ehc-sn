@@ -1,14 +1,13 @@
-"""Sequential Navigation (SN) module for the Entorhinal–Hippocampal circuit (EHC)"""
+"""Sequential Navigation (SN) for the Entorhinal–Hippocampal circuit (EHC)"""
 
-from typing import Any, List, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import numpy as np
 from ehc_sn import equations as eq
 from ehc_sn.config import HGMSettings
-from ehc_sn.equations import Item, Mixing, Observation, Sequence
+from ehc_sn.equations import Item, Map, Mixing, Observation, Sequence
 from ehc_sn.equations import get_item as item  # noqa: F401
 from ehc_sn.equations import get_sequence as sequence  # noqa: F401
-from ehc_sn.utils import CognitiveMap
 from numpy.typing import NDArray
 
 # pylint: disable=non-ascii-name
@@ -16,8 +15,8 @@ from numpy.typing import NDArray
 # pylint: disable=too-few-public-methods
 
 
-Trajectory = List[Observation]  # List of observations
-Episode = List[Trajectory]  # List of trajectories
+Trajectory = list[Observation]  # List of observations
+Episode = list[Trajectory]  # List of trajectories
 
 
 class HierarchicalGenerativeModel:
@@ -25,7 +24,7 @@ class HierarchicalGenerativeModel:
 
     def __init__(
         self,
-        α: List[float],  # Mixing hyperparameters
+        α: list[float],  # Mixing hyperparameters
         N: int,  # Number of items in the maps
         settings: Optional[HGMSettings] = None,
     ):
@@ -47,16 +46,17 @@ class HierarchicalGenerativeModel:
         """Call the model for inference."""
         return inference(self, *args, **kwargs)
 
-    def sample_maps(self) -> List[CognitiveMap]:
+    def sample_maps(self) -> list[Map]:
         """Return a list of generated cognitive maps."""
-        return [CognitiveMap(ρ) for ρ in self.ρ]
+        # return [ρ / ρ.sum() for ρ in self.ρ]  #TODO: Check if required
+        return list(self.ρ)
 
 
 def inference(  # pylint: disable=too-many-arguments
     model: HierarchicalGenerativeModel,
     ξ: Observation,
     y: Sequence,
-    Θ: List[CognitiveMap],
+    Θ: list[Map],
     z: Optional[Mixing] = None,
 ) -> Tuple[Item, Sequence, NDArray[np.float64], np.int64]:
     """Inference function, returns predicted next item and sequence."""
@@ -65,8 +65,7 @@ def inference(  # pylint: disable=too-many-arguments
     k = z.argmax()  # Convert to list and get best
     x = eq.item(ξ, y, Θ[k])  # Predict item code
     y = eq.sequence(ξ, y, Θ[k])  # Update the sequence
-    return x, y, z, k  # z ~ Cat(π)
-    # return x, y, z / z.sum(), k  # z ~ Cat(π)
+    return x, y, z / z.sum(), k  # z ~ Cat(π)
 
 
 def learning(  # pylint: disable=too-many-arguments
@@ -74,7 +73,7 @@ def learning(  # pylint: disable=too-many-arguments
     episode: Episode,
     γ: float = 0.1,
     λ: float = 0.1,
-) -> None:
+) -> list[Map]:
     """Learning function for the model."""
     _, N = model.shape  # Get the number of items
     z = None  # Initialize mixing probabilities
