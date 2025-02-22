@@ -4,8 +4,7 @@
 
 import numpy as np
 import pytest
-
-from ehc_sn import HGModelParams, HierarchicalGenerativeModel
+from ehc_sn import HGModelSettings, HierarchicalGenerativeModel
 from ehc_sn.utils import CognitiveMap
 
 
@@ -21,7 +20,7 @@ def alpha(request):
 @pytest.fixture(scope="module")
 def parameters():
     """Return the parameters for the HierarchicalGenerativeModel."""
-    return HGModelParams(δ=0.5, τ=0.5, c=0.5)
+    return HGModelSettings(δ=0.5, τ=0.5, c=0.5)
 
 
 @pytest.fixture(scope="function")
@@ -62,7 +61,7 @@ def cognitive_maps(request, alpha, size):
     if hasattr(request, "param"):
         return request.param
     k, N = len(alpha), size
-    return [CognitiveMap(θ=np.random.rand(N)) for _ in range(k)]
+    return [CognitiveMap(ρ=np.random.rand(N)) for _ in range(k)]
 
 
 @pytest.mark.parametrize("size", [10])

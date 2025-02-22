@@ -4,6 +4,7 @@ from typing import Any, Tuple
 
 import numpy as np
 import numpy.typing as npt
+from numpy.typing import NDArray
 
 # pylint: disable=non-ascii-name
 
@@ -13,28 +14,12 @@ class CognitiveMap:  # pylint: disable=too-few-public-methods
 
     def __init__(self, ρ: list[float]):
         # Initialize the synaptic weights (structural parameters)
-        self.θ = np.array(ρ, dtype=np.float64) / sum(ρ)  # ~Cat(ρ)
-
-    def _likelihood(self, y: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        # Note ln[p(y|Θ_k)] actually proportional to y·ln[θ_k]
-        return y @ np.log(self.θ)  # Eq. (5)
-
-    def __call__(self, y: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        """Normalized likelihood of sequence given a map."""
-        return np.exp(self._likelihood(y))
-
-    def __mul__(self, other) -> npt.NDArray[np.float64]:
-        """Element-wise multiplication."""
-        return self.θ * other
-
-    def __add__(self, other) -> npt.NDArray[np.float64]:
-        """Element-wise addition."""
-        return self.θ + other
+        self._param = np.array(ρ, dtype=np.float64) / sum(ρ)  # ~Cat(ρ)
 
     @property
-    def values(self) -> npt.NDArray[np.float64]:
+    def values(self) -> NDArray[np.float64] | NDArray[np.floating]:
         """Return the structural parameters."""
-        return self.θ
+        return self._param
 
 
 def kron_delta(ξ: np.int64, x: npt.NDArray[Any]) -> npt.NDArray[Any]:
