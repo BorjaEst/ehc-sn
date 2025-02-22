@@ -1,0 +1,4 @@
+numpy ~= 2.1.0
+matplotlib ~= 3.10.0
+pydantic-settings ~= 2.8.0
+rich ~= 13.9.0

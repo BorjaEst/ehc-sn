@@ -1,22 +1,33 @@
-[tool.poetry]
-name = "ehc-sn"
-version = "0.1.0"
-description = ""
-authors = ["Borja Esteban <boressan@outlook.com>"]
-readme = "README.md"
-
-[tool.poetry.dependencies]
-python = "^3.12"
-numpy = "^2.1.3"
-matplotlib = "^3.10.0"
-
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.3.4"
-
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "ehc-sn"
+description = "Sequential Navigation (SN) for the Entorhinal–Hippocampal circuit (EHC)"
+authors = [{ name = "Borja Esteban", email = "boressan@outlook.com" }]
+license = { text = "Apache License 2.0" }
+keywords = ["Sequential Navigation", "Entorhinal–Hippocampal circuit"]
+readme = "README.md"
+dynamic = ["version", "dependencies"]
+
+[project.optional-dependencies]
+test = ["pytest ~= 8.3.0"]
+
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
+dependencies = { file = "requirements.txt" }
+
+
+[project.urls]
+homepage = "https://github.com/BorjaEst/ehc-sn"
+documentation = "https://github.com/BorjaEst/ehc-sn"
+repository = "https://github.com/BorjaEst/ehc-sn"
+changelog = "https://github.com/BorjaEst/ehc-sn/blob/main/CHANGELOG.md"
+issue_tracker = "https://github.com/BorjaEst/ehc-sn/issues"
+source = "https://github.com/BorjaEst/ehc-sn"
 
 
 [tool.pylint.main]
@@ -25,6 +36,7 @@ disable = ["non-ascii-name", "invalid-name"]
 
 [tool.mypy]
 plugins = "numpy.typing.mypy_plugin"
+ignore_missing_imports = true
 
 [tool.black]
 line-length = 88
