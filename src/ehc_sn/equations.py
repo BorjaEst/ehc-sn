@@ -113,5 +113,5 @@ def ρ_update(ρ_k: Array, z_k: float, y: Sequence) -> Array:
 def pmap_update(θ_k: Map, ξ: Observation, x: Item, λ: float = 0.1) -> Map:
     """Return the updated map."""
     ξ_index = ξ != 0  # Index of the observations
-    δ = utils.kronecker_delta(ξ_index, np.log(x))  # Kronecker delta
+    δ = utils.kronecker_delta(ξ_index, np.log(x))
     return (1 - λ) * θ_k - δ

@@ -75,7 +75,8 @@ def learning(  # pylint: disable=too-many-arguments
     λ: float = 0.1,
 ) -> list[Map]:
     """Learning function for the model."""
-    _, N = model.shape  # Get the number of items
+    n_clusters, N = model.shape  # Get the number of items
+    p_maps = [np.zeros(N) for _ in range(n_clusters)]
     z = None  # Initialize mixing probabilities
     for trajectory in episode:
         Θ = model.sample_maps()  # Get the cognitive maps
@@ -84,4 +85,5 @@ def learning(  # pylint: disable=too-many-arguments
             x, y, z, k = inference(model, ξ, y, Θ)
             model.π[k] = eq.π_update(model.π[k], z[k], γ)
             model.ρ[k] = eq.ρ_update(model.ρ[k], z[k], y)
-    # TODO: Implement priority map
+            p_maps[k] = eq.pmap_update(p_maps[k], ξ, x, λ)
+    return p_maps  # Return the updated priority maps
