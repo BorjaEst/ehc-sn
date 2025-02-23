@@ -20,6 +20,7 @@ x2 = np.array([0.1, 0.5, 0.9])  # Item at t=2
 X1 = np.stack([x0, x1, x2])  # Items episode 1
 
 Y1 = np.array([0.0, 0.5, 1.0])  # Sequence 1, δ = 0.3
+v1 = np.array([0.0, 0.5, 0.5])  # Velocity 1
 θ1 = np.array([0.0, 0.5, 0.5])  # Cognitive map 1
 θ2 = np.array([0.2, 0.0, 0.8])  # Cognitive map 2
 Θ1 = [θ1, θ2]  # Cognitive maps 1
@@ -100,13 +101,13 @@ def test_equation_07(y, Θ, z, desired):
 
 
 @pytest.mark.parametrize(
-    "ξ, y, θ, desired",
-    [(ξ_ns, Y1, θ1, [0.0, -0.25, -0.9])],
+    "ξ, y, θ, v, desired",
+    [(ξ_ns, Y1, θ1, v1, [0.0, -0.25, -0.9])],
 )
-def test_equation_08(ξ, y, θ, desired):
+def test_equation_08(ξ, y, θ, v, desired):
     """Test the hidden code for item."""
-    result = equations.item(ξ, y, θ)
-    assert_allclose(result, desired, 1e-3)
+    results = [equations.item(ξ, y, θ, v, c=0.001) for _ in range(100)]
+    assert_allclose(np.mean(results, axis=0), desired, 0.1)
 
 
 @pytest.mark.parametrize(

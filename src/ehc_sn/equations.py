@@ -79,10 +79,11 @@ def lnz(y: Sequence, Θ: list[Map], z: Mixing, τ: float = 0.9) -> Mixing:
 
 
 # Eq. (8)
-def item(ξ: Observation, y: Sequence, θ: Map) -> Item:
+def item(ξ: Observation, y: Sequence, θ: Map, v: Velocity, c: float = 0.4) -> Item:
     """Return the hidden code for item."""
-    # ξ here is a noisy prediction about the observation
-    return ξ * θ - y
+    μ, Σ = ξ + c * v, v * np.eye(v.size)  # Noise parameters
+    ξn = np.random.multivariate_normal(μ, Σ)  # Noisy observation
+    return ξn * θ - y
 
 
 # Eq. (9)

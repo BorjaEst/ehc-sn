@@ -36,6 +36,7 @@ class HierarchicalGenerativeModel:
         ρh, size = np.ones(N), len(α)
         self.π = np.random.dirichlet(α)  # Mixing hyperparameter
         self.ρ = [np.random.dirichlet(ρh) for _ in range(size)]
+        self.v = np.zeros(N)  # Velocity for the model
 
     @property
     def shape(self) -> Tuple[int, int]:
@@ -59,10 +60,11 @@ def inference(  # pylint: disable=too-many-arguments
     z: Optional[Mixing] = None,
 ) -> Tuple[Item, Sequence, NDArray[np.float64], np.int64]:
     """Inference function, returns predicted next item and sequence."""
-    τ = model.settings.τ  # Extract exponential decay for mixing
+    τ, c = model.settings.τ, model.settings.c  # Get the settings
     z = model.π if z is None else eq.mixing(y, Θ, z, τ)
     k = z.argmax()  # Convert to list and get best
-    x = eq.item(ξ, y, Θ[k])  # Predict item code
+    x = eq.item(ξ, y, Θ[k], model.v, c)  # Predict item code
+    model.v = eq.observation(x) - ξ  # Update the velocity
     y = eq.sequence(ξ, y, Θ[k])  # Update the sequence
     return x, y, z / z.sum(), k  # z ~ Cat(π)
 
@@ -80,6 +82,7 @@ def learning(  # pylint: disable=too-many-arguments
     for trajectory in episode:
         Θ = model.sample_maps()  # Get the cognitive maps
         x, y = np.zeros(N), np.zeros(N)  # First item and sequence
+        model.v = np.zeros(N)  # Reset the velocity
         for ξ in trajectory:
             x, y, z, k = inference(model, ξ, y, Θ)
             model.π[k] = eq.π_update(model.π[k], z[k], γ)
