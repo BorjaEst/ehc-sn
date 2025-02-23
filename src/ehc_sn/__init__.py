@@ -48,8 +48,7 @@ class HierarchicalGenerativeModel:
 
     def sample_maps(self) -> list[Map]:
         """Return a list of generated cognitive maps."""
-        # return [ρ / ρ.sum() for ρ in self.ρ]  #TODO: Check if required
-        return list(self.ρ)
+        return [ρ / ρ.sum() for ρ in self.ρ]  # Cat(ρ)
 
 
 def inference(  # pylint: disable=too-many-arguments
