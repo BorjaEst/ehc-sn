@@ -35,7 +35,7 @@ def get_item(Ξ: list[Observation]) -> Item:
 
 
 # Eq. (2)
-def get_sequence(X: list[Item], δ: float = 0.7) -> Sequence:
+def get_sequence(X: list[Item], δ: float) -> Sequence:
     """Return the hidden code for sequence."""
     T = len(X)  # Number of items
     discounted = [x * δ ** (T - t) for t, x in enumerate(X, 1)]
@@ -65,21 +65,21 @@ def lnp(y: Sequence, θ: Map) -> float:
 
 
 # Eq. (6)
-def mixing(y: Sequence, Θ: list[Map], z: Mixing, τ: float = 0.9) -> Mixing:
+def mixing(y: Sequence, Θ: list[Map], z: Mixing, τ: float) -> Mixing:
     """Return the mixing probability values."""
     _z = [z_i**τ * p(y, θ) ** (1 - τ) for θ, z_i in zip(Θ, z)]
     return np.array(_z, dtype=np.float64)
 
 
 # Eq. (7)
-def lnz(y: Sequence, Θ: list[Map], z: Mixing, τ: float = 0.9) -> Mixing:
+def lnz(y: Sequence, Θ: list[Map], z: Mixing, τ: float) -> Mixing:
     """Return ln of mixing probability values."""
     _lnz = [τ * np.log(z_i) + (1 - τ) * lnp(y, θ) for θ, z_i in zip(Θ, z)]
     return np.array(_lnz, dtype=np.float64)
 
 
 # Eq. (8)
-def item(ξ: Observation, y: Sequence, θ: Map, v: Velocity, c: float = 0.4) -> Item:
+def item(ξ: Observation, y: Sequence, θ: Map, v: Velocity, c: float) -> Item:
     """Return the hidden code for item."""
     μ, Σ = ξ + c * v, v * np.eye(v.size)  # Noise parameters
     ξn = np.random.multivariate_normal(μ, Σ)  # Noisy observation
@@ -93,13 +93,13 @@ def observation(x: Item) -> Observation:
 
 
 # Eq. (10)
-def sequence(ξ: Observation, y: Sequence, θ: Map, δ: float = 0.9) -> Sequence:
+def sequence(ξ: Observation, y: Sequence, θ: Map, δ: float) -> Sequence:
     """Return the predicted sequence code."""
     return δ * y + (1 - δ) * θ + ξ
 
 
 # Eq. (11)
-def π_update(π_k: float, z_k: float, γ: float = 0.1) -> float:
+def π_update(π_k: float, z_k: float, γ: float) -> float:
     """Return mixing hyperparameters."""
     return (1 - γ) * π_k + z_k
 
@@ -111,7 +111,7 @@ def ρ_update(ρ_k: Array, z_k: float, y: Sequence) -> Array:
 
 
 # Eq. (13)
-def pmap_update(θ_k: Map, ξ: Observation, x: Item, λ: float = 0.1) -> Map:
+def pmap_update(θ_k: Map, ξ: Observation, x: Item, λ: float) -> Map:
     """Return the updated map."""
     ξ_index = ξ != 0  # Index of the observations
     δ = utils.kronecker_delta(ξ_index, np.log(x))

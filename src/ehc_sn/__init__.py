@@ -60,12 +60,12 @@ def inference(  # pylint: disable=too-many-arguments
     z: Optional[Mixing] = None,
 ) -> Tuple[Item, Sequence, NDArray[np.float64], np.int64]:
     """Inference function, returns predicted next item and sequence."""
-    τ, c = model.settings.τ, model.settings.c  # Get the settings
+    δ, τ, c = model.settings.δ, model.settings.τ, model.settings.c
     z = model.π if z is None else eq.mixing(y, Θ, z, τ)
     k = z.argmax()  # Convert to list and get best
     x = eq.item(ξ, y, Θ[k], model.v, c)  # Predict item code
     model.v = eq.observation(x) - ξ  # Update the velocity
-    y = eq.sequence(ξ, y, Θ[k])  # Update the sequence
+    y = eq.sequence(ξ, y, Θ[k], δ)  # Update the sequence
     return x, y, z / z.sum(), k  # z ~ Cat(π)
 
 

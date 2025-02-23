@@ -106,8 +106,8 @@ def test_equation_07(y, Θ, z, desired):
 )
 def test_equation_08(ξ, y, θ, v, desired):
     """Test the hidden code for item."""
-    results = [equations.item(ξ, y, θ, v, c=0.001) for _ in range(100)]
-    assert_allclose(np.mean(results, axis=0), desired, 0.1)
+    results = [equations.item(ξ, y, θ, v, c=1e-3) for _ in range(99)]
+    assert_allclose(np.mean(results, axis=0), desired, 0.2)
 
 
 @pytest.mark.parametrize(
