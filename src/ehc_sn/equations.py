@@ -1,21 +1,22 @@
 """Equations for the EHC-SN model."""
 
+from typing import TypeAlias
+
 import numpy as np
 from ehc_sn import utils
-from numpy import typing as npt
+from numpydantic import NDArray, Shape
 
 # pylint: disable=non-ascii-name
 # pylint: disable=invalid-name
 # pylint: disable=redefined-outer-name
 
-# Type aliases for the EHC-SN model
-Array = npt.NDArray[np.floating]  # Alias for array of floats
-Observation = npt.NDArray[np.floating]  # Observation
-Velocity = npt.NDArray[np.floating]  # Velocity
-Item = npt.NDArray[np.floating]  # Navigation Item
-Sequence = npt.NDArray[np.floating]  # Navigation Sequence
-Mixing = npt.NDArray[np.floating]  # Mixing probabilities
-Map = npt.NDArray[np.floating]  # Navigation Map
+Array: TypeAlias = NDArray[Shape["*"], np.floating]  # Array of floats
+Observation: TypeAlias = NDArray[Shape["*"], np.floating]  # Observation
+Velocity: TypeAlias = NDArray[Shape["*"], np.floating]  # Velocity
+Item: TypeAlias = NDArray[Shape["*"], np.floating]  # Navigation Item
+Sequence: TypeAlias = NDArray[Shape["*"], np.floating]  # Navigation Sequence
+Mixing: TypeAlias = NDArray[Shape["*"], np.floating]  # Mixing probabilities
+Map: TypeAlias = NDArray[Shape["*"], np.floating]  # Navigation Map
 
 # Constant limits for numerical stability
 LOG_LIMIT = -1e12  # Logarithm limit for numerical stability

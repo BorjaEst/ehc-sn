@@ -1,14 +1,15 @@
 {
     "version": "0.2",
-    "ignorePaths": [ ],
-    "dictionaryDefinitions": [ ],
-    "dictionaries": [ ],
+    "ignorePaths": [],
+    "dictionaryDefinitions": [],
+    "dictionaries": [],
     "words": [
         "allclose",
         "Entorhinal",
         "Hippocampal",
+        "numpydantic",
         "pmap"
     ],
-    "ignoreWords": [ ],
-    "import": [ ]
+    "ignoreWords": [],
+    "import": []
 }

@@ -6,7 +6,7 @@ import ehc_sn
 import numpy as np
 import pytest
 from ehc_sn import HierarchicalGenerativeModel
-from ehc_sn.config import HGMSettings
+from ehc_sn.config import GenSettings
 
 # pylint: disable=non-ascii-name
 # pylint: disable=too-many-arguments
@@ -24,7 +24,7 @@ def alpha(request):
 @pytest.fixture(scope="module")
 def settings():
     """Return the settings for the Hierarchical Generative Model."""
-    return HGMSettings(δ=0.5, τ=0.5, c=0.5)
+    return GenSettings()
 
 
 @pytest.fixture(scope="function")
@@ -38,7 +38,7 @@ def observation(request, size):
     """Return the observation input."""
     if hasattr(request, "param"):
         return request.param
-    default = np.zeros(size, dtype=np.float32)  # Initialize with zeros
+    default = np.zeros(size, dtype=np.float64)  # Initialize with zeros
     default[np.random.randint(size)] = 1.0  # Set random position to 1.0
     return default
 
@@ -86,9 +86,9 @@ def test_inference(model, alpha, size, ξ, x, y, Θ):
 
 @pytest.mark.parametrize("episode", [np.random.rand(2, 6, 10)])
 @pytest.mark.parametrize("size", [10])
-def test_learning(model, episode, size, alpha):
+def test_learning(model, episode, size, alpha, settings):
     """Test learning using the HierarchicalGenerativeModel class."""
-    Θ = ehc_sn.learning(model, episode, γ=0.1, λ=0.1)
+    Θ = ehc_sn.learning(model, episode, settings)
     n_clusters = len(alpha)
     assert isinstance(model.π, np.ndarray) and model.π.shape == (n_clusters,)
     assert isinstance(model.ρ, list)
