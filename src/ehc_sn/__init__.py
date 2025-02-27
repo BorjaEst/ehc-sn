@@ -16,8 +16,9 @@ from pydantic import InstanceOf, PositiveInt, validate_call
 # pylint: disable=too-few-public-methods
 
 
-Trajectory: TypeAlias = list[Observation]  # List of observations
-Episode: TypeAlias = list[Trajectory]  # List of trajectories
+Episode: TypeAlias = list[Observation]  # List of observations
+Episodes: TypeAlias = list[Episode]  # List of episodes
+Experiment: TypeAlias = list[Episodes]  # List of list of episodes
 
 
 class HierarchicalGenerativeModel:
@@ -77,7 +78,7 @@ def inference(  # pylint: disable=too-many-arguments
 @validate_call
 def learning(  # pylint: disable=too-many-arguments
     model: InstanceOf[HierarchicalGenerativeModel],
-    episode: Episode,
+    episodes: list[Episode],
     settings: Optional[LearningSettings] = None,
 ) -> list[Map]:
     """Learning function for the model."""
@@ -87,19 +88,18 @@ def learning(  # pylint: disable=too-many-arguments
 
     # Train the model on the episode data
     p_maps = [np.zeros(N) for _ in range(n_clusters)]
-    for trajectory in episode:
-        _train(model, trajectory, γ, λ, p_maps)  # Train the model
+    for episode in episodes:
+        _train(model, episode, γ, λ, p_maps)  # Train the model
 
     # Return the updated priority maps
     return p_maps
 
 
-# pylint: disable=too-many-arguments
-def _train(model, trajectory, γ, λ, p_maps):
+def _train(model, episode, γ, λ, p_maps):
     Θ, N = model.sample_maps(), model.shape[1]
     x, y = np.zeros(N), np.zeros(N)  # First item and sequence
     model.v = np.zeros(N)  # Reset the velocity
-    for ξ in trajectory:
+    for ξ in episode:
         x, y, z, k = inference(model, ξ, y, Θ)
         model.π[k] = eq.π_update(model.π[k], z[k], γ)
         model.ρ[k] = eq.ρ_update(model.ρ[k], z[k], y)
@@ -108,7 +108,7 @@ def _train(model, trajectory, γ, λ, p_maps):
 
 @validate_call
 def baseline(
-    experiment: list[Episode],
+    experiment: Experiment,
     α: list[float],
     N: int,
     settings: Optional[GenSettings] = None,
