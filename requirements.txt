@@ -1,4 +1,4 @@
-numpy ~= 2.1.0
+norse ~= 1.1.0
 matplotlib ~= 3.10.0
 pydantic-settings ~= 2.8.0
 numpydantic ~= 1.6.0
