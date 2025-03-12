@@ -5,11 +5,17 @@
     "dictionaries": [],
     "words": [
         "allclose",
+        "AMPA",
         "Entorhinal",
+        "GABA",
         "Hippocampal",
         "inihibitory",
         "numpydantic",
-        "pmap"
+        "pmap",
+        "Presynaptic",
+        "Refrac",
+        "STDP",
+        "teta"
     ],
     "ignoreWords": [],
     "import": []
