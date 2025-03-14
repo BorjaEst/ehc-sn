@@ -14,14 +14,14 @@ from torch import nn
 # pylint: disable=non-ascii-name
 
 
-class PopulationsModel(BaseModel):
+class Populations(BaseModel):
     """The populations settings of the EI model."""
 
     n_exc: PositiveInt = Field(default=80, description="Size of excitatory population E")
     n_inh: PositiveInt = Field(default=20, description="Size of inhibitory population I")
 
 
-class LIFModel(BaseModel):
+class LIFCell(BaseModel):
     """The LIF neuron settings of the EI model."""
 
     tau_syn_inv: NonNegativeFloat = Field(default=2.0, description="(1/ms) Inverse synaptic time constant")
@@ -37,21 +37,39 @@ class LIFModel(BaseModel):
         """Convert the LIF parameters to a tensor."""
         return torch.tensor(value).to(config.device)
 
+    def parameters(self) -> snn.LIFParameters:
+        """Return the LIF parameters as a norse object."""
+        return snn.LIFParameters(**self.model_dump())
 
-class LIFRefracModel(BaseModel):
+    def cell(self) -> snn.LIFCell:
+        """Return the LIF cell as a norse object."""
+        return snn.LIFCell(p=self.parameters()).to(config.device)
+
+
+class LIFRefracCell(LIFCell):
     """The LIF refractory settings of the EI model."""
 
-    lif: LIFModel = LIFModel()
     rho_reset: NonNegativeFloat = Field(default=5, description="(ms) Refractory period")
 
-    @field_serializer("rho_reset")
-    @classmethod
-    def to_tensor(cls, value):
-        """Convert the refractory period to a tensor."""
-        return torch.tensor(value).to(config.device)
+    def parameters(self) -> snn.LIFRefracParameters:
+        """Return the LIFRefrac parameters as a norse object."""
+        lif = snn.LIFParameters(**self.model_dump(exclude={"rho_reset"}))
+        rho_reset = torch.tensor(self.rho_reset).to(config.device)
+        return snn.LIFRefracParameters(lif, rho_reset)
+
+    def cell(self) -> snn.LIFRefracCell:
+        """Return the LIFRefrac cell as a norse object."""
+        return snn.LIFRefracCell(p=self.parameters()).to(config.device)
 
 
-class ConnectivityModel(BaseModel):
+class Layer(BaseModel):
+    """The layer settings of the EI model."""
+
+    population: PositiveInt = Field(default=80, description="Size of the population")
+    cell: LIFRefracCell = LIFRefracCell()
+
+
+class Connectivity(BaseModel):
     """The connectivity settings of the EI model."""
 
     epsilon: NonNegativeFloat = Field(default=0.02, description="Probability of any connection (EE,EI,IE,II)")
@@ -62,7 +80,7 @@ class ConnectivityModel(BaseModel):
     chi: NonNegativeFloat = Field(default=5, description="Potentiation factor of excitatory weights")
 
 
-class PlasticityModel(BaseModel):
+class Plasticity(BaseModel):
     """The plasticity settings of the EI model."""
 
     tau_stdp: NonNegativeFloat = Field(default=20, description="(ms) Decay of (pre and post) synaptic trace")
@@ -75,11 +93,11 @@ class PlasticityModel(BaseModel):
 class EIParameters(BaseSettings):
     """The settings of a Excitatory Inhibitory network model."""
 
-    populations: PopulationsModel = PopulationsModel()
-    excitatory: LIFRefracModel = LIFRefracModel()
-    inhibitory: LIFRefracModel = LIFRefracModel()
-    connectivity: ConnectivityModel = ConnectivityModel()
-    plasticity: PlasticityModel = PlasticityModel()
+    populations: Populations = Populations()
+    excitatory: LIFRefracCell = LIFRefracCell()
+    inhibitory: LIFRefracCell = LIFRefracCell()
+    connectivity: Connectivity = Connectivity()
+    plasticity: Plasticity = Plasticity()
 
 
 class BaseEIModel(nn.Module, ABC):
@@ -87,8 +105,8 @@ class BaseEIModel(nn.Module, ABC):
 
     def __init__(self, p: EIParameters) -> None:
         super().__init__()
-        self.excitatory = BaseEIModel.layer_exc(p.excitatory)
-        self.inihibitory = BaseEIModel.layer_inh(p.inhibitory)
+        self.excitatory = p.excitatory.cell()
+        self.inihibitory = p.inhibitory.cell()
         self.masks = BaseEIModel.create_masks(p.populations, p.connectivity)
         self.populations = p.populations
         self.chi = p.connectivity.chi  # TODO: how to use this?
@@ -96,23 +114,7 @@ class BaseEIModel(nn.Module, ABC):
         self.e, self.i = None, None
 
     @staticmethod
-    def layer_exc(p: LIFRefracModel) -> snn.LIFRefracCell:
-        """Create an excitatory layer."""
-        lif = snn.LIFParameters(**p.lif.model_dump())
-        rho_reset = torch.tensor(p.rho_reset).to(config.device)
-        parameters = snn.LIFRefracParameters(lif, rho_reset)
-        return snn.LIFRefracCell(p=parameters).to(config.device)
-
-    @staticmethod
-    def layer_inh(p: LIFRefracModel) -> snn.LIFRefracCell:
-        """Create an inhibitory layer."""
-        lif = snn.LIFParameters(**p.lif.model_dump())
-        rho_reset = torch.tensor(p.rho_reset).to(config.device)
-        parameters = snn.LIFRefracParameters(lif, rho_reset)
-        return snn.LIFRefracCell(p=parameters).to(config.device)
-
-    @staticmethod
-    def create_masks(pp: PopulationsModel, conn: ConnectivityModel) -> dict:
+    def create_masks(pp: Populations, conn: Connectivity) -> dict:
         """Create the masks for the model."""
         return {
             "ee": (conn.g_ee * torch.rand(pp.n_exc, pp.n_exc) < conn.epsilon).to(config.device),
