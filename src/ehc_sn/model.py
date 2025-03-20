@@ -1,161 +1,64 @@
 """Module for the model class."""
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
-import norse.torch as snn
 import torch
-from ehc_sn import config
-from pydantic import BaseModel, Field, NonNegativeFloat, PositiveInt, field_serializer
-from pydantic_settings import BaseSettings
+from ehc_sn import config, parameters
+from norse.torch.functional import stdp
 from torch import nn
 
 # pylint: disable=too-few-public-methods
 # pylint: disable=non-ascii-name
 
 
-class Populations(BaseModel):
-    """The populations settings of the EI model."""
-
-    n_exc: PositiveInt = Field(default=80, description="Size of excitatory population E")
-    n_inh: PositiveInt = Field(default=20, description="Size of inhibitory population I")
-
-
-class LIFCell(BaseModel):
-    """The LIF neuron settings of the EI model."""
-
-    tau_syn_inv: NonNegativeFloat = Field(default=2.0, description="(1/ms) Inverse synaptic time constant")
-    tau_mem_inv: NonNegativeFloat = Field(default=0.05, description="(1/ms) Inverse membrane time constant")
-    v_leak: float = Field(default=-65, description="(mV) Leak potential")
-    v_th: float = Field(default=-50, description="(mV) Threshold potential")
-    v_reset: float = Field(default=-65, description="(mV) Reset potential")
-    alpha: NonNegativeFloat = Field(default=0.5, description="Surrogate gradient computation parameter")
-
-    @field_serializer("*")
-    @classmethod
-    def to_tensor(cls, value):
-        """Convert the LIF parameters to a tensor."""
-        return torch.tensor(value).to(config.device)
-
-    def parameters(self) -> snn.LIFParameters:
-        """Return the LIF parameters as a norse object."""
-        return snn.LIFParameters(**self.model_dump())
-
-    def cell(self) -> snn.LIFCell:
-        """Return the LIF cell as a norse object."""
-        return snn.LIFCell(p=self.parameters()).to(config.device)
-
-
-class LIFRefracCell(LIFCell):
-    """The LIF refractory settings of the EI model."""
-
-    rho_reset: NonNegativeFloat = Field(default=5, description="(ms) Refractory period")
-
-    def parameters(self) -> snn.LIFRefracParameters:
-        """Return the LIFRefrac parameters as a norse object."""
-        lif = snn.LIFParameters(**self.model_dump(exclude={"rho_reset"}))
-        rho_reset = torch.tensor(self.rho_reset).to(config.device)
-        return snn.LIFRefracParameters(lif, rho_reset)
-
-    def cell(self) -> snn.LIFRefracCell:
-        """Return the LIFRefrac cell as a norse object."""
-        return snn.LIFRefracCell(p=self.parameters()).to(config.device)
-
-
-class Layer(BaseModel):
+class Layer:
     """The layer settings of the EI model."""
 
-    population: PositiveInt = Field(default=80, description="Size of the population")
-    cell: LIFRefracCell = LIFRefracCell()
-
-
-class Connectivity(BaseModel):
-    """The connectivity settings of the EI model."""
-
-    epsilon: NonNegativeFloat = Field(default=0.02, description="Probability of any connection (EE,EI,IE,II)")
-    g_ee: NonNegativeFloat = Field(default=3, description="Weight of excitatory to excitatory synapses")
-    g_ei: NonNegativeFloat = Field(default=3, description="Weight of excitatory to inhibitory synapses")
-    g_ii: NonNegativeFloat = Field(default=30, description="Weight of inhibitory to inhibitory synapses")
-    g_ie: NonNegativeFloat = Field(default=30, description="Weight of inhibitory to excitatory synapses")
-    chi: NonNegativeFloat = Field(default=5, description="Potentiation factor of excitatory weights")
-
-
-class Plasticity(BaseModel):
-    """The plasticity settings of the EI model."""
-
-    tau_stdp: NonNegativeFloat = Field(default=20, description="(ms) Decay of (pre and post) synaptic trace")
-    eta: NonNegativeFloat = Field(default=1e-4, description="Learning rate")
-    alpha: NonNegativeFloat = Field(default=0.12, description="Presynaptic offset")
-    w_min: NonNegativeFloat = Field(default=0, description="Minimum inhibitory synaptic weight")
-    w_max: NonNegativeFloat = Field(default=300, description="Maximum inhibitory synaptic weight")
-
-
-class EIParameters(BaseSettings):
-    """The settings of a Excitatory Inhibitory network model."""
-
-    populations: Populations = Populations()
-    excitatory: LIFRefracCell = LIFRefracCell()
-    inhibitory: LIFRefracCell = LIFRefracCell()
-    connectivity: Connectivity = Connectivity()
-    plasticity: Plasticity = Plasticity()
-
-
-class BaseEIModel(nn.Module, ABC):
-    """Base model class for connectivity models."""
-
-    def __init__(self, p: EIParameters) -> None:
-        super().__init__()
-        self.excitatory = p.excitatory.cell()
-        self.inihibitory = p.inhibitory.cell()
-        self.masks = BaseEIModel.create_masks(p.populations, p.connectivity)
-        self.populations = p.populations
-        self.chi = p.connectivity.chi  # TODO: how to use this?
-        self.plasticity = p.plasticity
-        self.e, self.i = None, None
-
-    @staticmethod
-    def create_masks(pp: Populations, conn: Connectivity) -> dict:
-        """Create the masks for the model."""
-        return {
-            "ee": (conn.g_ee * torch.rand(pp.n_exc, pp.n_exc) < conn.epsilon).to(config.device),
-            "ei": (conn.g_ei * torch.rand(pp.n_exc, pp.n_inh) < conn.epsilon).to(config.device),
-            "ii": (conn.g_ii * torch.rand(pp.n_inh, pp.n_inh) < conn.epsilon).to(config.device),
-            "ie": (conn.g_ie * torch.rand(pp.n_inh, pp.n_exc) < conn.epsilon).to(config.device),
-        }
+    def __init__(self, p: parameters.Layer):
+        self.population = p.population
+        self.cell = p.cell.cell()
+        zeros = torch.zeros(self.population).to(config.device)
+        self.nodes = self.cell(zeros, None)
 
     def reset(self):
-        """Reset the state of the model."""
-        zeros = torch.zeros(self.populations.n_exc).to(config.device)
-        self.e = self.excitatory(zeros, None)
-        zeros = torch.zeros(self.populations.n_inh).to(config.device)
-        self.i = self.inihibitory(zeros, None)
+        """Reset the state of the layer."""
+        zeros = torch.zeros(self.population).to(config.device)
+        self.nodes = self.cell(zeros, None)
+
+
+class Network(nn.Module, ABC):
+    """The connectivity settings of the EI model."""
+
+    def __init__(self, p: parameters.Network):
+        super().__init__()  # Initialize the parent class
+        self.layers = {l1: Layer(p) for l1, p in p.layers.items()}
+        self.w = {l1: {l2: p.mask(l1, l2) * p.weights(l1, l2)
+                       for l2 in p.synapses[l1].w}
+                  for l1 in p.synapses} # fmt: skip
+        self.p_stdp = p.plasticity.parameters()
+        self.stdp_state = {l1: {l2: p.stdp_state(l1, l2)
+                                for l2 in p.synapses[l1].w}
+                           for l1 in p.synapses} # fmt: skip
+
+    def reset(self) -> None:
+        """Reset the state of the network."""
+        for layer in self.layers.values():
+            layer.reset()
+
+    def plasticity(self, l1: str, l2: str) -> None:
+        """Update the weights of the network."""
+        self.w[l1][l2], self.stdp_state[l1][l2] = stdp.stdp_step_linear(
+            z_pre=self.layers[l1].nodes[0].unsqueeze(0),
+            z_post=self.layers[l2].nodes[0].unsqueeze(0),
+            w=self.w[l1][l2],
+            state_stdp=self.stdp_state[l1][l2],
+            p_stdp=self.p_stdp,
+        )
 
     @abstractmethod
-    def step(self, x):
+    def step(self, x: torch.Tensor) -> torch.Tensor:
         """Execute a single step of the model with input x."""
 
     def forward(self, exc_current):
         """Forward pass."""
         return torch.stack([self.step(x) for x in exc_current])
-
-
-class EIModel(BaseEIModel):
-    """Excitatory Inhibitory Network Model."""
-
-    def __init__(self, p: Optional[EIParameters] = None) -> None:
-        super().__init__(p or EIParameters())
-        self.w_ee = self.masks["ee"] * torch.ones(self.masks["ee"].shape).to(config.device)
-        self.w_ei = self.masks["ei"] * torch.ones(self.masks["ei"].shape).to(config.device)
-        self.w_ii = self.masks["ii"] * torch.ones(self.masks["ii"].shape).to(config.device)
-        self.w_ie = self.masks["ie"] * torch.ones(self.masks["ie"].shape).to(config.device)
-        self.reset()
-        self.w_ii = nn.Parameter(self.w_ii)
-
-    def step(self, x):  # TODO: Check if masks are required or STDP err does not prop
-        xe = x - self.i[0] @ (self.masks["ie"] * self.w_ie)
-        xe = xe + self.e[0] @ (self.masks["ee"] * self.w_ee)
-        self.e = self.excitatory(xe, self.e[1])
-        xi = self.e[0] @ (self.masks["ei"] * self.w_ei)
-        xi = xi - self.i[0] @ (self.masks["ii"] * self.w_ii)
-        self.i = self.inihibitory(xi, self.i[1])
-        return self.e[0]
