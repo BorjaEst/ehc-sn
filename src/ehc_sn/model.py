@@ -1,6 +1,6 @@
 """Module for the model class."""
 
-from abc import ABC, abstractmethod
+from abc import ABC
 
 import torch
 from ehc_sn import config, parameters
@@ -55,10 +55,6 @@ class Network(nn.Module, ABC):
             p_stdp=self.p_stdp,
         )
 
-    @abstractmethod
-    def step(self, x: torch.Tensor) -> torch.Tensor:
-        """Execute a single step of the model with input x."""
-
-    def forward(self, exc_current):
-        """Forward pass."""
-        return torch.stack([self.step(x) for x in exc_current])
+    def run(self, exc_current):
+        """Run the model for a given input current."""
+        return torch.stack([self(x) for x in exc_current])
