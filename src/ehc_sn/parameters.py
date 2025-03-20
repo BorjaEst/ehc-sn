@@ -7,6 +7,8 @@ import torch
 from ehc_sn import config
 from norse.torch.functional import stdp
 from pydantic import BaseModel, Field, NonNegativeFloat, PositiveInt, field_serializer, model_validator
+from pydantic import ConfigDict
+
 
 # pylint: disable=too-few-public-methods
 # pylint: disable=non-ascii-name
@@ -15,6 +17,7 @@ from pydantic import BaseModel, Field, NonNegativeFloat, PositiveInt, field_seri
 class LIFCell(BaseModel):
     """The LIF neuron settings of the EI model."""
 
+    model_config = ConfigDict(extra="forbid")
     tau_syn_inv: NonNegativeFloat = Field(default=2.0, description="(1/ms) Inverse synaptic time constant")
     tau_mem_inv: NonNegativeFloat = Field(default=0.05, description="(1/ms) Inverse membrane time constant")
     v_leak: float = Field(default=-65, description="(mV) Leak potential")
@@ -40,6 +43,7 @@ class LIFCell(BaseModel):
 class LIFRefracCell(LIFCell):
     """The LIF refractory settings of the EI model."""
 
+    model_config = ConfigDict(extra="forbid")
     rho_reset: NonNegativeFloat = Field(default=5, description="(ms) Refractory period")
 
     def parameters(self) -> snn.LIFRefracParameters:
@@ -56,6 +60,7 @@ class LIFRefracCell(LIFCell):
 class Layer(BaseModel):
     """The layer settings of the EI model."""
 
+    model_config = ConfigDict(extra="forbid")
     population: PositiveInt = Field(default=80, description="Size of the population")
     cell: LIFRefracCell = LIFRefracCell()
 
@@ -63,6 +68,7 @@ class Layer(BaseModel):
 class Synapses(BaseModel):
     """The connectivity settings of the EI model."""
 
+    model_config = ConfigDict(extra="forbid")
     epsilon: NonNegativeFloat = Field(default=0.02, description="Probability of any connection")
     w: dict[str, NonNegativeFloat] = Field({}, description="Initial synaptic weights to layer (nS)")
 
@@ -70,6 +76,7 @@ class Synapses(BaseModel):
 class Plasticity(BaseModel):
     """The plasticity settings of the EI model."""
 
+    model_config = ConfigDict(extra="forbid")
     a_pre: NonNegativeFloat = Field(default=1.0, description="Contribution of presynaptic spikes to trace")
     a_post: NonNegativeFloat = Field(default=1.0, description="Contribution of postsynaptic spikes to trace")
     tau_pre_inv: NonNegativeFloat = Field(default=20, description="(1/s) Inverse decay of presynaptic spike trace")
@@ -102,6 +109,7 @@ class Plasticity(BaseModel):
 class Network(BaseModel):
     """The network settings of the EI model."""
 
+    model_config = ConfigDict(extra="forbid")
     layers: dict[str, Layer] = Field({}, description="The layers of the network")
     synapses: dict[str, Synapses] = Field({}, description="The synaptic connections between layers")
     plasticity: Plasticity = Plasticity()  # STDP parameters
