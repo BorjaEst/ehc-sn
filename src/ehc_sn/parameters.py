@@ -6,18 +6,20 @@ import norse.torch as snn
 import torch
 from ehc_sn import config
 from norse.torch.functional import stdp
-from pydantic import BaseModel, Field, NonNegativeFloat, PositiveInt, field_serializer, model_validator
-from pydantic import ConfigDict
-
+from pydantic import ConfigDict  # fmt: skip
+from pydantic import field_serializer  # fmt: skip
+from pydantic import model_validator  # fmt: skip
+from pydantic import BaseModel, Field, NonNegativeFloat, NonNegativeInt, PositiveInt
 
 # pylint: disable=too-few-public-methods
 # pylint: disable=non-ascii-name
 
 
-class LIFCell(BaseModel):
-    """The LIF neuron settings of the EI model."""
+class LIFRefracCell(BaseModel):
+    """The LIF refractory settings of the model."""
 
     model_config = ConfigDict(extra="forbid")
+    rho_reset: NonNegativeInt = Field(default=0, description="(steps) Refractory period")
     tau_syn_inv: NonNegativeFloat = Field(default=2.0, description="(1/ms) Inverse synaptic time constant")
     tau_mem_inv: NonNegativeFloat = Field(default=0.05, description="(1/ms) Inverse membrane time constant")
     v_leak: float = Field(default=-65, description="(mV) Leak potential")
@@ -31,46 +33,34 @@ class LIFCell(BaseModel):
         """Convert the LIF parameters to a tensor."""
         return torch.tensor(value).to(config.device)
 
-    def parameters(self) -> snn.LIFParameters:
-        """Return the LIF parameters as a norse object."""
-        return snn.LIFParameters(**self.model_dump())
-
-    def cell(self) -> snn.LIFCell:
-        """Return the LIF cell as a norse object."""
-        return snn.LIFCell(p=self.parameters()).to(config.device)
-
-
-class LIFRefracCell(LIFCell):
-    """The LIF refractory settings of the EI model."""
-
-    model_config = ConfigDict(extra="forbid")
-    rho_reset: NonNegativeFloat = Field(default=5, description="(ms) Refractory period")
-
     def parameters(self) -> snn.LIFRefracParameters:
         """Return the LIFRefrac parameters as a norse object."""
         lif = snn.LIFParameters(**self.model_dump(exclude={"rho_reset"}))
         rho_reset = torch.tensor(self.rho_reset).to(config.device)
         return snn.LIFRefracParameters(lif, rho_reset)
 
-    def cell(self) -> snn.LIFRefracCell:
-        """Return the LIFRefrac cell as a norse object."""
-        return snn.LIFRefracCell(p=self.parameters()).to(config.device)
-
 
 class Layer(BaseModel):
     """The layer settings of the EI model."""
 
     model_config = ConfigDict(extra="forbid")
-    population: PositiveInt = Field(default=80, description="Size of the population")
+    population: PositiveInt = Field(..., description="Size of the population")
+    input_size: PositiveInt = Field(..., description="Size of the input")
+    epsilon: NonNegativeFloat = Field(default=0.2, description="Probability of any connection")
+    init_weight: NonNegativeFloat = Field(default=20.0, description="Initial weight of the connections")
     cell: LIFRefracCell = LIFRefracCell()
 
+    def cell_parameters(self) -> snn.LIFRefracParameters:
+        """Return the LIFRefrac parameters as a norse object."""
+        return self.cell.parameters()
 
-class Synapses(BaseModel):
-    """The connectivity settings of the EI model."""
+    def spawn_connections(self) -> torch.Tensor:
+        """Return the mask for the layer connections."""
+        return torch.rand(self.population, self.input_size) < self.epsilon
 
-    model_config = ConfigDict(extra="forbid")
-    epsilon: NonNegativeFloat = Field(default=0.02, description="Probability of any connection")
-    w: dict[str, NonNegativeFloat] = Field({}, description="Initial synaptic weights to layer (nS)")
+    def spawn_weights(self) -> torch.Tensor:
+        """Return the weights for the layer connections."""
+        return self.init_weight * self.spawn_connections().to(config.device)
 
 
 class Plasticity(BaseModel):
@@ -111,18 +101,7 @@ class Network(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     layers: dict[str, Layer] = Field({}, description="The layers of the network")
-    synapses: dict[str, Synapses] = Field({}, description="The synaptic connections between layers")
     plasticity: Plasticity = Plasticity()  # STDP parameters
-
-    def mask(self, l1: str, l2: str) -> torch.Tensor:
-        """Return the mask for the layer."""
-        l1_pop, l2_pop = self.layers[l1].population, self.layers[l2].population
-        return (torch.rand(l1_pop, l2_pop) < self.synapses[l1].epsilon).T.to(config.device)
-
-    def weights(self, l1: str, l2: str) -> torch.Tensor:
-        """Return the weights for the layer."""
-        l1_pop, l2_pop = self.layers[l1].population, self.layers[l2].population
-        return self.synapses[l1].w[l2] * torch.ones(l1_pop, l2_pop).T.to(config.device)
 
     def stdp_state(self, l1: str, l2: str) -> stdp.STDPState:
         """Return the STDP state for the layer."""
