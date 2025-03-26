@@ -1,7 +1,6 @@
 """Module for the model class."""
 
 from abc import ABC
-from collections import deque
 from typing import Any
 
 import norse.torch as snn
@@ -103,12 +102,24 @@ class SumDecoder(nn.Module):
 
     def __init__(self, window: int):
         super().__init__()
-        self._acc: deque = deque(maxlen=window)
+        self.window = window
+        self._index = 0
+        self._kernel = torch.ones(window, 1).to(config.device) / window
+        self._buffer: torch.Tensor | None = None
+
+    def _initialize_buffer(self, x: torch.Tensor) -> torch.Tensor:
+        """Initialize the rolling buffer based on the input tensor shape."""
+        buffer_shape = (self.window, *x.shape)
+        return torch.zeros(buffer_shape, device=x.device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Decode the input current."""
-        self._acc.append(x)
-        return sum(self._acc) / len(self._acc)
+        if self._buffer is None:  # Initialize the buffer
+            self._buffer = self._initialize_buffer(x)
+
+        self._buffer[self._index] = x  # Store the input in buffer
+        self._index = (self._index + 1) % self.window
+        return (self._buffer * self._kernel).sum(dim=0)
 
 
 class EHCModel(nn.Module):
