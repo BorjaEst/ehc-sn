@@ -1,11 +1,11 @@
 """Module for the model class."""
 
-from typing import Any
+from typing import Any, Optional
 
 import norse.torch as snn
 import torch
 from ehc_sn import config
-from norse.torch.functional import stdp
+from norse.torch.functional.stdp import STDPParameters, STDPState
 from pydantic import ConfigDict  # fmt: skip
 from pydantic import field_serializer  # fmt: skip
 from pydantic import model_validator  # fmt: skip
@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, NonNegativeFloat, NonNegativeInt, Positiv
 # pylint: disable=non-ascii-name
 
 
-class LIFRefracCell(BaseModel):
+class CellParameters(BaseModel):
     """The LIF refractory settings of the model."""
 
     model_config = ConfigDict(extra="forbid")
@@ -38,29 +38,6 @@ class LIFRefracCell(BaseModel):
         lif = snn.LIFParameters(**self.model_dump(exclude={"rho_reset"}))
         rho_reset = torch.tensor(self.rho_reset).to(config.device)
         return snn.LIFRefracParameters(lif, rho_reset)
-
-
-class Layer(BaseModel):
-    """The layer settings of the EI model."""
-
-    model_config = ConfigDict(extra="forbid")
-    population: PositiveInt = Field(..., description="Size of the population")
-    input_size: PositiveInt = Field(..., description="Size of the input")
-    epsilon: NonNegativeFloat = Field(default=0.2, description="Probability of any connection")
-    init_weight: NonNegativeFloat = Field(default=20.0, description="Initial weight of the connections")
-    cell: LIFRefracCell = LIFRefracCell()
-
-    def cell_parameters(self) -> snn.LIFRefracParameters:
-        """Return the LIFRefrac parameters as a norse object."""
-        return self.cell.parameters()
-
-    def spawn_connections(self) -> torch.Tensor:
-        """Return the mask for the layer connections."""
-        return torch.rand(self.population, self.input_size) < self.epsilon
-
-    def spawn_weights(self) -> torch.Tensor:
-        """Return the weights for the layer connections."""
-        return self.init_weight * self.spawn_connections().to(config.device)
 
 
 class Plasticity(BaseModel):
@@ -91,22 +68,56 @@ class Plasticity(BaseModel):
         """Convert the LIF parameters to a tensor."""
         return torch.tensor(value).to(config.device)
 
-    def parameters(self) -> stdp.STDPParameters:
+    def parameters(self) -> STDPParameters:
         """Return the LIFRefrac parameters as a norse object."""
-        return stdp.STDPParameters(**self.model_dump())
+        return STDPParameters(**self.model_dump())
+
+
+class Layer(BaseModel):
+    """The layer settings of the EI model."""
+
+    model_config = ConfigDict(extra="forbid")
+    population: PositiveInt = Field(..., description="Size of the population")
+    input_size: PositiveInt = Field(..., description="Size of the input")
+    epsilon: NonNegativeFloat = Field(default=0.2, description="Probability of any connection")
+    init_weight: NonNegativeFloat = Field(default=20.0, description="Initial weight of the connections")
+    cell: CellParameters = CellParameters()
+
+    def cell_parameters(self) -> snn.LIFRefracParameters:
+        """Return the LIFRefrac parameters as a norse object."""
+        return self.cell.parameters()
+
+    def spawn_connections(self) -> torch.Tensor:
+        """Return the mask for the layer connections."""
+        return torch.rand(self.population, self.input_size) < self.epsilon
+
+    def spawn_weights(self) -> torch.Tensor:
+        """Return the weights for the layer connections."""
+        return self.init_weight * self.spawn_connections().to(config.device)
+
+
+class STDPLayer(Layer):
+    """The STDP class attributes of the model."""
+
+    model_config = ConfigDict(extra="forbid")
+    stdp: Optional[Plasticity] = None
+
+    def plasticity_parameters(self) -> STDPParameters:
+        """Return the STDP parameters as a norse object."""
+        if self.stdp is None:
+            raise ValueError("The layer does not have STDP parameters")
+        return self.stdp.parameters()
+
+    def plasticity_state(self) -> STDPState:
+        """Return the STDP state for the layer."""
+        return STDPState(
+            t_pre=torch.zeros(1, self.input_size).to(config.device),
+            t_post=torch.zeros(1, self.population).to(config.device),
+        )
 
 
 class Network(BaseModel):
     """The network settings of the EI model."""
 
     model_config = ConfigDict(extra="forbid")
-    layers: dict[str, Layer] = Field({}, description="The layers of the network")
-    plasticity: Plasticity = Plasticity()  # STDP parameters
-
-    def stdp_state(self, l1: str, l2: str) -> stdp.STDPState:
-        """Return the STDP state for the layer."""
-        l1_pop, l2_pop = self.layers[l1].population, self.layers[l2].population
-        return stdp.STDPState(
-            t_pre=torch.zeros(1, l1_pop).to(config.device),
-            t_post=torch.zeros(1, l2_pop).to(config.device),
-        )
+    layers: dict[str, STDPLayer] = Field({}, description="The layers of the network")

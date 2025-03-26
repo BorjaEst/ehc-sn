@@ -17,7 +17,7 @@ from torch import nn
 
 
 class Layer(snn.LIFRefracCell):
-    """The layer settings of the model."""
+    """The layer main class for the the model."""
 
     def __init__(self, p: parameters.Layer):
         super().__init__(p=p.cell_parameters())
@@ -48,16 +48,40 @@ class Layer(snn.LIFRefracCell):
         return self.spikes
 
 
+class STDPLayer(Layer):
+    """The STDP class attributes of the model."""
+
+    def __init__(self, p: parameters.STDPLayer):
+        super().__init__(p)
+        self.stdp_state = p.plasticity_state()
+        self.plasticity = p.plasticity_parameters()
+
+    def stdp(self, x: torch.Tensor) -> None:
+        """Update the weights of the network."""
+        self.w[:], self.stdp_state = stdp.stdp_step_linear(
+            z_pre=x.unsqueeze(0),
+            z_post=self.spikes.unsqueeze(0),
+            w=self.w,
+            state_stdp=self.stdp_state,
+            p_stdp=self.plasticity,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Run the layer for a given input current."""
+        spikes = super().forward(x)  # Run the layer
+        self.stdp(x)  # Calculate weight update
+        return spikes
+
+
 class Network(nn.Module, ABC):
     """The connectivity settings of the EI model."""
 
     def __init__(self, p: parameters.Network):
         super().__init__()
-        self.layers = nn.ModuleDict({l1: Layer(v) for l1, v in p.layers.items()})
-        # self.p_stdp = p.plasticity.parameters()
-        # self.stdp_state = {l1: {l2: p.stdp_state(l1, l2)
-        #                         for l2 in p.synapses[l1].w}
-        #                    for l1 in p.synapses} # fmt: skip
+        self.layers = nn.ModuleDict({
+            "excitatory": STDPLayer(p.layers["excitatory"]),
+            "inhibitory": STDPLayer(p.layers["inhibitory"]),
+        }) # fmt: skip
 
     def reset(self) -> None:
         """Reset the state of the network."""
@@ -68,16 +92,6 @@ class Network(nn.Module, ABC):
     def spikes(self) -> list[torch.Tensor]:
         """Return the spikes of the network."""
         return [layer.spikes for layer in self.layers.values()]
-
-    # def plasticity(self, l1: str, l2: str) -> None:
-    #     """Update the weights of the network."""
-    #     self.w[l1][l2], self.stdp_state[l1][l2] = stdp.stdp_step_linear(
-    #         z_pre=self.layers[l1].nodes[0].unsqueeze(0),
-    #         z_post=self.layers[l2].nodes[0].unsqueeze(0),
-    #         w=self.w[l1][l2],
-    #         state_stdp=self.stdp_state[l1][l2],
-    #         p_stdp=self.p_stdp,
-    #     )
 
     def run(self, exc_currents: torch.Tensor) -> torch.Tensor:
         """Do something."""
