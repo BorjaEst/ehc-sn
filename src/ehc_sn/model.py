@@ -95,25 +95,3 @@ class Network(nn.Module, ABC):
         xe = self.excitatory(torch.concatenate([x, xe, -xi]))
         xi = self.inhibitory(torch.concatenate([xe, -xi]))
         return xe
-
-
-class EHCModel(nn.Module):
-    """The encoder extension of the EI model."""
-
-    def __init__(self, network: Network, decode_win: int = 100):
-        super().__init__()
-        self.encoder = PoissonEncoderStep()
-        self.network = network
-        self.decoder = HannDecoder(decode_win)
-        self.decoder_win = decode_win
-
-    def reset(self) -> None:
-        """Reset the state of the model."""
-        self.network.reset()
-        self.decoder = HannDecoder(self.decoder_win)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Run the model for a given input current."""
-        x = self.encoder(x)
-        x = self.network(x)
-        return self.decoder(x)
