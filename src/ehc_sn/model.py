@@ -6,6 +6,7 @@ from typing import Any
 import norse.torch as snn
 import torch
 from ehc_sn import config, parameters
+from ehc_sn.decoders import HannDecoder
 from norse.torch.functional import stdp
 from norse.torch.module.encode import PoissonEncoderStep
 from torch import nn
@@ -95,42 +96,23 @@ class Network(nn.Module, ABC):
         return xe
 
 
-class SumDecoder(nn.Module):
-    """The decoder settings of the EI model."""
-
-    def __init__(self, window: int):
-        super().__init__()
-        self.window = window
-        self._index = 0
-        self._kernel = torch.ones(window, 1).to(config.device) / window
-        self._buffer: torch.Tensor | None = None
-
-    def _initialize_buffer(self, x: torch.Tensor) -> torch.Tensor:
-        """Initialize the rolling buffer based on the input tensor shape."""
-        buffer_shape = (self.window, *x.shape)
-        return torch.zeros(buffer_shape, device=x.device)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Decode the input current."""
-        if self._buffer is None:  # Initialize the buffer
-            self._buffer = self._initialize_buffer(x)
-
-        self._buffer[self._index] = x  # Store the input in buffer
-        self._index = (self._index + 1) % self.window
-        return (self._buffer * self._kernel).sum(dim=0)
-
-
 class EHCModel(nn.Module):
     """The encoder extension of the EI model."""
 
-    def __init__(self, network: Network, decode_win: int = 32):
+    def __init__(self, network: Network, decode_win: int = 100):
         super().__init__()
         self.encoder = PoissonEncoderStep()
         self.network = network
-        self.decoder = SumDecoder(window=decode_win)
+        self.decoder = HannDecoder(decode_win)
+        self.decoder_win = decode_win
 
-    def forward(self, x: torch.Tensor) -> tuple[Any, torch.Tensor]:
+    def reset(self) -> None:
+        """Reset the state of the model."""
+        self.network.reset()
+        self.decoder = HannDecoder(self.decoder_win)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Run the model for a given input current."""
         x = self.encoder(x)
         x = self.network(x)
-        return self.decoder(x), x
+        return self.decoder(x)
