@@ -60,13 +60,14 @@ class STDPLayer(Layer):
 
     def stdp(self, x: torch.Tensor) -> None:
         """Update the weights of the network."""
-        self.w[:], self.stdp_state = stdp.stdp_step_linear(
+        w, self.stdp_state = stdp.stdp_step_linear(
             z_pre=x.unsqueeze(0),
             z_post=self.spikes.unsqueeze(0),
             w=self.w,
             state_stdp=self.stdp_state,
             p_stdp=self.plasticity,
         )
+        self.w = w * self.mask
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Run the layer for a given input current."""
