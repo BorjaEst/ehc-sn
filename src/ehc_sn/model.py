@@ -79,24 +79,20 @@ class Network(nn.Module, ABC):
 
     def __init__(self, p: parameters.Network):
         super().__init__()
-        self.layers = nn.ModuleDict({
-            "excitatory": STDPLayer(p.layers["excitatory"]),
-            "inhibitory": STDPLayer(p.layers["inhibitory"]),
-        }) # fmt: skip
+        self.excitatory = STDPLayer(p.layers["excitatory"])
+        self.inhibitory = STDPLayer(p.layers["inhibitory"])
 
     def reset(self) -> None:
         """Reset the state of the network."""
-        for layer in self.layers.values():
-            layer.reset()
+        self.excitatory.reset()
+        self.inhibitory.reset()
 
-    @property
-    def spikes(self) -> list[torch.Tensor]:
-        """Return the spikes of the network."""
-        return [layer.spikes for layer in self.layers.values()]
-
-    def run(self, exc_currents: torch.Tensor) -> torch.Tensor:
-        """Do something."""
-        return torch.stack([self(x) for x in exc_currents])
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Run the network for a given input current."""
+        xe, xi = self.excitatory.spikes, self.inhibitory.spikes
+        xe = self.excitatory(torch.concatenate([x, xe, -xi]))
+        xi = self.inhibitory(torch.concatenate([xe, -xi]))
+        return xe
 
 
 class SumDecoder(nn.Module):
