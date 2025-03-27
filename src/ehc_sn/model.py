@@ -20,7 +20,8 @@ class Layer(snn.LIFRefracCell):
 
     def __init__(self, p: parameters.Layer):
         super().__init__(p=p.cell_parameters())
-        self.w = nn.Parameter(p.spawn_weights())
+        self.mask = p.spawn_connections()
+        self.w = self.mask * p.init_weight
         self.population = p.population
         self.input_size = p.input_size
         zeros = torch.zeros(self.population).to(config.device)
@@ -43,7 +44,8 @@ class Layer(snn.LIFRefracCell):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Run the layer for a given input current."""
-        self.nodes = super().forward(x @ self.w.T, self.states)
+        spikes_in = x @ (self.mask * self.w).T
+        self.nodes = super().forward(spikes_in, self.states)
         return self.spikes
 
 

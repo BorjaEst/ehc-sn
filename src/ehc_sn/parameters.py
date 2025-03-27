@@ -89,11 +89,8 @@ class Layer(BaseModel):
 
     def spawn_connections(self) -> torch.Tensor:
         """Return the mask for the layer connections."""
-        return torch.rand(self.population, self.input_size) < self.epsilon
-
-    def spawn_weights(self) -> torch.Tensor:
-        """Return the weights for the layer connections."""
-        return self.init_weight * self.spawn_connections().to(config.device)
+        mask = torch.rand(self.population, self.input_size) < self.epsilon
+        return mask.to(config.device)
 
 
 class STDPLayer(Layer):
