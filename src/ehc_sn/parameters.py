@@ -80,7 +80,7 @@ class Layer(BaseModel):
     population: PositiveInt = Field(..., description="Size of the population")
     input_size: PositiveInt = Field(..., description="Size of the input")
     epsilon: NonNegativeFloat = Field(default=0.2, description="Probability of any connection")
-    init_weight: NonNegativeFloat = Field(default=20.0, description="Initial weight of the connections")
+    init_weight: NonNegativeFloat = Field(default=1.0, description="Initial weight of the connections")
     cell: CellParameters = CellParameters()
 
     def cell_parameters(self) -> snn.LIFRefracParameters:
