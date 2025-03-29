@@ -2,5 +2,5 @@
 
 from ehc_sn import decoders, encoders
 from ehc_sn.config import device
-from ehc_sn.model import Network
+from ehc_sn.models import Network
 from ehc_sn.parameters import Network as Parameters

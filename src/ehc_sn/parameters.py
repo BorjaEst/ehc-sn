@@ -1,6 +1,6 @@
 """Module for the model class."""
 
-from typing import Any, Optional
+from typing import Any
 
 import norse.torch as snn
 import torch
@@ -13,10 +13,11 @@ from pydantic import BaseModel, Field, NonNegativeFloat, NonNegativeInt, Positiv
 
 # pylint: disable=too-few-public-methods
 # pylint: disable=non-ascii-name
+# pylint: disable=too-many-function-args
 
 
 class CellParameters(BaseModel):
-    """The LIF refractory settings of the model."""
+    """The LIF refractory settings."""
 
     model_config = ConfigDict(extra="forbid")
     rho_reset: NonNegativeInt = Field(default=0, description="(steps) Refractory period")
@@ -41,7 +42,7 @@ class CellParameters(BaseModel):
 
 
 class Plasticity(BaseModel):
-    """The plasticity settings of the EI model."""
+    """The plasticity settings."""
 
     model_config = ConfigDict(extra="forbid")
     a_pre: NonNegativeFloat = Field(default=1.0, description="Contribution of presynaptic spikes to trace")
@@ -73,48 +74,38 @@ class Plasticity(BaseModel):
         return STDPParameters(**self.model_dump())
 
 
-class Layer(BaseModel):
-    """The layer settings of the EI model."""
+class Synapses(BaseModel):
+    """The synapse settings."""
 
-    model_config = ConfigDict(extra="forbid")
-    population: PositiveInt = Field(..., description="Size of the population")
-    input_size: PositiveInt = Field(..., description="Size of the input")
     epsilon: NonNegativeFloat = Field(default=0.2, description="Probability of any connection")
-    init_weight: NonNegativeFloat = Field(default=1.0, description="Initial weight of the connections")
-    cell: CellParameters = CellParameters()
+    init_value: NonNegativeFloat = Field(default=1.0, description="Initial weight of the connections")
+    input_size: PositiveInt = Field(..., description="Size of the input")
+    stdp: Plasticity = Plasticity()  # STDP parameters
 
-    def cell_parameters(self) -> snn.LIFRefracParameters:
-        """Return the LIFRefrac parameters as a norse object."""
-        return self.cell.parameters()
-
-    def spawn_connections(self) -> torch.Tensor:
-        """Return the mask for the layer connections."""
-        mask = torch.rand(self.population, self.input_size) < self.epsilon
+    def make_mask(self, layer_size: int) -> torch.Tensor:
+        """Return the mask for the synapses."""
+        mask = torch.rand(layer_size, self.input_size) < self.epsilon
         return mask.to(config.device)
 
-
-class STDPLayer(Layer):
-    """The STDP class attributes of the model."""
-
-    model_config = ConfigDict(extra="forbid")
-    stdp: Optional[Plasticity] = None
-
-    def plasticity_parameters(self) -> STDPParameters:
-        """Return the STDP parameters as a norse object."""
-        if self.stdp is None:
-            raise ValueError("The layer does not have STDP parameters")
-        return self.stdp.parameters()
-
-    def plasticity_state(self) -> STDPState:
-        """Return the STDP state for the layer."""
+    def state(self, layer_size: int) -> STDPState:
+        """Return the STDP state for the synapses."""
         return STDPState(
             t_pre=torch.zeros(1, self.input_size).to(config.device),
-            t_post=torch.zeros(1, self.population).to(config.device),
+            t_post=torch.zeros(1, layer_size).to(config.device),
         )
 
 
-class Network(BaseModel):
-    """The network settings of the EI model."""
+class Layer(BaseModel):
+    """The layer settings."""
 
     model_config = ConfigDict(extra="forbid")
-    layers: dict[str, STDPLayer] = Field({}, description="The layers of the network")
+    population: PositiveInt = Field(..., description="Size of the population")
+    cells: CellParameters = CellParameters()  # LIFRefrac parameters
+    synapses: dict[str, Synapses] = Field({}, description="The synapses of the layer")
+
+
+class Network(BaseModel):
+    """The network settings."""
+
+    model_config = ConfigDict(extra="forbid")
+    layers: dict[str, Layer] = Field({}, description="The layers of the network")
