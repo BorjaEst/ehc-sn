@@ -1,12 +1,9 @@
 """Module for the model class."""
 
 from abc import ABC
-from typing import Any
 
-import norse.torch as snn
 import torch
-from ehc_sn import config, parameters
-from ehc_sn import layers
+from ehc_sn import layers, parameters
 from torch import nn
 
 # pylint: disable=too-few-public-methods
@@ -21,6 +18,7 @@ class Network(nn.Module, ABC):
         super().__init__()
         self.excitatory = layers.EILayer(p.layers["excitatory"])
         self.inhibitory = layers.EILayer(p.layers["inhibitory"])
+        self.eval()
 
     def reset(self) -> None:
         """Reset the state of the network."""
@@ -29,8 +27,9 @@ class Network(nn.Module, ABC):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Run the network for a given input current."""
-        xe = torch.concatenate([x, self.excitatory.neurons.spikes])
-        xi = self.inhibitory.neurons.spikes
-        xe = self.excitatory(xe, xi)
-        xi = self.inhibitory(xe, xi)
+        with torch.no_grad():
+            xe = torch.concatenate([x, self.excitatory.neurons.spikes])
+            xi = self.inhibitory.neurons.spikes
+            xe = self.excitatory(xe, xi)
+            xi = self.inhibitory(xe, xi)
         return xe
