@@ -83,9 +83,9 @@ class EILayer(nn.Module):
         self.ampa = Inputs(self.neurons, p=p.synapses["ampa"])
         self.gaba = Inputs(self.neurons, p=p.synapses["gaba"])
 
-    def forward(self, xe: torch.Tensor, xi: torch.Tensor) -> torch.Tensor:
+    def forward(self, *x: torch.Tensor) -> torch.Tensor:
         """Run the layer for excitatory and inhibitory synapses."""
-        x = self.neurons(self.ampa(xe) - self.gaba(xi))
-        self.ampa.stdp(z_pre=xe, z_post=x)
-        self.gaba.stdp(z_pre=xi, z_post=x)
-        return x
+        y = self.neurons(x[0] + self.ampa(x[1]) - self.gaba(x[2]))
+        self.ampa.stdp(z_pre=x[1], z_post=y)
+        self.gaba.stdp(z_pre=x[2], z_post=y)
+        return y

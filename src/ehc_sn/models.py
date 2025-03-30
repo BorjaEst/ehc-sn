@@ -28,8 +28,8 @@ class Network(nn.Module, ABC):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Run the network for a given input current."""
         with torch.no_grad():
-            xe = torch.concatenate([x, self.excitatory.neurons.spikes])
+            xe = self.excitatory.neurons.spikes
             xi = self.inhibitory.neurons.spikes
-            xe = self.excitatory(xe, xi)
-            xi = self.inhibitory(xe, xi)
+            xe = self.excitatory(x, xe, xi)
+            xi = self.inhibitory(0, xe, xi)
         return xe
