@@ -4,11 +4,11 @@ import norse.torch as snn
 import torch
 from ehc_sn import config, parameters
 from norse.torch.functional import stdp
-from torch import nn
+from torch import Tensor, nn
 
 # pylint: disable=too-few-public-methods
-# pylint: disable=non-ascii-name
 # pylint: disable=arguments-differ
+# pylint: disable=redefined-outer-name
 
 
 class BaseLayer(snn.LIFRefracCell):
@@ -21,12 +21,12 @@ class BaseLayer(snn.LIFRefracCell):
         self.nodes = super().forward(zeros, None)
 
     @property
-    def states(self) -> torch.Tensor:
+    def states(self) -> Tensor:
         """Return the state of the layer."""
         return self.nodes[1]
 
     @property
-    def spikes(self) -> torch.Tensor:
+    def spikes(self) -> Tensor:
         """Return the spikes of the layer."""
         return self.nodes[0]
 
@@ -35,7 +35,7 @@ class BaseLayer(snn.LIFRefracCell):
         zeros = torch.zeros(self.size).to(config.device)
         self.nodes = super().forward(zeros, None)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         """Run the layer for a given input current."""
         self.nodes = super().forward(x, self.states)
         return self.spikes
@@ -52,7 +52,7 @@ class Inputs(nn.Module):
         self.plasticity = p.stdp.parameters()
         self.state = p.state(neurons.size)
 
-    def stdp(self, z_pre: torch.Tensor, z_post: torch.Tensor) -> None:
+    def stdp(self, z_pre: Tensor, z_post: Tensor) -> None:
         """Update the weights of the network."""
         w, self.state = stdp.stdp_step_linear(
             z_pre=z_pre.unsqueeze(0),
@@ -69,7 +69,7 @@ class Inputs(nn.Module):
         self.state.t_pre = torch.zeros(1, self.w.shape[1]).to(config.device)
         self.w[:] = self.init_value * self.mask
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         """Run the layer for a given input current."""
         return x @ (self.mask * self.w).T
 
@@ -83,9 +83,21 @@ class EILayer(nn.Module):
         self.ampa = Inputs(self.neurons, p=p.synapses["ampa"])
         self.gaba = Inputs(self.neurons, p=p.synapses["gaba"])
 
-    def forward(self, *x: torch.Tensor) -> torch.Tensor:
+    def reset(self) -> None:
+        """Reset the state of the layer."""
+        self.neurons.reset()
+        self.ampa.reset()
+        self.gaba.reset()
+
+    @property
+    def spikes(self) -> Tensor:
+        """Return the spikes of the layer."""
+        return self.neurons.spikes
+
+    def forward(self, *x: Tensor, stdp: bool = True) -> Tensor:
         """Run the layer for excitatory and inhibitory synapses."""
         y = self.neurons(x[0] + self.ampa(x[1]) - self.gaba(x[2]))
-        self.ampa.stdp(z_pre=x[1], z_post=y)
-        self.gaba.stdp(z_pre=x[2], z_post=y)
+        if stdp:  # Update the weights of the network.
+            self.ampa.stdp(z_pre=x[1], z_post=y)
+            self.gaba.stdp(z_pre=x[2], z_post=y)
         return y
