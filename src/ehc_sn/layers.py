@@ -14,8 +14,8 @@ from torch import Tensor, nn
 class BaseLayer(snn.LIFRefracCell):
     """The layer main class for the the model."""
 
-    def __init__(self, n: int, p: parameters.CellParameters):
-        super().__init__(p=p.parameters())
+    def __init__(self, n: int, p: parameters.CellParameters, **kwds):
+        super().__init__(p=p.parameters(), **kwds)
         self.size = n
         zeros = torch.zeros(self.size).to(config.device)
         self.nodes = super().forward(zeros, None)
@@ -52,7 +52,7 @@ class Inputs(nn.Module):
         self.plasticity = p.stdp.parameters()
         self.state = p.state(neurons.size)
 
-    def stdp(self, z_pre: Tensor, z_post: Tensor) -> None:
+    def stdp(self, z_pre: Tensor, z_post: Tensor, dt: float) -> None:
         """Update the weights of the network."""
         w, self.state = stdp.stdp_step_linear(
             z_pre=z_pre.unsqueeze(0),
@@ -60,6 +60,7 @@ class Inputs(nn.Module):
             w=self.w,
             state_stdp=self.state,
             p_stdp=self.plasticity,
+            dt=dt,
         )
         self.w[:] = w * self.mask
 
@@ -77,9 +78,9 @@ class Inputs(nn.Module):
 class EILayer(nn.Module):
     """Excitatory layer class."""
 
-    def __init__(self, p: parameters.Layer):
+    def __init__(self, p: parameters.Layer, **kwds):
         super().__init__()
-        self.neurons = BaseLayer(n=p.population, p=p.cells)
+        self.neurons = BaseLayer(n=p.population, p=p.cells, **kwds)
         self.ampa = Inputs(self.neurons, p=p.synapses["ampa"])
         self.gaba = Inputs(self.neurons, p=p.synapses["gaba"])
 
@@ -98,6 +99,6 @@ class EILayer(nn.Module):
         """Run the layer for excitatory and inhibitory synapses."""
         y = self.neurons(x[0] + self.ampa(x[1]) - self.gaba(x[2]))
         if stdp:  # Update the weights of the network.
-            self.ampa.stdp(z_pre=x[1], z_post=y)
-            self.gaba.stdp(z_pre=x[2], z_post=y)
+            self.ampa.stdp(z_pre=x[1], z_post=y, dt=self.neurons.dt)
+            self.gaba.stdp(z_pre=x[2], z_post=y, dt=self.neurons.dt)
         return y

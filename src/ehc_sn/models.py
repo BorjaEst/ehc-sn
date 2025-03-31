@@ -13,10 +13,10 @@ from torch import Tensor
 class EINetwork(nn.Module):
     """The connectivity settings of the EI model."""
 
-    def __init__(self, p: parameters.Network):
+    def __init__(self, p: parameters.Network, **kwds):
         super().__init__()
-        self.excitatory = layers.EILayer(p.layers["excitatory"])
-        self.inhibitory = layers.EILayer(p.layers["inhibitory"])
+        self.excitatory = layers.EILayer(p.layers["excitatory"], **kwds)
+        self.inhibitory = layers.EILayer(p.layers["inhibitory"], **kwds)
         self.eval()
 
     def reset(self) -> None:
@@ -37,11 +37,11 @@ class EINetwork(nn.Module):
 class EHCNetwork(nn.Module):
     """The main class for the EHC model."""
 
-    def __init__(self, p: parameters.Network):
+    def __init__(self, p: parameters.Network, **kwds):
         super().__init__()
-        self.mapping = layers.EILayer(p.layers["mapping"])
-        self.inhibitory = layers.EILayer(p.layers["inhibitory"])
-        self.embedding = layers.EILayer(p.layers["embedding"])
+        self.mapping = layers.EILayer(p.layers["mapping"], **kwds)
+        self.inhibitory = layers.EILayer(p.layers["inhibitory"], **kwds)
+        self.embedding = layers.EILayer(p.layers["embedding"], **kwds)
         self.eval()
 
     def reset(self) -> None:
