@@ -17,7 +17,7 @@ class BaseLayer(snn.LIFRefracCell):
     def __init__(self, n: int, p: parameters.CellParameters, **kwds):
         super().__init__(p=p.parameters(), **kwds)
         self.size = n
-        zeros = torch.zeros(self.size).to(config.device)
+        zeros = torch.zeros(self.size, device=config.device)
         self.nodes = super().forward(zeros, None)
 
     @property
@@ -32,7 +32,7 @@ class BaseLayer(snn.LIFRefracCell):
 
     def reset(self) -> None:
         """Reset the state of the layer."""
-        zeros = torch.zeros(self.size).to(config.device)
+        zeros = torch.zeros(self.size, device=config.device)
         self.nodes = super().forward(zeros, None)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -66,8 +66,8 @@ class Inputs(nn.Module):
 
     def reset(self) -> None:
         """Reset the state of the layer."""
-        self.state.t_post = torch.zeros(1, self.w.shape[0]).to(config.device)
-        self.state.t_pre = torch.zeros(1, self.w.shape[1]).to(config.device)
+        self.state.t_post = torch.zeros(1, self.w.shape[0], device=config.device)
+        self.state.t_pre = torch.zeros(1, self.w.shape[1], device=config.device)
         self.w[:] = self.init_value * self.mask
 
     def forward(self, x: Tensor) -> Tensor:

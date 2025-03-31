@@ -32,12 +32,12 @@ class CellParameters(BaseModel):
     @classmethod
     def to_tensor(cls, value):
         """Convert the LIF parameters to a tensor."""
-        return torch.tensor(value).to(config.device)
+        return torch.tensor(value, device=config.device)
 
     def parameters(self) -> snn.LIFRefracParameters:
         """Return the LIFRefrac parameters as a norse object."""
         lif = snn.LIFParameters(**self.model_dump(exclude={"rho_reset"}))
-        rho_reset = torch.tensor(self.rho_reset).to(config.device)
+        rho_reset = torch.tensor(self.rho_reset, device=config.device)
         return snn.LIFRefracParameters(lif, rho_reset)
 
 
@@ -67,7 +67,7 @@ class Plasticity(BaseModel):
     @classmethod
     def to_tensor(cls, value):
         """Convert the LIF parameters to a tensor."""
-        return torch.tensor(value).to(config.device)
+        return torch.tensor(value, device=config.device)
 
     def parameters(self) -> STDPParameters:
         """Return the LIFRefrac parameters as a norse object."""
@@ -85,14 +85,14 @@ class Synapses(BaseModel):
 
     def make_mask(self, layer_size: int) -> torch.Tensor:
         """Return the mask for the synapses."""
-        mask = torch.rand(layer_size, self.input_size) < self.epsilon
-        return mask.to(config.device)
+        n, m = layer_size, self.input_size
+        return torch.rand(n, m, device=config.device) < self.epsilon
 
     def state(self, layer_size: int) -> STDPState:
         """Return the STDP state for the synapses."""
         return STDPState(
-            t_pre=torch.zeros(1, self.input_size).to(config.device),
-            t_post=torch.zeros(1, layer_size).to(config.device),
+            t_pre=torch.zeros(1, self.input_size, device=config.device),
+            t_post=torch.zeros(1, layer_size, device=config.device),
         )
 
 
