@@ -20,12 +20,12 @@ class CellParameters(BaseModel):
     """The LIF refractory settings."""
 
     model_config = ConfigDict(extra="forbid")
-    rho_reset: NonNegativeInt = Field(default=0, description="(steps) Refractory period")
-    tau_syn_inv: NonNegativeFloat = Field(default=2.0, description="(1/ms) Inverse synaptic time constant")
-    tau_mem_inv: NonNegativeFloat = Field(default=0.05, description="(1/ms) Inverse membrane time constant")
-    v_leak: float = Field(default=-65, description="(mV) Leak potential")
-    v_th: float = Field(default=-50, description="(mV) Threshold potential")
-    v_reset: float = Field(default=-65, description="(mV) Reset potential")
+    rho_reset: NonNegativeInt = Field(default=5, description="(steps) Refractory period")
+    tau_syn_inv: NonNegativeFloat = Field(default=10.0, description="Inverse synaptic time constant")
+    tau_mem_inv: NonNegativeFloat = Field(default=4.0, description="Inverse membrane time constant")
+    v_leak: float = Field(default=-65, description="Leak potential")
+    v_th: float = Field(default=-50, description="Threshold potential")
+    v_reset: float = Field(default=-65, description="Reset potential")
     alpha: NonNegativeFloat = Field(default=0.5, description="Surrogate gradient computation parameter")
 
     @field_serializer("*")
