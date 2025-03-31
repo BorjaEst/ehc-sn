@@ -1,9 +1,8 @@
 """Module for the model class."""
 
 import torch
-from ehc_sn import layers, parameters
-from torch import nn
-from torch import Tensor
+from ehc_sn import config, layers, parameters
+from torch import Tensor, jit, nn
 
 # pylint: disable=too-few-public-methods
 # pylint: disable=non-ascii-name
@@ -24,14 +23,25 @@ class EINetwork(nn.Module):
         self.excitatory.neurons.reset()
         self.inhibitory.neurons.reset()
 
-    def forward(self, x: Tensor) -> Tensor:
+    @property
+    def xe(self) -> Tensor:
+        """Return the excitatory layer of the network."""
+        return self.excitatory.neurons.spikes
+
+    @property
+    def xi(self) -> Tensor:
+        """Return the inhibitory layer of the network."""
+        return self.inhibitory.neurons.spikes
+
+    def forward(self, x: Tensor, stdp: bool = True) -> Tensor:
         """Run the network for a given input current."""
         with torch.no_grad():
-            xe = self.excitatory.neurons.spikes
-            xi = self.inhibitory.neurons.spikes
-            xe = self.excitatory(x, xe, xi)
-            xi = self.inhibitory(0, xe, xi)
-        return xe
+            for task in [
+                jit.fork(self.excitatory, x, self.xe, self.xi, stdp=stdp),
+                jit.fork(self.inhibitory, 0, self.xe, self.xi, stdp=stdp),
+            ]:
+                jit.wait(task)
+        return self.excitatory.neurons.spikes
 
 
 class EHCNetwork(nn.Module):
@@ -64,7 +74,10 @@ class EHCNetwork(nn.Module):
     def forward(self, sens: Tensor, mem: Tensor, stdp=True) -> tuple[Tensor, Tensor]:
         """Run the network for a given input current."""
         with torch.no_grad():
-            self.embedding(mem, self.xe, self.xi, stdp=stdp)
-            self.mapping(sens, self.xe, self.xi, stdp=stdp)
-            self.inhibitory(0, self.xe, self.xi, stdp=stdp)
+            for task in [
+                jit.fork(self.embedding, mem, self.xe, self.xi, stdp=stdp),
+                jit.fork(self.mapping, sens, self.xe, self.xi, stdp=stdp),
+                jit.fork(self.inhibitory, 0, self.xe, self.xi, stdp=stdp),
+            ]:
+                jit.wait(task)
         return self.mapping.spikes, self.embedding.spikes
