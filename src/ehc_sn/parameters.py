@@ -78,7 +78,7 @@ class Synapses(BaseModel):
     """The synapse settings."""
 
     model_config = ConfigDict(extra="forbid")
-    epsilon: NonNegativeFloat = Field(default=0.2, description="Probability of any connection")
+    epsilon: NonNegativeFloat = Field(default=0.02, description="Probability of any connection")
     init_value: NonNegativeFloat = Field(default=1.0, description="Initial weight of the connections")
     input_size: PositiveInt = Field(..., description="Size of the input")
     stdp: Plasticity = Plasticity()  # STDP parameters
