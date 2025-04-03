@@ -61,7 +61,7 @@ class Synapses(BaseModel):
     model_config = ConfigDict(extra="forbid")
     input_size: PositiveInt = Field(..., description="Size for the number of inputs")
     epsilon: NonNegativeFloat = Field(default=0.02, description="Probability of any connection")
-    w_init: NonNegativeFloat = Field(default=1.0, description="Initial weight of the connections")
+    w_init: NonNegativeFloat = Field(default=0.1, description="Initial weight of the connections")
     w_min: float = Field(default=0.0, description="Lower bound on synaptic weights (should be < w_max)")
     w_max: float = Field(default=10.0, description="Upper bound on synaptic weight (should be > w_min)")
     learning_rate: NonNegativeFloat = Field(default=1e-3, lt=1, description="Learning rate (<<1)")
