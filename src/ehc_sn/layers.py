@@ -47,9 +47,9 @@ class Inputs(nn.Module):
     def __init__(self, neurons: BaseLayer, p: parameters.Synapses):
         super().__init__()
         self.mask = p.make_mask(neurons.size)
-        self.init_value = w0 = p.init_value
+        self.w_init = w0 = p.w_init
         self.w = nn.Parameter(w0 * self.mask, requires_grad=False)
-        self.plasticity = p.stdp.parameters()
+        self.plasticity = p.stdp_parameters()
         self.state = p.state(neurons.size)
 
     def stdp(self, z_pre: Tensor, z_post: Tensor, dt: float) -> None:
@@ -68,7 +68,7 @@ class Inputs(nn.Module):
         """Reset the state of the layer."""
         self.state.t_post = torch.zeros(1, self.w.shape[0], device=config.device)
         self.state.t_pre = torch.zeros(1, self.w.shape[1], device=config.device)
-        self.w[:] = self.init_value * self.mask
+        self.w[:] = self.w_init * self.mask
 
     def forward(self, x: Tensor) -> Tensor:
         """Run the layer for a given input current."""

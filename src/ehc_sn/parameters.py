@@ -45,15 +45,28 @@ class Plasticity(BaseModel):
     """The plasticity settings."""
 
     model_config = ConfigDict(extra="forbid")
-    a_pre: NonNegativeFloat = Field(default=1.0, description="Contribution of presynaptic spikes to trace")
-    a_post: NonNegativeFloat = Field(default=1.0, description="Contribution of postsynaptic spikes to trace")
-    tau_pre_inv: NonNegativeFloat = Field(default=0.50, description="Inverse decay of presynaptic spike trace")
-    tau_post_inv: NonNegativeFloat = Field(default=0.45, description="Inverse decay of postsynaptic spike trace")
-    w_min: NonNegativeFloat = Field(default=0.0, description="Lower bound on synaptic weights (should be < w_max)")
-    w_max: NonNegativeFloat = Field(default=10.0, description="Upper bound on synaptic weight (should be > w_min)")
-    eta_plus: NonNegativeFloat = Field(default=1e-3, lt=1, description="Learning rate for potentiation (<<1)")
-    eta_minus: NonNegativeFloat = Field(default=1e-3, lt=1, description="Learning rate for depression (<<1)")
-    mu: NonNegativeFloat = Field(default=0.5, le=1, description="Exponent for multiplicative STDP (<= 1)")
+    gain: NonNegativeFloat = Field(default=1.00, description="Contribution of spikes to trace")
+    tau: NonNegativeFloat = Field(default=0.01, gt=0, description="Inverse decay of spike trace")
+
+    @field_serializer("*")
+    @classmethod
+    def to_tensor(cls, value):
+        """Convert the LIF parameters to a tensor."""
+        return torch.tensor(value, device=config.device)
+
+
+class Synapses(BaseModel):
+    """The synapse settings."""
+
+    model_config = ConfigDict(extra="forbid")
+    input_size: PositiveInt = Field(..., description="Size for the number of inputs")
+    epsilon: NonNegativeFloat = Field(default=0.02, description="Probability of any connection")
+    w_init: NonNegativeFloat = Field(default=1.0, description="Initial weight of the connections")
+    w_min: float = Field(default=0.0, description="Lower bound on synaptic weights (should be < w_max)")
+    w_max: float = Field(default=10.0, description="Upper bound on synaptic weight (should be > w_min)")
+    learning_rate: NonNegativeFloat = Field(default=1e-3, lt=1, description="Learning rate (<<1)")
+    ltp: Plasticity = Plasticity(tau=0.01)  # STDP parameters for Long-Term Potentiation
+    ltd: Plasticity = Plasticity(tau=0.02)  # STDP parameters for Long-Term Depression
 
     @model_validator(mode="after")
     @classmethod
@@ -62,26 +75,6 @@ class Plasticity(BaseModel):
         if data.w_min >= data.w_max:
             raise ValueError("The minimum weight must be less than the maximum weight.")
         return data
-
-    @field_serializer("*")
-    @classmethod
-    def to_tensor(cls, value):
-        """Convert the LIF parameters to a tensor."""
-        return torch.tensor(value, device=config.device)
-
-    def parameters(self) -> STDPParameters:
-        """Return the LIFRefrac parameters as a norse object."""
-        return STDPParameters(**self.model_dump())
-
-
-class Synapses(BaseModel):
-    """The synapse settings."""
-
-    model_config = ConfigDict(extra="forbid")
-    epsilon: NonNegativeFloat = Field(default=0.02, description="Probability of any connection")
-    init_value: NonNegativeFloat = Field(default=1.0, description="Initial weight of the connections")
-    input_size: PositiveInt = Field(..., description="Size of the input")
-    stdp: Plasticity = Plasticity()  # STDP parameters
 
     def make_mask(self, layer_size: int) -> torch.Tensor:
         """Return the mask for the synapses."""
@@ -94,6 +87,18 @@ class Synapses(BaseModel):
             t_pre=torch.zeros(1, self.input_size, device=config.device),
             t_post=torch.zeros(1, layer_size, device=config.device),
         )
+
+    def stdp_parameters(self) -> STDPParameters:
+        """Return the STDP parameters for the synapses."""
+        return STDPParameters(
+            stdp_algorithm="additive",  # Fastest; all algorithms can overlap 
+            a_post=torch.tensor(self.ltd.gain, device=config.device),
+            a_pre=torch.tensor(self.ltp.gain, device=config.device),
+            tau_post_inv=torch.tensor(1/self.ltd.tau, device=config.device),
+            tau_pre_inv=torch.tensor(1/self.ltp.tau, device=config.device),
+            eta_minus=self.learning_rate, eta_plus=self.learning_rate,
+            w_min=self.w_min, w_max=self.w_max,
+        ) # fmt: skip
 
 
 class Layer(BaseModel):
