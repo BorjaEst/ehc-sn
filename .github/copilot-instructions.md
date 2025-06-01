@@ -12,10 +12,9 @@ This file establishes guidelines for using GitHub Copilot in the "Entorhinal-Hip
 - `pyproject.toml` - Package configuration and build settings
 - `src/ehc_sn/` - Main package source code
   - `VERSION` - File containing the current version number
-  - `representations/` - Neural cell types (place cells, grid cells, etc.)
-  - `mapping/` - Environment representation functions
-  - `memory/` - Memory encoding/retrieval mechanisms
-  - `plasticity/` - Plasticity mechanisms (STDP)
+  - `mec` - Medial entorhinal cortex model and components
+  - `hpc` - Hippocampus model and components
+  - `stdp/` - Plasticity mechanisms
   - `autoencoder/` - Autoencoder components
   - `utils/` - Utility functions
 - `requirements.txt` - Core package dependencies
