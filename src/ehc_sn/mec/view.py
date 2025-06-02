@@ -1,41 +1,18 @@
-"""
-Visualization and utility tools for the EHC Spatial Navigation library.
-"""
+# Head comments
 
-from ehc_sn.mec import core
+from ehc_sn.mec.core import GridCellsBase, MECBase
 import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import RegularPolygon
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
-class GridLayerView(core.GridCellsBase):
-    """
-    Visualization class for the Medial Entorhinal Cortex (MEC) grid cell layers.
-    This class provides methods to visualize the hexagonal grid structure of grid cells.
-    """
+class GridLayerView(GridCellsBase):
+    # A view class for grid cell layers that inherits core functionality and adds visualization
 
     def show(self, ax=None, cell_size=0.8, edgecolor="black", title=None):
-        """
-        Visualize the hexagonal structure of a grid cell layer.
+        # Creates a visual representation of the grid cell layer
 
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes, optional
-            Axes to plot on, if None creates a new figure
-        cell_size : float, optional
-            Size of each hexagonal cell, default is 0.8
-        edgecolor : str, optional
-            Color of hexagon edges, default is 'black'
-        title : str, optional
-            Title for the plot, if None uses default title
-
-        Returns
-        -------
-        matplotlib.axes.Axes
-            The axes containing the visualization
-        """
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -76,26 +53,12 @@ class GridLayerView(core.GridCellsBase):
         return ax
 
 
-class MECView(core.MECBase):
-    """
-    Visualization class for the Medial Entorhinal Cortex (MEC) grid cell network.
-    This class provides methods to visualize the grid cell layers in a MEC model.
-    """
+class MECView(MECBase):
+    # A view class for MEC networks that inherits core functionality and adds visualization
 
     def show(self, figsize=(16, 10)):
-        """
-        Create a comprehensive visualization of multiple grid cell layers in a MEC model.
+        # Creates a visual representation of all grid cell layers in the network
 
-        Parameters
-        ----------
-        figsize : tuple, optional
-            Figure size (width, height) in inches, default is (16, 10)
-
-        Returns
-        -------
-        matplotlib.figure.Figure
-            The figure containing all visualizations
-        """
         n_grids = len(self.grid_cells)
 
         # Create a figure with just the grid structures
