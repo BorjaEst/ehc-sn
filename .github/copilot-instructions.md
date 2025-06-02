@@ -19,7 +19,7 @@ This file establishes guidelines for using GitHub Copilot in the "Entorhinal-Hip
   - `utils/` - Utility functions
 - `requirements.txt` - Core package dependencies
 - `requirements-dev.txt` - Development dependencies
-- `docs/` - Documentation (Sphinx)
+- `docs/` - Documentation based in md format
 - `tests/` - Unit and integration tests
 - `tools/` - Utility scripts for development (e.g., data generation, visualization, etc.)
 - `.github/` - GitHub workflows and templates
