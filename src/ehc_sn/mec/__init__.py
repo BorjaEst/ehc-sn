@@ -38,9 +38,19 @@ class GridCellsLayer(view.GridLayerView, core.GridCellsBase):
         Parameters
         ----------
         position : tuple or array-like
-            Current (x, y) position
+            Current (x, y) position, which may have wrapped multiple times
+            around the toroidal environment
         """
         position = np.array(position)
+
+        # Calculate the environment dimensions
+        env_width = self.width * self.spacing
+        env_height = self.height * self.spacing
+
+        # Normalize position to be within environment bounds
+        # This handles multiple wraps by converting any position to its
+        # equivalent position within the environment
+        normalized_pos = np.array([position[0] % env_width, position[1] % env_height])
 
         # Calculate activity for each grid cell
         for i in range(self.height):
@@ -50,12 +60,12 @@ class GridCellsLayer(view.GridLayerView, core.GridCellsBase):
 
                 # For toroidal distance, need to consider wrapping in both dimensions
                 dx = min(
-                    abs(cell_pos[0] - position[0]),
-                    self.width * self.spacing - abs(cell_pos[0] - position[0]),
+                    abs(cell_pos[0] - normalized_pos[0]),
+                    env_width - abs(cell_pos[0] - normalized_pos[0]),
                 )
                 dy = min(
-                    abs(cell_pos[1] - position[1]),
-                    self.height * self.spacing - abs(cell_pos[1] - position[1]),
+                    abs(cell_pos[1] - normalized_pos[1]),
+                    env_height - abs(cell_pos[1] - normalized_pos[1]),
                 )
 
                 distance = np.sqrt(dx**2 + dy**2)
