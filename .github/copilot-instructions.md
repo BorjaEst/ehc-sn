@@ -26,7 +26,10 @@ This file establishes guidelines for using GitHub Copilot in the "Entorhinal-Hip
 
 ## Python-Specific Guidelines
 - Follow PEP 8 style guidelines for Python code
-- Use NumPy docstring format for all functions and classes
+- Use `__init__.py` to define the package or subpackage public API without actual implementations
+- Place comprehensive NumPy docstring format documentation in `__init__.py` files for all public interfaces
+- Use non `__init__.py` files for the actual implementations of functions and classes
+- Use comments on non `__init__.py` files instead of docstrings to help Copilot understand cross-file references and key concepts
 - Target Python 3.10 and newer (3.10, 3.11, 3.12)
 - Suggest scientific libraries appropriate for neural modeling (NumPy, SciPy, PyTorch, etc.)
 - Prioritize vectorized operations over loops when applicable for performance
