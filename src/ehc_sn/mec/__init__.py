@@ -92,17 +92,8 @@ class MECNetwork(view.MECView, core.MECBase):
     def __init__(self, grid_cells, noise_level=0.1):
         super().__init__(grid_cells, noise_level)
 
-    def set_position(self, position):
-        """
-        Update the activity of grid cells based on a given position.
-
-        Parameters
-        ----------
-        position : tuple
-            The (x, y) coordinates to update the grid cell activities.
-        """
-        for layer in self.grid_cells:
-            layer.set_position(position)
+    # We don't need to redefine set_position here since we're using the parent implementation.
+    # The parent MECBase.set_position already provides the functionality we need.
 
 
 if __name__ == "__main__":

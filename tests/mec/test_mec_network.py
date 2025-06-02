@@ -69,14 +69,15 @@ def test_noise_effect(network_gen, noise_levels):
     assert high_noise_variance > low_noise_variance
 
 
-def test_position_transition(network_gen, position_gen):
+@pytest.mark.parametrize("num_points", [40, 60])
+def test_position_transition(network_gen, position_gen, num_points):
     """Test network response to position transitions."""
     network = network_gen()
 
     # Generate a path of positions
     start_pos = (0.0, 0.0)
-    end_pos = (2.0, 2.0)
-    positions = position_gen(start_pos, end_pos, 10)
+    end_pos = (1.0, 1.0)
+    positions = position_gen(start_pos, end_pos, num_points)
 
     # Track activities along the path
     activities = []
