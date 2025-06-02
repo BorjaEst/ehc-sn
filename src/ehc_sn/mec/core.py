@@ -19,6 +19,11 @@ class GridCellsBase(ABC):
     matches the observed pattern in real grid cells, and the toroidal structure
     ensures continuous mapping.
 
+    This class is the core component for modeling grid cells and contains the
+    activity matrix, grid cell positions, and methods for updating
+    activities based on spatial position. Coordinates are calculated based on
+    hexagonal offset coordinates, and the grid can be oriented in any direction.
+
     Parameters
     ----------
     width : int
@@ -119,7 +124,7 @@ class GridCellsBase(ABC):
         return neighbors
 
     @abstractmethod
-    def update_activity(self, position):
+    def set_position(self, position):
         """
         Update grid cell activities based on current position.
 
@@ -185,7 +190,7 @@ class MECBase(ABC):
         """
         self.current_position = np.array(position)
         for grid in self.grid_cells:
-            grid.update_activity(position)
+            grid.set_position(position)
 
             # Add some noise to model biological variability
             if self.noise_level > 0:

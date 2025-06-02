@@ -31,7 +31,7 @@ class GridCellsLayer(view.GridLayerView, core.GridCellsBase):
     def __init__(self, width, height, spacing, orientation):
         super().__init__(width, height, spacing, orientation)
 
-    def update_activity(self, position):
+    def set_position(self, position):
         """
         Update grid cell activities based on current position.
 
@@ -102,7 +102,7 @@ class MECNetwork(view.MECView, core.MECBase):
             The (x, y) coordinates to update the grid cell activities.
         """
         for layer in self.grid_cells:
-            layer.update_activity(position)
+            layer.set_position(position)
 
 
 if __name__ == "__main__":
