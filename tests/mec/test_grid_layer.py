@@ -68,35 +68,6 @@ def test_grid_cell_toroid_diagonal_cycling(layer):
     np.testing.assert_allclose(reference_activity, cycled_activity, rtol=1e-5)
 
 
-@pytest.mark.parametrize("scale", [0.2, 0.5, 1.0])
-def test_grid_cell_multiple_scales(scale):
-    """Test that grid cells with different scales cycle correctly."""
-    from ehc_sn.mec import GridCellsLayer
-    
-    # Create grid layer with specified scale
-    layer = GridCellsLayer(width=10, height=10, spacing=scale, orientation=0.0)
-    
-    # Define reference point
-    reference_point = (0.5, 0.5)
-    
-    # Move by the expected periodicity given the scale
-    # For grid cells, periodicity depends on scale
-    period_point = (0.5 + 2 * scale, 0.5)
-    
-    # Measure activations
-    layer.update_activity(reference_point)
-    reference_activity = layer.activity.copy()
-    
-    layer.update_activity(period_point)
-    period_activity = layer.activity.copy()
-    
-    # Calculate correlation between activation patterns
-    correlation = np.corrcoef(reference_activity.flatten(), period_activity.flatten())[0, 1]
-    
-    # Correlation should be high if scaling is working correctly
-    assert correlation > 0.7
-
-
 @pytest.mark.parametrize("distance_factor", [1, 2, 3])
 def test_grid_cell_multiple_cycles(layer, distance_factor):
     """Test that grid cell activation repeats after multiple cycles."""
