@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-from ehc_sn.mec import GridCellsLayer, MECNetwork
 
 
 @pytest.mark.parametrize("noise_level", [0.0, 0.2])

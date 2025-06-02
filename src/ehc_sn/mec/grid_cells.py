@@ -1,9 +1,11 @@
-# Core comments
-
+import matplotlib.colors as colors
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import RegularPolygon
 
 
 class GridCellsBase:
+    # Base class for grid cells, providing core functionality for grid cell layers
 
     def __init__(self, width, height, spacing, orientation=0.0):
         self.width = width
@@ -11,10 +13,10 @@ class GridCellsBase:
         self.spacing = spacing
         self.orientation = orientation
 
-        # Initialize grid activity matrix
+        # Initialize activity matrix
         self.activity = np.zeros((height, width))
 
-        # Initialize grid cell positions
+        # Initialize grid positions
         self.positions = self._initialize_grid_positions()
 
     def _initialize_grid_positions(self):
@@ -102,91 +104,61 @@ class GridCellsBase:
                 # Gaussian activation based on distance
                 self.activity[i, j] = np.exp(-(distance**2) / (2 * self.spacing**2))
 
+
+class GridLayerView(GridCellsBase):
+    # A view class for grid cell layers that inherits core functionality and adds visualization
+
+    def show(self, ax=None, cell_size=0.8, edgecolor="black", title=None):
+        # Creates a visual representation of the grid cell layer
+
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 8))
+
+        # Create proper colormap for activity coloring
+        cmap = plt.get_cmap("viridis")
+        # Normalize activity values to [0, 1] for colormap
+        norm = colors.Normalize(vmin=0, vmax=np.max(self.activity) or 1.0)
+
+        # Plot hexagons at each grid cell position
+        for i in range(self.height):
+            for j in range(self.width):
+                pos = self.positions[i, j]
+
+                # Create hexagon
+                hex_cell = RegularPolygon(
+                    pos,
+                    numVertices=6,
+                    radius=cell_size * self.spacing / 2,
+                    orientation=np.pi / 6,  # Orientation for flat-topped hexagon
+                    edgecolor=edgecolor,
+                    facecolor=cmap(norm(self.activity[i, j])),
+                    alpha=0.8,
+                )
+                ax.add_patch(hex_cell)
+
+        # Set axis limits a bit larger than the grid
+        max_pos = np.max(self.positions) + self.spacing
+        min_pos = np.min(self.positions) - self.spacing
+        ax.set_xlim(min_pos, max_pos)
+        ax.set_ylim(min_pos, max_pos)
+        ax.set_aspect("equal")
+
+        # Set title
+        if title is None:
+            title = f"Grid Cell Layer Structure (spacing={self.spacing})"
+        ax.set_title(title)
+
+        return ax
+
+
+class GridCellsLayer(GridLayerView, GridCellsBase):
+    """Represents a layer of grid cells in the medial entorhinal cortex (MEC)."""
+
+    def __init__(self, width, height, spacing, orientation=0.0):
+        GridCellsBase.__init__(self, width, height, spacing, orientation)
+
     def __repr__(self):
-        """Return string representation of the GridCellsNetwork."""
         return (
-            f"GridCellsNetwork(width={self.width}, height={self.height}, "
+            f"GridCellsLayer(width={self.width}, height={self.height}, "
             f"spacing={self.spacing}, orientation={self.orientation})"
         )
-
-
-class MECBase:
-
-    def __init__(self, grid_cells, noise_level=0.1):
-
-        self.grid_cells = grid_cells
-        self.noise_level = noise_level
-        self.current_position = np.zeros(2)
-
-        # Track the total number of grid cells across all networks
-        self.total_cells = sum(grid.width * grid.height for grid in grid_cells)
-
-        # Initialize velocity input connections for path integration
-        self.velocity_weights = np.random.randn(2, self.total_cells) * 0.01
-
-    def set_position(self, position):
-
-        self.current_position = np.array(position)
-        for grid in self.grid_cells:
-            grid.set_position(position)
-
-            # Add some noise to model biological variability
-            if self.noise_level > 0:
-                noise = np.random.normal(0, self.noise_level, grid.activity.shape)
-                grid.activity = np.clip(grid.activity + noise, 0, 1)
-
-    def path_integrate(self, velocity, dt=0.1):
-
-        velocity = np.array(velocity)
-
-        # Update position based on velocity
-        new_position = self.current_position + velocity * dt
-
-        # Update grid cell activities for the new position
-        self.set_position(new_position)
-
-        return tuple(new_position)
-
-    def get_spatial_encoding(self):
-
-        # Flatten and concatenate all grid cell activities
-        encoding = np.concatenate([grid.activity.flatten() for grid in self.grid_cells])
-
-        return encoding
-
-    def output_to_hippocampus(self):
-
-        # Get the basic spatial encoding
-        encoding = self.get_spatial_encoding()
-
-        # Apply a nonlinear transformation to mimic biological processing
-        # Threshold weak activations to create sparse coding
-        threshold = 0.2
-        encoding[encoding < threshold] = 0
-
-        return encoding
-
-    def get_population_vector(self):
-
-        x_sum, y_sum, total_activity = 0, 0, 0
-
-        for grid in self.grid_cells:
-            for i in range(grid.height):
-                for j in range(grid.width):
-                    activity = grid.activity[i, j]
-                    pos = grid.positions[i, j]
-
-                    x_sum += pos[0] * activity
-                    y_sum += pos[1] * activity
-                    total_activity += activity
-
-        # Avoid division by zero
-        if total_activity > 0:
-            x = x_sum / total_activity
-            y = y_sum / total_activity
-            return (x, y)
-        else:
-            return (0, 0)
-
-    def __repr__(self):
-        return f"MEC(grid_cells={len(self.grid_cells)}, noise_level={self.noise_level})"
