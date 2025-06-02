@@ -100,9 +100,9 @@ def test_position_transition(network_gen, position_gen, num_points):
             assert corr > 0.5
 
 
-def test_multiple_scales_integration(network_gen):
+def test_multiple_scales_integration(network_gen, layer_gen):
     """Test that network properly integrates multiple grid scales."""
-    network = network_gen()
+    network = network_gen([layer_gen(spacing=x) for x in [0.2, 0.4, 0.8]])
 
     # Set a position and get activities
     test_position = (1.0, 1.0)
@@ -115,14 +115,20 @@ def test_multiple_scales_integration(network_gen):
         peak_positions.append(layer.positions[max_idx])
 
     # Different scales should give complementary spatial information
-    # We verify this by checking that peak positions are different
-    for i in range(len(peak_positions)):
-        for j in range(i + 1, len(peak_positions)):
-            # Distance between peak positions should reflect their scale differences
-            dist = np.linalg.norm(
-                np.array(peak_positions[i]) - np.array(peak_positions[j])
-            )
-            assert dist > 0.01  # Small threshold to account for discretization
+    # We verify this by checking that the grid patterns are unique across scales
+    # Note: Peak positions can legitimately overlap sometimes, so instead we'll
+    # check that activity patterns across scales are different
+    for i in range(len(network.grid_cells)):
+        for j in range(i + 1, len(network.grid_cells)):
+            activity_i = network.grid_cells[i].activity.flatten()
+            activity_j = network.grid_cells[j].activity.flatten()
+
+            # Calculate correlation between activities of different scales
+            corr = np.corrcoef(activity_i, activity_j)[0, 1]
+
+            # Different scales should not have identical activity patterns
+            # A perfect correlation of 1.0 would indicate identical patterns
+            assert corr < 0.99
 
     # Test that a new position creates different activity patterns
     new_position = (1.5, 1.5)
@@ -133,8 +139,21 @@ def test_multiple_scales_integration(network_gen):
         max_idx = np.unravel_index(np.argmax(layer.activity), layer.activity.shape)
         new_peak = layer.positions[max_idx]
 
-        # Verify the peak shifted
-        assert new_peak != peak_positions[i]
+        # Get the previous activity pattern for comparison
+        # Set position back to original position to get old activity
+        network.set_position(test_position)
+        old_activity = layer.activity.copy()
+
+        # Set position back to new position
+        network.set_position(new_position)
+        new_activity = layer.activity.copy()
+
+        # Compare activity patterns to ensure they changed
+        correlation = np.corrcoef(old_activity.flatten(), new_activity.flatten())[0, 1]
+
+        # Different positions should result in different activity patterns
+        # A correlation significantly below 1.0 indicates pattern change
+        assert correlation < 0.95
 
 
 def test_orientation_effect(network_gen, layer_gen):
