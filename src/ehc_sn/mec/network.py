@@ -4,6 +4,8 @@ import numpy as np
 
 class MECBase:
     # Base class for MEC networks, providing core functionality for grid cell layers
+    # This class serves as the implementation foundation for MEC simulation
+    # See __init__.py for the public API documentation
 
     def __init__(self, grid_cells, noise_level=0.1):
         self.grid_cells = grid_cells
@@ -14,20 +16,38 @@ class MECBase:
         self.total_cells = sum(grid.width * grid.height for grid in grid_cells)
 
         # Initialize velocity input connections for path integration
+        # These weights connect velocity signals to grid cells for path integration
+        # Reference: McNaughton et al. (2006), Path integration and the neural basis of the 'cognitive map'
         self.velocity_weights = 0.01 * np.random.randn(2, self.total_cells)
 
     def set_position(self, position):
+        # Update the activity of all grid cells based on current position
+        # Parameters
+        # ----------
+        # position : tuple or array-like
+        #     (x, y) coordinates representing current position in the environment
 
         self.current_position = np.array(position)
         for grid in self.grid_cells:
             grid.set_position(position)
 
             # Add some noise to model biological variability
+            # This simulates the inherent noise in neural responses
             if self.noise_level > 0:
                 noise = np.random.normal(0, self.noise_level, grid.activity.shape)
                 grid.activity = np.clip(grid.activity + noise, 0, 1)
 
     def path_integrate(self, velocity, dt=0.1):
+        # Update position based on velocity vector (path integration)
+        # This function simulates the continuous updating of position representation
+        # through integration of velocity signals, a key function of grid cells
+        #
+        # Parameters
+        # ----------
+        # velocity : tuple or array-like
+        #     (vx, vy) velocity vector
+        # dt : float
+        #     Time step for integration
 
         velocity = np.array(velocity)
 
@@ -40,6 +60,8 @@ class MECBase:
         return tuple(new_position)
 
     def get_spatial_encoding(self):
+        # Returns the concatenated activity of all grid cells as a spatial code
+        # This provides a complete spatial representation across all scales
 
         # Flatten and concatenate all grid cell activities
         encoding = np.concatenate([grid.activity.flatten() for grid in self.grid_cells])
@@ -47,6 +69,10 @@ class MECBase:
         return encoding
 
     def output_to_hippocampus(self):
+        # Process grid cell activity for output to hippocampal formation
+        # Applies thresholding to create sparse coding, which is biologically plausible
+        # Reference: Rolls et al. (2006), Sparse but not 'Grandmother-cell' coding in the medial
+        # temporal lobe
 
         # Get the basic spatial encoding
         encoding = self.get_spatial_encoding()
@@ -59,6 +85,8 @@ class MECBase:
         return encoding
 
     def get_population_vector(self):
+        # Calculate the population vector (center of mass) of grid cell activity
+        # This represents an estimate of the current position encoded by the grid cells
 
         x_sum, y_sum, total_activity = 0, 0, 0
 
@@ -83,9 +111,12 @@ class MECBase:
 
 class MECView(MECBase):
     # A view class for MEC networks that inherits core functionality and adds visualization
+    # This implements the visualization layer for grid cell activity
+    # Follows MVC pattern to separate visualization from core model
 
     def show(self, figsize=(16, 10)):
         # Creates a visual representation of all grid cell layers in the network
+        # Generates a figure showing activity across different grid scales
 
         n_grids = len(self.grid_cells)
 
@@ -108,7 +139,9 @@ class MECView(MECBase):
 
 
 class MEC(MECView, MECBase):
-    """Represents a network of grid cells in the medial entorhinal cortex (MEC)."""
+    # Implementation class for MEC models
+    # This is the actual class that will be exposed through the public API
+    # Uses multiple inheritance to combine the base functionality and visualization
 
     def __init__(self, grid_cells, noise_level=0.1):
         MECBase.__init__(self, grid_cells, noise_level)
