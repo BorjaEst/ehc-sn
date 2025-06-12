@@ -1,34 +1,50 @@
+import pytest
 import torch
 
-import ehc_sn.nn
+from ehc_sn.models import Layer, Network
 from ehc_sn.settings import config
 
 
+@pytest.mark.parametrize("model_data", ["model_1"], indirect=True)
 class TestModelInitialization:
 
     def test_instance(self, model):
-        assert isinstance(model, ehc_sn.EHC_SN)
+        assert isinstance(model, Network)
 
-    def test_networks(self, model):
-        assert isinstance(model.hpc, ehc_sn.nn.Network)
-        assert isinstance(model.mec, ehc_sn.nn.Network)
+    @pytest.mark.parametrize("layer_name", ["hpc-place_cells", "mec-grid_1"])
+    def test_layer(self, model, layer_name):
+        assert layer_name in model.layers
+        assert isinstance(model.layers[layer_name], Layer)
 
-    def test_hpc_layers(self, model):
-        assert "place_cells" in model.hpc.layers
-        assert isinstance(model.hpc.layers["place_cells"], ehc_sn.nn.Layer)
+    @pytest.mark.parametrize("layer_name", ["visual_stimulus", "velocity"])
+    def test_inputs(self, model, layer_name):
+        assert layer_name in model.layers
+        assert isinstance(model.layers[layer_name], Layer)
 
-    def test_mec_layers(self, model):
-        assert "grid_1" in model.mec.layers
-        assert isinstance(model.mec.layers["grid_1"], ehc_sn.nn.Layer)
-        assert "grid_2" in model.mec.layers
-        assert isinstance(model.mec.layers["grid_2"], ehc_sn.nn.Layer)
-        assert "grid_3" in model.mec.layers
-        assert isinstance(model.mec.layers["grid_3"], ehc_sn.nn.Layer)
+    @pytest.mark.parametrize("connection", [
+        {"source": "hpc-place_cells", "target": "mec-grid_1", "synapse": "hybrid"},
+        {"source": "mec-grid_1", "target": "hpc-place_cells", "synapse": "silent"},
+        {"source": "velocity", "target": "mec-grid_1", "synapse": "ampa"},
+    ])  # fmt: skip
+    def test_connections(self, model, connection):
+        assert connection["target"] in model.links
+        link = model.links[connection["target"]]
+        assert hasattr(link, connection["synapse"])
+        synapse = getattr(link, connection["synapse"])
+        assert any(connection["source"] == c.source for c in synapse.connections)
 
 
+@pytest.mark.parametrize("model_data", ["model_1"], indirect=True)
 def test_model_forward(model):
-    # Create sample input
-    hpc_input = torch.ones((1, 3), device=config.device)
-    mec_input = torch.ones((1, 3), device=config.device)
-    # Forward pass through network
-    output = model(hpc_input, mec_input)
+    """Test the forward pass of the model with sample inputs."""
+    output = model(
+        {
+            "visual_stimulus": torch.ones((1, 4), device=config.device),
+            "velocity": torch.ones((1, 2), device=config.device),
+        }
+    )
+    assert isinstance(output, dict)
+    assert "hpc-place_cells" in output
+    assert "mec-grid_1" in output
+    assert "mec-grid_2" in output
+    assert "mec-grid_3" in output

@@ -1,18 +1,16 @@
 import pytest
 import tomli
 
-import ehc_sn
+import ehc_sn.models
 
 
-@pytest.fixture(scope="module", params=["config_1"])
-def parameters(request):
+@pytest.fixture(scope="module", params=["model_1"])
+def model_data(request):
     """Fixture providing model parameters from a TOML file."""
-    with open(f"tests/test_models/{request.param}.toml", "rb") as f:
-        data = tomli.load(f)
-    return ehc_sn.parameters.Model.model_validate(data)
+    return ehc_sn.models.load_model(f"tests/config/{request.param}.toml")
 
 
 @pytest.fixture()
-def model(parameters):
+def model(model_data):
     """Fixture providing a simple network instance."""
-    return ehc_sn.EHC_SN(parameters)
+    return ehc_sn.models.Network(model_data)

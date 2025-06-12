@@ -5,10 +5,8 @@ from torch.nn import Module
 from ehc_sn import utils
 from ehc_sn.config import parameters
 from ehc_sn.models.config import Connection as ConnectionConfig
-from ehc_sn.models.config import Input as InputConfig
 from ehc_sn.models.config import Layer as LayerConfig
 from ehc_sn.models.config import Network as NetworkConfig
-from ehc_sn.models.config import load_network
 from ehc_sn.settings import config
 
 
