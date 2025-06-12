@@ -1,0 +1,94 @@
+# Test configuration for hippocampal-entorhinal network structure
+
+# Layer definitions
+[layers.hpc-place_cells]
+  description = "Hippocampal place cells encoding specific locations"
+  neuron      = "standard"
+  size        = 3
+
+[layers.mec-grid_1]
+  description = "Grid cells with large scale factor"
+  neuron      = "standard"
+  size        = 3
+
+[layers.mec-grid_2]
+  description = "Grid cells with medium scale factor"
+  neuron      = "standard"
+  size        = 3
+
+[layers.mec-grid_3]
+  description = "Grid cells with small scale factor"
+  neuron      = "standard"
+  size        = 3
+
+
+# External inputs to the network
+[layers.visual_stimulus]
+  description = "Visual stimulus input to hippocampal place cells"
+  neuron      = "input"
+  size        = 4
+
+[layers.velocity]
+  description = "Velocity input to grid cells"
+  neuron      = "input"
+  size        = 2
+
+
+# Connections from external inputs to network layers
+[[connections]]
+  source  = "visual_stimulus"
+  target  = "hpc-place_cells"
+  synapse = "ampa"
+
+[[connections]]
+  source  = "velocity"
+  target  = "mec-grid_1"
+  synapse = "ampa"
+
+# Connections from hippocampal place cells to grid cells
+[[connections]]
+  source  = "hpc-place_cells"
+  target  = "mec-grid_1"
+  synapse = "hybrid"
+
+[[connections]]
+  source  = "hpc-place_cells"
+  target  = "mec-grid_2"
+  synapse = "hybrid"
+
+[[connections]]
+  source  = "hpc-place_cells"
+  target  = "mec-grid_3"
+  synapse = "hybrid"
+
+# Connections from grid cells to hippocampal place cells
+[[connections]]
+  source  = "mec-grid_1"
+  target  = "hpc-place_cells"
+  synapse = "silent"
+
+[[connections]]
+  source  = "mec-grid_2"
+  target  = "hpc-place_cells"
+  synapse = "silent"
+
+[[connections]]
+  source  = "mec-grid_3"
+  target  = "hpc-place_cells"
+  synapse = "silent"
+
+# Recurrent connections
+[[connections]]
+  source  = "mec-grid_1"
+  target  = "mec-grid_1"
+  synapse = "hybrid"
+
+[[connections]]
+  source  = "mec-grid_2"
+  target  = "mec-grid_2"
+  synapse = "hybrid"
+
+[[connections]]
+  source  = "mec-grid_3"
+  target  = "mec-grid_3"
+  synapse = "hybrid"

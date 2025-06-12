@@ -28,6 +28,7 @@ class TestModelInitialization:
 
 def test_model_forward(model):
     # Create sample input
-    input_tensor = torch.ones((1, 3), device=config.device)
+    hpc_input = torch.ones((1, 3), device=config.device)
+    mec_input = torch.ones((1, 3), device=config.device)
     # Forward pass through network
-    output = model(input_tensor)
+    output = model(hpc_input, mec_input)
