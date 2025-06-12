@@ -1,0 +1,11 @@
+# Test configuration for a simple network model
+
+[layers.layer_1]
+neurons.size = 3
+synapses.ampa.size = 3
+synapses.ampa.w_init = 0.5
+
+[layers.layer_2]
+neurons.size = 3
+synapses.ampa.size = 3
+synapses.ampa.w_init = 0.5

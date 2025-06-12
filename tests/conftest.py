@@ -1,5 +1,8 @@
 import numpy as np
 import pytest
+import tomli
+
+from ehc_sn import hpc, parameters
 
 
 @pytest.fixture(autouse=True)
@@ -8,14 +11,15 @@ def set_random_seed():
     np.random.seed(42)
 
 
-@pytest.fixture(scope="module")
-def position_gen():
-    """Fixture providing a function to generate test positions."""
+@pytest.fixture(scope="module", params=["model_1"])
+def model_parameters(request):
+    """Fixture providing model parameters from a TOML file."""
+    with open(f"tests/config/{request.param}.toml", "rb") as f:
+        data = tomli.load(f)
+    return parameters.Network.model_validate(data)
 
-    def _generate_positions(start, end, num_points=10):
-        """Generate evenly spaced positions from start to end."""
-        x = np.linspace(start[0], end[0], num_points)
-        y = np.linspace(start[1], end[1], num_points)
-        return np.column_stack((x, y))
 
-    return _generate_positions
+@pytest.fixture()
+def model(model_parameters):
+    """Fixture providing a simple network instance."""
+    return hpc.Network(model_parameters)
