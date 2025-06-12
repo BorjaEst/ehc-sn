@@ -30,3 +30,11 @@ class Network(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     layers: dict[str, Layer] = Field({}, description="The layers of the network")
+
+
+class Model(BaseSettings):
+    """The model settings."""
+
+    model_config = ConfigDict(extra="forbid")
+    hpc: Network = Field(..., description="Hippocampal network parameters")
+    mec: Network = Field(..., description="Entorhinal-hippocampal complex network parameters")
