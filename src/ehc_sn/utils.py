@@ -53,7 +53,7 @@ def torch_function(name: str) -> Any:
     if normalized_name in special_functions:
         return special_functions[normalized_name]
 
-    torch_func = getattr(nn, normalized_name, None)
+    torch_func = getattr(nn.functional, normalized_name, None)
     if torch_func is None:
         raise ValueError(f"Unknown torch function: {name}")
 
