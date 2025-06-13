@@ -10,8 +10,8 @@ from collections import namedtuple
 import pytest
 import torch
 
-import ehc_sn.models
-from ehc_sn.models import Layer, Network
+import ehc_sn.core
+from ehc_sn.core import Layer, Network
 from ehc_sn.settings import config
 
 # Define test data structures for better readability
@@ -37,7 +37,7 @@ def model_config():
     This fixture provides the parsed configuration data for the test model,
     which can be reused across multiple tests.
     """
-    return ehc_sn.models.load_model(TEST_MODELS[0].path)
+    return ehc_sn.core.load_model(TEST_MODELS[0].path)
 
 
 @pytest.fixture(scope="module")
@@ -47,7 +47,7 @@ def model(model_config):
     This fixture instantiates the model once per test module
     for efficiency, since model creation is expensive.
     """
-    return ehc_sn.models.Network(model_config)
+    return ehc_sn.core.Network(model_config)
 
 
 class TestModelStructure:

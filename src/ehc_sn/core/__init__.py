@@ -182,7 +182,7 @@ class Network:
     pass
 
 
-from ehc_sn.models.config import load_model as load_model
-from ehc_sn.models.models import Connection, Layer, Network, Neurons, Synapses
+from ehc_sn.core.config import load_model as load_model
+from ehc_sn.core.models import Connection, Layer, Network, Neurons, Synapses
 
 __all__ = ["Connection", "Layer", "Network", "Neurons", "Synapses", "load_model"]
