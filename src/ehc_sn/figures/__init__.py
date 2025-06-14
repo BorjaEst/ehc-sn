@@ -1,18 +1,18 @@
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional
 
 import matplotlib.pyplot as plt
-import torch
+import numpy as np
+import seaborn as sns
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
 
+from ehc_sn import models, simulations
 from ehc_sn.figures import settings
-from ehc_sn.models.item_memory import ItemMemory
 from ehc_sn.utils import grids
 
 
 def visualize_item_memory_state(
-    hpc_activity: torch.Tensor,
-    mec_activity: List[torch.Tensor],
+    model: models.ItemMemory,
     config: Optional[settings.ItemMemoryStateConfig] = None,
 ) -> Figure:
     """Visualize the current state of an ItemMemory model.
@@ -27,12 +27,13 @@ def visualize_item_memory_state(
     """
     # Use default config if none provided
     config = config or settings.ItemMemoryStateConfig()
-    n_mec_modules = len(mec_activity)  # Number of subplots needed
+    n_mec_modules = len(model.mec)  # Number of subplots needed
+    hpc_activity = model.hpc.place_cells
+    mec_activity = [mec_module.grid_cells for mec_module in model.mec]
 
     # Determine grid layout based on whether item units are present
     fig = plt.figure(figsize=config.figsize)
-    rows = 2
-    gs = GridSpec(rows, n_mec_modules + 1, figure=fig)
+    gs = GridSpec(nrows=2, ncols=n_mec_modules + 1, figure=fig)
 
     # Plot hippocampal place cell activity
     ax_hpc = fig.add_subplot(gs[0, :])
@@ -66,6 +67,62 @@ def visualize_item_memory_state(
     ax_stats.text(0.05, 0.95, "Activity Statistics:", fontsize=12, fontweight="bold", va="top")
     ax_stats.text(0.05, 0.85, hpc_stats, fontsize=10, va="top")
     ax_stats.text(0.05, 0.75, mec_stats, fontsize=10, va="top")
+
+    plt.tight_layout()
+    return fig
+
+
+def visualize_memory_retrieval(
+    simulation: simulations.SimulationResults,
+    config: Optional[settings.MemoryRetrievalConfig] = None,
+) -> Figure:
+    """Visualize the dynamics of memory retrieval over iterations.
+
+    Args:
+        simulation: Simulation results containing HPC and MEC states
+        config: Optional configuration object with visualization parameters
+
+    Returns:
+        Matplotlib figure with subplots showing the dynamics of retrieval
+    """
+    # Use default config if none provided
+    config = config or settings.MemoryRetrievalConfig()
+    hpc_states = simulation.hpc_states
+    mec_states = simulation.mec_states
+
+    # Determine number of MEC modules from the simulation data
+    if mec_states and len(mec_states) > 0:
+        n_mec_modules = len(mec_states[0])
+    else:
+        n_mec_modules = 0
+
+    # Select iterations to visualize
+    iter_indices = list(np.linspace(0, len(hpc_states) - 1, config.n_frames, dtype=int))
+
+    # Create figure
+    n_frames = len(iter_indices)
+    n_cols = n_mec_modules + 1  # HPC + each MEC module
+    fig, axs = plt.subplots(n_frames, n_cols, figsize=config.figsize)
+
+    # Handle single row case
+    if n_frames == 1:
+        axs = axs.reshape(1, -1)
+
+    # Plot each selected iteration
+    for frame, iter_idx in enumerate(iter_indices):
+        # Plot HPC activity
+        ax = axs[frame, 0]
+        hpc_data = hpc_states[iter_idx].detach().cpu().numpy().reshape(1, -1)
+        sns.heatmap(hpc_data, ax=ax, cmap=config.cmap_hpc, cbar_kws={"label": "Act"})
+        ax.set_title(f"Iteration {iter_idx+1}: HPC")
+        ax.set_yticks([])
+
+        # Plot each MEC module's grid cell activity
+        for i in range(n_mec_modules):
+            ax = axs[frame, i + 1]
+            grid = grids.arrange_2d(mec_states[iter_idx][i])
+            sns.heatmap(grid, ax=ax, cmap=config.cmap_mec, cbar_kws={"label": "Act"})
+            ax.set_title(f"MEC Module {i+1}")
 
     plt.tight_layout()
     return fig
