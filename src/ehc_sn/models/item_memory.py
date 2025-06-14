@@ -59,7 +59,11 @@ class HPCGrid(nn.Module):
         fea_currents = self.synapses_features(features)
         mec_currents = sum(synapse(mec_i) for synapse, mec_i in zip(self.synapses_mec, mec))
 
-        return self.nonlinearity(fea_currents + mec_currents)
+        # Update place cell activations with recurrent connections
+        self.place_cells = self.place_cells + fea_currents + mec_currents
+        self.place_cells = self.nonlinearity(self.place_cells)
+
+        return self.place_cells
 
 
 class MECGrid(nn.Module):
