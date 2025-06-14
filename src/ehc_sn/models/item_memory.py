@@ -3,41 +3,41 @@ from torch import nn
 
 
 class Encoder(nn.Module):
-    """Encoder for input data to feature space."""
+    """Encoder for item data to feature space."""
 
-    def __init__(self, inputs_dim: int, hidden_dim: int, hpc_dim: int):
+    def __init__(self, items_dim: int, hidden_dim: int, hpc_dim: int):
         super().__init__()
 
         # Encoder network
         self.network = nn.Sequential(
-            nn.Linear(inputs_dim, hidden_dim),
+            nn.Linear(items_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hpc_dim),
             nn.Tanh(),  # Bounded activation for normalized feature vectors
         )
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        # Encode input into feature space
-        return self.network(inputs)
+    def forward(self, items: torch.Tensor) -> torch.Tensor:
+        # Encode items space into feature space
+        return self.network(items)
 
 
 class Decoder(nn.Module):
-    """Decoder for feature space to input data."""
+    """Decoder for feature space to item data."""
 
-    def __init__(self, hpc_dim: int, hidden_dim: int, output_dim: int):
+    def __init__(self, hpc_dim: int, hidden_dim: int, items_dim: int):
         super().__init__()
 
         # Encoder network
         self.network = nn.Sequential(
             nn.Linear(hpc_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, output_dim),
+            nn.Linear(hidden_dim, items_dim),
             nn.Tanh(),  # Bounded activation for normalized feature vectors
         )
 
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        # Decode feature space into input
-        return self.network(inputs)
+    def forward(self, items: torch.Tensor) -> torch.Tensor:
+        # Decode feature space into items space
+        return self.network(items)
 
 
 class HPCGrid(nn.Module):
@@ -47,7 +47,7 @@ class HPCGrid(nn.Module):
         super().__init__()
 
         # Linear layer to compute place cell activations
-        self.register_buffer("place_cells", torch.zeros(neurons))
+        self.register_buffer("place_cells", torch.zeros(1, neurons))
         self.synapses_mec = nn.ModuleList([nn.Linear(grid_dim, neurons) for grid_dim in mec_dims])
         self.synapses_features = nn.Linear(neurons, neurons)
 
@@ -69,17 +69,17 @@ class MECGrid(nn.Module):
         super().__init__()
 
         # Register a persistent tensor to hold the activations
-        self.register_buffer("grid_cells", torch.zeros(neurons))
-        self.synapses_hpc = nn.Linear(hpc_dim, neurons)
-        self.synapses_rcc = nn.Linear(neurons, neurons)
+        self.register_buffer("grid_cells", torch.zeros(1, neurons))
+        self.synapses_hpc = nn.Linear(hpc_dim, neurons)  # Synapses from HPC to MEC
+        self.synapses_rcc = nn.Linear(neurons, neurons)  # Recurrent connections
 
         # Gain parameter for attractor dynamics
         self.gain = nn.Parameter(torch.tensor(init_gain))
 
     def forward(self, hpc_activations: torch.Tensor) -> torch.Tensor:
-        # Update attractor state with new input
-        hpc_currents = self.synapses_hpc(hpc_activations)
-        rcc_currents = self.synapses_rcc(self.grid_cells)
+        # Update attractor state with new item representations
+        hpc_currents = self.synapses_hpc(hpc_activations)  # Current from HPC to MEC
+        rcc_currents = self.synapses_rcc(self.grid_cells)  # Recurrent current
 
         # Apply attractor dynamics with gain parameter
         self.grid_cells = self.gain * self.grid_cells + hpc_currents + rcc_currents
@@ -95,31 +95,36 @@ class ItemMemory(nn.Module):
         super().__init__()
 
         # Item representation network
-        self.encoder = Encoder(inputs_dim=100, hidden_dim=80, hpc_dim=25)
-        self.decoder = Decoder(hpc_dim=25, hidden_dim=80, output_dim=100)
+        self.encoder = Encoder(items_dim=100, hidden_dim=80, hpc_dim=25)
+        self.decoder = Decoder(hpc_dim=25, hidden_dim=80, items_dim=100)
 
         # Spatial representation networks
         self.hpc = HPCGrid(25, mec_dims=[40, 40, 40])
         self.mec = nn.ModuleList([MECGrid(40, hpc_dim=25) for _ in range(3)])
 
-    def forward(self, inputs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        # Encode input into feature space
-        hpc_activations = self.hpc(self.encoder(inputs), [mec.grid_cells for mec in self.mec])
-        _mec_activations = [mec(hpc_activations) for mec in self.mec]
-        # Decode feature space into output
-        return hpc_activations, self.decoder(hpc_activations)
+    def forward(self, items: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # Encode item space into feature space
+        features = self.encoder(items)
 
-    def store_item(self, features: torch.Tensor, inputs: torch.Tensor):
-        """Process input and store in memory."""
+        # First get HPC activations based on current MEC states
+        hpc_activations = self.hpc(features, [mec.grid_cells for mec in self.mec])
+        mec_activations = [mec(hpc_activations) for mec in self.mec]  # Update MEC states
+
+        # Decode output
+        decoded = self.decoder(hpc_activations)
+        return hpc_activations, decoded
+
+    def store_item(self, features: torch.Tensor, items: torch.Tensor):
+        """Process items and store in memory."""
         # TODO: Implement scaffold dynamics to store item representations
         with torch.no_grad():
-            # Encode input into feature space
-            encoded_features = self.forward(inputs)
+            # Encode item space into feature space
+            encoded_features = self.forward(items)
             err = torch.norm(encoded_features - features, dim=1)
         # TODO: Implement scaffold dynamics to store item representations
 
     def query(self, features: torch.Tensor) -> torch.Tensor:
-        """Find items in memory most similar to the input."""
+        """Find items in memory most similar to the item."""
         # TODO: Implement scaffold dynamics to query item representations
         with torch.no_grad():
             # decode features into output space
