@@ -11,13 +11,28 @@ from matplotlib.gridspec import GridSpec
 from pydantic import BaseModel, Field
 
 
-class ItemMemoryStateConfig(BaseModel):
+class NeuronActivationConfig(BaseModel):
     cmap_hpc: str = Field(
         default="viridis",
         description="Colormap for hippocampal place cell activity",
     )
     cmap_mec: str = Field(
         default="plasma",
+        description="Colormap for MEC grid cell activity",
+    )
+    figsize: Tuple[int, int] = Field(
+        default=(15, 10),
+        description="Figure size for item memory state plots",
+    )
+
+
+class ConnectivityMatricesConfig(BaseModel):
+    cmap_hpc: str = Field(
+        default="coolwarm",  # Blue inhibitory, red excitatory
+        description="Colormap for hippocampal place cell activity",
+    )
+    cmap_mec: str = Field(
+        default="coolwarm",  # Blue inhibitory, red excitatory
         description="Colormap for MEC grid cell activity",
     )
     figsize: Tuple[int, int] = Field(

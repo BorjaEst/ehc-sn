@@ -11,9 +11,9 @@ from ehc_sn.figures import settings
 from ehc_sn.utils import grids
 
 
-def visualize_item_memory_state(
+def visualize_neuron_actications(
     model: models.ItemMemory,
-    config: Optional[settings.ItemMemoryStateConfig] = None,
+    config: Optional[settings.NeuronActivationConfig] = None,
 ) -> Figure:
     """Visualize the current state of an ItemMemory model.
 
@@ -26,7 +26,7 @@ def visualize_item_memory_state(
         Matplotlib figure with subplots showing hippocampal and grid cell activity
     """
     # Use default config if none provided
-    config = config or settings.ItemMemoryStateConfig()
+    config = config or settings.NeuronActivationConfig()
     n_mec_modules = len(model.mec)  # Number of subplots needed
     hpc_activity = model.hpc.place_cells
     mec_activity = [mec_module.grid_cells for mec_module in model.mec]
@@ -67,6 +67,80 @@ def visualize_item_memory_state(
     ax_stats.text(0.05, 0.95, "Activity Statistics:", fontsize=12, fontweight="bold", va="top")
     ax_stats.text(0.05, 0.85, hpc_stats, fontsize=10, va="top")
     ax_stats.text(0.05, 0.75, mec_stats, fontsize=10, va="top")
+
+    plt.tight_layout()
+    return fig
+
+
+def visualize_connectivity_matrices(
+    model: models.ItemMemory,
+    config: Optional[settings.ConnectivityMatricesConfig] = None,
+) -> Figure:
+    """Visualize the connection weights between components.
+
+    Args:
+        model: An ItemMemory model instance
+        config: Optional configuration object with colormap, figure size, etc.
+
+    Returns:
+        Matplotlib figure with subplots weight matrix visualizations
+    """
+    # Use default config if none provided
+    config = config or settings.ConnectivityMatricesConfig()
+    n_mec_modules = len(model.mec)
+
+    # Calculate layout
+    n_rows = 2  # HPC->MEC and MEC->HPC
+    n_cols = n_mec_modules
+
+    # Create figure
+    fig = plt.figure(figsize=config.figsize)
+    gs = GridSpec(n_rows, n_cols + 1, figure=fig)
+
+    # 1. Visualize MEC->HPC synapses (one for each MEC module)
+    for i in range(n_mec_modules):
+        ax = fig.add_subplot(gs[0, i])
+        weights = model.hpc.synapses_mec[i].weight.detach().cpu().numpy()
+        im = ax.imshow(weights, cmap=config.cmap_hpc, aspect="auto")
+        plt.colorbar(im, ax=ax)
+        ax.set_title(f"MEC{i+1}->HPC")
+        ax.set_xlabel("MEC Grid Cell")
+        ax.set_ylabel("HPC Place Cell")
+
+    # 2. Visualize HPC->MEC synapses (one for each MEC module)
+    for i in range(n_mec_modules):
+        ax = fig.add_subplot(gs[1, i])
+        weights = model.mec[i].synapses_hpc.weight.detach().cpu().numpy()
+        im = ax.imshow(weights, cmap=config.cmap_mec, aspect="auto")
+        plt.colorbar(im, ax=ax)
+        ax.set_title(f"HPC->MEC{i+1}")
+        ax.set_xlabel("HPC Place Cell")
+        ax.set_ylabel("MEC Grid Cell")
+
+    # 3. Visualize feature->HPC synapses in the first row, last column
+    ax_feat = fig.add_subplot(gs[0, -1])
+    feat_weights = model.hpc.synapses_features.weight.detach().cpu().numpy()
+    im_feat = ax_feat.imshow(feat_weights, cmap=config.cmap_hpc, aspect="auto")
+    plt.colorbar(im_feat, ax=ax_feat)
+    ax_feat.set_title("Features->HPC")
+    ax_feat.set_xlabel("Feature")
+    ax_feat.set_ylabel("HPC Place Cell")
+
+    # 4. Show statistics for MEC recurrent connections in the last cell
+    ax_stats = fig.add_subplot(gs[1, -1])
+    ax_stats.axis("off")
+
+    stats_text = "MEC Recurrent Connection Stats:\n\n"
+    for i in range(n_mec_modules):
+        weights = model.mec[i].synapses_rcc.weight.detach().cpu().numpy()
+        mean_w = np.mean(weights)
+        std_w = np.std(weights)
+        stats_text += f"MEC {i+1}:\n"
+        stats_text += f"  Mean: {mean_w:.4f}\n"
+        stats_text += f"  Std: {std_w:.4f}\n\n"
+
+    ax_stats.text(0.05, 0.95, stats_text, transform=ax_stats.transAxes, 
+                 verticalalignment='top', fontsize=10)  # fmt: skip
 
     plt.tight_layout()
     return fig
