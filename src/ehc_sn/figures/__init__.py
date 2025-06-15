@@ -12,7 +12,7 @@ from ehc_sn.utils import grids
 
 
 def visualize_neuron_actications(
-    model: models.ItemMemory,
+    model: models.CANModule,
     config: Optional[settings.NeuronActivationConfig] = None,
 ) -> Figure:
     """Visualize the current state of an ItemMemory model.
@@ -73,7 +73,7 @@ def visualize_neuron_actications(
 
 
 def visualize_connectivity_matrices(
-    model: models.ItemMemory,
+    model: models.CANModule,
     config: Optional[settings.ConnectivityMatricesConfig] = None,
 ) -> Figure:
     """Visualize the connection weights between components.
@@ -117,13 +117,13 @@ def visualize_connectivity_matrices(
         ax.set_xlabel("HPC Place Cell")
         ax.set_ylabel("MEC Grid Cell")
 
-    # 3. Visualize feature->HPC synapses in the first row, last column
+    # 3. Visualize EC->HPC synapses in the first row, last column
     ax_feat = fig.add_subplot(gs[0, -1])
-    feat_weights = model.hpc.synapses_features.weight.detach().cpu().numpy()
+    feat_weights = model.hpc.synapses_ec.weight.detach().cpu().numpy()
     im_feat = ax_feat.imshow(feat_weights, cmap=config.cmap_hpc, aspect="auto")
     plt.colorbar(im_feat, ax=ax_feat)
-    ax_feat.set_title("Features->HPC")
-    ax_feat.set_xlabel("Feature")
+    ax_feat.set_title("EC->HPC")
+    ax_feat.set_xlabel("EC Feature Cell")
     ax_feat.set_ylabel("HPC Place Cell")
 
     # 4. Show statistics for MEC recurrent connections in the last cell

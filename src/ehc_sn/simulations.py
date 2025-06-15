@@ -32,7 +32,7 @@ class ItemMemoryRetrieval(Simulation):
 
     def __init__(
         self: "ItemMemoryRetrieval",
-        model: ehc_sn.models.ItemMemory,
+        model: ehc_sn.models.CANModule,
         item: torch.Tensor,
         iterations: int = 10,
     ):
