@@ -1,7 +1,7 @@
 from typing import Optional
 
 import torch
-from torch import nn
+from torch import jit, nn
 
 from ehc_sn.core import synapses
 from ehc_sn.utils import methods
@@ -24,12 +24,16 @@ class MECGrid(nn.Module):
         self.nonlinearity = nn.ReLU()
 
     def forward(self, hpc_activations: torch.Tensor) -> torch.Tensor:
-        # Update attractor state with new item representations
-        hpc_currents = self.synapses_hpc(hpc_activations)  # Current from HPC to MEC
-        rcc_currents = self.synapses_rcc(self.grid_cells)  # Recurrent current
+        # Forward pass through the MEC grid cells
+        currents = []  # List to collect currents from synapses
+        for task in [
+            jit.fork(self.synapses_hpc, hpc_activations),  # Current from HPC to MEC
+            jit.fork(self.synapses_rcc, self.grid_cells),  # Recurrent current
+        ]:
+            currents.append(jit.wait(task))  # Wait for all tasks to complete
 
         # Apply attractor dynamics with gain parameter
-        self.grid_cells = self.grid_cells + hpc_currents + rcc_currents
+        self.grid_cells = self.grid_cells + sum(currents)
         self.grid_cells = self.nonlinearity(self.grid_cells)  # Bounded activation
 
         # Return the updated grid cell activations
@@ -52,11 +56,15 @@ class HPCGrid(nn.Module):
 
     def forward(self, ec_activations: torch.Tensor, mec_activations: list[torch.Tensor]) -> torch.Tensor:
         # Compute place cell activations from features and MEC grid cells
-        ec_currents = self.synapses_ec(ec_activations)
-        mec_currents = sum(synapse(x) for synapse, x in zip(self.synapses_mec, mec_activations))
+        currents = []  # List to collect currents from synapses
+        for taks in [
+            jit.fork(self.synapses_ec, ec_activations),  # Current from EC to HPC
+            *[jit.fork(*x) for x in zip(self.synapses_mec, mec_activations)],
+        ]:
+            currents.append(jit.wait(taks))
 
         # Update place cell activations with recurrent connections
-        self.place_cells = self.place_cells + ec_currents + mec_currents
+        self.place_cells = self.place_cells + sum(currents)
         self.place_cells = self.nonlinearity(self.place_cells)
 
         # Return the updated place cell activations
@@ -78,8 +86,11 @@ class CANModule(nn.Module):
     def forward(self, ec_activations: torch.Tensor) -> torch.Tensor:
         # Forward pass through the hippocampal module
         mec_activations = [mec.grid_cells for mec in self.mec]  # Collect MEC activations
-        hpc_activations = self.hpc(ec_activations, mec_activations)  # (2)
-        mec_activations = [mec(hpc_activations) for mec in self.mec]  # (1 and 4)
+        for task in [
+            jit.fork(self.hpc, ec_activations, mec_activations),  # (2)
+            *[jit.fork(grid, self.hpc.place_cells) for grid in self.mec],  # (1 and 4)
+        ]:
+            jit.wait(task)
 
         # Return hippocampal activations
-        return hpc_activations
+        return self.hpc.place_cells
