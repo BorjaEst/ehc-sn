@@ -48,7 +48,7 @@ class HPCGrid(nn.Module):
         self.synapses_ec = synapses.Plastic(ec_dim, hpc_dim)  # Synapses from EC to HPC
 
         # Apply additional nonlinearity and normalization for place fields
-        self.nonlinearity = nn.Sequential(nn.ReLU(), nn.LayerNorm(hpc_dim))
+        self.nonlinearity = nn.ReLU()
 
     def forward(self, ec_activations: torch.Tensor, mec_activations: list[torch.Tensor]) -> torch.Tensor:
         # Compute place cell activations from features and MEC grid cells
