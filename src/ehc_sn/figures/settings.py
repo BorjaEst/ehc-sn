@@ -21,7 +21,7 @@ class NeuronActivationConfig(BaseModel):
         description="Colormap for MEC grid cell activity",
     )
     figsize: Tuple[int, int] = Field(
-        default=(15, 10),
+        default=(20, 10),
         description="Figure size for item memory state plots",
     )
 
@@ -36,7 +36,7 @@ class ConnectivityMatricesConfig(BaseModel):
         description="Colormap for MEC grid cell activity",
     )
     figsize: Tuple[int, int] = Field(
-        default=(15, 10),
+        default=(20, 10),
         description="Figure size for item memory state plots",
     )
 
@@ -55,6 +55,6 @@ class MemoryRetrievalConfig(BaseModel):
         description="Colormap for MEC grid cell activity",
     )
     figsize: Tuple[int, int] = Field(
-        default=(15, 10),
+        default=(20, 10),
         description="Figure size for memory retrieval visualization",
     )
