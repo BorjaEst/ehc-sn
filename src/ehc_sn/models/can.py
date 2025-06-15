@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch
 from torch import jit, nn
 
@@ -22,7 +20,7 @@ class GridCells(nn.Module):
         # Forward pass through the MEC grid cells
         currents = []  # List to collect currents from synapses
         for task in [
-            jit.fork(self.synapses_hpc, place_cells.activations),  # Current from HPC to MEC
+            jit.fork(self.synapses_hpc, place_cells.activations),  # HPC to MEC
             jit.fork(self.synapses_rcc, self.activations),  # Recurrent current
         ]:
             currents.append(jit.wait(task))  # Wait for all tasks to complete
@@ -32,7 +30,6 @@ class GridCells(nn.Module):
 
     @property
     def activations(self) -> torch.Tensor:
-        """Get the current activations of the grid cells."""
         return self.neurons.activations
 
 
@@ -61,12 +58,11 @@ class PlaceCells(nn.Module):
 
     @property
     def activations(self) -> torch.Tensor:
-        """Get the current activations of the grid cells."""
         return self.neurons.activations
 
 
 class CANModule(nn.Module):
-    """Cortical Attractor Network (CAN) for item memory"""
+    """Cortical Attractor Network (CAN) for space representations"""
 
     def __init__(self, h: torch.Tensor, gx: list[torch.Tensor], ec_dim: int):
         super().__init__()
@@ -78,12 +74,10 @@ class CANModule(nn.Module):
         self.hpc = PlaceCells(hpc_dim, mec_dims, ec_dim)
 
     def forward(self, ec_activations: torch.Tensor) -> torch.Tensor:
-        # Forward pass through the hippocampal module
-        for task in [
-            jit.fork(self.hpc, ec_activations, self.mec),  # (2)
-            *[jit.fork(grid, self.hpc) for grid in self.mec],  # (1 and 4)
-        ]:
-            jit.wait(task)
+        # Forward pass through the module (beware of race conditions)
+        hpc_activations = self.hpc(ec_activations, self.mec)
+        for taks in [jit.fork(grid, self.hpc) for grid in self.mec]:
+            jit.wait(taks)
 
         # Return hippocampal activations
-        return self.hpc.activations
+        return hpc_activations
