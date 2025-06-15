@@ -8,6 +8,8 @@ from torch.nn import init
 
 from ehc_sn import parameters
 
+nn.RNN
+
 
 class Synapse(nn.Module, ABC):
     """Base class for synapses in the EHC spatial navigation model.
@@ -19,16 +21,22 @@ class Synapse(nn.Module, ABC):
 
         # Collect synapse parameters from the provided Synapse object
         self.description = p.description
-        self.w_max = p.w_max
-        self.w_min = p.w_min
+        self.weight_max = p.weight_max
+        self.weight_min = p.weight_min
+        self.normalize = p.normalize
         self.learning_rate = p.learning_rate
 
         # Initialize the synapse with fixed weights and optional bias.
-        self.weight = nn.Parameter(self.clamp(weight.clone()))
+        self.weight = nn.Parameter(weight.clone())
         if bias is not None:
-            self.bias = nn.Parameter(self.clamp(bias.clone()))
+            self.bias = nn.Parameter(bias.clone())
         else:
             self.register_parameter("bias", None)
+
+        # Apply clamping to the weights and bias
+        self.weight.data = self.clamp(self.weight.data)
+        if bias is not None:
+            self.bias.data = self.clamp(self.bias.data)
 
         # Freeze the parameters to prevent backpropagation training
         self.weight.requires_grad = False
@@ -37,8 +45,10 @@ class Synapse(nn.Module, ABC):
 
     def clamp(self, tensor: Tensor) -> Tensor:
         """Clamp the weights to the specified min and max values."""
-        if self.w_min or self.w_max:
-            return tensor.clamp(min=self.w_min, max=self.w_max)
+        if self.weight_min or self.weight_max:
+            tensor = tensor.clamp(self.weight_min, self.weight_max)
+        if self.normalize:
+            tensor = F.normalize(tensor, p=2, dim=tensor.ndim - 1)
         return tensor
 
     def forward(self, input: Tensor) -> Tensor:

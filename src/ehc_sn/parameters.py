@@ -13,8 +13,9 @@ class Synapse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     description: str = Field(..., description="Description of the synapse")
-    w_max: Optional[float] = Field(None, description="Maximum weight value for plasticity")
-    w_min: Optional[float] = Field(None, description="Minimum weight value for plasticity")
+    weight_max: Optional[float] = Field(None, description="Maximum weight value for plasticity")
+    weight_min: Optional[float] = Field(None, description="Minimum weight value for plasticity")
+    normalize: bool = Field(False, description="Whether to normalize weights")
     learning_rate: float = Field(..., description="Learning rate for plasticity")
 
 
@@ -23,6 +24,7 @@ class Neuron(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     description: str = Field(..., description="Description of the neuron")
+    activation_lim: Optional[float] = Field(None, description="Maximum activation value")
     activation_function: str = Field(..., description="Activation function used by the neuron")
 
 

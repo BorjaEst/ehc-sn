@@ -16,10 +16,17 @@ class Layer(nn.Module, ABC):
 
         # Collect synapse parameters from the provided Neuron object
         self.description = p.description
+        self.activation_lim = p.activation_lim
         self.activation_function = p.activation_function
 
         # Initialize the neuron with a fixed population size.
         self.register_buffer("activations", torch.zeros(1, population_size))
+
+    def clamp(self, tensor: Tensor) -> Tensor:
+        """Clamp the activations to the specified min and max values."""
+        if self.activation_lim:
+            tensor = tensor.clamp(-self.activation_lim, self.activation_lim)
+        return tensor
 
     @property
     def activation_function(self) -> Tensor:
@@ -35,6 +42,7 @@ class Layer(nn.Module, ABC):
     def forward(self, current: Tensor) -> Tensor:
         """Forward pass through the neuron."""
         self.activations = self.__activation_fn(current)
+        self.activations = self.clamp(self.activations)
         return self.activations
 
     def extra_repr(self) -> str:

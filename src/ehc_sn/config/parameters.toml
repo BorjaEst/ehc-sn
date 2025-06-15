@@ -3,36 +3,40 @@
 # Synapse parameters by type
 [synapses.hybrid]
   description   = "Hybrid synapses allowing for both excitatory and inhibitory effects"
-  w_max         = +1.0 # Maximum weight (for plasticity)
-  w_min         = -1.0 # Minimum weight (for plasticity)
+  weight_max    = +1.0 # Maximum weight (for plasticity)
+  weight_min    = -1.0 # Minimum weight (for plasticity)
+  normalize     = true # Normalize weights
   learning_rate = 0.01 # Learning rate for plasticity
 
 [synapses.silent]
   description   = "Silent synapses with no learning or plasticity"
+  normalize     = true # Normalize weights
   learning_rate = 0.0 # No learning
 
 [synapses.ampa]
   description   = "Fast excitatory glutamatergic synapses"
-  w_max         = +2.0 # Maximum weight (for plasticity)
-  w_min         = -0.0 # Minimum weight (for plasticity)
+  weight_max    = +2.0 # Maximum weight (for plasticity)
+  weight_min    = -0.0 # Minimum weight (for plasticity)
   learning_rate = 0.1 # Learning rate for plasticity
 
 [synapses.gaba]
   description   = "Fast inhibitory GABAergic synapses"
-  w_max         = +0.0 # Maximum weight (for plasticity)
-  w_min         = -2.0 # Minimum weight (for plasticity)
-  learning_rate = 0.1 # Learning rate for plasticity
+  weight_max    = +0.0 # Maximum weight (for plasticity)
+  weight_min    = -2.0 # Minimum weight (for plasticity)
+  learning_rate = 0.1 # Leardocsning rate for plasticity
 
 
 # Neuron parameters by type
 [neurons.sigmoid]
   description         = "Standard neurons with basic excitatory properties"
-  activation_function = "sigmoid"
+  activation_function = "Sigmoid"
 
 [neurons.relu]
   description         = "ReLU neurons for fast activation"
+  activation_lim      = +2.0 # Maximum activation absolute value
   activation_function = "ReLU"
 
 [neurons.linear]
   description         = "Input neurons for external stimuli"
-  activation_function = "linear"
+  activation_lim      = +1.0 # Maximum activation absolute value
+  activation_function = "Linear"
