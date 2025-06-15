@@ -12,6 +12,10 @@ class SimulationResults:
     hpc_states: List[torch.Tensor] = field(default_factory=list)
     mec_states: List[List[torch.Tensor]] = field(default_factory=list)
 
+    def append(self, model: ehc_sn.models.CANModule) -> None:
+        self.hpc_states.append(model.hpc.activations.clone())
+        self.mec_states.append([grid.activations.clone() for grid in model.mec])
+
 
 class Simulation(ABC):
     @abstractmethod
@@ -33,11 +37,11 @@ class ItemMemoryRetrieval(Simulation):
     def __init__(
         self: "ItemMemoryRetrieval",
         model: ehc_sn.models.CANModule,
-        item: torch.Tensor,
+        ec_activations: torch.Tensor,
         iterations: int = 10,
     ):
         self.model = model
-        self.item = item
+        self.ec_activations = ec_activations
         self.iterations = iterations
 
     def __call__(self, *args: Any, **kwds: Any) -> SimulationResults:
@@ -48,8 +52,7 @@ class ItemMemoryRetrieval(Simulation):
         # Simulate retrieval process
         with torch.no_grad():
             for _ in range(self.iterations):
-                self.model(self.item)  # Forward pass to get HPC and MEC states
-                results.hpc_states.append(self.model.hpc.place_cells)
-                results.mec_states.append([mec.grid_cells for mec in self.model.mec])
+                self.model(self.ec_activations)  # Forward pass
+                results.append(self.model)  # Store the states
 
         return results

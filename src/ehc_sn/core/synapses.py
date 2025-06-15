@@ -1,88 +1,93 @@
+from abc import ABC, abstractmethod
 from typing import Optional
 
 import torch
-from torch import nn
+from torch import Tensor, nn
+from torch.nn import functional as F
+from torch.nn import init
+
+from ehc_sn import parameters
 
 
-class FixedRandom(nn.Linear):
-    """Fixed random linear layer with fixed synaptic weights.
-    Cannot be trained, weights are fixed at initialization.
+class Synapse(nn.Module, ABC):
+    """Base class for synapses in the EHC spatial navigation model.
+    This class is not meant to be instantiated directly.
     """
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = False):
-        super().__init__(in_features, out_features, bias)
-        # Initialize with random weights
-        nn.init.xavier_normal_(self.weight)  # Paper mentions N(0, 1) initialization
-        # Freeze the parameters
+    def __init__(self, p: parameters.Synapse, weight: Tensor, bias: Optional[Tensor] = None):
+        super().__init__()
+
+        # Collect synapse parameters from the provided Synapse object
+        self.description = p.description
+        self.w_max = p.w_max
+        self.w_min = p.w_min
+        self.learning_rate = p.learning_rate
+
+        # Initialize the synapse with fixed weights and optional bias.
+        self.weight = nn.Parameter(self.clamp(weight.clone()))
+        if bias is not None:
+            self.bias = nn.Parameter(self.clamp(bias.clone()))
+        else:
+            self.register_parameter("bias", None)
+
+        # Freeze the parameters to prevent backpropagation training
         self.weight.requires_grad = False
-        if bias:
+        if bias is not None:
             self.bias.requires_grad = False
 
+    def clamp(self, tensor: Tensor) -> Tensor:
+        """Clamp the weights to the specified min and max values."""
+        if self.w_min or self.w_max:
+            return tensor.clamp(min=self.w_min, max=self.w_max)
+        return tensor
 
-class FixedNonRandom(nn.Linear):
-    """Fixed non random linear layer with fixed synaptic weights.
-    Cannot be trained, weights are fixed at initialization.
-    """
+    def forward(self, input: Tensor) -> Tensor:
+        """Forward pass through the synapse."""
+        return F.linear(input, self.weight, self.bias)
 
-    def __init__(self, weights: torch.Tensor, bias: Optional[torch.Tensor] = None):
-        out_features, in_features = weights.shape
-        has_bias = bias is not None
-        super().__init__(in_features, out_features, has_bias)
+    def extra_repr(self) -> str:
+        out_feat, in_feat = self.weight.shape
+        return f"in_features={in_feat}, out_features={out_feat}, bias={self.bias is not None}"
 
-        # Set the provided weights
-        with torch.no_grad():
-            self.weight.copy_(weights)
-            if has_bias:
-                self.bias.copy_(bias)
+    @classmethod
+    def normal(cls, in_features: int, out_features: int, bias: bool = False) -> "Synapse":
+        """Create a synapse with normally distributed weights."""
+        weight = torch.randn(out_features, in_features)
+        bias_tensor = torch.randn(out_features) if bias else None
+        return cls(weight, bias_tensor)
 
-        # Freeze the parameters
-        self.weight.requires_grad = False
-        if has_bias:
-            self.bias.requires_grad = False
+    @classmethod
+    def xavier(cls, in_features: int, out_features: int, bias: bool = False) -> "Synapse":
+        """Create a synapse with Xavier initialized weights."""
+        weight = torch.empty(out_features, in_features)
+        init.xavier_normal_(weight)
+        bias_tensor = torch.zeros(out_features) if bias else None
+        return cls(weight, bias_tensor)
 
 
-class Plastic(nn.Linear):
-    """Plastic linear layer with learnable synaptic weights.
-    Trainable only through Hebbian learning.
-    """
+class Hybrid(Synapse):
+    """Hybrid synapse that combines features of different synapse types."""
 
-    def __init__(self, in_features, out_features, learning_rate=0.01, decay=0.0, bias=False):
-        super().__init__(in_features, out_features, bias)
-        # Initialize weights
-        nn.init.xavier_normal_(self.weight)
-        # Freeze parameters for backprop (we'll update them manually)
-        self.weight.requires_grad = False
-        if bias:
-            self.bias.requires_grad = False
+    def __init__(self, weight: Tensor, bias: Optional[Tensor] = None):
+        super().__init__(parameters.synapses["hybrid"], weight, bias)
 
-        self.learning_rate = learning_rate
-        self.decay = decay
 
-    def forward(self, x):
-        # Store input for Hebbian learning
-        self.last_input = x
-        # Use nn.Linear's forward pass
-        output = super().forward(x)
-        self.last_output = output
-        return output
+class Silent(Synapse):
+    """Silent synapse that does not transmit signals but can be used for weight storage."""
 
-    def update_weights(self):
-        """Apply Hebbian learning rule"""
-        if hasattr(self, "last_input") and hasattr(self, "last_output"):
-            batch_size = self.last_input.size(0)
+    def __init__(self, weight: Tensor, bias: Optional[Tensor] = None):
+        super().__init__(parameters.synapses["silent"], weight, bias)
 
-            # Compute weight updates using Hebbian learning
-            for i in range(batch_size):
-                x = self.last_input[i].unsqueeze(0)
-                y = self.last_output[i].unsqueeze(0)
 
-                # Hebbian update: presynaptic * postsynaptic activity
-                dw = torch.mm(y.t(), x)
+class AMPA(Synapse):
+    """AMPA synapse that transmits excitatory signals."""
 
-                # Apply update with learning rate and decay
-                with torch.no_grad():
-                    self.weight.data = (1 - self.decay) * self.weight.data + self.learning_rate * dw
+    def __init__(self, weight: Tensor, bias: Optional[Tensor] = None):
+        super().__init__(parameters.synapses["ampa"], weight, bias)
 
-            # Clear stored values after update
-            del self.last_input
-            del self.last_output
+
+class GABA(Synapse):
+    """GABA synapse that transmits inhibitory signals."""
+
+    def __init__(self, weight: Tensor, bias: Optional[Tensor] = None):
+        super().__init__(parameters.synapses["gaba"], weight, bias)

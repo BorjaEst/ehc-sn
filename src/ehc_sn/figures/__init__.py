@@ -28,8 +28,8 @@ def visualize_neuron_actications(
     # Use default config if none provided
     config = config or settings.NeuronActivationConfig()
     n_mec_modules = len(model.mec)  # Number of subplots needed
-    hpc_activity = model.hpc.place_cells
-    mec_activity = [mec_module.grid_cells for mec_module in model.mec]
+    hpc_activity = model.hpc.activations  # HPC place cell activity
+    mec_activity = [grid.activations for grid in model.mec]
 
     # Determine grid layout based on whether item units are present
     fig = plt.figure(figsize=config.figsize)

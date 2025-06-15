@@ -1,6 +1,6 @@
 """Parameter definitions for EHC spatial navigation models."""
 
-from typing import Dict
+from typing import Dict, Optional
 
 import tomli
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,9 +13,8 @@ class Synapse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     description: str = Field(..., description="Description of the synapse")
-    w_init: float = Field(..., description="Initial weight value")
-    w_max: float = Field(..., description="Maximum weight value for plasticity")
-    w_min: float = Field(..., description="Minimum weight value for plasticity")
+    w_max: Optional[float] = Field(None, description="Maximum weight value for plasticity")
+    w_min: Optional[float] = Field(None, description="Minimum weight value for plasticity")
     learning_rate: float = Field(..., description="Learning rate for plasticity")
 
 
@@ -40,7 +39,9 @@ with open(config.parameters_file, "rb") as f:
     config_data = tomli.load(f)
 
 # Use Pydantic v2's model_validate method
-parameters = Parameters.model_validate(config_data)
+_parameters = Parameters.model_validate(config_data)
+neurons = _parameters.neurons
+synapses = _parameters.synapses
 
 
-__all__ = ["Synapse", "Synapses", "Neuron", "Neurons", "Parameters", "parameters"]
+__all__ = ["Synapse", "Neuron", "synapses", "neurons"]

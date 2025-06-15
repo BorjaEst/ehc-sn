@@ -118,19 +118,67 @@ class ItemMemory(nn.Module):
         decoded = self.decoder(hpc_activations)
         return hpc_activations, decoded
 
-    def store_item(self, features: torch.Tensor, items: torch.Tensor):
-        """Process items and store in memory."""
-        # TODO: Implement scaffold dynamics to store item representations
-        with torch.no_grad():
-            # Encode item space into feature space
-            encoded_features = self.forward(items)
-            err = torch.norm(encoded_features - features, dim=1)
-        # TODO: Implement scaffold dynamics to store item representations
 
-    def query(self, features: torch.Tensor) -> torch.Tensor:
-        """Find items in memory most similar to the item."""
-        # TODO: Implement scaffold dynamics to query item representations
-        with torch.no_grad():
-            # decode features into output space
-            decoded_features = self.forward(features)
-        # TODO: Implement scaffold dynamics to query item representations
+def store_item(
+    model: ItemMemory,
+    features: torch.Tensor,
+    items: torch.Tensor,
+    learning_rate: float = 0.01,
+    num_iterations: int = 50,
+):
+    """Process items and store in memory using scaffold dynamics.
+
+    Args:
+        model: The ItemMemory model
+        features: Target feature representations to associate with items
+        items: Input item representations to store
+        learning_rate: Learning rate for updating model parameters
+        num_iterations: Number of iterations for scaffold stabilization
+    """
+    # Create optimizer for updating model parameters
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+    # Storage phase - stabilize the scaffold representation
+    for _ in range(num_iterations):
+        # Forward pass through the model
+        encoded_features = model.encoder(items)
+
+        # Get current HPC activations based on MEC states
+        hpc_activations = model.hpc(encoded_features, [mec.grid_cells for mec in model.mec])
+
+        # Update MEC states based on HPC activity (recurrent dynamics)
+        mec_activations = [mec(hpc_activations) for mec in model.mec]
+
+        # Compute loss (matching target features and reconstructing items)
+        feature_loss = torch.nn.functional.mse_loss(hpc_activations, features)
+        reconstructed_items = model.decoder(hpc_activations)
+        reconstruction_loss = torch.nn.functional.mse_loss(reconstructed_items, items)
+
+        # Total loss combines feature matching and reconstruction
+        total_loss = feature_loss + reconstruction_loss
+
+        # Backpropagation and optimization
+        optimizer.zero_grad()
+        total_loss.backward()
+        optimizer.step()
+
+    # Finalize storage by running one more iteration without gradients
+    with torch.no_grad():
+        # Encode item space into feature space
+        encoded_features = model.encoder(items)
+
+        # Run through hippocampal-entorhinal circuit to create stable representation
+        hpc_activations = model.hpc(encoded_features, [mec.grid_cells for mec in model.mec])
+        _ = [mec(hpc_activations) for mec in model.mec]
+
+        # At this point, the MEC and HPC contain activity patterns that represent the items
+        # These patterns are now stored in the attractor dynamics of the network
+
+
+def query(model: ItemMemory, features: torch.Tensor) -> torch.Tensor:
+    """Find items in memory most similar to the item."""
+    # TODO: Implement scaffold dynamics to query item representations
+    with torch.no_grad():
+        # decode features into output space
+        decoded_features = model.forward(features)
+    # TODO: Implement scaffold dynamics to query item representations
