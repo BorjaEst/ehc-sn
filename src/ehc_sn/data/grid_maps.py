@@ -6,13 +6,15 @@ import torch
 from pydantic import BaseModel, Field, field_validator
 from torch.utils.data import Dataset
 
+from ehc_sn.constants import Direction, GoalMap, GridMap, GridMapSample, GridSize, ObstacleMap, Position
+
 
 class GridMapParameters(BaseModel):
     """Parameters for generating grid maps with obstacles and goal positions."""
 
     model_config = {"extra": "forbid"}  # Forbid extra fields not defined in the model
 
-    grid_size: Tuple[int, int] = Field(default=(16, 16), description="Size of the grid as (height, width)")
+    grid_size: GridSize = Field(default=(16, 16), description="Size of the grid as (height, width)")
     obstacle_density: float = Field(default=0.2, description="Probability of a cell being an obstacle (0.0-1.0)")
     min_obstacles: int = Field(default=5, description="Minimum number of obstacles to generate")
     max_obstacles: int = Field(default=15, description="Maximum number of obstacles to generate")
@@ -49,13 +51,13 @@ class GridMapGenerator:
             random.seed(parameters.seed)
             np.random.seed(parameters.seed)
 
-    def _is_valid_position(self, grid: np.ndarray, pos: Tuple[int, int]) -> bool:
+    def _is_valid_position(self, grid: GridMap, pos: Position) -> bool:
         """Check if a position is valid (within bounds and not an obstacle)."""
         h, w = grid.shape
         i, j = pos
         return 0 <= i < h and 0 <= j < w and grid[i, j] == 0
 
-    def _get_valid_position(self, grid: np.ndarray) -> Tuple[int, int]:
+    def _get_valid_position(self, grid: GridMap) -> Position:
         """Get a random valid position (not occupied by an obstacle)."""
         h, w = grid.shape
         while True:
@@ -63,7 +65,7 @@ class GridMapGenerator:
             if grid[i, j] == 0:
                 return (i, j)
 
-    def _add_random_obstacle_cluster(self, grid: np.ndarray) -> np.ndarray:
+    def _add_random_obstacle_cluster(self, grid: GridMap) -> GridMap:
         """Add a cluster of obstacles with random size and shape."""
         h, w = grid.shape
         size = random.randint(self.obstacle_size_range[0], self.obstacle_size_range[1])
@@ -73,7 +75,7 @@ class GridMapGenerator:
         grid[start_i, start_j] = 1  # Mark as obstacle
 
         # Grow obstacle cluster
-        positions = [(start_i, start_j)]
+        positions: List[Position] = [(start_i, start_j)]
         for _ in range(size - 1):
             if not positions:
                 break
@@ -83,7 +85,7 @@ class GridMapGenerator:
             i, j = positions[pos_idx]
 
             # Try to add an adjacent cell
-            directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+            directions: List[Direction] = [(0, 1), (1, 0), (0, -1), (-1, 0)]
             random.shuffle(directions)
 
             for di, dj in directions:
@@ -95,18 +97,19 @@ class GridMapGenerator:
 
         return grid
 
-    def generate_map(self) -> Dict[str, Any]:
+    def generate_map(self) -> GridMapSample:
         """
         Generate a grid map with obstacles and a goal position.
 
         Returns:
-            Dict containing:
-                'map': Binary grid with 1s indicating obstacles, 0s indicating free space
-                'goal': One-hot encoded goal position with 1 at the goal location
-                'goal_position': Tuple of (row, col) coordinates of the goal
+            A GridMapSample containing:
+            - "map": NumpyGridMap with obstacles (1) and free space (0)
+            - "goal": GoalMap with one-hot encoding of the goal position
+            - "goal_position": Position of the goal in the grid
+
         """
         # Initialize empty grid
-        grid = np.zeros(self.grid_size, dtype=np.uint8)
+        grid: GridMap = np.zeros(self.grid_size, dtype=np.uint8)
 
         # Add random obstacle clusters
         num_obstacles = random.randint(self.min_obstacles, self.max_obstacles)
@@ -120,10 +123,10 @@ class GridMapGenerator:
             grid[i, j] = 0
 
         # Set goal position in a free cell
-        goal_pos = self._get_valid_position(grid)
+        goal_pos: Position = self._get_valid_position(grid)
 
         # Create one-hot encoded goal map
-        goal_map = np.zeros_like(grid)
+        goal_map: GoalMap = np.zeros_like(grid)
         goal_map[goal_pos] = 1
 
         return {"map": grid, "goal": goal_map, "goal_position": goal_pos}
@@ -147,8 +150,8 @@ class GridMapDataset(Dataset):
     def __len__(self) -> int:
         return self.num_samples
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        sample = self.generator.generate_map()
+    def __getitem__(self, idx: int) -> GridMapSample:
+        sample: GridMapSample = self.generator.generate_map()
 
         # Convert numpy arrays to tensors
         return {

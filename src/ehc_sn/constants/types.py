@@ -1,25 +1,48 @@
 """Custom type definitions for the entorhinal-hippocampal circuit library."""
 
-from typing import Dict, List, Optional, Tuple, TypedDict, Union
+from typing import Dict, List, Optional, Tuple, TypedDict
 
 import torch
 
-# Type for cognitive map representation
-CognitiveMap = torch.Tensor
+# Types for spatial positions and coordinates
+Position = Tuple[int, int]  # (row, column) or (y, x) position in grid
+GridSize = Tuple[int, int]  # (height, width) of a grid
+Direction = Tuple[int, int]  # (dy, dx) movement direction
 
+# Types for grid map representation
+GridMap = torch.Tensor  # 2D binary tensor representing obstacles (1) and free space (0)
+ObstacleMap = torch.Tensor  # 2D binary tensor with 1s for obstacles
+GoalMap = torch.Tensor  # 2D binary tensor with 1 at goal location
 
-# Configuration type for region parameters
-class RegionConfig(TypedDict):
-    input_size: int
-    hidden_size: int
-    output_size: int
-    activation: str
-    dropout: float
+# Types for cognitive map representation
+CognitiveMap = torch.Tensor  # 2D tensor representing spatial knowledge
+ValueMap = torch.Tensor  # 2D tensor with values (e.g., distance to goal)
+DistanceMap = torch.Tensor  # 2D tensor with distance metrics
 
+# EHC model component types
+NeuralActivity = torch.Tensor  # Neural firing patterns in a region
+RegionalState = torch.Tensor  # Hidden state of a region
+Embedding = torch.Tensor  # Feature representation in latent space
+Weights = torch.Tensor  # Connection weights between regions
 
-# Configuration type for connection parameters
-class ConnectionConfig(TypedDict):
-    source: str
-    target: str
-    weight_type: str  # "trainable" or "fixed"
-    initial_weight: Optional[torch.Tensor]
+# Type for circuit states across all regions
+CircuitStates = Dict[str, torch.Tensor]
+
+# Dataset sample types
+GridMapSample = TypedDict(
+    "GridMapSample",
+    {
+        "map": GridMap,
+        "goal": GoalMap,
+        "goal_position": Position,
+    },
+)
+
+CognitiveMapSample = TypedDict(
+    "CognitiveMapSample",
+    {
+        "input_map": CognitiveMap,
+        "target_map": CognitiveMap,
+        "embeddings": Optional[Embedding],
+    },
+)
