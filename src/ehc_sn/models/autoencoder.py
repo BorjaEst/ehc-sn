@@ -2,15 +2,26 @@ from abc import ABC
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from torch import Tensor, nn
+
+from ehc_sn import utils
 
 
 class SeqParameters(BaseModel):
     dims: List[int] = Field(..., description="List of layer dimensions for the sequence")
 
+    @field_validator("dims")
+    def validate_dims(cls, v: List[int]) -> List[int]:
+        if len(v) < 2:
+            raise ValueError("Sequence must have at least 2 dimensions (input and output)")
+        for i, dim in enumerate(v):
+            if dim <= 0:
+                raise ValueError(f"Dimension at position {i} must be positive, got {dim}")
+        return v
+
     def args_iter(self) -> Iterable[Tuple[int, int]]:
-        return zip(self.dims[1:], self.dims[:-1])
+        return zip(self.dims[:-1], self.dims[1:])
 
 
 class Sequence(nn.Module, ABC):
@@ -56,34 +67,30 @@ class Decoder(Encoder):
 
     @property
     def feature_dim(self) -> int:
-        return self.layers[-1].in_features
+        return self.layers[-1].out_features
 
     @property
     def embedding_dim(self) -> int:
-        return self.layers[0].out_features
+        return self.layers[0].in_features
 
 
 class AutoencoderParameters(BaseModel):
-    encoder: SeqParameters = Field(..., description="Parameters for the encoder")
-    decoder: SeqParameters = Field(..., description="Parameters for the decoder")
-
-    def __init__(self, **data):
-        super(AutoencoderParameters, self).__init__(**data)
-        self._val_dimensions()
-
-    def _val_dimensions(self):
-        if self.encoder.dims[-1] != self.decoder.dims[0]:
-            raise ValueError(
-                f"Output dimension of encoder ({self.encoder.dims[-1]}) "
-                f"does not match input dimension of decoder ({self.decoder.dims[0]})."
-            )
+    dummy_parameter: int = Field(0, description="Dummy parameter to ensure the model can be instantiated")
 
 
 class Autoencoder(nn.Module):
-    def __init__(self, parameters: AutoencoderParameters):
+    def __init__(self, encoder: Encoder, decoder: Decoder, parameters: AutoencoderParameters):
         super(Autoencoder, self).__init__()
-        self.encoder = Encoder(parameters.encoder)
-        self.decoder = Decoder(parameters.decoder)
+        self.encoder = encoder
+        self.decoder = decoder
+        self.val_dimensions()
+
+    def val_dimensions(self):
+        if self.encoder.embedding_dim != self.decoder.embedding_dim:
+            raise ValueError(
+                f"Output dimension of encoder ({self.encoder.embedding_dim}) "
+                f"does not match input dimension of decoder ({self.decoder.embedding_dim})."
+            )
 
     def forward(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         x = self.encoder(y)
@@ -96,8 +103,8 @@ class SparseAutoencoderParameters(AutoencoderParameters):
 
 
 class SparseAutoencoder(Autoencoder):
-    def __init__(self, parameters: SparseAutoencoderParameters):
-        super(SparseAutoencoder, self).__init__(parameters)
+    def __init__(self, encoder: Encoder, decoder: Decoder, parameters: SparseAutoencoderParameters):
+        super(SparseAutoencoder, self).__init__(encoder, decoder, parameters)
         self.sparsity = parameters.sparsity
         self.beta = parameters.beta
 
@@ -105,20 +112,3 @@ class SparseAutoencoder(Autoencoder):
         x, encoder_activations = self.encoder(y)
         y, decoder_activations = self.decoder(x)
         return x, y, encoder_activations + decoder_activations
-
-    def calculate_loss(self, y: Tensor, y_: Tensor, activations: List[Tensor]) -> Tuple[Tensor, Tensor]:
-        reconstruction_loss = torch.nn.functional.mse_loss(y, y_)
-        sparsity_loss = sparsity_loss(activations, self.beta, self.sparsity)
-        return reconstruction_loss, sparsity_loss
-
-
-def sparsity_loss(activations: List[Tensor], beta: float, sparsity: float) -> Tensor:
-    """Calculate sparsity loss using KL divergence"""
-    return beta * sum(kl_divergence(x.mean(dim=0), sparsity) for x in activations)
-
-
-def kl_divergence(rho_hat: Tensor, sparsity: float, eps=1e-10) -> Tensor:
-    """Calculate KL divergence between target sparsity and actual activations"""
-    kl = sparsity * torch.log((sparsity + eps) / (rho_hat + eps))
-    kl += (1 - sparsity) * torch.log((1 - sparsity + eps) / (1 - rho_hat + eps))
-    return torch.sum(kl)
