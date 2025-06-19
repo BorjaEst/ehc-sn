@@ -5,10 +5,8 @@ import torch
 from pydantic import BaseModel, Field, field_validator
 from torch import Tensor, nn
 
-from ehc_sn import utils
 
-
-class SeqParameters(BaseModel):
+class SequenceParams(BaseModel):
     dims: List[int] = Field(..., description="List of layer dimensions for the sequence")
 
     @field_validator("dims")
@@ -25,7 +23,7 @@ class SeqParameters(BaseModel):
 
 
 class Sequence(nn.Module, ABC):
-    def __init__(self, parameters: SeqParameters):
+    def __init__(self, parameters: SequenceParams):
         super(Sequence, self).__init__()
         self.layers = nn.ModuleList([nn.Linear(*x) for x in parameters.args_iter()])
         self.hidden_activation = nn.ReLU()
@@ -45,7 +43,7 @@ class Sequence(nn.Module, ABC):
 
 
 class Encoder(Sequence):
-    def __init__(self, parameters: SeqParameters):
+    def __init__(self, parameters: SequenceParams):
         super(Encoder, self).__init__(parameters)
         # Assuming the output is in [0, inf) range
         self.output_activation = nn.ReLU()
@@ -60,7 +58,7 @@ class Encoder(Sequence):
 
 
 class Decoder(Encoder):
-    def __init__(self, parameters: SeqParameters):
+    def __init__(self, parameters: SequenceParams):
         super(Decoder, self).__init__(parameters)
         # Assuming the output is in [0, 1] range
         self.output_activation = nn.Sigmoid()
@@ -74,13 +72,15 @@ class Decoder(Encoder):
         return self.layers[0].in_features
 
 
-class AutoencoderParameters(BaseModel):
-    dummy_parameter: int = Field(0, description="Dummy parameter to ensure the model can be instantiated")
+class AutoencoderParams(BaseModel):
+    sparsity: float = Field(0.05, description="Target sparsity level for the activations")
+    beta: float = Field(0.01, description="Sparsity regularization coefficient for the autoencoder")
 
 
 class Autoencoder(nn.Module):
-    def __init__(self, encoder: Encoder, decoder: Decoder, parameters: AutoencoderParameters):
+    def __init__(self, encoder: Encoder, decoder: Decoder, params: Optional[AutoencoderParams] = None):
         super(Autoencoder, self).__init__()
+        self.params = params or AutoencoderParams()
         self.encoder = encoder
         self.decoder = decoder
         self.val_dimensions()
@@ -92,23 +92,15 @@ class Autoencoder(nn.Module):
                 f"does not match input dimension of decoder ({self.decoder.embedding_dim})."
             )
 
-    def forward(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        x = self.encoder(y)
-        return x, self.decoder(x)
-
-
-class SparseAutoencoderParameters(AutoencoderParameters):
-    sparsity: float = Field(0.05, description="Target sparsity level for the activations")
-    beta: float = Field(0.01, description="Sparsity regularization coefficient for the autoencoder")
-
-
-class SparseAutoencoder(Autoencoder):
-    def __init__(self, encoder: Encoder, decoder: Decoder, parameters: SparseAutoencoderParameters):
-        super(SparseAutoencoder, self).__init__(encoder, decoder, parameters)
-        self.sparsity = parameters.sparsity
-        self.beta = parameters.beta
-
     def forward(self, y: Tensor) -> Tuple[Tensor, Tensor, List[Tensor]]:
         x, encoder_activations = self.encoder(y)
         y, decoder_activations = self.decoder(x)
         return x, y, encoder_activations + decoder_activations
+
+    @property
+    def sparsity(self) -> float:
+        return self.params.sparsity
+
+    @property
+    def beta(self) -> float:
+        return self.params.beta
