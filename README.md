@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/ehc-sn.svg)](https://pypi.org/project/ehc-sn/)
 [![Python versions](https://img.shields.io/pypi/pyversions/ehc-sn.svg)](https://pypi.org/project/ehc-sn/)
 [![Documentation Status](https://readthedocs.io/en/latest/?badge=latest)](https://ehc-sn.readthedocs.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-GPLv3-yellow.svg)](https://opensource.org/license/gpl-3-0)
 
 A Python library for modeling and simulating the entorhinal-hippocampal complex during spatial navigation tasks.
 
@@ -26,30 +26,6 @@ Requires Python 3.10 or later.
 - Memory encoding and retrieval mechanisms
 - Implementation of spike-timing-dependent plasticity (STDP)
 - Biologically plausible autoencoder components
-
-## Usage Example
-
-```python
-import ehc_sn
-
-# Create a simple grid cell model
-grid_cell_module = ehc_sn.neural_representations.GridCellModule(
-    n_cells=100, 
-    scale=0.3, 
-    orientation=0.0
-)
-
-# Run spatial navigation simulation
-position = (0.5, 0.3)  # x, y coordinates
-activity = grid_cell_module.compute_activity(position)
-
-# Visualize grid cell activity
-import matplotlib.pyplot as plt
-plt.figure(figsize=(10, 8))
-ehc_sn.utils.visualization.plot_spatial_activity(grid_cell_module, resolution=50)
-plt.title("Grid Cell Spatial Activity")
-plt.show()
-```
 
 ## Development Setup
 
