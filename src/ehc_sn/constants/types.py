@@ -10,7 +10,6 @@ GridSize = Tuple[int, int]  # (height, width) of a grid
 Direction = Tuple[int, int]  # (dy, dx) movement direction
 
 # Types for grid map representation
-GridMap = torch.Tensor  # 2D binary tensor representing obstacles (1) and free space (0)
 ObstacleMap = torch.Tensor  # 2D binary tensor with 1s for obstacles
 GoalMap = torch.Tensor  # 2D binary tensor with 1 at goal location
 
@@ -27,22 +26,3 @@ Weights = torch.Tensor  # Connection weights between regions
 
 # Type for circuit states across all regions
 CircuitStates = Dict[str, torch.Tensor]
-
-# Dataset sample types
-GridMapSample = TypedDict(
-    "GridMapSample",
-    {
-        "map": GridMap,
-        "goal": GoalMap,
-        "goal_position": Position,
-    },
-)
-
-CognitiveMapSample = TypedDict(
-    "CognitiveMapSample",
-    {
-        "input_map": CognitiveMap,
-        "target_map": CognitiveMap,
-        "embeddings": Optional[Embedding],
-    },
-)
