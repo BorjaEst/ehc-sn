@@ -26,15 +26,20 @@ class EncoderParams(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_feature_dims(self) -> "EncoderParams":
+    def validate_dims_after(self) -> "EncoderParams":
         if prod(self.feature_dims) != self.dims[0]:
             raise ValueError(
-                f"Input feature dimension {self.feature_dims} "
+                f"Input feature dimensions product {prod(self.feature_dims)} "
                 f"does not match the first dimension {self.dims[0]} in dims."
+            )
+        if self.embedding_dim != self.dims[-1]:
+            raise ValueError(
+                f"Output embedding dimension {self.embedding_dim} "
+                f"does not match the last dimension {self.dims[-1]} in dims."
             )
         return self
 
-    def layers(self) -> Iterable[Tuple[int, int]]:
+    def layers(self) -> List[nn.Linear]:
         return [nn.Linear(*x) for x in zip(self.dims[:-1], self.dims[1:])]
 
 
@@ -76,7 +81,7 @@ class Encoder(nn.Module):
         return output, activations
 
     @property
-    def feature_dim(self) -> List[int]:
+    def feature_dims(self) -> List[int]:
         return self._params.feature_dims
 
     @property
