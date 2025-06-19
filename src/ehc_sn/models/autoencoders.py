@@ -78,13 +78,9 @@ class Autoencoder(nn.Module):
         return self.encoder.embedding_dim
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, List[Tensor]]:
-        # Encode the input to get embeddings
+        # Forward pass through the autoencoder.
         embedding, encoder_activations = self.encoder(x)
-
-        # Decode the embeddings to reconstruct the input
         reconstruction, decoder_activations = self.decoder(embedding)
-
-        # Return embeddings, reconstruction, and all activations
         return embedding, reconstruction, encoder_activations + decoder_activations
 
 

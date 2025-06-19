@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn, optim
 from torch.utils.data import DataLoader
 
-from ehc_sn.models.autoencoder import Autoencoder
+from ehc_sn.models.autoencoders import Autoencoder
 from ehc_sn.training.loss import SparseLoss, sparse_loss
 
 

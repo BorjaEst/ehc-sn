@@ -1,1 +1,1 @@
-from ehc_sn.models import autoencoder, decoders, encoders
+from ehc_sn.models import autoencoders, decoders, encoders

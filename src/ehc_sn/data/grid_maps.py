@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ehc_sn.constants import Direction, GridSize, ObstacleMap, Position
 from ehc_sn.data import base
+from ehc_sn.data.base import DataModule, DataModuleParams
 
 
 class GeneratorParams(base.GeneratorParams):
@@ -171,7 +172,6 @@ def plot(ax: Axes, grid: ObstacleMap, params: Optional[PlotMapParams] = None) ->
 
 # Example usage of the DataModule and plotting function
 if __name__ == "__main__":
-    from ehc_sn.data import DataModule, DataModuleParams
 
     # Create a generator with custom parameters
     generator_params = GeneratorParams(grid_size=(10, 10), obstacle_density=0.3)
