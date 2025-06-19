@@ -2,27 +2,23 @@ import random
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-import pytorch_lightning as pl
 import seaborn as sns
 import torch
 from matplotlib.axes import Axes
-from pydantic import BaseModel, Field, field_validator, model_validator
-from torch.utils.data import DataLoader
+from pydantic import BaseModel, Field, field_validator
 
 from ehc_sn.constants import Direction, GridSize, ObstacleMap, Position
+from ehc_sn.data import base
 
 
-class GeneratorParams(BaseModel):
+class GeneratorParams(base.GeneratorParams):
     """Parameters for generating grid maps with obstacles and goal positions."""
-
-    model_config = {"extra": "forbid"}  # Forbid extra fields not defined in the model
 
     grid_size: GridSize = Field(default=(16, 16), description="Size of the grid as (height, width)")
     obstacle_density: float = Field(default=0.2, description="Probability of a cell being an obstacle (0.0-1.0)")
     min_obstacles: int = Field(default=5, description="Minimum number of obstacles to generate")
     max_obstacles: int = Field(default=15, description="Maximum number of obstacles to generate")
     obstacle_size_range: Tuple[int, int] = Field(default=(1, 3), description="Range of obstacle sizes (min, max)")
-    seed: Optional[int] = Field(default=None, description="Random seed for reproducibility")
 
     @field_validator("obstacle_density")
     @classmethod
@@ -39,20 +35,17 @@ class GeneratorParams(BaseModel):
         return v
 
 
-class Generator:
+class Generator(base.Generator):
     """Generates grid maps with random obstacles and a goal position."""
 
     def __init__(self, params: Optional[GeneratorParams] = None):
         params = params or GeneratorParams()
+        super().__init__(params)
         self.grid_size = params.grid_size
         self.obstacle_density = params.obstacle_density
         self.min_obstacles = params.min_obstacles
         self.max_obstacles = params.max_obstacles
         self.obstacle_size_range = params.obstacle_size_range
-
-        if params.seed is not None:
-            random.seed(params.seed)
-            torch.random.seed(params.seed)
 
     def _is_valid_position(self, grid: ObstacleMap, pos: Position) -> bool:
         """Check if a position is valid (within bounds and not an obstacle)."""
@@ -100,7 +93,7 @@ class Generator:
 
         return grid
 
-    def generate_map(self) -> ObstacleMap:
+    def __next__(self) -> ObstacleMap:
         """
         Generate a grid map with obstacles and a goal position.
 
@@ -126,111 +119,6 @@ class Generator:
         return grid
 
 
-class Dataset(torch.utils.data.IterableDataset):
-    """Dataset for grid maps with obstacles and goal positions."""
-
-    def __init__(self, num_samples: int, params: Optional[GeneratorParams] = None):
-        """
-        Initialize a dataset of grid maps with obstacles and goals.
-
-        Args:
-            num_samples: Number of grid map samples to generate per iteration
-            params: Parameters for grid map generation
-        """
-        self.num_samples = num_samples
-        self.params = params or GeneratorParams()
-        self.generator = Generator(params=self.params)
-
-    def __iter__(self):
-        """Yield grid map samples on-the-fly."""
-        for _ in range(self.num_samples):
-            yield self.generator.generate_map()
-
-
-class DataLoaderParams(BaseModel):
-    """Parameters for the GridMapDataModule."""
-
-    model_config = {"extra": "forbid"}  # Pydantic v2 way to forbid extra fields
-
-    batch_size: int = Field(default=32, description="Batch size for dataloaders")
-    num_workers: int = Field(default=0, description="Number of workers for dataloaders")
-    pin_memory: bool = Field(default=True, description="Whether to keep dataset in memory for faster access")
-    persistent_workers: bool = Field(default=False, description="Whether to use persistent workers for dataloaders")
-
-    @property
-    def kwargs(self) -> Dict[str, Any]:
-        """Return common dataloader parameters as a dictionary."""
-        return dict(self.model_dump())
-
-
-class DataModuleParams(BaseModel):
-    """Parameters for the GridMapDataModule."""
-
-    model_config = {"extra": "forbid"}  # Pydantic v2 way to forbid extra fields
-
-    train_params: GeneratorParams = Field(default_factory=GeneratorParams, description="Parameters for training maps")
-    val_split: float = Field(default=0.2, description="Fraction to use for validation (0.0-1.0)")
-    val_params: GeneratorParams = Field(default_factory=GeneratorParams, description="Parameters for validation maps")
-    test_split: float = Field(default=0.1, description="Fraction to use for testing (0.0-1.0)")
-    test_params: GeneratorParams = Field(default_factory=GeneratorParams, description="Parameters for test maps")
-    dataloader_params: DataLoaderParams = Field(default_factory=DataLoaderParams, description="Parameters dataloader")
-
-    @field_validator("val_split", "test_split")
-    @classmethod
-    def validate_split(cls, v: float) -> float:
-        """Ensure split values are between 0.0 and 1.0."""
-        if not (0.0 <= v <= 1.0):
-            raise ValueError("Split values must be between 0.0 and 1.0")
-        return v
-
-    @model_validator(mode="after")
-    def validate_splits(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        """Ensure that the sum of validation and test splits does not exceed 1.0."""
-        if values.val_split + values.test_split > 1.0:
-            raise ValueError("Sum of validation and test splits cannot exceed 1.0")
-        return values
-
-
-class DataModule(pl.LightningDataModule):
-    """PyTorch Lightning DataModule for grid maps with obstacles."""
-
-    def __init__(self, num_samples: int = 1000, params: Optional[DataModuleParams] = None):
-        """
-        Initialize the data module.
-
-        Args:
-            num_samples: Total number of samples to generate
-            params: Parameters for grid map generation
-        """
-        super().__init__()
-        self.params = params or DataModuleParams()
-        self.num_samples = num_samples
-
-    def setup(self, stage: Optional[str] = None):
-        """Setup the dataset for the given stage."""
-        if stage in (None, "fit", "validate"):
-            num_samples = int(self.num_samples * (1 - self.params.val_split - self.params.test_split))
-            self.train_dataset = Dataset(num_samples, params=self.params.train_params)
-        if stage in (None, "validate"):
-            num_samples = int(self.num_samples * self.params.val_split)
-            self.val_dataset = Dataset(num_samples, params=self.params.val_params)
-        if stage in (None, "test"):
-            num_samples = int(self.num_samples * self.params.test_split)
-            self.test_dataset = Dataset(num_samples, params=self.params.test_params)
-
-    def train_dataloader(self):
-        """Return the training dataloader."""
-        return DataLoader(self.train_dataset, **self.params.dataloader_params.kwargs)
-
-    def val_dataloader(self):
-        """Return the validation dataloader."""
-        return DataLoader(self.val_dataset, **self.params.dataloader_params.kwargs)
-
-    def test_dataloader(self):
-        """Return the test dataloader."""
-        return DataLoader(self.test_dataset, **self.params.dataloader_params.kwargs)
-
-
 class PlotMapParams(BaseModel):
     """Parameters for plotting grid maps on an axis."""
 
@@ -246,7 +134,7 @@ class PlotMapParams(BaseModel):
         return dict(self.model_dump(exclude={"title"}))
 
 
-def plot_map(ax: Axes, grid: ObstacleMap, params: Optional[PlotMapParams] = None) -> None:
+def plot(ax: Axes, grid: ObstacleMap, params: Optional[PlotMapParams] = None) -> None:
     """Adds a grid map visualization to the given axis.
 
     Args:
@@ -277,26 +165,21 @@ def plot_map(ax: Axes, grid: ObstacleMap, params: Optional[PlotMapParams] = None
     ax.set_yticks([])
 
     # Add visual boundary to differentiate between subplots
-    ax.spines["top"].set_visible(True)
-    ax.spines["right"].set_visible(True)
-    ax.spines["bottom"].set_visible(True)
-    ax.spines["left"].set_visible(True)
+    for spine in ax.spines.values():
+        spine.set_visible(True)
 
 
 # Example usage of the DataModule and plotting function
 if __name__ == "__main__":
+    from ehc_sn.data import DataModule, DataModuleParams
+
     # Create a generator with custom parameters
-    data_module = DataModule(
-        num_samples=100,
-        params=DataModuleParams(
-            dataloader_params=DataLoaderParams(batch_size=16),
-            train_params=GeneratorParams(grid_size=(10, 10), obstacle_density=0.3),
-            val_split=0.2,
-            val_params=GeneratorParams(grid_size=(10, 10), obstacle_density=0.2),
-            test_split=0.1,
-            test_params=GeneratorParams(grid_size=(10, 10), obstacle_density=0.2),
-        ),
-    )
+    generator_params = GeneratorParams(grid_size=(10, 10), obstacle_density=0.3)
+    generator = Generator(generator_params)
+
+    # Create the parameters for the data loader
+    datamodule_params = DataModuleParams(num_samples=100, batch_size=16, val_split=0.2, test_split=0.1)
+    data_module = DataModule(generator, datamodule_params)
     data_module.setup()
 
     # Visualize the generated map
@@ -305,6 +188,6 @@ if __name__ == "__main__":
     fig, axs = plt.subplots(2, 3, figsize=(12, 8))
     for ax, sample in zip(axs.flatten(), data_module.train_dataset):
         # Ensure sample is a tensor
-        plot_map(ax, sample)
+        plot(ax, sample)
 
     plt.show()
