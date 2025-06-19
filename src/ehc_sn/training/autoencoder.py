@@ -7,38 +7,36 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn, optim
 from torch.utils.data import DataLoader
 
-from ehc_sn.models.autoencoder import Autoencoder, SparseAutoencoder
+from ehc_sn.models.autoencoder import Autoencoder
 from ehc_sn.training.loss import SparseLoss, sparse_loss
 
 
-class TrainingParameters(BaseModel):
+class TrainParams(BaseModel):
     learning_rate: float = Field(default=1e-3, description="Learning rate for the optimizer")
     weight_decay: float = Field(default=1e-5, description="Weight decay for the optimizer")
 
 
-class TrainAutoencoder(pl.LightningModule):
+class TrainModule(pl.LightningModule):
     """Class for training autoencoders with PyTorch Lightning"""
 
     def __init__(
         self,
-        model: Union[Autoencoder, SparseAutoencoder],
-        train_dataloader: DataLoader,
-        val_dataloader: Optional[DataLoader] = None,
-        parameters: Optional[TrainingParameters] = None,
+        model: Autoencoder,
+        data_module: pl.LightningDataModule,
+        parameters: Optional[TrainParams] = None,
     ):
         super().__init__()
-        parameters = parameters or TrainingParameters()
+        parameters = parameters or TrainParams()
         self.model = model
 
-        # Store the dataloaders
-        self.train_dataloader_obj = train_dataloader
-        self.val_dataloader_obj = val_dataloader
+        # Store the data module
+        self.data_module = data_module
 
         self.learning_rate = parameters.learning_rate
         self.weight_decay = parameters.weight_decay
 
         # Save hyperparameters automatically
-        self.save_hyperparameters(ignore=["model", "train_dataloader_obj", "val_dataloader_obj"])
+        self.save_hyperparameters(ignore=["model", "data_module"])
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, List[Tensor]]:
         """Forward pass through the model"""
@@ -51,16 +49,6 @@ class TrainAutoencoder(pl.LightningModule):
             lr=self.learning_rate,
             weight_decay=self.weight_decay,
         )
-
-    def train_dataloader(self):
-        """Return the training dataloader"""
-        return self.train_dataloader_obj
-
-    def val_dataloader(self):
-        """Return the validation dataloader"""
-        if self.val_dataloader_obj:
-            return self.val_dataloader_obj
-        return None
 
     def _common_step(self, batch: Tensor) -> Tuple[SparseLoss, Tensor, Tensor]:
         """Common computation for training and validation steps"""
