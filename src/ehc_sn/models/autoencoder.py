@@ -5,102 +5,134 @@ import torch
 from pydantic import BaseModel, Field, field_validator
 from torch import Tensor, nn
 
-
-class SequenceParams(BaseModel):
-    dims: List[int] = Field(..., description="List of layer dimensions for the sequence")
-
-    @field_validator("dims")
-    def validate_dims(cls, v: List[int]) -> List[int]:
-        if len(v) < 2:
-            raise ValueError("Sequence must have at least 2 dimensions (input and output)")
-        for i, dim in enumerate(v):
-            if dim <= 0:
-                raise ValueError(f"Dimension at position {i} must be positive, got {dim}")
-        return v
-
-    def args_iter(self) -> Iterable[Tuple[int, int]]:
-        return zip(self.dims[:-1], self.dims[1:])
-
-
-class Sequence(nn.Module, ABC):
-    def __init__(self, parameters: SequenceParams):
-        super(Sequence, self).__init__()
-        self.layers = nn.ModuleList([nn.Linear(*x) for x in parameters.args_iter()])
-        self.hidden_activation = nn.ReLU()
-        self.output_activation = nn.ReLU()
-
-    def forward(self, h: torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
-        activations = []
-
-        for i, layer in enumerate(self.layers[:-1]):
-            h = self.hidden_activation(layer(h))
-            activations.append(h)
-
-        output = self.output_activation(self.layers[-1](h))
-        activations.append(output)
-
-        return output, activations
-
-
-class Encoder(Sequence):
-    def __init__(self, parameters: SequenceParams):
-        super(Encoder, self).__init__(parameters)
-        # Assuming the output is in [0, inf) range
-        self.output_activation = nn.ReLU()
-
-    @property
-    def feature_dim(self) -> int:
-        return self.layers[0].in_features
-
-    @property
-    def embedding_dim(self) -> int:
-        return self.layers[-1].out_features
-
-
-class Decoder(Encoder):
-    def __init__(self, parameters: SequenceParams):
-        super(Decoder, self).__init__(parameters)
-        # Assuming the output is in [0, 1] range
-        self.output_activation = nn.Sigmoid()
-
-    @property
-    def feature_dim(self) -> int:
-        return self.layers[-1].out_features
-
-    @property
-    def embedding_dim(self) -> int:
-        return self.layers[0].in_features
+from ehc_sn.models.decoders import Decoder, DecoderParams
+from ehc_sn.models.encoders import Encoder, EncoderParams
 
 
 class AutoencoderParams(BaseModel):
+    """Parameters for configuring the autoencoder's regularization behavior."""
+
+    model_config = {"extra": "forbid"}  # Forbid extra fields not defined in the model
+
     sparsity: float = Field(0.05, description="Target sparsity level for the activations")
     beta: float = Field(0.01, description="Sparsity regularization coefficient for the autoencoder")
 
+    @field_validator("sparsity")
+    def validate_sparsity(cls, v: float) -> float:
+        if not (0 <= v <= 1):
+            raise ValueError(f"Sparsity must be between 0 and 1, got {v}.")
+        return v
 
-class Autoencoder(nn.Module):
-    def __init__(self, encoder: Encoder, decoder: Decoder, params: Optional[AutoencoderParams] = None):
-        super(Autoencoder, self).__init__()
-        self.params = params or AutoencoderParams()
-        self.encoder = encoder
-        self.decoder = decoder
-        self.val_dimensions()
-
-    def val_dimensions(self):
-        if self.encoder.embedding_dim != self.decoder.embedding_dim:
+    @staticmethod
+    def validate_dimensions(encoder: Encoder, decoder: Decoder) -> None:
+        """Validate that encoder and decoder dimensions are compatible."""
+        if encoder.embedding_dim != decoder.embedding_dim:
             raise ValueError(
-                f"Output dimension of encoder ({self.encoder.embedding_dim}) "
-                f"does not match input dimension of decoder ({self.decoder.embedding_dim})."
+                f"Output dimension of encoder ({encoder.embedding_dim}) "
+                f"does not match input dimension of decoder ({decoder.embedding_dim})."
+            )
+        if encoder.feature_dims != decoder.feature_dims:
+            raise ValueError(
+                f"Input feature dimensions of encoder ({encoder.feature_dims}) "
+                f"do not match output feature dimensions of decoder ({decoder.feature_dims})."
             )
 
-    def forward(self, y: Tensor) -> Tuple[Tensor, Tensor, List[Tensor]]:
-        x, encoder_activations = self.encoder(y)
-        y, decoder_activations = self.decoder(x)
-        return x, y, encoder_activations + decoder_activations
+
+class Autoencoder(nn.Module):
+    """Neural network autoencoder for the entorhinal-hippocampal circuit.
+
+    This autoencoder combines an encoder that transforms spatial input into a compact
+    embedding and a decoder that reconstructs the original input from the embedding.
+    It supports sparse activations to model the sparse firing patterns observed in
+    the hippocampus, which is critical for pattern separation and completion.
+
+    The autoencoder serves as a computational model for how the entorhinal-hippocampal
+    circuit might encode, store, and retrieve spatial information.
+    """
+
+    def __init__(self, encoder: Encoder, decoder: Decoder, params: Optional[AutoencoderParams] = None):
+        super(Autoencoder, self).__init__()
+        self._params = params or AutoencoderParams()
+        self.encoder = encoder
+        self.decoder = decoder
+        AutoencoderParams.validate_dimensions(self.encoder, self.decoder)
+
+    @property
+    def params(self) -> AutoencoderParams:
+        return self._params
 
     @property
     def sparsity(self) -> float:
-        return self.params.sparsity
+        return self._params.sparsity
 
     @property
     def beta(self) -> float:
-        return self.params.beta
+        return self._params.beta
+
+    @property
+    def feature_dims(self) -> List[int]:
+        return self.encoder.feature_dims
+
+    @property
+    def embedding_dim(self) -> int:
+        return self.encoder.embedding_dim
+
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, List[Tensor]]:
+        # Encode the input to get embeddings
+        embedding, encoder_activations = self.encoder(x)
+
+        # Decode the embeddings to reconstruct the input
+        reconstruction, decoder_activations = self.decoder(embedding)
+
+        # Return embeddings, reconstruction, and all activations
+        return embedding, reconstruction, encoder_activations + decoder_activations
+
+
+# Example usage of the Autoencoder
+if __name__ == "__main__":
+    # Define parameters for a simple model that works with 10x10 spatial maps
+    feature_dims = [10, 10]  # 10x10 grid maps
+    embedding_dim = 32  # 32-dimensional latent space
+
+    # Encoder: 10x10 grid -> flatten to 100 -> hidden layer 64 -> embedding 32
+    encoder_params = EncoderParams(
+        feature_dims=feature_dims,
+        embedding_dim=embedding_dim,
+        dims=[100, 64, embedding_dim],
+    )
+    encoder = Encoder(encoder_params)
+
+    # Decoder: embedding 32 -> hidden layer 64 -> flattened output 100 -> reshape to 10x10
+    decoder_params = DecoderParams(
+        feature_dims=feature_dims,
+        embedding_dim=embedding_dim,
+        dims=[embedding_dim, 64, 100],
+    )
+    decoder = Decoder(decoder_params)
+
+    # Create autoencoder with custom regularization parameters
+    autoencoder_params = AutoencoderParams(sparsity=0.1, beta=0.05)
+    autoencoder = Autoencoder(encoder, decoder, autoencoder_params)
+
+    # Create a sample batch of 4 grid maps
+    sample_maps = torch.rand(4, *feature_dims)
+
+    # Forward pass through the autoencoder
+    embeddings, reconstructions, activations = autoencoder(sample_maps)
+
+    # Calculate reconstruction loss (mean squared error)
+    mse_loss = nn.MSELoss()(reconstructions, sample_maps)
+
+    # Print model information
+    print(f"Autoencoder architecture:")
+    print(f"  - Input shape: {sample_maps.shape}")
+    print(f"  - Embedding shape: {embeddings.shape}")
+    print(f"  - Reconstruction shape: {reconstructions.shape}")
+    print(f"  - Number of activations: {len(activations)}")
+    print(f"  - Regularization: sparsity={autoencoder.sparsity}, beta={autoencoder.beta}")
+    print(f"  - Reconstruction loss: {mse_loss.item():.6f}")
+
+    # Verify shapes match expected
+    assert embeddings.shape == (4, embedding_dim)
+    assert reconstructions.shape == sample_maps.shape
+    print("Autoencoder works as expected!")

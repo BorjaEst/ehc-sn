@@ -64,6 +64,14 @@ class Decoder(nn.Module):
         self.hidden_activation = nn.ReLU()
         self.output_activation = nn.ReLU()
 
+    @property
+    def feature_dims(self) -> List[int]:
+        return self._params.feature_dims
+
+    @property
+    def embedding_dim(self) -> int:
+        return self._params.embedding_dim
+
     def forward(self, x: Tensor) -> Tuple[Tensor, List[Tensor]]:
         activations = []
         h = x
@@ -81,14 +89,6 @@ class Decoder(nn.Module):
         output = h.view(batch_size, *self._params.feature_dims)
 
         return output, activations
-
-    @property
-    def feature_dims(self) -> List[int]:
-        return self._params.feature_dims
-
-    @property
-    def embedding_dim(self) -> int:
-        return self._params.embedding_dim
 
 
 # Example usage of the Decoder class
