@@ -276,8 +276,14 @@ def plot_map(ax: Axes, grid: ObstacleMap, params: Optional[PlotMapParams] = None
     ax.set_xticks([])
     ax.set_yticks([])
 
+    # Add visual boundary to differentiate between subplots
+    ax.spines["top"].set_visible(True)
+    ax.spines["right"].set_visible(True)
+    ax.spines["bottom"].set_visible(True)
+    ax.spines["left"].set_visible(True)
 
-# Example usage
+
+# Example usage of the DataModule and plotting function
 if __name__ == "__main__":
     # Create a generator with custom parameters
     data_module = DataModule(
