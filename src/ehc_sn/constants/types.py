@@ -14,9 +14,9 @@ ObstacleMap = torch.Tensor  # 2D binary tensor with 1s for obstacles
 GoalMap = torch.Tensor  # 2D binary tensor with 1 at goal location
 
 # Types for cognitive map representation
-CognitiveMap = torch.Tensor  # 2D tensor representing spatial knowledge
 ValueMap = torch.Tensor  # 2D tensor with values (e.g., distance to goal)
-DistanceMap = torch.Tensor  # 2D tensor with distance metrics
+CognitiveMap = ValueMap  # 2D tensor representing spatial knowledge
+DistanceMap = ValueMap  # 2D tensor with distance metrics
 
 # EHC model component types
 NeuralActivity = torch.Tensor  # Neural firing patterns in a region
