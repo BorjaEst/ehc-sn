@@ -6,12 +6,12 @@ import torch
 from matplotlib.axes import Axes
 from pydantic import BaseModel, Field, field_validator
 
-import ehc_sn.data.grid_maps as base
+import ehc_sn.data.grid_maps as _base
 from ehc_sn.constants import CognitiveMap, ObstacleMap
-from ehc_sn.data.base import DataModule, DataModuleParams
+from ehc_sn.data._base import DataModule, DataModuleParams
 
 
-class GeneratorParams(base.GeneratorParams):
+class GeneratorParams(_base.GeneratorParams):
     """Parameters for generating maze-like cognitive maps with probability distributions."""
 
     diffusion_iterations: int = Field(default=3, description="Number of diffusion iterations to apply to walls")
@@ -40,7 +40,7 @@ class GeneratorParams(base.GeneratorParams):
         return v
 
 
-class Generator(base.Generator):
+class Generator(_base.Generator):
     """Generates cognitive maps with maze-like structures and diffused walls."""
 
     def __init__(self, params: Optional[GeneratorParams] = None):

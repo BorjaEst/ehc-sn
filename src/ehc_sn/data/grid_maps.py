@@ -8,11 +8,11 @@ from matplotlib.axes import Axes
 from pydantic import BaseModel, Field, field_validator
 
 from ehc_sn.constants import Direction, GridSize, ObstacleMap, Position
-from ehc_sn.data import base
-from ehc_sn.data.base import DataModule, DataModuleParams
+from ehc_sn.data import _base
+from ehc_sn.data._base import DataModule, DataModuleParams
 
 
-class GeneratorParams(base.GeneratorParams):
+class GeneratorParams(_base.GeneratorParams):
     """Parameters for generating grid maps with obstacles and goal positions."""
 
     grid_size: GridSize = Field(default=(16, 16), description="Size of the grid as (height, width)")
@@ -36,7 +36,7 @@ class GeneratorParams(base.GeneratorParams):
         return v
 
 
-class Generator(base.Generator):
+class Generator(_base.Generator):
     """Generates grid maps with random obstacles and a goal position."""
 
     def __init__(self, params: Optional[GeneratorParams] = None):
