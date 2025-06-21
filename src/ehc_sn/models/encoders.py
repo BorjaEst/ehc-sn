@@ -60,7 +60,6 @@ class Encoder(nn.Module):
     def __init__(self, params: EncoderParams):
         super(Encoder, self).__init__()
         self._params = params
-        self.flatten = nn.Flatten()
         self.layers = nn.ModuleList(params.layers())
         self.hidden_activation = nn.ReLU()
         self.output_activation = nn.ReLU()
@@ -77,7 +76,7 @@ class Encoder(nn.Module):
         activations = []
 
         # Flatten the input if it is multi-dimensional
-        h = self.flatten(x)
+        h = x.view(x.size(0), -1) if x.dim() > 2 else x
 
         for i, layer in enumerate(self.layers[:-1]):
             h = self.hidden_activation(layer(h))

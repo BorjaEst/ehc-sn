@@ -17,25 +17,25 @@ class AutoencoderParams(BaseModel):
     sparsity: float = Field(0.05, description="Target sparsity level for the activations")
     beta: float = Field(0.01, description="Sparsity regularization coefficient for the autoencoder")
 
-    @field_validator("sparsity")
+    @field_validator("sparsity_target", "sparsity_weight")
     def validate_sparsity(cls, v: float) -> float:
         if not (0 <= v <= 1):
-            raise ValueError(f"Sparsity must be between 0 and 1, got {v}.")
+            raise ValueError(f"Value must be between 0 and 1, got {v}.")
         return v
 
-    @staticmethod
-    def validate_dimensions(encoder: Encoder, decoder: Decoder) -> None:
-        """Validate that encoder and decoder dimensions are compatible."""
-        if encoder.embedding_dim != decoder.embedding_dim:
-            raise ValueError(
-                f"Output dimension of encoder ({encoder.embedding_dim}) "
-                f"does not match input dimension of decoder ({decoder.embedding_dim})."
-            )
-        if encoder.feature_dims != decoder.feature_dims:
-            raise ValueError(
-                f"Input feature dimensions of encoder ({encoder.feature_dims}) "
-                f"do not match output feature dimensions of decoder ({decoder.feature_dims})."
-            )
+
+def validate_dimensions(encoder: Encoder, decoder: Decoder) -> None:
+    """Validate that encoder and decoder dimensions are compatible."""
+    if encoder.embedding_dim != decoder.embedding_dim:
+        raise ValueError(
+            f"Output dimension of encoder ({encoder.embedding_dim}) "
+            f"does not match input dimension of decoder ({decoder.embedding_dim})."
+        )
+    if encoder.feature_dims != decoder.feature_dims:
+        raise ValueError(
+            f"Input feature dimensions of encoder ({encoder.feature_dims}) "
+            f"do not match output feature dimensions of decoder ({decoder.feature_dims})."
+        )
 
 
 class Autoencoder(nn.Module):
@@ -55,19 +55,19 @@ class Autoencoder(nn.Module):
         self._params = params or AutoencoderParams()
         self.encoder = encoder
         self.decoder = decoder
-        AutoencoderParams.validate_dimensions(self.encoder, self.decoder)
+        validate_dimensions(self.encoder, self.decoder)
 
     @property
     def params(self) -> AutoencoderParams:
         return self._params
 
     @property
-    def sparsity(self) -> float:
-        return self._params.sparsity
+    def sparsity_target(self) -> float:
+        return self._params.sparsity_target
 
     @property
-    def beta(self) -> float:
-        return self._params.beta
+    def sparsity_weight(self) -> float:
+        return self._params.sparsity_weight
 
     @property
     def feature_dims(self) -> List[int]:
@@ -107,7 +107,7 @@ if __name__ == "__main__":
     decoder = Decoder(decoder_params)
 
     # Create autoencoder with custom regularization parameters
-    autoencoder_params = AutoencoderParams(sparsity=0.1, beta=0.05)
+    autoencoder_params = AutoencoderParams()
     autoencoder = Autoencoder(encoder, decoder, autoencoder_params)
 
     # Create a sample batch of 4 grid maps
@@ -125,7 +125,8 @@ if __name__ == "__main__":
     print(f"  - Embedding shape: {embeddings.shape}")
     print(f"  - Reconstruction shape: {reconstructions.shape}")
     print(f"  - Number of activations: {len(activations)}")
-    print(f"  - Regularization: sparsity={autoencoder.sparsity}, beta={autoencoder.beta}")
+    print(f"  - Regularization: sparsity={autoencoder.sparsity_target}")
+    print(f"  - Regularization: weight={autoencoder.sparsity_weight}")
     print(f"  - Reconstruction loss: {mse_loss.item():.6f}")
 
     # Verify shapes match expected
