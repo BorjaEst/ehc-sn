@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
+from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
 from pydantic import BaseModel, Field
 from torch import Tensor, nn, optim
 from torch.utils.data import DataLoader
@@ -129,13 +130,21 @@ class TrainModule(pl.LightningModule):
         """Forward pass through the model"""
         return self.model(x)
 
-    def configure_optimizers(self) -> optim.Optimizer:
+    def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
         """Configure optimizer for training"""
-        return optim.Adam(
-            params=self.parameters(),
-            lr=self.params.learning_rate,
-            weight_decay=self.params.weight_decay,
-        )
+        kwds = {"lr": self.params.learning_rate, "weight_decay": self.params.weight_decay}
+        optimizer = optim.Adam(params=self.model.parameters(), **kwds)
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+                "reduce_on_plateau": False,
+                "strict": True,
+            },
+        }
 
     def _common_step(self, batch: list[Any]) -> Tuple[SparseLoss, Tensor, Tensor]:
         """Common computation for training and validation steps"""
@@ -186,6 +195,7 @@ if __name__ == "__main__":
     # Example usage
     import lightning
     import matplotlib.pyplot as plt
+    from torch.utils.data import DataLoader
     from tqdm import tqdm
 
     print("Initializing Sparse Training Example...")
@@ -195,13 +205,20 @@ if __name__ == "__main__":
     print(f"Using device: {fabric.device}")
 
     # Model configuration
-    model = nn.Sequential(nn.Linear(10, 20), nn.ReLU(), nn.Linear(20, 15), nn.ReLU(), nn.Linear(15, 10))
+    layers = nn.Linear(10, 20), nn.ReLU(), nn.Linear(20, 15), nn.ReLU(), nn.Linear(15, 10)
+    model = nn.Sequential(*layers)
     print(f"Model architecture:\n{model}")
 
     # Create a simple dataset
     print("Creating datasets...")
-    train_dataset = torch.utils.data.TensorDataset(torch.randn(100, 10))
-    val_dataset = torch.utils.data.TensorDataset(torch.randn(20, 10))
+    train_dataset = torch.utils.data.TensorDataset(
+        torch.randn(100, 10),
+        torch.randn(100, 10),
+    )
+    val_dataset = torch.utils.data.TensorDataset(
+        torch.randn(20, 10),
+        torch.randn(20, 10),
+    )
     print(f"Train dataset size: {len(train_dataset)}, Val dataset size: {len(val_dataset)}")
 
     # Create a data module
@@ -226,15 +243,15 @@ if __name__ == "__main__":
     model = TrainModule(model, data_module, train_params)
 
     # Get the optimizer(s) from the LightningModule
-    optimizer = model.configure_optimizers()
-    print(f"Optimizer: {optimizer}")
+    optmsch_config = model.configure_optimizers()
+    print(f"Optimizer: {optmsch_config['optimizer']}")
 
     # Get the dataloaders from the LightningModule
     train_dataloader = model.train_dataloader()
     val_dataloader = model.val_dataloader()
 
     # Set up objects
-    model, optimizer = fabric.setup(model, optimizer)
+    model, optimizer = fabric.setup(model, optmsch_config["optimizer"])
     train_dataloader = fabric.setup_dataloaders(train_dataloader)
     val_dataloader = fabric.setup_dataloaders(val_dataloader)
 
