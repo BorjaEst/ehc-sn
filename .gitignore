@@ -196,6 +196,9 @@ cython_debug/
 # Pytorch and lightning 
 checkpoints/
 logs/
+lightning_logs/
+example_checkpoints/
+sparse_training_loss.png
 
 # Project-specific files
 whiteboard/
