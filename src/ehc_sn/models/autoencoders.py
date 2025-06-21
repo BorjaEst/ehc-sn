@@ -9,21 +9,6 @@ from ehc_sn.models.decoders import Decoder, DecoderParams
 from ehc_sn.models.encoders import Encoder, EncoderParams
 
 
-class AutoencoderParams(BaseModel):
-    """Parameters for configuring the autoencoder's regularization behavior."""
-
-    model_config = {"extra": "forbid"}  # Forbid extra fields not defined in the model
-
-    sparsity: float = Field(0.05, description="Target sparsity level for the activations")
-    beta: float = Field(0.01, description="Sparsity regularization coefficient for the autoencoder")
-
-    @field_validator("sparsity_target", "sparsity_weight")
-    def validate_sparsity(cls, v: float) -> float:
-        if not (0 <= v <= 1):
-            raise ValueError(f"Value must be between 0 and 1, got {v}.")
-        return v
-
-
 def validate_dimensions(encoder: Encoder, decoder: Decoder) -> None:
     """Validate that encoder and decoder dimensions are compatible."""
     if encoder.embedding_dim != decoder.embedding_dim:
@@ -50,24 +35,11 @@ class Autoencoder(nn.Module):
     circuit might encode, store, and retrieve spatial information.
     """
 
-    def __init__(self, encoder: Encoder, decoder: Decoder, params: Optional[AutoencoderParams] = None):
+    def __init__(self, encoder: Encoder, decoder: Decoder):
+        validate_dimensions(encoder, decoder)
         super(Autoencoder, self).__init__()
-        self._params = params or AutoencoderParams()
         self.encoder = encoder
         self.decoder = decoder
-        validate_dimensions(self.encoder, self.decoder)
-
-    @property
-    def params(self) -> AutoencoderParams:
-        return self._params
-
-    @property
-    def sparsity_target(self) -> float:
-        return self._params.sparsity_target
-
-    @property
-    def sparsity_weight(self) -> float:
-        return self._params.sparsity_weight
 
     @property
     def feature_dims(self) -> List[int]:
@@ -77,11 +49,11 @@ class Autoencoder(nn.Module):
     def embedding_dim(self) -> int:
         return self.encoder.embedding_dim
 
-    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, List[Tensor]]:
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         # Forward pass through the autoencoder.
-        embedding, encoder_activations = self.encoder(x)
-        reconstruction, decoder_activations = self.decoder(embedding)
-        return embedding, reconstruction, encoder_activations + decoder_activations
+        embedding = self.encoder(x)
+        reconstruction = self.decoder(embedding)
+        return embedding, reconstruction
 
 
 # Example usage of the Autoencoder
@@ -107,14 +79,13 @@ if __name__ == "__main__":
     decoder = Decoder(decoder_params)
 
     # Create autoencoder with custom regularization parameters
-    autoencoder_params = AutoencoderParams()
-    autoencoder = Autoencoder(encoder, decoder, autoencoder_params)
+    autoencoder = Autoencoder(encoder, decoder)
 
     # Create a sample batch of 4 grid maps
     sample_maps = torch.rand(4, *feature_dims)
 
     # Forward pass through the autoencoder
-    embeddings, reconstructions, activations = autoencoder(sample_maps)
+    embeddings, reconstructions = autoencoder(sample_maps)
 
     # Calculate reconstruction loss (mean squared error)
     mse_loss = nn.MSELoss()(reconstructions, sample_maps)
@@ -124,9 +95,6 @@ if __name__ == "__main__":
     print(f"  - Input shape: {sample_maps.shape}")
     print(f"  - Embedding shape: {embeddings.shape}")
     print(f"  - Reconstruction shape: {reconstructions.shape}")
-    print(f"  - Number of activations: {len(activations)}")
-    print(f"  - Regularization: sparsity={autoencoder.sparsity_target}")
-    print(f"  - Regularization: weight={autoencoder.sparsity_weight}")
     print(f"  - Reconstruction loss: {mse_loss.item():.6f}")
 
     # Verify shapes match expected

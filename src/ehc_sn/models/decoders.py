@@ -72,23 +72,15 @@ class Decoder(nn.Module):
     def embedding_dim(self) -> int:
         return self._params.embedding_dim
 
-    def forward(self, x: Tensor) -> Tuple[Tensor, List[Tensor]]:
-        activations = []
-        h = x
-
+    def forward(self, x: Tensor) -> Tensor:
+        h = x  # Assign input embeddings to hidden variable h
         for i, layer in enumerate(self.layers[:-1]):
             h = self.hidden_activation(layer(h))
-            activations.append(h)
 
-        # Final layer output
         h = self.output_activation(self.layers[-1](h))
-        activations.append(h)
 
-        # Reshape to original feature dimensions
-        batch_size = x.size(0)
-        output = h.view(batch_size, *self._params.feature_dims)
-
-        return output, activations
+        batch_size = x.size(0)  # Reshape to original feature dimensions
+        return h.view(batch_size, *self._params.feature_dims)
 
 
 # Example usage of the Decoder class
@@ -108,14 +100,13 @@ if __name__ == "__main__":
     sample_embeddings = torch.rand(4, 32)
 
     # Forward pass
-    reconstructed_features, activations = decoder(sample_embeddings)
+    decoded_features = decoder(sample_embeddings)
 
     # Print decoder details
     print(f"Decoder architecture: {decoder}")
     print(f"Input embedding shape: {sample_embeddings.shape}")
-    print(f"Reconstructed features shape: {reconstructed_features.shape}")
-    print(f"Number of intermediate activations: {len(activations)}")
+    print(f"Decoded features shape: {decoded_features.shape}")
 
     # Verify output shape matches expected
-    assert reconstructed_features.shape == (4, 10, 10)
+    assert decoded_features.shape == (4, 10, 10)
     print("Decoder works as expected!")

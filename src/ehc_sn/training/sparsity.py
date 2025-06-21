@@ -1,6 +1,6 @@
 import dataclasses
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
@@ -89,62 +89,6 @@ class TrainModule(pl.LightningModule):
             hook.remove()
         self.activation_hooks = []
 
-    def forward(self, x: Tensor) -> Tensor:
-        """Forward pass through the model"""
-        return self.model(x)
-
-    def configure_optimizers(self) -> optim.Optimizer:
-        """Configure optimizer for training"""
-        return optim.Adam(
-            params=self.parameters(),
-            lr=self.params.learning_rate,
-            weight_decay=self.params.weight_decay,
-        )
-
-    def _common_step(self, batch: list[Tensor]) -> Tuple[SparseLoss, Tensor, Tensor]:
-        """Common computation for training and validation steps"""
-        # Clear previous activations
-        self._clear_activations()
-        inputs = batch[0]  # Dataset.__getitem__ -> Tuple[Input, Target, ...]
-
-        # Forward pass
-        outputs = self(inputs)
-        loss = SparseLoss(inputs, outputs, self.activations, self.params)
-        return loss, inputs, outputs
-
-    def training_step(self, batch: list[Tensor], batch_idx: int) -> Tensor:
-        """Lightning training step"""
-        loss, _inputs, _outputs = self._common_step(batch)
-
-        # Log metrics
-        self.log("train_loss", loss.total, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train_loss.output", loss.output, on_epoch=True)
-        self.log("train_loss.sparsity", loss.sparsity, on_epoch=True)
-
-        return loss.total
-
-    def validation_step(self, batch: list[Tensor], batch_idx: int) -> Tensor:
-        """Lightning validation step"""
-        loss, _inputs, _outputs = self._common_step(batch)
-
-        # Log metrics
-        self.log("val_loss", loss.total, on_epoch=True, prog_bar=True)
-        self.log("val_loss.output", loss.output, on_epoch=True)
-        self.log("val_loss.sparsity", loss.sparsity, on_epoch=True)
-
-        return loss.total
-
-    def test_step(self, batch: list[Tensor], batch_idx: int) -> Tensor:
-        """Lightning test step"""
-        loss, _inputs, _outputs = self._common_step(batch)
-
-        # Log metrics
-        self.log("test_loss", loss.total, on_epoch=True)
-        self.log("test_loss.output", loss.output, on_epoch=True)
-        self.log("test_loss.sparsity", loss.sparsity, on_epoch=True)
-
-        return loss.total
-
     def train_dataloader(self):
         """Get train dataloader from the data module"""
         return self.data_module.train_dataloader()
@@ -180,6 +124,62 @@ class TrainModule(pl.LightningModule):
     def on_test_end(self):
         """Remove hooks when test ends"""
         self._remove_hooks()
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Forward pass through the model"""
+        return self.model(x)
+
+    def configure_optimizers(self) -> optim.Optimizer:
+        """Configure optimizer for training"""
+        return optim.Adam(
+            params=self.parameters(),
+            lr=self.params.learning_rate,
+            weight_decay=self.params.weight_decay,
+        )
+
+    def _common_step(self, batch: list[Any]) -> Tuple[SparseLoss, Tensor, Tensor]:
+        """Common computation for training and validation steps"""
+        # Clear previous activations
+        self._clear_activations()
+        inputs, target = batch
+
+        # Forward pass
+        outputs = self(inputs)
+        loss = SparseLoss(target, outputs, self.activations, self.params)
+        return loss, inputs, outputs
+
+    def training_step(self, batch: list[Any], batch_idx: int) -> Tensor:
+        """Lightning training step"""
+        loss, _inputs, _outputs = self._common_step(batch)
+
+        # Log metrics
+        self.log("train_loss", loss.total, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train_loss.output", loss.output, on_epoch=True)
+        self.log("train_loss.sparsity", loss.sparsity, on_epoch=True)
+
+        return loss.total
+
+    def validation_step(self, batch: list[Any], batch_idx: int) -> Tensor:
+        """Lightning validation step"""
+        loss, _inputs, _outputs = self._common_step(batch)
+
+        # Log metrics
+        self.log("val_loss", loss.total, on_epoch=True, prog_bar=True)
+        self.log("val_loss.output", loss.output, on_epoch=True)
+        self.log("val_loss.sparsity", loss.sparsity, on_epoch=True)
+
+        return loss.total
+
+    def test_step(self, batch: list[Any], batch_idx: int) -> Tensor:
+        """Lightning test step"""
+        loss, _inputs, _outputs = self._common_step(batch)
+
+        # Log metrics
+        self.log("test_loss", loss.total, on_epoch=True)
+        self.log("test_loss.output", loss.output, on_epoch=True)
+        self.log("test_loss.sparsity", loss.sparsity, on_epoch=True)
+
+        return loss.total
 
 
 if __name__ == "__main__":

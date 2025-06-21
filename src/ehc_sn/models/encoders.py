@@ -72,20 +72,14 @@ class Encoder(nn.Module):
     def embedding_dim(self) -> int:
         return self._params.embedding_dim
 
-    def forward(self, x: Tensor) -> Tuple[Tensor, List[Tensor]]:
-        activations = []
-
+    def forward(self, x: Tensor) -> Tensor:
         # Flatten the input if it is multi-dimensional
         h = x.view(x.size(0), -1) if x.dim() > 2 else x
 
         for i, layer in enumerate(self.layers[:-1]):
             h = self.hidden_activation(layer(h))
-            activations.append(h)
 
-        output = self.output_activation(self.layers[-1](h))
-        activations.append(output)
-
-        return output, activations
+        return self.output_activation(self.layers[-1](h))
 
 
 # Example usage of the Encoder class
@@ -105,13 +99,12 @@ if __name__ == "__main__":
     sample_input = torch.rand(4, 10, 10)
 
     # Forward pass
-    embedding, activations = encoder(sample_input)
+    embedding = encoder(sample_input)
 
     # Print encoder details
     print(f"Encoder architecture: {encoder}")
     print(f"Input shape: {sample_input.shape}")
     print(f"Output embedding shape: {embedding.shape}")
-    print(f"Number of intermediate activations: {len(activations)}")
 
     # Verify embedding dimension matches expected
     assert embedding.shape == (4, 32), f"Expected shape (4, 32), got {embedding.shape}"
