@@ -54,6 +54,10 @@ class Dataset(torch.utils.data.IterableDataset):
         for _ in range(self.num_samples):
             yield self.generator.__next__()
 
+    def __len__(self) -> int:
+        """Return the number of samples in the dataset."""
+        return self.num_samples
+
 
 class DataModuleParams(BaseModel):
     """Parameters for the GridMapDataModule."""
