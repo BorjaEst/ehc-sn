@@ -24,6 +24,29 @@ class InvertProbCallback(Callback):
         return batch
 
 
+class InputToLabel(Callback):
+    """Callback to convert input tensors to label tensors."""
+
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+        """Convert input tensors to label tensors before training."""
+        if isinstance(batch, torch.Tensor):
+            # Assuming the first element is the input and the second is the label
+            batch = (batch[0], batch[0])  # Example conversion
+        return batch
+
+    def on_validation_batch_start(self, trainer, pl_module, batch, batch_idx, dataloader_idx=0):
+        """Convert input tensors to label tensors before validation."""
+        if isinstance(batch, torch.Tensor):
+            batch = (batch[0], batch[0])  # Example conversion
+        return batch
+
+    def on_test_batch_start(self, trainer, pl_module, batch, batch_idx, dataloader_idx=0):
+        """Convert input tensors to label tensors before testing."""
+        if isinstance(batch, torch.Tensor):
+            batch = (batch[0], batch[0])  # Example conversion
+        return batch
+
+
 if __name__ == "__main__":
     import pytorch_lightning as pl
 
