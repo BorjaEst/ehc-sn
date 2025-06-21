@@ -1,6 +1,5 @@
 import dataclasses
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple
 
 import pytorch_lightning as pl
 import torch
