@@ -79,6 +79,16 @@ class TrainModule(pl.LightningModule):
         """Store activations from forward pass"""
         self.activations.append(output.detach())
 
+    def _clear_activations(self):
+        """Clear stored activations"""
+        self.activations = []
+
+    def _remove_hooks(self):
+        """Remove all registered activation hooks"""
+        for hook in self.activation_hooks:
+            hook.remove()
+        self.activation_hooks = []
+
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass through the model"""
         return self.model(x)
@@ -94,7 +104,7 @@ class TrainModule(pl.LightningModule):
     def _common_step(self, batch: list[Tensor]) -> Tuple[SparseLoss, Tensor, Tensor]:
         """Common computation for training and validation steps"""
         # Clear previous activations
-        self.activations = []
+        self._clear_activations()
         inputs = batch[0]  # Dataset.__getitem__ -> Tuple[Input, Target, ...]
 
         # Forward pass
@@ -147,25 +157,52 @@ class TrainModule(pl.LightningModule):
         """Get test dataloader from the data module"""
         return self.data_module.test_dataloader()
 
+    def on_train_start(self):
+        """Register hooks when training starts"""
+        self._register_activation_hooks()
+
     def on_train_end(self):
         """Remove hooks when training ends"""
-        for hook in self.activation_hooks:
-            hook.remove()
+        self._remove_hooks()
+
+    def on_validation_start(self):
+        """Register hooks when validation starts"""
+        self._register_activation_hooks()
+
+    def on_validation_end(self):
+        """Remove hooks when validation ends"""
+        self._remove_hooks()
+
+    def on_test_start(self):
+        """Register hooks when test starts"""
+        self._register_activation_hooks()
+
+    def on_test_end(self):
+        """Remove hooks when test ends"""
+        self._remove_hooks()
 
 
 if __name__ == "__main__":
     # Example usage
     import lightning
+    import matplotlib.pyplot as plt
+    from tqdm import tqdm
+
+    print("Initializing Sparse Training Example...")
 
     # Initialize Fabric
     fabric = lightning.Fabric(accelerator="cpu", devices=1)
+    print(f"Using device: {fabric.device}")
 
     # Model configuration
-    model = nn.Sequential(nn.Linear(10, 5), nn.ReLU(), nn.Linear(5, 10))
+    model = nn.Sequential(nn.Linear(10, 20), nn.ReLU(), nn.Linear(20, 15), nn.ReLU(), nn.Linear(15, 10))
+    print(f"Model architecture:\n{model}")
 
     # Create a simple dataset
+    print("Creating datasets...")
     train_dataset = torch.utils.data.TensorDataset(torch.randn(100, 10))
     val_dataset = torch.utils.data.TensorDataset(torch.randn(20, 10))
+    print(f"Train dataset size: {len(train_dataset)}, Val dataset size: {len(val_dataset)}")
 
     # Create a data module
     class SimpleDataModule(pl.LightningDataModule):
@@ -184,22 +221,79 @@ if __name__ == "__main__":
 
     # Instantiate the LightningModule with sparsity parameters
     train_params = TrainParams(sparsity_target=0.05, sparsity_weight=0.1)
+    print(f"Training parameters: {train_params.model_dump()}")
+
     model = TrainModule(model, data_module, train_params)
 
     # Get the optimizer(s) from the LightningModule
     optimizer = model.configure_optimizers()
+    print(f"Optimizer: {optimizer}")
 
-    # Get the training data loader from the LightningModule
+    # Get the dataloaders from the LightningModule
     train_dataloader = model.train_dataloader()
+    val_dataloader = model.val_dataloader()
 
     # Set up objects
     model, optimizer = fabric.setup(model, optimizer)
     train_dataloader = fabric.setup_dataloaders(train_dataloader)
+    val_dataloader = fabric.setup_dataloaders(val_dataloader)
 
-    # Training loop for a single epoch
-    model.train()
-    for i, batch in enumerate(train_dataloader):
-        optimizer.zero_grad()
-        loss = model.training_step(batch, i)
-        fabric.backward(loss)
-        optimizer.step()
+    # Track metrics for plotting
+    train_losses = []
+    val_losses = []
+    epochs = 5
+
+    print(f"\nTraining for {epochs} epochs...")
+    for epoch in range(epochs):
+        # Training loop
+        model.train()
+        epoch_train_losses = []
+        print(f"\nEpoch {epoch+1}/{epochs}")
+
+        # Call lifecycle methods manually
+        model.on_train_start()
+
+        for i, batch in enumerate(tqdm(train_dataloader, desc="Training")):
+            optimizer.zero_grad()
+            loss = model.training_step(batch, i)
+            fabric.backward(loss)
+            optimizer.step()
+            epoch_train_losses.append(loss.item())
+
+        model.on_train_end()
+
+        avg_train_loss = sum(epoch_train_losses) / len(epoch_train_losses)
+        train_losses.append(avg_train_loss)
+        print(f"Avg train loss: {avg_train_loss:.4f}")
+
+        # Validation loop
+        model.eval()
+        epoch_val_losses = []
+
+        # Call lifecycle methods manually
+        model.on_validation_start()
+
+        with torch.no_grad():
+            for i, batch in enumerate(tqdm(val_dataloader, desc="Validation")):
+                val_loss = model.validation_step(batch, i)
+                epoch_val_losses.append(val_loss.item())
+
+        model.on_validation_end()
+
+        avg_val_loss = sum(epoch_val_losses) / len(epoch_val_losses)
+        val_losses.append(avg_val_loss)
+        print(f"Avg val loss: {avg_val_loss:.4f}")
+
+    # Plot training and validation loss
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(1, epochs + 1), train_losses, "b-", label="Training Loss")
+    plt.plot(range(1, epochs + 1), val_losses, "r-", label="Validation Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.title("Training and Validation Loss")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig("sparse_training_loss.png")
+    print(f"Loss plot saved to sparse_training_loss.png")
+
+    print("\nTraining complete!")
