@@ -94,7 +94,7 @@ class Generator(_base.Generator):
 
         return grid
 
-    def __next__(self) -> ObstacleMap:
+    def __next__(self) -> Tuple[ObstacleMap, None]:
         """
         Generate a grid map with obstacles and a goal position.
 
@@ -117,7 +117,7 @@ class Generator(_base.Generator):
             grid[i, j] = 0
 
         # Return a one-hot encoder for the obstacle map
-        return grid
+        return (grid, None)
 
 
 class PlotMapParams(BaseModel):
@@ -187,7 +187,6 @@ if __name__ == "__main__":
 
     fig, axs = plt.subplots(2, 3, figsize=(12, 8))
     for ax, sample in zip(axs.flatten(), data_module.train_dataset):
-        # Ensure sample is a tensor
-        plot(ax, sample)
+        plot(ax, sample[0])  # sample[0] is the obstacle map
 
     plt.show()

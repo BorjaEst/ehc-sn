@@ -7,6 +7,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from pydantic import BaseModel, Field, field_validator, model_validator
+from torch import Tensor
 from torch.utils.data import DataLoader
 
 
@@ -29,7 +30,7 @@ class Generator(ABC, collections.abc.Iterator):
             torch.manual_seed(params.seed)
 
     @abstractmethod
-    def __next__(self):
+    def __next__(self) -> Tuple[Tensor, ...]:
         """Generate next data sample."""
         pass
 
@@ -48,7 +49,7 @@ class Dataset(torch.utils.data.IterableDataset):
         self.num_samples = num_samples
         self.generator = generator
 
-    def __iter__(self):
+    def __iter__(self) -> collections.abc.Iterator[Tuple[Tensor, Optional[Tensor]]]:
         """Yield grid map samples on-the-fly."""
         for _ in range(self.num_samples):
             yield self.generator.__next__()
@@ -139,8 +140,8 @@ class DataModule(pl.LightningDataModule):
 if __name__ == "__main__":
     # Example usage
     class MyGenerator(Generator):
-        def __next__(self) -> torch.Tensor:
-            return torch.randint(0, 2, (16, 16))
+        def __next__(self) -> Tuple[Tensor, ...]:
+            return (torch.randint(0, 2, (16, 16)), torch.randint(0, 10, [1]))
 
     # Create the parameters for the data loader
     datamodule_params = DataModuleParams(num_samples=100, batch_size=16, val_split=0.2, test_split=0.1)

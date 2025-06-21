@@ -89,7 +89,7 @@ class Generator(_base.Generator):
 
         return noisy_grid
 
-    def _preprocess_grid(self, obstacle_map: ObstacleMap) -> CognitiveMap:
+    def _preprocess_grid(self, obstacle_map: ObstacleMap) -> Tuple[CognitiveMap, None]:
         """Convert binary obstacle map to probability distribution."""
         return 1.0 - obstacle_map
 
@@ -101,7 +101,7 @@ class Generator(_base.Generator):
             A cognitive map tensor with probability values (0.0 to 1.0).
         """
         # Generate base maze structure using the grid_maps generator
-        obstacle_map = super().__next__()
+        obstacle_map, _label = super().__next__()  # Take only the input grid
 
         # Convert binary obstacle map to probability values
         cognitive_map = self._preprocess_grid(obstacle_map)
@@ -112,7 +112,7 @@ class Generator(_base.Generator):
         # Add noise for more realistic cognitive representation
         cognitive_map = self._add_noise(cognitive_map)
 
-        return cognitive_map
+        return (cognitive_map, None)
 
 
 class PlotMapParams(BaseModel):
@@ -181,7 +181,6 @@ if __name__ == "__main__":
 
     fig, axs = plt.subplots(2, 3, figsize=(12, 8))
     for ax, sample in zip(axs.flatten(), data_module.train_dataset):
-        # Ensure sample is a tensor
-        plot(ax, sample)
+        plot(ax, sample[0])  # sample[0] is the cognitive map
 
     plt.show()
