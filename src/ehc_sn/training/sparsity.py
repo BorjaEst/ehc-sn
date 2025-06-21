@@ -46,18 +46,10 @@ class SparseLoss:
 class TrainModule(pl.LightningModule):
     """Class for training sparse autoencoders with PyTorch Lightning"""
 
-    def __init__(
-        self,
-        model: nn.Module,
-        data_module: pl.LightningDataModule,
-        params: Optional[TrainParams] = None,
-    ):
+    def __init__(self, model: nn.Module, params: Optional[TrainParams] = None):
         super().__init__()
         self.params = params or TrainParams()
-
-        # Store the model and the data module
-        self.model = model
-        self.data_module = data_module
+        self.model = model  # Store the model and the data module
 
         # Setup activation hooks and storage
         self.activation_hooks = []
@@ -88,18 +80,6 @@ class TrainModule(pl.LightningModule):
         for hook in self.activation_hooks:
             hook.remove()
         self.activation_hooks = []
-
-    def train_dataloader(self):
-        """Get train dataloader from the data module"""
-        return self.data_module.train_dataloader()
-
-    def val_dataloader(self):
-        """Get validation dataloader from the data module"""
-        return self.data_module.val_dataloader()
-
-    def test_dataloader(self):
-        """Get test dataloader from the data module"""
-        return self.data_module.test_dataloader()
 
     def on_train_start(self):
         """Register hooks when training starts"""
