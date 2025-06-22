@@ -56,7 +56,7 @@ class BPTrainerParams(_base.FabricConfig):
     )
     checkpoint_frequency: int = Field(
         description="Frequency of saving checkpoints (in epochs)",
-        default=1,
+        default=10,
     )
 
 
@@ -143,30 +143,30 @@ class BPTrainer(_base.BaseTrainer):
             self.sanity_check(model, data_module)
 
         # Training loop
-        epoch = 0
-        global_step = 0
+        self.current_epoch = 0
+        self.global_step = 0
 
-        while (self.max_epochs is None or epoch < self.max_epochs) and (
-            self.max_steps is None or global_step < self.max_steps
+        while (self.max_epochs is None or self.current_epoch < self.max_epochs) and (
+            self.max_steps is None or self.global_step < self.max_steps
         ):
 
             # Train for one epoch
             train_results = self.train(model, train_dataloader, loss_function, optimizer, scheduler)
-            global_step += train_results.get("steps", 0)
+            self.global_step += train_results.get("steps", 0)
 
             # Validate if needed
-            if val_dataloader and epoch % self.validation_frequency == 0:
+            if val_dataloader and self.current_epoch % self.validation_frequency == 0:
                 self.validation(model, val_dataloader, loss_function)
 
             # Save checkpoint if needed
-            if epoch % self.checkpoint_frequency == 0:
-                checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_epoch_{epoch}.pt")
+            if self.current_epoch % self.checkpoint_frequency == 0:
+                checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_epoch_{self.current_epoch}.pt")
                 self.save_checkpoint(checkpoint_path, model)
 
-            epoch += 1
+            self.current_epoch += 1
 
             # Check max_steps condition
-            if self.max_steps is not None and global_step >= self.max_steps:
+            if self.max_steps is not None and self.global_step >= self.max_steps:
                 break
 
         # Test the model if test dataloader is available
@@ -175,7 +175,11 @@ class BPTrainer(_base.BaseTrainer):
 
         self.fabric.call("on_fit_end", self, model)
 
-    def sanity_check(self, model: nn.Module, data_module: pl.LightningDataModule) -> None:
+    def sanity_check(
+        self,
+        model: nn.Module,
+        data_module: pl.LightningDataModule,
+    ) -> None:
         """Run a sanity check on the model before training.
 
         Args:
