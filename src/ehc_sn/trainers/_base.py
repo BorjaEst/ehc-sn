@@ -15,56 +15,76 @@ from pydantic import BaseModel, Field
 from torch import nn
 
 
+# -------------------------------------------------------------------------------------------
 class FabricConfig(BaseModel):
     """Configuration for Lightning Fabric."""
 
+    # -----------------------------------------------------------------------------------
     model_config = {
         "extra": "forbid",  # Forbid extra fields not defined in the model
         "arbitrary_types_allowed": True,  # Forbid extra fields not defined in the model
     }
 
+    # -----------------------------------------------------------------------------------
     accelerator: Union[str, Accelerator] = Field(
         description="Accelerator to use for training",
         default="auto",
     )
+
+    # -----------------------------------------------------------------------------------
     strategy: Union[str, Strategy] = Field(
         description="Strategy for distributed training",
         default="auto",
     )
+
+    # -----------------------------------------------------------------------------------
     devices: Union[list[int], str, int] = Field(
         description="Number of devices to use for training",
         default="auto",
     )
+
+    # -----------------------------------------------------------------------------------
     num_nodes: int = Field(
         description="Number of nodes to use for distributed training",
         default=1,
     )
+
+    # -----------------------------------------------------------------------------------
     precision: Optional[_PRECISION_INPUT] = Field(
         description="Numerical precision for training (e.g., '32-true', '16-mixed')",
         default=None,
     )
+
+    # -----------------------------------------------------------------------------------
     plugins: Optional[Union[_PLUGIN_INPUT, list[_PLUGIN_INPUT]]] = Field(
         description="Plugins to use for training",
         default=None,
     )
+
+    # -----------------------------------------------------------------------------------
     callbacks: Optional[Union[list[Any], Any]] = Field(
         description="Callbacks to use during training",
         default=None,
     )
+
+    # -----------------------------------------------------------------------------------
     loggers: Optional[Union[Logger, list[Logger]]] = Field(
         description="Loggers to use for logging training progress",
         default=None,
     )
 
+    # -----------------------------------------------------------------------------------
     def kwargs(self) -> Dict[str, Any]:
         """Convert the configuration to a dictionary of keyword arguments."""
         keys = FabricConfig.model_fields.keys()
         return self.model_dump(include=keys, exclude_none=True)
 
 
+# -------------------------------------------------------------------------------------------
 class BaseTrainer(ABC):
     """Abstract base class for trainers using Lightning Fabric."""
 
+    # -----------------------------------------------------------------------------------
     def __init__(self, config: FabricConfig):
         """Initialize the trainer with the given configuration.
         Args:
@@ -73,9 +93,8 @@ class BaseTrainer(ABC):
         self.fabric = lightning.Fabric(**config.kwargs())
         self.global_step = 0
         self.current_epoch = 0
-        self.should_stop = False
-        self.current_return = {}
 
+    # -----------------------------------------------------------------------------------
     @abstractmethod
     def fit(
         self: "BaseTrainer",
@@ -96,6 +115,175 @@ class BaseTrainer(ABC):
         """
         pass
 
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def callback_metrics(self) -> Dict[str, Any]:
+        """Metrics collected by callbacks during training."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def logged_metrics(self) -> Dict[str, Any]:
+        """Metrics sent to the loggers during training."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def progress_bar_metrics(self) -> Dict[str, Any]:
+        """Metrics sent to the progress bar during training."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def current_epoch(self) -> int:
+        """Current epoch during training."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def datamodule(self) -> Optional[pl.LightningDataModule]:
+        """DataModule being used for training."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def is_last_batch(self) -> bool:
+        """Whether the current batch is the last batch."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def global_step(self) -> int:
+        """Total number of steps taken during training."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def logger(self) -> Optional[Logger]:
+        """The main logger being used."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def loggers(self) -> list[Logger]:
+        """All loggers being used."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def log_dir(self) -> Optional[str]:
+        """Directory for logs."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def is_global_zero(self) -> bool:
+        """Whether this process is the global zero process."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def estimated_stepping_batches(self) -> int:
+        """Total number of expected stepping batches."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def state(self) -> Dict[str, Any]:
+        """Current state of the trainer."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def should_stop(self) -> bool:
+        """Whether training should stop."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def sanity_checking(self) -> bool:
+        """Whether sanity checking is in progress."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def num_training_batches(self) -> int:
+        """Number of batches in the training dataloader."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def num_sanity_val_batches(self) -> int:
+        """Number of batches used for sanity checking."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def num_val_batches(self) -> Union[int, list[int]]:
+        """Number of batches in the validation dataloader(s)."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def num_test_batches(self) -> Union[int, list[int]]:
+        """Number of batches in the test dataloader(s)."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def num_predict_batches(self) -> Union[int, list[int]]:
+        """Number of batches in the prediction dataloader(s)."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def train_dataloader(self) -> Optional[Iterable]:
+        """Training dataloader."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def val_dataloaders(self) -> Union[Iterable, list[Iterable]]:
+        """Validation dataloader(s)."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def test_dataloaders(self) -> Union[Iterable, list[Iterable]]:
+        """Test dataloader(s)."""
+        pass
+
+    # -----------------------------------------------------------------------------------
+    @property
+    @abstractmethod
+    def predict_dataloaders(self) -> Union[Iterable, list[Iterable]]:
+        """Prediction dataloader(s)."""
+        pass
+
+    # -----------------------------------------------------------------------------------
     def sanity_check(
         self,
         model: nn.Module,
@@ -109,6 +297,7 @@ class BaseTrainer(ABC):
         """
         raise NotImplementedError("sanity_check method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def train_batch(
         self: "BaseTrainer",
         model: nn.Module,
@@ -131,6 +320,7 @@ class BaseTrainer(ABC):
         """
         raise NotImplementedError("train_batch method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def train_epoch(
         self: "BaseTrainer",
         model: nn.Module,
@@ -151,6 +341,7 @@ class BaseTrainer(ABC):
         """
         raise NotImplementedError("train_epoch method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def validation_batch(
         self: "BaseTrainer",
         model: nn.Module,
@@ -172,6 +363,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("validation_batch method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def validation_epoch(
         self: "BaseTrainer",
         model: nn.Module,
@@ -191,6 +383,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("validation_epoch method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def test_batch(
         self: "BaseTrainer",
         model: nn.Module,
@@ -212,6 +405,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("test_batch method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def test_epoch(
         self: "BaseTrainer",
         model: nn.Module,
@@ -231,6 +425,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("test_epoch method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def predict_batch(
         self: "BaseTrainer",
         model: nn.Module,
@@ -250,6 +445,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("predict_batch method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def predict_epoch(
         self: "BaseTrainer",
         model: nn.Module,
@@ -267,6 +463,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("predict_epoch method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def train(
         self: "BaseTrainer",
         model: nn.Module,
@@ -290,6 +487,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("train method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def validation(
         self: "BaseTrainer",
         model: nn.Module,
@@ -309,6 +507,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("validation method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def test(
         self: "BaseTrainer",
         model: nn.Module,
@@ -328,6 +527,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("test method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def predict(
         self: "BaseTrainer",
         model: nn.Module,
@@ -345,6 +545,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("predict method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def backward(
         self,
         model: nn.Module,
@@ -359,6 +560,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("backward method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def optimizer_step(
         self: "BaseTrainer",
         model: nn.Module,
@@ -373,6 +575,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("optimizer_step method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def zero_grad(
         self: "BaseTrainer",
         model: nn.Module,
@@ -387,7 +590,12 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("zero_grad method should be implemented in subclasses.")
 
-    def save_checkpoint(self, path: str, model: nn.Module) -> None:
+    # -----------------------------------------------------------------------------------
+    def save_checkpoint(
+        self,
+        path: str,
+        model: nn.Module,
+    ) -> None:
         """Save a checkpoint of the model state.
 
         Args:
@@ -397,6 +605,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("save_checkpoint method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def load_checkpoint(
         self,
         path: str,
@@ -414,6 +623,7 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("load_checkpoint method should be implemented in subclasses.")
 
+    # -----------------------------------------------------------------------------------
     def catch_exception(
         self,
         exception: BaseException,
