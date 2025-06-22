@@ -14,58 +14,81 @@ from ehc_sn import utils
 from ehc_sn.trainers import _base
 
 
+# -------------------------------------------------------------------------------------------
 class BPTrainerParams(_base.FabricConfig):
     """Configuration for the Backpropagation Trainer."""
 
+    # -----------------------------------------------------------------------------------
     # Backpropagation-specific configuration
+    # -----------------------------------------------------------------------------------
     max_epochs: Optional[int] = Field(
         description="Maximum number of training epochs",
         default=1000,
     )
+
+    # -----------------------------------------------------------------------------------
     max_steps: Optional[int] = Field(
         description="Maximum number of training steps",
         default=None,
     )
+
+    # -----------------------------------------------------------------------------------
     grad_accum_steps: int = Field(
         description="Number of gradient accumulation steps",
         default=1,
     )
+
+    # -----------------------------------------------------------------------------------
     clip_grad_norm: Optional[float] = Field(
         description="Maximum norm for gradient clipping. If None, no clipping is applied.",
         default=None,
     )
+
+    # -----------------------------------------------------------------------------------
     limit_train_batches: Union[int, float] = Field(
         description="Limit on the number of training batches per epoch",
         default=float("inf"),
     )
+
+    # -----------------------------------------------------------------------------------
     limit_val_batches: Union[int, float] = Field(
         description="Limit on the number of validation batches per epoch",
         default=float("inf"),
     )
+
+    # -----------------------------------------------------------------------------------
     validation_frequency: int = Field(
         description="Frequency of validation checks (in epochs)",
         default=1,
     )
+
+    # -----------------------------------------------------------------------------------
     use_distributed_sampler: bool = Field(
         description="Whether to use distributed sampler for training data",
         default=True,
     )
+
+    # -----------------------------------------------------------------------------------
     checkpoint_dir: str = Field(
         description="Directory to save the train module checkpoints",
         default="./checkpoints",
     )
+
+    # -----------------------------------------------------------------------------------
     checkpoint_frequency: int = Field(
         description="Frequency of saving checkpoints (in epochs)",
         default=10,
     )
 
 
+# -------------------------------------------------------------------------------------------
 class BPTrainer(_base.BaseTrainer):
     """
     Trainer for backpropagation-based training of entorhinal-hippocampal circuit models.
     Uses Lightning Fabric for efficient device management and training acceleration.
     """
 
+    # -----------------------------------------------------------------------------------
     def __init__(self, config: BPTrainerParams):
         """Initialize the trainer with the given configuration.
 
@@ -87,11 +110,198 @@ class BPTrainer(_base.BaseTrainer):
         self.checkpoint_frequency = config.checkpoint_frequency
 
         # Add metrics tracking
-        self.logged_metrics = {}
+        self._logged_metrics = {}
+        self._callback_metrics = {}
+        self._progress_bar_metrics = {}
+
+        # State tracking
+        self._current_epoch = 0
+        self._global_step = 0
+        self._datamodule = None
+        self._should_stop = False
+        self._sanity_checking = False
+        self._is_last_batch = False
+
+        # Dataloaders
+        self._train_dataloader = None
+        self._val_dataloaders = None
+        self._test_dataloaders = None
+        self._predict_dataloaders = None
+
+        # Batch counts
+        self._num_training_batches = 0
+        self._num_val_batches = 0
+        self._num_test_batches = 0
+        self._num_predict_batches = 0
+        self._num_sanity_val_batches = 0
 
         # Ensure checkpoint directory exists
         os.makedirs(self.checkpoint_dir, exist_ok=True)
 
+    # -----------------------------------------------------------------------------------
+    # Implementation of abstract properties
+    # -----------------------------------------------------------------------------------
+    @property
+    def callback_metrics(self) -> Dict[str, Any]:
+        """Metrics collected by callbacks during training."""
+        return self._callback_metrics
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def logged_metrics(self) -> Dict[str, Any]:
+        """Metrics sent to the loggers during training."""
+        return self._logged_metrics
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def progress_bar_metrics(self) -> Dict[str, Any]:
+        """Metrics sent to the progress bar during training."""
+        return self._progress_bar_metrics
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def current_epoch(self) -> int:
+        """Current epoch during training."""
+        return self._current_epoch
+
+    @current_epoch.setter
+    def current_epoch(self, value: int) -> None:
+        self._current_epoch = value
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def datamodule(self) -> Optional[pl.LightningDataModule]:
+        """DataModule being used for training."""
+        return self._datamodule
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def is_last_batch(self) -> bool:
+        """Whether the current batch is the last batch."""
+        return self._is_last_batch
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def global_step(self) -> int:
+        """Total number of steps taken during training."""
+        return self._global_step
+
+    @global_step.setter
+    def global_step(self, value: int) -> None:
+        self._global_step = value
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def logger(self) -> Optional[_base.Logger]:
+        """The main logger being used."""
+        if self.fabric.loggers and len(self.fabric.loggers) > 0:
+            return self.fabric.loggers[0]
+        return None
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def loggers(self) -> list[_base.Logger]:
+        """All loggers being used."""
+        return self.fabric.loggers if self.fabric.loggers else []
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def log_dir(self) -> Optional[str]:
+        """Directory for logs."""
+        if self.logger and hasattr(self.logger, "log_dir"):
+            return self.logger.log_dir
+        return None
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def is_global_zero(self) -> bool:
+        """Whether this process is the global zero process."""
+        return self.fabric.is_global_zero
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def estimated_stepping_batches(self) -> int:
+        """Total number of expected stepping batches."""
+        return (self.num_training_batches // self.grad_accum_steps) * (self.max_epochs or 0)
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def state(self) -> Dict[str, Any]:
+        """Current state of the trainer."""
+        return {
+            "current_epoch": self.current_epoch,
+            "global_step": self.global_step,
+            "should_stop": self.should_stop,
+            "sanity_checking": self.sanity_checking,
+        }
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def should_stop(self) -> bool:
+        """Whether training should stop."""
+        return self._should_stop
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def sanity_checking(self) -> bool:
+        """Whether sanity checking is in progress."""
+        return self._sanity_checking
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def num_training_batches(self) -> int:
+        """Number of batches in the training dataloader."""
+        return self._num_training_batches
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def num_sanity_val_batches(self) -> int:
+        """Number of batches used for sanity checking."""
+        return self._num_sanity_val_batches
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def num_val_batches(self) -> Union[int, list[int]]:
+        """Number of batches in the validation dataloader(s)."""
+        return self._num_val_batches
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def num_test_batches(self) -> Union[int, list[int]]:
+        """Number of batches in the test dataloader(s)."""
+        return self._num_test_batches
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def num_predict_batches(self) -> Union[int, list[int]]:
+        """Number of batches in the prediction dataloader(s)."""
+        return self._num_predict_batches
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def train_dataloader(self) -> Optional[Iterable]:
+        """Training dataloader."""
+        return self._train_dataloader
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def val_dataloaders(self) -> Union[Iterable, list[Iterable]]:
+        """Validation dataloader(s)."""
+        return self._val_dataloaders or []
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def test_dataloaders(self) -> Union[Iterable, list[Iterable]]:
+        """Test dataloader(s)."""
+        return self._test_dataloaders or []
+
+    # -----------------------------------------------------------------------------------
+    @property
+    def predict_dataloaders(self) -> Union[Iterable, list[Iterable]]:
+        """Prediction dataloader(s)."""
+        return self._predict_dataloaders or []
+
+    # -----------------------------------------------------------------------------------
     def fit(
         self: "BPTrainer",
         model: nn.Module,
@@ -111,19 +321,27 @@ class BPTrainer(_base.BaseTrainer):
         """
         self.fabric.call("on_fit_start", self, model)
 
+        # Store the datamodule
+        self._datamodule = data_module
+
         # Setup dataloaders
         data_module.setup()
-        train_dataloader = data_module.train_dataloader()
-        val_dataloader = data_module.val_dataloader()
-        test_dataloader = data_module.test_dataloader()
+        self._train_dataloader = data_module.train_dataloader()
+        self._val_dataloaders = data_module.val_dataloader()
+        self._test_dataloaders = data_module.test_dataloader()
+
+        # Set batch counts
+        self._num_training_batches = len(self._train_dataloader) if self._train_dataloader else 0
+        self._num_val_batches = len(self._val_dataloaders) if self._val_dataloaders else 0
+        self._num_test_batches = len(self._test_dataloaders) if self._test_dataloaders else 0
 
         # Apply fabric to dataloaders
         if self.use_distributed_sampler:
-            train_dataloader = self.fabric.setup_dataloaders(train_dataloader)
-            if val_dataloader:
-                val_dataloader = self.fabric.setup_dataloaders(val_dataloader)
-            if test_dataloader:
-                test_dataloader = self.fabric.setup_dataloaders(test_dataloader)
+            self._train_dataloader = self.fabric.setup_dataloaders(self._train_dataloader)
+            if self._val_dataloaders:
+                self._val_dataloaders = self.fabric.setup_dataloaders(self._val_dataloaders)
+            if self._test_dataloaders:
+                self._test_dataloaders = self.fabric.setup_dataloaders(self._test_dataloaders)
 
         # Setup model, loss function, and optimizers with fabric
         model = self.fabric.setup(model)
@@ -139,42 +357,43 @@ class BPTrainer(_base.BaseTrainer):
             optimizer = self.fabric.setup_optimizers(optimizer)
 
         # Sanity check
-        if val_dataloader:
+        if self._val_dataloaders:
             self.sanity_check(model, data_module)
 
         # Training loop
-        self.current_epoch = 0
-        self.global_step = 0
+        self._current_epoch = 0
+        self._global_step = 0
 
-        while (self.max_epochs is None or self.current_epoch < self.max_epochs) and (
-            self.max_steps is None or self.global_step < self.max_steps
+        while (self.max_epochs is None or self._current_epoch < self.max_epochs) and (
+            self.max_steps is None or self._global_step < self.max_steps
         ):
 
             # Train for one epoch
-            train_results = self.train(model, train_dataloader, loss_function, optimizer, scheduler)
-            self.global_step += train_results.get("steps", 0)
+            train_results = self.train(model, self._train_dataloader, loss_function, optimizer, scheduler)
+            self._global_step += train_results.get("steps", 0)
 
             # Validate if needed
-            if val_dataloader and self.current_epoch % self.validation_frequency == 0:
-                self.validation(model, val_dataloader, loss_function)
+            if self._val_dataloaders and self._current_epoch % self.validation_frequency == 0:
+                self.validation(model, self._val_dataloaders, loss_function)
 
             # Save checkpoint if needed
-            if self.current_epoch % self.checkpoint_frequency == 0:
-                checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_epoch_{self.current_epoch}.pt")
+            if self._current_epoch % self.checkpoint_frequency == 0:
+                checkpoint_path = os.path.join(self.checkpoint_dir, f"checkpoint_epoch_{self._current_epoch}.pt")
                 self.save_checkpoint(checkpoint_path, model)
 
-            self.current_epoch += 1
+            self._current_epoch += 1
 
             # Check max_steps condition
-            if self.max_steps is not None and self.global_step >= self.max_steps:
+            if self.max_steps is not None and self._global_step >= self.max_steps:
                 break
 
         # Test the model if test dataloader is available
-        if test_dataloader:
-            self.test(model, test_dataloader, loss_function)
+        if self._test_dataloaders:
+            self.test(model, self._test_dataloaders, loss_function)
 
         self.fabric.call("on_fit_end", self, model)
 
+    # -----------------------------------------------------------------------------------
     def sanity_check(
         self,
         model: nn.Module,
@@ -187,6 +406,7 @@ class BPTrainer(_base.BaseTrainer):
             data_module: Data module containing the datasets.
         """
         self.fabric.call("on_sanity_check_start", self, model)
+        self._sanity_checking = True
 
         # Get the validation dataloader
         val_dataloader = data_module.val_dataloader()
@@ -211,10 +431,12 @@ class BPTrainer(_base.BaseTrainer):
                 self.fabric.print("Sanity check passed: Model forward pass successful")
             except Exception as e:
                 self.fabric.print(f"Sanity check failed: {str(e)}")
-                raise
+                self.catch_exception(e)
 
+        self._sanity_checking = False
         self.fabric.call("on_sanity_check_end", self, model)
 
+    # -----------------------------------------------------------------------------------
     def train_batch(
         self: "BPTrainer",
         model: nn.Module,
@@ -278,6 +500,7 @@ class BPTrainer(_base.BaseTrainer):
         self.fabric.call("on_train_batch_end", self, model, outputs, batch, batch_idx)
         return outputs
 
+    # -----------------------------------------------------------------------------------
     def train_epoch(
         self: "BPTrainer",
         model: nn.Module,
@@ -309,6 +532,9 @@ class BPTrainer(_base.BaseTrainer):
 
         # Train for one epoch
         for batch_idx, batch in enumerate(train_dataloader):
+            # Set last batch flag
+            self._is_last_batch = batch_idx == num_batches - 1
+
             if batch_idx >= num_batches:
                 break
 
@@ -321,14 +547,20 @@ class BPTrainer(_base.BaseTrainer):
                     epoch_results[key] += outputs[key]
             epoch_results["steps"] += 1
 
+            # Update logged metrics
+            for key, value in outputs.items():
+                self._logged_metrics[key] = value
+
         # Average metrics
         for key in epoch_results:
             if key != "steps":
                 epoch_results[key] = epoch_results[key] / max(1, epoch_results["steps"])
+                self._logged_metrics[key] = epoch_results[key]
 
         self.fabric.call("on_train_epoch_end", self, model)
         return epoch_results
 
+    # -----------------------------------------------------------------------------------
     def validation_batch(
         self: "BPTrainer",
         model: nn.Module,
@@ -379,6 +611,7 @@ class BPTrainer(_base.BaseTrainer):
         self.fabric.call("on_validation_batch_end", self, model, outputs, batch, batch_idx)
         return outputs
 
+    # -----------------------------------------------------------------------------------
     def validation_epoch(
         self: "BPTrainer",
         model: nn.Module,
@@ -427,6 +660,7 @@ class BPTrainer(_base.BaseTrainer):
         self.fabric.call("on_validation_epoch_end", self, model)
         return epoch_results
 
+    # -----------------------------------------------------------------------------------
     def test_batch(
         self: "BPTrainer",
         model: nn.Module,
@@ -477,6 +711,7 @@ class BPTrainer(_base.BaseTrainer):
         self.fabric.call("on_test_batch_end", self, model, outputs, batch, batch_idx)
         return outputs
 
+    # -----------------------------------------------------------------------------------
     def test_epoch(
         self: "BPTrainer",
         model: nn.Module,
@@ -519,6 +754,7 @@ class BPTrainer(_base.BaseTrainer):
         self.fabric.call("on_test_epoch_end", self, model)
         return epoch_results
 
+    # -----------------------------------------------------------------------------------
     def predict_batch(
         self: "BPTrainer",
         model: nn.Module,
@@ -555,6 +791,7 @@ class BPTrainer(_base.BaseTrainer):
         self.fabric.call("on_predict_batch_end", self, model, outputs, batch, batch_idx)
         return outputs
 
+    # -----------------------------------------------------------------------------------
     def predict_epoch(
         self: "BPTrainer",
         model: nn.Module,
@@ -588,6 +825,7 @@ class BPTrainer(_base.BaseTrainer):
         self.fabric.call("on_predict_epoch_end", self, model)
         return epoch_results
 
+    # -----------------------------------------------------------------------------------
     def train(
         self: "BPTrainer",
         model: nn.Module,
@@ -619,6 +857,7 @@ class BPTrainer(_base.BaseTrainer):
         self.fabric.call("on_train_end", self, model)
         return epoch_results
 
+    # -----------------------------------------------------------------------------------
     def validation(
         self: "BPTrainer",
         model: nn.Module,
@@ -665,6 +904,7 @@ class BPTrainer(_base.BaseTrainer):
         self.fabric.call("on_test_end", self, model)
         return epoch_results
 
+    # -----------------------------------------------------------------------------------
     def predict(
         self: "BPTrainer",
         model: nn.Module,
@@ -686,6 +926,7 @@ class BPTrainer(_base.BaseTrainer):
         self.fabric.call("on_predict_end", self, model)
         return epoch_results
 
+    # -----------------------------------------------------------------------------------
     def backward(
         self: "BPTrainer",
         model: nn.Module,
@@ -708,6 +949,7 @@ class BPTrainer(_base.BaseTrainer):
 
         self.fabric.call("on_after_backward", self, model)
 
+    # -----------------------------------------------------------------------------------
     def optimizer_step(
         self: "BPTrainer",
         model: nn.Module,
@@ -727,6 +969,7 @@ class BPTrainer(_base.BaseTrainer):
         else:
             optimizer.step()
 
+    # -----------------------------------------------------------------------------------
     def zero_grad(
         self: "BPTrainer",
         model: nn.Module,
@@ -746,7 +989,12 @@ class BPTrainer(_base.BaseTrainer):
         else:
             optimizer.zero_grad(set_to_none=True)
 
-    def save_checkpoint(self, path: str, model: nn.Module) -> None:
+    # -----------------------------------------------------------------------------------
+    def save_checkpoint(
+        self,
+        path: str,
+        model: nn.Module,
+    ) -> None:
         """Save a checkpoint of the model state.
 
         Args:
@@ -770,7 +1018,12 @@ class BPTrainer(_base.BaseTrainer):
         self.fabric.save(path, checkpoint)
         self.fabric.print(f"Checkpoint saved to {path}")
 
-    def load_checkpoint(self, path: str, model: nn.Module) -> nn.Module:
+    # -----------------------------------------------------------------------------------
+    def load_checkpoint(
+        self,
+        path: str,
+        model: nn.Module,
+    ) -> nn.Module:
         """Load a model from a checkpoint.
 
         Args:
@@ -791,6 +1044,7 @@ class BPTrainer(_base.BaseTrainer):
 
         return model
 
+    # -----------------------------------------------------------------------------------
     def step_scheduler(
         self: "BPTrainer",
         model: nn.Module,
@@ -814,9 +1068,9 @@ class BPTrainer(_base.BaseTrainer):
                     if level == "epoch":
                         # Get the appropriate metric for ReduceLROnPlateau
                         if hasattr(model, "validation_step"):
-                            metric_value = self.logged_metrics.get("val_loss", None)
+                            metric_value = self._logged_metrics.get("val_loss", None)
                         else:
-                            metric_value = self.logged_metrics.get("train_loss", None)
+                            metric_value = self._logged_metrics.get("train_loss", None)
 
                         if metric_value is not None:
                             sched.step(metric_value)
@@ -831,9 +1085,9 @@ class BPTrainer(_base.BaseTrainer):
                 if level == "epoch":
                     # Get the appropriate metric
                     if hasattr(model, "validation_step"):
-                        metric_value = self.logged_metrics.get("val_loss", None)
+                        metric_value = self._logged_metrics.get("val_loss", None)
                     else:
-                        metric_value = self.logged_metrics.get("train_loss", None)
+                        metric_value = self._logged_metrics.get("train_loss", None)
 
                     if metric_value is not None:
                         scheduler.step(metric_value)
@@ -843,8 +1097,22 @@ class BPTrainer(_base.BaseTrainer):
             elif level == "step" and getattr(scheduler, "step_on_batch", False):
                 scheduler.step()
 
+    # -----------------------------------------------------------------------------------
+    def catch_exception(
+        self,
+        exception: BaseException,
+    ) -> None:
+        """Handle an exception raised during training.
 
-# Example usage
+        Args:
+            exception: The exception that was raised.
+        """
+        self.fabric.call("on_exception", self, exception)
+        # Re-raise the exception after handling
+        raise exception
+
+
+# -------------------------------------------------------------------------------------------
 if __name__ == "__main__":
     import torch.nn as nn
     import torch.optim as optim
@@ -885,6 +1153,9 @@ if __name__ == "__main__":
 
         def val_dataloader(self):
             return val_loader
+
+        def test_dataloader(self):
+            return None
 
     # Configure and initialize the trainer
     config = BPTrainerParams(
