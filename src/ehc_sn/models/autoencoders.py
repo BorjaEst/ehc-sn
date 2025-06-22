@@ -1,8 +1,6 @@
-from abc import ABC
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, List, Tuple
 
 import torch
-from pydantic import BaseModel, Field, field_validator
 from torch import Tensor, nn
 
 from ehc_sn.models.decoders import Decoder, DecoderParams
@@ -49,11 +47,14 @@ class Autoencoder(nn.Module):
     def embedding_dim(self) -> int:
         return self.encoder.embedding_dim
 
-    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
-        # Forward pass through the autoencoder.
+    def forward(self, x: Tensor, *args: Any) -> Tuple[Tensor, Tensor]:
         embedding = self.encoder(x)
         reconstruction = self.decoder(embedding)
-        return embedding, reconstruction
+        return reconstruction, embedding
+
+    def embedding(self, x: Tensor) -> Tensor:
+        """Extract the embedding from the input data."""
+        return self.encoder(x)
 
 
 # Example usage of the Autoencoder
@@ -85,7 +86,7 @@ if __name__ == "__main__":
     sample_maps = torch.rand(4, *feature_dims)
 
     # Forward pass through the autoencoder
-    embeddings, reconstructions = autoencoder(sample_maps)
+    reconstructions, embeddings = autoencoder(sample_maps)
 
     # Calculate reconstruction loss (mean squared error)
     mse_loss = nn.MSELoss()(reconstructions, sample_maps)
