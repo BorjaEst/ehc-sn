@@ -49,7 +49,7 @@ class Dataset(torch.utils.data.IterableDataset):
         self.num_samples = num_samples
         self.generator = generator
 
-    def __iter__(self) -> collections.abc.Iterator[Tuple[Tensor, Optional[Tensor]]]:
+    def __iter__(self) -> collections.abc.Iterator[Tuple[Tensor, ...]]:
         """Yield grid map samples on-the-fly."""
         for _ in range(self.num_samples):
             yield self.generator.__next__()

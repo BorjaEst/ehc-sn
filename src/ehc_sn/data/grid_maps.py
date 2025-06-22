@@ -94,7 +94,7 @@ class Generator(_base.Generator):
 
         return grid
 
-    def __next__(self) -> Tuple[ObstacleMap, None]:
+    def __next__(self) -> Tuple[ObstacleMap]:
         """
         Generate a grid map with obstacles and a goal position.
 
@@ -117,7 +117,7 @@ class Generator(_base.Generator):
             grid[i, j] = 0
 
         # Return a one-hot encoder for the obstacle map
-        return (grid, None)
+        return (grid,)
 
 
 class PlotMapParams(BaseModel):
