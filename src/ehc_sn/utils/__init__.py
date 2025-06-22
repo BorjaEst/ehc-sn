@@ -58,3 +58,23 @@ def torch_function(name: str) -> Any:
         raise ValueError(f"Unknown torch function: {name}")
 
     return torch_func
+
+
+def determine_batch_limit(limit_batches, dataloader_length):
+    """Determine the actual number of batches to process based on the limit setting.
+
+    Args:
+        limit_batches: The batch limit setting (int, float, or inf)
+        dataloader_length: The total number of batches in the dataloader
+
+    Returns:
+        int: The actual number of batches to process
+    """
+    if isinstance(limit_batches, int):
+        return min(limit_batches, dataloader_length)
+    elif limit_batches == float("inf"):
+        return dataloader_length
+    elif isinstance(limit_batches, float):
+        return int(limit_batches * dataloader_length)
+    else:
+        raise ValueError("limit_batches must be an int, float, or inf")

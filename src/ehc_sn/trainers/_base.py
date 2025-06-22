@@ -11,9 +11,8 @@ from lightning.fabric.connector import _PLUGIN_INPUT, _PRECISION_INPUT
 from lightning.fabric.loggers import Logger
 from lightning.fabric.strategies import Strategy
 from lightning.fabric.utilities.types import LRScheduler
-from lightning_utilities import apply_to_collection
 from pydantic import BaseModel, Field
-from tqdm import tqdm
+from torch import nn
 
 
 class FabricConfig(BaseModel):
@@ -78,171 +77,332 @@ class BaseTrainer(ABC):
         self.current_return = {}
 
     @abstractmethod
-    def fit(self, train_module: pl.LightningModule, data_module: pl.LightningDataModule):
+    def fit(
+        self: "BaseTrainer",
+        model: nn.Module,
+        data_module: pl.LightningDataModule,
+        loss_function: Union[nn.Module, Dict[str, nn.Module]],
+        optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
+        scheduler: Optional[Union[LRScheduler, Dict[str, LRScheduler]]] = None,
+    ) -> None:
         """The main entrypoint of the trainer, triggering the actual training.
 
         Args:
-            train_module: LightningModule to train, can have the same hooks as :attr:`callbacks`.
+            Model: Model to train with the trainer.
+            data_module: Data module containing the training, validation, and test datasets.
+            loss_function: Loss function or a dictionary of loss functions to use for training.
+            optimizer: Optimizer or a dictionary of optimizers to use for training.
+            scheduler: Learning rate scheduler or a dictionary of schedulers to use for training.
         """
+        pass
 
-    @abstractmethod
-    def train_loop(
-        self,
-        model: lightning.LightningModule,
-        optimizer: torch.optim.Optimizer,
-        train_loader: torch.utils.data.DataLoader,
-        scheduler: LRScheduler,
-    ):
-        """The training loop running a single training epoch.
+    def sanity_check(self, model: nn.Module, data_module: pl.LightningDataModule) -> None:
+        """Run a sanity check on the model before training.
 
         Args:
-            model: the LightningModule to train
-            optimizer: the optimizer, optimizing the LightningModule.
-            train_loader: The dataloader yielding the training batches.
-            scheduler: The learning rate scheduler configuration.
+            model: Model to run the sanity check on.
+            data_module: Data module containing the datasets.
         """
+        raise NotImplementedError("sanity_check method should be implemented in subclasses.")
 
-    @abstractmethod
-    def val_loop(
-        self,
-        model: lightning.LightningModule,
-        val_loader: Optional[torch.utils.data.DataLoader],
-    ):
-        """The validation loop running a single validation epoch.
-
-        Args:
-            model: the LightningModule to evaluate
-            val_loader: The dataloader yielding the validation batches.
-        """
-
-    @abstractmethod
-    def training_step(
-        self,
-        model: lightning.LightningModule,
+    def train_batch(
+        self: "BaseTrainer",
+        model: nn.Module,
         batch: Any,
         batch_idx: int,
-    ):
-        """A single training step, running forward and backward. The optimizer step is called separately, as this is
-        given as a closure to the optimizer step.
+        loss_function: Union[nn.Module, Dict[str, nn.Module]],
+        optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
+    ) -> Dict[str, Any]:
+        """Process a single training batch.
 
         Args:
-            model: the lightning module to train
-            batch: the batch to run the forward on
-            batch_idx: index of the current batch w.r.t the current epoch
+            model: Model being trained.
+            batch: Current batch of data.
+            batch_idx: Index of the current batch.
+            loss_function: Loss function(s) to calculate training loss.
+            optimizer: Optimizer(s) to update model parameters.
 
+        Returns:
+            Dict containing the batch results.
         """
+        raise NotImplementedError("train_batch method should be implemented in subclasses.")
 
-    @abstractmethod
-    def validation_step(
-        self,
-        model: lightning.LightningModule,
+    def train_epoch(
+        self: "BaseTrainer",
+        model: nn.Module,
+        train_dataloader: Iterable,
+        loss_function: Union[nn.Module, Dict[str, nn.Module]],
+        optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
+    ) -> Dict[str, Any]:
+        """Process a full training epoch.
+
+        Args:
+            model: Model being trained.
+            train_dataloader: DataLoader for training data.
+            loss_function: Loss function(s) to calculate training loss.
+            optimizer: Optimizer(s) to update model parameters.
+
+        Returns:
+            Dict containing the epoch results.
+        """
+        raise NotImplementedError("train_epoch method should be implemented in subclasses.")
+
+    def validation_batch(
+        self: "BaseTrainer",
+        model: nn.Module,
         batch: Any,
         batch_idx: int,
-    ):
-        """A single validation step, running forward on the validation data.
+        loss_function: Union[nn.Module, Dict[str, nn.Module]],
+    ) -> Dict[str, Any]:
+        """Process a single validation batch.
 
         Args:
-            model: the lightning module to evaluate
-            batch: the batch to run the forward on
-            batch_idx: index of the current batch w.r.t the current epoch
+            model: Model being validated.
+            batch: Current batch of data.
+            batch_idx: Index of the current batch.
+            loss_function: Loss function(s) to calculate validation loss.
 
+        Returns:
+            Dict containing the batch results.
         """
 
-    @abstractmethod
-    def step_scheduler(
-        self,
-        model: lightning.LightningModule,
-        scheduler: LRScheduler,
-        level: Literal["step", "epoch"],
-    ):
-        """Steps the learning rate scheduler if necessary.
+        raise NotImplementedError("validation_batch method should be implemented in subclasses.")
+
+    def validation_epoch(
+        self: "BaseTrainer",
+        model: nn.Module,
+        val_dataloader: Iterable,
+        loss_function: Union[nn.Module, Dict[str, nn.Module]],
+    ) -> Dict[str, Any]:
+        """Process a full validation epoch.
 
         Args:
-            model: The LightningModule to train
-            scheduler_cfg: The learning rate scheduler configuration.
-                Have a look at :meth:`lightning.pytorch.LightningModule.configure_optimizers` for supported values.
-            level: whether we are trying to step on epoch- or step-level
+            model: Model being validated.
+            val_dataloader: DataLoader for validation data.
+            loss_function: Loss function(s) to calculate validation loss.
 
+        Returns:
+            Dict containing the epoch results.
         """
 
-    def load(self, state: Optional[Mapping], path: str) -> None:
-        """Loads a checkpoint from a given file into state.
+        raise NotImplementedError("validation_epoch method should be implemented in subclasses.")
+
+    def test_batch(
+        self: "BaseTrainer",
+        model: nn.Module,
+        batch: Any,
+        batch_idx: int,
+        loss_function: Union[nn.Module, Dict[str, nn.Module]],
+    ) -> Dict[str, Any]:
+        """Process a single test batch.
 
         Args:
-            state: a mapping containing model, optimizer and lr scheduler
-            path: the path to load the checkpoint from
+            model: Model being tested.
+            batch: Current batch of data.
+            batch_idx: Index of the current batch.
+            loss_function: Loss function(s) to calculate test loss.
 
+        Returns:
+            Dict containing the batch results.
         """
-        if state is None:
-            state = {}
 
-        remainder = self.fabric.load(path, state)
-        self.global_step = remainder.pop("global_step")
-        self.current_epoch = remainder.pop("current_epoch")
+        raise NotImplementedError("test_batch method should be implemented in subclasses.")
 
-        if remainder:
-            raise RuntimeError(f"Unused Checkpoint Values: {remainder}")
-
-    def save(self, state: Optional[Mapping]) -> None:
-        """Saves a checkpoint to the ``checkpoint_dir``
+    def test_epoch(
+        self: "BaseTrainer",
+        model: nn.Module,
+        test_dataloader: Iterable,
+        loss_function: Union[nn.Module, Dict[str, nn.Module]],
+    ) -> Dict[str, Any]:
+        """Process a full test epoch.
 
         Args:
-            state: A mapping containing model, optimizer and lr scheduler.
+            model: Model being tested.
+            test_dataloader: DataLoader for test data.
+            loss_function: Loss function(s) to calculate test loss.
 
+        Returns:
+            Dict containing the epoch results.
         """
-        if state is None:
-            state = {}
 
-        state.update(global_step=self.global_step, current_epoch=self.current_epoch)
+        raise NotImplementedError("test_epoch method should be implemented in subclasses.")
 
-        self.fabric.save(os.path.join(self.checkpoint_dir, f"epoch-{self.current_epoch:04d}.ckpt"), state)
-
-    @staticmethod
-    def get_latest_checkpoint(checkpoint_dir: str) -> Optional[str]:
-        """Returns the latest checkpoint from the ``checkpoint_dir``
+    def predict_batch(
+        self: "BaseTrainer",
+        model: nn.Module,
+        batch: Any,
+        batch_idx: int,
+    ) -> Dict[str, Any]:
+        """Process a single prediction batch.
 
         Args:
-            checkpoint_dir: the directory to search for checkpoints
+            model: Model for prediction.
+            batch: Current batch of data.
+            batch_idx: Index of the current batch.
 
+        Returns:
+            Dict containing the batch results.
         """
-        if not os.path.isdir(checkpoint_dir):
-            return None
 
-        items = sorted(os.listdir(checkpoint_dir))
+        raise NotImplementedError("predict_batch method should be implemented in subclasses.")
 
-        if not items:
-            return None
-
-        return os.path.join(checkpoint_dir, items[-1])
-
-    def progbar_wrapper(self, iterable: Iterable, total: int, **kwargs: Any) -> Iterable:
-        """Wraps the iterable with tqdm for global rank zero.
+    def predict_epoch(
+        self: "BaseTrainer",
+        model: nn.Module,
+        predict_dataloader: Iterable,
+    ) -> Dict[str, Any]:
+        """Process a full prediction epoch.
 
         Args:
-            iterable: the iterable to wrap with tqdm
-            total: the total length of the iterable, necessary in case the number of batches was limited.
+            model: Model for prediction.
+            predict_dataloader: DataLoader for prediction data.
 
+        Returns:
+            Dict containing the epoch results.
         """
-        if self.fabric.is_global_zero:
-            return tqdm(iterable, total=total, **kwargs)
-        return iterable
 
-    def format_iterable(self, prog_bar: Iterable, prefix: str):
-        """Adds values as postfix string to progressbar.
+        raise NotImplementedError("predict_epoch method should be implemented in subclasses.")
+
+    def train(
+        self: "BaseTrainer",
+        model: nn.Module,
+        train_dataloader: Iterable,
+        loss_function: Union[nn.Module, Dict[str, nn.Module]],
+        optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
+        scheduler: Optional[Union[LRScheduler, Dict[str, LRScheduler]]] = None,
+    ) -> Dict[str, Any]:
+        """Run a full training process.
 
         Args:
-            prog_bar: a progressbar (on global rank zero) or an iterable (every other rank).
-            prefix: the prefix to add to each of these values.
+            model: Model to train.
+            train_dataloader: DataLoader for training data.
+            loss_function: Loss function(s) to calculate training loss.
+            optimizer: Optimizer(s) to update model parameters.
+            scheduler: Optional learning rate scheduler(s).
 
+        Returns:
+            Dict containing the training results.
         """
-        if isinstance(prog_bar, tqdm) and self.current_return is not None:
-            postfix_str = ""
-            float_candidates = apply_to_collection(self.current_return, torch.Tensor, lambda x: x.item())
-            if isinstance(self.current_return, torch.Tensor):
-                postfix_str += f" {prefix}_loss: {float_candidates:.3f}"
-            elif isinstance(self.current_return, Mapping):
-                for k, v in float_candidates.items():
-                    postfix_str += f" {prefix}_{k}: {v:.3f}"
 
-            if postfix_str:
-                prog_bar.set_postfix_str(postfix_str)
+        raise NotImplementedError("train method should be implemented in subclasses.")
+
+    def validation(
+        self: "BaseTrainer",
+        model: nn.Module,
+        val_dataloader: Iterable,
+        loss_function: Union[nn.Module, Dict[str, nn.Module]],
+    ) -> Dict[str, Any]:
+        """Run a full validation process.
+
+        Args:
+            model: Model to validate.
+            val_dataloader: DataLoader for validation data.
+            loss_function: Loss function(s) to calculate validation loss.
+
+        Returns:
+            Dict containing the validation results.
+        """
+
+        raise NotImplementedError("validation method should be implemented in subclasses.")
+
+    def test(
+        self: "BaseTrainer",
+        model: nn.Module,
+        test_dataloader: Iterable,
+        loss_function: Union[nn.Module, Dict[str, nn.Module]],
+    ) -> Dict[str, Any]:
+        """Run a full test process.
+
+        Args:
+            model: Model to test.
+            test_dataloader: DataLoader for test data.
+            loss_function: Loss function(s) to calculate test loss.
+
+        Returns:
+            Dict containing the test results.
+        """
+
+        raise NotImplementedError("test method should be implemented in subclasses.")
+
+    def predict(
+        self: "BaseTrainer",
+        model: nn.Module,
+        predict_dataloader: Iterable,
+    ) -> Dict[str, Any]:
+        """Run a full prediction process.
+
+        Args:
+            model: Model for prediction.
+            predict_dataloader: DataLoader for prediction data.
+
+        Returns:
+            Dict containing the prediction results.
+        """
+
+        raise NotImplementedError("predict method should be implemented in subclasses.")
+
+    def backward(self, loss: torch.Tensor) -> None:
+        """Perform backward pass with the given loss.
+
+        Args:
+            loss: The loss tensor to backpropagate.
+        """
+
+        raise NotImplementedError("backward method should be implemented in subclasses.")
+
+    def optimizer_step(
+        self: "BaseTrainer",
+        optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
+    ) -> None:
+        """Perform optimizer step.
+
+        Args:
+            optimizer: Optimizer or dictionary of optimizers to step.
+        """
+
+        raise NotImplementedError("optimizer_step method should be implemented in subclasses.")
+
+    def zero_grad(
+        self: "BaseTrainer",
+        optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
+    ) -> None:
+        """Zero gradients for the given optimizer.
+
+        Args:
+            optimizer: Optimizer or dictionary of optimizers to zero gradients for.
+        """
+
+        raise NotImplementedError("zero_grad method should be implemented in subclasses.")
+
+    def save_checkpoint(self, path: str, model: nn.Module) -> None:
+        """Save a checkpoint of the model state.
+
+        Args:
+            path: Path where to save the checkpoint.
+            model: Model whose state to save.
+        """
+
+        raise NotImplementedError("save_checkpoint method should be implemented in subclasses.")
+
+    def load_checkpoint(self, path: str, model: nn.Module) -> nn.Module:
+        """Load a model from a checkpoint.
+
+        Args:
+            path: Path to the checkpoint file.
+            model: Model to load the state into.
+
+        Returns:
+            The model with loaded state.
+        """
+
+        raise NotImplementedError("load_checkpoint method should be implemented in subclasses.")
+
+    def catch_exception(self, exception: BaseException) -> None:
+        """Handle an exception raised during training.
+
+        Args:
+            exception: The exception that was raised.
+        """
+        self.fabric.call("on_exception", self, exception)
+        # Re-raise the exception after handling
+        raise exception
