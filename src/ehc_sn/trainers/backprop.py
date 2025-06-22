@@ -66,8 +66,7 @@ class BPTrainer(_base.BaseTrainer):
     Uses Lightning Fabric for efficient device management and training acceleration.
     """
 
-    # -----------------------------------------------------------------------------------
-    def __init__(self, config: BPTrainerParams):  # -------------------------------------
+    def __init__(self, config: BPTrainerParams):
         """Initialize the trainer with the given configuration.
 
         Args:
@@ -115,13 +114,16 @@ class BPTrainer(_base.BaseTrainer):
         # Setup dataloaders
         data_module.setup()
         train_dataloader = data_module.train_dataloader()
-        val_dataloader = data_module.val_dataloader() if hasattr(data_module, "val_dataloader") else None
+        val_dataloader = data_module.val_dataloader()
+        test_dataloader = data_module.test_dataloader()
 
         # Apply fabric to dataloaders
         if self.use_distributed_sampler:
             train_dataloader = self.fabric.setup_dataloaders(train_dataloader)
             if val_dataloader:
                 val_dataloader = self.fabric.setup_dataloaders(val_dataloader)
+            if test_dataloader:
+                test_dataloader = self.fabric.setup_dataloaders(test_dataloader)
 
         # Setup model, loss function, and optimizers with fabric
         model = self.fabric.setup(model)
@@ -166,6 +168,10 @@ class BPTrainer(_base.BaseTrainer):
             # Check max_steps condition
             if self.max_steps is not None and global_step >= self.max_steps:
                 break
+
+        # Test the model if test dataloader is available
+        if test_dataloader:
+            self.test(model, test_dataloader, loss_function)
 
         self.fabric.call("on_fit_end", self, model)
 
@@ -248,25 +254,25 @@ class BPTrainer(_base.BaseTrainer):
             # For multi-loss scenarios
             losses = {name: loss_fn(y_hat, y) for name, loss_fn in loss_function.items()}
             total_loss = sum(losses.values())
-            batch_results = {f"train_{name}_loss": loss.detach() for name, loss in losses.items()}
-            batch_results["train_loss"] = total_loss.detach()
+            outputs = {f"train_{name}_loss": loss.detach() for name, loss in losses.items()}
+            outputs["train_loss"] = total_loss.detach()
         else:
             # Single loss function
             total_loss = loss_function(y_hat, y)
-            batch_results = {"train_loss": total_loss.detach()}
+            outputs = {"train_loss": total_loss.detach()}
 
         # Backward pass with accumulated gradients
         if is_accumulating:
             # Accumulate gradients but don't optimize yet
-            self.backward(total_loss / self.grad_accum_steps)
+            self.backward(model, total_loss / self.grad_accum_steps)
         else:
             # Backward and optimize
-            self.backward(total_loss / self.grad_accum_steps)
-            self.optimizer_step(optimizer)
-            self.zero_grad(optimizer)
+            self.backward(model, total_loss / self.grad_accum_steps)
+            self.optimizer_step(model, optimizer)
+            self.zero_grad(model, optimizer)
 
-        self.fabric.call("on_train_batch_end", self, model, batch_results, batch, batch_idx)
-        return batch_results
+        self.fabric.call("on_train_batch_end", self, model, outputs, batch, batch_idx)
+        return outputs
 
     def train_epoch(
         self: "BPTrainer",
@@ -302,12 +308,13 @@ class BPTrainer(_base.BaseTrainer):
             if batch_idx >= num_batches:
                 break
 
-            batch_results = self.train_batch(model, batch, batch_idx, loss_function, optimizer)
+            # Process the batch
+            outputs = self.train_batch(model, batch, batch_idx, loss_function, optimizer)
 
             # Accumulate results
-            for key in batch_results:
+            for key in outputs:
                 if key in epoch_results:
-                    epoch_results[key] += batch_results[key]
+                    epoch_results[key] += outputs[key]
             epoch_results["steps"] += 1
 
         # Average metrics
@@ -315,7 +322,7 @@ class BPTrainer(_base.BaseTrainer):
             if key != "steps":
                 epoch_results[key] = epoch_results[key] / max(1, epoch_results["steps"])
 
-        self.fabric.call("on_train_epoch_end", self, model, epoch_results)
+        self.fabric.call("on_train_epoch_end", self, model)
         return epoch_results
 
     def validation_batch(
@@ -358,15 +365,15 @@ class BPTrainer(_base.BaseTrainer):
                 # For multi-loss scenarios
                 losses = {name: loss_fn(y_hat, y) for name, loss_fn in loss_function.items()}
                 total_loss = sum(losses.values())
-                batch_results = {f"val_{name}_loss": loss.detach() for name, loss in losses.items()}
-                batch_results["val_loss"] = total_loss.detach()
+                outputs = {f"val_{name}_loss": loss.detach() for name, loss in losses.items()}
+                outputs["val_loss"] = total_loss.detach()
             else:
                 # Single loss function
                 total_loss = loss_function(y_hat, y)
-                batch_results = {"val_loss": total_loss.detach()}
+                outputs = {"val_loss": total_loss.detach()}
 
-        self.fabric.call("on_validation_batch_end", self, model, batch_results, batch, batch_idx)
-        return batch_results
+        self.fabric.call("on_validation_batch_end", self, model, outputs, batch, batch_idx)
+        return outputs
 
     def validation_epoch(
         self: "BPTrainer",
@@ -400,12 +407,12 @@ class BPTrainer(_base.BaseTrainer):
             if batch_idx >= num_batches:
                 break
 
-            batch_results = self.validation_batch(model, batch, batch_idx, loss_function)
+            outputs = self.validation_batch(model, batch, batch_idx, loss_function)
 
             # Accumulate results
-            for key in batch_results:
+            for key in outputs:
                 if key in epoch_results:
-                    epoch_results[key] += batch_results[key]
+                    epoch_results[key] += outputs[key]
             epoch_results["steps"] += 1
 
         # Average metrics
@@ -413,7 +420,7 @@ class BPTrainer(_base.BaseTrainer):
             if key != "steps":
                 epoch_results[key] = epoch_results[key] / max(1, epoch_results["steps"])
 
-        self.fabric.call("on_validation_epoch_end", self, model, epoch_results)
+        self.fabric.call("on_validation_epoch_end", self, model)
         return epoch_results
 
     def test_batch(
@@ -456,15 +463,15 @@ class BPTrainer(_base.BaseTrainer):
                 # For multi-loss scenarios
                 losses = {name: loss_fn(y_hat, y) for name, loss_fn in loss_function.items()}
                 total_loss = sum(losses.values())
-                batch_results = {f"test_{name}_loss": loss.detach() for name, loss in losses.items()}
-                batch_results["test_loss"] = total_loss.detach()
+                outputs = {f"test_{name}_loss": loss.detach() for name, loss in losses.items()}
+                outputs["test_loss"] = total_loss.detach()
             else:
                 # Single loss function
                 total_loss = loss_function(y_hat, y)
-                batch_results = {"test_loss": total_loss.detach()}
+                outputs = {"test_loss": total_loss.detach()}
 
-        self.fabric.call("on_test_batch_end", self, model, batch_results, batch, batch_idx)
-        return batch_results
+        self.fabric.call("on_test_batch_end", self, model, outputs, batch, batch_idx)
+        return outputs
 
     def test_epoch(
         self: "BPTrainer",
@@ -492,12 +499,12 @@ class BPTrainer(_base.BaseTrainer):
 
         # Test for one epoch
         for batch_idx, batch in enumerate(test_dataloader):
-            batch_results = self.test_batch(model, batch, batch_idx, loss_function)
+            outputs = self.test_batch(model, batch, batch_idx, loss_function)
 
             # Accumulate results
-            for key in batch_results:
+            for key in outputs:
                 if key in epoch_results:
-                    epoch_results[key] += batch_results[key]
+                    epoch_results[key] += outputs[key]
             epoch_results["steps"] += 1
 
         # Average metrics
@@ -505,7 +512,7 @@ class BPTrainer(_base.BaseTrainer):
             if key != "steps":
                 epoch_results[key] = epoch_results[key] / max(1, epoch_results["steps"])
 
-        self.fabric.call("on_test_epoch_end", self, model, epoch_results)
+        self.fabric.call("on_test_epoch_end", self, model)
         return epoch_results
 
     def predict_batch(
@@ -539,10 +546,10 @@ class BPTrainer(_base.BaseTrainer):
             else:
                 y_hat = model(batch)
 
-            batch_results = {"predictions": y_hat.detach()}
+            outputs = {"predictions": y_hat.detach()}
 
-        self.fabric.call("on_predict_batch_end", self, model, batch_results, batch, batch_idx)
-        return batch_results
+        self.fabric.call("on_predict_batch_end", self, model, outputs, batch, batch_idx)
+        return outputs
 
     def predict_epoch(
         self: "BPTrainer",
@@ -565,8 +572,8 @@ class BPTrainer(_base.BaseTrainer):
 
         # Predict for the entire dataset
         for batch_idx, batch in enumerate(predict_dataloader):
-            batch_results = self.predict_batch(model, batch, batch_idx)
-            all_predictions.append(batch_results["predictions"])
+            outputs = self.predict_batch(model, batch, batch_idx)
+            all_predictions.append(outputs["predictions"])
 
         # Concatenate all predictions
         if all_predictions:
@@ -574,7 +581,7 @@ class BPTrainer(_base.BaseTrainer):
 
         epoch_results = {"predictions": all_predictions}
 
-        self.fabric.call("on_predict_epoch_end", self, model, epoch_results)
+        self.fabric.call("on_predict_epoch_end", self, model)
         return epoch_results
 
     def train(
@@ -605,7 +612,7 @@ class BPTrainer(_base.BaseTrainer):
         if scheduler is not None:
             self.step_scheduler(model, scheduler, level="epoch")
 
-        self.fabric.call("on_train_end", self, model, epoch_results)
+        self.fabric.call("on_train_end", self, model)
         return epoch_results
 
     def validation(
@@ -628,7 +635,7 @@ class BPTrainer(_base.BaseTrainer):
 
         epoch_results = self.validation_epoch(model, val_dataloader, loss_function)
 
-        self.fabric.call("on_validation_end", self, model, epoch_results)
+        self.fabric.call("on_validation_end", self, model)
         return epoch_results
 
     def test(
@@ -651,7 +658,7 @@ class BPTrainer(_base.BaseTrainer):
 
         epoch_results = self.test_epoch(model, test_dataloader, loss_function)
 
-        self.fabric.call("on_test_end", self, model, epoch_results)
+        self.fabric.call("on_test_end", self, model)
         return epoch_results
 
     def predict(
@@ -672,19 +679,21 @@ class BPTrainer(_base.BaseTrainer):
 
         epoch_results = self.predict_epoch(model, predict_dataloader)
 
-        self.fabric.call("on_predict_end", self, model, epoch_results)
+        self.fabric.call("on_predict_end", self, model)
         return epoch_results
 
     def backward(
         self: "BPTrainer",
+        model: nn.Module,
         loss: torch.Tensor,
     ) -> None:
         """Perform backward pass with the given loss.
 
         Args:
+            model: The model being trained.
             loss: The loss tensor to backpropagate.
         """
-        self.fabric.call("on_before_backward", self, loss)
+        self.fabric.call("on_before_backward", self, model, loss)
 
         # Use fabric's backward
         self.fabric.backward(loss)
@@ -693,18 +702,20 @@ class BPTrainer(_base.BaseTrainer):
         if self.clip_grad_norm is not None:
             self.fabric.clip_gradients(model=None, optimizer=None, max_norm=self.clip_grad_norm)
 
-        self.fabric.call("on_after_backward", self)
+        self.fabric.call("on_after_backward", self, model)
 
     def optimizer_step(
         self: "BPTrainer",
+        model: nn.Module,
         optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
     ) -> None:
         """Perform optimizer step.
 
         Args:
+            model: The model being trained.
             optimizer: Optimizer or dictionary of optimizers to step.
         """
-        self.fabric.call("on_before_optimizer_step", self, optimizer)
+        self.fabric.call("on_before_optimizer_step", self, model, optimizer)
 
         if isinstance(optimizer, dict):
             for opt in optimizer.values():
@@ -714,14 +725,16 @@ class BPTrainer(_base.BaseTrainer):
 
     def zero_grad(
         self: "BPTrainer",
+        model: nn.Module,
         optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
     ) -> None:
         """Zero gradients for the given optimizer.
 
         Args:
+            model: The model being trained.
             optimizer: Optimizer or dictionary of optimizers to zero gradients for.
         """
-        self.fabric.call("on_before_zero_grad", self, optimizer)
+        self.fabric.call("on_before_zero_grad", self, model, optimizer)
 
         if isinstance(optimizer, dict):
             for opt in optimizer.values():
@@ -747,7 +760,7 @@ class BPTrainer(_base.BaseTrainer):
         }
 
         # Allow callback to modify the checkpoint
-        self.fabric.call("on_save_checkpoint", self, checkpoint)
+        self.fabric.call("on_save_checkpoint", self, model, checkpoint)
 
         # Save the checkpoint
         self.fabric.save(path, checkpoint)
@@ -766,7 +779,7 @@ class BPTrainer(_base.BaseTrainer):
         checkpoint = self.fabric.load(path)
 
         # Allow callback to modify the checkpoint
-        self.fabric.call("on_load_checkpoint", self, checkpoint)
+        self.fabric.call("on_load_checkpoint", self, model, checkpoint)
 
         # Load model state
         _unwrap_objects(model).load_state_dict(checkpoint["model_state_dict"])
@@ -783,9 +796,9 @@ class BPTrainer(_base.BaseTrainer):
         """Steps the learning rate scheduler if necessary.
 
         Args:
-            model: The model to train
-            scheduler: The learning rate scheduler or dictionary of schedulers
-            level: whether we are trying to step on epoch- or step-level
+            model: The model being trained.
+            scheduler: The learning rate scheduler or dictionary of schedulers.
+            level: whether we are trying to step on epoch- or step-level.
         """
         if scheduler is None:
             return
