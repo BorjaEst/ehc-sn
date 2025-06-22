@@ -88,7 +88,7 @@ class BaseTrainer(ABC):
         """The main entrypoint of the trainer, triggering the actual training.
 
         Args:
-            Model: Model to train with the trainer.
+            model: Model to train with the trainer.
             data_module: Data module containing the training, validation, and test datasets.
             loss_function: Loss function or a dictionary of loss functions to use for training.
             optimizer: Optimizer or a dictionary of optimizers to use for training.
@@ -96,7 +96,11 @@ class BaseTrainer(ABC):
         """
         pass
 
-    def sanity_check(self, model: nn.Module, data_module: pl.LightningDataModule) -> None:
+    def sanity_check(
+        self,
+        model: nn.Module,
+        data_module: pl.LightningDataModule,
+    ) -> None:
         """Run a sanity check on the model before training.
 
         Args:
@@ -341,10 +345,15 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("predict method should be implemented in subclasses.")
 
-    def backward(self, loss: torch.Tensor) -> None:
+    def backward(
+        self,
+        model: nn.Module,
+        loss: torch.Tensor,
+    ) -> None:
         """Perform backward pass with the given loss.
 
         Args:
+            model: The model being trained.
             loss: The loss tensor to backpropagate.
         """
 
@@ -352,11 +361,13 @@ class BaseTrainer(ABC):
 
     def optimizer_step(
         self: "BaseTrainer",
+        model: nn.Module,
         optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
     ) -> None:
         """Perform optimizer step.
 
         Args:
+            model: The model being trained.
             optimizer: Optimizer or dictionary of optimizers to step.
         """
 
@@ -364,11 +375,13 @@ class BaseTrainer(ABC):
 
     def zero_grad(
         self: "BaseTrainer",
+        model: nn.Module,
         optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
     ) -> None:
         """Zero gradients for the given optimizer.
 
         Args:
+            model: The model being trained.
             optimizer: Optimizer or dictionary of optimizers to zero gradients for.
         """
 
@@ -384,7 +397,11 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("save_checkpoint method should be implemented in subclasses.")
 
-    def load_checkpoint(self, path: str, model: nn.Module) -> nn.Module:
+    def load_checkpoint(
+        self,
+        path: str,
+        model: nn.Module,
+    ) -> nn.Module:
         """Load a model from a checkpoint.
 
         Args:
@@ -397,7 +414,10 @@ class BaseTrainer(ABC):
 
         raise NotImplementedError("load_checkpoint method should be implemented in subclasses.")
 
-    def catch_exception(self, exception: BaseException) -> None:
+    def catch_exception(
+        self,
+        exception: BaseException,
+    ) -> None:
         """Handle an exception raised during training.
 
         Args:
