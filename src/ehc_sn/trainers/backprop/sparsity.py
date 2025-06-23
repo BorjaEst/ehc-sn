@@ -46,6 +46,10 @@ class SparsityBPTrainer(base.BaseTrainer):
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "val_loss"}
 
     # -----------------------------------------------------------------------------------
+    def on_before_batch_transfer(self, batch: Tuple[Tensor], dataloader_idx: int) -> Tuple[Tensor, Tensor]:
+        return batch[0], batch[0]  # Target is the reconstruction
+
+    # -----------------------------------------------------------------------------------
     def _common_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int) -> Dict[str, Any]:
         inputs, targets = batch
         outputs = self.model(inputs)
