@@ -38,25 +38,21 @@ class Generator(ABC, collections.abc.Iterator):
 class Dataset(torch.utils.data.IterableDataset):
     """Dataset for grid maps with obstacles and goal positions."""
 
-    def __init__(self, num_samples: int, generator: Generator):
+    def __init__(self, generator: Generator, batch_size: int = 32):
         """
         Initialize a dataset of grid maps with obstacles and goals.
 
         Args:
-            num_samples: Number of grid map samples to generate per iteration
             generator: Generator class to use for creating grid maps
+            batch_size: Number of samples to yield in each batch
         """
-        self.num_samples = num_samples
         self.generator = generator
+        self.batch_size = batch_size
 
     def __iter__(self) -> collections.abc.Iterator[Tuple[Tensor, ...]]:
         """Yield grid map samples on-the-fly."""
-        for _ in range(self.num_samples):
-            yield self.generator.__next__()
-
-    def __len__(self) -> int:
-        """Return the number of samples in the dataset."""
-        return self.num_samples
+        batch_zip = [self.generator.__next__() for _ in range(self.batch_size)]
+        yield tuple(torch.stack(x) for x in zip(*batch_zip))
 
 
 class DataModuleParams(BaseModel):
@@ -117,35 +113,26 @@ class DataModule(pl.LightningDataModule):
 
     def setup(self, stage: Optional[str] = None):
         """Setup the dataset for the given stage."""
-
-        if stage in (None, "fit", "validate"):
-            num_samples = int(self.params.num_samples * self.params.train_split)
-            self.train_dataset = Dataset(num_samples, self.generator)
-        if stage in (None, "validate"):
-            num_samples = int(self.params.num_samples * self.params.val_split)
-            self.val_dataset = Dataset(num_samples, self.generator)
-        if stage in (None, "test"):
-            num_samples = int(self.params.num_samples * self.params.test_split)
-            self.test_dataset = Dataset(num_samples, self.generator)
+        pass
 
     def train_dataloader(self):
         """Return the training dataloader."""
-        return self.params.gen_dataloader(self.train_dataset)
+        return Dataset(self.generator)
 
     def val_dataloader(self):
         """Return the validation dataloader."""
-        return self.params.gen_dataloader(self.val_dataset)
+        return Dataset(self.generator)
 
     def test_dataloader(self):
         """Return the test dataloader."""
-        return self.params.gen_dataloader(self.test_dataset)
+        return Dataset(self.generator)
 
 
 if __name__ == "__main__":
     # Example usage
     class MyGenerator(Generator):
         def __next__(self) -> Tuple[Tensor, ...]:
-            return (torch.randint(0, 2, (16, 16)), torch.randint(0, 10, [1]))
+            return (torch.randint(0, 2, (16, 16)), torch.randint(0, 10, [10]))
 
     # Create the parameters for the data loader
     datamodule_params = DataModuleParams(num_samples=100, batch_size=16, val_split=0.2, test_split=0.1)
