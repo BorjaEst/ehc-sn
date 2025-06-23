@@ -7,6 +7,7 @@ from lightning.fabric.utilities.types import _PATH
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import Logger
 from lightning.pytorch.strategies import Strategy
+from lightning.pytorch.utilities.types import OptimizerLRScheduler
 from pydantic import BaseModel, Field
 from torch import nn
 
@@ -221,7 +222,7 @@ class BaseTrainer(ABC, pl.LightningModule):
         self.model = model
 
     @abstractmethod
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> OptimizerLRScheduler:
         """Configure the optimizers for the model."""
         pass
 

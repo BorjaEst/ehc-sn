@@ -1,27 +1,18 @@
-from typing import Optional, Tuple
+from typing import Tuple
 
 import torch
-from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 
-class SparseLossParams(BaseModel):
-
-    model_config = {"extra": "forbid"}  # Forbid extra fields not defined in the model
-
-    sparsity_target: float = Field(default=0.05, description="Target activation rate for sparsity")
-    sparsity_weight: float = Field(default=0.1, description="Weight for sparsity loss term (beta)")
-
-
 class SparsityLoss(nn.Module):
-    def __init__(self, params: Optional[SparseLossParams] = None):
+    def __init__(self, sparsity_target: float = 0.05):
         super().__init__()
-        self.params = SparseLossParams() if params is None else params
+        self.sparsity_target = sparsity_target
 
     def forward(self, outputs: Tuple[Tensor, Tensor], targets: Tensor) -> Tensor:
         _, encodings = outputs
-        kl_div = self.kl_divergence(encodings.mean(dim=0), self.params.sparsity_target)
-        return self.params.sparsity_weight * torch.sum(kl_div)
+        kl_div = self.kl_divergence(encodings.mean(dim=0), self.sparsity_target)
+        return torch.sum(kl_div)
 
     @staticmethod
     def kl_divergence(input: Tensor, target: float, eps=1e-10) -> Tensor:

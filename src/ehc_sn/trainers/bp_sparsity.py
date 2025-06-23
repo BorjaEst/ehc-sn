@@ -1,29 +1,37 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 from lightning.pytorch.utilities.types import OptimizerLRSchedulerConfig
+from pydantic import Field
 from torch import Tensor, nn, optim
 from torch.nn import functional
 
+from ehc_sn.losses import autoencoders as loss_fns
 from ehc_sn.trainers import _base as base
 
 
 # -------------------------------------------------------------------------------------------
-class BPTrainerParams(base.TrainerParams):
+class SparsityBPTrainerParams(base.TrainerParams):
     """
-    Parameters for the BPtrainer model.
+    Parameters for the SparsityBPtrainer model.
     """
+
+    sparsity_target: float = Field(default=0.05, description="Target activation rate for sparsity")
+    sparsity_weight: float = Field(default=0.1, description="Weight for sparsity loss term (beta)")
 
 
 # -------------------------------------------------------------------------------------------
-class BPTrainer(base.BaseTrainer):
+class SparsityBPTrainer(base.BaseTrainer):
     """
-    Trainer class for backpropagation-based training.
+    Trainer class for sparsity backpropagation-based training.
     """
 
     # -----------------------------------------------------------------------------------
-    def __init__(self, model: nn.Module, params: Optional[BPTrainerParams] = None):
-        super().__init__(model, BPTrainerParams() if params is None else params)
-        self.loss_fn = functional.mse_loss
+    def __init__(self, model: nn.Module, params: Optional[SparsityBPTrainerParams] = None):
+        params = SparsityBPTrainerParams() if params is None else params
+        super().__init__(model, params)
+        self.loss_reconsturction = loss_fns.ReconstructionLoss()
+        self.loss_sparsity = loss_fns.SparsityLoss(params.sparsity_target)
+        self.sparsity_weight = params.sparsity_weight
 
     # -----------------------------------------------------------------------------------
     def configure_optimizers(self) -> OptimizerLRSchedulerConfig:
@@ -38,10 +46,16 @@ class BPTrainer(base.BaseTrainer):
         return {"optimizer": optimizer, "lr_scheduler": scheduler, "monitor": "val_loss"}
 
     # -----------------------------------------------------------------------------------
-    def _common_step(self, batch: Tuple[Tensor, Tensor], batch_nb: int) -> Dict[str, Any]:
+    def _common_step(self, batch: Tuple[Tensor, Tensor], batch_idx: int) -> Dict[str, Any]:
         inputs, targets = batch
         outputs = self.model(inputs)
-        return {"loss": self.loss_fn(outputs, targets)}
+        loss_reconstruction = self.loss_reconsturction(outputs, targets)
+        loss_sparsity = self.loss_sparsity(outputs, targets)
+        return {
+            "loss": loss_reconstruction + self.sparsity_weight * loss_sparsity,
+            "reconstruction_loss": loss_reconstruction,
+            "sparsity_loss": loss_sparsity,
+        }
 
     # -----------------------------------------------------------------------------------
     def training_step(self, batch: Tuple[Tensor, Tensor], batch_nb: int) -> Tensor:
@@ -93,24 +107,24 @@ if __name__ == "__main__":
     class Model(nn.Module):
         def __init__(self):
             super().__init__()
-            self.fc1 = nn.Linear(10, 30)
-            self.fc2 = nn.Linear(30, 5)
+            self.fc1 = nn.Linear(10, 50)
+            self.fc2 = nn.Linear(50, 10)
 
         def forward(self, x):
             x = functional.relu(self.fc1(x))
-            return self.fc2(x)
+            return self.fc2(x), x
 
     # Trainer example
     model = Model()  # Example model
-    trainer_params = BPTrainerParams(max_epochs=10, min_epochs=1)
-    trainer = BPTrainer(model, trainer_params)
+    trainer_params = SparsityBPTrainerParams(max_epochs=10, min_epochs=1)
+    trainer = SparsityBPTrainer(model, trainer_params)
 
     # DataLoader example
     class DummyData(pl.LightningDataModule):
         def __init__(self, batch_size: int = 32):
             super().__init__()
             self.batch_size = batch_size
-            self.xy = TensorDataset(torch.randn(100, 10), torch.randn(100, 5))
+            self.xy = TensorDataset(torch.randn(100, 10), torch.randn(100, 1))
 
         def train_dataloader(self):
             return DataLoader(self.xy, batch_size=self.batch_size)
