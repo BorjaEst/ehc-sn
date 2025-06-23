@@ -1,10 +1,10 @@
 import torch
+from lightning.pytorch.callbacks import RichModelSummary, RichProgressBar
+from lightning.pytorch.loggers import TensorBoardLogger
 from pydantic import BaseModel, Field
-from torch import optim
 
 from ehc_sn.data import cognitive_maps as data
 from ehc_sn.figures import cognitive_maps as figures
-from ehc_sn.losses import autoencoders as losses
 from ehc_sn.models import autoencoders as models
 from ehc_sn.models import decoders, encoders
 from ehc_sn.trainers.backprop import sparsity as trainers
@@ -29,8 +29,7 @@ class Parameters(BaseModel):
         description="Parameters for the data module",
         default_factory=lambda: data.DataModuleParams(
             num_samples=1000,  # Total number of samples to generate
-            num_workers=14,  # Number of workers for data loading
-            batch_size=4,  # Batch size for training and testing
+            batch_size=32,  # Batch size for training and testing
             val_split=0.2,  # Fraction of data to use for validation
             test_split=0.1,  # Fraction of data to use for testing
         ),
@@ -55,8 +54,8 @@ class Parameters(BaseModel):
             max_epochs=20,  # Maximum number of epochs for training
             sparsity_target=0.05,  # Target activation rate for sparsity
             sparsity_weight=0.1,  # Weight for sparsity loss term (beta)
-            # callbacks=[],
-            # loggers=[],
+            callbacks=[RichModelSummary(), RichProgressBar()],  # Callbacks for training
+            logger=TensorBoardLogger("logs", name="autoencoder"),  # Logger for training
         ),
     )
     figure: figures.CompareMapsFigParam = Field(
