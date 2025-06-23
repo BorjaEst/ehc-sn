@@ -4,7 +4,7 @@ from torch import optim
 
 from ehc_sn.data import cognitive_maps as data
 from ehc_sn.figures import cognitive_maps as figures
-from ehc_sn.hooks import TqdmProgress, datahooks
+from ehc_sn.hooks import TensorBoardLogger, TqdmProgress, datahooks
 from ehc_sn.losses import autoencoders as losses
 from ehc_sn.models import autoencoders as models
 from ehc_sn.models import decoders, encoders
@@ -60,6 +60,9 @@ class Parameters(BaseModel):
                 datahooks.AppendToBatch(),
                 TqdmProgress(),
             ],
+            loggers=[
+                TensorBoardLogger("logs"),
+            ],
         ),
     )
     figure: figures.CompareMapsFigParam = Field(
@@ -108,26 +111,18 @@ scheduler = optim.lr_scheduler.ReduceLROnPlateau(
     patience=5,  # Number of epochs with no improvement after which learning rate will be reduced
 )
 
+# Train the model
+print("Training autoencoder...")
+trainer.fit(model, data_module, loss_functions, optimizer, scheduler)
+print("Training completed!")
 
-# Ensure the model is in training mode
-try:
-    # Train the model
-    print("Training autoencoder...")
-    trainer.fit(model, data_module, loss_functions, optimizer, scheduler)
-    print("Training completed!")
-
-except Exception as e:
-    print(f"An error occurred during training or testing: {e}")
-
-finally:
-    # Run and get some predictions
-    print("Running predictions...")
-    # Get a batch of test data
-    (test_batch,) = next(iter(data_module.test_dataloader()))
-    model.to(device=test_batch.device)  # Ensure model is on the same device as the data
-    with torch.no_grad():
-        reconstructed, _ = model(test_batch)
-
+# Run and get some predictions
+print("Running predictions...")
+# Get a batch of test data
+(test_batch,) = next(iter(data_module.test_dataloader()))
+model.to(device=test_batch.device)  # Ensure model is on the same device as the data
+with torch.no_grad():
+    reconstructed, _ = model(test_batch)
 
 # Visualize the results
 print("Visualizing results...")
