@@ -1,5 +1,36 @@
 # The Entorhinal-Hippocampal Circuit
 
+## Medial Entorhinal Cortex (EC)
+
+The entorhinal cortex serves as the main interface between the hippocampus and neocortex. It's crucial for memory, navigation, and time perception.
+Divided into medial (MEC) and lateral (LEC) regions, this application studies the MEC circuit.
+
+### Layer II
+
+- Grid cells, Boundary cells
+- Attractor dynamics
+- EHC Inputs: [MEC Vb]
+
+### MEC Layer III
+
+- Speed cells, head direction cells, boundary
+- Major gateway from the neocortex to the hippocampus.
+- EHC Inputs: [MEC Vb]
+
+### MEC Layer Va
+
+- Lower excitability, integrator cells
+- Project to neocortex (other brain areas)
+- EHC Inputs: [MEC Vb]
+
+### MEC Layer Vb
+
+- Higher excitability, input receiver
+- Input receiver from hippocampus
+- EHC Inputs: [MEC II, CA1, Subiculum]
+
+### MEC Layer VI
+
 ## Hippocampal Subfields
 
 The hippocampus contains several distinct regions that form the trisynaptic circuit:
@@ -55,34 +86,3 @@ Compares “expected” (CA3-memories) with “actual” sensory information (EC
 - Early Alzheimer's disease affects the entorhinal cortex, particularly its lateral region
 - EC stimulation can improve spatial memory and navigation abilities
 - The subiculum is implicated in epilepsy and the spread
-
-## Medial Entorhinal Cortex (EC)
-
-The entorhinal cortex serves as the main interface between the hippocampus and neocortex. It's crucial for memory, navigation, and time perception.
-Divided into medial (MEC) and lateral (LEC) regions, this application studies the MEC circuit.
-
-### Layer II
-
-- Grid cells, Boundary cells
-- Attractor dynamics
-- EHC Inputs: [MEC Vb]
-
-### MEC Layer III
-
-- Speed cells, head direction cells, boundary
-- Major gateway from the neocortex to the hippocampus.
-- EHC Inputs: [MEC Vb]
-
-### MEC Layer Va
-
-- Lower excitability, integrator cells
-- Project to neocortex (other brain areas)
-- EHC Inputs: [MEC Vb]
-
-### MEC Layer Vb
-
-- Higher excitability, input receiver
-- Input receiver from hippocampus
-- EHC Inputs: [MEC II, CA1, Subiculum]
-
-### MEC Layer VI
