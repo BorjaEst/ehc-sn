@@ -7,11 +7,11 @@ from matplotlib.axes import Axes
 from pydantic import BaseModel, Field, field_validator
 
 from ehc_sn.constants import CognitiveMap, ObstacleMap, ValueMap
-from ehc_sn.data import grid_maps
+from ehc_sn.data import obstacle_maps
 from ehc_sn.data._base import DataModule, DataModuleParams
 
 
-class GeneratorParams(grid_maps.GeneratorParams):
+class GeneratorParams(obstacle_maps.GeneratorParams):
     """Parameters for generating maze-like cognitive maps with probability distributions."""
 
     diffusion_iterations: int = Field(default=3, description="Number of diffusion iterations to apply to walls")
@@ -40,7 +40,7 @@ class GeneratorParams(grid_maps.GeneratorParams):
         return v
 
 
-class Generator(grid_maps.Generator):
+class Generator(obstacle_maps.Generator):
     """Generates cognitive maps with maze-like structures and diffused walls."""
 
     def __init__(self, params: Optional[GeneratorParams] = None):
@@ -116,7 +116,7 @@ class Generator(grid_maps.Generator):
         return (cognitive_map,)
 
 
-class PlotMapParams(grid_maps.PlotMapParams):
+class PlotMapParams(obstacle_maps.PlotMapParams):
     """Parameters for plotting cognitive maps on an axis."""
 
     model_config = {"extra": "forbid"}  # Pydantic v2 way to forbid extra fields
@@ -145,7 +145,7 @@ def plot(axs: List[Axes], grid: CognitiveMap, params: Optional[PlotMapParams] = 
     params = PlotMapParams() if params is None else params
 
     # Plot in the first available axis the obstacle map
-    grid_maps.plot(axs[0], grid[0, :, :], params)
+    obstacle_maps.plot(axs[0], grid[0, :, :], params)
 
     # TODO: Add more channels, for speed, trajectories, head direction, etc.
     pass

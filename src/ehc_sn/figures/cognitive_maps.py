@@ -116,9 +116,9 @@ class CompareCognitiveMaps(CognitiveMapFigure):
 
     def _plot_single_map(self, row, col, idx, cognitive_map, obstacle_map):
         # Plot the obstacle map
-        obstacle_plot_params = data.grid_maps.PlotMapParams()
+        obstacle_plot_params = data.obstacle_maps.PlotMapParams()
         obs_ax = self.axes[row, col]
-        data.grid_maps.plot(obs_ax, obstacle_map, obstacle_plot_params)
+        data.obstacle_maps.plot(obs_ax, obstacle_map, obstacle_plot_params)
         obs_ax.set_title(f"Obstacles {idx + 1}")
 
         # Plot the cognitive map
