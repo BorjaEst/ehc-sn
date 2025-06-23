@@ -3,8 +3,8 @@ import random
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple, Type
 
+import lightning.pytorch as pl
 import numpy as np
-import pytorch_lightning as pl
 import torch
 from pydantic import BaseModel, Field, field_validator, model_validator
 from torch import Tensor

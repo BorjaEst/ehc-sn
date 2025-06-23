@@ -1,7 +1,7 @@
 from typing import List, Optional, Tuple, Union
 
 import torch
-from pytorch_lightning.callbacks import Callback
+from lightning.pytorch.callbacks import Callback
 from torch import Tensor, cat
 
 
@@ -103,7 +103,7 @@ class AppendToBatch(Callback):
 
 
 if __name__ == "__main__":
-    import pytorch_lightning as pl
+    import lightning.pytorch as pl
 
     # Example usage of the InvertProbCallback
     callback = InvertProb(positions=[0])  # Invert probabilities at position 0
