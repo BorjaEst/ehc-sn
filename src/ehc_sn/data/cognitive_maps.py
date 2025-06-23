@@ -6,12 +6,12 @@ import torch
 from matplotlib.axes import Axes
 from pydantic import BaseModel, Field, field_validator
 
-import ehc_sn.data.grid_maps as _base
-from ehc_sn.constants import CognitiveMap, ObstacleMap
+from ehc_sn.constants import CognitiveMap, ObstacleMap, ValueMap
+from ehc_sn.data import grid_maps
 from ehc_sn.data._base import DataModule, DataModuleParams
 
 
-class GeneratorParams(_base.GeneratorParams):
+class GeneratorParams(grid_maps.GeneratorParams):
     """Parameters for generating maze-like cognitive maps with probability distributions."""
 
     diffusion_iterations: int = Field(default=3, description="Number of diffusion iterations to apply to walls")
@@ -40,7 +40,7 @@ class GeneratorParams(_base.GeneratorParams):
         return v
 
 
-class Generator(_base.Generator):
+class Generator(grid_maps.Generator):
     """Generates cognitive maps with maze-like structures and diffused walls."""
 
     def __init__(self, params: Optional[GeneratorParams] = None):
@@ -50,7 +50,7 @@ class Generator(_base.Generator):
         self.diffusion_strength = params.diffusion_strength
         self.noise_level = params.noise_level
 
-    def _apply_diffusion(self, grid: CognitiveMap) -> CognitiveMap:
+    def _apply_diffusion(self, grid: ValueMap) -> ValueMap:
         import torch.nn.functional as F
 
         if not isinstance(grid, torch.Tensor):
@@ -76,7 +76,7 @@ class Generator(_base.Generator):
         # Remove extra dimensions
         return diffused_grid.squeeze(0).squeeze(0)
 
-    def _add_noise(self, grid: CognitiveMap) -> CognitiveMap:
+    def _add_noise(self, grid: ValueMap) -> ValueMap:
         """Add random noise to the cognitive map."""
         if not isinstance(grid, torch.Tensor):
             grid = torch.tensor(grid, dtype=torch.float32)
@@ -89,29 +89,30 @@ class Generator(_base.Generator):
 
         return noisy_grid
 
-    def _preprocess_grid(self, obstacle_map: ObstacleMap) -> Tuple[CognitiveMap]:
+    def _preprocess_grid(self, obstacle_map: ObstacleMap) -> ValueMap:
         """Convert binary obstacle map to probability distribution."""
         return 1.0 - obstacle_map
 
-    def __next__(self) -> CognitiveMap:
+    def __next__(self) -> Tuple[CognitiveMap]:
         """
         Generate a maze-like cognitive map with diffused walls.
 
         Returns:
             A cognitive map tensor with probability values (0.0 to 1.0).
         """
+        cognitive_map = torch.zeros([1, *self.grid_size], dtype=torch.float32)
+
         # Generate base maze structure using the grid_maps generator
-        (obstacle_map,) = super().__next__()  # Take only the input grid
+        (obstacle_layer, *_) = super().__next__()  # Take only the input grid
+        obstacle_layer = self._preprocess_grid(obstacle_layer)  # Convert to probability values
+        obstacle_layer = self._apply_diffusion(obstacle_layer)  # Apply diffusion
+        obstacle_layer = self._add_noise(obstacle_layer)  # Add noise
 
-        # Convert binary obstacle map to probability values
-        cognitive_map = self._preprocess_grid(obstacle_map)
+        # TODO: Add more channels, for speed, trajectories, head direction, etc.
+        pass
 
-        # Apply diffusion to create blurred boundaries
-        cognitive_map = self._apply_diffusion(cognitive_map)
-
-        # Add noise for more realistic cognitive representation
-        cognitive_map = self._add_noise(cognitive_map)
-
+        # Reshape to cognitive map format and return
+        cognitive_map[0, :, :] = obstacle_layer  # First channel is the obstacle layer
         return (cognitive_map,)
 
 
@@ -132,36 +133,22 @@ class PlotMapParams(BaseModel):
         return dict(self.model_dump(exclude={"title"}))
 
 
-def plot(ax: Axes, grid: CognitiveMap, params: Optional[PlotMapParams] = None) -> None:
+def plot(axs: List[Axes], grid: CognitiveMap, params: Optional[PlotMapParams] = None) -> None:
     """Adds a cognitive map visualization to the given axis.
 
     Args:
-        ax: Matplotlib axis to plot on
+        axs: Matplotlib list of axis to plot on
         grid: CognitiveMap containing probability distribution
         params: Cognitive map visualization params
     """
     params = params or PlotMapParams()
 
-    # Extract cognitive map data
-    if isinstance(grid, torch.Tensor):
-        cog_data = grid.detach().cpu().numpy()
-    else:
-        cog_data = np.array(grid)
+    # Plot in the first available axis the obstacle map
+    obstacles_params = grid_maps.PlotMapParams(cbar=True)
+    grid_maps.plot(axs[0], grid[0, :, :], obstacles_params)
 
-    # Plot the heatmap
-    sns.heatmap(cog_data, ax=ax, cbar=True, **params.kwargs)
-
-    # Set title if provided
-    if params.title:
-        ax.set_title(params.title)
-
-    # Remove axis ticks for cleaner look
-    ax.set_xticks([])
-    ax.set_yticks([])
-
-    # Add visual boundary to differentiate between subplots
-    for spine in ax.spines.values():
-        spine.set_visible(True)
+    # TODO: Add more channels, for speed, trajectories, head direction, etc.
+    pass
 
 
 # Example usage of the DataModule and plotting function
@@ -179,8 +166,8 @@ if __name__ == "__main__":
     # Visualize the generated map
     import matplotlib.pyplot as plt
 
-    fig, axs = plt.subplots(2, 3, figsize=(12, 8))
-    for ax, sample in zip(axs.flatten(), data_module.train_dataset):
-        plot(ax, sample[0])  # sample[0] is the cognitive map
+    fig, axs = plt.subplots(3, 2, figsize=(12, 8))
+    for axs_, sample in zip(axs, data_module.train_dataset):
+        plot(axs_, sample[0])  # sample[0] is the cognitive map
 
     plt.show()

@@ -126,6 +126,7 @@ class PlotMapParams(BaseModel):
     model_config = {"extra": "forbid"}  # Pydantic v2 way to forbid extra fields
 
     cmap: str = Field(default="binary", description="Colormap for the grid map")
+    cbar: bool = Field(default=False, description="Whether to show color bar")
     annot: bool = Field(default=False, description="Whether to annotate cells")
     title: Optional[str] = Field(default=None, description="Title for the plot")
 
@@ -155,7 +156,7 @@ def plot(ax: Axes, grid: ObstacleMap, params: Optional[PlotMapParams] = None) ->
         obstacles_data = np.array(grid)
 
     # Plot the heatmap
-    sns.heatmap(obstacles_data, ax=ax, cbar=False, **params.kwargs)
+    sns.heatmap(obstacles_data, ax=ax, **params.kwargs)
 
     # Set title if provided
     if params.title:
