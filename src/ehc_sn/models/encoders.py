@@ -62,12 +62,18 @@ class Encoder(nn.Module):
             params.activation_fn(),
             nn.Conv2d(2 * c_hid, 2 * c_hid, kernel_size=3, padding=1, stride=2),  # 8x8 => 4x4
             params.activation_fn(),
-            nn.Flatten(),  # Image grid to single feature vector
+        )
+        self.flatten = nn.Flatten()  # Flatten the output of the convolutional layers
+        self.linear = nn.Sequential(
             nn.Linear(2 * c_hid * prod(self.spatial_dimensions) // 64, params.latent_dim),
+            nn.ReLU(),  # Activation after linear layer
         )
 
     def forward(self, x):
-        return self.net(x)
+        x = self.net(x)  # Pass through convolutional layers
+        x = self.flatten(x)  # Flatten the output to a single feature vector
+        x = self.linear(x)  # Pass through linear layer to get embedding
+        return x
 
     @property
     def input_shape(self) -> Tuple[int, int, int]:
@@ -92,7 +98,7 @@ class Encoder(nn.Module):
     @property
     def latent_dim(self) -> int:
         """Returns the dimensionality of the latent representation."""
-        return self.net[-1].out_features
+        return self.linear[-2].out_features
 
 
 # Example usage of the Encoder class
