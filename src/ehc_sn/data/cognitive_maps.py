@@ -116,12 +116,13 @@ class Generator(grid_maps.Generator):
         return (cognitive_map,)
 
 
-class PlotMapParams(BaseModel):
+class PlotMapParams(grid_maps.PlotMapParams):
     """Parameters for plotting cognitive maps on an axis."""
 
     model_config = {"extra": "forbid"}  # Pydantic v2 way to forbid extra fields
 
     cmap: str = Field(default="gray", description="Colormap for the cognitive map")
+    cbar: bool = Field(default=True, description="Whether to show color bar")
     annot: bool = Field(default=False, description="Whether to annotate cells")
     title: Optional[str] = Field(default=None, description="Title for the plot")
     vmin: float = Field(default=0.0, description="Minimum value for colormap scaling")
@@ -141,11 +142,10 @@ def plot(axs: List[Axes], grid: CognitiveMap, params: Optional[PlotMapParams] = 
         grid: CognitiveMap containing probability distribution
         params: Cognitive map visualization params
     """
-    params = params or PlotMapParams()
+    params = PlotMapParams() if params is None else params
 
     # Plot in the first available axis the obstacle map
-    obstacles_params = grid_maps.PlotMapParams(cbar=True)
-    grid_maps.plot(axs[0], grid[0, :, :], obstacles_params)
+    grid_maps.plot(axs[0], grid[0, :, :], params)
 
     # TODO: Add more channels, for speed, trajectories, head direction, etc.
     pass

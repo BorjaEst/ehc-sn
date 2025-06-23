@@ -16,9 +16,9 @@ class GeneratorParams(_base.GeneratorParams):
     """Parameters for generating grid maps with obstacles and goal positions."""
 
     grid_size: GridSize = Field(default=(16, 16), description="Size of the grid as (height, width)")
-    obstacle_density: float = Field(default=0.2, description="Probability of a cell being an obstacle (0.0-1.0)")
-    min_obstacles: int = Field(default=5, description="Minimum number of obstacles to generate")
-    max_obstacles: int = Field(default=15, description="Maximum number of obstacles to generate")
+    obstacle_density: float = Field(default=0.4, description="Probability of a cell being an obstacle (0.0-1.0)")
+    min_obstacles: Optional[int] = Field(default=None, description="Minimum number of obstacles to generate")
+    max_obstacles: Optional[int] = Field(default=None, description="Maximum number of obstacles to generate")
     obstacle_size_range: Tuple[int, int] = Field(default=(1, 3), description="Range of obstacle sizes (min, max)")
 
     @field_validator("obstacle_density")
@@ -106,7 +106,9 @@ class Generator(_base.Generator):
         grid = torch.zeros(self.grid_size, dtype=torch.float32)
 
         # Add random obstacle clusters
-        num_obstacles = random.randint(self.min_obstacles, self.max_obstacles)
+        min_obstacles = self.min_obstacles or 0
+        max_obstacles = self.max_obstacles or int(self.grid_size[0] * self.grid_size[1] * self.obstacle_density)
+        num_obstacles = random.randint(min_obstacles, max_obstacles)
         for _ in range(num_obstacles):
             grid = self._add_random_obstacle_cluster(grid)
 
@@ -133,7 +135,7 @@ class PlotMapParams(BaseModel):
     @property
     def kwargs(self) -> Dict[str, Any]:
         """Return params as a dictionary for seaborn heatmap."""
-        return dict(self.model_dump(exclude={"title"}))
+        return self.model_dump(exclude={"title"})
 
 
 def plot(ax: Axes, grid: ObstacleMap, params: Optional[PlotMapParams] = None) -> None:
@@ -147,7 +149,7 @@ def plot(ax: Axes, grid: ObstacleMap, params: Optional[PlotMapParams] = None) ->
     Returns:
         The matplotlib axis with the plot
     """
-    params = params or PlotMapParams()
+    params = PlotMapParams() if params is None else params
 
     # Extract obstacle map
     if isinstance(grid, torch.Tensor):
