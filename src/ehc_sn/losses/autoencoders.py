@@ -15,9 +15,9 @@ class SparsityLoss(nn.Module):
         return torch.sum(kl_div)
 
     @staticmethod
-    def kl_divergence(input: Tensor, target: float, eps=1e-10) -> Tensor:
-        kl = input * torch.log((input + eps) / (target + eps))
-        kl += (1 - input) * torch.log((1 - input + eps) / (1 - target + eps))
+    def kl_divergence(inputs: Tensor, target: float, eps=1e-10) -> Tensor:
+        kl = inputs * torch.log((inputs + eps) / (target + eps))
+        kl += (1 - inputs) * torch.log((1 - inputs + eps) / (1 - target + eps))
         return torch.sum(kl)
 
 
