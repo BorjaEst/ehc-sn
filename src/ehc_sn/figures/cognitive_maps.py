@@ -124,7 +124,7 @@ class CompareCognitiveMaps(CognitiveMapFigure):
         # Plot the cognitive map
         cognitive_plot_params = data.cognitive_maps.PlotMapParams()
         cog_ax = self.axes[row, col + 1]
-        data.cognitive_maps.plot(cog_ax, cognitive_map, cognitive_plot_params)
+        data.cognitive_maps.plot([cog_ax], cognitive_map, cognitive_plot_params)
         cog_ax.set_title(f"Cognitive Map {idx + 1}")
 
     def _hide_unused_axes(self, num_maps: int, total_rows: int, total_cols: int) -> None:
