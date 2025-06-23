@@ -9,15 +9,15 @@ from ehc_sn.models.encoders import Encoder, EncoderParams
 
 def validate_dimensions(encoder: Encoder, decoder: Decoder) -> None:
     """Validate that encoder and decoder dimensions are compatible."""
-    if encoder.embedding_dim != decoder.embedding_dim:
+    if encoder.input_shape != decoder.input_shape:
         raise ValueError(
-            f"Output dimension of encoder ({encoder.embedding_dim}) "
-            f"does not match input dimension of decoder ({decoder.embedding_dim})."
+            f"Input shape of encoder ({encoder.input_shape}) "
+            f"does not match input shape of decoder ({decoder.input_shape})."
         )
-    if encoder.feature_dims != decoder.feature_dims:
+    if encoder.latent_dim != decoder.latent_dim:
         raise ValueError(
-            f"Input feature dimensions of encoder ({encoder.feature_dims}) "
-            f"do not match output feature dimensions of decoder ({decoder.feature_dims})."
+            f"Latent dimension of encoder ({encoder.latent_dim}) "
+            f"does not match embedding dimension of decoder ({decoder.latent_dim})."
         )
 
 
@@ -39,43 +39,46 @@ class Autoencoder(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
 
-    @property
-    def feature_dims(self) -> List[int]:
-        return self.encoder.feature_dims
-
-    @property
-    def embedding_dim(self) -> int:
-        return self.encoder.embedding_dim
-
     def forward(self, x: Tensor, *args: Any) -> Tuple[Tensor, Tensor]:
         embedding = self.encoder(x)
         reconstruction = self.decoder(embedding)
         return reconstruction, embedding
 
-    def embedding(self, x: Tensor) -> Tensor:
-        """Extract the embedding from the input data."""
-        return self.encoder(x)
+    @property
+    def input_shape(self) -> Tuple[int, int, int]:
+        """Returns the shape of the input feature map."""
+        return self.encoder.input_shape
+
+    @property
+    def input_channels(self) -> int:
+        """Returns the number of input channels."""
+        return self.encoder.input_channels
+
+    @property
+    def spatial_dimensions(self) -> Tuple[int, int]:
+        """Returns the output shape as (height, width)."""
+        return self.encoder.spatial_dimensions
+
+    @property
+    def latent_dim(self) -> int:
+        """Returns the dimensionality of the latent representation."""
+        return self.encoder.latent_dim
 
 
 # Example usage of the Autoencoder
 if __name__ == "__main__":
-    # Define parameters for a simple model that works with 10x10 spatial maps
-    feature_dims = [10, 10]  # 10x10 grid maps
-    embedding_dim = 32  # 32-dimensional latent space
 
-    # Encoder: 10x10 grid -> flatten to 100 -> hidden layer 64 -> embedding 32
+    # Encoder: 16x16 grid -> embedding of to 32
     encoder_params = EncoderParams(
-        feature_dims=feature_dims,
-        embedding_dim=embedding_dim,
-        dims=[100, 64, embedding_dim],
+        input_shape=(1, 16, 32),
+        latent_dim=32,
     )
     encoder = Encoder(encoder_params)
 
-    # Decoder: embedding 32 -> hidden layer 64 -> flattened output 100 -> reshape to 10x10
+    # Decoder: embedding 32 -> reconstruct to 16x16 grid
     decoder_params = DecoderParams(
-        feature_dims=feature_dims,
-        embedding_dim=embedding_dim,
-        dims=[embedding_dim, 64, 100],
+        input_shape=(1, 16, 32),
+        latent_dim=32,
     )
     decoder = Decoder(decoder_params)
 
@@ -83,7 +86,7 @@ if __name__ == "__main__":
     autoencoder = Autoencoder(encoder, decoder)
 
     # Create a sample batch of 4 grid maps
-    sample_maps = torch.rand(4, *feature_dims)
+    sample_maps = torch.rand(4, *autoencoder.input_shape)
 
     # Forward pass through the autoencoder
     reconstructions, embeddings = autoencoder(sample_maps)
@@ -99,6 +102,6 @@ if __name__ == "__main__":
     print(f"  - Reconstruction loss: {mse_loss.item():.6f}")
 
     # Verify shapes match expected
-    assert embeddings.shape == (4, embedding_dim)
-    assert reconstructions.shape == sample_maps.shape
+    assert embeddings.shape == (4, autoencoder.latent_dim)
+    assert reconstructions.shape == (4, *autoencoder.input_shape)
     print("Autoencoder works as expected!")
