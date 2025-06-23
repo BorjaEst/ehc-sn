@@ -1,74 +1,348 @@
-# GitHub Copilot Instructions
+# Comprehensive Instructions for Entorhinal-Hippocampal Circuit Modeling
 
-This file establishes guidelines for using GitHub Copilot in the "Entorhinal-Hippocampal Complex (EHC) Spatial Navigation" Python library.
+## Overview & Overall Goal
 
-## Overview
-- Provides guidance for Python code suggestions related to EHC spatial navigation models
-- Serves as a central reference for development standards in neuroscience modeling
-- Focuses on biologically plausible learning mechanisms and neural representations
-- Supports the development of a PyPI-distributed library (`pip install ehc-sn`)
+Develop a Python library to model the entorhinal-hippocampal circuit for spatial navigation and memory functions, including:
+
+- Pattern separation: Decoding distinct cognitive maps from overlapping inputs
+- Completion: Recovering full cognitive maps from partial inputs
+
+This library will:
+
+- Support training using Backpropagation (BP) and Direct Random Target Projection (DRTP)
+- Integrate key regions of the entorhinal-hippocampal circuit to simulate information flow
+- Be distributed via PyPI (`pip install ehc-sn`)
+- Provide network definition and parameters via TOML files loaded with Pydantic 2
+- Focus on forward learning mechanisms and neural representations
 
 ## Project Structure
+
 - `pyproject.toml` - Package configuration and build settings
 - `src/ehc_sn/` - Main package source code
   - `VERSION` - File containing the current version number
-  - `mec` - Medial entorhinal cortex model and components
-  - `hpc` - Hippocampus model and components
-  - `stdp/` - Plasticity mechanisms
-  - `autoencoder/` - Autoencoder components
-  - `utils/` - Utility functions
-- `requirements.txt` - Core package dependencies
+  - `config/` - TOML files for library configuration (parameters, etc.)
+  - `constants/` - Constants and types definitions (Enums, literals, types, etc.)
+  - `core/` - Implementation of core library components (neurons, synapses, etc.)
+  - `data/` - Data module for generating and managing Lightning data modules (cognitive maps, grid maps, etc.)
+  - `figures/` - Module containing figure classes to visualize experiment results
+  - `hooks/` - Custom hooks for Fabric trainers (classes inherit from lightning.pytorch.callbacks.Callback)
+  - `losses/` - Custom loss modules for the library (e.g., reconstruction loss, error loss)
+  - `models/` - Implementation of library models (CANModel, Autoencoder, etc.)
+  - `trainers/` - Custom trainers for the library (e.g., Fabric trainers for Backpropagation and DRTP)
+  - `utils/` - Utility functions for the library
+  - `parameters.py` - Global parameters for synapses types, neuron types, etc.
+  - `settings.py` - Global settings and configurations
+  - `simulations.py` - Class functions for running simulations
 - `requirements-dev.txt` - Development dependencies
-- `docs/` - Documentation based in md format
+- `requirements.txt` - Core package dependencies
 - `tests/` - Unit and integration tests
-- `tools/` - Utility scripts for development (e.g., data generation, visualization, etc.)
-- `.github/` - GitHub workflows and templates
 
-## Python-Specific Guidelines
-- Follow PEP 8 style guidelines for Python code
-- Use `__init__.py` to define the package or subpackage public API without actual implementations
-- Place comprehensive NumPy docstring format documentation in `__init__.py` files for all public interfaces
-- Use non `__init__.py` files for the actual implementations of functions and classes
-- Use comments on non `__init__.py` files instead of docstrings to help Copilot understand cross-file references and key concepts
+### Config Direct
+
+- This directory should contain TOML files for library configuration
+- It does not contain any code, only configuration files
+
+### Constants Module
+
+- This module should contain constants and types definitions
+- It should include Enums, literals, and type definitions for the library
+- It should be used to define constants for neuron types, synapse types, and other fixed parameters
+- It should be used to define types for parameters and configurations
+
+### Core Module
+
+- This module should implement core library components such as neurons, synapses, and other fundamental building blocks
+- It should include neuron models, synapse models, and other essential components for the entorhinal-hippocampal circuit
+- It should provide a foundation for building more complex models and experiments
+- It should be structured to allow easy extension and modification of core components
+
+### Data Module
+
+- Provide generatators and lightning data modules for obstacle and cognitive maps.
+- Include plot generators for visualizing generated data (to be used on figures module)
+- Plot generators should accept axes as input and generate plots on those axes
+- Visualization should be implemented using Seaborn and Matplotlib
+
+### Figures Module
+
+- Provide functionality to visualize cognitive maps and model performance
+- Implement visualization objects using Matplotlib and Seaborn
+- Structure with:
+
+1. Proper separation of plotting functions and figure classes
+2. Consistent use of Pydantic for parameter management
+3. Good handling of tensor conversion and visualization options
+4. Comprehensive visualization capabilities for different map types
+
+- Design figure classes that:
+
+1. Encapsulate plotting logic and parameters into a single object
+2. Initialize subplot figure and axes in the constructor
+3. Have a specific and fixed title
+
+- Plot generators should accept axes as input and generate plots on those axes
+
+### Hooks Module
+
+- This module should contain custom hooks for Fabric trainers
+- Classes should inherit from `lightning.pytorch.callbacks.Callback`
+- Hooks should be designed to integrate with Fabric's training loop and provide custom behavior during training, validation, and testing
+- Hooks should be reusable and configurable to allow for different behaviors in different training scenarios
+
+### Losses Module
+
+- This module should contain submodules for different types of scenarios (e.g., autoencoders, reconstruction tasks)
+- Each submodule should implement a specific loss function relevant to the scenario
+- Loss functions should be designed to work with the entorhinal-hippocampal circuit models
+- Losses should be implemented as PyTorch modules to integrate seamlessly with the training process
+
+### Models Module
+
+- This module should implement the library models, such as CANModel, Autoencoder, and other relevant models
+- Each model should encapsulate the structure and behavior of the entorhinal-hippocampal circuit
+- Models should be designed to support both training and inference modes
+- Models should be modular and extensible to allow for future enhancements and variations
+- Submodule autoencoder serves as a baseline for evaluation, implementing a general sparse autoencoder
+
+### Trainers Module
+
+- This module should contain submodules for different training scenarios (e.g., Backpropagation, Direct Random Target Projection)
+- Each submodule should implement a specific training strategy
+- Trainers should be designed to work with Fabric and integrate with the library's models and losses
+- Trainers call for appropriate callback hooks to ensure proper integration with Fabric's training loop
+
+When implementing custom trainers with Fabric, ensure each method calls appropriate callback hooks:
+
+| Method                             | Starting Hook               | Ending Hook               |
+| ---------------------------------- | --------------------------- | ------------------------- |
+| `fit(self, ...)`                   | `on_fit_start`              | `on_fit_end`              |
+| `sanity_check(self, ...)`          | `on_sanity_check_start`     | `on_sanity_check_end`     |
+| `train_batch(self, ...)`           | `on_train_batch_start`      | `on_train_batch_end`      |
+| `train_epoch(self, ...)`           | `on_train_epoch_start`      | `on_train_epoch_end`      |
+| `validation_epoch(self, ...)`      | `on_validation_epoch_start` | `on_validation_epoch_end` |
+| `test_epoch(self, ...)`            | `on_test_epoch_start`       | `on_test_epoch_end`       |
+| `predict_epoch(self, ...)`         | `on_predict_epoch_start`    | `on_predict_epoch_end`    |
+| `validation_batch(self, ...)`      | `on_validation_batch_start` | `on_validation_batch_end` |
+| `test_batch(self, ...)`            | `on_test_batch_start`       | `on_test_batch_end`       |
+| `predict_batch(self, ...)`         | `on_predict_batch_start`    | `on_predict_batch_end`    |
+| `train(self, ...)`                 | `on_train_start`            | `on_train_end`            |
+| `validation(self, ...)`            | `on_validation_start`       | `on_validation_end`       |
+| `test(self, ...)`                  | `on_test_start`             | `on_test_end`             |
+| `predict(self, ...)`               | `on_predict_start`          | `on_predict_end`          |
+| `backward(self, ...)`              | `on_before_backward`        | `on_after_backward`       |
+| `save_checkpoint(self, ...)`       | `on_save_checkpoint`        | -                         |
+| `load_checkpoint(self, ...)`       | `on_load_checkpoint`        | -                         |
+| `optimizer_step(self, ...)`        | `on_before_optimizer_step`  | -                         |
+| `zero_grad(self, ...)`             | `on_before_zero_grad`       | -                         |
+| `catch_exception(self, exception)` | `on_exception`              | -                         |
+
+example implementation of a custom trainer's `fit` method with hooks:
+
+```python
+def fit(self, model, *args, **kwargs):
+    # Call the starting hook
+    self.fabric.call("on_fit_start", self, model)
+
+    # Method implementation
+    # ...
+
+    # Call the ending hook
+    self.fabric.call("on_fit_end", self, model)
+```
+
+### Utils Module
+
+- This module should contain utility functions for the library
+- It should include helper functions for data processing, tensor manipulation, and other common tasks
+- It should provide reusable functions that can be used across different modules
+- It should be structured to allow easy addition of new utility functions as needed
+- It should include functions for tensor conversion, data normalization, and other common operations
+- It should be designed to minimize dependencies on other modules to ensure reusability
+- It should provide functions for logging, debugging, and other common tasks that are not specific to any module
+- It should include functions for handling configuration files, such as loading and validating TOML files with Pydantic
+- It should provide functions for managing parameters and settings across the library
+
+### Parameters Module
+
+- This module should define global parameters for synapse types, neuron types, and other fixed parameters
+- It should use the `constants` module as a reference for defining parameter types
+
+### Settings Module
+
+- This module should define global settings and configurations for the library
+- It should provide a centralized location for managing library-wide settings
+- It should include settings for logging, debugging, and other global configurations
+- It should be designed to allow easy modification of settings without changing the core library code
+
+### Simulations Module
+
+- This module should provide functions for running simulations of the entorhinal-hippocampal circuit
+- It should include functions for initializing simulations, running experiments, and collecting results
+- It should be designed to work with the library's models and trainers
+- It should provide a framework for running different types of simulations
+
+## Modeling Framework
+
+- PyTorch with custom neuron models for the entorhinal-hippocampal circuit
+- PyTorch Lightning for data loading and callbacks
+- Fabric for distributed training and custom trainers
+- Norse for spiking neuron models and event-based processing
+- Optuna for hyperparameter optimization
+- TorchRL for reinforcement learning components, if needed
+- Keep code simple and avoid extending functionality beyond requirements
+- When implementing modifications, minimize the amount of code removed or added
+
+## Circuit Components and Properties
+
+The models are structured as autoencoders, where:
+
+- Medial Entorhinal Cortex (MEC) layers act as encoder for extracting features from sensory inputs
+- Hippocampal regions act as a decoder for reconstructing cognitive maps
+
+### Medial Entorhinal Cortex (MEC) - Encoder
+
+- **MEC Layer II**:
+
+  - Receives information from MEC Layer Vb and sensory inputs
+  - Calculates encoding hidden states
+  - Attractor dynamics behavior
+  - Projects signal to hippocampal subregions DG, CA3, CA2 and MEC Layer Vb
+
+- **MEC Layer III**:
+
+  - Receives information from Layer Vb and sensory inputs
+  - Calculates reconstruction errors based on input from Layer Vb
+  - Projects reconstruction error to CA1 and Subiculum (Sub)
+
+- **MEC Layer Va**:
+
+  - Lower excitability with integrator behavior
+  - Calculates hidden states for MEC Layer Va
+  - Projects signals to other brain areas (neocortex, etc.)
+  - Optional implementation as it does not project to EHC circuit
+
+- **MEC Layer Vb**:
+  - Receives information from MEC Layer II and Subiculum (Sub)
+  - Receives the reconstructed cognitive map from CA1
+  - Calculates hidden states for MEC Layer Vb
+  - Projects errors to MEC Layer II with fixed (no learning) weights
+
+### Hippocampal Circuit - Decoder
+
+- **DG (Dentate Gyrus)**:
+
+  - Receives input from MEC Layer II
+  - Calculates the features space (embeddings) for the cognitive map sensed by MEC
+  - Projects the features to CA3
+  - Neurogenesis; This layer dimensions can be increased after learning to allow for new cognitive maps
+  - Contains mossy cells and GABAergic interneurons
+
+- **CA3**:
+
+  - Receives input from DG using training weights (might include recurrent connections)
+  - Receives input from MEC Layer II using fixed weights
+  - Calculates the decoder hidden states
+  - Projects the hidden states to CA2 and CA1
+  - Has extensive recurrent connections within itself
+  - Association network; Pattern completion; One-shot learning; Place cells
+
+- **CA2**:
+
+  - Receives input from CA3 using training weights
+  - Receives input from MEC Layer II using fixed weights
+  - Calculates decoder hidden states
+  - Projects hidden states to CA1
+  - Modulates HPC dynamics; SWR generation; Unique plasticity profile
+
+- **CA1**:
+
+  - Receives input from CA3 and CA2 using training weights
+  - Receives errors from MEC Layer III
+  - Calculates the cognitive map reconstruction
+  - Projects reconstructed cognitive map to MEC Layer Vb and Subiculum
+  - HPC output; Contextual encoding and retrieval; Memory consolidation (via SWRs);
+  - Compares "expected" (CA3-memories) with "actual" sensory information (EC-observations)
+
+- **Subiculum (Sub)**:
+
+  - Receives input from CA1 using training weights
+  - Receives errors from MEC Layer III
+  - Calculates output reconstruction
+  - Projects reconstructed output to MEC Layer Vb
+  - Specialized cells (head directions, grid cells, etc.)
+
+## Models and Experiments
+
+- First model should be a general sparse autoencoder to use as baseline
+- Initial models replace the MEC by a standard sparse encoder trained a priori on cognitive maps
+- Initial models ignore the Subiculum layer to work with one reconstruction at a time
+- Full models will include the Subiculum layer and the MEC encoder layers
+
+## Code Specifications
+
+- Use type hints for function signatures
+- Use Pydantic v2 for parameter validation and management
+- Use comments with '-' till column 90 to separate sections of the code visually
+- Import in `__init__.py` from submodules to define the package/subpackage API
 - Target Python 3.10 and newer (3.10, 3.11, 3.12)
-- Suggest scientific libraries appropriate for neural modeling (NumPy, SciPy, PyTorch, etc.)
 - Prioritize vectorized operations over loops when applicable for performance
-- Implement proper error handling for mathematical and scientific calculations
-- Ensure backward compatibility for public API functions
-
-## Library Domain Guidelines
-- Use established terminology from hippocampal and spatial navigation literature
-- Structure library components with clear separation between:
-  - Neural representation components
-  - Spatial mapping functions
-  - Memory encoding/retrieval mechanisms
-  - Plasticity mechanisms (especially STDP implementations)
-  - Autoencoder components (encoding/decoding layers)
-- Include relevant citations as comments where appropriate
-- Optimize computationally intensive operations with appropriate algorithms
-- Design public interfaces that are intuitive for neuroscience researchers
-
-## Biological Plausibility Guidelines
-- Implement spike-timing-dependent plasticity (STDP) following established neuroscience models
-- Structure autoencoder components to align with biological neural network principles
-- Simulate realistic neural dynamics with appropriate time constants and firing properties
-- Balance computational efficiency with biological realism in model design
-
-## Testing Guidelines
-- Use pytest framework for all tests
-- Design testing and configure pytest to use importlib import mode 
-- Write unit tests for all public functions and classes
-- Mock complex neural simulations appropriately in tests
-- Verify mathematical correctness with known solutions where possible
-- Test edge cases relevant to neural modeling (e.g., boundary conditions, numerical stability)
 
 ## Documentation Guidelines
-- Maintain comprehensive Sphinx documentation
-- Include mathematical explanations with LaTeX where appropriate
-- Provide executable examples demonstrating key functionality
-- Explain biological relevance and limitations of implementations
+
+- Use docstrings for all public functions and classes
+- Follow PEP 257 conventions for docstrings
+- `__init__.py` files should contain package-level documentation
+- `__init__.py` files should only contain import statements, package metadata, and documentation strings
+
+## Evaluation Criteria and Metrics
+
+Evaluate model performance using these metrics:
+
+1. Reconstruction Accuracy:
+
+- Mean squared error (MSE) between original and reconstructed maps
+- Structural similarity index (SSIM) for spatial coherence
+
+2. Pattern Separation:
+
+- Discriminability index between representations of similar inputs
+- Hamming distance between encodings of similar patterns
+
+3. Pattern Completion:
+
+- Accuracy of reconstruction from partial inputs (10%, 30%, 50% missing)
+- Recovery time (iterations needed for stable completion)
+
+4. Biological Plausibility:
+
+- Sparsity of representations (percentage of active units)
+- Activity distributions compared to neurobiological data
+
+5. Computational Efficiency:
+
+- Training time and convergence speed
+- Memory usage during training and inference
+
+Each experiment should report these metrics in a standardized format to allow for comparison between model variants.
+
+## Library Domain Guidelines
+
+- Use established terminology from hippocampal and spatial navigation literature
+- Include relevant citations as comments where appropriate
+- Optimize computationally intensive operations with appropriate algorithms
+- Implement proper error handling for mathematical and scientific calculations
+
+## Testing Guidelines
+
+- Use pytest framework for all tests
+- Design testing and configure pytest to use importlib import mode
+- Write functional tests for all public functions and classes
+- Mock complex neural simulations appropriately in tests
+- Verify mathematical correctness with known solutions where possible
+- Test edge cases relevant to neural modeling (boundary conditions, numerical stability)
 
 ## Packaging Guidelines
+
 - Maintain version number in src/ehc_sn/VERSION file
 - Keep core dependencies in requirements.txt
 - Keep development dependencies in requirements-dev.txt
@@ -76,12 +350,7 @@ This file establishes guidelines for using GitHub Copilot in the "Entorhinal-Hip
 - Use dynamic configuration in pyproject.toml where appropriate
 
 ## General Guidelines
-- Follow existing coding styles and conventions
-- Suggest code only relevant to the current task
-- Use concise code blocks with file header comments
-- Avoid redundancies by referencing unchanged code with comments
-- Consider packaging requirements and distribution best practices
 
-## Notes
-- Update .github/copilot-instructions.md and README as the library evolves
-- Confirm that all file paths match exactly during modifications
+- Suggest code only relevant to the current task
+- Avoid redundancies by referencing unchanged code with comments
+- Update instructions and README as the library evolves
