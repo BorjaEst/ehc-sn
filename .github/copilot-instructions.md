@@ -282,10 +282,23 @@ The models are structured as autoencoders, where:
 
 - Use type hints for function signatures
 - Use Pydantic v2 for parameter validation and management
-- Use comments with '-' till column 90 to separate sections of the code visually
 - Import in `__init__.py` from submodules to define the package/subpackage API
 - Target Python 3.10 and newer (3.10, 3.11, 3.12)
 - Prioritize vectorized operations over loops when applicable for performance
+
+### Comments to split code sections
+
+- Use comments with '-' to visually separate sections of the code
+
+```python
+# -------------------------------------------------------------------------------------------
+# Class, function, or section description without indentation
+    # -----------------------------------------------------------------------------------
+    # Subsection description with indentation
+```
+
+- Every function, class or method should have a section according to indentation
+- Only 2 levels of separators are defined, one for the main section and one for subsections
 
 ## Documentation Guidelines
 
