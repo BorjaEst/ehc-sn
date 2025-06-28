@@ -81,16 +81,15 @@ class LinearEncoder(BaseEncoder):
 
     def __init__(self, params: EncoderParams):
         super().__init__(params)
-        in_features, scale = prod(params.input_shape), self.scale_factor
+        in_features, scale = prod(params.input_shape), params.scale_factor
+        hidden_dim = min(in_features * 2, params.latent_dim * scale)  # Reasonable hidden layer size
         self.linear = nn.Sequential(
-            nn.Linear(in_features, in_features * scale),
+            nn.Linear(in_features, hidden_dim),
             params.activation_fn(),
-            nn.Linear(in_features * scale, params.latent_dim * 2 * scale),
+            nn.Linear(hidden_dim, params.latent_dim * 2),
             params.activation_fn(),
-            nn.Linear(params.latent_dim * 2 * scale, params.latent_dim * scale),
-            params.activation_fn(),
-            nn.Linear(params.latent_dim * scale, params.latent_dim),
-            nn.Sigmoid(),  # Final activation
+            nn.Linear(params.latent_dim * 2, params.latent_dim),
+            nn.Sigmoid(),  # Final activation for sparsity
         )
 
     def forward(self, x: Tensor) -> Tensor:

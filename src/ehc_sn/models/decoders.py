@@ -79,16 +79,15 @@ class LinearDecoder(BaseDecoder):
 
     def __init__(self, params: DecoderParams):
         super().__init__(params)
-        in_features, scale = prod(params.input_shape), self.scale_factor
+        in_features, scale = prod(params.input_shape), params.scale_factor
+        hidden_dim = min(in_features * 2, params.latent_dim * scale)  # Reasonable hidden layer size
         self.linear = nn.Sequential(
-            nn.Linear(params.latent_dim, params.latent_dim * scale),
+            nn.Linear(params.latent_dim, params.latent_dim * 2),
             params.activation_fn(),
-            nn.Linear(params.latent_dim * scale, params.latent_dim * 2 * scale),
+            nn.Linear(params.latent_dim * 2, hidden_dim),
             params.activation_fn(),
-            nn.Linear(params.latent_dim * 2 * scale, in_features * scale),
-            params.activation_fn(),
-            nn.Linear(in_features * scale, in_features),
-            nn.Sigmoid(),  # Changed from Softmax to Sigmoid for continuous value reconstruction
+            nn.Linear(hidden_dim, in_features),
+            nn.Sigmoid(),  # For binary reconstruction between 0 and 1
         )
 
     def forward(self, x):
