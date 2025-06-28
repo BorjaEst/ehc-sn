@@ -271,25 +271,9 @@ def plot(axs: List[Axes], grid: CognitiveMap, params: Optional[PlotMapParams] = 
     if len(axs) < num_channels:
         raise ValueError(f"Need {num_channels} axes to plot all channels of the cognitive map")
 
-    # Channel labels based on typical cognitive map structure
-    channel_labels = ["Obstacles", "Speed", "Trajectory", "Head Direction"]
-
-    # Different colormaps for each channel for better visualization
-    channel_cmaps = ["binary", "YlOrRd", "Blues", "hsv"]
-
     # Plot each channel
     for i in range(num_channels):
-        # Create a params object for this channel
-        channel_params = PlotMapParams(
-            cmap=channel_cmaps[i % len(channel_cmaps)],
-            title=channel_labels[i] if i < len(channel_labels) else f"Channel {i}",
-            cbar=True,
-            vmin=0.0,
-            vmax=1.0,
-        )
-
-        # Plot this channel
-        obstacle_maps.plot(axs[i], grid[i, :, :], channel_params)
+        obstacle_maps.plot(axs[i], grid[i, :, :], params)
 
 
 # -------------------------------------------------------------------------------------------
