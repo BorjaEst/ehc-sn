@@ -289,16 +289,13 @@ The models are structured as autoencoders, where:
 ### Comments to split code sections
 
 - Use comments with '-' to visually separate sections of the code
+- Every function, class or method should have a section according to indentation
+- Only 2 levels of separators are defined, one for the main section and one for subsections
 
 ```python
 # -------------------------------------------------------------------------------------------
-# Class, function, or section description without indentation
     # -----------------------------------------------------------------------------------
-    # Subsection description with indentation
 ```
-
-- Every function, class or method should have a section according to indentation
-- Only 2 levels of separators are defined, one for the main section and one for subsections
 
 ## Documentation Guidelines
 
