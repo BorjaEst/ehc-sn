@@ -11,14 +11,11 @@ class SparsityLoss(nn.Module):
 
     def forward(self, outputs: Tuple[Tensor, Tensor], targets: Tensor) -> Tensor:
         _, encodings = outputs
-        kl_div = self.kl_divergence(encodings.mean(dim=0), self.sparsity_target)
-        return torch.sum(kl_div)
-
-    @staticmethod
-    def kl_divergence(inputs: Tensor, target: float, eps=1e-10) -> Tensor:
-        kl = inputs * torch.log((inputs + eps) / (target + eps))
-        kl += (1 - inputs) * torch.log((1 - inputs + eps) / (1 - target + eps))
-        return torch.sum(kl)
+        # Calculate average activation across the batch
+        avg_activation = torch.mean(encodings, dim=0)
+        # Use L1 penalty for sparsity (simpler and more stable than KL divergence)
+        sparsity_penalty = torch.mean(torch.abs(avg_activation - self.sparsity_target))
+        return sparsity_penalty
 
 
 class ReconstructionLoss(nn.Module):
