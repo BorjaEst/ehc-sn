@@ -15,9 +15,9 @@ class DecoderParams(BaseModel):
         ...,
         description="Shape of the input feature map (channels, height, width). ",
     )
-    base_channel_size: int = Field(
+    scale_factor: int = Field(
         default=16,
-        description="Base number of channels used in the first convolutional layers",
+        description="Scaling factor to determine the number of nurons in hidden layers",
     )
     latent_dim: int = Field(
         ...,
@@ -27,17 +27,6 @@ class DecoderParams(BaseModel):
         default=nn.GELU,
         description="Activation function used throughout the encoder network",
     )
-
-    @model_validator(mode="after")
-    def validate_convolution_after(self) -> "DecoderParams":
-        expected_features = 2 * 16 * self.base_channel_size
-        if expected_features < self.latent_dim:
-            raise ValueError(
-                f"Base channel size {self.base_channel_size} "
-                f"does not scale properly to the latent dimension {self.latent_dim}. "
-                f"Expected at least {self.latent_dim / 32} base channels."
-            )
-        return self
 
 
 class BaseDecoder(nn.Module):
@@ -71,9 +60,9 @@ class BaseDecoder(nn.Module):
         return self.input_shape[1], self.input_shape[2]
 
     @property
-    def base_channel_size(self) -> int:
-        """Returns the base channel size used in the decoder."""
-        return self.params.base_channel_size
+    def scale_factor(self) -> int:
+        """Returns the scaling factor used in the decoder."""
+        return self.params.scale_factor
 
     @property
     def latent_dim(self) -> int:
@@ -90,15 +79,15 @@ class LinearDecoder(BaseDecoder):
 
     def __init__(self, params: DecoderParams):
         super().__init__(params)
-        c_hid = self.base_channel_size  # Base number of channels used in the first convolutional layers
+        in_features, scale = prod(params.input_shape), self.scale_factor
         self.linear = nn.Sequential(
-            nn.Linear(params.latent_dim, 2 * c_hid * prod(self.spatial_dimensions) // 64),
+            nn.Linear(params.latent_dim, params.latent_dim * scale),
             params.activation_fn(),
-            nn.Linear(2 * c_hid * prod(self.spatial_dimensions) // 64, 2 * c_hid * prod(self.spatial_dimensions) // 16),
+            nn.Linear(params.latent_dim * scale, params.latent_dim * 2 * scale),
             params.activation_fn(),
-            nn.Linear(2 * c_hid * prod(self.spatial_dimensions) // 16, c_hid * prod(self.spatial_dimensions) // 4),
+            nn.Linear(params.latent_dim * 2 * scale, in_features * scale),
             params.activation_fn(),
-            nn.Linear(c_hid * prod(self.spatial_dimensions) // 4, self.input_channels * prod(self.spatial_dimensions)),
+            nn.Linear(in_features * scale, in_features),
             nn.Sigmoid(),  # Changed from Softmax to Sigmoid for continuous value reconstruction
         )
 
@@ -117,7 +106,7 @@ class ConvDecoder(BaseDecoder):
 
     def __init__(self, params: DecoderParams):
         super().__init__(params)
-        c_hid = self.base_channel_size  # Base number of channels used in the first convolutional layers
+        c_hid = self.scale_factor  # Base number of channels used in the first convolutional layers
         first_dim = 2 * c_hid * prod(self.spatial_dimensions) // 64  # First dimension based on input shape
         self.linear = nn.Sequential(nn.Linear(params.latent_dim, first_dim), params.activation_fn())
         self.net = nn.Sequential(
@@ -145,7 +134,7 @@ if __name__ == "__main__":
     # Create decoder parameters for a simple case:
     params = DecoderParams(
         input_shape=(1, 32, 16),  # 1 channel, 32x16 grid
-        base_channel_size=16,
+        scale_factor=16,
         latent_dim=128,
     )
 

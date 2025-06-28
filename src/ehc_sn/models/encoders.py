@@ -15,9 +15,9 @@ class EncoderParams(BaseModel):
         ...,
         description="Shape of the input feature map (channels, height, width). ",
     )
-    base_channel_size: int = Field(
+    scale_factor: int = Field(
         default=16,
-        description="Base number of channels used in the first convolutional layers",
+        description="Scaling factor to determine the number of nurons in hidden layers",
     )
     latent_dim: int = Field(
         ...,
@@ -27,17 +27,6 @@ class EncoderParams(BaseModel):
         default=nn.GELU,
         description="Activation function used throughout the encoder network",
     )
-
-    @model_validator(mode="after")
-    def validate_convolution_after(self) -> "EncoderParams":
-        expected_features = 2 * 16 * self.base_channel_size
-        if expected_features < self.latent_dim:
-            raise ValueError(
-                f"Base channel size {self.base_channel_size} "
-                f"does not scale properly to the latent dimension {self.latent_dim}. "
-                f"Expected at least {self.latent_dim / 32} base channels."
-            )
-        return self
 
 
 class BaseEncoder(nn.Module):
@@ -71,9 +60,9 @@ class BaseEncoder(nn.Module):
         return self.input_shape[1], self.input_shape[2]
 
     @property
-    def base_channel_size(self) -> int:
-        """Returns the base channel size used in the encoder."""
-        return self.params.base_channel_size
+    def scale_factor(self) -> int:
+        """Returns the scaling factor used in the encoder."""
+        return self.params.scale_factor
 
     @property
     def latent_dim(self) -> int:
@@ -92,21 +81,21 @@ class LinearEncoder(BaseEncoder):
 
     def __init__(self, params: EncoderParams):
         super().__init__(params)
-        c_hid = self.base_channel_size  # Base number of channels used in the first convolutional layers
+        in_features, scale = prod(params.input_shape), self.scale_factor
         self.linear = nn.Sequential(
-            nn.Linear(prod(params.input_shape), c_hid),  # Flatten input to hidden layer
+            nn.Linear(in_features, in_features * scale),
             params.activation_fn(),
-            nn.Linear(c_hid, c_hid),  # Hidden layer to hidden layer
+            nn.Linear(in_features * scale, params.latent_dim * 2 * scale),
             params.activation_fn(),
-            nn.Linear(c_hid, params.latent_dim),  # Hidden layer to output layer
+            nn.Linear(params.latent_dim * 2 * scale, params.latent_dim * scale),
             params.activation_fn(),
-            nn.Linear(params.latent_dim, params.latent_dim),  # Output layer to final embedding
-            nn.ReLU(),  # Final activation
+            nn.Linear(params.latent_dim * scale, params.latent_dim),
+            nn.Sigmoid(),  # Final activation
         )
 
     def forward(self, x: Tensor) -> Tensor:
-        x = x.reshape(x.size(0), -1)  # Flatten the input tensor
-        return self.linear(x)  # Pass through linear layers to get embedding
+        x = x.reshape(x.size(0), -1)  # Flatten
+        return self.linear(x)
 
 
 class ConvEncoder(BaseEncoder):
@@ -117,7 +106,7 @@ class ConvEncoder(BaseEncoder):
 
     def __init__(self, params: EncoderParams):
         super().__init__(params)
-        c_hid = params.base_channel_size  # Base number of channels used in the first convolutional layers
+        c_hid = params.scale_factor  # Base number of channels used in the first convolutional layers
         self.net = nn.Sequential(
             nn.Conv2d(self.input_channels, c_hid, kernel_size=3, padding=1, stride=2),  # 32x32 => 16x16
             params.activation_fn(),
@@ -142,18 +131,13 @@ class ConvEncoder(BaseEncoder):
         x = self.linear(x)  # Pass through linear layer to get embedding
         return x
 
-    @property
-    def base_channel_size(self) -> int:
-        """Returns the base channel size used in the encoder."""
-        return self.net[0].out_channels
-
 
 # Example usage of the Encoder class
 if __name__ == "__main__":
     # Create encoder parameters for a simple case:
     params = EncoderParams(
         input_shape=(1, 32, 16),  # 1 channel, 32x16 grid
-        base_channel_size=16,
+        scale_factor=16,
         latent_dim=128,
     )
 
