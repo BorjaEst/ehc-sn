@@ -9,7 +9,7 @@ from torch import Tensor, nn
 class EncoderParams(BaseModel):
     """Configuration parameters for the neural network encoder."""
 
-    model_config = {"extra": "forbid"}  # Forbid extra fields not defined in the model
+    model_config = {"extra": "forbid", "arbitrary_types_allowed": True}
 
     input_shape: Tuple[int, int, int] = Field(
         ...,
@@ -81,15 +81,14 @@ class LinearEncoder(BaseEncoder):
 
     def __init__(self, params: EncoderParams):
         super().__init__(params)
-        in_features, scale = prod(params.input_shape), params.scale_factor
-        hidden_dim = min(in_features * 2, params.latent_dim * scale)  # Reasonable hidden layer size
+        in_features = prod(params.input_shape)
         self.linear = nn.Sequential(
-            nn.Linear(in_features, hidden_dim),
-            params.activation_fn(),
-            nn.Linear(hidden_dim, params.latent_dim * 2),
-            params.activation_fn(),
+            nn.Linear(in_features, params.latent_dim * 4),
+            self.params.activation_fn(),
+            nn.Linear(params.latent_dim * 4, params.latent_dim * 2),
+            self.params.activation_fn(),
             nn.Linear(params.latent_dim * 2, params.latent_dim),
-            nn.Sigmoid(),  # Final activation for sparsity
+            self.params.activation_fn(),
         )
 
     def forward(self, x: Tensor) -> Tensor:

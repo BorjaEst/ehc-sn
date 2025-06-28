@@ -9,7 +9,7 @@ from torch import Tensor, nn
 class DecoderParams(BaseModel):
     """Configuration parameters for the neural network decoder."""
 
-    model_config = {"extra": "forbid"}  # Forbid extra fields not defined in the model
+    model_config = {"extra": "forbid", "arbitrary_types_allowed": True}
 
     input_shape: Tuple[int, int, int] = Field(
         ...,
@@ -79,15 +79,14 @@ class LinearDecoder(BaseDecoder):
 
     def __init__(self, params: DecoderParams):
         super().__init__(params)
-        in_features, scale = prod(params.input_shape), params.scale_factor
-        hidden_dim = min(in_features * 2, params.latent_dim * scale)  # Reasonable hidden layer size
+        in_features = prod(params.input_shape)
         self.linear = nn.Sequential(
             nn.Linear(params.latent_dim, params.latent_dim * 2),
-            params.activation_fn(),
-            nn.Linear(params.latent_dim * 2, hidden_dim),
-            params.activation_fn(),
-            nn.Linear(hidden_dim, in_features),
-            nn.Sigmoid(),  # For binary reconstruction between 0 and 1
+            self.params.activation_fn(),
+            nn.Linear(params.latent_dim * 2, params.latent_dim * 4),
+            self.params.activation_fn(),
+            nn.Linear(params.latent_dim * 4, in_features),
+            nn.Sigmoid(),  # Keep sigmoid for final layer to ensure output is in [0,1]
         )
 
     def forward(self, x):
