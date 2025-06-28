@@ -8,5 +8,8 @@
     // TOML configuration
     "evenBetterToml.formatter.alignEntries": true,
     "evenBetterToml.formatter.indentEntries": true,
-    "evenBetterToml.formatter.alignComments": false
+    "evenBetterToml.formatter.alignComments": false,
+
+    // Mypy configuration
+    "mypy-type-checker.args": [ "--config-file=pyproject.toml" ]
 }
