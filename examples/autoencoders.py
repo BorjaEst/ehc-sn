@@ -1,5 +1,5 @@
 import torch
-from lightning.pytorch.callbacks import RichModelSummary, RichProgressBar
+from lightning.pytorch.callbacks import ModelCheckpoint, RichModelSummary, RichProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
 from pydantic import BaseModel, Field
 
@@ -27,9 +27,9 @@ class Parameters(BaseModel):
     datamodule: data.DataModuleParams = Field(
         description="Parameters for the data module",
         default_factory=lambda: data.DataModuleParams(
-            num_samples=600,  # Total number of samples to generate
-            num_workers=15,  # Number of workers for data loading
-            batch_size=32,  # Batch size for training and testing
+            num_samples=6000,  # Total number of samples to generate
+            num_workers=8,  # Number of workers to generate the data
+            batch_size=32,  # Increased batch size for better efficiency
             val_split=0.1,  # Fraction of data to use for validation
             test_split=0.1,  # Fraction of data to use for testing
         ),
@@ -38,7 +38,7 @@ class Parameters(BaseModel):
         description="Parameters for the encoder",
         default_factory=lambda: encoders.EncoderParams(
             input_shape=(1, 16, 32),  # 1 channel
-            scale_factor=16,  # Sacaling factor for the number of neurons in hidden layers
+            scale_factor=4,  # Sacaling factor for the number of neurons in hidden layers
             latent_dim=256,
         ),
     )
@@ -46,7 +46,7 @@ class Parameters(BaseModel):
         description="Parameters for the decoder",
         default_factory=lambda: decoders.DecoderParams(
             input_shape=(1, 16, 32),  # 1 channel
-            scale_factor=16,  # Sacaling factor for the number of neurons in hidden layers
+            scale_factor=4,  # Sacaling factor for the number of neurons in hidden layers
             latent_dim=256,
         ),
     )
@@ -55,8 +55,12 @@ class Parameters(BaseModel):
         default_factory=lambda: trainers.SparsityBPTrainerParams(
             max_epochs=20,  # Maximum number of epochs for training
             sparsity_target=0.05,  # Target activation (95% neurons inactive)
-            sparsity_weight=0.1,  # Weight for sparsity loss term (beta)
-            callbacks=[RichModelSummary(), RichProgressBar()],  # Callbacks for training
+            sparsity_weight=0.0,  # Weight for sparsity loss term (beta)
+            callbacks=[
+                RichModelSummary(),  # Summary of model architecture
+                RichProgressBar(refresh_rate=5),  # Reduce progress bar update frequency
+                ModelCheckpoint(every_n_epochs=5, save_weights_only=True),
+            ],  # Optimized callbacks for training
             logger=TensorBoardLogger("logs", name="autoencoder"),  # Logger for training
             profiler="simple",  # Profiler for performance monitoring
         ),
