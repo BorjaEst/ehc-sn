@@ -27,7 +27,7 @@ class Parameters(BaseModel):
     datamodule: data.DataModuleParams = Field(
         description="Parameters for the data module",
         default_factory=lambda: data.DataModuleParams(
-            num_samples=6000,  # Total number of samples to generate
+            num_samples=4000,  # Total number of samples to generate
             num_workers=8,  # Number of workers to generate the data
             batch_size=32,  # Increased batch size for better efficiency
             val_split=0.1,  # Fraction of data to use for validation
@@ -38,7 +38,6 @@ class Parameters(BaseModel):
         description="Parameters for the encoder",
         default_factory=lambda: encoders.EncoderParams(
             input_shape=(1, 16, 32),  # 1 channel
-            scale_factor=4,  # Sacaling factor for the number of neurons in hidden layers
             latent_dim=256,
         ),
     )
@@ -46,16 +45,15 @@ class Parameters(BaseModel):
         description="Parameters for the decoder",
         default_factory=lambda: decoders.DecoderParams(
             input_shape=(1, 16, 32),  # 1 channel
-            scale_factor=4,  # Sacaling factor for the number of neurons in hidden layers
             latent_dim=256,
         ),
     )
     trainer: trainers.SparsityBPTrainerParams = Field(
         description="Parameters for the backpropagation trainer",
         default_factory=lambda: trainers.SparsityBPTrainerParams(
-            max_epochs=20,  # Maximum number of epochs for training
+            max_epochs=200,  # Reduced epochs for faster testing
             sparsity_target=0.05,  # Target activation (95% neurons inactive)
-            sparsity_weight=0.0,  # Weight for sparsity loss term (beta)
+            sparsity_weight=0.01,  # Much lower weight for sparsity loss term
             callbacks=[
                 RichModelSummary(),  # Summary of model architecture
                 RichProgressBar(refresh_rate=5),  # Reduce progress bar update frequency
