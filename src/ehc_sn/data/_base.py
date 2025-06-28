@@ -1,4 +1,5 @@
 import collections.abc
+import math
 import random
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Literal, Optional, Tuple, Type, Union
@@ -49,20 +50,51 @@ class Dataset(torch.utils.data.IterableDataset):
     """Dataset for data with obstacles and goal positions."""
 
     # -----------------------------------------------------------------------------------
-    def __init__(self, generator: Generator):
+    def __init__(self, generator: Generator, num_samples: int):
         """
         Initialize a dataset of data with obstacles and goals.
 
         Args:
             generator: Generator class to use for creating data
+            num_samples: Number of samples in this dataset split
         """
         self.generator = generator
+        self.num_samples = num_samples
+        self._data = None
+
+    # -----------------------------------------------------------------------------------
+    def _generate_data(self):
+        """Generate all data samples at once."""
+        if self._data is None:
+            self._data = []
+            for _ in range(self.num_samples):
+                self._data.append(self.generator.__next__())
 
     # -----------------------------------------------------------------------------------
     def __iter__(self) -> collections.abc.Iterator[Tuple[Tensor, ...]]:
-        """Yield individual data samples on-the-fly."""
-        while True:
-            yield self.generator.__next__()
+        """Yield data samples with proper worker handling."""
+        self._generate_data()
+
+        # Handle multi-worker data loading
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info is None:
+            # Single-process data loading
+            for sample in self._data:
+                yield sample
+        else:
+            # Multi-process data loading - split data among workers
+            per_worker = int(math.ceil(len(self._data) / worker_info.num_workers))
+            worker_id = worker_info.id
+            start = worker_id * per_worker
+            end = min(start + per_worker, len(self._data))
+
+            for i in range(start, end):
+                yield self._data[i]
+
+    # -----------------------------------------------------------------------------------
+    def __len__(self) -> int:
+        """Return the length of the dataset."""
+        return self.num_samples
 
 
 # -------------------------------------------------------------------------------------------
@@ -138,7 +170,6 @@ class AugmentedDataset(torch.utils.data.IterableDataset):
     def __iter__(self) -> collections.abc.Iterator[Tuple[Tensor, ...]]:
         """Yield augmented samples."""
         for batch in self.dataset:
-
             # Assuming samples are in the first element of the batch
             augmenting_samples, *other_data = batch
 
@@ -148,6 +179,11 @@ class AugmentedDataset(torch.utils.data.IterableDataset):
 
             # Merge augmented samples with other data and yield
             yield (augmenting_samples, *other_data)
+
+    # -----------------------------------------------------------------------------------
+    def __len__(self) -> int:
+        """Return the length of the wrapped dataset."""
+        return len(self.dataset)
 
 
 # -------------------------------------------------------------------------------------------
@@ -199,7 +235,7 @@ class DataGenParams(BaseModel):
 class DataLoaderParams(BaseModel):
     """Parameters for the DataLoader."""
 
-    model_config = {"extra": "forbid"}  # Pydantic v2 way to forbid extra fields
+    model_config = {"extra": "forbid"}
 
     # -----------------------------------------------------------------------------------
     batch_size: int = Field(
@@ -270,40 +306,48 @@ class DataModule(pl.LightningDataModule):
         super().__init__()
         self.params = params or DataModuleParams()
         self.generator = generator
+        self._train_dataloader = None
+        self._val_dataloader = None
+        self._test_dataloader = None
 
     # -----------------------------------------------------------------------------------
     def setup(self, stage: Optional[str] = None):
-        """Setup the dataset for the given stage."""
-        # We'll continue to create datasets on-the-fly, no additional setup needed
-        pass
+        """Setup datasets and dataloaders for the given stage."""
+        if stage in (None, "fit"):
+            # Training dataset
+            train_samples = int(self.params.train_split * self.params.num_samples)
+            train_dataset = Dataset(self.generator, train_samples)
 
-    # -----------------------------------------------------------------------------------
-    def _create_dataset(self, augment: bool = False) -> Dataset:
-        """Create a dataset with optional augmentation."""
-        dataset = Dataset(self.generator)
+            if self.params.augmenters:
+                train_dataset = AugmentedDataset(train_dataset, self.params.augmenters)
 
-        if augment and self.params.augmenters:
-            # Wrap the dataset to apply augmentations
-            return AugmentedDataset(dataset, self.params.augmenters)
-        return dataset
+            self._train_dataloader = self.params.gen_dataloader(train_dataset)
+
+            # Validation dataset
+            val_samples = int(self.params.val_split * self.params.num_samples)
+            val_dataset = Dataset(self.generator, val_samples)
+            self._val_dataloader = self.params.gen_dataloader(val_dataset)
+
+        if stage in (None, "test"):
+            # Test dataset
+            test_samples = int(self.params.test_split * self.params.num_samples)
+            test_dataset = Dataset(self.generator, test_samples)
+            self._test_dataloader = self.params.gen_dataloader(test_dataset)
 
     # -----------------------------------------------------------------------------------
     def train_dataloader(self):
-        """Return the training dataloader with augmentation."""
-        dataset = self._create_dataset(augment=True)
-        return self.params.gen_dataloader(dataset)
+        """Return the training dataloader."""
+        return self._train_dataloader
 
     # -----------------------------------------------------------------------------------
     def val_dataloader(self):
-        """Return the validation dataloader without augmentation."""
-        dataset = self._create_dataset(augment=False)
-        return self.params.gen_dataloader(dataset)
+        """Return the validation dataloader."""
+        return self._val_dataloader
 
     # -----------------------------------------------------------------------------------
     def test_dataloader(self):
-        """Return the test dataloader without augmentation."""
-        dataset = self._create_dataset(augment=False)
-        return self.params.gen_dataloader(dataset)
+        """Return the test dataloader."""
+        return self._test_dataloader
 
 
 # -------------------------------------------------------------------------------------------
