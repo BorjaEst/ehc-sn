@@ -72,7 +72,12 @@ class SparsityBPTrainer(base.BaseTrainer):
         Returns:
             (torch.Tensor): The training loss.
         """
-        return self._common_step(batch, batch_nb)["loss"]
+        loss = self._common_step(batch, batch_nb)
+        self.log("train_loss", loss["loss"], prog_bar=True)
+        self.log("train_reconstruction_loss", loss["reconstruction_loss"], prog_bar=True)
+        self.log("train_sparsity_loss", loss["sparsity_loss"], prog_bar=True)
+
+        return loss["loss"]
 
     # -----------------------------------------------------------------------------------
     def validation_step(self, batch: Tuple[Tensor, Tensor], batch_nb: int) -> None:
