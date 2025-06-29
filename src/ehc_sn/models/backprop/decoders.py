@@ -46,23 +46,6 @@ class BaseDecoder(nn.Module):
         """Forward pass through the decoder."""
         raise NotImplementedError("Subclasses must implement forward method")
 
-    def reinit_weights(self, init_fn=None):
-        """Reinitialize all weights in the decoder.
-
-        Args:
-            init_fn: Optional initialization function. If None, uses Xavier uniform.
-        """
-        if init_fn is None:
-            init_fn = nn.init.xavier_uniform_
-
-        def init_weights(module):
-            if isinstance(module, (nn.Linear, nn.Conv2d)):
-                init_fn(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-
-        self.apply(init_weights)
-
     @property
     def input_shape(self) -> Tuple[int, int, int]:
         """Returns the shape of the input feature map."""
@@ -108,7 +91,7 @@ class LinearDecoder(BaseDecoder):
             nn.Sigmoid(),  # Keep sigmoid for final layer to ensure output is in [0,1]
         )
 
-    def forward(self, x):
+    def forward(self, x: Tensor, target: Tensor = None) -> Tensor:
         x = self.linear(x)  # Pass through linear layers to get reconstructed features
         return x.reshape(x.shape[0], *self.input_shape)  # Reshape to original input shape
 
@@ -207,7 +190,7 @@ class ConvDecoder(BaseDecoder):
             nn.Sigmoid(),  # Changed from Softmax to Sigmoid for continuous value reconstruction
         )
 
-    def forward(self, x):
+    def forward(self, x: Tensor, target: Tensor = None) -> Tensor:
         x = self.linear(x)  # Needs reshape
         x = x.reshape(x.shape[0], -1, *[s // 8 for s in self.spatial_dimensions])
         x = self.net(x)
