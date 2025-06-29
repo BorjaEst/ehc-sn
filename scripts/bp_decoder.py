@@ -202,7 +202,7 @@ class DecoderTrainingPipeline:
         # Load pretrained weights
         if Path(self.settings.pretrained_path).exists():
             print(f"📥 Loading pretrained model from: {self.settings.pretrained_path}")
-            utils.load_state(model, self.settings.pretrained_path)  # type: ignore
+            utils.load_weights(model, self.settings.pretrained_path)  # type: ignore
         else:
             print(f"⚠️  Warning: Pretrained model not found at {self.settings.pretrained_path}")
             print("   Proceeding with randomly initialized weights")

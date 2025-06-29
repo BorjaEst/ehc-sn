@@ -107,7 +107,7 @@ def load_state_dict(filepath: str, map_location: str = "cpu") -> Dict[str, Any]:
     return cleaned_state_dict
 
 
-def load_state(model: nn.Module, filepath: str, map_location: str = "cpu") -> nn.Module:
+def load_weights(model: nn.Module, filepath: str, map_location: str = "cpu"):
     """
     Load model weights from checkpoint file.
 
@@ -121,7 +121,6 @@ def load_state(model: nn.Module, filepath: str, map_location: str = "cpu") -> nn
     """
     state_dict = load_state_dict(filepath, map_location)
     model.load_state_dict(state_dict)
-    return model
 
 
 def load_settings(config_path: str) -> Dict[str, Any]:
