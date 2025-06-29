@@ -5,6 +5,8 @@ import torch
 from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
+from ehc_sn.core.drtp import DRTPLayer
+
 
 class DecoderParams(BaseModel):
     """Configuration parameters for the neural network decoder."""
@@ -111,6 +113,74 @@ class LinearDecoder(BaseDecoder):
         return x.reshape(x.shape[0], *self.input_shape)  # Reshape to original input shape
 
 
+class DRTPDecoder(BaseDecoder):
+    """Neural network decoder that transforms embeddings into reconstructed features using DRTP.
+
+    This decoder takes embedding vectors and passes them through a sequence of
+    linear layers with DRTP modulation to produce a reconstructed feature output.
+
+    Unlike the LinearDecoder which uses standard backpropagation, this decoder
+    applies DRTP (Direct Random Target Projection) to hidden layers, providing
+    biologically plausible learning signals.
+
+    The target for DRTP should be provided during the forward pass.
+    """
+
+    def __init__(self, params: DecoderParams):
+        super().__init__(params)
+        in_features = prod(params.input_shape)
+
+        # Define layers separately since we need to apply DRTP manually
+        self.layer1 = nn.Linear(params.latent_dim, params.latent_dim * 2)
+        self.activation1 = params.activation_fn()
+        self.drtp1 = DRTPLayer(target_dim=in_features, hidden_dim=params.latent_dim * 2)
+
+        self.layer2 = nn.Linear(params.latent_dim * 2, params.latent_dim * 4)
+        self.activation2 = params.activation_fn()
+        self.drtp2 = DRTPLayer(target_dim=in_features, hidden_dim=params.latent_dim * 4)
+
+        self.layer3 = nn.Linear(params.latent_dim * 4, in_features)
+        self.output_activation = nn.Sigmoid()
+
+    # -----------------------------------------------------------------------------------
+    def forward(self, x: Tensor, target: Tensor = None) -> Tensor:
+        """
+        Forward pass through the DRTP decoder.
+
+        Args:
+            x: Input embeddings with shape (batch_size, latent_dim)
+            target: Target for DRTP training with shape (batch_size, in_features).
+                   If None, DRTP layers are bypassed (inference mode).
+
+        Returns:
+            Reconstructed features with shape (batch_size, *input_shape)
+        """
+        # First layer
+        h1 = self.layer1(x)
+        h1 = self.activation1(h1)
+
+        # Apply DRTP to first hidden layer if target is provided
+        if target is not None:
+            # Flatten target to match in_features dimension
+            target_flat = target.view(target.size(0), -1)
+            h1 = self.drtp1(h1, target_flat)
+
+        # Second layer
+        h2 = self.layer2(h1)
+        h2 = self.activation2(h2)
+
+        # Apply DRTP to second hidden layer if target is provided
+        if target is not None:
+            h2 = self.drtp2(h2, target_flat)
+
+        # Output layer (no DRTP - uses standard gradients)
+        output = self.layer3(h2)
+        output = self.output_activation(output)
+
+        # Reshape to original input shape
+        return output.reshape(output.shape[0], *self.input_shape)
+
+
 class ConvDecoder(BaseDecoder):
     """Neural network decoder that transforms embeddings into reconstructed features.
 
@@ -144,7 +214,7 @@ class ConvDecoder(BaseDecoder):
         return x
 
 
-# Example usage of the Decoder class
+# Example usage of the Decoder classes
 if __name__ == "__main__":
     # Create decoder parameters for a simple case:
     params = DecoderParams(
@@ -153,20 +223,59 @@ if __name__ == "__main__":
         latent_dim=128,
     )
 
-    # Create the decoder
-    decoder = ConvDecoder(params)
+    print("=== Testing LinearDecoder ===")
+    # Create the linear decoder
+    linear_decoder = LinearDecoder(params)
 
     # Create a sample input (batch size 4, latent dimension)
     sample_input = torch.randn(4, params.latent_dim)
 
     # Forward pass
-    reconstruction = decoder(sample_input)
+    reconstruction = linear_decoder(sample_input)
 
-    # Print decoder details
-    print(f"Decoder architecture: {decoder}")
-    print(f"Input shape: {sample_input.shape}")
-    print(f"Output reconstruction shape: {reconstruction.shape}")
-
-    # Verify reconstruction dimension matches expected
+    print(f"Linear Decoder:")
+    print(f"  Input shape: {sample_input.shape}")
+    print(f"  Output reconstruction shape: {reconstruction.shape}")
     assert reconstruction.shape == (4, *params.input_shape)
-    print("Decoder works as expected!")
+    print("  ✓ Linear decoder works as expected!")
+
+    print("\n=== Testing DRTPDecoder ===")
+    # Create the DRTP decoder
+    drtp_decoder = DRTPDecoder(params)
+
+    # Create target for DRTP training (same shape as expected output)
+    target = torch.randn(4, *params.input_shape)
+
+    # Forward pass with target (training mode)
+    reconstruction_drtp = drtp_decoder(sample_input, target)
+
+    print(f"DRTP Decoder (training mode):")
+    print(f"  Input shape: {sample_input.shape}")
+    print(f"  Target shape: {target.shape}")
+    print(f"  Output reconstruction shape: {reconstruction_drtp.shape}")
+    assert reconstruction_drtp.shape == (4, *params.input_shape)
+    print("  ✓ DRTP decoder training mode works!")
+
+    # Forward pass without target (inference mode)
+    reconstruction_inference = drtp_decoder(sample_input, target=None)
+
+    print(f"DRTP Decoder (inference mode):")
+    print(f"  Input shape: {sample_input.shape}")
+    print(f"  Output reconstruction shape: {reconstruction_inference.shape}")
+    assert reconstruction_inference.shape == (4, *params.input_shape)
+    print("  ✓ DRTP decoder inference mode works!")
+
+    print("\n=== Testing ConvDecoder ===")
+    # Create the convolutional decoder
+    conv_decoder = ConvDecoder(params)
+
+    # Forward pass
+    reconstruction_conv = conv_decoder(sample_input)
+
+    print(f"Conv Decoder:")
+    print(f"  Input shape: {sample_input.shape}")
+    print(f"  Output reconstruction shape: {reconstruction_conv.shape}")
+    assert reconstruction_conv.shape == (4, *params.input_shape)
+    print("  ✓ Conv decoder works as expected!")
+
+    print("\nAll decoders work correctly!")
