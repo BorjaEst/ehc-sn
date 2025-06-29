@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
-from ehc_sn.models.backprop.decoders import BaseDecoder, DecoderParams
-from ehc_sn.models.backprop.encoders import BaseEncoder, EncoderParams
+from ehc_sn.models.decoders import BaseDecoder, DecoderParams
+from ehc_sn.models.encoders import BaseEncoder, EncoderParams
 
 
 class AutoencoderParams(BaseModel):
@@ -89,9 +89,9 @@ class Autoencoder(pl.LightningModule):
     # Training step
     # -----------------------------------------------------------------------------------
 
-    def training_step(self, batch: Tensor, batch_idx: int) -> Tensor:  # noqa: ARG002
+    def training_step(self, batch: Tensor, batch_idx: int) -> Tensor:
         """Training step for the autoencoder."""
-        x = batch
+        x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
         reconstruction, embedding = self(x)
 
         # Calculate losses
@@ -116,7 +116,7 @@ class Autoencoder(pl.LightningModule):
 
     def validation_step(self, batch: Tensor, batch_idx: int) -> Tensor:  # noqa: ARG002
         """Validation step for the autoencoder."""
-        x = batch
+        x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
         reconstruction, embedding = self(x)
 
         # Calculate losses
@@ -141,7 +141,7 @@ class Autoencoder(pl.LightningModule):
 
     def test_step(self, batch: Tensor, batch_idx: int) -> Dict[str, Tensor]:  # noqa: ARG002
         """Test step for the autoencoder."""
-        x = batch
+        x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
         reconstruction, embedding = self(x)
 
         # Calculate losses
@@ -173,7 +173,8 @@ class Autoencoder(pl.LightningModule):
 
     def predict_step(self, batch: Tensor, batch_idx: int) -> Tuple[Tensor, Tensor]:  # noqa: ARG002
         """Prediction step returns reconstructions and embeddings."""
-        return self(batch)
+        x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
+        return self(x)
 
     # -----------------------------------------------------------------------------------
     # Model properties
@@ -236,8 +237,8 @@ if __name__ == "__main__":
 
     import lightning.pytorch as pl
 
-    from ehc_sn.models.backprop.decoders import LinearDecoder
-    from ehc_sn.models.backprop.encoders import LinearEncoder
+    from ehc_sn.models.decoders import LinearDecoder
+    from ehc_sn.models.encoders import LinearEncoder
 
     # Simple dataset
     class SimpleDataset(torch.utils.data.Dataset):
