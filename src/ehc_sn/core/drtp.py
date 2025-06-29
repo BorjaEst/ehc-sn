@@ -1,4 +1,5 @@
 import torch
+from torch import Tensor
 
 
 # -------------------------------------------------------------------------------------------
@@ -9,21 +10,21 @@ class DRTPFunction(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, input: torch.Tensor, B: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def forward(ctx, inputs: Tensor, B: Tensor, target: Tensor) -> Tensor:
         """
         Forward pass: returns the input unchanged to maintain computational graph.
         """
-        ctx.save_for_backward(B, target, input)
-        return input
+        ctx.save_for_backward(B, target)
+        return inputs
 
     # -----------------------------------------------------------------------------------
     @staticmethod
-    def backward(ctx, grad_output: torch.Tensor):
+    def backward(ctx, grad_output: Tensor):
         """
         Backward pass: propagate the error using the fixed random matrix B.
         Instead of using grad_output, we use B^T · target as the gradient signal.
         """
-        B, target, input = ctx.saved_tensors
+        B, target = ctx.saved_tensors
 
         # DRTP: delta = B^T · target (not grad_output)
         # B shape: (target_dim, hidden_dim), target shape: (batch, target_dim)
@@ -35,7 +36,7 @@ class DRTPFunction(torch.autograd.Function):
 
 
 # -------------------------------------------------------------------------------------------
-def drtp_layer(input: torch.Tensor, B: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+def drtp_layer(input: Tensor, B: Tensor, target: Tensor) -> Tensor:
     """
     DRTP layer wrapper for use in nn.Module.
 
@@ -54,6 +55,7 @@ def drtp_layer(input: torch.Tensor, B: torch.Tensor, target: torch.Tensor) -> to
 if __name__ == "__main__":
     # Example usage of DRTP in a simple neural network
     # This is a minimal example to demonstrate the DRTP functionality
+    from torch import nn
 
     # Define layers and random projection matrices
     layer_1 = torch.nn.Linear(5, 4)  # 5 -> 4
@@ -63,6 +65,7 @@ if __name__ == "__main__":
     B2 = torch.randn(2, 3) * 0.1  # Random projection matrix (target_dim=2, hidden_dim=3)
 
     layer_3 = torch.nn.Linear(3, 2)  # 3 -> 2
+    # No DRTP on the final output layer so we use standard backpropagation here
 
     x = torch.ones(1, 5, requires_grad=True)  # Input tensor with gradient tracking
     y_ = torch.ones(1, 2)  # Target tensor (h_*)
@@ -75,7 +78,7 @@ if __name__ == "__main__":
     y3 = layer_3(y2)  # Forward pass through layer 3: (1, 3) -> (1, 2)
 
     # To trigger backward pass, we need a scalar loss
-    loss = y3.sum()  # Simple loss for demonstration
+    loss = nn.MSELoss()(y3, y_)  # Mean Squared Error loss
 
     # Backward pass
     print("Before backward pass:")
