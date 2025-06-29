@@ -1,6 +1,8 @@
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import tomli as tomllib
 import torch
 from torch import nn
 
@@ -120,3 +122,17 @@ def load_state(model: nn.Module, filepath: str, map_location: str = "cpu") -> nn
     state_dict = load_state_dict(filepath, map_location)
     model.load_state_dict(state_dict)
     return model
+
+
+def load_settings(config_path: str) -> Dict[str, Any]:
+    """
+    Load settings from TOML file with optional overrides.
+
+    Args:
+        config_path: Path to TOML configuration file
+
+    Returns:
+        Dictionary with experiment settings
+    """
+    with open(config_path, "rb") as f:
+        return tomllib.load(f)

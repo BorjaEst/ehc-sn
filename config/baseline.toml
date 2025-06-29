@@ -1,0 +1,36 @@
+# Baseline Autoencoder Configuration
+# Default parameters for backpropagation baseline experiment
+
+# data generation
+grid_width           = 32
+grid_height          = 16
+diffusion_iterations = 0
+diffusion_strength   = 0.0
+noise_level          = 0.0
+
+# data module
+num_samples = 4000
+batch_size  = 32
+num_workers = 8
+val_split   = 0.1
+test_split  = 0.1
+
+# model
+latent_dim = 256
+
+# training
+max_epochs      = 200
+sparsity_target = 0.05
+sparsity_weight = 0.01
+
+# logging
+log_dir                   = "logs"
+experiment_name           = "baseline"
+checkpoint_every_n_epochs = 5
+progress_refresh_rate     = 5
+
+# visualization
+figure_width              = 10
+figure_height             = 10
+figure_dpi                = 100
+num_visualization_samples = 5
