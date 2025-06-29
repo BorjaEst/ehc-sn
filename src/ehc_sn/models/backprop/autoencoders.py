@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
-from ehc_sn.models.decoders import BaseDecoder, DecoderParams
-from ehc_sn.models.encoders import BaseEncoder, EncoderParams
+from ehc_sn.models.backprop.decoders import BaseDecoder, DecoderParams
+from ehc_sn.models.backprop.encoders import BaseEncoder, EncoderParams
 
 
 class AutoencoderParams(BaseModel):
@@ -236,8 +236,8 @@ if __name__ == "__main__":
 
     import lightning.pytorch as pl
 
-    from ehc_sn.models.decoders import LinearDecoder
-    from ehc_sn.models.encoders import LinearEncoder
+    from ehc_sn.models.backprop.decoders import LinearDecoder
+    from ehc_sn.models.backprop.encoders import LinearEncoder
 
     # Simple dataset
     class SimpleDataset(torch.utils.data.Dataset):
