@@ -54,6 +54,9 @@ class BPTrainer(base.BaseTrainer):
         Returns:
             (torch.Tensor): The training loss.
         """
+        loss = self._common_step(batch, batch_nb)["loss"]
+        self.log("train_loss", loss, prog_bar=True)
+
         return self._common_step(batch, batch_nb)["loss"]
 
     # -----------------------------------------------------------------------------------
