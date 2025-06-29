@@ -1,6 +1,7 @@
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
+import torch
 from torch import nn
 
 
@@ -78,3 +79,44 @@ def determine_batch_limit(limit_batches, dataloader_length):
         return int(limit_batches * dataloader_length)
     else:
         raise ValueError("limit_batches must be an int, float, or inf")
+
+
+def load_state_dict(filepath: str, map_location: str = "cpu") -> Dict[str, Any]:
+    """
+    Load checkpoint and clean state dict keys if needed.
+
+    Args:
+        filepath: Path to checkpoint file
+        map_location: Device to map tensors to
+
+    Returns:
+        Cleaned state dict ready for model loading
+    """
+    checkpoint = torch.load(filepath, map_location=map_location)
+    state_dict = checkpoint["state_dict"]
+
+    cleaned_state_dict = {}
+    for key, value in state_dict.items():
+        if key.startswith("model."):
+            cleaned_key = key[len("model.") :]
+            cleaned_state_dict[cleaned_key] = value
+        else:
+            cleaned_state_dict[key] = value
+    return cleaned_state_dict
+
+
+def load_state(model: nn.Module, filepath: str, map_location: str = "cpu") -> nn.Module:
+    """
+    Load model weights from checkpoint file.
+
+    Args:
+        model: Model instance to load weights into
+        filepath: Path to checkpoint file
+        map_location: Device to map tensors to
+
+    Returns:
+        Model with loaded weights
+    """
+    state_dict = load_state_dict(filepath, map_location)
+    model.load_state_dict(state_dict)
+    return model
