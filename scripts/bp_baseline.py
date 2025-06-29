@@ -11,8 +11,10 @@ Usage:
 """
 
 import argparse
+from functools import partial
 from typing import Any, Dict, Optional
 
+import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, RichModelSummary, RichProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -20,9 +22,9 @@ from pydantic import BaseModel, Field
 
 from ehc_sn.data import cognitive_maps as data
 from ehc_sn.figures import cognitive_maps as figures
-from ehc_sn.models import autoencoders as models
-from ehc_sn.models import decoders, encoders
-from ehc_sn.trainers.backprop import sparsity as trainers
+from ehc_sn.models.autoencoders import Autoencoder, AutoencoderParams
+from ehc_sn.models.decoders import DecoderParams, LinearDecoder
+from ehc_sn.models.encoders import EncoderParams, LinearEncoder
 from ehc_sn.utils import load_settings
 
 # -------------------------------------------------------------------------------------------
@@ -56,6 +58,7 @@ class ExperimentSettings(BaseModel):
 
     # Training Settings
     max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
+    learning_rate: float = Field(default=1e-3, ge=1e-6, le=1e-1, description="Learning rate for optimizer")
     sparsity_target: float = Field(default=0.05, ge=0.01, le=0.5, description="Target sparsity level")
     sparsity_weight: float = Field(default=0.01, ge=0.0, le=1.0, description="Sparsity regularization weight")
 
@@ -113,36 +116,30 @@ class ExperimentSettings(BaseModel):
             test_split=self.test_split,
         )
 
-    def create_encoder_params(self) -> encoders.EncoderParams:
+    def create_encoder_params(self) -> EncoderParams:
         """Create encoder parameters from settings."""
-        return encoders.EncoderParams(
+        return EncoderParams(
             input_shape=self.input_shape,
             latent_dim=self.latent_dim,
         )
 
-    def create_decoder_params(self) -> decoders.DecoderParams:
+    def create_decoder_params(self) -> DecoderParams:
         """Create decoder parameters from settings."""
-        return decoders.DecoderParams(
+        return DecoderParams(
             input_shape=self.input_shape,
             latent_dim=self.latent_dim,
         )
 
-    def create_trainer_params(self) -> trainers.SparsityBPTrainerParams:
-        """Create trainer parameters from settings."""
-        return trainers.SparsityBPTrainerParams(
-            max_epochs=self.max_epochs,
-            sparsity_target=self.sparsity_target,
+    def create_autoencoder_params(self) -> AutoencoderParams:
+        """Create autoencoder parameters from settings."""
+        encoder = LinearEncoder(self.create_encoder_params())
+        decoder = LinearDecoder(self.create_decoder_params())
+        return AutoencoderParams(
+            encoder=encoder,
+            decoder=decoder,
             sparsity_weight=self.sparsity_weight,
-            callbacks=[
-                RichModelSummary(),
-                RichProgressBar(refresh_rate=self.progress_refresh_rate),
-                ModelCheckpoint(
-                    every_n_epochs=self.checkpoint_every_n_epochs,
-                    save_weights_only=True,
-                ),
-            ],
-            logger=TensorBoardLogger(self.log_dir, name=self.experiment_name),
-            profiler="simple",
+            sparsity_target=self.sparsity_target,
+            optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
 
     def create_figure_params(self) -> figures.CompareMapsFigParam:
@@ -183,10 +180,23 @@ class ExperimentPipeline:
         # Initialize components directly from settings
         generator = data.BlockMapGenerator(self.settings.create_generator_params())
         datamodule = data.DataModule(generator, self.settings.create_datamodule_params())
-        encoder = encoders.LinearEncoder(self.settings.create_encoder_params())
-        decoder = decoders.LinearDecoder(self.settings.create_decoder_params())
-        model = models.Autoencoder(encoder, decoder)
-        trainer = trainers.SparsityBPTrainer(model, self.settings.create_trainer_params())
+        model = Autoencoder(self.settings.create_autoencoder_params())
+
+        # Create standard Lightning trainer
+        trainer = pl.Trainer(
+            max_epochs=self.settings.max_epochs,
+            callbacks=[
+                RichModelSummary(),
+                RichProgressBar(refresh_rate=self.settings.progress_refresh_rate),
+                ModelCheckpoint(
+                    every_n_epochs=self.settings.checkpoint_every_n_epochs,
+                    save_weights_only=True,
+                ),
+            ],
+            logger=TensorBoardLogger(self.settings.log_dir, name=self.settings.experiment_name),
+            profiler="simple",
+        )
+
         fig_generator = figures.CompareCognitiveMaps(self.settings.create_figure_params())
 
         self.components = {
@@ -209,7 +219,9 @@ class ExperimentPipeline:
         print(f"Batch Size: {self.settings.batch_size}")
         print(f"Latent Dim: {self.settings.latent_dim}")
         print(f"Max Epochs: {self.settings.max_epochs}")
+        print(f"Learning Rate: {self.settings.learning_rate:.1e}")
         print(f"Sparsity Target: {self.settings.sparsity_target:.1%}")
+        print(f"Sparsity Weight: {self.settings.sparsity_weight:.3f}")
         print(f"Log Directory: {self.settings.log_dir}")
         print(f"Experiment: {self.settings.experiment_name}")
 
@@ -234,8 +246,8 @@ class ExperimentPipeline:
         print(f"   • Validation samples: {val_samples:,}")
         print(f"   • Test samples: {test_samples:,}")
 
-        # Execute training
-        self.components["trainer"].fit(datamodule=self.components["datamodule"])
+        # Execute training using standard Lightning trainer
+        self.components["trainer"].fit(model=self.components["model"], datamodule=self.components["datamodule"])
 
         print("🎉 Training completed successfully!")
 
@@ -249,19 +261,26 @@ class ExperimentPipeline:
         print("\n📊 Evaluating model performance...")
 
         # Get test data
-        (test_batch,) = next(iter(self.components["datamodule"].test_dataloader()))
+        test_batch = next(iter(self.components["datamodule"].test_dataloader()))
+
+        # Handle batch input - extract tensor from tuple if needed
+        if isinstance(test_batch, (list, tuple)):
+            test_data = test_batch[0]  # Extract the first element (cognitive map tensor)
+        else:
+            test_data = test_batch
+
         model = self.components["model"]
 
         # Ensure device compatibility
-        model.to(device=test_batch.device)
+        model.to(device=test_data.device)
 
         # Generate predictions
         model.eval()
         with torch.no_grad():
-            reconstructed, latent = model(test_batch)
+            reconstructed, latent = model(test_data)
 
             # Calculate metrics
-            mse_loss = torch.nn.functional.mse_loss(reconstructed, test_batch)
+            mse_loss = torch.nn.functional.mse_loss(reconstructed, test_data)
             sparsity = (latent.abs() < 1e-6).float().mean()
 
             print(f"   • Test MSE Loss: {mse_loss:.6f}")
@@ -272,7 +291,7 @@ class ExperimentPipeline:
         sample_pairs = list(
             zip(
                 reconstructed[: self.settings.num_visualization_samples].cpu(),
-                test_batch[: self.settings.num_visualization_samples].squeeze(1).cpu(),
+                test_data[: self.settings.num_visualization_samples].squeeze(1).cpu(),
             )
         )
 
@@ -302,6 +321,7 @@ def run_experiment(
     samples: Optional[int] = None,
     batch_size: Optional[int] = None,
     latent_dim: Optional[int] = None,
+    learning_rate: Optional[float] = None,
 ) -> None:
     """
     Run the complete backpropagation baseline experiment.
@@ -312,6 +332,7 @@ def run_experiment(
         samples: Number of training samples (overrides config)
         batch_size: Training batch size (overrides config)
         latent_dim: Latent space dimension (overrides config)
+        learning_rate: Learning rate for optimizer (overrides config)
     """
     print("=" * 80)
     print("🧠 ENTORHINAL-HIPPOCAMPAL CIRCUIT: BACKPROPAGATION BASELINE")
@@ -327,6 +348,8 @@ def run_experiment(
         overrides["batch_size"] = batch_size
     if latent_dim is not None:
         overrides["latent_dim"] = latent_dim
+    if learning_rate is not None:
+        overrides["learning_rate"] = learning_rate
 
     # Load settings
     print(f"📁 Loading configuration from: {config}")
@@ -360,6 +383,7 @@ def parse_arguments():
     parser.add_argument("--samples", "-s", type=int, help="Number of training samples")
     parser.add_argument("--batch-size", "-b", type=int, help="Training batch size")
     parser.add_argument("--latent-dim", "-l", type=int, help="Latent space dimension")
+    parser.add_argument("--learning-rate", "-lr", type=float, help="Learning rate for optimizer")
 
     return parser.parse_args()
 
@@ -377,6 +401,7 @@ if __name__ == "__main__":
             samples=args.samples,
             batch_size=args.batch_size,
             latent_dim=args.latent_dim,
+            learning_rate=args.learning_rate,
         )
     except Exception as e:
         print(f"\n❌ EXPERIMENT FAILED: {e}")
