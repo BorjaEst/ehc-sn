@@ -7,31 +7,25 @@ using backpropagation. Uses TOML configuration files for parameter management.
 Usage:
     python bp_decoder.py
     python bp_decoder.py --config experiments/decoder.toml
-    python bp_decoder.py --pretrained models/baseli    # Prepare overrides
-    overrides: Dict[str, Union[str, int, bool]] = {}
-    if pretrained is not None:
-        overrides['pretrained_path'] = pretrained
-    if epochs is not None:
-        overrides['max_epochs'] = epochs
-    if samples is not None:
-        overrides['num_samples'] = samplesochs 100
+    python bp_decoder.py --pretrained models/baseline.ckpt --epochs 100
 """
 
 import argparse
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
+import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, RichModelSummary, RichProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
 from pydantic import BaseModel, Field
 
-from ehc_sn import utils
 from ehc_sn.data import cognitive_maps as data
 from ehc_sn.figures import cognitive_maps as figures
-from ehc_sn.models import autoencoders as models
-from ehc_sn.models import decoders, encoders
-from ehc_sn.trainers.backprop import sparsity as trainers
+from ehc_sn.models.autoencoders import Autoencoder, AutoencoderParams
+from ehc_sn.models.decoders import DecoderParams, LinearDecoder
+from ehc_sn.models.encoders import EncoderParams, LinearEncoder
 from ehc_sn.utils import load_settings
 
 # -------------------------------------------------------------------------------------------
@@ -70,6 +64,7 @@ class DecoderTrainingSettings(BaseModel):
 
     # Training Settings
     max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
+    learning_rate: float = Field(default=1e-3, ge=1e-6, le=1e-1, description="Learning rate for optimizer")
     sparsity_target: float = Field(default=0.05, ge=0.01, le=0.5, description="Target sparsity level")
     sparsity_weight: float = Field(default=0.01, ge=0.0, le=1.0, description="Sparsity regularization weight")
 
@@ -108,16 +103,16 @@ class DecoderTrainingSettings(BaseModel):
     # Component Configuration Methods
     # -----------------------------------------------------------------------------------
 
-    def create_encoder_params(self) -> encoders.EncoderParams:
+    def create_encoder_params(self) -> EncoderParams:
         """Create encoder parameters from settings."""
-        return encoders.EncoderParams(
+        return EncoderParams(
             input_shape=self.input_shape,
             latent_dim=self.latent_dim,
         )
 
-    def create_decoder_params(self) -> decoders.DecoderParams:
+    def create_decoder_params(self) -> DecoderParams:
         """Create decoder parameters from settings."""
-        return decoders.DecoderParams(
+        return DecoderParams(
             input_shape=self.input_shape,
             latent_dim=self.latent_dim,
         )
@@ -141,22 +136,14 @@ class DecoderTrainingSettings(BaseModel):
             test_split=self.test_split,
         )
 
-    def create_trainer_params(self) -> trainers.SparsityBPTrainerParams:
-        """Create trainer parameters from settings."""
-        return trainers.SparsityBPTrainerParams(
-            max_epochs=self.max_epochs,
-            sparsity_target=self.sparsity_target,
+    def create_autoencoder_params(self, encoder: LinearEncoder, decoder: LinearDecoder) -> AutoencoderParams:
+        """Create autoencoder parameters from settings."""
+        return AutoencoderParams(
+            encoder=encoder,
+            decoder=decoder,
             sparsity_weight=self.sparsity_weight,
-            callbacks=[
-                RichModelSummary(),
-                RichProgressBar(refresh_rate=self.progress_refresh_rate),
-                ModelCheckpoint(
-                    every_n_epochs=self.checkpoint_every_n_epochs,
-                    save_weights_only=True,
-                ),
-            ],
-            logger=TensorBoardLogger(self.log_dir, name=self.experiment_name),
-            profiler="simple",
+            sparsity_target=self.sparsity_target,
+            optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
 
     def create_figure_params(self) -> figures.CompareMapsFigParam:
@@ -195,14 +182,21 @@ class DecoderTrainingPipeline:
         print("🔧 Setting up decoder training components...")
 
         # Initialize model architecture
-        encoder = encoders.LinearEncoder(self.settings.create_encoder_params())
-        decoder = decoders.LinearDecoder(self.settings.create_decoder_params())
-        model = models.Autoencoder(encoder, decoder)
+        encoder = LinearEncoder(self.settings.create_encoder_params())
+        decoder = LinearDecoder(self.settings.create_decoder_params())
 
-        # Load pretrained weights
+        # Create autoencoder with initial parameters
+        autoencoder_params = self.settings.create_autoencoder_params(encoder, decoder)
+        model = Autoencoder(autoencoder_params)
+
+        # Load pretrained weights if available
         if Path(self.settings.pretrained_path).exists():
             print(f"📥 Loading pretrained model from: {self.settings.pretrained_path}")
-            utils.load_weights(model, self.settings.pretrained_path)  # type: ignore
+            checkpoint = torch.load(self.settings.pretrained_path, map_location="cpu")
+            if "state_dict" in checkpoint:
+                model.load_state_dict(checkpoint["state_dict"])
+            else:
+                model.load_state_dict(checkpoint)
         else:
             print(f"⚠️  Warning: Pretrained model not found at {self.settings.pretrained_path}")
             print("   Proceeding with randomly initialized weights")
@@ -215,14 +209,26 @@ class DecoderTrainingPipeline:
 
         if self.settings.reinit_decoder:
             print("🔄 Reinitializing decoder weights")
-            model.decoder.reinit_weights()
+            model.decoder = LinearDecoder(self.settings.create_decoder_params())
 
         # Initialize data components
         generator = data.BlockMapGenerator(self.settings.create_generator_params())
         datamodule = data.DataModule(generator, self.settings.create_datamodule_params())
 
-        # Initialize trainer
-        trainer = trainers.SparsityBPTrainer(model, self.settings.create_trainer_params())
+        # Create standard Lightning trainer
+        trainer = pl.Trainer(
+            max_epochs=self.settings.max_epochs,
+            callbacks=[
+                RichModelSummary(),
+                RichProgressBar(refresh_rate=self.settings.progress_refresh_rate),
+                ModelCheckpoint(
+                    every_n_epochs=self.settings.checkpoint_every_n_epochs,
+                    save_weights_only=True,
+                ),
+            ],
+            logger=TensorBoardLogger(self.settings.log_dir, name=self.settings.experiment_name),
+            profiler="simple",
+        )
 
         # Initialize visualization
         fig_generator = figures.CompareCognitiveMaps(self.settings.create_figure_params())
@@ -250,7 +256,9 @@ class DecoderTrainingPipeline:
         print(f"Batch Size: {self.settings.batch_size}")
         print(f"Latent Dim: {self.settings.latent_dim}")
         print(f"Max Epochs: {self.settings.max_epochs}")
+        print(f"Learning Rate: {self.settings.learning_rate:.1e}")
         print(f"Sparsity Target: {self.settings.sparsity_target:.1%}")
+        print(f"Sparsity Weight: {self.settings.sparsity_weight:.3f}")
         print(f"Log Directory: {self.settings.log_dir}")
         print(f"Experiment: {self.settings.experiment_name}")
 
@@ -284,8 +292,8 @@ class DecoderTrainingPipeline:
         print(f"   • Trainable parameters: {trainable_params:,}")
         print(f"   • Frozen parameters: {frozen_params:,}")
 
-        # Execute training
-        self.components["trainer"].fit(datamodule=self.components["datamodule"])
+        # Execute training using standard Lightning trainer
+        self.components["trainer"].fit(model=self.components["model"], datamodule=self.components["datamodule"])
 
         print("🎉 Decoder training completed successfully!")
 
@@ -300,8 +308,14 @@ class DecoderTrainingPipeline:
 
         # Get test data
         test_batch = next(iter(self.components["datamodule"].test_dataloader()))
-        inputs = test_batch[0]
-        original_targets = inputs.squeeze(1)
+
+        # Handle batch input - extract tensor from tuple if needed
+        if isinstance(test_batch, (list, tuple)):
+            inputs = test_batch[0]  # Extract the first element (cognitive map tensor)
+        else:
+            inputs = test_batch
+
+        original_targets = inputs.squeeze(1) if inputs.dim() > 3 else inputs
         model = self.components["model"]
 
         # Ensure device compatibility
