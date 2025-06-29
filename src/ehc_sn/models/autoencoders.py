@@ -82,7 +82,7 @@ class Autoencoder(pl.LightningModule):
 
     def forward(self, x: Tensor, *args: Any) -> Tuple[Tensor, Tensor]:
         embedding = self.encoder(x)
-        reconstruction = self.decoder(embedding)
+        reconstruction = self.decoder(embedding, target=x)
         return reconstruction, embedding
 
     # -----------------------------------------------------------------------------------
