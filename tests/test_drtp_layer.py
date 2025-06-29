@@ -1,7 +1,8 @@
 import pytest
 import torch
+from torch import nn
 
-from ehc_sn.core.drtp import DRTPFunction, drtp_layer
+from ehc_sn.core.drtp import DRTPFunction, DRTPLayer, drtp_layer
 
 
 class TestDRTPLayer:
@@ -260,3 +261,122 @@ class TestDRTPFunction:
         # it uses a fixed random projection instead of the true gradient.
         # This is the core feature of DRTP - it provides learning signals
         # that are biologically plausible but mathematically different from backprop.
+
+
+# -------------------------------------------------------------------------------------------
+class TestDRTPLayerModule:
+    """Test suite for the DRTPLayer nn.Module class."""
+
+    # -----------------------------------------------------------------------------------
+    def test_drtp_layer_initialization(self):
+        """Test DRTPLayer module initialization."""
+        target_dim, hidden_dim = 5, 10
+        layer = DRTPLayer(target_dim=target_dim, hidden_dim=hidden_dim)
+
+        assert layer.target_dim == target_dim
+        assert layer.hidden_dim == hidden_dim
+        assert layer.B.shape == (target_dim, hidden_dim)
+        assert isinstance(layer.B, torch.Tensor)
+
+    # -----------------------------------------------------------------------------------
+    def test_drtp_layer_forward_pass(self):
+        """Test DRTPLayer module forward pass."""
+        batch_size, target_dim, hidden_dim = 3, 5, 10
+        layer = DRTPLayer(target_dim=target_dim, hidden_dim=hidden_dim)
+
+        input_tensor = torch.randn(batch_size, hidden_dim, requires_grad=True)
+        target = torch.randn(batch_size, target_dim)
+
+        output = layer(input_tensor, target)
+
+        # Output should be identical to input
+        assert torch.allclose(output, input_tensor)
+        assert output.requires_grad == input_tensor.requires_grad
+
+    # -----------------------------------------------------------------------------------
+    def test_drtp_layer_gradient_computation(self):
+        """Test that DRTPLayer computes gradients correctly."""
+        batch_size, target_dim, hidden_dim = 2, 3, 4
+        layer = DRTPLayer(target_dim=target_dim, hidden_dim=hidden_dim)
+
+        input_tensor = torch.randn(batch_size, hidden_dim, requires_grad=True)
+        target = torch.ones(batch_size, target_dim)  # Use ones for predictable results
+
+        output = layer(input_tensor, target)
+        loss = output.sum()
+        loss.backward()
+
+        # Expected gradient should be target @ layer.B
+        expected_grad = torch.matmul(target, layer.B)
+
+        assert torch.allclose(input_tensor.grad, expected_grad, atol=1e-6)
+
+    # -----------------------------------------------------------------------------------
+    def test_drtp_layer_dimension_validation(self):
+        """Test that DRTPLayer validates input dimensions."""
+        layer = DRTPLayer(target_dim=5, hidden_dim=10)
+
+        # Test with wrong input dimension
+        wrong_input = torch.randn(2, 8)  # Should be (2, 10)
+        target = torch.randn(2, 5)
+
+        with pytest.raises(ValueError, match="Input last dimension"):
+            layer(wrong_input, target)
+
+        # Test with wrong target dimension
+        input_tensor = torch.randn(2, 10)
+        wrong_target = torch.randn(2, 3)  # Should be (2, 5)
+
+        with pytest.raises(ValueError, match="Target last dimension"):
+            layer(input_tensor, wrong_target)
+
+    # -----------------------------------------------------------------------------------
+    def test_drtp_layer_reinit_projection_matrix(self):
+        """Test reinitializing the projection matrix."""
+        layer = DRTPLayer(target_dim=3, hidden_dim=5)
+        original_B = layer.B.clone()
+
+        # Reinitialize with different scale
+        layer.reinit_projection_matrix(scale=0.5)
+
+        # Matrix should be different
+        assert not torch.allclose(layer.B, original_B)
+        assert layer.scale == 0.5
+
+    # -----------------------------------------------------------------------------------
+    def test_drtp_layer_extra_repr(self):
+        """Test the extra_repr method for debugging."""
+        layer = DRTPLayer(target_dim=3, hidden_dim=5, scale=0.2)
+        repr_str = layer.extra_repr()
+
+        assert "target_dim=3" in repr_str
+        assert "hidden_dim=5" in repr_str
+        assert "scale=0.2" in repr_str
+
+    # -----------------------------------------------------------------------------------
+    def test_drtp_layer_with_linear_layers(self):
+        """Test DRTPLayer integration with linear layers."""
+        input_dim, hidden_dim, output_dim = 4, 6, 3
+        target_dim = 2
+
+        # Create a small network with DRTP
+        linear1 = nn.Linear(input_dim, hidden_dim)
+        drtp = DRTPLayer(target_dim=target_dim, hidden_dim=hidden_dim)
+        linear2 = nn.Linear(hidden_dim, output_dim)
+
+        x = torch.randn(2, input_dim, requires_grad=True)
+        target = torch.randn(2, target_dim)
+
+        # Forward pass
+        h = linear1(x)
+        h_drtp = drtp(h, target)
+        output = linear2(h_drtp)
+
+        # Compute loss and backpropagate
+        loss = output.sum()
+        loss.backward()
+
+        # Check that all layers have gradients
+        assert linear1.weight.grad is not None
+        assert linear2.weight.grad is not None
+        assert x.grad is not None

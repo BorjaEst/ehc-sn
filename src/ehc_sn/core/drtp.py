@@ -1,9 +1,9 @@
 import torch
-from torch import Tensor
+from torch import Tensor, autograd, nn
 
 
 # -------------------------------------------------------------------------------------------
-class DRTPFunction(torch.autograd.Function):
+class DRTPFunction(autograd.Function):
     """
     Custom autograd function for Direct Random Target Projection (DRTP).
     The backward pass uses a fixed random projection matrix to propagate the error.
@@ -52,67 +52,174 @@ def drtp_layer(input: Tensor, B: Tensor, target: Tensor) -> Tensor:
 
 
 # -------------------------------------------------------------------------------------------
+class DRTPLayer(nn.Module):
+    """
+    DRTP (Direct Random Target Projection) layer module.
+
+    This layer implements the DRTP learning mechanism where gradients are computed
+    using a fixed random projection of the target instead of standard backpropagation.
+    The layer maintains a fixed random projection matrix B that maps target signals
+    to the hidden layer dimensions.
+
+    During forward pass, the layer returns its input unchanged to maintain the
+    computational graph. During backward pass, it uses the custom DRTPFunction
+    to provide modulatory signals based on the target projection.
+
+    This implementation is biologically inspired and provides an alternative to
+    standard backpropagation that doesn't require symmetric weight transport.
+
+    Args:
+        target_dim: Dimensionality of the target space (output dimension)
+        hidden_dim: Dimensionality of the hidden layer where DRTP is applied
+        scale: Scaling factor for the random projection matrix initialization
+
+    Example:
+        >>> drtp_layer = DRTPLayer(target_dim=10, hidden_dim=128)
+        >>> hidden = torch.randn(32, 128)  # batch_size=32, hidden_dim=128
+        >>> target = torch.randn(32, 10)   # batch_size=32, target_dim=10
+        >>> output = drtp_layer(hidden, target)  # Returns hidden unchanged
+    """
+
+    def __init__(self, target_dim: int, hidden_dim: int, scale: float = 0.1):
+        """
+        Initialize a DRTP layer with a fixed random projection matrix.
+
+        Args:
+            target_dim: Dimensionality of the target space (e.g., output classes)
+            hidden_dim: Dimensionality of the hidden layer activations
+            scale: Scaling factor for random matrix initialization (default: 0.1)
+        """
+        super().__init__()
+
+        # Store dimensions for reference
+        self.target_dim = target_dim
+        self.hidden_dim = hidden_dim
+        self.scale = scale
+
+        # Register the random projection matrix as a buffer (non-trainable)
+        # Shape: (target_dim, hidden_dim) to allow target @ B multiplication
+        self.register_buffer("B", torch.randn(target_dim, hidden_dim) * scale)
+
+    # -----------------------------------------------------------------------------------
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        """
+        Forward pass through the DRTP layer.
+
+        During forward pass, the input is returned unchanged to maintain the
+        computational graph. The DRTP mechanism is applied during the backward
+        pass through the custom autograd function.
+
+        Args:
+            input: Hidden layer activations with shape (batch_size, hidden_dim)
+            target: Target values with shape (batch_size, target_dim)
+
+        Returns:
+            Tensor: Input unchanged, maintaining computational graph for gradient flow
+
+        Raises:
+            ValueError: If input or target dimensions don't match expected shapes
+        """
+        # Validate input dimensions
+        if input.size(-1) != self.hidden_dim:
+            raise ValueError(
+                f"Input last dimension {input.size(-1)} doesn't match " f"expected hidden_dim {self.hidden_dim}"
+            )
+
+        if target.size(-1) != self.target_dim:
+            raise ValueError(
+                f"Target last dimension {target.size(-1)} doesn't match " f"expected target_dim {self.target_dim}"
+            )
+
+        # Apply DRTP function which handles the custom backward pass
+        return DRTPFunction.apply(input, self.B, target)
+
+    # -----------------------------------------------------------------------------------
+    def extra_repr(self) -> str:
+        """Return extra representation for better debugging and model inspection."""
+        return f"target_dim={self.target_dim}, hidden_dim={self.hidden_dim}, scale={self.scale}"
+
+    # -----------------------------------------------------------------------------------
+    def reinit_projection_matrix(self, scale: float = None):
+        """
+        Reinitialize the random projection matrix B.
+
+        This can be useful for experimentation or resetting the DRTP behavior.
+
+        Args:
+            scale: New scaling factor. If None, uses the original scale.
+        """
+        if scale is None:
+            scale = self.scale
+        else:
+            self.scale = scale
+
+        # Reinitialize the projection matrix
+        self.B.data = torch.randn(self.target_dim, self.hidden_dim) * scale
+
+
+# -------------------------------------------------------------------------------------------
 if __name__ == "__main__":
     # Example usage of DRTP in a simple neural network
-    # This is a minimal example to demonstrate the DRTP functionality
-    from torch import nn
+    print("=== DRTP Layer Example ===")
 
-    # Define layers and random projection matrices
-    layer_1 = torch.nn.Linear(5, 4)  # 5 -> 4
-    B1 = torch.randn(2, 4) * 0.1  # Random projection matrix (target_dim=2, hidden_dim=4)
+    # Network parameters
+    input_dim, hidden1_dim, hidden2_dim, output_dim = 5, 4, 3, 2
+    batch_size = 2
 
-    layer_2 = torch.nn.Linear(4, 3)  # 4 -> 3
-    B2 = torch.randn(2, 3) * 0.1  # Random projection matrix (target_dim=2, hidden_dim=3)
+    # Create network layers
+    layer1 = nn.Linear(input_dim, hidden1_dim)
+    drtp1 = DRTPLayer(target_dim=output_dim, hidden_dim=hidden1_dim)
 
-    layer_3 = torch.nn.Linear(3, 2)  # 3 -> 2
-    # No DRTP on the final output layer so we use standard backpropagation here
+    layer2 = nn.Linear(hidden1_dim, hidden2_dim)
+    drtp2 = DRTPLayer(target_dim=output_dim, hidden_dim=hidden2_dim)
 
-    x = torch.ones(1, 5, requires_grad=True)  # Input tensor with gradient tracking
-    y_ = torch.ones(1, 2)  # Target tensor (h_*)
+    layer3 = nn.Linear(hidden2_dim, output_dim)  # Output layer (no DRTP)
 
-    # Full forward pass
-    y1 = layer_1(x)  # Forward pass through layer 1: (1, 5) -> (1, 4)
-    y1 = drtp_layer(y1, B1, y_)  # DRTP modulation on layer 1 output
-    y2 = layer_2(y1)  # Forward pass through layer 2: (1, 4) -> (1, 3)
-    y2 = drtp_layer(y2, B2, y_)  # DRTP modulation on layer 2 output
-    y3 = layer_3(y2)  # Forward pass through layer 3: (1, 3) -> (1, 2)
+    # Create input and target
+    x = torch.randn(batch_size, input_dim, requires_grad=True)
+    target = torch.randn(batch_size, output_dim)
 
-    # To trigger backward pass, we need a scalar loss
-    loss = nn.MSELoss()(y3, y_)  # Mean Squared Error loss
+    print(f"Input shape: {x.shape}")
+    print(f"Target shape: {target.shape}")
+    print(f"DRTP1 projection matrix shape: {drtp1.B.shape}")
+    print(f"DRTP2 projection matrix shape: {drtp2.B.shape}")
+
+    # Forward pass
+    h1 = layer1(x)  # (batch_size, hidden1_dim)
+    h1_drtp = drtp1(h1, target)  # Apply DRTP to hidden layer 1
+
+    h2 = layer2(h1_drtp)  # (batch_size, hidden2_dim)
+    h2_drtp = drtp2(h2, target)  # Apply DRTP to hidden layer 2
+
+    output = layer3(h2_drtp)  # (batch_size, output_dim) - no DRTP on output
+
+    # Compute loss
+    loss = nn.MSELoss()(output, target)
+
+    print(f"\nForward pass:")
+    print(f"  Hidden 1 shape: {h1.shape}")
+    print(f"  Hidden 2 shape: {h2.shape}")
+    print(f"  Output shape: {output.shape}")
+    print(f"  Loss: {loss.item():.6f}")
 
     # Backward pass
-    print("Before backward pass:")
-    print("  Layer 1 gradients:", layer_1.weight.grad)
-    print("  Layer 2 gradients:", layer_2.weight.grad)
-    print("  Layer 3 gradients:", layer_3.weight.grad)
-    print("  Input gradients:", x.grad)
+    print(f"\nBefore backward:")
+    print(f"  Layer1 grad: {layer1.weight.grad}")
+    print(f"  Layer2 grad: {layer2.weight.grad}")
+    print(f"  Layer3 grad: {layer3.weight.grad}")
 
-    loss.backward()  # This will use our custom DRTP backward pass
+    loss.backward()
 
-    print("\nAfter DRTP backward pass:")
-    print("  Layer 1 weight gradients shape:", layer_1.weight.grad.shape if layer_1.weight.grad is not None else None)
-    print("  Layer 1 weight gradients:", layer_1.weight.grad)
-    print("  Layer 2 weight gradients shape:", layer_2.weight.grad.shape if layer_2.weight.grad is not None else None)
-    print("  Layer 2 weight gradients:", layer_2.weight.grad)
-    print("  Layer 3 weight gradients shape:", layer_3.weight.grad.shape if layer_3.weight.grad is not None else None)
-    print("  Layer 3 weight gradients:", layer_3.weight.grad)
-    print("  Input gradients:", x.grad)
+    print(f"\nAfter backward:")
+    print(f"  Layer1 grad shape: {layer1.weight.grad.shape if layer1.weight.grad is not None else None}")
+    print(f"  Layer2 grad shape: {layer2.weight.grad.shape if layer2.weight.grad is not None else None}")
+    print(f"  Layer3 grad shape: {layer3.weight.grad.shape if layer3.weight.grad is not None else None}")
 
-    # Verify the DRTP computation manually
-    print("\nManual DRTP verification:")
-    print("  Network architecture: 5 -> 4 -> 3 -> 2")
-    print("  B1 shape:", B1.shape)  # (2, 4) - projects target (2,) to layer1 output (4,)
-    print("  B2 shape:", B2.shape)  # (2, 3) - projects target (2,) to layer2 output (3,)
-    print("  y_ (target) shape:", y_.shape)  # (1, 2)
-    print("  y1 shape:", y1.shape)  # (1, 4)
-    print("  y2 shape:", y2.shape)  # (1, 3)
-    print("  y3 (final output) shape:", y3.shape)  # (1, 2)
+    # Verify DRTP projections
+    print(f"\nDRTP projections:")
+    expected_grad1 = torch.matmul(target, drtp1.B)  # Should match h1 gradients
+    expected_grad2 = torch.matmul(target, drtp2.B)  # Should match h2 gradients
+    print(f"  Expected DRTP1 gradient shape: {expected_grad1.shape}")
+    print(f"  Expected DRTP2 gradient shape: {expected_grad2.shape}")
 
-    # The gradients should be:
-    # For layer 1: y_ @ B1 = (1, 2) @ (2, 4) = (1, 4)
-    # For layer 2: y_ @ B2 = (1, 2) @ (2, 3) = (1, 3)
-    manual_grad_1 = torch.matmul(y_, B1)
-    manual_grad_2 = torch.matmul(y_, B2)
-    print("  Manual DRTP gradient for layer 1:", manual_grad_1)
-    print("  Manual DRTP gradient for layer 2:", manual_grad_2)
-    print("  Final output y3:", y3)
+    print(f"\nDRTP Layer example completed successfully!")
