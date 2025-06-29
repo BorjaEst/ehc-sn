@@ -44,6 +44,23 @@ class BaseEncoder(nn.Module):
         """Forward pass through the encoder."""
         raise NotImplementedError("Subclasses must implement forward method")
 
+    def reinit_weights(self, init_fn=None):
+        """Reinitialize all weights in the encoder.
+
+        Args:
+            init_fn: Optional initialization function. If None, uses Xavier uniform.
+        """
+        if init_fn is None:
+            init_fn = nn.init.xavier_uniform_
+
+        def init_weights(module):
+            if isinstance(module, (nn.Linear, nn.Conv2d)):
+                init_fn(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+        self.apply(init_weights)
+
     @property
     def input_shape(self) -> Tuple[int, int, int]:
         """Returns the shape of the input feature map."""
