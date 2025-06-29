@@ -1,23 +1,32 @@
 """
-Backpropagation Baseline for Entorhinal-Hippocampal Circuit
+Backpropagation Decoder for Entorhinal-Hippocampal Circuit
 
-Simple script for running baseline autoencoder experiments using backpropagation
-training on cognitive maps. Uses TOML configuration files for parameter management.
+Simple script for training only the decoder part of a pretrained autoencoder
+using backpropagation. Uses TOML configuration files for parameter management.
 
 Usage:
-    python bp_baseline.py
-    python bp_baseline.py --config experiments/baseline.toml
-    python bp_baseline.py --epochs 300 --samples 8000
+    python bp_decoder.py
+    python bp_decoder.py --config experiments/decoder.toml
+    python bp_decoder.py --pretrained models/baseli    # Prepare overrides
+    overrides: Dict[str, Union[str, int, bool]] = {}
+    if pretrained is not None:
+        overrides['pretrained_path'] = pretrained
+    if epochs is not None:
+        overrides['max_epochs'] = epochs
+    if samples is not None:
+        overrides['num_samples'] = samplesochs 100
 """
 
 import argparse
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional, Union
 
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, RichModelSummary, RichProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
 from pydantic import BaseModel, Field
 
+from ehc_sn import utils
 from ehc_sn.data import cognitive_maps as data
 from ehc_sn.figures import cognitive_maps as figures
 from ehc_sn.models import autoencoders as models
@@ -30,12 +39,17 @@ from ehc_sn.utils import load_settings
 # -------------------------------------------------------------------------------------------
 
 
-class ExperimentSettings(BaseModel):
+class DecoderTrainingSettings(BaseModel):
     """
-    Configuration settings for the autoencoder baseline experiment.
+    Configuration settings for decoder-only training experiment.
 
     Loads parameters from TOML configuration files with validation.
     """
+
+    # Model Loading Settings
+    pretrained_path: str = Field(default="autoencoder.ckpt", description="Path to pretrained autoencoder checkpoint")
+    freeze_encoder: bool = Field(default=True, description="Whether to freeze encoder weights during training")
+    reinit_decoder: bool = Field(default=True, description="Whether to reinitialize decoder weights before training")
 
     # Data Generation Settings
     grid_width: int = Field(default=32, ge=8, le=128, description="Width of the cognitive map grid")
@@ -61,7 +75,7 @@ class ExperimentSettings(BaseModel):
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
-    experiment_name: str = Field(default="baseline", description="Experiment name")
+    experiment_name: str = Field(default="bp_decoder", description="Experiment name")
     checkpoint_every_n_epochs: int = Field(default=5, ge=1, le=50, description="Checkpoint frequency")
     progress_refresh_rate: int = Field(default=5, ge=1, le=20, description="Progress bar refresh rate")
 
@@ -94,6 +108,20 @@ class ExperimentSettings(BaseModel):
     # Component Configuration Methods
     # -----------------------------------------------------------------------------------
 
+    def create_encoder_params(self) -> encoders.EncoderParams:
+        """Create encoder parameters from settings."""
+        return encoders.EncoderParams(
+            input_shape=self.input_shape,
+            latent_dim=self.latent_dim,
+        )
+
+    def create_decoder_params(self) -> decoders.DecoderParams:
+        """Create decoder parameters from settings."""
+        return decoders.DecoderParams(
+            input_shape=self.input_shape,
+            latent_dim=self.latent_dim,
+        )
+
     def create_generator_params(self) -> data.BlockMapParams:
         """Create data generator parameters from settings."""
         return data.BlockMapParams(
@@ -111,20 +139,6 @@ class ExperimentSettings(BaseModel):
             batch_size=self.batch_size,
             val_split=self.val_split,
             test_split=self.test_split,
-        )
-
-    def create_encoder_params(self) -> encoders.EncoderParams:
-        """Create encoder parameters from settings."""
-        return encoders.EncoderParams(
-            input_shape=self.input_shape,
-            latent_dim=self.latent_dim,
-        )
-
-    def create_decoder_params(self) -> decoders.DecoderParams:
-        """Create decoder parameters from settings."""
-        return decoders.DecoderParams(
-            input_shape=self.input_shape,
-            latent_dim=self.latent_dim,
         )
 
     def create_trainer_params(self) -> trainers.SparsityBPTrainerParams:
@@ -157,19 +171,19 @@ class ExperimentSettings(BaseModel):
 
 
 # -------------------------------------------------------------------------------------------
-# Experiment Pipeline
+# Decoder Training Pipeline
 # -------------------------------------------------------------------------------------------
 
 
-class ExperimentPipeline:
-    """Orchestrates the complete experiment workflow."""
+class DecoderTrainingPipeline:
+    """Orchestrates the decoder-only training workflow."""
 
-    def __init__(self, settings: ExperimentSettings):
+    def __init__(self, settings: DecoderTrainingSettings):
         """
-        Initialize experiment pipeline with settings.
+        Initialize decoder training pipeline with settings.
 
         Args:
-            settings: CLI configuration settings
+            settings: Configuration settings
         """
         self.settings = settings
         self.components: Optional[Dict[str, Any]] = None
@@ -177,33 +191,60 @@ class ExperimentPipeline:
     # -----------------------------------------------------------------------------------
 
     def setup_components(self) -> None:
-        """Initialize all experiment components based on settings."""
-        print("🔧 Setting up experiment components...")
+        """Initialize all experiment components and load pretrained model."""
+        print("🔧 Setting up decoder training components...")
 
-        # Initialize components directly from settings
-        generator = data.BlockMapGenerator(self.settings.create_generator_params())
-        datamodule = data.DataModule(generator, self.settings.create_datamodule_params())
+        # Initialize model architecture
         encoder = encoders.LinearEncoder(self.settings.create_encoder_params())
         decoder = decoders.LinearDecoder(self.settings.create_decoder_params())
         model = models.Autoencoder(encoder, decoder)
+
+        # Load pretrained weights
+        if Path(self.settings.pretrained_path).exists():
+            print(f"📥 Loading pretrained model from: {self.settings.pretrained_path}")
+            utils.load_state(model, self.settings.pretrained_path)  # type: ignore
+        else:
+            print(f"⚠️  Warning: Pretrained model not found at {self.settings.pretrained_path}")
+            print("   Proceeding with randomly initialized weights")
+
+        # Configure model for decoder-only training
+        if self.settings.freeze_encoder:
+            print("🔒 Freezing encoder parameters")
+            for param in model.encoder.parameters():
+                param.requires_grad = False
+
+        if self.settings.reinit_decoder:
+            print("🔄 Reinitializing decoder weights")
+            model.decoder.reinit_weights()
+
+        # Initialize data components
+        generator = data.BlockMapGenerator(self.settings.create_generator_params())
+        datamodule = data.DataModule(generator, self.settings.create_datamodule_params())
+
+        # Initialize trainer
         trainer = trainers.SparsityBPTrainer(model, self.settings.create_trainer_params())
+
+        # Initialize visualization
         fig_generator = figures.CompareCognitiveMaps(self.settings.create_figure_params())
 
         self.components = {
-            "datamodule": datamodule,
             "model": model,
+            "datamodule": datamodule,
             "trainer": trainer,
             "fig_generator": fig_generator,
         }
 
-        print("✅ Experiment setup completed!")
+        print("✅ Component setup completed!")
 
     # -----------------------------------------------------------------------------------
 
     def display_configuration(self) -> None:
         """Display experiment configuration summary."""
-        print("\n📋 EXPERIMENT CONFIGURATION")
+        print("\n📋 DECODER TRAINING CONFIGURATION")
         print("-" * 50)
+        print(f"Pretrained Path: {self.settings.pretrained_path}")
+        print(f"Freeze Encoder: {self.settings.freeze_encoder}")
+        print(f"Reinit Decoder: {self.settings.reinit_decoder}")
         print(f"Grid Size: {self.settings.grid_height}×{self.settings.grid_width}")
         print(f"Samples: {self.settings.num_samples:,}")
         print(f"Batch Size: {self.settings.batch_size}")
@@ -215,12 +256,12 @@ class ExperimentPipeline:
 
     # -----------------------------------------------------------------------------------
 
-    def train(self) -> None:
-        """Execute the training pipeline."""
+    def train_decoder(self) -> None:
+        """Execute the decoder training pipeline."""
         if not self.components:
             raise RuntimeError("Components not initialized. Call setup_components() first.")
 
-        print("\n🚀 Starting model training...")
+        print("\n🚀 Starting decoder-only training...")
 
         # Setup data
         self.components["datamodule"].setup()
@@ -234,34 +275,46 @@ class ExperimentPipeline:
         print(f"   • Validation samples: {val_samples:,}")
         print(f"   • Test samples: {test_samples:,}")
 
+        # Count trainable parameters
+        total_params = sum(p.numel() for p in self.components["model"].parameters())
+        trainable_params = sum(p.numel() for p in self.components["model"].parameters() if p.requires_grad)
+        frozen_params = total_params - trainable_params
+
+        print(f"   • Total parameters: {total_params:,}")
+        print(f"   • Trainable parameters: {trainable_params:,}")
+        print(f"   • Frozen parameters: {frozen_params:,}")
+
         # Execute training
         self.components["trainer"].fit(datamodule=self.components["datamodule"])
 
-        print("🎉 Training completed successfully!")
+        print("🎉 Decoder training completed successfully!")
 
     # -----------------------------------------------------------------------------------
 
     def evaluate_and_visualize(self) -> None:
-        """Evaluate model and generate visualizations."""
+        """Evaluate decoder performance and generate visualizations."""
         if not self.components:
             raise RuntimeError("Components not initialized. Call setup_components() first.")
 
-        print("\n📊 Evaluating model performance...")
+        print("\n📊 Evaluating decoder performance...")
 
         # Get test data
-        (test_batch,) = next(iter(self.components["datamodule"].test_dataloader()))
+        test_batch = next(iter(self.components["datamodule"].test_dataloader()))
+        inputs = test_batch[0]
+        original_targets = inputs.squeeze(1)
         model = self.components["model"]
 
         # Ensure device compatibility
-        model.to(device=test_batch.device)
+        device = inputs.device
+        model.to(device)
 
         # Generate predictions
         model.eval()
         with torch.no_grad():
-            reconstructed, latent = model(test_batch)
+            reconstructed, latent = model(inputs)
 
             # Calculate metrics
-            mse_loss = torch.nn.functional.mse_loss(reconstructed, test_batch)
+            mse_loss = torch.nn.functional.mse_loss(reconstructed, inputs)
             sparsity = (latent.abs() < 1e-6).float().mean()
 
             print(f"   • Test MSE Loss: {mse_loss:.6f}")
@@ -269,14 +322,14 @@ class ExperimentPipeline:
 
         # Generate visualization
         print("\n🎨 Generating visualization...")
-        sample_pairs = list(
+        comparison_pairs = list(
             zip(
                 reconstructed[: self.settings.num_visualization_samples].cpu(),
-                test_batch[: self.settings.num_visualization_samples].squeeze(1).cpu(),
+                original_targets[: self.settings.num_visualization_samples].cpu(),
             )
         )
 
-        self.components["fig_generator"].plot(sample_pairs)
+        self.components["fig_generator"].plot(comparison_pairs)
         self.components["fig_generator"].show()
 
         print("✅ Evaluation completed!")
@@ -284,10 +337,10 @@ class ExperimentPipeline:
     # -----------------------------------------------------------------------------------
 
     def run_complete_experiment(self) -> None:
-        """Execute the complete experiment pipeline."""
+        """Execute the complete decoder training pipeline."""
         self.display_configuration()
         self.setup_components()
-        self.train()
+        self.train_decoder()
         self.evaluate_and_visualize()
 
 
@@ -296,50 +349,47 @@ class ExperimentPipeline:
 # -------------------------------------------------------------------------------------------
 
 
-def run_experiment(
+def run_decoder_experiment(
     config: Optional[str] = None,
+    pretrained: Optional[str] = None,
     epochs: Optional[int] = None,
     samples: Optional[int] = None,
-    batch_size: Optional[int] = None,
-    latent_dim: Optional[int] = None,
 ) -> None:
     """
-    Run the complete backpropagation baseline experiment.
+    Run the complete decoder training experiment.
 
     Args:
         config: Path to TOML configuration file
+        pretrained: Path to pretrained autoencoder checkpoint (overrides config)
         epochs: Maximum training epochs (overrides config)
         samples: Number of training samples (overrides config)
-        batch_size: Training batch size (overrides config)
-        latent_dim: Latent space dimension (overrides config)
     """
     print("=" * 80)
-    print("🧠 ENTORHINAL-HIPPOCAMPAL CIRCUIT: BACKPROPAGATION BASELINE")
+    print("🧠 ENTORHINAL-HIPPOCAMPAL CIRCUIT: DECODER TRAINING")
     print("=" * 80)
 
     # Prepare overrides
-    overrides = {}
+    overrides: Dict[str, Union[str, int, bool]] = {}
+    if pretrained is not None:
+        overrides["pretrained_path"] = pretrained
     if epochs is not None:
         overrides["max_epochs"] = epochs
     if samples is not None:
         overrides["num_samples"] = samples
-    if batch_size is not None:
-        overrides["batch_size"] = batch_size
-    if latent_dim is not None:
-        overrides["latent_dim"] = latent_dim
 
     # Load settings
-    print(f"📁 Loading configuration from: {config}")
+    if config:
+        print(f"📁 Loading configuration from: {config}")
     settings_dict = load_settings(config) if config else {}
     settings_dict.update(overrides)
-    settings = ExperimentSettings(**settings_dict)
+    settings = DecoderTrainingSettings(**settings_dict)
 
     # Run experiment pipeline
-    pipeline = ExperimentPipeline(settings)
+    pipeline = DecoderTrainingPipeline(settings)
     pipeline.run_complete_experiment()
 
     print("\n" + "=" * 80)
-    print("🎯 EXPERIMENT COMPLETED SUCCESSFULLY!")
+    print("🎯 DECODER TRAINING COMPLETED SUCCESSFULLY!")
     print("=" * 80)
 
 
@@ -351,15 +401,14 @@ def run_experiment(
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Backpropagation baseline for Entorhinal-Hippocampal Circuit",
+        description="Decoder training for Entorhinal-Hippocampal Circuit",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     parser.add_argument("--config", "-c", type=str, help="Path to TOML configuration file")
+    parser.add_argument("--pretrained", "-p", type=str, help="Path to pretrained autoencoder checkpoint")
     parser.add_argument("--epochs", "-e", type=int, help="Maximum training epochs")
     parser.add_argument("--samples", "-s", type=int, help="Number of training samples")
-    parser.add_argument("--batch-size", "-b", type=int, help="Training batch size")
-    parser.add_argument("--latent-dim", "-l", type=int, help="Latent space dimension")
 
     return parser.parse_args()
 
@@ -371,13 +420,13 @@ def parse_arguments():
 if __name__ == "__main__":
     try:
         args = parse_arguments()
-        run_experiment(
+
+        run_decoder_experiment(
             config=args.config,
+            pretrained=args.pretrained,
             epochs=args.epochs,
             samples=args.samples,
-            batch_size=args.batch_size,
-            latent_dim=args.latent_dim,
         )
     except Exception as e:
-        print(f"\n❌ EXPERIMENT FAILED: {e}")
+        print(f"\n❌ DECODER TRAINING FAILED: {e}")
         raise
