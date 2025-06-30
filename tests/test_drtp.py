@@ -2,7 +2,7 @@ import pytest
 import torch
 from torch import nn
 
-from ehc_sn.core.drtp import DRTPFunction, DRTPLayer, drtp_layer
+from ehc_sn.hooks.drtp import DRTPFunction, DRTPLayer, drtp
 
 
 class TestDRTPLayer:
@@ -15,7 +15,7 @@ class TestDRTPLayer:
         fb_weights = torch.randn(3, 4) * 0.1
         target = torch.randn(2, 3)
 
-        output = drtp_layer(input_tensor, fb_weights, target)
+        output = drtp(input_tensor, fb_weights, target)
 
         # Forward pass should return input unchanged
         assert torch.allclose(output, input_tensor)
@@ -30,7 +30,7 @@ class TestDRTPLayer:
         fb_weights = torch.randn(target_dim, hidden_dim) * 0.1
         target = torch.randn(batch_size, target_dim)
 
-        output = drtp_layer(input_tensor, fb_weights, target)
+        output = drtp(input_tensor, fb_weights, target)
         loss = output.sum()
         loss.backward()
 
@@ -47,7 +47,7 @@ class TestDRTPLayer:
         fb_weights = torch.randn(target_dim, hidden_dim) * 0.1
         target = torch.ones(batch_size, target_dim)  # Use ones for predictable results
 
-        output = drtp_layer(input_tensor, fb_weights, target)
+        output = drtp(input_tensor, fb_weights, target)
         loss = output.sum()
         loss.backward()
 
@@ -70,7 +70,7 @@ class TestDRTPLayer:
 
         # Forward pass
         hidden = layer(x)
-        drtp_output = drtp_layer(hidden, fb_weights, target)
+        drtp_output = drtp(hidden, fb_weights, target)
         loss = drtp_output.sum()
 
         # Backward pass
@@ -108,10 +108,10 @@ class TestDRTPLayer:
 
         # Forward pass
         y1 = layer1(x)
-        y1_drtp = drtp_layer(y1, B1, target1)
+        y1_drtp = drtp(y1, B1, target1)
 
         y2 = layer2(y1_drtp)
-        y2_drtp = drtp_layer(y2, B2, target2)
+        y2_drtp = drtp(y2, B2, target2)
 
         loss = y2_drtp.sum()
         loss.backward()
@@ -133,7 +133,7 @@ class TestDRTPLayer:
         target = torch.ones(batch_size, target_dim)
 
         # DRTP backward pass
-        output = drtp_layer(input_tensor, fb_weights, target)
+        output = drtp(input_tensor, fb_weights, target)
         loss = output.sum()
         loss.backward()
 
@@ -166,7 +166,7 @@ class TestDRTPLayer:
             input_tensor = torch.randn(batch_size, hidden_dim, requires_grad=True)
             target = torch.ones(batch_size, target_dim)
 
-            output = drtp_layer(input_tensor, fb_weights, target)
+            output = drtp(input_tensor, fb_weights, target)
             loss = output.sum()
             loss.backward()
 
@@ -186,7 +186,7 @@ class TestDRTPLayer:
         fb_weights = torch.randn(target_dim, hidden_dim) * 0.1
         target = torch.zeros(batch_size, target_dim)  # Zero target
 
-        output = drtp_layer(input_tensor, fb_weights, target)
+        output = drtp(input_tensor, fb_weights, target)
         loss = output.sum()
         loss.backward()
 
@@ -210,14 +210,14 @@ class TestDRTPLayer:
         assert not torch.allclose(B1, B2)
 
         # Test with first matrix
-        output1 = drtp_layer(input_tensor, B1, target)
+        output1 = drtp(input_tensor, B1, target)
         loss1 = output1.sum()
         loss1.backward()
         grad1 = input_tensor.grad.clone()
 
         # Reset gradients and test with second matrix
         input_tensor.grad.zero_()
-        output2 = drtp_layer(input_tensor, B2, target)
+        output2 = drtp(input_tensor, B2, target)
         loss2 = output2.sum()
         loss2.backward()
         grad2 = input_tensor.grad.clone()
