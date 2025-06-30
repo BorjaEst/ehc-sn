@@ -82,18 +82,32 @@ class LinearDecoder(BaseDecoder):
     def __init__(self, params: DecoderParams):
         super().__init__(params)
         in_features = prod(params.input_shape)
-        self.linear = nn.Sequential(
-            nn.Linear(params.latent_dim, params.latent_dim * 2),
-            self.params.activation_fn(),
-            nn.Linear(params.latent_dim * 2, params.latent_dim * 4),
-            self.params.activation_fn(),
-            nn.Linear(params.latent_dim * 4, in_features),
-            nn.Sigmoid(),  # Keep sigmoid for final layer to ensure output is in [0,1]
-        )
+
+        # Define layers separately since we need to apply DRTP manually
+        self.layer1 = nn.Linear(params.latent_dim, params.latent_dim * 2)
+        self.activation1 = params.activation_fn()
+
+        self.layer2 = nn.Linear(params.latent_dim * 2, params.latent_dim * 4)
+        self.activation2 = params.activation_fn()
+
+        self.layer3 = nn.Linear(params.latent_dim * 4, in_features)
+        self.output_activation = nn.Sigmoid()
 
     def forward(self, x: Tensor, target: Tensor = None) -> Tensor:
-        x = self.linear(x)  # Pass through linear layers to get reconstructed features
-        return x.reshape(x.shape[0], *self.input_shape)  # Reshape to original input shape
+        # First layer
+        h1 = self.layer1(x)
+        h1 = self.activation1(h1)
+
+        # Second layer
+        h2 = self.layer2(h1)
+        h2 = self.activation2(h2)
+
+        # Output layer (no DRTP - uses standard gradients)
+        output = self.layer3(h2)
+        output = self.output_activation(output)
+
+        # Reshape to original input shape
+        return output.reshape(output.shape[0], *self.input_shape)
 
 
 class DRTPDecoder(BaseDecoder):
