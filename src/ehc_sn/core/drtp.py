@@ -1,3 +1,5 @@
+from typing import Any, Tuple
+
 import torch
 from torch import Tensor, autograd, nn
 
@@ -19,7 +21,7 @@ class DRTPFunction(autograd.Function):
 
     # -----------------------------------------------------------------------------------
     @staticmethod
-    def backward(ctx, grad_output: Tensor):
+    def backward(ctx, *gradients: Any) -> Tuple[Tensor, None, None]:
         """
         Backward pass: propagate the error using the fixed random matrix fb_weights.
         Instead of using grad_output, we use fb_weights^T · target as the gradient signal.
@@ -29,10 +31,10 @@ class DRTPFunction(autograd.Function):
         # DRTP: delta = fb_weights^T · target (not grad_output)
         # fb_weights shape: (target_dim, hidden_dim), target shape: (batch, target_dim)
         # Result should have same shape as input: (batch, hidden_dim)
-        grad_output = torch.matmul(target, fb_weights)  # (batch, target_dim) @ (target_dim, hidden_dim)
+        grad_est = torch.matmul(target, fb_weights)  # (batch, target_dim) @ (target_dim, hidden_dim)
 
         # Return gradients for input, fb_weights, target (None for non-learnable parameters)
-        return grad_output, None, None
+        return grad_est, None, None
 
 
 # -------------------------------------------------------------------------------------------
