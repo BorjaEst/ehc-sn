@@ -1,5 +1,47 @@
+"""
+Neural network encoders for the entorhinal-hippocampal circuit (EHC) spatial navigation library.
+
+This module implements various encoder architectures that transform sensory inputs
+(e.g., obstacle maps, cognitive maps) into latent representations suitable for spatial
+navigation and memory tasks. The encoders support both standard backpropagation (BP)
+and Direct Random Target Projection (DRTP) training methods.
+
+The module provides four main encoder types:
+1. Linear: Fully connected layers for flattened inputs
+2. DRTPLinear: DRTP-enabled fully connected encoder
+3. Conv2D: Convolutional encoder for spatial data
+4. DRTPConv2D: DRTP-enabled convolutional encoder
+
+All encoders follow a consistent architecture pattern:
+- Input processing (flattening or convolution)
+- Two hidden layers with 1000 units each
+- Output layer projecting to latent dimension
+- Appropriate activation functions for each training method
+
+Key Features:
+- Pydantic-based parameter validation and configuration
+- Dynamic dimension calculation for convolutional layers
+- Biologically plausible sparse representations
+- Support for both standard and DRTP training algorithms
+- Consistent interface across all encoder types
+
+Example:
+    >>> params = EncoderParams(
+    ...     input_shape=(1, 32, 16),
+    ...     latent_dim=128,
+    ...     activation_fn=nn.GELU
+    ... )
+    >>> encoder = Linear(params)
+    >>> latent = encoder(input_tensor)
+
+References:
+    - Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
+      error backpropagation for deep learning. Nature Communications, 7, 13276.
+    - O'Keefe, J., & Nadel, L. (1978). The hippocampus as a cognitive map.
+"""
+
 from math import prod
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 from pydantic import BaseModel, Field, model_validator
@@ -9,20 +51,81 @@ from ehc_sn.hooks.drtp import DRTPLayer
 
 
 class EncoderParams(BaseModel):
-    """Configuration parameters for the neural network encoder."""
+    """Configuration parameters for neural network encoders.
+
+    This class defines the essential parameters needed to configure any encoder
+    in the EHC library. It uses Pydantic for automatic validation and type checking.
+
+    Attributes:
+        input_shape: 3D tensor shape as (channels, height, width). For cognitive
+            maps, typically (1, 32, 16) representing a single-channel obstacle grid.
+        latent_dim: Size of the compressed latent representation. Should be smaller
+            than the input dimension to achieve meaningful compression. Typical
+            values range from 64 to 512 depending on the complexity of the task.
+        activation_fn: PyTorch activation function class (not instance). Use nn.GELU
+            for standard encoders and nn.Tanh for DRTP encoders, as these have been
+            shown to work well in practice.
+
+    Examples:
+        >>> # For a 32x16 obstacle map compressed to 128 dimensions
+        >>> params = EncoderParams(
+        ...     input_shape=(1, 32, 16),
+        ...     latent_dim=128,
+        ...     activation_fn=nn.GELU
+        ... )
+
+        >>> # For DRTP training (use Tanh activation)
+        >>> drtp_params = EncoderParams(
+        ...     input_shape=(1, 32, 16),
+        ...     latent_dim=128,
+        ...     activation_fn=nn.Tanh
+        ... )
+
+    Note:
+        The activation_fn should be a class reference (e.g., nn.GELU), not an
+        instance (e.g., nn.GELU()). The encoder will instantiate it as needed.
+    """
 
     model_config = {"extra": "forbid", "arbitrary_types_allowed": True}
 
-    input_shape: Tuple[int, int, int] = Field(..., description="Shape input (chn,h,w)")
-    latent_dim: int = Field(..., description="Dimensionality of latent representation z")
-    activation_fn: object = Field(..., description="Activation function")
+    input_shape: Tuple[int, int, int] = Field(..., description="3D input shape as (channels, height, width)")
+    latent_dim: int = Field(..., description="Dimensionality of the latent representation", gt=0)
+    activation_fn: object = Field(..., description="PyTorch activation function class (not instance)")
 
 
 class BaseEncoder(nn.Module):
-    """Base class for neural network encoders.
+    """Abstract base class for neural network encoders in the EHC library.
 
-    This class defines the basic structure and properties of an encoder, which
-    transforms input data into latent representations.
+    This class defines the common interface and utility properties for all encoder
+    implementations. It provides a consistent API for working with different encoder
+    architectures while maintaining biological plausibility principles.
+
+    All encoders in this library follow the pattern of transforming high-dimensional
+    sensory inputs (such as obstacle maps or visual scenes) into lower-dimensional
+    latent representations that can be processed by the hippocampal circuit.
+
+    Args:
+        params: EncoderParams instance containing configuration parameters.
+
+    Attributes:
+        params: Stored configuration parameters for the encoder.
+
+    Properties:
+        input_shape: 3D shape of input tensors (channels, height, width).
+        input_channels: Number of input channels.
+        spatial_dimensions: Spatial dimensions as (height, width) tuple.
+        latent_dim: Dimensionality of the output latent representation.
+
+    Abstract Methods:
+        forward: Must be implemented by subclasses to define the encoding process.
+
+    Example:
+        This is an abstract class and cannot be instantiated directly. Use one of
+        the concrete implementations:
+
+        >>> params = EncoderParams(...)
+        >>> encoder = Linear(params)  # or Conv2D, DRTPLinear, etc.
+        >>> latent = encoder(input_tensor)
     """
 
     def __init__(self, params: EncoderParams):
@@ -30,12 +133,22 @@ class BaseEncoder(nn.Module):
         self.params = params
 
     def forward(self, x: Tensor) -> Tensor:
-        """Forward pass through the encoder."""
+        """Forward pass through the encoder.
+
+        Args:
+            x: Input tensor of shape (batch_size, *input_shape).
+
+        Returns:
+            Latent representation tensor of shape (batch_size, latent_dim).
+
+        Raises:
+            NotImplementedError: This method must be implemented by subclasses.
+        """
         raise NotImplementedError("Subclasses must implement forward method")
 
     @property
     def input_shape(self) -> Tuple[int, int, int]:
-        """Returns the shape of the input feature map."""
+        """Returns the expected input tensor shape (channels, height, width)."""
         return self.params.input_shape
 
     @property
@@ -45,7 +158,7 @@ class BaseEncoder(nn.Module):
 
     @property
     def spatial_dimensions(self) -> Tuple[int, int]:
-        """Returns the output shape as (height, width)."""
+        """Returns the spatial dimensions as (height, width)."""
         return self.input_shape[1], self.input_shape[2]
 
     @property
@@ -55,12 +168,44 @@ class BaseEncoder(nn.Module):
 
 
 class Linear(BaseEncoder):
-    """Linear neural network encoder that transforms flattened inputs into fixed-size embeddings.
+    """Linear neural network encoder using standard backpropagation training.
 
-    This encoder flattens multi-dimensional inputs and passes them through a sequence of
-    linear layers with non-linear activations to produce a sparse embedding vector.
-    It's suitable for processing structured obstacle maps where sparse representations
-    are biologically plausible.
+    This encoder transforms flattened multi-dimensional inputs into fixed-size
+    embeddings through a sequence of fully connected layers. It's designed for
+    processing structured obstacle maps where spatial relationships can be captured
+    through dense connectivity patterns.
+
+    Architecture:
+        Input (flattened) → Linear(1000) → GELU → Linear(1000) → GELU → Linear(latent_dim) → ReLU
+
+    The architecture uses:
+    - Two hidden layers with 1000 units each for sufficient representational capacity
+    - GELU activation functions in hidden layers for smooth, differentiable non-linearity
+    - ReLU activation in the output layer to ensure non-negative sparse representations
+    - Bias terms in all layers for improved expressiveness
+
+    This encoder is suitable for:
+    - Cognitive map encoding where spatial structure is less critical
+    - Baseline comparisons with more complex architectures
+    - Cases where computational efficiency is important
+    - Initial prototyping and development
+
+    Args:
+        params: EncoderParams with activation_fn typically set to nn.GELU.
+
+    Example:
+        >>> params = EncoderParams(
+        ...     input_shape=(1, 32, 16),  # 512 input features when flattened
+        ...     latent_dim=128,
+        ...     activation_fn=nn.GELU
+        ... )
+        >>> encoder = Linear(params)
+        >>> input_batch = torch.randn(4, 1, 32, 16)  # batch of 4 samples
+        >>> latent = encoder(input_batch)  # shape: (4, 128)
+
+    Note:
+        The target parameter in forward() is ignored but kept for API consistency
+        with DRTP encoders.
     """
 
     def __init__(self, params: EncoderParams):
@@ -79,7 +224,17 @@ class Linear(BaseEncoder):
         self.layer3 = nn.Linear(1000, params.latent_dim, bias=True)
         self.output_activation = nn.ReLU()
 
-    def forward(self, x: Tensor, target: Tensor = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+        """Forward pass through the linear encoder.
+
+        Args:
+            x: Input tensor of shape (batch_size, channels, height, width).
+            target: Ignored for standard encoder, kept for API consistency.
+
+        Returns:
+            Latent representation of shape (batch_size, latent_dim) with
+            non-negative values due to ReLU output activation.
+        """
         # Flatten the input tensor to a single feature vector
         x = x.reshape(x.shape[0], -1)  # Reshape to (batch_size, num_features)
 
@@ -99,6 +254,47 @@ class Linear(BaseEncoder):
 
 
 class DRTPLinear(BaseEncoder):
+    """Linear encoder using Direct Random Target Projection (DRTP) training.
+
+    This encoder implements the DRTP algorithm, which uses random feedback weights
+    instead of symmetric weight updates for biologically plausible learning. DRTP
+    enables learning without requiring precise error backpropagation through the
+    network, making it more similar to biological neural networks.
+
+    Architecture:
+        Input (flattened) → Linear(1000) → Tanh → DRTP → Linear(1000) → Tanh → DRTP → Linear(latent_dim) → Sigmoid
+
+    Key differences from standard Linear encoder:
+    - Uses Tanh activation functions (work better with DRTP)
+    - Applies DRTP layers after hidden layers but not output layer
+    - Uses Sigmoid output activation for bounded outputs
+    - Target tensor is only required during backward pass for DRTP gradient computation
+    - Forward pass accepts optional target parameter for consistent API
+
+    The DRTP mechanism:
+    - Generates random feedback weights instead of using transpose of forward weights
+    - Computes gradients using these random weights for biologically plausible learning
+    - Maintains learning performance comparable to standard backpropagation
+    - Provides insights into how biological neural networks might learn
+
+    Args:
+        params: EncoderParams with activation_fn typically set to nn.Tanh.
+
+    Example:
+        >>> params = EncoderParams(
+        ...     input_shape=(1, 32, 16),
+        ...     latent_dim=128,
+        ...     activation_fn=nn.Tanh
+        ... )
+        >>> encoder = DRTPLinear(params)
+        >>> input_batch = torch.randn(4, 1, 32, 16)
+        >>> latent = encoder(input_batch)  # shape: (4, 128), target=None is default
+        >>> # During training: latent = encoder(input_batch, target_batch)
+
+    References:
+        Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
+        error backpropagation for deep learning. Nature Communications, 7, 13276.
+    """
 
     def __init__(self, params: EncoderParams):
         super().__init__(params)
@@ -118,7 +314,18 @@ class DRTPLinear(BaseEncoder):
         self.layer3 = nn.Linear(1000, out_features=self.latent_dim)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Tensor = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+        """Forward pass through the DRTP linear encoder.
+
+        Args:
+            x: Input tensor of shape (batch_size, channels, height, width).
+            target: Target tensor for DRTP gradient computation during backward pass.
+                Can be None during forward-only inference.
+
+        Returns:
+            Latent representation of shape (batch_size, latent_dim) with values
+            in range [0, 1] due to Sigmoid output activation.
+        """
         # Flatten the input tensor to a single feature vector
         x = x.reshape(x.shape[0], -1)  # Reshape to (batch_size, num_features)
 
@@ -140,6 +347,46 @@ class DRTPLinear(BaseEncoder):
 
 
 class Conv2D(BaseEncoder):
+    """Convolutional neural network encoder using standard backpropagation training.
+
+    This encoder uses convolutional layers to process spatial data while preserving
+    spatial relationships in the input. It's particularly effective for obstacle maps,
+    cognitive maps, and other spatially structured data where local patterns and
+    spatial features are important.
+
+    Architecture:
+        Input → Conv2d(5x5, 32) → GELU → MaxPool(2x2) → Flatten → Linear(1000) → GELU → Linear(latent_dim) → Sigmoid
+
+    Design choices:
+    - 5x5 convolution kernel captures local spatial patterns effectively
+    - 32 output channels provide sufficient feature diversity
+    - Padding=2 with kernel=5 preserves spatial dimensions before pooling
+    - MaxPool with 2x2 stride reduces spatial dimensions by half
+    - Two fully connected layers for final feature processing
+    - GELU activations for smooth gradients and improved training
+
+    The encoder automatically calculates the correct linear layer input size based
+    on the spatial dimensions and convolution/pooling operations, making it adaptable
+    to different input sizes.
+
+    Args:
+        params: EncoderParams with activation_fn typically set to nn.GELU.
+
+    Example:
+        >>> params = EncoderParams(
+        ...     input_shape=(1, 32, 16),  # After conv+pool: 32 channels × 16×8 = 4096 features
+        ...     latent_dim=128,
+        ...     activation_fn=nn.GELU
+        ... )
+        >>> encoder = Conv2D(params)
+        >>> input_batch = torch.randn(4, 1, 32, 16)
+        >>> latent = encoder(input_batch)  # shape: (4, 128)
+
+    Note:
+        Spatial dimensions must be even numbers to work correctly with MaxPool(2x2).
+        The target parameter in forward() is ignored but kept for API consistency.
+    """
+
     def __init__(self, params: EncoderParams):
         super().__init__(params)
 
@@ -162,8 +409,18 @@ class Conv2D(BaseEncoder):
         self.layer3 = nn.Linear(1000, self.latent_dim, bias=True)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Tensor = None) -> Tensor:
-        # First layer
+    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+        """Forward pass through the convolutional encoder.
+
+        Args:
+            x: Input tensor of shape (batch_size, channels, height, width).
+            target: Ignored for standard encoder, kept for API consistency.
+
+        Returns:
+            Latent representation of shape (batch_size, latent_dim) with values
+            in range [0, 1] due to Sigmoid output activation.
+        """
+        # First layer: convolution → activation → pooling
         h1 = self.conv1(x)
         h1 = self.activation1(h1)
         h1 = self.pool1(h1)
@@ -171,7 +428,7 @@ class Conv2D(BaseEncoder):
         # Flatten for FC layers
         h1 = h1.reshape(h1.size(0), -1)
 
-        # Second layer
+        # Second layer: fully connected
         h2 = self.layer2(h1)
         h2 = self.activation2(h2)
 
@@ -183,6 +440,53 @@ class Conv2D(BaseEncoder):
 
 
 class DRTPConv2D(BaseEncoder):
+    """Convolutional encoder using Direct Random Target Projection (DRTP) training.
+
+    This encoder combines the spatial processing capabilities of convolutional layers
+    with the biologically plausible learning mechanism of DRTP. It's designed for
+    scenarios where both spatial feature extraction and biological learning
+    constraints are important.
+
+    Architecture:
+        Input → Conv2d(5x5, 32) → Tanh → DRTP → MaxPool(2x2) → Flatten → Linear(1000) → Tanh → DRTP → Linear(latent_dim) → Sigmoid
+
+    Key features:
+    - Convolutional layer processes spatial patterns while preserving local structure
+    - DRTP applied to both convolutional and fully connected hidden layers
+    - Uses Tanh activation functions for compatibility with DRTP
+    - Random feedback weights enable biologically plausible learning
+    - Output layer uses standard backpropagation for final projection
+
+    The combination of convolution and DRTP makes this encoder suitable for:
+    - Spatial navigation tasks requiring biological plausibility
+    - Investigating how spatial processing might work in biological neural networks
+    - Research comparing biological vs. standard learning mechanisms
+    - Applications where spatial features and learning constraints both matter
+
+    Args:
+        params: EncoderParams with activation_fn typically set to nn.Tanh.
+
+    Example:
+        >>> params = EncoderParams(
+        ...     input_shape=(1, 32, 16),
+        ...     latent_dim=128,
+        ...     activation_fn=nn.Tanh
+        ... )
+        >>> encoder = DRTPConv2D(params)
+        >>> input_batch = torch.randn(4, 1, 32, 16)
+        >>> latent = encoder(input_batch)  # shape: (4, 128), target=None is default
+        >>> # During training: latent = encoder(input_batch, target_batch)
+
+    Note:
+        Target tensor is only required during backward pass for DRTP computation.
+        Forward pass accepts optional target parameter for consistent API.
+        Spatial dimensions should be even numbers for MaxPool compatibility.
+
+    References:
+        Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
+        error backpropagation for deep learning. Nature Communications, 7, 13276.
+    """
+
     def __init__(self, params: EncoderParams):
         super().__init__(params)
 
@@ -208,8 +512,19 @@ class DRTPConv2D(BaseEncoder):
         self.output_activation = nn.Sigmoid()
         # No DRTP on output layer (uses standard gradients)
 
-    def forward(self, x: Tensor, target: Tensor = None) -> Tensor:
-        # First layer
+    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+        """Forward pass through the DRTP convolutional encoder.
+
+        Args:
+            x: Input tensor of shape (batch_size, channels, height, width).
+            target: Target tensor for DRTP gradient computation during backward pass.
+                Can be None during forward-only inference.
+
+        Returns:
+            Latent representation of shape (batch_size, latent_dim) with values
+            in range [0, 1] due to Sigmoid output activation.
+        """
+        # First layer: convolution → activation → DRTP → pooling
         h1 = self.conv1(x)
         h1 = self.activation1(h1)
         h1 = self.drtp1(h1, target)  # Apply DRTP to conv layer
@@ -218,12 +533,12 @@ class DRTPConv2D(BaseEncoder):
         # Flatten for FC layers
         h1 = h1.reshape(h1.size(0), -1)
 
-        # Second layer
+        # Second layer: fully connected with DRTP
         h2 = self.layer2(h1)
         h2 = self.activation2(h2)
         h2 = self.drtp2(h2, target)  # Apply DRTP to linear layer
 
-        # Output layer
+        # Output layer (standard backpropagation)
         output = self.layer3(h2)
         output = self.output_activation(output)
 
@@ -231,10 +546,22 @@ class DRTPConv2D(BaseEncoder):
 
 
 # -------------------------------------------------------------------------------------------
-# Example usage
+# Examples and demonstrations
 # -------------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    """
+    Demonstration script showing how to use all encoder types.
+
+    This script provides complete examples of:
+    1. Parameter configuration for different encoder types
+    2. Model instantiation and forward passes
+    3. Performance comparison between architectures
+    4. Expected input/output shapes and characteristics
+
+    Run this script directly to see the encoders in action:
+        python -m ehc_sn.models.encoders
+    """
     # -----------------------------------------------------------------------------------
     # Setup and parameters
     # -----------------------------------------------------------------------------------
@@ -281,10 +608,9 @@ if __name__ == "__main__":
     print("2. DRTP Linear Encoder:")
     drtp_linear_encoder = DRTPLinear(drtp_params)
 
-    # Forward pass (requires target for DRTP)
-    target = torch.randn(batch_size, *drtp_params.input_shape)
+    # Forward pass (no target needed for forward pass)
     with torch.no_grad():
-        drtp_linear_output = drtp_linear_encoder(sample_input, target)
+        drtp_linear_output = drtp_linear_encoder(sample_input)
 
     print(f"   Input features: {prod(drtp_params.input_shape)}")
     print(f"   Output shape: {drtp_linear_output.shape}")
@@ -319,7 +645,7 @@ if __name__ == "__main__":
     drtp_conv_encoder = DRTPConv2D(drtp_params)
 
     with torch.no_grad():
-        drtp_conv_output = drtp_conv_encoder(sample_input, target)
+        drtp_conv_output = drtp_conv_encoder(sample_input)
 
     print(f"   Spatial dimensions: {h}x{w}")
     print(f"   After conv+pool: 32x{h//2}x{w//2} = {expected_conv_features} features")
