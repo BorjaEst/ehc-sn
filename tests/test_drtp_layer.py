@@ -12,10 +12,10 @@ class TestDRTPLayer:
     def test_drtp_forward_pass(self):
         """Test that DRTP forward pass returns input unchanged."""
         input_tensor = torch.randn(2, 4, requires_grad=True)
-        B = torch.randn(3, 4) * 0.1
+        fb_weights = torch.randn(3, 4) * 0.1
         target = torch.randn(2, 3)
 
-        output = drtp_layer(input_tensor, B, target)
+        output = drtp_layer(input_tensor, fb_weights, target)
 
         # Forward pass should return input unchanged
         assert torch.allclose(output, input_tensor)
@@ -27,10 +27,10 @@ class TestDRTPLayer:
         batch_size, hidden_dim, target_dim = 2, 4, 3
 
         input_tensor = torch.randn(batch_size, hidden_dim, requires_grad=True)
-        B = torch.randn(target_dim, hidden_dim) * 0.1
+        fb_weights = torch.randn(target_dim, hidden_dim) * 0.1
         target = torch.randn(batch_size, target_dim)
 
-        output = drtp_layer(input_tensor, B, target)
+        output = drtp_layer(input_tensor, fb_weights, target)
         loss = output.sum()
         loss.backward()
 
@@ -40,19 +40,19 @@ class TestDRTPLayer:
 
     # -----------------------------------------------------------------------------------
     def test_drtp_gradient_computation(self):
-        """Test that DRTP computes gradients correctly using the formula: delta = target @ B."""
+        """Test that DRTP computes gradients correctly using the formula: delta = target @ fb_weights."""
         batch_size, hidden_dim, target_dim = 1, 3, 2
 
         input_tensor = torch.randn(batch_size, hidden_dim, requires_grad=True)
-        B = torch.randn(target_dim, hidden_dim) * 0.1
+        fb_weights = torch.randn(target_dim, hidden_dim) * 0.1
         target = torch.ones(batch_size, target_dim)  # Use ones for predictable results
 
-        output = drtp_layer(input_tensor, B, target)
+        output = drtp_layer(input_tensor, fb_weights, target)
         loss = output.sum()
         loss.backward()
 
         # Manual computation of DRTP gradient
-        expected_grad = torch.matmul(target, B)  # (batch_size, target_dim) @ (target_dim, hidden_dim)
+        expected_grad = torch.matmul(target, fb_weights)  # (batch_size, target_dim) @ (target_dim, hidden_dim)
 
         assert torch.allclose(input_tensor.grad, expected_grad, atol=1e-6)
 
@@ -65,12 +65,12 @@ class TestDRTPLayer:
         # Create layer and inputs
         layer = torch.nn.Linear(input_size, hidden_size)
         x = torch.randn(batch_size, input_size, requires_grad=True)
-        B = torch.randn(target_size, hidden_size) * 0.1
+        fb_weights = torch.randn(target_size, hidden_size) * 0.1
         target = torch.ones(batch_size, target_size)
 
         # Forward pass
         hidden = layer(x)
-        drtp_output = drtp_layer(hidden, B, target)
+        drtp_output = drtp_layer(hidden, fb_weights, target)
         loss = drtp_output.sum()
 
         # Backward pass
@@ -129,11 +129,11 @@ class TestDRTPLayer:
         batch_size, hidden_dim, target_dim = 1, 3, 2
 
         input_tensor = torch.randn(batch_size, hidden_dim, requires_grad=True)
-        B = torch.randn(target_dim, hidden_dim) * 0.1
+        fb_weights = torch.randn(target_dim, hidden_dim) * 0.1
         target = torch.ones(batch_size, target_dim)
 
         # DRTP backward pass
-        output = drtp_layer(input_tensor, B, target)
+        output = drtp_layer(input_tensor, fb_weights, target)
         loss = output.sum()
         loss.backward()
 
@@ -153,20 +153,20 @@ class TestDRTPLayer:
         assert not torch.allclose(drtp_grad, standard_grad)
 
         # DRTP gradient should match manual computation
-        expected_drtp_grad = torch.matmul(target, B)
+        expected_drtp_grad = torch.matmul(target, fb_weights)
         assert torch.allclose(drtp_grad, expected_drtp_grad, atol=1e-6)
 
     # -----------------------------------------------------------------------------------
     def test_drtp_batch_consistency(self):
         """Test that DRTP works consistently across different batch sizes."""
         hidden_dim, target_dim = 3, 2
-        B = torch.randn(target_dim, hidden_dim) * 0.1
+        fb_weights = torch.randn(target_dim, hidden_dim) * 0.1
 
         for batch_size in [1, 2, 4, 8]:
             input_tensor = torch.randn(batch_size, hidden_dim, requires_grad=True)
             target = torch.ones(batch_size, target_dim)
 
-            output = drtp_layer(input_tensor, B, target)
+            output = drtp_layer(input_tensor, fb_weights, target)
             loss = output.sum()
             loss.backward()
 
@@ -174,7 +174,7 @@ class TestDRTPLayer:
             assert input_tensor.grad.shape == (batch_size, hidden_dim)
 
             # Check gradient computation
-            expected_grad = torch.matmul(target, B)
+            expected_grad = torch.matmul(target, fb_weights)
             assert torch.allclose(input_tensor.grad, expected_grad, atol=1e-6)
 
     # -----------------------------------------------------------------------------------
@@ -183,10 +183,10 @@ class TestDRTPLayer:
         batch_size, hidden_dim, target_dim = 1, 3, 2
 
         input_tensor = torch.randn(batch_size, hidden_dim, requires_grad=True)
-        B = torch.randn(target_dim, hidden_dim) * 0.1
+        fb_weights = torch.randn(target_dim, hidden_dim) * 0.1
         target = torch.zeros(batch_size, target_dim)  # Zero target
 
-        output = drtp_layer(input_tensor, B, target)
+        output = drtp_layer(input_tensor, fb_weights, target)
         loss = output.sum()
         loss.backward()
 
@@ -196,7 +196,7 @@ class TestDRTPLayer:
 
     # -----------------------------------------------------------------------------------
     def test_drtp_random_matrix_effect(self):
-        """Test that different random matrices B produce different gradients."""
+        """Test that different random matrices fb_weights produce different gradients."""
         batch_size, hidden_dim, target_dim = 1, 3, 2
 
         input_tensor = torch.randn(batch_size, hidden_dim, requires_grad=True)
@@ -234,10 +234,10 @@ class TestDRTPFunction:
     def test_drtp_function_forward(self):
         """Test DRTPFunction forward method."""
         input_tensor = torch.randn(2, 4)
-        B = torch.randn(3, 4)
+        fb_weights = torch.randn(3, 4)
         target = torch.randn(2, 3)
 
-        output = DRTPFunction.apply(input_tensor, B, target)
+        output = DRTPFunction.apply(input_tensor, fb_weights, target)
 
         assert torch.allclose(output, input_tensor)
 
@@ -245,16 +245,16 @@ class TestDRTPFunction:
     def test_drtp_function_gradient_implementation(self):
         """Test that DRTPFunction correctly implements the DRTP gradient formula."""
         input_tensor = torch.randn(1, 3, requires_grad=True, dtype=torch.double)
-        B = torch.randn(2, 3, dtype=torch.double)
+        fb_weights = torch.randn(2, 3, dtype=torch.double)
         target = torch.randn(1, 2, dtype=torch.double)
 
         # Forward and backward pass
-        output = DRTPFunction.apply(input_tensor, B, target)
+        output = DRTPFunction.apply(input_tensor, fb_weights, target)
         loss = output.sum()
         loss.backward()
 
-        # Check that gradient matches DRTP formula: target @ B
-        expected_grad = torch.matmul(target, B)
+        # Check that gradient matches DRTP formula: target @ fb_weights
+        expected_grad = torch.matmul(target, fb_weights)
         assert torch.allclose(input_tensor.grad, expected_grad, atol=1e-6)
 
         # Note: DRTP intentionally does NOT match numerical gradients because
@@ -275,8 +275,8 @@ class TestDRTPLayerModule:
 
         assert layer.target_dim == target_dim
         assert layer.hidden_dim == hidden_dim
-        assert layer.B.shape == (target_dim, hidden_dim)
-        assert isinstance(layer.B, torch.Tensor)
+        assert layer.fb_weights.shape == (target_dim, hidden_dim)
+        assert isinstance(layer.fb_weights, torch.Tensor)
 
     # -----------------------------------------------------------------------------------
     def test_drtp_layer_forward_pass(self):
@@ -306,8 +306,8 @@ class TestDRTPLayerModule:
         loss = output.sum()
         loss.backward()
 
-        # Expected gradient should be target @ layer.B
-        expected_grad = torch.matmul(target, layer.B)
+        # Expected gradient should be target @ layer.fb_weights
+        expected_grad = torch.matmul(target, layer.fb_weights)
 
         assert torch.allclose(input_tensor.grad, expected_grad, atol=1e-6)
 
@@ -334,13 +334,13 @@ class TestDRTPLayerModule:
     def test_drtp_layer_reinit_projection_matrix(self):
         """Test reinitializing the projection matrix."""
         layer = DRTPLayer(target_dim=3, hidden_dim=5)
-        original_B = layer.B.clone()
+        original_B = layer.fb_weights.clone()
 
         # Reinitialize with different scale
         layer.reinit_projection_matrix(scale=0.5)
 
         # Matrix should be different
-        assert not torch.allclose(layer.B, original_B)
+        assert not torch.allclose(layer.fb_weights, original_B)
         assert layer.scale == 0.5
 
     # -----------------------------------------------------------------------------------
