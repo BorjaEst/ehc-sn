@@ -122,13 +122,15 @@ class DRTPLayer(nn.Module):
         # Validate input dimensions
         if input.size(-1) != self.hidden_dim:
             raise ValueError(
-                f"Input last dimension {input.size(-1)} doesn't match " f"expected hidden_dim {self.hidden_dim}"
-            )
+                f"Input last dimension {input.size(-1)} doesn't match "
+                f"expected hidden_dim {self.hidden_dim}"
+            )  # fmt: skip
 
         if target.size(-1) != self.target_dim:
             raise ValueError(
-                f"Target last dimension {target.size(-1)} doesn't match " f"expected target_dim {self.target_dim}"
-            )
+                f"Target last dimension {target.size(-1)} doesn't match "
+                f"expected target_dim {self.target_dim}"
+            )  # fmt: skip
 
         # Apply DRTP function which handles the custom backward pass
         return DRTPFunction.apply(input, self.B, target)
