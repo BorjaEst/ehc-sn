@@ -72,7 +72,6 @@ class DRTPLayer(nn.Module):
     Args:
         target_dim: Dimensionality of the target space (output dimension)
         hidden_dim: Dimensionality of the hidden layer where DRTP is applied
-        scale: Scaling factor for the random projection matrix initialization
 
     Example:
         >>> drtp_layer = DRTPLayer(target_dim=10, hidden_dim=128)
@@ -81,29 +80,26 @@ class DRTPLayer(nn.Module):
         >>> output = drtp(hidden, target)  # Returns hidden unchanged
     """
 
-    def __init__(self, target_dim: List[int] | int, hidden_dim: List[int] | int, scale: float = 1.0):
+    def __init__(self, target_dim: List[int] | int, hidden_dim: List[int] | int):
         """
         Initialize a DRTP layer with a fixed random projection matrix.
 
         Args:
             target_dim: Dimensionality of the target space (e.g., output classes)
             hidden_dim: Dimensionality of the hidden layer activations
-            scale: Scaling factor for random matrix initialization (default: 1.0)
         """
         super().__init__()
 
         # Store dimensions for reference
-        self.target_dim = Size(target_dim) if isinstance(target_dim, (list, tuple)) else Size([target_dim])
-        self.hidden_dim = Size(hidden_dim) if isinstance(hidden_dim, (list, tuple)) else Size([hidden_dim])
-        self.scale = scale
+        self.target_dim = Size([target_dim]) if isinstance(target_dim, int) else Size(target_dim)
+        self.hidden_dim = Size([hidden_dim]) if isinstance(hidden_dim, int) else Size(hidden_dim)
 
-        # Register the random projection matrix as a buffer (non-trainable)
-        # Shape: (target_dim, hidden_dim) to allow target @ fb_weights multiplication
+        # Shape: (*target_dim, *hidden_dim) to allow einstein summation for multi-dimension
         fb_weights_shape = Size([*self.target_dim, *self.hidden_dim])
-        fb_weights = torch.randn(fb_weights_shape) * scale
 
         # Convert to a non-trainable parameter to save (saves with the model)
-        self.fb_weights = nn.Parameter(fb_weights, requires_grad=False)
+        self.fb_weights = nn.Parameter(torch.Tensor(fb_weights_shape))
+        self.reset_weights()  # Initis weights and requires_grad=False
 
     # -----------------------------------------------------------------------------------
     def forward(self, inputs: Tensor, target: Tensor) -> Tensor:
@@ -131,22 +127,17 @@ class DRTPLayer(nn.Module):
     # -----------------------------------------------------------------------------------
     def extra_repr(self) -> str:
         """Return extra representation for better debugging and model inspection."""
-        return f"target_dim={self.target_dim}, hidden_dim={self.hidden_dim}, scale={self.scale}"
+        return f"target_dim={self.target_dim}, hidden_dim={self.hidden_dim}"
 
     # -----------------------------------------------------------------------------------
-    def reinit_projection_matrix(self, scale: float = None):
+    def reset_weights(self):
         """
         Reinitialize the random projection matrix fb_weights.
-
         This can be useful for experimentation or resetting the DRTP behavior.
-
-        Args:
-            scale: New scaling factor. If None, uses the original scale.
         """
-        scale = scale if scale is not None else self.scale
-
-        # Reinitialize the projection matrix
-        self.fb_weights.data = torch.randn(self.target_dim, self.hidden_dim) * scale
+        # Reinitialize the projection matrix with a new random matrix
+        torch.nn.init.kaiming_uniform_(self.fb_weights)
+        self.fb_weights.requires_grad = False  # Ensure it's non-trainable
 
 
 # -------------------------------------------------------------------------------------------
