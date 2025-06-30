@@ -5,7 +5,7 @@ import torch
 from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
-from ehc_sn.core.drtp import DRTPLayer
+from ehc_sn.hooks.drtp import DRTPLayer
 
 
 class DecoderParams(BaseModel):
