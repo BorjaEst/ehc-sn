@@ -1,3 +1,4 @@
+from math import prod
 from typing import Any, List, Tuple
 
 import torch
@@ -27,10 +28,11 @@ class DRTPFunction(autograd.Function):
         Instead of using grad_output, we use fb_weights^T · target as the gradient signal.
         """
         fb_weights, target = ctx.saved_tensors
+        nbatch = grad_output.shape[0]
 
         # DRTP: delta = fb_weights^T · target (not grad_output)
         # target shape: (batch, target_dim) @ fb_weights shape: (target_dim, hidden_dim),
-        grad_est = torch.matmul(target, fb_weights.view(target.size(-1), -1))
+        grad_est = torch.matmul(target.view(nbatch, -1), fb_weights)
 
         # Return gradients for input, fb_weights, target (None for non-learnable parameters)
         return grad_est.view(grad_output.shape), None, None
@@ -91,11 +93,11 @@ class DRTPLayer(nn.Module):
         super().__init__()
 
         # Store dimensions for reference
-        self.target_dim = Size([target_dim]) if isinstance(target_dim, int) else Size(target_dim)
-        self.hidden_dim = Size([hidden_dim]) if isinstance(hidden_dim, int) else Size(hidden_dim)
+        self.target_dim = target_dim if isinstance(target_dim, int) else prod(target_dim)
+        self.hidden_dim = hidden_dim if isinstance(hidden_dim, int) else prod(hidden_dim)
 
-        # Shape: (*target_dim, *hidden_dim) to allow einstein summation for multi-dimension
-        fb_weights_shape = Size([*self.target_dim, *self.hidden_dim])
+        # Shape: (target_dim, hidden_dim) to project target to hidden space
+        fb_weights_shape = Size([self.target_dim, self.hidden_dim])
 
         # Convert to a non-trainable parameter to save (saves with the model)
         self.fb_weights = nn.Parameter(torch.Tensor(fb_weights_shape))
