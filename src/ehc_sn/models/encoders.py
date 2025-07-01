@@ -490,14 +490,16 @@ class DRTPConv2D(BaseEncoder):
     def __init__(self, params: EncoderParams):
         super().__init__(params)
 
+        # Get spatial dimensions
+        h, w = self.spatial_dimensions
+
         # Conv layer 1: 32 channels, 5x5 kernel, stride=1, padding=2
         self.conv1 = nn.Conv2d(self.input_channels, out_channels=32, kernel_size=5, stride=1, padding=2, bias=True)
         self.activation1 = params.activation_fn()  # Usually Tanh
-        self.drtp1 = DRTPLayer(target_dim=self.input_shape, hidden_dim=[32, 32, 16])
+        self.drtp1 = DRTPLayer(target_dim=self.latent_dim, hidden_dim=[32, h, w])
         self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
 
         # Calculate the output size after conv and pooling
-        h, w = self.spatial_dimensions
         # After conv (same size due to padding=2, kernel=5): h x w
         # After maxpool (stride=2): h//2 x w//2
         conv_output_size = 32 * (h // 2) * (w // 2)
@@ -505,7 +507,7 @@ class DRTPConv2D(BaseEncoder):
         # Linear layer 2: 1000 units
         self.layer2 = nn.Linear(conv_output_size, 1000, bias=True)
         self.activation2 = params.activation_fn()  # Usually Tanh
-        self.drtp2 = DRTPLayer(target_dim=self.input_shape, hidden_dim=[1000])
+        self.drtp2 = DRTPLayer(target_dim=self.latent_dim, hidden_dim=[1000])
 
         # Linear layer 3 (output): latent_dim units
         self.layer3 = nn.Linear(1000, self.latent_dim, bias=True)
