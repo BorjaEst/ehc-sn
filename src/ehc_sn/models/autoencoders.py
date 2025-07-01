@@ -18,13 +18,12 @@ class AutoencoderParams(BaseModel):
     encoder: BaseEncoder = Field(..., description="Parameters for the encoder component.")
     decoder: BaseDecoder = Field(..., description="Parameters for the decoder component.")
     sparsity_weight: float = Field(0.1, description="Weight for the sparsity loss term.")
-    sparsity_target: float = Field(0.05, description="Target sparsity level for the embeddings.")
     optimizer_init: Callable = Field(..., description="Callable to initialize the optimizer.")
 
 
 def validate_dimensions(params: AutoencoderParams) -> None:
     """Validate that encoder and decoder dimensions are compatible."""
-    if params.encoder.input_shape != params.decoder.input_shape:
+    if params.encoder.input_shape != params.decoder.output_shape:
         raise ValueError(
             f"Input shape of encoder ({params.encoder.input_shape}) "
             f"does not match input shape of decoder ({params.decoder.input_shape})."
@@ -60,9 +59,9 @@ class Autoencoder(pl.LightningModule):
         self.optimizer_init = params.optimizer_init
 
         # Loss functions
-        self.reconstruction_loss = nn.MSELoss()
+        self.reconstruction_loss = nn.BCELoss()
+        self.sparsity_loss = nn.L1Loss()
         self.sparsity_weight = params.sparsity_weight
-        self.sparsity_target = params.sparsity_target
 
         # Save hyperparameters for checkpointing
         self.save_hyperparameters(ignore=["encoder", "decoder"])
@@ -81,7 +80,7 @@ class Autoencoder(pl.LightningModule):
     # -----------------------------------------------------------------------------------
 
     def forward(self, x: Tensor, *args: Any) -> Tuple[Tensor, Tensor]:
-        embedding = self.encoder(x)
+        embedding = self.encoder(x, target=None)  # No sparse target available
         reconstruction = self.decoder(embedding, target=x)
         return reconstruction, embedding
 
@@ -96,7 +95,7 @@ class Autoencoder(pl.LightningModule):
 
         # Calculate losses
         recon_loss = self.reconstruction_loss(reconstruction, x)
-        sparsity_loss = torch.mean(torch.abs(embedding))  # L1 norm
+        sparsity_loss = self.sparsity_loss(embedding)
         total_loss = recon_loss + self.sparsity_weight * sparsity_loss
 
         # Log metrics
@@ -121,7 +120,7 @@ class Autoencoder(pl.LightningModule):
 
         # Calculate losses
         recon_loss = self.reconstruction_loss(reconstruction, x)
-        sparsity_loss = torch.mean(torch.abs(embedding))
+        sparsity_loss = self.sparsity_loss(embedding)
         total_loss = recon_loss + self.sparsity_weight * sparsity_loss
 
         # Log metrics
@@ -146,7 +145,7 @@ class Autoencoder(pl.LightningModule):
 
         # Calculate losses
         recon_loss = self.reconstruction_loss(reconstruction, x)
-        sparsity_loss = torch.mean(torch.abs(embedding))
+        sparsity_loss = self.sparsity_loss(embedding)
         total_loss = recon_loss + self.sparsity_weight * sparsity_loss
 
         # Calculate additional metrics
@@ -237,8 +236,7 @@ if __name__ == "__main__":
 
     import lightning.pytorch as pl
 
-    from ehc_sn.models.decoders import LinearDecoder
-    from ehc_sn.models.encoders import LinearEncoder
+    from ehc_sn.models import decoders, encoders
 
     # Simple dataset
     class SimpleDataset(torch.utils.data.Dataset):
@@ -256,10 +254,9 @@ if __name__ == "__main__":
 
     # Create model
     autoencoder_params = AutoencoderParams(
-        encoder=LinearEncoder(EncoderParams(input_shape=(1, 16, 32), latent_dim=32)),
-        decoder=LinearDecoder(DecoderParams(input_shape=(1, 16, 32), latent_dim=32)),
+        encoder=encoders.Linear(EncoderParams(input_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)),
+        decoder=decoders.Linear(DecoderParams(output_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)),
         sparsity_weight=0.1,
-        sparsity_target=0.05,
         optimizer_init=partial(torch.optim.Adam, lr=1e-3),
     )
     model = Autoencoder(autoencoder_params)
