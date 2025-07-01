@@ -18,6 +18,7 @@ class AutoencoderParams(BaseModel):
     encoder: BaseEncoder = Field(..., description="Parameters for the encoder component.")
     decoder: BaseDecoder = Field(..., description="Parameters for the decoder component.")
     sparsity_weight: float = Field(0.1, description="Weight for the sparsity loss term.")
+    sparsity_target: float = Field(1e-3, description="Target sparsity level for the embedding.")
     optimizer_init: Callable = Field(..., description="Callable to initialize the optimizer.")
 
 
@@ -61,6 +62,7 @@ class Autoencoder(pl.LightningModule):
         # Loss functions
         self.reconstruction_loss = nn.BCELoss()
         self.sparsity_loss = nn.L1Loss()
+        self.sparsity_target = params.sparsity_target
         self.sparsity_weight = params.sparsity_weight
 
         # Save hyperparameters for checkpointing
@@ -85,29 +87,42 @@ class Autoencoder(pl.LightningModule):
         return reconstruction, embedding
 
     # -----------------------------------------------------------------------------------
+    # Loss computation
+    # -----------------------------------------------------------------------------------
+
+    def compute_loss(self, x: Tensor, reconstruction: Tensor, embedding: Tensor) -> Dict[str, Tensor]:
+        """Compute all losses for a given input."""
+
+        # Calculate reconstruction and sparsity losses
+        recon_loss = self.reconstruction_loss(reconstruction, x)
+        sparsity_target = torch.full_like(embedding, self.sparsity_target)
+        sparsity_loss = self.sparsity_loss(embedding, sparsity_target)
+        total_loss = recon_loss + self.sparsity_weight * sparsity_loss
+
+        # Return a dictionary of losses
+        return {"reconstruction": recon_loss, "sparsity": sparsity_loss, "total": total_loss}
+
+    # -----------------------------------------------------------------------------------
     # Training step
     # -----------------------------------------------------------------------------------
 
     def training_step(self, batch: Tensor, batch_idx: int) -> Tensor:
         """Training step for the autoencoder."""
+
         x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
         reconstruction, embedding = self(x)
-
-        # Calculate losses
-        recon_loss = self.reconstruction_loss(reconstruction, x)
-        sparsity_loss = self.sparsity_loss(embedding)
-        total_loss = recon_loss + self.sparsity_weight * sparsity_loss
+        loss = self.compute_loss(x, reconstruction, embedding)  # Calculate losses
 
         # Log metrics
-        self.log("train/reconstruction_loss", recon_loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/sparsity_loss", sparsity_loss, on_step=True, on_epoch=True)
-        self.log("train/total_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/reconstruction_loss", loss["reconstruction"], on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/sparsity_loss", loss["sparsity"], on_step=True, on_epoch=True)
+        self.log("train/total_loss", loss["total"], on_step=True, on_epoch=True, prog_bar=True)
 
         # Calculate and log sparsity metrics
         sparsity_rate = (embedding > 0.01).float().mean()
         self.log("train/sparsity_rate", sparsity_rate, on_step=True, on_epoch=True)
 
-        return total_loss
+        return loss["total"]
 
     # -----------------------------------------------------------------------------------
     # Validation step
@@ -115,24 +130,21 @@ class Autoencoder(pl.LightningModule):
 
     def validation_step(self, batch: Tensor, batch_idx: int) -> Tensor:  # noqa: ARG002
         """Validation step for the autoencoder."""
+
         x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
         reconstruction, embedding = self(x)
-
-        # Calculate losses
-        recon_loss = self.reconstruction_loss(reconstruction, x)
-        sparsity_loss = self.sparsity_loss(embedding)
-        total_loss = recon_loss + self.sparsity_weight * sparsity_loss
+        loss = self.compute_loss(x, reconstruction, embedding)  # Calculate losses
 
         # Log metrics
-        self.log("val/reconstruction_loss", recon_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/sparsity_loss", sparsity_loss, on_step=False, on_epoch=True)
-        self.log("val/total_loss", total_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/reconstruction_loss", loss["reconstruction"], on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/sparsity_loss", loss["sparsity"], on_step=False, on_epoch=True)
+        self.log("val/total_loss", loss["total"], on_step=False, on_epoch=True, prog_bar=True)
 
         # Calculate and log sparsity metrics
         sparsity_rate = (embedding > 0.01).float().mean()
         self.log("val/sparsity_rate", sparsity_rate, on_step=False, on_epoch=True)
 
-        return total_loss
+        return loss["total"]
 
     # -----------------------------------------------------------------------------------
     # Test step
@@ -140,27 +152,19 @@ class Autoencoder(pl.LightningModule):
 
     def test_step(self, batch: Tensor, batch_idx: int) -> Dict[str, Tensor]:  # noqa: ARG002
         """Test step for the autoencoder."""
+
         x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
         reconstruction, embedding = self(x)
-
-        # Calculate losses
-        recon_loss = self.reconstruction_loss(reconstruction, x)
-        sparsity_loss = self.sparsity_loss(embedding)
-        total_loss = recon_loss + self.sparsity_weight * sparsity_loss
+        loss = self.compute_loss(x, reconstruction, embedding)  # Calculate losses
 
         # Calculate additional metrics
-        mse = nn.MSELoss()(reconstruction, x)
-        mae = nn.L1Loss()(reconstruction, x)
-        sparsity_rate = (embedding > 0.01).float().mean()
-
-        # Log metrics
         metrics = {
-            "test/reconstruction_loss": recon_loss,
-            "test/sparsity_loss": sparsity_loss,
-            "test/total_loss": total_loss,
-            "test/mse": mse,
-            "test/mae": mae,
-            "test/sparsity_rate": sparsity_rate,
+            "test/reconstruction_loss": loss["reconstruction"],
+            "test/sparsity_loss": loss["sparsity"],
+            "test/total_loss": loss["total"],
+            "test/mse": nn.MSELoss()(reconstruction, x),
+            "test/mae": nn.L1Loss()(reconstruction, x),
+            "test/sparsity_rate": (embedding > 0.01).float().mean(),
         }
 
         self.log_dict(metrics, on_step=False, on_epoch=True)
@@ -215,19 +219,6 @@ class Autoencoder(pl.LightningModule):
         """Full reconstruction from input."""
         embedding = self.encode(x)
         return self.decode(embedding)
-
-    def compute_loss(self, x: Tensor) -> Dict[str, Tensor]:
-        """Compute all losses for a given input."""
-        reconstruction, embedding = self(x)
-        recon_loss = self.reconstruction_loss(reconstruction, x)
-        sparsity_loss = torch.mean(torch.abs(embedding))
-        total_loss = recon_loss + self.sparsity_weight * sparsity_loss
-
-        return {
-            "reconstruction_loss": recon_loss,
-            "sparsity_loss": sparsity_loss,
-            "total_loss": total_loss,
-        }
 
 
 # Example usage with training
