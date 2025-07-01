@@ -22,9 +22,10 @@ from pydantic import BaseModel, Field
 
 from ehc_sn.data import cognitive_maps as data
 from ehc_sn.figures import cognitive_maps as figures
+from ehc_sn.models import decoders, encoders
 from ehc_sn.models.autoencoders import Autoencoder, AutoencoderParams
-from ehc_sn.models.decoders import DecoderParams, LinearDecoder
-from ehc_sn.models.encoders import EncoderParams, LinearEncoder
+from ehc_sn.models.decoders import DecoderParams
+from ehc_sn.models.encoders import EncoderParams
 from ehc_sn.utils import load_settings
 
 # -------------------------------------------------------------------------------------------
@@ -59,7 +60,6 @@ class ExperimentSettings(BaseModel):
     # Training Settings
     max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
     learning_rate: float = Field(default=1e-3, ge=1e-6, le=1e-1, description="Learning rate for optimizer")
-    sparsity_target: float = Field(default=0.05, ge=0.01, le=0.5, description="Target sparsity level")
     sparsity_weight: float = Field(default=0.01, ge=0.0, le=1.0, description="Sparsity regularization weight")
 
     # Logging and Output Settings
@@ -121,24 +121,25 @@ class ExperimentSettings(BaseModel):
         return EncoderParams(
             input_shape=self.input_shape,
             latent_dim=self.latent_dim,
+            activation_fn=torch.nn.GELU,
         )
 
     def create_decoder_params(self) -> DecoderParams:
         """Create decoder parameters from settings."""
         return DecoderParams(
-            input_shape=self.input_shape,
+            output_shape=self.input_shape,
             latent_dim=self.latent_dim,
+            activation_fn=torch.nn.GELU,
         )
 
     def create_autoencoder_params(self) -> AutoencoderParams:
         """Create autoencoder parameters from settings."""
-        encoder = LinearEncoder(self.create_encoder_params())
-        decoder = LinearDecoder(self.create_decoder_params())
+        encoder = encoders.Linear(self.create_encoder_params())
+        decoder = decoders.Linear(self.create_decoder_params())
         return AutoencoderParams(
             encoder=encoder,
             decoder=decoder,
             sparsity_weight=self.sparsity_weight,
-            sparsity_target=self.sparsity_target,
             optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
 
@@ -220,7 +221,6 @@ class ExperimentPipeline:
         print(f"Latent Dim: {self.settings.latent_dim}")
         print(f"Max Epochs: {self.settings.max_epochs}")
         print(f"Learning Rate: {self.settings.learning_rate:.1e}")
-        print(f"Sparsity Target: {self.settings.sparsity_target:.1%}")
         print(f"Sparsity Weight: {self.settings.sparsity_weight:.3f}")
         print(f"Log Directory: {self.settings.log_dir}")
         print(f"Experiment: {self.settings.experiment_name}")

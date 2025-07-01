@@ -21,12 +21,16 @@ import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, RichModelSummary, RichProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
 from pydantic import BaseModel, Field
+from torch import nn
 
 from ehc_sn.data import cognitive_maps as data
 from ehc_sn.figures import cognitive_maps as figures
+from ehc_sn.models import decoders, encoders
 from ehc_sn.models.autoencoders import Autoencoder, AutoencoderParams
-from ehc_sn.models.decoders import DecoderParams, DRTPDecoder
-from ehc_sn.models.encoders import EncoderParams, LinearEncoder
+from ehc_sn.models.decoders import DecoderParams
+from ehc_sn.models.decoders import DRTPLinear as DRTPDecoder
+from ehc_sn.models.encoders import EncoderParams
+from ehc_sn.models.encoders import Linear as LinearEncoder
 from ehc_sn.utils import load_settings
 
 # -------------------------------------------------------------------------------------------
@@ -66,8 +70,8 @@ class DRTPDecoderTrainingSettings(BaseModel):
     # Training Settings
     max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
     learning_rate: float = Field(default=1e-3, ge=1e-6, le=1e-1, description="Learning rate for optimizer")
-    sparsity_target: float = Field(default=0.05, ge=0.01, le=0.5, description="Target sparsity level")
-    sparsity_weight: float = Field(default=0.01, ge=0.0, le=1.0, description="Sparsity regularization weight")
+    sparsity_target: float = Field(default=0.00, ge=0.01, le=0.5, description="Target sparsity level")
+    sparsity_weight: float = Field(default=0.00, ge=0.0, le=1.0, description="Sparsity regularization weight")
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
@@ -109,13 +113,15 @@ class DRTPDecoderTrainingSettings(BaseModel):
         return EncoderParams(
             input_shape=self.input_shape,
             latent_dim=self.latent_dim,
+            activation_fn=nn.GELU,  # Used GELU for encoder
         )
 
     def create_decoder_params(self) -> DecoderParams:
         """Create decoder parameters from settings."""
         return DecoderParams(
-            input_shape=self.input_shape,
+            output_shape=self.input_shape,
             latent_dim=self.latent_dim,
+            activation_fn=nn.GELU,  # Used GELU for decoder
         )
 
     def create_generator_params(self) -> data.BlockMapParams:
@@ -137,7 +143,7 @@ class DRTPDecoderTrainingSettings(BaseModel):
             test_split=self.test_split,
         )
 
-    def create_autoencoder_params(self, encoder: LinearEncoder, decoder: DRTPDecoder) -> AutoencoderParams:
+    def create_autoencoder_params(self, encoder, decoder) -> AutoencoderParams:
         """Create autoencoder parameters from settings."""
         return AutoencoderParams(
             encoder=encoder,
@@ -182,12 +188,12 @@ class DRTPDecoderTrainingPipeline:
         """Initialize all experiment components and load pretrained model."""
         print("🔧 Setting up DRTP decoder training components...")
 
-        # Initialize model architecture
+        # Create initial encoder and decoder for loading pretrained model
         encoder = LinearEncoder(self.settings.create_encoder_params())
-        decoder = DRTPDecoder(self.settings.create_decoder_params())
+        temp_decoder = decoders.Linear(self.settings.create_decoder_params())  # Temporary decoder for loading
 
-        # Create autoencoder with initial parameters
-        autoencoder_params = self.settings.create_autoencoder_params(encoder, decoder)
+        # Create autoencoder with initial parameters to load pretrained weights
+        autoencoder_params = self.settings.create_autoencoder_params(encoder, temp_decoder)
         model = Autoencoder(autoencoder_params)
 
         # Load pretrained weights if available
@@ -209,7 +215,16 @@ class DRTPDecoderTrainingPipeline:
                 param.requires_grad = False
 
         print("🔄 Replacing decoder with DRTPDecoder")
-        model.decoder = DRTPDecoder(self.settings.create_decoder_params())
+        # Create DRTP decoder parameters with Tanh activation
+        drtp_decoder_params = DecoderParams(
+            output_shape=self.settings.input_shape,
+            latent_dim=self.settings.latent_dim,
+            activation_fn=nn.Tanh,  # Use Tanh for DRTP
+        )
+        model.decoder = DRTPDecoder(drtp_decoder_params)
+
+        # Update optimizer to include new decoder parameters
+        model.optimizer_init = self.settings.create_autoencoder_params(model.encoder, model.decoder).optimizer_init
 
         # Initialize data components
         generator = data.BlockMapGenerator(self.settings.create_generator_params())
