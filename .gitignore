@@ -201,4 +201,5 @@ example_checkpoints/
 sparse_training_loss.png
 
 # Project-specific files
-whiteboard/
+temp/
+Copilot-Processing.md
