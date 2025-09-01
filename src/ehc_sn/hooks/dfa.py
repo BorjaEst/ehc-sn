@@ -1,57 +1,142 @@
 from math import prod
+from threading import local
 from typing import Any, List, Tuple
 
 import torch
 from torch import Size, Tensor, autograd, nn
+
+# -------------------------------------------------------------------------------------------
+# Global storage for DFA error signals (thread-local and device-aware)
+# -------------------------------------------------------------------------------------------
+
+_dfa_storage = local()
+
+
+def get_dfa_error(device: torch.device) -> Tensor | None:
+    """Get the current DFA error signal for the specified device."""
+    if not hasattr(_dfa_storage, "errors"):
+        return None
+    return _dfa_storage.errors.get(str(device))
+
+
+def set_dfa_error(error: Tensor) -> None:
+    """Set the DFA error signal for the device of the given tensor."""
+    if not hasattr(_dfa_storage, "errors"):
+        _dfa_storage.errors = {}
+    _dfa_storage.errors[str(error.device)] = error
+
+
+def clear_dfa_error(device: torch.device) -> None:
+    """Clear the DFA error signal for the specified device."""
+    if hasattr(_dfa_storage, "errors") and str(device) in _dfa_storage.errors:
+        del _dfa_storage.errors[str(device)]
+
+
+def register_dfa_hook(output_tensor: Tensor) -> None:
+    """
+    Register a hook on the output tensor to capture gradients for DFA.
+
+    This hook captures dL/dz_out during backpropagation and stores it
+    for use by DFA layers throughout the network.
+
+    Args:
+        output_tensor: The final output tensor of the network (logits/predictions)
+    """
+
+    def capture_grad_hook(grad):
+        if grad is not None:
+            set_dfa_error(grad.detach())
+        return grad
+
+    output_tensor.register_hook(capture_grad_hook)
 
 
 # -------------------------------------------------------------------------------------------
 class DFAFunction(autograd.Function):
     """
     Custom autograd function for Direct Feedback Alignment (DFA).
-    The backward pass uses a fixed random projection matrix to propagate the error.
+
+    In DFA, each hidden layer receives gradients computed using a fixed random
+    projection of the global output error, rather than through standard backpropagation.
+    This eliminates the need for symmetric weight transport while maintaining
+    effective learning.
     """
 
     @staticmethod
-    def forward(ctx, inputs: Tensor, fb_weights: Tensor, grad_output: Tensor) -> Tensor:
+    def forward(ctx, inputs: Tensor, fb_weights: Tensor) -> Tensor:
         """
         Forward pass: returns the input unchanged to maintain computational graph.
+
+        Args:
+            inputs: Hidden layer activations
+            fb_weights: Fixed random projection matrix (output_dim, hidden_dim)
+
+        Returns:
+            inputs: Unchanged to maintain computational graph
         """
-        ctx.save_for_backward(fb_weights, grad_output)
+        ctx.save_for_backward(fb_weights)
         return inputs
 
     # -----------------------------------------------------------------------------------
     @staticmethod
-    def backward(ctx, grad_output: Tensor, *gradients: Any) -> Tuple[Tensor, None, None]:
+    def backward(ctx, grad_output: Tensor) -> Tuple[Tensor, None]:
         """
-        Backward pass: propagate the error using the fixed random matrix fb_weights.
-        DFA uses fb_weights^T · grad_output as the gradient signal.
+        Backward pass: Use global error signal with random feedback weights.
+
+        The key insight of DFA is that instead of using the standard backpropagated
+        gradient, we use: gradient = fb_weights^T @ global_error
+
+        Args:
+            grad_output: Standard backpropagated gradient (we ignore this in DFA)
+
+        Returns:
+            Tuple of gradients for (inputs, fb_weights)
         """
-        fb_weights, saved_grad_output = ctx.saved_tensors
-        nbatch = grad_output.shape[0]
+        (fb_weights,) = ctx.saved_tensors
 
-        # DFA: delta = fb_weights^T · grad_output (error from output layer)
-        # grad_output shape: (batch, output_dim) @ fb_weights shape: (output_dim, hidden_dim)
-        grad_est = torch.matmul(saved_grad_output.view(nbatch, -1), fb_weights)
+        # Get the global error signal captured from network output
+        global_error = get_dfa_error(grad_output.device)
 
-        # Return gradients for input, fb_weights, grad_output (None for non-learnable parameters)
-        return grad_est.view(grad_output.shape), None, None
+        if global_error is None:
+            # Fallback: if no global error available, return zeros to prevent gradient flow
+            # This maintains the computational graph while signaling no update
+            return torch.zeros_like(grad_output), None
+
+        # Ensure global_error and grad_output have compatible batch dimensions
+        batch_size = grad_output.shape[0]
+        if global_error.shape[0] != batch_size:
+            # Handle batch size mismatch (e.g., during validation with different batch sizes)
+            if global_error.shape[0] == 1:
+                global_error = global_error.expand(batch_size, -1)
+            else:
+                # If we can't match batch sizes, fall back to zeros
+                return torch.zeros_like(grad_output), None
+
+        # DFA gradient computation: fb_weights^T @ global_error
+        # global_error shape: (batch_size, output_dim)
+        # fb_weights shape: (output_dim, hidden_dim)
+        # Result shape: (batch_size, hidden_dim)
+        dfa_gradient = torch.matmul(global_error.view(batch_size, -1), fb_weights)
+
+        # Reshape to match the input shape
+        dfa_gradient = dfa_gradient.view(grad_output.shape)
+
+        return dfa_gradient, None
 
 
 # -------------------------------------------------------------------------------------------
-def dfa(input: Tensor, fb_weights: Tensor, grad_output: Tensor) -> Tensor:
+def dfa(input: Tensor, fb_weights: Tensor) -> Tensor:
     """
     DFA layer wrapper for use in nn.Module.
 
     Args:
         input: Hidden layer activations (batch_size, hidden_dim)
         fb_weights: Fixed random projection matrix (output_dim, hidden_dim)
-        grad_output: Error signal from output layer (batch_size, output_dim)
 
     Returns:
         input: Unchanged input (to maintain computational graph)
     """
-    return DFAFunction.apply(input, fb_weights, grad_output)
+    return DFAFunction.apply(input, fb_weights)
 
 
 # -------------------------------------------------------------------------------------------
@@ -60,26 +145,36 @@ class DFALayer(nn.Module):
     DFA (Direct Feedback Alignment) layer module.
 
     This layer implements the DFA learning mechanism where gradients are computed
-    using a fixed random projection of the output error instead of standard backpropagation.
-    The layer maintains a fixed random projection matrix fb_weights that maps error signals
-    from the output layer to the hidden layer dimensions.
+    using a fixed random projection of the global output error instead of standard
+    backpropagation. The layer maintains a fixed random projection matrix fb_weights
+    that maps the global error signal to the hidden layer dimensions.
 
     During forward pass, the layer returns its input unchanged to maintain the
     computational graph. During backward pass, it uses the custom DFAFunction
-    to provide modulatory signals based on the error projection.
+    to compute gradients using the global error captured via hooks on the network output.
 
     This implementation is biologically inspired and provides an alternative to
     standard backpropagation that doesn't require symmetric weight transport.
+    The global error is automatically captured when register_dfa_hook() is called
+    on the network's final output tensor.
 
     Args:
         output_dim: Dimensionality of the output space (number of output units)
         hidden_dim: Dimensionality of the hidden layer where DFA is applied
 
     Example:
+        >>> # Create network with DFA layers
         >>> dfa_layer = DFALayer(output_dim=10, hidden_dim=128)
-        >>> hidden = torch.randn(32, 128)  # batch_size=32, hidden_dim=128
-        >>> grad_output = torch.randn(32, 10)   # batch_size=32, output_dim=10
-        >>> output = dfa(hidden, grad_output)  # Returns hidden unchanged
+        >>> hidden = torch.randn(32, 128, requires_grad=True)
+        >>>
+        >>> # Forward pass (returns input unchanged)
+        >>> output = dfa_layer(hidden)
+        >>>
+        >>> # Register hook on final network output to capture global error
+        >>> register_dfa_hook(final_output)
+        >>>
+        >>> # Backward pass automatically uses DFA gradients
+        >>> loss.backward()
     """
 
     def __init__(self, output_dim: List[int] | int, hidden_dim: List[int] | int):
@@ -104,7 +199,7 @@ class DFALayer(nn.Module):
         self.reset_weights()  # Initis weights and requires_grad=False
 
     # -----------------------------------------------------------------------------------
-    def forward(self, inputs: Tensor, grad_output: Tensor) -> Tensor:
+    def forward(self, inputs: Tensor) -> Tensor:
         """
         Forward pass through the DFA layer.
 
@@ -114,17 +209,17 @@ class DFALayer(nn.Module):
 
         Args:
             inputs: Hidden layer activations with shape (batch_size, *hidden_dim)
-            grad_output: Error signal from output layer with shape (batch_size, *output_dim)
 
         Returns:
             Tensor: Input unchanged, maintaining computational graph for gradient flow
 
-        Raises:
-            ValueError: If input or grad_output dimensions don't match expected shapes
+        Note:
+            The global error signal is automatically captured during backpropagation
+            through the hook registered on the network output. No manual error
+            passing is required.
         """
-
         # Apply DFA function which handles the custom backward pass
-        return DFAFunction.apply(inputs, self.fb_weights, grad_output)
+        return DFAFunction.apply(inputs, self.fb_weights)
 
     # -----------------------------------------------------------------------------------
     def extra_repr(self) -> str:
@@ -151,7 +246,7 @@ if __name__ == "__main__":
     input_dim, hidden1_dim, hidden2_dim, output_dim = 5, 4, 3, 2
     batch_size = 2
 
-    # Create network layers
+    # Create network layers with DFA
     layer1 = nn.Linear(input_dim, hidden1_dim)
     dfa1 = DFALayer(output_dim=output_dim, hidden_dim=hidden1_dim)
 
@@ -169,29 +264,28 @@ if __name__ == "__main__":
     print(f"DFA1 projection matrix shape: {dfa1.fb_weights.shape}")
     print(f"DFA2 projection matrix shape: {dfa2.fb_weights.shape}")
 
-    # Forward pass
+    # Forward pass with DFA layers integrated into the network
     h1 = layer1(x)  # (batch_size, hidden1_dim)
+    h1_dfa = dfa1(h1)  # Apply DFA to hidden layer 1 (returns h1 unchanged)
 
-    h2 = layer2(h1)  # (batch_size, hidden2_dim)
+    h2 = layer2(h1_dfa)  # (batch_size, hidden2_dim)
+    h2_dfa = dfa2(h2)  # Apply DFA to hidden layer 2 (returns h2 unchanged)
 
-    output = layer3(h2)  # (batch_size, output_dim) - no DFA on output
+    output = layer3(h2_dfa)  # (batch_size, output_dim)
 
-    # Compute loss and get error signal
+    # IMPORTANT: Register DFA hook on output to capture global error
+    register_dfa_hook(output)
+
+    # Compute loss
     loss = nn.MSELoss()(output, target)
-    error = output - target  # Error signal for DFA
-
-    # Apply DFA with error signal (in practice this would be integrated differently)
-    h1_dfa = dfa1(h1, error)  # Apply DFA to hidden layer 1
-    h2_dfa = dfa2(h2, error)  # Apply DFA to hidden layer 2
 
     print(f"\nForward pass:")
     print(f"  Hidden 1 shape: {h1.shape}")
     print(f"  Hidden 2 shape: {h2.shape}")
     print(f"  Output shape: {output.shape}")
-    print(f"  Error shape: {error.shape}")
     print(f"  Loss: {loss.item():.6f}")
 
-    # Backward pass
+    # Backward pass - DFA gradients are automatically computed
     print(f"\nBefore backward:")
     print(f"  Layer1 grad: {layer1.weight.grad}")
     print(f"  Layer2 grad: {layer2.weight.grad}")
@@ -204,11 +298,21 @@ if __name__ == "__main__":
     print(f"  Layer2 grad shape: {layer2.weight.grad.shape if layer2.weight.grad is not None else None}")
     print(f"  Layer3 grad shape: {layer3.weight.grad.shape if layer3.weight.grad is not None else None}")
 
-    # Verify DFA projections
-    print(f"\nDFA projections:")
-    expected_grad1 = torch.matmul(error, dfa1.fb_weights)  # Should match h1 gradients
-    expected_grad2 = torch.matmul(error, dfa2.fb_weights)  # Should match h2 gradients
-    print(f"  Expected DFA1 gradient shape: {expected_grad1.shape}")
-    print(f"  Expected DFA2 gradient shape: {expected_grad2.shape}")
+    # Check if global error was captured
+    global_error = get_dfa_error(output.device)
+    if global_error is not None:
+        print(f"\nGlobal error captured successfully:")
+        print(f"  Global error shape: {global_error.shape}")
+
+        # Verify DFA projections
+        expected_grad1 = torch.matmul(global_error, dfa1.fb_weights)
+        expected_grad2 = torch.matmul(global_error, dfa2.fb_weights)
+        print(f"  Expected DFA1 gradient shape: {expected_grad1.shape}")
+        print(f"  Expected DFA2 gradient shape: {expected_grad2.shape}")
+    else:
+        print(f"\nWarning: Global error was not captured!")
+
+    # Clean up
+    clear_dfa_error(output.device)
 
     print(f"\nDFA Layer example completed successfully!")
