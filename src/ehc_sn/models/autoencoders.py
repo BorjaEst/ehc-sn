@@ -48,7 +48,7 @@ class AutoencoderParams(BaseModel):
     encoder: BaseEncoder = Field(..., description="Parameters for the encoder component.")
     decoder: BaseDecoder = Field(..., description="Parameters for the decoder component.")
     sparsity_weight: float = Field(0.1, description="Weight for the sparsity loss term.")
-    sparsity_target: float = Field(1e-3, description="Target sparsity level for the embedding.")
+    sparsity_target: float = Field(-1e-3, description="Target sparsity level for the embedding.")
     optimizer_init: Callable = Field(..., description="Callable to initialize the optimizer.")
 
 
@@ -154,7 +154,7 @@ class Autoencoder(pl.LightningModule):
         self.optimizer_init = params.optimizer_init
 
         # Loss functions
-        self.reconstruction_loss = nn.BCELoss()
+        self.reconstruction_loss = nn.BCELoss(reduction="mean")
         self.sparsity_loss = nn.L1Loss()
         self.sparsity_target = params.sparsity_target
         self.sparsity_weight = params.sparsity_weight
