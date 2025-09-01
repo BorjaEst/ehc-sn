@@ -60,6 +60,7 @@ class ExperimentSettings(BaseModel):
     # Training Settings
     max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
     learning_rate: float = Field(default=1e-3, ge=1e-6, le=1e-1, description="Learning rate for optimizer")
+    sparsity_target: float = Field(default=0.00, ge=0.0, le=1.0, description="Target sparsity level for latent space")
     sparsity_weight: float = Field(default=0.01, ge=0.0, le=1.0, description="Sparsity regularization weight")
 
     # Logging and Output Settings
@@ -139,6 +140,7 @@ class ExperimentSettings(BaseModel):
         return AutoencoderParams(
             encoder=encoder,
             decoder=decoder,
+            sparsity_target=self.sparsity_target,
             sparsity_weight=self.sparsity_weight,
             optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
