@@ -358,7 +358,7 @@ class DFALinear(BaseDecoder):
     - Applies DFA layers after hidden layers but not output layer
     - Uses Sigmoid output activation for bounded outputs
     - Error signal from output layer is propagated directly to hidden layers via random weights
-    - Forward pass accepts optional grad_output parameter for DFA computation
+    - Forward pass accepts optional error_signal parameter for DFA computation
 
     The DFA mechanism:
     - Uses random feedback weights to project output errors to hidden layers
@@ -377,7 +377,7 @@ class DFALinear(BaseDecoder):
         ... )
         >>> decoder = DFALinear(params)
         >>> latent_batch = torch.randn(4, 128)
-        >>> reconstruction = decoder(latent_batch)  # shape: (4, 1, 32, 16), grad_output=None is default
+        >>> reconstruction = decoder(latent_batch)  # shape: (4, 1, 32, 16), error_signal=None is default
         >>> # During training: reconstruction = decoder(latent_batch, grad_output_batch)
 
     References:
@@ -403,13 +403,12 @@ class DFALinear(BaseDecoder):
         self.layer3 = nn.Linear(in_features=1024, out_features=output_features)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, grad_output: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
         """Forward pass through the DFA linear decoder.
 
         Args:
             x: Input latent tensor of shape (batch_size, latent_dim).
-            grad_output: Error signal from output layer for DFA gradient computation
-                during backward pass. Can be None during forward-only inference.
+            target: Ignored for standard decoder, kept for API consistency.
 
         Returns:
             Reconstructed output of shape (batch_size, *output_shape) with values
@@ -418,12 +417,12 @@ class DFALinear(BaseDecoder):
         # First layer
         h1 = self.layer1(x)
         h1 = self.activation1(h1)
-        h1 = self.dfa1(h1, grad_output)
+        h1 = self.dfa1(h1)
 
         # Second layer
         h2 = self.layer2(h1)
         h2 = self.activation2(h2)
-        h2 = self.dfa2(h2, grad_output)
+        h2 = self.dfa2(h2)
 
         # Output layer (no DFA - uses standard gradients)
         output = self.layer3(h2)
@@ -671,12 +670,12 @@ class DFAConv2D(BaseDecoder):
         ... )
         >>> decoder = DFAConv2D(params)
         >>> latent_batch = torch.randn(4, 128)
-        >>> reconstruction = decoder(latent_batch)  # shape: (4, 1, 32, 16), grad_output=None is default
+        >>> reconstruction = decoder(latent_batch)  # shape: (4, 1, 32, 16), error_signal=None is default
         >>> # During training: reconstruction = decoder(latent_batch, grad_output_batch)
 
     Note:
         Error signal is only required during backward pass for DFA computation.
-        Forward pass accepts optional grad_output parameter for consistent API.
+        Forward pass accepts optional error_signal parameter for consistent API.
         Output spatial dimensions should be even numbers for transpose conv compatibility.
 
     References:
@@ -711,13 +710,12 @@ class DFAConv2D(BaseDecoder):
         self.conv3 = nn.ConvTranspose2d(32, self.output_channels, kernel_size=5, **kwds)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, grad_output: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
         """Forward pass through the DFA transpose convolutional decoder.
 
         Args:
             x: Input latent tensor of shape (batch_size, latent_dim).
-            grad_output: Error signal from output layer for DFA gradient computation
-                during backward pass. Can be None during forward-only inference.
+            target: Ignored for standard decoder, kept for API consistency.
 
         Returns:
             Reconstructed output of shape (batch_size, *output_shape) with values
@@ -726,12 +724,12 @@ class DFAConv2D(BaseDecoder):
         # First layer with DFA
         h1 = self.layer1(x)
         h1 = self.activation1(h1)
-        h1 = self.dfa1(h1, grad_output)
+        h1 = self.dfa1(h1)
 
         # Second layer with DFA
         h2 = self.layer2(h1)
         h2 = self.activation2(h2)
-        h2 = self.dfa2(h2, grad_output)
+        h2 = self.dfa2(h2)
 
         # Reshape to spatial format for transpose convolution
         h2 = h2.reshape(h2.size(0), *self.intermediate_shape)
