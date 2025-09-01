@@ -412,13 +412,12 @@ class DFALinear(BaseEncoder):
         self.layer3 = nn.Linear(512, out_features=self.latent_dim)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, grad_output: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
         """Forward pass through the DFA linear encoder.
 
         Args:
             x: Input tensor of shape (batch_size, channels, height, width).
-            grad_output: Error signal from output layer for DFA gradient computation
-                during backward pass. Can be None during forward-only inference.
+            target: Ignored for standard encoder, kept for API consistency.
 
         Returns:
             Latent representation of shape (batch_size, latent_dim) with values
@@ -430,12 +429,12 @@ class DFALinear(BaseEncoder):
         # First layer
         h1 = self.layer1(x)
         h1 = self.activation1(h1)
-        h1 = self.dfa1(h1, grad_output)
+        h1 = self.dfa1(h1)
 
         # Second layer
         h2 = self.layer2(h1)
         h2 = self.activation2(h2)
-        h2 = self.dfa2(h2, grad_output)
+        h2 = self.dfa2(h2)
 
         # Output layer (no DFA - uses standard gradients)
         output = self.layer3(h2)
@@ -721,13 +720,12 @@ class DFAConv2D(BaseEncoder):
         self.output_activation = nn.Sigmoid()
         # No DFA on output layer (uses standard gradients)
 
-    def forward(self, x: Tensor, grad_output: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
         """Forward pass through the DFA convolutional encoder.
 
         Args:
             x: Input tensor of shape (batch_size, channels, height, width).
-            grad_output: Error signal from output layer for DFA gradient computation
-                during backward pass. Can be None during forward-only inference.
+            target: Ignored for standard encoder, kept for API consistency.
 
         Returns:
             Latent representation of shape (batch_size, latent_dim) with values
@@ -736,7 +734,7 @@ class DFAConv2D(BaseEncoder):
         # First layer: convolution → activation → DFA → pooling
         h1 = self.conv1(x)
         h1 = self.activation1(h1)
-        h1 = self.dfa1(h1, grad_output)  # Apply DFA to conv layer
+        h1 = self.dfa1(h1)  # Apply DFA to conv layer
         h1 = self.pool1(h1)
 
         # Flatten for FC layers
@@ -745,7 +743,7 @@ class DFAConv2D(BaseEncoder):
         # Second layer: fully connected with DFA
         h2 = self.layer2(h1)
         h2 = self.activation2(h2)
-        h2 = self.dfa2(h2, grad_output)  # Apply DFA to linear layer
+        h2 = self.dfa2(h2)  # Apply DFA to linear layer
 
         # Output layer (standard backpropagation)
         output = self.layer3(h2)
