@@ -175,10 +175,10 @@ class Linear(BaseDecoder):
     in reverse, expanding from the latent dimension back to the full output size.
 
     Architecture:
-        Latent input → Linear(1000) → GELU → Linear(1000) → GELU → Linear(output_size) → Sigmoid
+        Latent input → Linear(512) → GELU → Linear(1024) → GELU → Linear(output_size) → Sigmoid
 
     The architecture uses:
-    - Two hidden layers with 1000 units each for sufficient representational capacity
+    - Two hidden layers: first with 512 units, second with 1024 units for progressive expansion
     - GELU activation functions in hidden layers for smooth, differentiable non-linearity
     - Sigmoid activation in the output layer to ensure bounded outputs in [0,1]
     - Bias terms in all layers for improved expressiveness
@@ -208,16 +208,16 @@ class Linear(BaseDecoder):
         super().__init__(params)
         output_features = prod(params.output_shape)
 
-        # First layer: expand from latent to first hidden layer (1000 units)
-        self.layer1 = nn.Linear(params.latent_dim, 1000, bias=True)
+        # First layer: expand from latent to first hidden layer (512 units)
+        self.layer1 = nn.Linear(params.latent_dim, out_features=512, bias=True)
         self.activation1 = params.activation_fn()  # Usually GELU
 
-        # Second layer: 1000 units (same as encoder)
-        self.layer2 = nn.Linear(1000, 1000, bias=True)
+        # Second layer: 1024 units (progressive expansion)
+        self.layer2 = nn.Linear(in_features=512, out_features=1024, bias=True)
         self.activation2 = params.activation_fn()  # Usually GELU
 
         # Output layer: expand to full output size
-        self.layer3 = nn.Linear(1000, output_features, bias=True)
+        self.layer3 = nn.Linear(in_features=1024, out_features=output_features, bias=True)
         self.output_activation = nn.Sigmoid()
 
     def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
@@ -255,10 +255,11 @@ class DRTPLinear(BaseDecoder):
     mirrors the DRTPLinear encoder architecture in reverse.
 
     Architecture:
-        Latent input → Linear(1000) → Tanh → DRTP → Linear(1000) → Tanh → DRTP → Linear(output_size) → Sigmoid
+        Latent input → Linear(512) → Tanh → DRTP → Linear(1024) → Tanh → DRTP → Linear(output_size) → Sigmoid
 
     Key differences from standard Linear decoder:
     - Uses Tanh activation functions (work better with DRTP)
+    - Two hidden layers: first with 512 units, second with 1024 units for progressive expansion
     - Applies DRTP layers after hidden layers but not output layer
     - Uses Sigmoid output activation for bounded outputs
     - Target tensor is only required during backward pass for DRTP gradient computation
@@ -293,18 +294,18 @@ class DRTPLinear(BaseDecoder):
         super().__init__(params)
         output_features = prod(params.output_shape)
 
-        # Define layers separately since we need to apply DRTP manually
-        self.layer1 = nn.Linear(params.latent_dim, 1000)
+        # First layer: expand from latent to first hidden layer (512 units)
+        self.layer1 = nn.Linear(params.latent_dim, out_features=512, bias=True)
         self.activation1 = params.activation_fn()  # Usually Tanh
-        self.drtp1 = DRTPLayer(target_dim=params.output_shape, hidden_dim=1000)
+        self.drtp1 = DRTPLayer(target_dim=params.output_shape, hidden_dim=512)
 
-        # Second layer: 1000 units
-        self.layer2 = nn.Linear(1000, 1000)
+        # Second layer: 1024 units
+        self.layer2 = nn.Linear(in_features=512, out_features=1024, bias=True)
         self.activation2 = params.activation_fn()  # Usually Tanh
-        self.drtp2 = DRTPLayer(target_dim=params.output_shape, hidden_dim=1000)
+        self.drtp2 = DRTPLayer(target_dim=params.output_shape, hidden_dim=1024)
 
         # Output layer (no DRTP - uses standard gradients)
-        self.layer3 = nn.Linear(1000, output_features)
+        self.layer3 = nn.Linear(in_features=1024, out_features=output_features)
         self.output_activation = nn.Sigmoid()
 
     def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
@@ -345,11 +346,11 @@ class Conv2D(BaseDecoder):
     architecture in reverse, expanding from latent space back to full spatial dimensions.
 
     Architecture:
-        Latent input → Linear(1000) → GELU → Linear(4096) → GELU → Reshape → TransposeConv2d(5x5, 1) → Sigmoid
+        Latent input → Linear(512) → GELU → Linear(intermediate_features) → GELU → Reshape → TransposeConv2d(5x5, 1) → Sigmoid
 
     Design choices:
-    - First linear layer expands latent to 1000 units (matching encoder)
-    - Second linear layer expands to match flattened conv feature size
+    - First linear layer expands latent to 512 units
+    - Second linear layer expands to match flattened conv feature size (calculated dynamically)
     - Reshape to spatial dimensions that transpose conv can process
     - 5x5 transpose convolution kernel reconstructs local spatial patterns
     - Stride=2 and appropriate padding to double spatial dimensions
@@ -386,12 +387,12 @@ class Conv2D(BaseDecoder):
         intermediate_h, intermediate_w = h // 2, w // 2
         intermediate_features = 32 * intermediate_h * intermediate_w
 
-        # Linear layer: expand from latent to 1000 units
-        self.layer1 = nn.Linear(params.latent_dim, 1000, bias=True)
+        # Linear layer: expand from latent to 512 units
+        self.layer1 = nn.Linear(params.latent_dim, out_features=512, bias=True)
         self.activation1 = params.activation_fn()  # Usually GELU
 
         # Second linear layer to match conv input size
-        self.layer2 = nn.Linear(1000, intermediate_features, bias=True)
+        self.layer2 = nn.Linear(in_features=512, out_features=intermediate_features, bias=True)
         self.activation2 = params.activation_fn()  # Usually GELU
 
         # Store intermediate dimensions for reshape
@@ -439,7 +440,7 @@ class DRTPConv2D(BaseDecoder):
     It mirrors the DRTPConv2D encoder architecture in reverse.
 
     Architecture:
-        Latent input → Linear(1000) → Tanh → DRTP → Linear(4096) → Tanh → DRTP → Reshape → TransposeConv2d(5x5, 1) → Sigmoid
+        Latent input → Linear(512) → Tanh → DRTP → Linear(intermediate_features) → Tanh → DRTP → Reshape → TransposeConv2d(5x5, 1) → Sigmoid
 
     Key features:
     - Transpose convolutional layer reconstructs spatial patterns from feature maps
@@ -447,6 +448,7 @@ class DRTPConv2D(BaseDecoder):
     - Uses Tanh activation functions for compatibility with DRTP
     - Random feedback weights enable biologically plausible learning
     - Output layer uses standard backpropagation for final reconstruction
+    - Second linear layer size is calculated dynamically based on output dimensions
 
     The combination of transpose convolution and DRTP makes this decoder suitable for:
     - Spatial navigation tasks requiring biological plausibility
@@ -487,12 +489,12 @@ class DRTPConv2D(BaseDecoder):
         intermediate_features = 32 * intermediate_h * intermediate_w
 
         # Define layers separately since we need to apply DRTP manually
-        self.layer1 = nn.Linear(params.latent_dim, 1000)
+        self.layer1 = nn.Linear(in_features=params.latent_dim, out_features=512, bias=True)
         self.activation1 = params.activation_fn()  # Usually Tanh
-        self.drtp1 = DRTPLayer(target_dim=params.output_shape, hidden_dim=1000)
+        self.drtp1 = DRTPLayer(target_dim=params.output_shape, hidden_dim=512)
 
         # Second linear layer to match conv input size
-        self.layer2 = nn.Linear(1000, intermediate_features)
+        self.layer2 = nn.Linear(in_features=512, out_features=intermediate_features, bias=True)
         self.activation2 = params.activation_fn()  # Usually Tanh
         self.drtp2 = DRTPLayer(target_dim=params.output_shape, hidden_dim=intermediate_features)
 
