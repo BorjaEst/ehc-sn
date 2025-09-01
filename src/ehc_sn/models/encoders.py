@@ -14,7 +14,7 @@ The module provides four main encoder types:
 
 All encoders follow a consistent architecture pattern:
 - Input processing (flattening or convolution)
-- Two hidden layers with 1000 units each
+- Two hidden layers with 1024 and 512 units respectively
 - Output layer projecting to latent dimension
 - Appropriate activation functions for each training method
 
@@ -176,10 +176,10 @@ class Linear(BaseEncoder):
     through dense connectivity patterns.
 
     Architecture:
-        Input (flattened) → Linear(1000) → GELU → Linear(1000) → GELU → Linear(latent_dim) → ReLU
+        Input (flattened) → Linear(1024) → GELU → Linear(512) → GELU → Linear(latent_dim) → ReLU
 
     The architecture uses:
-    - Two hidden layers with 1000 units each for sufficient representational capacity
+    - Two hidden layers: first with 1024 units, second with 512 units for progressive dimensionality reduction
     - GELU activation functions in hidden layers for smooth, differentiable non-linearity
     - ReLU activation in the output layer to ensure non-negative sparse representations
     - Bias terms in all layers for improved expressiveness
@@ -212,17 +212,17 @@ class Linear(BaseEncoder):
         super().__init__(params)
         in_features = prod(params.input_shape)
 
-        # First layer: 1000 units
-        self.layer1 = nn.Linear(in_features, 1000, bias=True)
+        # First layer: 1024 units
+        self.layer1 = nn.Linear(in_features, 1024, bias=True)
         self.activation1 = params.activation_fn()  # Usually GELU
 
-        # Second layer: 1000 units
-        self.layer2 = nn.Linear(1000, 1000, bias=True)
+        # Second layer: 512 units
+        self.layer2 = nn.Linear(1024, 512, bias=True)
         self.activation2 = params.activation_fn()  # Usually GELU
 
         # Output layer: latent_dim units
-        self.layer3 = nn.Linear(1000, params.latent_dim, bias=True)
-        self.output_activation = nn.ReLU()
+        self.layer3 = nn.Linear(512, params.latent_dim, bias=True)
+        self.output_activation = nn.GELU()
 
     def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
         """Forward pass through the linear encoder.
@@ -262,10 +262,11 @@ class DRTPLinear(BaseEncoder):
     network, making it more similar to biological neural networks.
 
     Architecture:
-        Input (flattened) → Linear(1000) → Tanh → DRTP → Linear(1000) → Tanh → DRTP → Linear(latent_dim) → Sigmoid
+        Input (flattened) → Linear(1024) → Tanh → DRTP → Linear(512) → Tanh → DRTP → Linear(latent_dim) → Sigmoid
 
     Key differences from standard Linear encoder:
     - Uses Tanh activation functions (work better with DRTP)
+    - Two hidden layers: first with 1024 units, second with 512 units for progressive dimensionality reduction
     - Applies DRTP layers after hidden layers but not output layer
     - Uses Sigmoid output activation for bounded outputs
     - Target tensor is only required during backward pass for DRTP gradient computation
@@ -300,18 +301,18 @@ class DRTPLinear(BaseEncoder):
         super().__init__(params)
         in_features = prod(params.input_shape)
 
-        # Define layers separately since we need to apply DRTP manually
-        self.layer1 = nn.Linear(in_features, out_features=1000)
+        # First layer: 1024 units
+        self.layer1 = nn.Linear(in_features, out_features=1024)
         self.activation1 = params.activation_fn()  # Usually Tanh
-        self.drtp1 = DRTPLayer(target_dim=self.input_shape, hidden_dim=1000)
+        self.drtp1 = DRTPLayer(target_dim=self.latent_dim, hidden_dim=1024)
 
-        # Second layer: 1000 units
-        self.layer2 = nn.Linear(1000, 1000)
+        # Second layer: 512 units
+        self.layer2 = nn.Linear(in_features=1024, out_features=512)
         self.activation2 = params.activation_fn()  # Usually Tanh
-        self.drtp2 = DRTPLayer(target_dim=self.input_shape, hidden_dim=1000)
+        self.drtp2 = DRTPLayer(target_dim=self.latent_dim, hidden_dim=512)
 
         # Output layer (no DRTP - uses standard gradients)
-        self.layer3 = nn.Linear(1000, out_features=self.latent_dim)
+        self.layer3 = nn.Linear(512, out_features=self.latent_dim)
         self.output_activation = nn.Sigmoid()
 
     def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
@@ -355,14 +356,14 @@ class Conv2D(BaseEncoder):
     spatial features are important.
 
     Architecture:
-        Input → Conv2d(5x5, 32) → GELU → MaxPool(2x2) → Flatten → Linear(1000) → GELU → Linear(latent_dim) → Sigmoid
+        Input → Conv2d(5x5, 32) → GELU → MaxPool(2x2) → Flatten → Linear(512) → GELU → Linear(latent_dim) → Sigmoid
 
     Design choices:
     - 5x5 convolution kernel captures local spatial patterns effectively
     - 32 output channels provide sufficient feature diversity
     - Padding=2 with kernel=5 preserves spatial dimensions before pooling
     - MaxPool with 2x2 stride reduces spatial dimensions by half
-    - Two fully connected layers for final feature processing
+    - Single fully connected layer (512 units) for final feature processing
     - GELU activations for smooth gradients and improved training
 
     The encoder automatically calculates the correct linear layer input size based
@@ -401,12 +402,12 @@ class Conv2D(BaseEncoder):
         # After maxpool (stride=2): h//2 x w//2
         conv_output_size = 32 * (h // 2) * (w // 2)
 
-        # Linear layer 2: 1000 units
-        self.layer2 = nn.Linear(conv_output_size, 1000, bias=True)
+        # Linear layer 2: 512 units
+        self.layer2 = nn.Linear(conv_output_size, 512, bias=True)
         self.activation2 = params.activation_fn()  # Usually GELU
 
         # Linear layer 3 (output): latent_dim units
-        self.layer3 = nn.Linear(1000, self.latent_dim, bias=True)
+        self.layer3 = nn.Linear(in_features=512, out_features=self.latent_dim, bias=True)
         self.output_activation = nn.Sigmoid()
 
     def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
@@ -448,7 +449,7 @@ class DRTPConv2D(BaseEncoder):
     constraints are important.
 
     Architecture:
-        Input → Conv2d(5x5, 32) → Tanh → DRTP → MaxPool(2x2) → Flatten → Linear(1000) → Tanh → DRTP → Linear(latent_dim) → Sigmoid
+        Input → Conv2d(5x5, 32) → Tanh → DRTP → MaxPool(2x2) → Flatten → Linear(512) → Tanh → DRTP → Linear(latent_dim) → Sigmoid
 
     Key features:
     - Convolutional layer processes spatial patterns while preserving local structure
@@ -504,13 +505,13 @@ class DRTPConv2D(BaseEncoder):
         # After maxpool (stride=2): h//2 x w//2
         conv_output_size = 32 * (h // 2) * (w // 2)
 
-        # Linear layer 2: 1000 units
-        self.layer2 = nn.Linear(conv_output_size, 1000, bias=True)
+        # Linear layer 2: 512 units
+        self.layer2 = nn.Linear(conv_output_size, out_features=512, bias=True)
         self.activation2 = params.activation_fn()  # Usually Tanh
-        self.drtp2 = DRTPLayer(target_dim=self.latent_dim, hidden_dim=[1000])
+        self.drtp2 = DRTPLayer(target_dim=self.latent_dim, hidden_dim=[512])
 
         # Linear layer 3 (output): latent_dim units
-        self.layer3 = nn.Linear(1000, self.latent_dim, bias=True)
+        self.layer3 = nn.Linear(in_features=512, out_features=self.latent_dim, bias=True)
         self.output_activation = nn.Sigmoid()
         # No DRTP on output layer (uses standard gradients)
 
