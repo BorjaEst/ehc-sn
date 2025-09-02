@@ -107,9 +107,7 @@ class SRTPLayer(nn.Module):
         fb_weights_shape = Size([self.target_dim, self.hidden_dim])
 
         # Convert to a non-trainable parameter to save (saves with the model)
-        self.fb_weights = nn.Parameter(torch.eye(fb_weights_shape[0]))  # Use Identity for first test
-        # Note: For full SRTP, replace with random initialization:
-        # self.fb_weights = nn.Parameter(torch.Tensor....
+        self.fb_weights = nn.Parameter(torch.Tensor(fb_weights_shape))
         self.reset_weights()  # Initis weights and requires_grad=False
 
     # -----------------------------------------------------------------------------------
@@ -147,12 +145,7 @@ class SRTPLayer(nn.Module):
         This can be useful for experimentation or resetting the SRTP behavior.
         """
         # Reinitialize the projection matrix with a new random matrix
-        # torch.nn.init.kaiming_uniform_(self.fb_weights)
-        # self.fb_weights.requires_grad = False  # Ensure it's non-trainable
-
-        # For identity matrix (current simplification), no reinitialization needed
-        # For full random SRTP, uncomment the following:
-        # torch.nn.init.normal_(self.fb_weights, mean=0, std=0.1)
+        torch.nn.init.kaiming_uniform_(self.fb_weights)
         self.fb_weights.requires_grad = False  # Ensure it's non-trainable
 
 
