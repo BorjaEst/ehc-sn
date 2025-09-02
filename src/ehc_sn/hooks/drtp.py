@@ -29,11 +29,11 @@ class DRTPFunction(autograd.Function):
         Instead of using grad_output, we use fb_weights^T · target as the gradient signal.
         """
         (fb_weights,) = ctx.saved_tensors
-        nbatch = grad_output.shape[0]
+        batch_size = grad_output.shape[0]
 
         # DRTP: delta = fb_weights^T · target (not grad_output)
         # target shape: (batch, target_dim) @ fb_weights shape: (target_dim, hidden_dim),
-        grad_est = torch.matmul(ctx.target.view(nbatch, -1), fb_weights)
+        grad_est = torch.matmul(ctx.target.view(batch_size, -1), fb_weights)
 
         # Return gradients for input, fb_weights, target (None for non-learnable parameters)
         return grad_est.view(grad_output.shape), None, None
