@@ -19,7 +19,7 @@ class SRTPFunction(autograd.Function):
         """
         Forward pass: returns the input unchanged to maintain computational graph.
         """
-        ctx.save_for_backward(fb_weights)
+        ctx.save_for_backward(inputs, fb_weights)  # As wraps, inputs are the activations
         ctx.target = target  # Save target signal for backward
         return inputs
 
@@ -28,13 +28,13 @@ class SRTPFunction(autograd.Function):
     def backward(ctx, grad_output: Tensor, *gradients: Any) -> Tuple[Tensor, None, None]:
         """
         Backward pass: propagate the error using the fixed random matrix fb_weights.
-        Uses the local error signal (target - grad_output) projected through fb_weights.
+        Uses the local error signal (target - activations) projected through fb_weights.
         """
-        (fb_weights,) = ctx.saved_tensors
+        activations, fb_weights = ctx.saved_tensors
         batch_size = grad_output.shape[0]
 
         # Calculate local error signal (target - current_output)
-        error_signal = ctx.target - grad_output
+        error_signal = ctx.target - activations  # Shape: (batch_size, target_dim)
 
         # Project error through random feedback weights
         # error_signal: (batch_size, target_dim)
