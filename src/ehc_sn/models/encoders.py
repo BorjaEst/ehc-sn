@@ -49,7 +49,7 @@ import torch
 from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
-from ehc_sn.hooks.dfa import DFALayer
+from ehc_sn.hooks.dfa import DFALayer, clear_dfa_error, register_dfa_hook
 from ehc_sn.hooks.drtp import DRTPLayer
 
 
@@ -367,7 +367,7 @@ class DFALinear(BaseEncoder):
     - Applies DFA layers after hidden layers but not output layer
     - Uses Sigmoid output activation for bounded outputs
     - Error signal from output layer is propagated directly to hidden layers via random weights
-    - Forward pass accepts optional grad_output parameter for DFA computation
+    - Automatically registers DFA hooks during forward pass
 
     The DFA mechanism:
     - Uses random feedback weights to project output errors to hidden layers
@@ -386,8 +386,7 @@ class DFALinear(BaseEncoder):
         ... )
         >>> encoder = DFALinear(params)
         >>> input_batch = torch.randn(4, 1, 32, 16)
-        >>> latent = encoder(input_batch)  # shape: (4, 128), grad_output=None is default
-        >>> # During training: latent = encoder(input_batch, grad_output_batch)
+        >>> latent = encoder(input_batch)  # shape: (4, 128)
 
     References:
         Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
@@ -439,6 +438,11 @@ class DFALinear(BaseEncoder):
         # Output layer (no DFA - uses standard gradients)
         output = self.layer3(h2)
         output = self.output_activation(output)
+
+        # Register DFA hook on the current output every forward (per batch)
+        if output.requires_grad:
+            clear_dfa_error()
+            register_dfa_hook(output)
 
         return output
 
@@ -748,6 +752,11 @@ class DFAConv2D(BaseEncoder):
         # Output layer (standard backpropagation)
         output = self.layer3(h2)
         output = self.output_activation(output)
+
+        # Register DFA hook on the current output every forward (per batch)
+        if output.requires_grad:
+            clear_dfa_error()
+            register_dfa_hook(output)
 
         return output
 

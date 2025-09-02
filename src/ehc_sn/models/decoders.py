@@ -49,7 +49,7 @@ import torch
 from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
-from ehc_sn.hooks.dfa import DFALayer
+from ehc_sn.hooks.dfa import DFALayer, clear_dfa_error, register_dfa_hook
 from ehc_sn.hooks.drtp import DRTPLayer
 
 
@@ -428,6 +428,11 @@ class DFALinear(BaseDecoder):
         output = self.layer3(h2)
         output = self.output_activation(output)
 
+        # Register DFA hook on the current output every forward (per batch)
+        if output.requires_grad:
+            clear_dfa_error()
+            register_dfa_hook(output)
+
         # Reshape to original spatial dimensions
         return output.reshape(output.shape[0], *self.output_shape)
 
@@ -737,6 +742,11 @@ class DFAConv2D(BaseDecoder):
         # Transpose convolution to final output size (no DFA)
         output = self.conv3(h2)
         output = self.output_activation(output)
+
+        # Register DFA hook on the current output every forward (per batch)
+        if output.requires_grad:
+            clear_dfa_error()
+            register_dfa_hook(output)
 
         return output
 

@@ -1,35 +1,33 @@
 from math import prod
-from threading import local
-from typing import Any, List, Tuple
+from typing import List, Tuple
 
 import torch
 from torch import Size, Tensor, autograd, nn
 
 # -------------------------------------------------------------------------------------------
-# Global storage for DFA error signals (thread-local and device-aware)
+# Global storage for DFA error signals
 # -------------------------------------------------------------------------------------------
 
-_dfa_storage = local()
+_dfa_error: Tensor | None = None
 
 
-def get_dfa_error(device: torch.device) -> Tensor | None:
-    """Get the current DFA error signal for the specified device."""
-    if not hasattr(_dfa_storage, "errors"):
-        return None
-    return _dfa_storage.errors.get(str(device))
+def get_dfa_error() -> Tensor:
+    """Get the current DFA error signal."""
+    if _dfa_error is None:
+        raise RuntimeError("No DFA error signal available. DFA hook not registered properly.")
+    return _dfa_error
 
 
 def set_dfa_error(error: Tensor) -> None:
-    """Set the DFA error signal for the device of the given tensor."""
-    if not hasattr(_dfa_storage, "errors"):
-        _dfa_storage.errors = {}
-    _dfa_storage.errors[str(error.device)] = error
+    """Set the DFA error signal."""
+    global _dfa_error
+    _dfa_error = error
 
 
-def clear_dfa_error(device: torch.device) -> None:
-    """Clear the DFA error signal for the specified device."""
-    if hasattr(_dfa_storage, "errors") and str(device) in _dfa_storage.errors:
-        del _dfa_storage.errors[str(device)]
+def clear_dfa_error() -> None:
+    """Clear the DFA error signal."""
+    global _dfa_error
+    _dfa_error = None
 
 
 def register_dfa_hook(output_tensor: Tensor) -> None:
@@ -93,29 +91,13 @@ class DFAFunction(autograd.Function):
             Tuple of gradients for (inputs, fb_weights)
         """
         (fb_weights,) = ctx.saved_tensors
-
-        # Get the global error signal captured from network output
-        global_error = get_dfa_error(grad_output.device)
-
-        if global_error is None:
-            # Fallback: if no global error available, return zeros to prevent gradient flow
-            # This maintains the computational graph while signaling no update
-            return torch.zeros_like(grad_output), None
-
-        # Ensure global_error and grad_output have compatible batch dimensions
         batch_size = grad_output.shape[0]
-        if global_error.shape[0] != batch_size:
-            # Handle batch size mismatch (e.g., during validation with different batch sizes)
-            if global_error.shape[0] == 1:
-                global_error = global_error.expand(batch_size, -1)
-            else:
-                # If we can't match batch sizes, fall back to zeros
-                return torch.zeros_like(grad_output), None
+
+        # Get the global error signal - will raise if not available
+        global_error = get_dfa_error()
 
         # DFA gradient computation: fb_weights^T @ global_error
         # global_error shape: (batch_size, output_dim)
-        # fb_weights shape: (output_dim, hidden_dim)
-        # Result shape: (batch_size, hidden_dim)
         dfa_gradient = torch.matmul(global_error.view(batch_size, -1), fb_weights)
 
         # Reshape to match the input shape
@@ -299,8 +281,8 @@ if __name__ == "__main__":
     print(f"  Layer3 grad shape: {layer3.weight.grad.shape if layer3.weight.grad is not None else None}")
 
     # Check if global error was captured
-    global_error = get_dfa_error(output.device)
-    if global_error is not None:
+    try:
+        global_error = get_dfa_error()
         print(f"\nGlobal error captured successfully:")
         print(f"  Global error shape: {global_error.shape}")
 
@@ -309,10 +291,10 @@ if __name__ == "__main__":
         expected_grad2 = torch.matmul(global_error, dfa2.fb_weights)
         print(f"  Expected DFA1 gradient shape: {expected_grad1.shape}")
         print(f"  Expected DFA2 gradient shape: {expected_grad2.shape}")
-    else:
-        print(f"\nWarning: Global error was not captured!")
+    except RuntimeError as e:
+        print(f"\nWarning: {e}")
 
     # Clean up
-    clear_dfa_error(output.device)
+    clear_dfa_error()
 
     print(f"\nDFA Layer example completed successfully!")
