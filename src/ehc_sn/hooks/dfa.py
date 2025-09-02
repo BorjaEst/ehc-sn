@@ -98,12 +98,9 @@ class DFAFunction(autograd.Function):
 
         # DFA gradient computation: fb_weights^T @ global_error
         # global_error shape: (batch_size, output_dim)
-        dfa_gradient = torch.matmul(global_error.view(batch_size, -1), fb_weights)
+        grad_est = torch.matmul(global_error.view(batch_size, -1), fb_weights)
 
-        # Reshape to match the input shape
-        dfa_gradient = dfa_gradient.view(grad_output.shape)
-
-        return dfa_gradient, None
+        return grad_est.view(grad_output.shape), None
 
 
 # -------------------------------------------------------------------------------------------
