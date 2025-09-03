@@ -28,18 +28,17 @@ class SRTPFunction(autograd.Function):
     def backward(ctx, grad_output: Tensor, *gradients: Any) -> Tuple[Tensor, None, None]:
         """
         Backward pass: propagate the error using the fixed random matrix fb_weights.
-        Uses the local error signal (target - activations) projected through fb_weights.
+        Uses the local error signal (activations-target) projected through fb_weights.
         """
         activations, fb_weights = ctx.saved_tensors
         batch_size = grad_output.shape[0]
 
-        # Calculate local error signal (target - current_output)
-        error_signal = ctx.target - activations  # Shape: (batch_size, target_dim)
-
         # Project error through random feedback weights
-        # error_signal: (batch_size, target_dim)
+        # target: (batch_size, target_dim)
         # fb_weights: (target_dim, hidden_dim)
-        grad_est = torch.matmul(error_signal, fb_weights)
+        # adapted_targets = torch.matmul(target, fb_weights)
+        # grad_est = activations - adapted_targets
+        grad_est = activations - ctx.target
 
         # Return gradients for input, fb_weights, target (None for non-learnable parameters)
         return grad_est, None, None

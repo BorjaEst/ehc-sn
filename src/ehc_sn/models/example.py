@@ -247,7 +247,7 @@ class Autoencoder(pl.LightningModule):
         # Hidden layer
         hd1 = self.decoder.layer2(hd2)  # 1024 units
         hd1 = self.decoder.activation2(hd1)
-        # hd1 = self.srtp1(hd1, target=he1)  # Apply SRTP after activation
+        hd1 = self.srtp1(hd1, target=he1)  # Apply SRTP after activation
 
         # Bottom layer
         output = self.decoder.layer3(hd1)  # Reconstructed output
