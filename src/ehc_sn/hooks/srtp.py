@@ -36,9 +36,8 @@ class SRTPFunction(autograd.Function):
         # Project error through random feedback weights
         # target: (batch_size, target_dim)
         # fb_weights: (target_dim, hidden_dim)
-        # adapted_targets = torch.matmul(target, fb_weights)
-        # grad_est = activations - adapted_targets
-        grad_est = activations - ctx.target
+        adapted_targets = torch.matmul(ctx.target, fb_weights)
+        grad_est = activations - adapted_targets
 
         # Return gradients for input, fb_weights, target (None for non-learnable parameters)
         return grad_est, None, None
