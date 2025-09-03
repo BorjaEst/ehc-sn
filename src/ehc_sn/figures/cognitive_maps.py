@@ -116,15 +116,15 @@ class CompareCognitiveMaps(CognitiveMapFigure):
 
     def _plot_single_map(self, row, col, idx, cognitive_map, obstacle_map):
         # Plot the obstacle map
-        obstacle_plot_params = data.grid_maps.PlotMapParams()
+        obstacle_plot_params = data.obstacle_maps.PlotMapParams()
         obs_ax = self.axes[row, col]
-        data.grid_maps.plot(obs_ax, obstacle_map, obstacle_plot_params)
+        data.obstacle_maps.plot(obs_ax, obstacle_map, obstacle_plot_params)
         obs_ax.set_title(f"Obstacles {idx + 1}")
 
         # Plot the cognitive map
         cognitive_plot_params = data.cognitive_maps.PlotMapParams()
         cog_ax = self.axes[row, col + 1]
-        data.cognitive_maps.plot(cog_ax, cognitive_map, cognitive_plot_params)
+        data.cognitive_maps.plot([cog_ax], cognitive_map, cognitive_plot_params)
         cog_ax.set_title(f"Cognitive Map {idx + 1}")
 
     def _hide_unused_axes(self, num_maps: int, total_rows: int, total_cols: int) -> None:

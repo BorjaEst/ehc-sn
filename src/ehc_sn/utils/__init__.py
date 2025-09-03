@@ -1,6 +1,9 @@
 from collections import defaultdict
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
+import tomli as tomllib
+import torch
 from torch import nn
 
 
@@ -78,3 +81,17 @@ def determine_batch_limit(limit_batches, dataloader_length):
         return int(limit_batches * dataloader_length)
     else:
         raise ValueError("limit_batches must be an int, float, or inf")
+
+
+def load_settings(config_path: str) -> Dict[str, Any]:
+    """
+    Load settings from TOML file with optional overrides.
+
+    Args:
+        config_path: Path to TOML configuration file
+
+    Returns:
+        Dictionary with experiment settings
+    """
+    with open(config_path, "rb") as f:
+        return tomllib.load(f)

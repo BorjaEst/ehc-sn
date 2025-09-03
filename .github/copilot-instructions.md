@@ -25,10 +25,8 @@ This library will:
   - `core/` - Implementation of core library components (neurons, synapses, etc.)
   - `data/` - Data module for generating and managing Lightning data modules (cognitive maps, grid maps, etc.)
   - `figures/` - Module containing figure classes to visualize experiment results
-  - `hooks/` - Custom hooks for Fabric trainers (classes inherit from lightning.pytorch.callbacks.Callback)
   - `losses/` - Custom loss modules for the library (e.g., reconstruction loss, error loss)
   - `models/` - Implementation of library models (CANModel, Autoencoder, etc.)
-  - `trainers/` - Custom trainers for the library (e.g., Fabric trainers for Backpropagation and DRTP)
   - `utils/` - Utility functions for the library
   - `parameters.py` - Global parameters for synapses types, neuron types, etc.
   - `settings.py` - Global settings and configurations
@@ -82,13 +80,6 @@ This library will:
 
 - Plot generators should accept axes as input and generate plots on those axes
 
-### Hooks Module
-
-- This module should contain custom hooks for Fabric trainers
-- Classes should inherit from `lightning.pytorch.callbacks.Callback`
-- Hooks should be designed to integrate with Fabric's training loop and provide custom behavior during training, validation, and testing
-- Hooks should be reusable and configurable to allow for different behaviors in different training scenarios
-
 ### Losses Module
 
 - This module should contain submodules for different types of scenarios (e.g., autoencoders, reconstruction tasks)
@@ -103,52 +94,6 @@ This library will:
 - Models should be designed to support both training and inference modes
 - Models should be modular and extensible to allow for future enhancements and variations
 - Submodule autoencoder serves as a baseline for evaluation, implementing a general sparse autoencoder
-
-### Trainers Module
-
-- This module should contain submodules for different training scenarios (e.g., Backpropagation, Direct Random Target Projection)
-- Each submodule should implement a specific training strategy
-- Trainers should be designed to work with Fabric and integrate with the library's models and losses
-- Trainers call for appropriate callback hooks to ensure proper integration with Fabric's training loop
-
-When implementing custom trainers with Fabric, ensure each method calls appropriate callback hooks:
-
-| Method                             | Starting Hook               | Ending Hook               |
-| ---------------------------------- | --------------------------- | ------------------------- |
-| `fit(self, ...)`                   | `on_fit_start`              | `on_fit_end`              |
-| `sanity_check(self, ...)`          | `on_sanity_check_start`     | `on_sanity_check_end`     |
-| `train_batch(self, ...)`           | `on_train_batch_start`      | `on_train_batch_end`      |
-| `train_epoch(self, ...)`           | `on_train_epoch_start`      | `on_train_epoch_end`      |
-| `validation_epoch(self, ...)`      | `on_validation_epoch_start` | `on_validation_epoch_end` |
-| `test_epoch(self, ...)`            | `on_test_epoch_start`       | `on_test_epoch_end`       |
-| `predict_epoch(self, ...)`         | `on_predict_epoch_start`    | `on_predict_epoch_end`    |
-| `validation_batch(self, ...)`      | `on_validation_batch_start` | `on_validation_batch_end` |
-| `test_batch(self, ...)`            | `on_test_batch_start`       | `on_test_batch_end`       |
-| `predict_batch(self, ...)`         | `on_predict_batch_start`    | `on_predict_batch_end`    |
-| `train(self, ...)`                 | `on_train_start`            | `on_train_end`            |
-| `validation(self, ...)`            | `on_validation_start`       | `on_validation_end`       |
-| `test(self, ...)`                  | `on_test_start`             | `on_test_end`             |
-| `predict(self, ...)`               | `on_predict_start`          | `on_predict_end`          |
-| `backward(self, ...)`              | `on_before_backward`        | `on_after_backward`       |
-| `save_checkpoint(self, ...)`       | `on_save_checkpoint`        | -                         |
-| `load_checkpoint(self, ...)`       | `on_load_checkpoint`        | -                         |
-| `optimizer_step(self, ...)`        | `on_before_optimizer_step`  | -                         |
-| `zero_grad(self, ...)`             | `on_before_zero_grad`       | -                         |
-| `catch_exception(self, exception)` | `on_exception`              | -                         |
-
-example implementation of a custom trainer's `fit` method with hooks:
-
-```python
-def fit(self, model, *args, **kwargs):
-    # Call the starting hook
-    self.fabric.call("on_fit_start", self, model)
-
-    # Method implementation
-    # ...
-
-    # Call the ending hook
-    self.fabric.call("on_fit_end", self, model)
-```
 
 ### Utils Module
 
@@ -184,8 +129,7 @@ def fit(self, model, *args, **kwargs):
 ## Modeling Framework
 
 - PyTorch with custom neuron models for the entorhinal-hippocampal circuit
-- PyTorch Lightning for data loading and callbacks
-- Fabric for distributed training and custom trainers
+- PyTorch Lightning for training, data loading and callbacks
 - Norse for spiking neuron models and event-based processing
 - Optuna for hyperparameter optimization
 - TorchRL for reinforcement learning components, if needed
@@ -282,10 +226,20 @@ The models are structured as autoencoders, where:
 
 - Use type hints for function signatures
 - Use Pydantic v2 for parameter validation and management
-- Use comments with '-' till column 90 to separate sections of the code visually
 - Import in `__init__.py` from submodules to define the package/subpackage API
 - Target Python 3.10 and newer (3.10, 3.11, 3.12)
 - Prioritize vectorized operations over loops when applicable for performance
+
+### Comments to split code sections
+
+- Use comments with '-' to visually separate sections of the code
+- Every function, class or method should have a section according to indentation
+- Only 2 levels of separators are defined, one for the main section and one for subsections
+
+```python
+# -------------------------------------------------------------------------------------------
+    # -----------------------------------------------------------------------------------
+```
 
 ## Documentation Guidelines
 
@@ -354,3 +308,7 @@ Each experiment should report these metrics in a standardized format to allow fo
 - Suggest code only relevant to the current task
 - Avoid redundancies by referencing unchanged code with comments
 - Update instructions and README as the library evolves
+- Prevent unnecessary complexity by keeping the codebase clean and maintainable
+- Prevent long functions by breaking them into smaller, reusable components
+- Prevent deep conditions by breaking them into smaller, manageable functions
+- Prevent deep loops by using vectorized operations and comprehensions

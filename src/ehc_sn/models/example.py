@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
+from ehc_sn.hooks import srtp
 from ehc_sn.models.decoders import BaseDecoder, DecoderParams
 from ehc_sn.models.encoders import BaseEncoder, EncoderParams
 
@@ -162,6 +163,17 @@ class Autoencoder(pl.LightningModule):
         # Save hyperparameters for checkpointing
         self.save_hyperparameters(ignore=["encoder", "decoder"])
 
+        ## ONLY WORKS WITH Lienar ENCODER AND DECODER
+        # SRTP layers
+        self.srtp1 = srtp.SRTPLayer(
+            target_dim=self.encoder.layer1.out_features,
+            hidden_dim=self.decoder.layer2.out_features,
+        )
+        self.srtp2 = srtp.SRTPLayer(
+            target_dim=self.encoder.layer2.out_features,
+            hidden_dim=self.decoder.layer1.out_features,
+        )
+
     # -----------------------------------------------------------------------------------
     # Optimizer configuration
     # -----------------------------------------------------------------------------------
@@ -209,8 +221,40 @@ class Autoencoder(pl.LightningModule):
             available during the forward pass. The decoder uses the original
             input as target for potential supervised learning scenarios.
         """
-        embedding = self.encoder(x, target=None)  # No sparse target available
-        reconstruction = self.decoder(embedding, target=x)
+
+        # Encoder forward pass
+        # Flatten the input tensor to a single feature vector
+        inputs = x.reshape(x.shape[0], -1)  # Reshape to (batch_size, num_features)
+
+        # Top layer
+        he1 = self.encoder.layer1(inputs)  # 1024 units
+        he1 = self.encoder.activation1(he1)
+
+        # Hidden layer
+        he2 = self.encoder.layer2(he1)  # 512 units
+        he2 = self.encoder.activation2(he2)
+
+        # Bottom layer
+        embedding = self.encoder.layer3(he2)  # Latent representation
+        embedding = self.encoder.output_activation(embedding)
+
+        # Decoder forward pass
+        # Hidden layer
+        hd2 = self.decoder.layer1(embedding)  # 512 units
+        hd2 = self.decoder.activation1(hd2)
+        hd2 = self.srtp2(hd2, target=he2)  # Apply SRTP after activation
+
+        # Hidden layer
+        hd1 = self.decoder.layer2(hd2)  # 1024 units
+        hd1 = self.decoder.activation2(hd1)
+        hd1 = self.srtp1(hd1, target=he1)  # Apply SRTP after activation
+
+        # Bottom layer
+        output = self.decoder.layer3(hd1)  # Reconstructed output
+        output = self.decoder.output_activation(output)
+
+        # Reshape to original spatial dimensions
+        reconstruction = output.reshape(*x.shape)
         return reconstruction, embedding
 
     # -----------------------------------------------------------------------------------
