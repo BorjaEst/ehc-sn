@@ -4,49 +4,7 @@ from typing import List, Tuple
 import torch
 from torch import Size, Tensor, autograd, nn
 
-# -------------------------------------------------------------------------------------------
-# Global storage for DFA error signals
-# -------------------------------------------------------------------------------------------
-
-_dfa_error: Tensor | None = None
-
-
-def get_dfa_error() -> Tensor:
-    """Get the current DFA error signal."""
-    if _dfa_error is None:
-        raise RuntimeError("No DFA error signal available. DFA hook not registered properly.")
-    return _dfa_error
-
-
-def set_dfa_error(error: Tensor) -> None:
-    """Set the DFA error signal."""
-    global _dfa_error
-    _dfa_error = error
-
-
-def clear_dfa_error() -> None:
-    """Clear the DFA error signal."""
-    global _dfa_error
-    _dfa_error = None
-
-
-def register_dfa_hook(output_tensor: Tensor) -> None:
-    """
-    Register a hook on the output tensor to capture gradients for DFA.
-
-    This hook captures dL/dz_out during backpropagation and stores it
-    for use by DFA layers throughout the network.
-
-    Args:
-        output_tensor: The final output tensor of the network (logits/predictions)
-    """
-
-    def capture_grad_hook(grad):
-        if grad is not None:
-            set_dfa_error(grad.detach())
-        return grad
-
-    output_tensor.register_hook(capture_grad_hook)
+from ehc_sn.hooks.registry import clear_dfa_error, get_dfa_error, register_dfa_hook
 
 
 # -------------------------------------------------------------------------------------------

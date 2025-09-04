@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 import lightning.pytorch as pl
 import torch
@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
+from ehc_sn.hooks import registry
 from ehc_sn.models.decoders import BaseDecoder, DecoderParams
 from ehc_sn.models.encoders import BaseEncoder, EncoderParams
 
@@ -211,6 +212,8 @@ class Autoencoder(pl.LightningModule):
         """
         embedding = self.encoder(x, target=None)  # No sparse target available
         reconstruction = self.decoder(embedding, target=x)
+
+        # Return reconstruction and embedding
         return reconstruction, embedding
 
     # -----------------------------------------------------------------------------------
@@ -255,6 +258,11 @@ class Autoencoder(pl.LightningModule):
     # Training step
     # -----------------------------------------------------------------------------------
 
+    def on_train_batch_start(self, batch, batch_idx: int) -> None:
+        """Initialize registry and hooks before training batch starts."""
+        # Clear registry at the start of each batch
+        registry.clear("batch")
+
     def training_step(self, batch: Tensor, batch_idx: int) -> Tensor:
         """Training step for the autoencoder.
 
@@ -279,11 +287,13 @@ class Autoencoder(pl.LightningModule):
 
         Note:
             Metrics are logged both per-step and per-epoch for comprehensive
-            monitoring during training.
+            monitoring during training. Registry initialization is handled by
+            on_train_batch_start() and cleanup by on_train_batch_end().
+            Hook registration is handled by individual encoder/decoder models as needed.
         """
-
         x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
         reconstruction, embedding = self(x)
+
         loss = self.compute_loss(x, reconstruction, embedding)  # Calculate losses
 
         # Log metrics
@@ -296,6 +306,21 @@ class Autoencoder(pl.LightningModule):
         self.log("train/sparsity_rate", sparsity_rate, on_step=True, on_epoch=True)
 
         return loss["total"]
+
+    # -----------------------------------------------------------------------------------
+    # Training batch lifecycle hooks
+    # -----------------------------------------------------------------------------------
+
+    def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
+        """Clean up registry after training batch completion.
+
+        This method complements on_train_batch_start() to provide complete
+        lifecycle management for the registry during training.
+        Hook management is handled by individual encoder/decoder models.
+        """
+        # Registry cleanup is handled by on_train_batch_start of next batch
+        # Hook cleanup is handled by individual models that register them
+        pass
 
     # -----------------------------------------------------------------------------------
     # Validation step
