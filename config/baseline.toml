@@ -24,10 +24,10 @@ learning_rate = 1e-3
 
 # split training loss weights
 gramian_center = true
-gramian_weight = 1.0
-rate_target    = 0.05
+gramian_weight = 0.2
+rate_target    = 0.15
 min_active     = 8
-homeo_weight   = 1.0
+homeo_weight   = 0.2
 
 # logging
 log_dir                   = "logs"
