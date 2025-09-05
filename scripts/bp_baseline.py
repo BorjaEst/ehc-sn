@@ -60,8 +60,15 @@ class ExperimentSettings(BaseModel):
     # Training Settings
     max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
     learning_rate: float = Field(default=1e-3, ge=1e-6, le=1e-1, description="Learning rate for optimizer")
-    sparsity_target: float = Field(default=0.00, ge=0.0, le=1.0, description="Target sparsity level for latent space")
-    sparsity_weight: float = Field(default=0.01, ge=0.0, le=1.0, description="Sparsity regularization weight")
+
+    # Split Training Loss Settings
+    gramian_center: bool = Field(default=True, description="Center activations before Gramian computation")
+    gramian_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for Gramian orthogonality loss")
+    rate_target: float = Field(
+        default=0.05, ge=0.0, le=1.0, description="Target mean firing rate for homeostatic regulation"
+    )
+    min_active: int = Field(default=8, ge=1, le=64, description="Minimum number of active neurons per sample")
+    homeo_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for homeostatic activity loss")
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
@@ -140,8 +147,11 @@ class ExperimentSettings(BaseModel):
         return AutoencoderParams(
             encoder=encoder,
             decoder=decoder,
-            sparsity_target=self.sparsity_target,
-            sparsity_weight=self.sparsity_weight,
+            gramian_center=self.gramian_center,
+            gramian_weight=self.gramian_weight,
+            rate_target=self.rate_target,
+            min_active=self.min_active,
+            homeo_weight=self.homeo_weight,
             optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
 
@@ -223,7 +233,11 @@ class ExperimentPipeline:
         print(f"Latent Dim: {self.settings.latent_dim}")
         print(f"Max Epochs: {self.settings.max_epochs}")
         print(f"Learning Rate: {self.settings.learning_rate:.1e}")
-        print(f"Sparsity Weight: {self.settings.sparsity_weight:.3f}")
+        print("\n🧠 Split Training Loss Weights:")
+        print(f"  • Gramian Weight: {self.settings.gramian_weight:.3f}")
+        print(f"  • Homeostatic Weight: {self.settings.homeo_weight:.3f}")
+        print(f"  • Rate Target: {self.settings.rate_target:.3f}")
+        print(f"  • Min Active: {self.settings.min_active}")
         print(f"Log Directory: {self.settings.log_dir}")
         print(f"Experiment: {self.settings.experiment_name}")
 
@@ -324,6 +338,8 @@ def run_experiment(
     batch_size: Optional[int] = None,
     latent_dim: Optional[int] = None,
     learning_rate: Optional[float] = None,
+    gramian_weight: Optional[float] = None,
+    homeo_weight: Optional[float] = None,
 ) -> None:
     """
     Run the complete backpropagation baseline experiment.
@@ -335,6 +351,8 @@ def run_experiment(
         batch_size: Training batch size (overrides config)
         latent_dim: Latent space dimension (overrides config)
         learning_rate: Learning rate for optimizer (overrides config)
+        gramian_weight: Weight for Gramian orthogonality loss (overrides config)
+        homeo_weight: Weight for homeostatic activity loss (overrides config)
     """
     print("=" * 80)
     print("🧠 ENTORHINAL-HIPPOCAMPAL CIRCUIT: BACKPROPAGATION BASELINE")
@@ -352,6 +370,10 @@ def run_experiment(
         overrides["latent_dim"] = latent_dim
     if learning_rate is not None:
         overrides["learning_rate"] = learning_rate
+    if gramian_weight is not None:
+        overrides["gramian_weight"] = gramian_weight
+    if homeo_weight is not None:
+        overrides["homeo_weight"] = homeo_weight
 
     # Load settings
     print(f"📁 Loading configuration from: {config}")
@@ -386,6 +408,9 @@ def parse_arguments():
     parser.add_argument("--batch-size", "-b", type=int, help="Training batch size")
     parser.add_argument("--latent-dim", "-l", type=int, help="Latent space dimension")
     parser.add_argument("--learning-rate", "-lr", type=float, help="Learning rate for optimizer")
+    parser.add_argument("--gramian-weight", "-gw", type=float, help="Weight for Gramian orthogonality loss")
+    parser.add_argument("--homeo-weight", "-hw", type=float, help="Weight for homeostatic activity loss")
+    parser.add_argument("--l1-weight", "-l1w", type=float, help="Weight for L1 sparsity loss")
 
     return parser.parse_args()
 
@@ -404,6 +429,8 @@ if __name__ == "__main__":
             batch_size=args.batch_size,
             latent_dim=args.latent_dim,
             learning_rate=args.learning_rate,
+            gramian_weight=args.gramian_weight,
+            homeo_weight=args.homeo_weight,
         )
     except Exception as e:
         print(f"\n❌ EXPERIMENT FAILED: {e}")

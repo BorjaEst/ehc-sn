@@ -9,6 +9,7 @@ from torch.optim import Optimizer
 from ehc_sn.hooks import registry
 from ehc_sn.models.decoders import BaseDecoder, DecoderParams
 from ehc_sn.models.encoders import BaseEncoder, EncoderParams
+from ehc_sn.modules.loss import GramianOrthogonalityLoss, HomeostaticActivityLoss, TargetL1SparsityLoss
 
 
 class AutoencoderParams(BaseModel):
@@ -19,17 +20,32 @@ class AutoencoderParams(BaseModel):
     It ensures that the encoder and decoder components are properly configured
     and compatible with each other.
 
+    The parameters are organized into several groups:
+    - Core components: encoder, decoder, optimizer initialization
+    - Legacy sparsity: backward compatibility parameters
+    - Gramian orthogonality: decorrelation loss parameters
+    - Homeostatic activity: firing rate regulation parameters
+    - L1 sparsity: simple sparsity regularization parameters
+
     Attributes:
         encoder: The encoder component that transforms input into latent representations.
             Must be an instance of BaseEncoder with appropriate input dimensions.
         decoder: The decoder component that reconstructs outputs from latent representations.
             Must be an instance of BaseDecoder with output dimensions matching encoder input.
-        sparsity_weight: Weight coefficient for the sparsity regularization term.
-            Higher values encourage sparser latent representations, mimicking the sparse
-            firing patterns observed in hippocampal neurons. Typical range: 0.01-1.0.
-        sparsity_target: Target average activation level for latent units.
-            Lower values encourage sparser representations. Typical values: 1e-4 to 1e-2.
-        optimizer_init: Callable function to initialize the optimizer.
+        gramian_center: Whether to center activations before computing Gramian matrix.
+            Centering removes mean activation, improving correlation stability. Default: True.
+        gramian_weight: Weight coefficient for Gramian orthogonality loss term.
+            Controls strength of decorrelation constraint. Default: 1.0.
+        rate_target: Target mean firing rate for homeostatic regulation.
+            Should be between 0.0 and 1.0, typically 0.05-0.20. Default: 0.10.
+        min_active: Minimum number of neurons that should be active per sample.
+            Ensures robust distributed representations. Default: 8.
+        homeo_weight: Weight coefficient for homeostatic activity loss term.
+            Controls strength of firing rate regulation. Default: 1.0.
+        detach_gradients: Whether to detach gradients between decoder and encoder.
+            When True, prevents gradients from flowing from decoder to encoder during training.
+            This allows for split training behavior while using manual optimization. Default: True.
+        optimizer_init: Callable function to initialize optimizers.
             Should be a partial function or lambda that takes model parameters as input
             and returns an optimizer instance (e.g., functools.partial(torch.optim.Adam, lr=1e-3)).
 
@@ -38,18 +54,33 @@ class AutoencoderParams(BaseModel):
         >>> params = AutoencoderParams(
         ...     encoder=Linear(EncoderParams(...)),
         ...     decoder=Linear(DecoderParams(...)),
-        ...     sparsity_weight=0.1,
-        ...     sparsity_target=1e-3,
+        ...     gramian_weight=1.0,
+        ...     homeo_weight=1.0,
+        ...     rate_target=0.10,
+        ...     detach_gradients=True,  # Use gradient detachment for split training
         ...     optimizer_init=partial(torch.optim.Adam, lr=1e-3)
         ... )
     """
 
     model_config = {"extra": "forbid", "arbitrary_types_allowed": True}
 
+    # Encoder and decoder components
     encoder: BaseEncoder = Field(..., description="Parameters for the encoder component.")
     decoder: BaseDecoder = Field(..., description="Parameters for the decoder component.")
-    sparsity_weight: float = Field(0.1, description="Weight for the sparsity loss term.")
-    sparsity_target: float = Field(-1e-3, description="Target sparsity level for the embedding.")
+
+    # Gramian orthogonality loss parameters
+    gramian_center: bool = Field(True, description="Center activations before normalization.")
+    gramian_weight: float = Field(1.0, description="Weight for Gramian orthogonality term.")
+
+    # Homeostatic activity loss parameters
+    rate_target: float = Field(0.10, description="Target mean firing rate for codes.")
+    min_active: int = Field(8, description="Min active neurons per-sample.")
+    homeo_weight: float = Field(1.0, description="Weight for homeostatic term.")
+
+    # Gradient flow control
+    detach_gradients: bool = Field(True, description="Whether to detach gradients between decoder and encoder.")
+
+    # Optimizer initialization
     optimizer_init: Callable = Field(..., description="Callable to initialize the optimizer.")
 
 
@@ -85,12 +116,12 @@ def validate_dimensions(params: AutoencoderParams) -> None:
 
 
 class Autoencoder(pl.LightningModule):
-    """Neural network autoencoder for the entorhinal-hippocampal circuit.
+    """Neural network autoencoder for the entorhinal-hippocampal circuit with configurable gradient flow.
 
     This autoencoder combines an encoder that transforms spatial input into a compact
     embedding and a decoder that reconstructs the original input from the embedding.
-    It supports sparse activations to model the sparse firing patterns observed in
-    the hippocampus, which is critical for pattern separation and completion.
+    It uses manual optimization with configurable gradient flow between encoder and decoder,
+    allowing for both standard training and split training strategies.
 
     The autoencoder serves as a computational model for how the entorhinal-hippocampal
     circuit might encode, store, and retrieve spatial information. It incorporates
@@ -98,19 +129,20 @@ class Autoencoder(pl.LightningModule):
     efficient representations similar to those found in hippocampal place cells.
 
     Key Features:
+        - Manual optimization with configurable gradient flow between components
         - Sparse latent representations mimicking hippocampal neuron firing patterns
         - Configurable encoder/decoder architectures for different input types
-        - Integrated sparsity regularization with adjustable target levels
+        - Multiple sparsity regularization methods (Gramian, homeostatic)
         - Lightning-based training with comprehensive logging and metrics
         - Support for both training and inference modes with proper checkpointing
 
     Architecture:
         Input → Encoder → Sparse Latent Representation → Decoder → Reconstruction
 
-    Loss Function:
-        Total Loss = Reconstruction Loss + λ × Sparsity Loss
-        where λ (sparsity_weight) controls the trade-off between reconstruction
-        accuracy and representation sparsity.
+    Training Strategy:
+        When detach_gradients=True: Split training with encoder focused on sparsity losses
+        and decoder focused on reconstruction, with no gradient flow between them.
+        When detach_gradients=False: Standard autoencoder with full gradient flow.
 
     Args:
         params: AutoencoderParams instance containing all configuration parameters.
@@ -119,15 +151,15 @@ class Autoencoder(pl.LightningModule):
     Attributes:
         encoder: The encoder neural network component.
         decoder: The decoder neural network component.
-        optimizer_init: Function to initialize the optimizer.
-        reconstruction_loss: Binary cross-entropy loss for reconstruction.
-        sparsity_loss: L1 loss for enforcing sparsity in latent representations.
-        sparsity_target: Target activation level for sparsity regularization.
-        sparsity_weight: Weight coefficient for sparsity loss term.
+        detach_gradients: Whether to detach gradients between decoder and encoder.
+        optimizer_init: Function to initialize optimizers for both components.
+        gramian_loss: Gramian orthogonality loss for decorrelated representations.
+        homeo_loss: Homeostatic activity loss for firing rate regulation.
+        reconstruction_loss: BCE loss for reconstruction accuracy.
 
     Example:
-        >>> # Create and train an autoencoder
-        >>> params = AutoencoderParams(...)
+        >>> # Create and train an autoencoder with configurable gradient flow
+        >>> params = AutoencoderParams(..., detach_gradients=True)
         >>> model = Autoencoder(params)
         >>> trainer = pl.Trainer(max_epochs=100)
         >>> trainer.fit(model, dataloader)
@@ -136,29 +168,55 @@ class Autoencoder(pl.LightningModule):
     def __init__(self, params: Optional[AutoencoderParams] = None):
         """Initialize the Autoencoder with given parameters.
 
+        Sets up the complete autoencoder architecture including encoder, decoder,
+        loss functions, and training configuration. The model uses manual optimization
+        with configurable gradient flow between encoder and decoder components.
+
         Args:
             params: AutoencoderParams instance containing model configuration.
-                If None, default parameters will be used (not recommended for
-                production use).
+                Must include compatible encoder/decoder pairs and all required
+                hyperparameters. If None, default parameters will be used (not
+                recommended for production use).
 
         Raises:
-            ValueError: If encoder and decoder dimensions are incompatible.
+            ValueError: If encoder and decoder dimensions are incompatible, as
+                validated by validate_dimensions().
+
+        Sets up:
+            - Model components: encoder, decoder
+            - Loss functions: reconstruction (BCE), Gramian orthogonality, homeostatic
+            - Training configuration: manual optimization with configurable gradient flow
+            - Hyperparameter weights for loss combination
+
+        Note:
+            Manual optimization is enabled to support dual optimizer training.
+            The detach_gradients parameter controls whether gradients flow from
+            decoder to encoder during training.
         """
         validate_dimensions(params)
         super(Autoencoder, self).__init__()
 
+        # Enable manual optimization for dual optimizer support
+        # Required by Lightning when using multiple optimizers in configure_optimizers()
+        self.automatic_optimization = False
+
         # Model components
         self.encoder = params.encoder
         self.decoder = params.decoder
+
+        # Gradient flow control
+        self.detach_gradients = params.detach_gradients
 
         # Training hyperparameters
         self.optimizer_init = params.optimizer_init
 
         # Loss functions
         self.reconstruction_loss = nn.BCELoss(reduction="mean")
-        self.sparsity_loss = nn.L1Loss()
-        self.sparsity_target = params.sparsity_target
-        self.sparsity_weight = params.sparsity_weight
+        self.reconstruction_weight = 1.0
+        self.gramian_loss = GramianOrthogonalityLoss(params.gramian_center)
+        self.gramian_weight = params.gramian_weight
+        self.homeo_loss = HomeostaticActivityLoss(params.rate_target, params.min_active)
+        self.homeo_weight = params.homeo_weight
 
         # Save hyperparameters for checkpointing
         self.save_hyperparameters(ignore=["encoder", "decoder"])
@@ -167,22 +225,37 @@ class Autoencoder(pl.LightningModule):
     # Optimizer configuration
     # -----------------------------------------------------------------------------------
 
-    def configure_optimizers(self) -> Optimizer:
-        """Configure optimizer for training.
+    def configure_optimizers(self) -> List[Optimizer]:
+        """Configure two optimizers for split training architecture.
 
-        This method is called by PyTorch Lightning to set up the optimizer
-        for training the autoencoder. It uses the optimizer initialization
-        function provided in the model parameters.
+        Creates separate optimizers for encoder and decoder components to enable
+        independent optimization with different loss functions. This split training
+        approach allows the encoder to focus on learning structured sparse
+        representations while the decoder focuses solely on reconstruction accuracy.
+
+        The optimizer configuration uses the same initialization function for both
+        components, ensuring consistent hyperparameters (learning rate, momentum, etc.)
+        while maintaining separate optimization states.
 
         Returns:
-            Optimizer: Configured optimizer instance ready for training.
+            List containing two optimizers:
+                - Index 0: Encoder optimizer for representation learning losses
+                - Index 1: Decoder optimizer for reconstruction losses
 
         Note:
-            The optimizer is initialized with the model's parameters using
-            the optimizer_init function from the configuration.
+            The order of optimizers in the returned list is important as it determines
+            how they are accessed in training_step() via self.optimizers(). The encoder
+            optimizer must be first, followed by the decoder optimizer.
+
+        Example:
+            >>> # In training_step:
+            >>> enc_opt, dec_opt = self.optimizers()
+            >>> # enc_opt trains encoder with composite loss
+            >>> # dec_opt trains decoder with reconstruction loss only
         """
-        optimizer = self.optimizer_init(self.parameters())  # functools.partial or similar
-        return optimizer
+        enc_opt = self.optimizer_init(self.encoder.parameters())
+        dec_opt = self.optimizer_init(self.decoder.parameters())
+        return [enc_opt, dec_opt]
 
     # -----------------------------------------------------------------------------------
     # Forward pass
@@ -220,92 +293,166 @@ class Autoencoder(pl.LightningModule):
     # Loss computation
     # -----------------------------------------------------------------------------------
 
-    def compute_loss(self, x: Tensor, reconstruction: Tensor, embedding: Tensor) -> Dict[str, Tensor]:
-        """Compute all losses for a given input.
+    def encoder_loss(self, x: Tensor, embedding: Tensor) -> Dict[str, Tensor]:
+        """Compute encoder loss components for representation learning.
 
-        Calculates the total loss as a combination of reconstruction loss and
-        sparsity regularization loss. The reconstruction loss measures how well
-        the autoencoder reproduces the input, while the sparsity loss encourages
-        sparse latent representations similar to biological neural activity.
+        Calculates individual loss components that guide the encoder to learn
+        structured sparse representations. These losses work together to encourage
+        orthogonal, homeostatic, and sparse latent representations that mimic
+        the firing patterns observed in hippocampal place cells.
 
         Args:
-            x: Original input tensor used as reconstruction target.
-            reconstruction: Reconstructed output from the decoder.
-            embedding: Latent representation from the encoder.
+            x: Input tensor (unused but kept for interface consistency).
+                Shape: (batch_size, channels, height, width).
+            embedding: Latent representation tensor from the encoder.
+                Shape: (batch_size, latent_dim).
 
         Returns:
-            Dictionary containing:
-                - 'reconstruction': Binary cross-entropy loss between input and reconstruction.
-                - 'sparsity': L1 loss between embedding and sparsity target.
-                - 'total': Weighted sum of reconstruction and sparsity losses.
+            Dictionary containing individual encoder loss components:
+                - "gramian_orthogonality": Promotes decorrelated representations
+                - "homeostatic_activity": Regulates firing rates and minimum activity
+                - "l1": Encourages sparse activations with L1 penalty
 
         Note:
-            The sparsity loss compares the embedding activations to a tensor filled
-            with the target sparsity value, encouraging most units to remain near
-            the target activation level (typically close to zero).
+            These loss components are combined with their respective weights
+            in the training and validation steps to create the final encoder loss.
         """
+        return {
+            "gramian_orthogonality": self.gramian_loss(embedding),
+            "homeostatic_activity": self.homeo_loss(embedding),
+        }
 
-        # Calculate reconstruction and sparsity losses
-        recon_loss = self.reconstruction_loss(reconstruction, x)
-        sparsity_target = torch.full_like(embedding, self.sparsity_target)
-        sparsity_loss = self.sparsity_loss(embedding, sparsity_target)
-        total_loss = recon_loss + self.sparsity_weight * sparsity_loss
+    def decoder_loss(self, x: Tensor, reconstruction: Tensor) -> Dict[str, Tensor]:
+        """Compute decoder loss components for reconstruction learning.
 
-        # Return a dictionary of losses
-        return {"reconstruction": recon_loss, "sparsity": sparsity_loss, "total": total_loss}
+        Calculates loss components that guide the decoder to accurately reconstruct
+        the original input from the latent representations. Currently contains only
+        reconstruction loss, but structured as a dictionary for future extensibility.
+
+        Args:
+            x: Original input tensor used as the reconstruction target.
+                Shape: (batch_size, channels, height, width).
+            reconstruction: Decoded output tensor from the decoder.
+                Shape: (batch_size, channels, height, width).
+
+        Returns:
+            Dictionary containing decoder loss components:
+                - "reconstruction": BCE loss measuring reconstruction accuracy
+
+        Note:
+            The dictionary structure allows for easy addition of future decoder-specific
+            losses such as perceptual loss, adversarial loss, or spatial consistency loss.
+        """
+        return {
+            "reconstruction": self.reconstruction_loss(reconstruction, x),
+        }
 
     # -----------------------------------------------------------------------------------
     # Training step
     # -----------------------------------------------------------------------------------
 
     def on_train_batch_start(self, batch, batch_idx: int) -> None:
-        """Initialize registry and hooks before training batch starts."""
+        """Initialize registry and hooks before training batch starts.
+
+        Clears the registry at the start of each batch to ensure clean state
+        for hook management and potential debugging/monitoring systems.
+
+        Args:
+            batch: Training batch (unused in this implementation).
+            batch_idx: Index of the current batch (unused in this implementation).
+
+        Note:
+            This hook is called automatically by PyTorch Lightning before each
+            training batch is processed. The registry clearing ensures that any
+            batch-specific state from previous iterations doesn't interfere with
+            the current batch.
+        """
         # Clear registry at the start of each batch
         registry.clear("batch")
 
-    def training_step(self, batch: Tensor, batch_idx: int) -> Tensor:
-        """Training step for the autoencoder.
+    def training_step(self, batch: Tensor, batch_idx: int) -> None:
+        """Training step with manual optimization and configurable gradient flow.
 
-        Executes one training iteration by processing a batch through the model,
-        computing losses, and logging training metrics. This method is called
-        automatically by PyTorch Lightning during training.
+        Implements the training strategy where encoder and decoder are trained
+        with different loss functions. The detach_gradients parameter
+        controls whether gradients flow from decoder to encoder:
+
+        When detach_gradients=True:
+        1. Encoder step: Optimized using combined Gramian orthogonality and homeostatic
+           activity losses to learn structured sparse representations.
+        2. Decoder step: Optimized using reconstruction loss only with detached embedding.
+
+        When detach_gradients=False:
+        Uses both optimizers but computes combined loss to allow full gradient flow.
 
         Args:
-            batch: Training batch containing input tensors and optional additional data.
-                Expected format: (input_tensor, ...) where input_tensor has shape
-                (batch_size, channels, height, width).
-            batch_idx: Index of the current batch in the training epoch.
-
-        Returns:
-            Total loss tensor for backpropagation.
+            batch: Training batch containing input tensors. Expected format is
+                (input_tensor, ...) where additional elements are ignored.
+            batch_idx: Index of the current batch in the training epoch. Used
+                implicitly by Lightning for scheduling and logging.
 
         Logs:
-            - train/reconstruction_loss: BCE loss for reconstruction accuracy
-            - train/sparsity_loss: L1 loss for sparsity regularization
-            - train/total_loss: Combined weighted loss
-            - train/sparsity_rate: Percentage of active units (> 0.01 threshold)
+            Encoder metrics:
+                - train/gramian_loss: Orthogonality constraint loss
+                - train/homeostatic_loss: Combined firing rate regulation
+                - train/encoder_loss: Combined encoder losses
+            Decoder metrics:
+                - train/reconstruction_loss: BCE reconstruction error
+                - train/decoder_loss: Total decoder loss
 
         Note:
-            Metrics are logged both per-step and per-epoch for comprehensive
-            monitoring during training. Registry initialization is handled by
-            on_train_batch_start() and cleanup by on_train_batch_end().
-            Hook registration is handled by individual encoder/decoder models as needed.
+            Uses manual optimization with two optimizers accessed via self.optimizers().
+            The detach_gradients parameter controls the training strategy.
         """
-        x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
-        reconstruction, embedding = self(x)
+        # Common setup
+        x, *_ = batch
+        encoder_optimizer, decoder_optimizer = self.optimizers()
 
-        loss = self.compute_loss(x, reconstruction, embedding)  # Calculate losses
+        # Common encoder forward pass and loss computation
+        embedding = self.encoder(x, target=None)
+        encoder_losses = self.encoder_loss(x, embedding)
+        encoder_loss = sum(
+            [
+                self.gramian_weight * encoder_losses["gramian_orthogonality"],
+                self.homeo_weight * encoder_losses["homeostatic_activity"],
+            ]
+        )
 
-        # Log metrics
-        self.log("train/reconstruction_loss", loss["reconstruction"], on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/sparsity_loss", loss["sparsity"], on_step=True, on_epoch=True)
-        self.log("train/total_loss", loss["total"], on_step=True, on_epoch=True, prog_bar=True)
+        # Common encoder logging
+        self.log("train/gramian_loss", encoder_losses["gramian_orthogonality"], on_step=True, on_epoch=True)
+        self.log("train/homeostatic_loss", encoder_losses["homeostatic_activity"], on_step=True, on_epoch=True)
+        self.log("train/encoder_loss", encoder_loss, on_step=True, on_epoch=True, prog_bar=True)
 
-        # Calculate and log sparsity metrics
-        sparsity_rate = (embedding > 0.01).float().mean()
-        self.log("train/sparsity_rate", sparsity_rate, on_step=True, on_epoch=True)
+        # Common decoder forward pass and loss computation
+        # Use detached embedding for split training, original for combined training
+        z = embedding.detach() if self.detach_gradients else embedding
+        reconstruction = self.decoder(z, target=x)
+        decoder_losses = self.decoder_loss(x, reconstruction)
+        decoder_loss = decoder_losses["reconstruction"]
 
-        return loss["total"]
+        if self.detach_gradients:
+            # Split training: encoder and decoder trained separately
+            encoder_optimizer.zero_grad()
+            self.manual_backward(encoder_loss)
+            encoder_optimizer.step()
+
+            decoder_optimizer.zero_grad()
+            self.manual_backward(decoder_loss)
+            decoder_optimizer.step()
+
+        else:
+            # Combined training: both optimizers step with full gradient flow
+            encoder_optimizer.zero_grad()
+            decoder_optimizer.zero_grad()
+
+            total_loss = encoder_loss + decoder_loss
+            self.manual_backward(total_loss)
+            encoder_optimizer.step()
+            decoder_optimizer.step()
+
+        # Common decoder logging
+        self.log("train/reconstruction_loss", decoder_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train/decoder_loss", decoder_loss, on_step=True, on_epoch=True, prog_bar=True)
 
     # -----------------------------------------------------------------------------------
     # Training batch lifecycle hooks
@@ -314,9 +461,19 @@ class Autoencoder(pl.LightningModule):
     def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
         """Clean up registry after training batch completion.
 
-        This method complements on_train_batch_start() to provide complete
-        lifecycle management for the registry during training.
-        Hook management is handled by individual encoder/decoder models.
+        Provides a hook for potential cleanup operations after each training batch.
+        Currently, registry cleanup is handled by the next batch's on_train_batch_start(),
+        and hook cleanup is managed by individual encoder/decoder models that register them.
+
+        Args:
+            outputs: Training step outputs (unused in this implementation).
+            batch: Training batch (unused in this implementation).
+            batch_idx: Index of the current batch (unused in this implementation).
+
+        Note:
+            This method complements on_train_batch_start() to provide complete
+            lifecycle management for the registry during training. The actual cleanup
+            operations are deferred to other parts of the system for efficiency.
         """
         # Registry cleanup is handled by on_train_batch_start of next batch
         # Hook cleanup is handled by individual models that register them
@@ -327,11 +484,12 @@ class Autoencoder(pl.LightningModule):
     # -----------------------------------------------------------------------------------
 
     def validation_step(self, batch: Tensor, batch_idx: int) -> Tensor:  # noqa: ARG002
-        """Validation step for the autoencoder.
+        """Validation step for the autoencoder using split loss evaluation.
 
         Executes one validation iteration by processing a batch through the model
-        and computing validation metrics. This method is called automatically by
-        PyTorch Lightning during validation phases.
+        and computing validation metrics consistent with the split training approach.
+        This method evaluates both encoder and decoder components separately to
+        provide detailed performance insights.
 
         Args:
             batch: Validation batch containing input tensors and optional additional data.
@@ -340,44 +498,74 @@ class Autoencoder(pl.LightningModule):
             batch_idx: Index of the current batch in the validation epoch (unused).
 
         Returns:
-            Total validation loss tensor.
+            Total validation loss tensor (encoder_loss + decoder_loss).
 
         Logs:
-            - val/reconstruction_loss: BCE loss for reconstruction accuracy
-            - val/sparsity_loss: L1 loss for sparsity regularization
-            - val/total_loss: Combined weighted loss
-            - val/sparsity_rate: Percentage of active units (> 0.01 threshold)
+            Encoder metrics:
+                - val/gramian_loss: Gramian orthogonality loss
+                - val/homeostatic_loss: Combined homeostatic activity loss
+                - val/l1_loss: L1 sparsity penalty
+                - val/encoder_loss: Weighted total encoder loss
+            Decoder metrics:
+                - val/reconstruction_loss: BCE reconstruction loss
+                - val/decoder_loss: Total decoder loss (same as reconstruction)
+            Combined metrics:
+                - val/total_loss: Combined encoder and decoder loss
+                - val/sparsity_rate: Percentage of active units (> 0.01 threshold)
 
         Note:
             Validation metrics are logged per-epoch only to reduce logging overhead
-            and focus on epoch-level performance tracking.
+            and focus on epoch-level performance tracking. This follows the same
+            split loss approach as the training_step for consistency.
         """
-
         x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
         reconstruction, embedding = self(x)
-        loss = self.compute_loss(x, reconstruction, embedding)  # Calculate losses
 
-        # Log metrics
-        self.log("val/reconstruction_loss", loss["reconstruction"], on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/sparsity_loss", loss["sparsity"], on_step=False, on_epoch=True)
-        self.log("val/total_loss", loss["total"], on_step=False, on_epoch=True, prog_bar=True)
+        # Compute encoder loss components using the same method as training
+        encoder_losses = self.encoder_loss(x, embedding)
+        encoder_loss = sum(
+            [
+                self.gramian_weight * encoder_losses["gramian_orthogonality"],
+                self.homeo_weight * encoder_losses["homeostatic_activity"],
+            ]
+        )
+
+        # Compute decoder loss components using the same method as training
+        decoder_losses = self.decoder_loss(x, reconstruction)
+        decoder_loss = decoder_losses["reconstruction"]
+
+        # Calculate total loss
+        total_loss = encoder_loss + decoder_loss
+
+        # Log encoder metrics
+        self.log("val/gramian_loss", encoder_losses["gramian_orthogonality"], on_step=False, on_epoch=True)
+        self.log("val/homeostatic_loss", encoder_losses["homeostatic_activity"], on_step=False, on_epoch=True)
+        self.log("val/encoder_loss", encoder_loss, on_step=False, on_epoch=True, prog_bar=True)
+
+        # Log decoder metrics
+        self.log("val/reconstruction_loss", decoder_loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("val/decoder_loss", decoder_loss, on_step=False, on_epoch=True, prog_bar=True)
+
+        # Log combined metrics
+        self.log("val/total_loss", total_loss, on_step=False, on_epoch=True, prog_bar=True)
 
         # Calculate and log sparsity metrics
         sparsity_rate = (embedding > 0.01).float().mean()
         self.log("val/sparsity_rate", sparsity_rate, on_step=False, on_epoch=True)
 
-        return loss["total"]
+        return total_loss
 
     # -----------------------------------------------------------------------------------
     # Test step
     # -----------------------------------------------------------------------------------
 
     def test_step(self, batch: Tensor, batch_idx: int) -> Dict[str, Tensor]:  # noqa: ARG002
-        """Test step for the autoencoder.
+        """Test step for the autoencoder using split loss evaluation.
 
         Executes one test iteration by processing a batch through the model and
         computing comprehensive test metrics. This method provides detailed
-        evaluation metrics beyond the standard training/validation losses.
+        evaluation metrics beyond the standard training/validation losses,
+        following the same split training approach for consistency.
 
         Args:
             batch: Test batch containing input tensors and optional additional data.
@@ -389,30 +577,58 @@ class Autoencoder(pl.LightningModule):
             Dictionary containing all computed test metrics.
 
         Logs:
-            - test/reconstruction_loss: BCE loss for reconstruction accuracy
-            - test/sparsity_loss: L1 loss for sparsity regularization
-            - test/total_loss: Combined weighted loss
-            - test/mse: Mean squared error between input and reconstruction
-            - test/mae: Mean absolute error between input and reconstruction
-            - test/sparsity_rate: Percentage of active units (> 0.01 threshold)
+            Encoder metrics:
+                - test/gramian_loss: Gramian orthogonality loss
+                - test/homeostatic_loss: Combined homeostatic activity loss
+                - test/l1_loss: L1 sparsity penalty
+                - test/encoder_loss: Weighted total encoder loss
+            Decoder metrics:
+                - test/reconstruction_loss: BCE reconstruction loss
+                - test/decoder_loss: Total decoder loss (same as reconstruction)
+            Combined metrics:
+                - test/total_loss: Combined encoder and decoder loss
+                - test/mse: Mean squared error between input and reconstruction
+                - test/mae: Mean absolute error between input and reconstruction
+                - test/sparsity_rate: Percentage of active units (> 0.01 threshold)
 
         Note:
             Test metrics are logged per-epoch only and include additional
             evaluation metrics (MSE, MAE) for comprehensive model assessment.
+            The split loss approach ensures consistency with training/validation.
         """
-
         x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
         reconstruction, embedding = self(x)
-        loss = self.compute_loss(x, reconstruction, embedding)  # Calculate losses
 
-        # Calculate additional metrics
+        # Compute encoder loss components using the same method as training
+        encoder_losses = self.encoder_loss(x, embedding)
+        encoder_loss = sum(
+            [
+                self.gramian_weight * encoder_losses["gramian_orthogonality"],
+                self.homeo_weight * encoder_losses["homeostatic_activity"],
+            ]
+        )
+
+        # Compute decoder loss components using the same method as training
+        decoder_losses = self.decoder_loss(x, reconstruction)
+        decoder_loss = decoder_losses["reconstruction"]
+
+        # Calculate total loss and additional metrics
+        total_loss = encoder_loss + decoder_loss
+        mse = nn.MSELoss()(reconstruction, x)
+        mae = nn.L1Loss()(reconstruction, x)
+        sparsity_rate = (embedding > 0.01).float().mean()
+
+        # Create metrics dictionary
         metrics = {
-            "test/reconstruction_loss": loss["reconstruction"],
-            "test/sparsity_loss": loss["sparsity"],
-            "test/total_loss": loss["total"],
-            "test/mse": nn.MSELoss()(reconstruction, x),
-            "test/mae": nn.L1Loss()(reconstruction, x),
-            "test/sparsity_rate": (embedding > 0.01).float().mean(),
+            "test/gramian_loss": encoder_losses["gramian_orthogonality"],
+            "test/homeostatic_loss": encoder_losses["homeostatic_activity"],
+            "test/encoder_loss": encoder_loss,
+            "test/reconstruction_loss": decoder_loss,
+            "test/decoder_loss": decoder_loss,
+            "test/total_loss": total_loss,
+            "test/mse": mse,
+            "test/mae": mae,
+            "test/sparsity_rate": sparsity_rate,
         }
 
         self.log_dict(metrics, on_step=False, on_epoch=True)
@@ -521,6 +737,7 @@ class Autoencoder(pl.LightningModule):
 
         Args:
             x: Input tensor with shape matching the encoder's expected dimensions.
+                For cognitive maps, typically (batch_size, channels, height, width).
 
         Returns:
             Latent representation tensor with shape (batch_size, latent_dim).
@@ -528,9 +745,10 @@ class Autoencoder(pl.LightningModule):
         Note:
             This method bypasses the decoder, making it efficient for tasks
             that only require the encoded representation, such as clustering
-            or dimensionality reduction analysis.
+            or dimensionality reduction analysis. The encoder is called with
+            target=None since no supervised target is available.
         """
-        return self.encoder(x)
+        return self.encoder(x, target=None)
 
     def decode(self, embedding: Tensor) -> Tensor:
         """Decode latent representation to reconstruction.
@@ -574,29 +792,61 @@ class Autoencoder(pl.LightningModule):
         return self.decode(embedding)
 
 
-# Example usage with training
+# -----------------------------------------------------------------------------------
+# Example usage and testing
+# -----------------------------------------------------------------------------------
+
 if __name__ == "__main__":
+    """Example demonstrating autoencoder training with configurable gradient flow.
+
+    This example shows how to:
+    1. Create a simple dataset of random obstacle maps
+    2. Configure autoencoder parameters with gradient flow control
+    3. Train the model using PyTorch Lightning with manual optimization
+    4. Test reconstruction performance and sparsity metrics
+
+    The example uses Linear encoder/decoder components with GELU activation
+    and demonstrates the gradient detachment approach using manual optimization
+    with a simple conditional for controlling gradient flow.
+    """
     from functools import partial
 
     import lightning.pytorch as pl
 
     from ehc_sn.models import decoders, encoders
 
-    # Simple dataset
+    # Simple dataset for testing
     class SimpleDataset(torch.utils.data.Dataset):
+        """Simple dataset generating random binary obstacle maps."""
+
         def __init__(self, size: int = 100):
+            """Initialize dataset with specified size.
+
+            Args:
+                size: Number of samples in the dataset.
+            """
             self.size = size
 
         def __len__(self):
+            """Return dataset size."""
             return self.size
 
         def __getitem__(self, idx):
-            # Random obstacle maps - make sure to return the right tensor format
+            """Generate a random obstacle map sample.
+
+            Args:
+                idx: Sample index (unused, generates random data).
+
+            Returns:
+                Tuple containing a single tensor with random obstacle placement.
+            """
+            # Create random obstacle maps with random obstacle placement
             x = torch.zeros(1, 16, 32)
-            x[0, torch.randint(0, 16, (5,)), torch.randint(0, 32, (5,))] = 1.0
+            num_obstacles = torch.randint(3, 8, (1,)).item()
+            x[0, torch.randint(0, 16, (num_obstacles,)), torch.randint(0, 32, (num_obstacles,))] = 1.0
             return (x,)  # Return as tuple for batch unpacking
 
-    # Create model
+    # Create autoencoder with configurable gradient flow
     autoencoder_params = AutoencoderParams(
         encoder=encoders.Linear(
             encoders.EncoderParams(input_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)
@@ -604,26 +854,30 @@ if __name__ == "__main__":
         decoder=decoders.Linear(
             decoders.DecoderParams(output_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)
         ),
-        sparsity_weight=0.1,
+        gramian_weight=1.0,
+        homeo_weight=1.0,
+        rate_target=0.10,
+        detach_gradients=True,  # Use gradient detachment for split training
         optimizer_init=partial(torch.optim.Adam, lr=1e-3),
     )
     model = Autoencoder(autoencoder_params)
 
-    # Create data
+    # Create training data
     dataset = SimpleDataset(200)
     loader = torch.utils.data.DataLoader(dataset, batch_size=16, shuffle=True)
 
-    # Train
+    # Train model with Lightning
     trainer = pl.Trainer(max_epochs=3, logger=False, enable_checkpointing=False)
     trainer.fit(model, loader)
 
-    # Test
+    # Test reconstruction performance
     test_input = torch.zeros(1, 1, 16, 32)
-    test_input[0, 0, 5:10, 10:20] = 1.0
+    test_input[0, 0, 5:10, 10:20] = 1.0  # Create test pattern
 
     with torch.no_grad():
         reconstruction, embedding = model(test_input)
-        loss = nn.MSELoss()(reconstruction, test_input)
+        mse_loss = nn.MSELoss()(reconstruction, test_input)
 
-    print(f"Test loss: {loss.item():.4f}")
-    print(f"Sparsity: {(embedding > 0.01).float().mean().item():.2%}")
+    print(f"Test MSE loss: {mse_loss.item():.4f}")
+    print(f"Embedding sparsity: {(embedding > 0.01).float().mean().item():.2%}")
+    print(f"Reconstruction range: [{reconstruction.min().item():.3f}, {reconstruction.max().item():.3f}]")

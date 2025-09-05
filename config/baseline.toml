@@ -19,9 +19,15 @@ test_split  = 0.1
 latent_dim = 256
 
 # training
-max_epochs      = 200
-sparsity_target = 0.05
-sparsity_weight = 0.01
+max_epochs    = 200
+learning_rate = 1e-3
+
+# split training loss weights
+gramian_center = true
+gramian_weight = 1.0
+rate_target    = 0.05
+min_active     = 8
+homeo_weight   = 1.0
 
 # logging
 log_dir                   = "logs"
