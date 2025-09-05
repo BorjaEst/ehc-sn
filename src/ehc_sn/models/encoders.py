@@ -51,6 +51,7 @@ from torch import Tensor, nn
 
 from ehc_sn.hooks.dfa import DFALayer, clear_dfa_error, register_dfa_hook
 from ehc_sn.hooks.drtp import DRTPLayer
+from ehc_sn.hooks.registry import registry
 
 
 class EncoderParams(BaseModel):
@@ -245,9 +246,15 @@ class Linear(BaseEncoder):
         h1 = self.layer1(x)
         h1 = self.activation1(h1)
 
+        # Store in registry for SRTP decoders
+        registry.set_activation("encoder.h1", h1, detach=True)
+
         # Second layer
         h2 = self.layer2(h1)
         h2 = self.activation2(h2)
+
+        # Store in registry for SRTP decoders
+        registry.set_activation("encoder.h2", h2, detach=True)
 
         # Output layer
         output = self.layer3(h2)

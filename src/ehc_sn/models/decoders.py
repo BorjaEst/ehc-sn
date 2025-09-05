@@ -43,7 +43,7 @@ References:
 """
 
 from math import prod
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 from pydantic import BaseModel, Field, model_validator
@@ -51,6 +51,8 @@ from torch import Tensor, nn
 
 from ehc_sn.hooks.dfa import DFALayer, clear_dfa_error, register_dfa_hook
 from ehc_sn.hooks.drtp import DRTPLayer
+from ehc_sn.hooks.registry import registry
+from ehc_sn.hooks.srtp import SRTPLayer
 
 
 class DecoderParams(BaseModel):
@@ -135,7 +137,7 @@ class BaseDecoder(nn.Module):
         super().__init__()
         self.params = params
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, **kwds) -> Tensor:
         """Forward pass through the decoder.
 
         Args:
@@ -223,7 +225,7 @@ class Linear(BaseDecoder):
         self.layer3 = nn.Linear(in_features=1024, out_features=output_features, bias=True)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
         """Forward pass through the linear decoder.
 
         Args:
@@ -311,7 +313,7 @@ class DRTPLinear(BaseDecoder):
         self.layer3 = nn.Linear(in_features=1024, out_features=output_features)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
         """Forward pass through the DRTP linear decoder.
 
         Args:
@@ -403,7 +405,7 @@ class DFALinear(BaseDecoder):
         self.layer3 = nn.Linear(in_features=1024, out_features=output_features)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
         """Forward pass through the DFA linear decoder.
 
         Args:
@@ -434,6 +436,137 @@ class DFALinear(BaseDecoder):
             register_dfa_hook(output)
 
         # Reshape to original spatial dimensions
+        return output.reshape(output.shape[0], *self.output_shape)
+
+
+class SRTPLinear(BaseDecoder):
+    """Linear decoder using Selective Random Target Projection (SRTP) training.
+
+    This decoder implements the SRTP algorithm which uses fixed random feedback weights
+    with encoder activation targets for biologically plausible learning. The decoder
+    mirrors the Linear architecture but applies SRTP modulatory signals at hidden layers.
+
+    Architecture:
+        Latent input → Linear(512) → GELU → SRTP → Linear(1024) → GELU → SRTP → Linear(output_size) → Sigmoid
+
+    Key differences from standard Linear decoder:
+    - Uses SRTP layers that accept encoder activations as targets
+    - SRTP layers use fixed random projection matrices (non-trainable)
+    - Backward pass projects error through random weights instead of transpose weights
+    - Supports lazy initialization of SRTP layers based on encoder activation shapes
+    - Maintains compatibility with standard training when encoder activations unavailable
+
+    The SRTP mechanism:
+    - Maps encoder activations to decoder hidden layer dimensions via fixed random weights
+    - Computes gradients as: hidden_activation - projected_encoder_target
+    - Provides modulatory signals that guide learning without symmetric weight transport
+    - Preserves computational graph for standard gradient flow
+
+    Args:
+        params: DecoderParams with activation_fn typically set to nn.GELU.
+
+    Example:
+        >>> params = DecoderParams(
+        ...     output_shape=(1, 32, 16),
+        ...     latent_dim=128,
+        ...     activation_fn=nn.GELU
+        ... )
+        >>> decoder = SRTPLinear(params)
+        >>> # With encoder activations
+        >>> reconstruction = decoder(latent_batch, encoder_acts={'h1': enc_h1, 'h2': enc_h2})
+        >>> # Without encoder activations (fallback to standard forward)
+        >>> reconstruction = decoder(latent_batch)
+
+    References:
+        Based on the SRTP mechanism which extends DFA principles with target-specific
+        random projections for enhanced biological plausibility.
+    """
+
+    def __init__(self, params: DecoderParams):
+        super().__init__(params)
+        output_features = prod(params.output_shape)
+
+        # Linear layers matching the standard Linear decoder architecture
+        self.fc1 = nn.Linear(params.latent_dim, 512, bias=True)
+        self.act1 = params.activation_fn()
+
+        self.fc2 = nn.Linear(512, 1024, bias=True)
+        self.act2 = params.activation_fn()
+
+        self.out = nn.Linear(1024, output_features, bias=True)
+        self.output_activation = nn.Sigmoid()
+
+        # SRTP layers - initialized lazily when encoder activations are first provided
+        self.srtp1: Optional[SRTPLayer] = None
+        self.srtp2: Optional[SRTPLayer] = None
+        self._srtp_initialized = False
+
+    def _initialize_srtp_layers(self) -> None:
+        """Initialize SRTP layers based on encoder activations from registry.
+
+        This method tries to get encoder activations from the registry to
+        determine the dimensions for SRTP layers. If activations are not available,
+        it uses default dimensions.
+        """
+        # Try to get encoder activations from registry
+        h1_activation = registry.get_activation("encoder.h1")
+        h2_activation = registry.get_activation("encoder.h2")
+
+        enc_h1_flat = h1_activation.flatten(1).shape[1]
+        enc_h2_flat = h2_activation.flatten(1).shape[1]
+
+        # Create SRTP layers
+        self.srtp1 = SRTPLayer(target_dim=enc_h2_flat, hidden_dim=512)
+        self.srtp2 = SRTPLayer(target_dim=enc_h1_flat, hidden_dim=1024)
+
+        # Ensure layers are on the same device as the model
+        self.srtp1 = self.srtp1.to(device=self.fc1.weight.device)
+        self.srtp2 = self.srtp2.to(device=self.fc2.weight.device)
+
+        # Register as proper submodules
+        self.add_module("srtp1", self.srtp1)
+        self.add_module("srtp2", self.srtp2)
+
+        # Set initialization flat to true
+        self._srtp_initialized = True
+
+    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
+        """Forward pass through SRTP linear decoder.
+
+        Args:
+            x: Latent tensor of shape (batch_size, latent_dim)
+            target: Optional target tensor (unused, kept for API consistency)
+
+        Returns:
+            Reconstructed output tensor of shape (batch_size, *output_shape)
+        """
+        # Initialize SRTP layers on first forward pass
+        if not self._srtp_initialized:
+            self._initialize_srtp_layers()
+
+        # First hidden layer
+        h1 = self.fc1(x)
+        h1 = self.act1(h1)
+
+        # Apply SRTP1 with encoder h2 as target
+        target1 = registry.get_activation("encoder.h2").flatten(1).detach()
+        target1 = target1.to(device=h1.device, dtype=h1.dtype)
+        h1 = self.srtp1(h1, target=target1)
+
+        # Second hidden layer
+        h2 = self.fc2(h1)
+        h2 = self.act2(h2)
+
+        # Apply SRTP2 with encoder h1 as target
+        target2 = registry.get_activation("encoder.h1").flatten(1).detach()
+        target2 = target2.to(device=h2.device, dtype=h2.dtype)
+        h2 = self.srtp2(h2, target=target2)
+
+        # Output layer (no SRTP)
+        output = self.out(h2)
+        output = self.output_activation(output)
+
+        # Reshape to match expected output shape
         return output.reshape(output.shape[0], *self.output_shape)
 
 
@@ -502,7 +635,7 @@ class Conv2D(BaseDecoder):
         self.conv3 = nn.ConvTranspose2d(32, self.output_channels, kernel_size=5, **kwds)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
         """Forward pass through the transpose convolutional decoder.
 
         Args:
@@ -606,7 +739,7 @@ class DRTPConv2D(BaseDecoder):
         self.conv3 = nn.ConvTranspose2d(32, self.output_channels, kernel_size=5, **kwds)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
         """Forward pass through the DRTP transpose convolutional decoder.
 
         Args:
@@ -715,7 +848,7 @@ class DFAConv2D(BaseDecoder):
         self.conv3 = nn.ConvTranspose2d(32, self.output_channels, kernel_size=5, **kwds)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
         """Forward pass through the DFA transpose convolutional decoder.
 
         Args:

@@ -4,8 +4,6 @@ from typing import Any, List, Tuple
 import torch
 from torch import Size, Tensor, autograd, nn
 
-dtp_loss = nn.MSELoss()  # DTP uses MSE loss for target comparison
-
 
 # -------------------------------------------------------------------------------------------
 class SRTPFunction(autograd.Function):
@@ -33,11 +31,11 @@ class SRTPFunction(autograd.Function):
         activations, fb_weights = ctx.saved_tensors
         batch_size = grad_output.shape[0]
 
-        # Project error through random feedback weights
+        # Project target through random feedback weights to fit hidden layer space
         # target: (batch_size, target_dim)
         # fb_weights: (target_dim, hidden_dim)
-        adapted_targets = torch.matmul(ctx.target, fb_weights)
-        grad_est = activations - adapted_targets
+        projected_targets = torch.matmul(ctx.target, fb_weights)
+        grad_est = activations - projected_targets
 
         # Return gradients for input, fb_weights, target (None for non-learnable parameters)
         return grad_est, None, None
@@ -104,9 +102,9 @@ class SRTPLayer(nn.Module):
         # Shape: (target_dim, hidden_dim) to project target to hidden space
         fb_weights_shape = Size([self.target_dim, self.hidden_dim])
 
-        # Convert to a non-trainable parameter to save (saves with the model)
-        self.fb_weights = nn.Parameter(torch.Tensor(fb_weights_shape))
-        self.reset_weights()  # Initis weights and requires_grad=False
+        # Register as buffer so it moves with model.to(device) and gets saved in state_dic
+        self.register_buffer("fb_weights", torch.Tensor(fb_weights_shape))
+        self.reset_weights()  # Initialize weights properly
 
     # -----------------------------------------------------------------------------------
     def forward(self, inputs: Tensor, target: Tensor) -> Tensor:
@@ -127,9 +125,8 @@ class SRTPLayer(nn.Module):
         Raises:
             ValueError: If input or target dimensions don't match expected shapes
         """
-
         # Apply SRTP function which handles the custom backward pass
-        return SRTPFunction.apply(inputs, self.fb_weights, target)
+        return srtp(inputs, self.fb_weights, target)
 
     # -----------------------------------------------------------------------------------
     def extra_repr(self) -> str:
@@ -144,7 +141,6 @@ class SRTPLayer(nn.Module):
         """
         # Reinitialize the projection matrix with a new random matrix
         torch.nn.init.kaiming_uniform_(self.fb_weights)
-        self.fb_weights.requires_grad = False  # Ensure it's non-trainable
 
 
 # -------------------------------------------------------------------------------------------
