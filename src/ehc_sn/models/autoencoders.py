@@ -329,17 +329,21 @@ class Autoencoder(pl.LightningModule):
 
         # Encoder-side losses
         gramian_loss = self.gramian_loss(embedding)
-        self.log(f"{log_label}/gramian_loss", gramian_loss, on_step=True, on_epoch=True)
+        self.log(f"{log_label}/gramian_loss", gramian_loss, on_epoch=True)
         homeo_loss = self.homeo_loss(embedding)
-        self.log(f"{log_label}/homeostatic_loss", homeo_loss, on_step=True, on_epoch=True)
+        self.log(f"{log_label}/homeostatic_loss", homeo_loss, on_epoch=True)
         encoder_loss = self.gramian_weight * gramian_loss + self.homeo_weight * homeo_loss
-        self.log(f"{log_label}/encoder_loss", encoder_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(f"{log_label}/encoder_loss", encoder_loss, on_epoch=True, prog_bar=True)
+
+        # Calculate and log sparsity metrics
+        sparsity_rate = (embedding > 0.01).float().mean()
+        self.log(f"{log_label}/sparsity_rate", sparsity_rate, on_epoch=True)
 
         # Decoder-side losses
         reconstruction_loss = self.reconstruction_loss(reconstruction, x)
-        self.log(f"{log_label}/reconstruction_loss", reconstruction_loss, on_step=True, on_epoch=True)
+        self.log(f"{log_label}/reconstruction_loss", reconstruction_loss, on_epoch=True)
         decoder_loss = reconstruction_loss
-        self.log(f"{log_label}/decoder_loss", decoder_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(f"{log_label}/decoder_loss", decoder_loss, on_epoch=True, prog_bar=True)
 
         return decoder_loss, encoder_loss
 
