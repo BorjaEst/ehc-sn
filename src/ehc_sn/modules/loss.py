@@ -1,12 +1,36 @@
-import warnings
-from pathlib import Path
+"""
+Loss functions for entorhinal-hippocampal circuit modeling.
+
+This module provides specialized loss functions designed for training neural network
+models of the entorhinal-hippocampal circuit. The losses implement biologically-inspired
+constraints that encourage sparse, decorrelated representations similar to those
+observed in hippocampal place cells and grid cells.
+
+Key Features:
+    - Gramian orthogonality loss for decorrelated representations
+    - Homeostatic activity loss for stable firing rate regulation
+    - Target-based L1 sparsity with ReLU thresholding
+    - Scale-invariant formulations for stable training across dimensions
+
+Classes:
+    GramianOrthogonalityLoss: Promotes orthogonal latent representations
+    HomeostaticActivityLoss: Maintains target firing rates with minimum activity
+    TargetL1SparsityLoss: Encourages sparse coding with baseline activity tolerance
+
+Examples:
+    >>> # Create combined loss for autoencoder training
+    >>> gramian_loss = GramianOrthogonalityLoss(center=True)
+    >>> homeo_loss = HomeostaticActivityLoss(target_rate=0.1, min_active=8)
+    >>>
+    >>> # Apply to encoder activations
+    >>> activations = encoder(inputs)  # Shape: (batch, latent_dim)
+    >>> total_loss = gramian_loss(activations) + homeo_loss(activations)
+"""
+
 from typing import Dict, List, Optional, Tuple
 
-import matplotlib.pyplot as plt
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
 
 
 class GramianOrthogonalityLoss(nn.Module):
@@ -18,23 +42,35 @@ class GramianOrthogonalityLoss(nn.Module):
     independent features, which is crucial for pattern separation in the
     entorhinal-hippocampal circuit.
 
-    The loss is computed as:
-        L_gramian = ||C - I||²_F
-    where C is the normalized correlation matrix of activations and I is the
-    identity matrix. The Frobenius norm ensures all pairwise correlations are
-    minimized equally.
+    The loss implements the Frobenius norm of the correlation matrix deviation:
+        L_gramian = mean((C - I)²) where C = (Z^T @ Z) / B
+
+    This formulation ensures all pairwise correlations are minimized equally
+    while preventing quadratic scaling with feature dimension that would
+    otherwise dominate composite loss functions.
+
+    Biological Motivation:
+        Orthogonal representations maximize information capacity and enable
+        effective pattern separation, similar to place cell firing patterns
+        in the hippocampus where different cells encode distinct spatial locations.
 
     Attributes:
-        center (bool): Whether to center activations before computing correlations.
-            Centering removes the mean, making the correlation matrix more stable.
-        eps (float): Small value for numerical stability when normalizing by
-            standard deviation. Prevents division by zero for constant activations.
+        center: Whether to center activations before computing correlations.
+            Centering removes the mean, making the correlation matrix more stable
+            and interpretable. Recommended for most applications.
+        eps: Small value for numerical stability when normalizing by standard
+            deviation. Prevents division by zero for constant activations.
 
-    Example:
-        >>> loss_fn = GramianOrthogonalityLoss(center=True, eps=1e-6)
+    Examples:
+        >>> # Standard orthogonality loss with centering
+        >>> loss_fn = GramianOrthogonalityLoss(center=True)
         >>> activations = torch.randn(32, 64)  # (batch_size, features)
         >>> loss = loss_fn(activations)
         >>> print(f"Orthogonality loss: {loss.item():.4f}")
+
+        >>> # Without centering for pre-normalized inputs
+        >>> loss_fn = GramianOrthogonalityLoss(center=False)
+        >>> loss = loss_fn(normalized_activations)
     """
 
     def __init__(self, center: bool = True, eps: float = 1e-6):
@@ -53,43 +89,56 @@ class GramianOrthogonalityLoss(nn.Module):
         self.eps = eps
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
-        """Compute Gramian orthogonality loss.
+        """Compute Gramian orthogonality loss for decorrelated representations.
 
-        Computes the Frobenius norm of the difference between the normalized
-        correlation matrix and the identity matrix. This encourages activations
-        to be decorrelated and orthogonal.
+        This method calculates the mean squared deviation between the normalized
+        correlation matrix of input activations and the identity matrix. The loss
+        encourages orthogonal representations by penalizing correlations between
+        different neurons/features.
+
+        The computation involves:
+        1. Optional mean centering of activations for stable correlations
+        2. Standard deviation normalization for scale invariance
+        3. Correlation matrix computation via normalized cross-products
+        4. Mean squared error with identity matrix (prevents D^2 scaling)
+
+        Mathematical formulation:
+            L_gramian = mean((C - I)²) where C = (Z^T @ Z) / B
+            Z is normalized activations, I is identity, B is batch size
 
         Args:
-            z: Activations tensor of shape (B, D) where B is batch size and
-                D is the number of features/neurons.
+            z: Input activations tensor of shape (batch_size, num_features).
+                Each row represents one sample's feature activations.
 
         Returns:
-            Scalar tensor containing the Gramian orthogonality loss.
+            Scalar loss tensor encouraging orthogonal feature representations.
+            Typical values range from 0.0 (perfect orthogonality) to ~1.0.
 
         Raises:
-            AssertionError: If input tensor is not 2-dimensional.
+            AssertionError: If input tensor is not 2-dimensional (batch, features).
 
         Note:
-            The loss is scale-invariant due to normalization by standard deviation,
-            making it robust to different activation magnitudes.
+            Using mean instead of sum prevents the loss from scaling quadratically
+            with feature dimension, ensuring stable training across different
+            latent sizes and proper balance with other loss components.
         """
         assert z.dim() == 2, "z must be (B, D)"
         B, D = z.shape
 
-        # Center activations if requested
+        # Optional centering
         if self.center:
             zc = z - z.mean(dim=0, keepdim=True)
         else:
             zc = z
 
-        # Normalize by standard deviation
+        # Standard deviation normalization (scale invariance)
         std = zc.std(dim=0, unbiased=False, keepdim=True).clamp_min(self.eps)
         zn = zc / std
 
-        # Compute correlation matrix and compare to identity
+        # Correlation-like matrix
         C = (zn.T @ zn) / float(B)
         I = torch.eye(D, device=z.device, dtype=z.dtype)
-        return (C - I).pow(2).sum()
+        return (C - I).pow(2).mean()
 
 
 class HomeostaticActivityLoss(nn.Module):
@@ -100,26 +149,43 @@ class HomeostaticActivityLoss(nn.Module):
     It mimics biological homeostatic mechanisms that maintain stable neural
     activity levels in the hippocampus and related brain regions.
 
-    The loss consists of two components:
-    1. Firing rate loss: (mean_rate - target_rate)² to maintain target activity
-    2. Minimum activity loss: Penalty when fewer than min_active neurons fire per sample
+    The loss implements a dual-constraint system observed in biological networks:
+    1. Firing rate homeostasis: Maintains population activity near target levels
+    2. Minimum activity constraint: Ensures sufficient neurons participate per sample
 
-    This dual constraint ensures representations are neither too sparse (which could
-    lose information) nor too dense (which reduces pattern separation capacity).
+    Mathematical formulation:
+        L_homeo = L_rate + 0.1 * L_min_activity
+        L_rate = mean((mean_rate - target_rate)²)
+        L_min_activity = mean(max(0, min_active - active_count)²)
+
+    This dual constraint ensures representations are neither too sparse (losing
+    information) nor too dense (reducing pattern separation capacity), mimicking
+    the balanced activity observed in hippocampal place cell populations.
+
+    Biological Motivation:
+        Homeostatic mechanisms in the brain maintain stable firing rates despite
+        varying inputs, ensuring robust neural computation. This loss encourages
+        similar stability in artificial neural representations.
 
     Attributes:
-        target_rate (float): Target mean firing rate for the neural population.
-            Typical values range from 0.05 to 0.20 based on biological observations.
-        min_active (int): Minimum number of neurons that should be active per sample.
-            Ensures each input activates enough neurons for robust representation.
-        eps (float): Small value for numerical stability in computations.
+        target_rate: Target mean firing rate for the neural population.
+            Typical biological values range from 0.05 to 0.20 based on
+            hippocampal recordings. Lower values promote sparser representations.
+        min_active: Minimum number of neurons that should be active per sample.
+            Ensures each input activates enough neurons for robust distributed
+            representation. Should be much smaller than total feature count.
+        eps: Small value for numerical stability in computations.
 
-    Example:
+    Examples:
+        >>> # Standard homeostatic loss for sparse representations
         >>> loss_fn = HomeostaticActivityLoss(target_rate=0.10, min_active=8)
         >>> activations = torch.rand(32, 64)  # (batch_size, features)
         >>> loss = loss_fn(activations)
-        >>> components = loss_fn.get_components(activations)
-        >>> print(f"Total: {loss.item():.4f}, Rate: {components['firing_rate'].item():.4f}")
+        >>> print(f"Homeostatic loss: {loss.item():.4f}")
+
+        >>> # Denser representations with higher target rate
+        >>> loss_fn = HomeostaticActivityLoss(target_rate=0.20, min_active=16)
+        >>> loss = loss_fn(activations)
     """
 
     def __init__(self, target_rate: float = 0.10, min_active: int = 8, eps: float = 1e-6):
@@ -139,25 +205,37 @@ class HomeostaticActivityLoss(nn.Module):
         self.eps = eps
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
-        """Compute homeostatic activity loss.
+        """Compute homeostatic activity loss for balanced neural populations.
 
-        Combines firing rate regulation with minimum activity constraints to
-        maintain healthy population dynamics. The total loss is:
-        L_homeo = L_rate + 0.1 * L_min_activity
+        This method implements a dual-constraint loss function that maintains
+        healthy neural population dynamics by regulating both mean firing rates
+        and minimum activity levels. It combines two biologically-motivated
+        constraints observed in hippocampal circuits.
+
+        The loss consists of two components:
+        1. Firing rate regulation: Penalizes deviation from target mean activity
+        2. Minimum activity constraint: Ensures sufficient neurons are active
+
+        Mathematical formulation:
+            L_homeo = L_rate + 0.1 * L_min_activity
+            L_rate = mean((mean_rate - target_rate)²)
+            L_min_activity = mean(max(0, min_active - active_count)²)
 
         Args:
-            z: Activations tensor of shape (B, D) where B is batch size and
-                D is the number of features/neurons.
+            z: Input activations tensor of shape (batch_size, num_features).
+                Values typically in [0, 1] range representing neural firing rates.
 
         Returns:
-            Scalar tensor containing the combined homeostatic loss.
+            Scalar loss tensor encouraging target firing rates and minimum activity.
+            Typical values range from 0.0 (perfect homeostasis) to ~0.1.
 
         Raises:
-            AssertionError: If input tensor is not 2-dimensional.
+            AssertionError: If input tensor is not 2-dimensional (batch, features).
 
         Note:
-            The 0.1 weighting factor for minimum activity loss preserves the
-            original balance from the composite loss function.
+            The 0.1 weighting factor for minimum activity maintains the original
+            balance between rate regulation and activity constraints. Neurons are
+            considered "active" if their activation exceeds 1e-6 threshold.
         """
         assert z.dim() == 2, "z must be (B, D)"
 
@@ -179,26 +257,39 @@ class TargetL1SparsityLoss(nn.Module):
     This loss function promotes sparsity by penalizing activations that exceed a target
     threshold using ReLU activation. It computes max(0, mean(|z|) - target_rate),
     which allows the network to maintain some baseline activity while discouraging
-    excessive activation.
+    excessive activation above the threshold.
 
-    The ReLU-based approach is biologically motivated - it models homeostatic
+    The ReLU-based approach is biologically motivated, modeling homeostatic
     mechanisms where neurons only incur metabolic costs when they exceed baseline
     firing rates. This encourages sparse coding while permitting necessary activity
-    for information encoding.
+    for information encoding, similar to energy-efficient coding in biological
+    neural networks.
+
+    Mathematical formulation:
+        L_sparsity = max(0, mean(|z|) - target_rate)
+
+    When target_rate = 0.0, this reduces to pure L1 sparsity penalty.
+    When target_rate > 0.0, it allows controlled baseline activity levels.
+
+    Biological Motivation:
+        Sparse coding in biological systems conserves metabolic energy while
+        maintaining representational capacity. The threshold mechanism reflects
+        the fact that neurons have baseline firing rates below which no
+        additional cost is incurred.
 
     Attributes:
-        target_rate (float): Target mean absolute activation level. Only activations
-            exceeding this threshold are penalized. When set to 0.0, all activations
-            are penalized (pure L1 penalty).
+        target_rate: Target mean absolute activation level. Only activations
+            exceeding this threshold are penalized. When set to 0.0, all
+            activations are penalized (pure L1). Typical values 0.01-0.1.
 
-    Example:
-        >>> # Pure L1 sparsity (target_rate=0.0)
+    Examples:
+        >>> # Pure L1 sparsity (no baseline tolerance)
         >>> loss_fn = TargetL1SparsityLoss(target_rate=0.0)
         >>> activations = torch.rand(32, 64)  # (batch_size, features)
         >>> loss = loss_fn(activations)
         >>> print(f"Pure L1 loss: {loss.item():.4f}")
 
-        >>> # Target-based sparsity (only penalize excess activity)
+        >>> # Target-based sparsity (allows baseline activity)
         >>> loss_fn = TargetL1SparsityLoss(target_rate=0.05)
         >>> loss = loss_fn(activations)
         >>> print(f"Target-based L1 loss: {loss.item():.4f}")
@@ -217,26 +308,36 @@ class TargetL1SparsityLoss(nn.Module):
         self.target_rate = target_rate
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
-        """Compute target-based L1 sparsity loss.
+        """Compute target-based L1 sparsity loss with ReLU thresholding.
 
-        Applies ReLU-thresholded L1 penalty: max(0, mean(|z|) - target_rate).
-        This allows baseline activity up to target_rate while penalizing excess
-        activation, promoting sparse representations with controlled activity levels.
+        This method applies a biologically-motivated sparsity penalty that only
+        penalizes activations exceeding a baseline threshold. The ReLU-based
+        approach models metabolic costs where neurons incur penalties only when
+        firing above baseline levels, allowing necessary activity for encoding.
+
+        The loss computation:
+        1. Calculate mean absolute activation across all features
+        2. Apply ReLU threshold to allow baseline activity up to target_rate
+        3. Return penalty only for excess activation above threshold
+
+        Mathematical formulation:
+            L_sparsity = max(0, mean(|z|) - target_rate)
 
         Args:
-            z: Activations tensor of shape (B, D) where B is batch size and
-                D is the number of features/neurons.
+            z: Input activations tensor of shape (batch_size, num_features).
+                Absolute values are computed internally for sparsity calculation.
 
         Returns:
-            Scalar tensor containing the target-based L1 sparsity loss.
+            Scalar loss tensor promoting sparse representations above baseline.
+            Returns 0.0 when mean activity is below target_rate, positive otherwise.
 
         Raises:
-            AssertionError: If input tensor is not 2-dimensional.
+            AssertionError: If input tensor is not 2-dimensional (batch, features).
 
         Note:
-            The ReLU thresholding ensures the loss is zero when mean activation
-            is below target_rate, allowing the network to maintain necessary
-            baseline activity for information encoding.
+            When target_rate=0.0, this becomes pure L1 sparsity penalty.
+            For target_rate > 0.0, allows controlled baseline activity while
+            still encouraging overall sparsity in the representation.
         """
         assert z.dim() == 2, "z must be (B, D)"
 
