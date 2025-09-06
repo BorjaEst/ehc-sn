@@ -500,7 +500,7 @@ class Autoencoder(pl.LightningModule):
               :meth:`compute_loss`.
         """
         x, *_ = batch
-        dec_loss, enc_loss = self.compute_loss(x, log_label="validation")
+        dec_loss, enc_loss = self.compute_loss(x, log_label="val")
         return dec_loss + enc_loss
 
     # -----------------------------------------------------------------------------------
