@@ -152,6 +152,7 @@ class ExperimentSettings(BaseModel):
             rate_target=self.rate_target,
             min_active=self.min_active,
             homeo_weight=self.homeo_weight,
+            detach_gradients=False,  # Enable standard autoencoder training with full gradient flow
             optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
 

@@ -25,7 +25,6 @@ class AutoencoderParams(BaseModel):
     - Legacy sparsity: backward compatibility parameters
     - Gramian orthogonality: decorrelation loss parameters
     - Homeostatic activity: firing rate regulation parameters
-    - L1 sparsity: simple sparsity regularization parameters
 
     Attributes:
         encoder: The encoder component that transforms input into latent representations.
@@ -106,7 +105,7 @@ def validate_dimensions(params: AutoencoderParams) -> None:
     if params.encoder.input_shape != params.decoder.output_shape:
         raise ValueError(
             f"Input shape of encoder ({params.encoder.input_shape}) "
-            f"does not match input shape of decoder ({params.decoder.input_shape})."
+            f"does not match output shape of decoder ({params.decoder.output_shape})."
         )
     if params.encoder.latent_dim != params.decoder.latent_dim:
         raise ValueError(
@@ -284,7 +283,8 @@ class Autoencoder(pl.LightningModule):
             input as target for potential supervised learning scenarios.
         """
         embedding = self.encoder(x, target=None)  # No sparse target available
-        reconstruction = self.decoder(embedding, target=x)
+        z = embedding.detach() if self.detach_gradients else embedding
+        reconstruction = self.decoder(z, target=x)
 
         # Return reconstruction and embedding
         return reconstruction, embedding
@@ -293,59 +293,55 @@ class Autoencoder(pl.LightningModule):
     # Loss computation
     # -----------------------------------------------------------------------------------
 
-    def encoder_loss(self, x: Tensor, embedding: Tensor) -> Dict[str, Tensor]:
-        """Compute encoder loss components for representation learning.
+    def compute_loss(self, x: Tensor, log_label: str) -> Tuple[Tensor, Tensor]:
+        """Compute and log decoder + encoder losses for a batch.
 
-        Calculates individual loss components that guide the encoder to learn
-        structured sparse representations. These losses work together to encourage
-        orthogonal, homeostatic, and sparse latent representations that mimic
-        the firing patterns observed in hippocampal place cells.
-
-        Args:
-            x: Input tensor (unused but kept for interface consistency).
-                Shape: (batch_size, channels, height, width).
-            embedding: Latent representation tensor from the encoder.
-                Shape: (batch_size, latent_dim).
-
-        Returns:
-            Dictionary containing individual encoder loss components:
-                - "gramian_orthogonality": Promotes decorrelated representations
-                - "homeostatic_activity": Regulates firing rates and minimum activity
-                - "l1": Encourages sparse activations with L1 penalty
-
-        Note:
-            These loss components are combined with their respective weights
-            in the training and validation steps to create the final encoder loss.
-        """
-        return {
-            "gramian_orthogonality": self.gramian_loss(embedding),
-            "homeostatic_activity": self.homeo_loss(embedding),
-        }
-
-    def decoder_loss(self, x: Tensor, reconstruction: Tensor) -> Dict[str, Tensor]:
-        """Compute decoder loss components for reconstruction learning.
-
-        Calculates loss components that guide the decoder to accurately reconstruct
-        the original input from the latent representations. Currently contains only
-        reconstruction loss, but structured as a dictionary for future extensibility.
+        Encapsulates the full loss decomposition used across training,
+        validation, and test loops. Performs a forward pass, derives
+        regularization (Gramian + homeostatic) and reconstruction losses,
+        then logs them with a namespace prefix.
 
         Args:
-            x: Original input tensor used as the reconstruction target.
-                Shape: (batch_size, channels, height, width).
-            reconstruction: Decoded output tensor from the decoder.
-                Shape: (batch_size, channels, height, width).
+            x: Input batch tensor (first element of dataloader batch) whose
+               shape excluding batch dimension matches ``self.input_shape``.
+            log_label: Namespace prefix for metric logging (``train``,
+               ``validation`` or ``test``).
 
         Returns:
-            Dictionary containing decoder loss components:
-                - "reconstruction": BCE loss measuring reconstruction accuracy
+            (decoder_loss, encoder_loss) where:
+              decoder_loss: Reconstruction criterion (BCE mean).
+              encoder_loss: Weighted sum of Gramian + homeostatic penalties.
 
-        Note:
-            The dictionary structure allows for easy addition of future decoder-specific
-            losses such as perceptual loss, adversarial loss, or spatial consistency loss.
+        Logging:
+            Emits (step + epoch):
+              ``{log_label}/reconstruction_loss``
+              ``{log_label}/gramian_loss``
+              ``{log_label}/homeostatic_loss``
+              ``{log_label}/decoder_loss`` (prog bar)
+              ``{log_label}/encoder_loss`` (prog bar)
+
+        Notes:
+            Keeps gradient behaviour consistent with current mode; Lightning
+            disables grads automatically during validation/test evaluation.
         """
-        return {
-            "reconstruction": self.reconstruction_loss(reconstruction, x),
-        }
+        # Forward pass to get reconstruction and embedding
+        reconstruction, embedding = self(x)
+
+        # Encoder-side losses
+        gramian_loss = self.gramian_loss(embedding)
+        self.log(f"{log_label}/gramian_loss", gramian_loss, on_step=True, on_epoch=True)
+        homeo_loss = self.homeo_loss(embedding)
+        self.log(f"{log_label}/homeostatic_loss", homeo_loss, on_step=True, on_epoch=True)
+        encoder_loss = self.gramian_weight * gramian_loss + self.homeo_weight * homeo_loss
+        self.log(f"{log_label}/encoder_loss", encoder_loss, on_step=True, on_epoch=True, prog_bar=True)
+
+        # Decoder-side losses
+        reconstruction_loss = self.reconstruction_loss(reconstruction, x)
+        self.log(f"{log_label}/reconstruction_loss", reconstruction_loss, on_step=True, on_epoch=True)
+        decoder_loss = reconstruction_loss
+        self.log(f"{log_label}/decoder_loss", decoder_loss, on_step=True, on_epoch=True, prog_bar=True)
+
+        return decoder_loss, encoder_loss
 
     # -----------------------------------------------------------------------------------
     # Training step
@@ -371,92 +367,89 @@ class Autoencoder(pl.LightningModule):
         registry.clear("batch")
 
     def training_step(self, batch: Tensor, batch_idx: int) -> None:
-        """Training step with manual optimization and configurable gradient flow.
+        """Perform one training iteration (manual optimization).
 
-        Implements the training strategy where encoder and decoder are trained
-        with different loss functions. The detach_gradients parameter
-        controls whether gradients flow from decoder to encoder:
-
-        When detach_gradients=True:
-        1. Encoder step: Optimized using combined Gramian orthogonality and homeostatic
-           activity losses to learn structured sparse representations.
-        2. Decoder step: Optimized using reconstruction loss only with detached embedding.
-
-        When detach_gradients=False:
-        Uses both optimizers but computes combined loss to allow full gradient flow.
+        Uses :meth:`compute_loss` to obtain the two loss components then
+        dispatches either split or joint optimization depending on
+        ``self.detach_gradients``.
 
         Args:
-            batch: Training batch containing input tensors. Expected format is
-                (input_tensor, ...) where additional elements are ignored.
-            batch_idx: Index of the current batch in the training epoch. Used
-                implicitly by Lightning for scheduling and logging.
+            batch: Batch tuple whose first element is the input tensor.
+            batch_idx: Index within the epoch (unused).
 
-        Logs:
-            Encoder metrics:
-                - train/gramian_loss: Orthogonality constraint loss
-                - train/homeostatic_loss: Combined firing rate regulation
-                - train/encoder_loss: Combined encoder losses
-            Decoder metrics:
-                - train/reconstruction_loss: BCE reconstruction error
-                - train/decoder_loss: Total decoder loss
-
-        Note:
-            Uses manual optimization with two optimizers accessed via self.optimizers().
-            The detach_gradients parameter controls the training strategy.
+        Notes:
+            Skips backward/step if a module is frozen or its loss does not
+            require gradients.
         """
-        # Common setup
         x, *_ = batch
-        encoder_optimizer, decoder_optimizer = self.optimizers()
-
-        # Common encoder forward pass and loss computation
-        embedding = self.encoder(x, target=None)
-        encoder_losses = self.encoder_loss(x, embedding)
-        encoder_loss = sum(
-            [
-                self.gramian_weight * encoder_losses["gramian_orthogonality"],
-                self.homeo_weight * encoder_losses["homeostatic_activity"],
-            ]
-        )
-
-        # Common encoder logging
-        self.log("train/gramian_loss", encoder_losses["gramian_orthogonality"], on_step=True, on_epoch=True)
-        self.log("train/homeostatic_loss", encoder_losses["homeostatic_activity"], on_step=True, on_epoch=True)
-        self.log("train/encoder_loss", encoder_loss, on_step=True, on_epoch=True, prog_bar=True)
-
-        # Common decoder forward pass and loss computation
-        # Use detached embedding for split training, original for combined training
-        z = embedding.detach() if self.detach_gradients else embedding
-        reconstruction = self.decoder(z, target=x)
-        decoder_losses = self.decoder_loss(x, reconstruction)
-        decoder_loss = decoder_losses["reconstruction"]
-
+        dec_loss, enc_loss = self.compute_loss(x, log_label="train")
         if self.detach_gradients:
-            # Split training: encoder and decoder trained separately
-            encoder_optimizer.zero_grad()
-            self.manual_backward(encoder_loss)
-            encoder_optimizer.step()
-
-            decoder_optimizer.zero_grad()
-            self.manual_backward(decoder_loss)
-            decoder_optimizer.step()
-
+            self.train_detached(enc_loss, dec_loss)
         else:
-            # Combined training: both optimizers step with full gradient flow
-            encoder_optimizer.zero_grad()
-            decoder_optimizer.zero_grad()
+            self.train_full(enc_loss, dec_loss)
 
-            total_loss = encoder_loss + decoder_loss
-            self.manual_backward(total_loss)
-            encoder_optimizer.step()
-            decoder_optimizer.step()
+    def train_detached(self, enc_loss: Tensor, dec_loss: Tensor) -> None:
+        """Optimize encoder and decoder independently (split mode).
 
-        # Common decoder logging
-        self.log("train/reconstruction_loss", decoder_loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train/decoder_loss", decoder_loss, on_step=True, on_epoch=True, prog_bar=True)
+        The latent embedding passed to the decoder was detached during the
+        forward pass, so reconstruction gradients cannot influence encoder
+        weights. Each component receives a separate backward pass and optimizer
+        step if (a) it has trainable parameters and (b) its loss requires
+        gradients.
 
-    # -----------------------------------------------------------------------------------
-    # Training batch lifecycle hooks
-    # -----------------------------------------------------------------------------------
+        Args:
+            enc_loss: Encoder composite sparsity / regularization loss.
+            dec_loss: Decoder reconstruction loss.
+
+        Notes:
+            - Ensures zeroed gradients per component before its backward pass.
+            - Safe-guards avoid unnecessary backward calls when modules are
+              frozen (supports curriculum or staged training).
+        """
+        enc_opt, dec_opt = self.optimizers()
+        enc_do_step = any(p.requires_grad for p in self.encoder.parameters()) and enc_loss.requires_grad
+        dec_do_step = any(p.requires_grad for p in self.decoder.parameters()) and dec_loss.requires_grad
+        if enc_do_step:
+            enc_opt.zero_grad()
+            self.manual_backward(enc_loss)
+            enc_opt.step()
+        if dec_do_step:
+            dec_opt.zero_grad()
+            self.manual_backward(dec_loss)
+            dec_opt.step()
+
+    def train_full(self, enc_loss: Tensor, dec_loss: Tensor) -> None:
+        """Optimize encoder + decoder jointly with full gradient flow.
+
+        Sums losses and performs a single backward pass so decoder (reconstruction)
+        gradients propagate through the encoder. Each optimizer steps if its
+        parameter set is trainable.
+
+        Args:
+            enc_loss: Encoder sparsity / regularization term.
+            dec_loss: Decoder reconstruction term.
+
+        Notes:
+            - Skips early if both modules are effectively frozen.
+            - Keeps separate optimizers to allow potential divergence of
+              schedulers or hyperparameters later while still sharing a
+              unified backward graph.
+        """
+        enc_opt, dec_opt = self.optimizers()
+        enc_do_step = any(p.requires_grad for p in self.encoder.parameters()) and enc_loss.requires_grad
+        dec_do_step = any(p.requires_grad for p in self.decoder.parameters()) and dec_loss.requires_grad
+        if not (enc_do_step or dec_do_step):
+            return
+        if enc_do_step:
+            enc_opt.zero_grad()
+        if dec_do_step:
+            dec_opt.zero_grad()
+        total_loss = enc_loss + dec_loss
+        self.manual_backward(total_loss)
+        if enc_do_step:
+            enc_opt.step()
+        if dec_do_step:
+            dec_opt.step()
 
     def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
         """Clean up registry after training batch completion.
@@ -484,155 +477,60 @@ class Autoencoder(pl.LightningModule):
     # -----------------------------------------------------------------------------------
 
     def validation_step(self, batch: Tensor, batch_idx: int) -> Tensor:  # noqa: ARG002
-        """Validation step for the autoencoder using split loss evaluation.
+        """Run one validation iteration and return combined loss.
 
-        Executes one validation iteration by processing a batch through the model
-        and computing validation metrics consistent with the split training approach.
-        This method evaluates both encoder and decoder components separately to
-        provide detailed performance insights.
+        Performs a forward pass on a validation batch, computing both decoder
+        (reconstruction) and encoder (regularization / sparsity) losses via
+        :meth:`compute_loss`. Returns their sum so Lightning can aggregate it
+        for epoch metrics. Individual component losses are logged inside
+        :meth:`compute_loss` under the ``validation/`` namespace
+        (e.g. ``validation/reconstruction_loss``).
 
         Args:
-            batch: Validation batch containing input tensors and optional additional data.
-                Expected format: (input_tensor, ...) where input_tensor has shape
-                (batch_size, channels, height, width).
-            batch_idx: Index of the current batch in the validation epoch (unused).
+            batch: Validation batch. Expected structure ``(x, *_)`` where ``x``
+                matches the model's ``input_shape``.
+            batch_idx: Index of the batch inside the validation epoch (unused).
 
         Returns:
-            Total validation loss tensor (encoder_loss + decoder_loss).
+            Scalar tensor: ``decoder_loss + encoder_loss`` for the batch.
 
-        Logs:
-            Encoder metrics:
-                - val/gramian_loss: Gramian orthogonality loss
-                - val/homeostatic_loss: Combined homeostatic activity loss
-                - val/l1_loss: L1 sparsity penalty
-                - val/encoder_loss: Weighted total encoder loss
-            Decoder metrics:
-                - val/reconstruction_loss: BCE reconstruction loss
-                - val/decoder_loss: Total decoder loss (same as reconstruction)
-            Combined metrics:
-                - val/total_loss: Combined encoder and decoder loss
-                - val/sparsity_rate: Percentage of active units (> 0.01 threshold)
-
-        Note:
-            Validation metrics are logged per-epoch only to reduce logging overhead
-            and focus on epoch-level performance tracking. This follows the same
-            split loss approach as the training_step for consistency.
+        Notes:
+            - Gradients are disabled automatically in eval mode.
+            - Wrapper keeps loop minimal; decomposition lives in
+              :meth:`compute_loss`.
         """
-        x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
-        reconstruction, embedding = self(x)
-
-        # Compute encoder loss components using the same method as training
-        encoder_losses = self.encoder_loss(x, embedding)
-        encoder_loss = sum(
-            [
-                self.gramian_weight * encoder_losses["gramian_orthogonality"],
-                self.homeo_weight * encoder_losses["homeostatic_activity"],
-            ]
-        )
-
-        # Compute decoder loss components using the same method as training
-        decoder_losses = self.decoder_loss(x, reconstruction)
-        decoder_loss = decoder_losses["reconstruction"]
-
-        # Calculate total loss
-        total_loss = encoder_loss + decoder_loss
-
-        # Log encoder metrics
-        self.log("val/gramian_loss", encoder_losses["gramian_orthogonality"], on_step=False, on_epoch=True)
-        self.log("val/homeostatic_loss", encoder_losses["homeostatic_activity"], on_step=False, on_epoch=True)
-        self.log("val/encoder_loss", encoder_loss, on_step=False, on_epoch=True, prog_bar=True)
-
-        # Log decoder metrics
-        self.log("val/reconstruction_loss", decoder_loss, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("val/decoder_loss", decoder_loss, on_step=False, on_epoch=True, prog_bar=True)
-
-        # Log combined metrics
-        self.log("val/total_loss", total_loss, on_step=False, on_epoch=True, prog_bar=True)
-
-        # Calculate and log sparsity metrics
-        sparsity_rate = (embedding > 0.01).float().mean()
-        self.log("val/sparsity_rate", sparsity_rate, on_step=False, on_epoch=True)
-
-        return total_loss
+        x, *_ = batch
+        dec_loss, enc_loss = self.compute_loss(x, log_label="validation")
+        return dec_loss + enc_loss
 
     # -----------------------------------------------------------------------------------
     # Test step
     # -----------------------------------------------------------------------------------
 
-    def test_step(self, batch: Tensor, batch_idx: int) -> Dict[str, Tensor]:  # noqa: ARG002
-        """Test step for the autoencoder using split loss evaluation.
+    def test_step(self, batch: Tensor, batch_idx: int) -> Tensor:  # noqa: ARG002
+        """Evaluate the model on a held-out test batch and return total loss.
 
-        Executes one test iteration by processing a batch through the model and
-        computing comprehensive test metrics. This method provides detailed
-        evaluation metrics beyond the standard training/validation losses,
-        following the same split training approach for consistency.
+        Mirrors `validation_step` but logs metrics under the `test/` namespace
+        to clearly separate final evaluation from validation monitoring.
 
         Args:
-            batch: Test batch containing input tensors and optional additional data.
-                Expected format: (input_tensor, ...) where input_tensor has shape
-                (batch_size, channels, height, width).
-            batch_idx: Index of the current batch in the test epoch (unused).
+            batch: Test batch structured as `(x, *_)` where `x` conforms to
+                the expected input tensor shape.
+            batch_idx: Sequential index of the test batch (unused).
 
         Returns:
-            Dictionary containing all computed test metrics.
+            A scalar tensor equal to the sum of decoder reconstruction loss
+            and encoder regularization loss for this batch.
 
-        Logs:
-            Encoder metrics:
-                - test/gramian_loss: Gramian orthogonality loss
-                - test/homeostatic_loss: Combined homeostatic activity loss
-                - test/l1_loss: L1 sparsity penalty
-                - test/encoder_loss: Weighted total encoder loss
-            Decoder metrics:
-                - test/reconstruction_loss: BCE reconstruction loss
-                - test/decoder_loss: Total decoder loss (same as reconstruction)
-            Combined metrics:
-                - test/total_loss: Combined encoder and decoder loss
-                - test/mse: Mean squared error between input and reconstruction
-                - test/mae: Mean absolute error between input and reconstruction
-                - test/sparsity_rate: Percentage of active units (> 0.01 threshold)
-
-        Note:
-            Test metrics are logged per-epoch only and include additional
-            evaluation metrics (MSE, MAE) for comprehensive model assessment.
-            The split loss approach ensures consistency with training/validation.
+        Notes:
+            - No gradients are produced (evaluation mode).
+            - Individual component losses are already logged by `compute_loss`.
+            - Keeping symmetry with `training_step` and `validation_step`
+              simplifies downstream aggregation and comparisons.
         """
-        x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
-        reconstruction, embedding = self(x)
-
-        # Compute encoder loss components using the same method as training
-        encoder_losses = self.encoder_loss(x, embedding)
-        encoder_loss = sum(
-            [
-                self.gramian_weight * encoder_losses["gramian_orthogonality"],
-                self.homeo_weight * encoder_losses["homeostatic_activity"],
-            ]
-        )
-
-        # Compute decoder loss components using the same method as training
-        decoder_losses = self.decoder_loss(x, reconstruction)
-        decoder_loss = decoder_losses["reconstruction"]
-
-        # Calculate total loss and additional metrics
-        total_loss = encoder_loss + decoder_loss
-        mse = nn.MSELoss()(reconstruction, x)
-        mae = nn.L1Loss()(reconstruction, x)
-        sparsity_rate = (embedding > 0.01).float().mean()
-
-        # Create metrics dictionary
-        metrics = {
-            "test/gramian_loss": encoder_losses["gramian_orthogonality"],
-            "test/homeostatic_loss": encoder_losses["homeostatic_activity"],
-            "test/encoder_loss": encoder_loss,
-            "test/reconstruction_loss": decoder_loss,
-            "test/decoder_loss": decoder_loss,
-            "test/total_loss": total_loss,
-            "test/mse": mse,
-            "test/mae": mae,
-            "test/sparsity_rate": sparsity_rate,
-        }
-
-        self.log_dict(metrics, on_step=False, on_epoch=True)
-        return metrics
+        x, *_ = batch
+        dec_loss, enc_loss = self.compute_loss(x, log_label="test")
+        return dec_loss + enc_loss
 
     # -----------------------------------------------------------------------------------
     # Prediction step
