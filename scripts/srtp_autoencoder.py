@@ -5,9 +5,9 @@ Simple script for running baseline autoencoder experiments using backpropagation
 training on cognitive maps. Uses TOML configuration files for parameter management.
 
 Usage:
-    python bp_baseline.py
-    python bp_baseline.py --config experiments/baseline.toml
-    python bp_baseline.py --epochs 300 --samples 8000
+    python srtp_autoencoder.py
+    python srtp_autoencoder.py --config experiments/baseline.toml
+    python srtp_autoencoder.py --epochs 300 --samples 8000
 """
 
 import argparse
@@ -64,15 +64,13 @@ class ExperimentSettings(BaseModel):
     # Split Training Loss Settings
     gramian_center: bool = Field(default=True, description="Center activations before Gramian computation")
     gramian_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for Gramian orthogonality loss")
-    rate_target: float = Field(
-        default=0.05, ge=0.0, le=1.0, description="Target mean firing rate for homeostatic regulation"
-    )
+    rate_target: float = Field(default=0.05, ge=0.0, le=1.0, description="Target mean firing rate for regulation")
     min_active: int = Field(default=8, ge=1, le=64, description="Minimum number of active neurons per sample")
     homeo_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for homeostatic activity loss")
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
-    experiment_name: str = Field(default="baseline", description="Experiment name")
+    experiment_name: str = Field(default="srtp_autoencoder", description="Experiment name")
     checkpoint_every_n_epochs: int = Field(default=5, ge=1, le=50, description="Checkpoint frequency")
     progress_refresh_rate: int = Field(default=5, ge=1, le=20, description="Progress bar refresh rate")
 
@@ -143,7 +141,7 @@ class ExperimentSettings(BaseModel):
     def create_autoencoder_params(self) -> AutoencoderParams:
         """Create autoencoder parameters from settings."""
         encoder = encoders.Linear(self.create_encoder_params())
-        decoder = decoders.Linear(self.create_decoder_params())
+        decoder = decoders.SRTPLinear(self.create_decoder_params())
         return AutoencoderParams(
             encoder=encoder,
             decoder=decoder,
@@ -152,7 +150,7 @@ class ExperimentSettings(BaseModel):
             rate_target=self.rate_target,
             min_active=self.min_active,
             homeo_weight=self.homeo_weight,
-            detach_gradients=False,  # Enable standard autoencoder training with full gradient flow
+            detach_gradients=True,  # Detach gradients for SRTP decoder training
             optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
 

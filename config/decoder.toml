@@ -31,7 +31,6 @@ homeo_weight   = 0.2
 
 # logging
 log_dir                   = "logs"
-experiment_name           = "bp_decoder"
 checkpoint_every_n_epochs = 5
 progress_refresh_rate     = 5
 
