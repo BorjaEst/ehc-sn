@@ -226,7 +226,7 @@ class Linear(BaseEncoder):
 
         # Output layer: latent_dim units
         self.layer3 = nn.Linear(512, params.latent_dim, bias=True)
-        self.output_activation = nn.GELU()
+        self.output_activation = nn.ReLU()
 
     def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
         """Forward pass through the linear encoder.
