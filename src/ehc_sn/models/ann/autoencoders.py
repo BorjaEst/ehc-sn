@@ -7,8 +7,9 @@ from torch import Tensor, nn
 from torch.optim import Optimizer
 
 from ehc_sn.hooks import registry
-from ehc_sn.models.decoders import BaseDecoder, DecoderParams
-from ehc_sn.models.encoders import BaseEncoder, EncoderParams
+from ehc_sn.models.ann import encoders
+from ehc_sn.models.ann.decoders import BaseDecoder, DecoderParams
+from ehc_sn.models.ann.encoders import BaseEncoder, EncoderParams
 from ehc_sn.modules.loss import GramianOrthogonalityLoss, HomeostaticActivityLoss, TargetL1SparsityLoss
 
 
@@ -715,7 +716,7 @@ if __name__ == "__main__":
 
     import lightning.pytorch as pl
 
-    from ehc_sn.models import decoders, encoders
+    from ehc_sn.models.ann import decoders
 
     # Simple dataset for testing
     class SimpleDataset(torch.utils.data.Dataset):

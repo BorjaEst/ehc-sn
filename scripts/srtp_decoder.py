@@ -25,12 +25,12 @@ from torch import nn
 
 from ehc_sn.data import cognitive_maps as data
 from ehc_sn.figures import cognitive_maps as figures
-from ehc_sn.models import decoders, encoders
-from ehc_sn.models.autoencoders import Autoencoder, AutoencoderParams
-from ehc_sn.models.decoders import DecoderParams
-from ehc_sn.models.decoders import SRTPLinear as SRTPDecoder
-from ehc_sn.models.encoders import EncoderParams
-from ehc_sn.models.encoders import Linear as LinearEncoder
+from ehc_sn.models.ann import decoders, encoders
+from ehc_sn.models.ann.autoencoders import Autoencoder, AutoencoderParams
+from ehc_sn.models.ann.decoders import DecoderParams
+from ehc_sn.models.ann.decoders import SRTPLinear as SRTPDecoder
+from ehc_sn.models.ann.encoders import EncoderParams
+from ehc_sn.models.ann.encoders import Linear as LinearEncoder
 from ehc_sn.utils import load_settings
 
 # -------------------------------------------------------------------------------------------
