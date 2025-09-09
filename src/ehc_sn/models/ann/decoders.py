@@ -6,13 +6,11 @@ back into reconstructed outputs (e.g., cognitive maps, obstacle maps). The decod
 the encoders and support both standard backpropagation (BP), Direct Random Target
 Projection (DRTP), and Direct Feedback Alignment (DFA) training methods.
 
-The module provides six main decoder types:
+The module provides four main decoder types:
 1. Linear: Fully connected layers for reconstructing flattened outputs
 2. DRTPLinear: DRTP-enabled fully connected decoder
 3. DFALinear: DFA-enabled fully connected decoder
-4. Conv2D: Transpose convolutional decoder for spatial data reconstruction
-5. DRTPConv2D: DRTP-enabled transpose convolutional decoder
-6. DFAConv2D: DFA-enabled transpose convolutional decoder
+4. SRTPLinear: SRTP-enabled fully connected decoder
 
 All decoders follow a consistent architecture pattern:
 - Input from latent representation
@@ -22,9 +20,7 @@ All decoders follow a consistent architecture pattern:
 
 Key Features:
 - Pydantic-based parameter validation and configuration
-- Dynamic dimension calculation for transpose convolutions
-- Symmetric architectures complementing encoder designs
-- Support for standard, DRTP, and DFA training algorithms
+- Support for standard, DRTP, DFA, and SRTP training algorithms
 - Consistent interface across all decoder types
 
 Example:
@@ -129,7 +125,7 @@ class BaseDecoder(nn.Module):
         the concrete implementations:
 
         >>> params = DecoderParams(...)
-        >>> decoder = Linear(params)  # or Conv2D, DRTPLinear, etc.
+        >>> decoder = Linear(params)  # or DRTPLinear, DFALinear, SRTPLinear
         >>> reconstruction = decoder(latent_tensor)
     """
 
@@ -570,320 +566,6 @@ class SRTPLinear(BaseDecoder):
         return output.reshape(output.shape[0], *self.output_shape)
 
 
-class Conv2D(BaseDecoder):
-    """Transpose convolutional neural network decoder using standard backpropagation training.
-
-    This decoder uses transpose convolutional layers to reconstruct spatial data while
-    preserving and enhancing spatial relationships. It mirrors the Conv2D encoder
-    architecture in reverse, expanding from latent space back to full spatial dimensions.
-
-    Architecture:
-        Latent input → Linear(512) → GELU → Linear(intermediate_features) → GELU → Reshape → TransposeConv2d(5x5, 1) → Sigmoid
-
-    Design choices:
-    - First linear layer expands latent to 512 units
-    - Second linear layer expands to match flattened conv feature size (calculated dynamically)
-    - Reshape to spatial dimensions that transpose conv can process
-    - 5x5 transpose convolution kernel reconstructs local spatial patterns
-    - Stride=2 and appropriate padding to double spatial dimensions
-    - GELU activations for smooth gradients and improved training
-    - Sigmoid output activation for bounded reconstruction values
-
-    The decoder automatically calculates the correct intermediate dimensions based
-    on the output spatial dimensions and transpose convolution operations.
-
-    Args:
-        params: DecoderParams with activation_fn typically set to nn.GELU.
-
-    Example:
-        >>> params = DecoderParams(
-        ...     output_shape=(1, 32, 16),  # Final output shape
-        ...     latent_dim=128,
-        ...     activation_fn=nn.GELU
-        ... )
-        >>> decoder = Conv2D(params)
-        >>> latent_batch = torch.randn(4, 128)
-        >>> reconstruction = decoder(latent_batch)  # shape: (4, 1, 32, 16)
-
-    Note:
-        Output spatial dimensions must be even numbers to work correctly with the
-        transpose convolution stride settings.
-    """
-
-    def __init__(self, params: DecoderParams):
-        super().__init__(params)
-
-        # Calculate intermediate dimensions (mirror of encoder conv calculations)
-        h, w = self.spatial_dimensions
-        # Before transpose conv: h//2 x w//2 (what encoder conv+pool produces)
-        intermediate_h, intermediate_w = h // 2, w // 2
-        intermediate_features = 32 * intermediate_h * intermediate_w
-
-        # Linear layer: expand from latent to 512 units
-        self.layer1 = nn.Linear(params.latent_dim, out_features=512, bias=True)
-        self.activation1 = params.activation_fn()  # Usually GELU
-
-        # Second linear layer to match conv input size
-        self.layer2 = nn.Linear(in_features=512, out_features=intermediate_features, bias=True)
-        self.activation2 = params.activation_fn()  # Usually GELU
-
-        # Store intermediate dimensions for reshape
-        self.intermediate_shape = (32, intermediate_h, intermediate_w)
-
-        # Transpose convolution: 32 channels -> 1 channel, 5x5 kernel, stride=2
-        kwds = {"stride": 2, "padding": 2, "output_padding": 1, "bias": True}
-        self.conv3 = nn.ConvTranspose2d(32, self.output_channels, kernel_size=5, **kwds)
-        self.output_activation = nn.Sigmoid()
-
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
-        """Forward pass through the transpose convolutional decoder.
-
-        Args:
-            x: Input latent tensor of shape (batch_size, latent_dim).
-            target: Ignored for standard decoder, kept for API consistency.
-
-        Returns:
-            Reconstructed output of shape (batch_size, *output_shape) with values
-            in range [0, 1] due to Sigmoid output activation.
-        """
-        # First linear layer
-        h1 = self.layer1(x)
-        h1 = self.activation1(h1)
-
-        # Second linear layer
-        h2 = self.layer2(h1)
-        h2 = self.activation2(h2)
-
-        # Reshape to spatial format for transpose convolution
-        h2 = h2.reshape(h2.size(0), *self.intermediate_shape)
-
-        # Transpose convolution to final output size
-        output = self.conv3(h2)
-        output = self.output_activation(output)
-
-        return output
-
-
-class DRTPConv2D(BaseDecoder):
-    """Transpose convolutional decoder using Direct Random Target Projection (DRTP) training.
-
-    This decoder combines the spatial reconstruction capabilities of transpose
-    convolutional layers with the biologically plausible learning mechanism of DRTP.
-    It mirrors the DRTPConv2D encoder architecture in reverse.
-
-    Architecture:
-        Latent input → Linear(512) → Tanh → DRTP → Linear(intermediate_features) → Tanh → DRTP → Reshape → TransposeConv2d(5x5, 1) → Sigmoid
-
-    Key features:
-    - Transpose convolutional layer reconstructs spatial patterns from feature maps
-    - DRTP applied to both fully connected hidden layers
-    - Uses Tanh activation functions for compatibility with DRTP
-    - Random feedback weights enable biologically plausible learning
-    - Output layer uses standard backpropagation for final reconstruction
-    - Second linear layer size is calculated dynamically based on output dimensions
-
-    The combination of transpose convolution and DRTP makes this decoder suitable for:
-    - Spatial navigation tasks requiring biological plausibility
-    - Investigating how spatial reconstruction might work in biological neural networks
-    - Research comparing biological vs. standard learning mechanisms
-    - Applications where spatial features and learning constraints both matter
-
-    Args:
-        params: DecoderParams with activation_fn typically set to nn.Tanh.
-
-    Example:
-        >>> params = DecoderParams(
-        ...     output_shape=(1, 32, 16),
-        ...     latent_dim=128,
-        ...     activation_fn=nn.Tanh
-        ... )
-        >>> decoder = DRTPConv2D(params)
-        >>> latent_batch = torch.randn(4, 128)
-        >>> reconstruction = decoder(latent_batch)  # shape: (4, 1, 32, 16), target=None is default
-        >>> # During training: reconstruction = decoder(latent_batch, target_batch)
-
-    Note:
-        Target tensor is only required during backward pass for DRTP computation.
-        Forward pass accepts optional target parameter for consistent API.
-        Output spatial dimensions should be even numbers for transpose conv compatibility.
-
-    References:
-        Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
-        error backpropagation for deep learning. Nature Communications, 7, 13276.
-    """
-
-    def __init__(self, params: DecoderParams):
-        super().__init__(params)
-
-        # Calculate intermediate dimensions (mirror of encoder conv calculations)
-        h, w = self.spatial_dimensions
-        intermediate_h, intermediate_w = h // 2, w // 2
-        intermediate_features = 32 * intermediate_h * intermediate_w
-
-        # Define layers separately since we need to apply DRTP manually
-        self.layer1 = nn.Linear(in_features=params.latent_dim, out_features=512, bias=True)
-        self.activation1 = params.activation_fn()  # Usually Tanh
-        self.drtp1 = DRTPLayer(target_dim=params.output_shape, hidden_dim=512)
-
-        # Second linear layer to match conv input size
-        self.layer2 = nn.Linear(in_features=512, out_features=intermediate_features, bias=True)
-        self.activation2 = params.activation_fn()  # Usually Tanh
-        self.drtp2 = DRTPLayer(target_dim=params.output_shape, hidden_dim=intermediate_features)
-
-        # Store intermediate dimensions for reshape
-        self.intermediate_shape = (32, intermediate_h, intermediate_w)
-
-        # Transpose convolution: 32 channels -> 1 channel, 5x5 kernel, stride=2
-        # No DRTP on transpose conv layer (uses standard gradients)
-        kwds = {"stride": 2, "padding": 2, "output_padding": 1, "bias": True}
-        self.conv3 = nn.ConvTranspose2d(32, self.output_channels, kernel_size=5, **kwds)
-        self.output_activation = nn.Sigmoid()
-
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
-        """Forward pass through the DRTP transpose convolutional decoder.
-
-        Args:
-            x: Input latent tensor of shape (batch_size, latent_dim).
-            target: Target tensor for DRTP gradient computation during backward pass.
-                Can be None during forward-only inference.
-
-        Returns:
-            Reconstructed output of shape (batch_size, *output_shape) with values
-            in range [0, 1] due to Sigmoid output activation.
-        """
-        # First layer with DRTP
-        h1 = self.layer1(x)
-        h1 = self.activation1(h1)
-        h1 = self.drtp1(h1, target)
-
-        # Second layer with DRTP
-        h2 = self.layer2(h1)
-        h2 = self.activation2(h2)
-        h2 = self.drtp2(h2, target)
-
-        # Reshape to spatial format for transpose convolution
-        h2 = h2.reshape(h2.size(0), *self.intermediate_shape)
-
-        # Transpose convolution to final output size (no DRTP)
-        output = self.conv3(h2)
-        output = self.output_activation(output)
-
-        return output
-
-
-class DFAConv2D(BaseDecoder):
-    """Transpose convolutional decoder using Direct Feedback Alignment (DFA) training.
-
-    This decoder combines the spatial reconstruction capabilities of transpose
-    convolutional layers with the biologically plausible learning mechanism of DFA.
-    It provides an alternative to both standard backpropagation and DRTP while
-    maintaining spatial processing capabilities.
-
-    Architecture:
-        Latent input → Linear(512) → Tanh → DFA → Linear(intermediate_features) → Tanh → DFA → Reshape → TransposeConv2d(5x5, 1) → Sigmoid
-
-    Key features:
-    - Transpose convolutional layer reconstructs spatial patterns from feature maps
-    - DFA applied to both fully connected hidden layers
-    - Uses Tanh activation functions for compatibility with DFA
-    - Random feedback weights enable biologically plausible learning
-    - Output layer uses standard backpropagation for final reconstruction
-    - Second linear layer size is calculated dynamically based on output dimensions
-    - Error signals are propagated directly from output to hidden layers
-
-    The combination of transpose convolution and DFA makes this decoder suitable for:
-    - Spatial navigation tasks requiring biological plausibility
-    - Investigating how spatial reconstruction might work in biological neural networks
-    - Research comparing biological vs. standard learning mechanisms
-    - Applications where spatial features and learning constraints both matter
-
-    Args:
-        params: DecoderParams with activation_fn typically set to nn.Tanh.
-
-    Example:
-        >>> params = DecoderParams(
-        ...     output_shape=(1, 32, 16),
-        ...     latent_dim=128,
-        ...     activation_fn=nn.Tanh
-        ... )
-        >>> decoder = DFAConv2D(params)
-        >>> latent_batch = torch.randn(4, 128)
-        >>> reconstruction = decoder(latent_batch)  # shape: (4, 1, 32, 16), error_signal=None is default
-        >>> # During training: reconstruction = decoder(latent_batch, grad_output_batch)
-
-    Note:
-        Error signal is only required during backward pass for DFA computation.
-        Forward pass accepts optional error_signal parameter for consistent API.
-        Output spatial dimensions should be even numbers for transpose conv compatibility.
-
-    References:
-        Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
-        error backpropagation for deep learning. Nature Communications, 7, 13276.
-    """
-
-    def __init__(self, params: DecoderParams):
-        super().__init__(params)
-
-        # Calculate intermediate dimensions (mirror of encoder conv calculations)
-        h, w = self.spatial_dimensions
-        intermediate_h, intermediate_w = h // 2, w // 2
-        intermediate_features = 32 * intermediate_h * intermediate_w
-
-        # Define layers separately since we need to apply DFA manually
-        self.layer1 = nn.Linear(in_features=params.latent_dim, out_features=512, bias=True)
-        self.activation1 = params.activation_fn()  # Usually Tanh
-        self.dfa1 = DFALayer(output_dim=params.output_shape, hidden_dim=512)
-
-        # Second linear layer to match conv input size
-        self.layer2 = nn.Linear(in_features=512, out_features=intermediate_features, bias=True)
-        self.activation2 = params.activation_fn()  # Usually Tanh
-        self.dfa2 = DFALayer(output_dim=params.output_shape, hidden_dim=intermediate_features)
-
-        # Store intermediate dimensions for reshape
-        self.intermediate_shape = (32, intermediate_h, intermediate_w)
-
-        # Transpose convolution: 32 channels -> 1 channel, 5x5 kernel, stride=2
-        # No DFA on transpose conv layer (uses standard gradients)
-        kwds = {"stride": 2, "padding": 2, "output_padding": 1, "bias": True}
-        self.conv3 = nn.ConvTranspose2d(32, self.output_channels, kernel_size=5, **kwds)
-        self.output_activation = nn.Sigmoid()
-
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
-        """Forward pass through the DFA transpose convolutional decoder.
-
-        Args:
-            x: Input latent tensor of shape (batch_size, latent_dim).
-            target: Ignored for standard decoder, kept for API consistency.
-
-        Returns:
-            Reconstructed output of shape (batch_size, *output_shape) with values
-            in range [0, 1] due to Sigmoid output activation.
-        """
-        # First layer with DFA
-        h1 = self.layer1(x)
-        h1 = self.activation1(h1)
-        h1 = self.dfa1(h1)
-
-        # Second layer with DFA
-        h2 = self.layer2(h1)
-        h2 = self.activation2(h2)
-        h2 = self.dfa2(h2)
-
-        # Reshape to spatial format for transpose convolution
-        h2 = h2.reshape(h2.size(0), *self.intermediate_shape)
-
-        # Transpose convolution to final output size (no DFA)
-        output = self.conv3(h2)
-        output = self.output_activation(output)
-
-        # Register DFA hook on the current output every forward (per batch)
-        if output.requires_grad:
-            clear_dfa_error()
-            register_dfa_hook(output)
-
-        return output
-
-
 # -------------------------------------------------------------------------------------------
 # Examples and demonstrations
 # -------------------------------------------------------------------------------------------
@@ -977,62 +659,10 @@ if __name__ == "__main__":
     print(f"   Mean activation: {dfa_linear_output.mean():.3f}\n")
 
     # -----------------------------------------------------------------------------------
-    # Conv2D Decoder Example
-    # -----------------------------------------------------------------------------------
-
-    print("4. Conv2D Decoder:")
-    conv_decoder = Conv2D(params)
-
-    # Calculate expected intermediate dimensions
-    h, w = params.output_shape[1], params.output_shape[2]
-    intermediate_features = 32 * (h // 2) * (w // 2)
-
-    with torch.no_grad():
-        conv_output = conv_decoder(sample_latent)
-
-    print(f"   Spatial dimensions: {h}x{w}")
-    print(f"   Intermediate features: 32x{h//2}x{w//2} = {intermediate_features}")
-    print(f"   Output shape: {conv_output.shape}")
-    print(f"   Output range: [{conv_output.min():.3f}, {conv_output.max():.3f}]")
-    print(f"   Mean activation: {conv_output.mean():.3f}\n")
-
-    # -----------------------------------------------------------------------------------
-    # DRTP Conv2D Decoder Example
-    # -----------------------------------------------------------------------------------
-
-    print("5. DRTP Conv2D Decoder:")
-    drtp_conv_decoder = DRTPConv2D(drtp_params)
-
-    with torch.no_grad():
-        drtp_conv_output = drtp_conv_decoder(sample_latent)
-
-    print(f"   Spatial dimensions: {h}x{w}")
-    print(f"   Intermediate features: 32x{h//2}x{w//2} = {intermediate_features}")
-    print(f"   Output shape: {drtp_conv_output.shape}")
-    print(f"   Output range: [{drtp_conv_output.min():.3f}, {drtp_conv_output.max():.3f}]")
-    print(f"   Mean activation: {drtp_conv_output.mean():.3f}\n")
-
-    # -----------------------------------------------------------------------------------
-    # DFA Conv2D Decoder Example
-    # -----------------------------------------------------------------------------------
-
-    print("6. DFA Conv2D Decoder:")
-    dfa_conv_decoder = DFAConv2D(dfa_params)
-
-    with torch.no_grad():
-        dfa_conv_output = dfa_conv_decoder(sample_latent)
-
-    print(f"   Spatial dimensions: {h}x{w}")
-    print(f"   Intermediate features: 32x{h//2}x{w//2} = {intermediate_features}")
-    print(f"   Output shape: {dfa_conv_output.shape}")
-    print(f"   Output range: [{dfa_conv_output.min():.3f}, {dfa_conv_output.max():.3f}]")
-    print(f"   Mean activation: {dfa_conv_output.mean():.3f}\n")
-
-    # -----------------------------------------------------------------------------------
     # Model comparison
     # -----------------------------------------------------------------------------------
 
-    print("7. Model Size Comparison:")
+    print("4. Model Size Comparison:")
 
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1041,9 +671,6 @@ if __name__ == "__main__":
         "Linear": linear_decoder,
         "DRTP Linear": drtp_linear_decoder,
         "DFA Linear": dfa_linear_decoder,
-        "Conv2D": conv_decoder,
-        "DRTP Conv2D": drtp_conv_decoder,
-        "DFA Conv2D": dfa_conv_decoder,
     }
 
     for name, model in models.items():
