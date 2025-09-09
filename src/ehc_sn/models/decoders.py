@@ -49,10 +49,10 @@ import torch
 from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
-from ehc_sn.hooks.drtp import DRTPLayer
 from ehc_sn.hooks.registry import registry
 from ehc_sn.hooks.srtp import SRTPLayer
 from ehc_sn.modules.dfa import DFALayer, clear_dfa_error, register_dfa_hook
+from ehc_sn.modules.drtp import DRTPLayer
 
 
 class DecoderParams(BaseModel):

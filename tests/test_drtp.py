@@ -2,7 +2,7 @@ import pytest
 import torch
 from torch import nn
 
-from ehc_sn.hooks.drtp import DRTPFunction, DRTPLayer, drtp
+from ehc_sn.modules.drtp import DRTPFunction, DRTPLayer, drtp
 
 
 class TestDRTPLayer:
