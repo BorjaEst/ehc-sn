@@ -67,6 +67,7 @@ class ExperimentSettings(BaseModel):
     rate_target: float = Field(default=0.05, ge=0.0, le=1.0, description="Target mean firing rate for regulation")
     min_active: int = Field(default=8, ge=1, le=64, description="Minimum number of active neurons per sample")
     homeo_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for homeostatic activity loss")
+    detach_gradients: bool = Field(default=True, description="Detach gradients for SRTP decoder training")
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
@@ -150,7 +151,7 @@ class ExperimentSettings(BaseModel):
             rate_target=self.rate_target,
             min_active=self.min_active,
             homeo_weight=self.homeo_weight,
-            detach_gradients=True,  # Detach gradients for SRTP decoder training
+            detach_gradients=self.detach_gradients,
             optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
 
