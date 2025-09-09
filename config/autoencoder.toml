@@ -19,13 +19,18 @@ test_split  = 0.1
 latent_dim = 256
 
 # training
-max_epochs      = 200
-sparsity_target = 0.05
-sparsity_weight = 0.01
+max_epochs    = 200
+learning_rate = 1e-3
+
+# split training loss weights
+gramian_center = true
+gramian_weight = 0.2
+rate_target    = 0.15
+min_active     = 8
+homeo_weight   = 0.2
 
 # logging
 log_dir                   = "logs"
-experiment_name           = "baseline"
 checkpoint_every_n_epochs = 5
 progress_refresh_rate     = 5
 

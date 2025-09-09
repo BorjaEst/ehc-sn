@@ -25,12 +25,12 @@ from torch import nn
 
 from ehc_sn.data import cognitive_maps as data
 from ehc_sn.figures import cognitive_maps as figures
-from ehc_sn.models import decoders, encoders
-from ehc_sn.models.autoencoders import Autoencoder, AutoencoderParams
-from ehc_sn.models.decoders import DecoderParams
-from ehc_sn.models.decoders import SRTPLinear as SRTPDecoder
-from ehc_sn.models.encoders import EncoderParams
-from ehc_sn.models.encoders import Linear as LinearEncoder
+from ehc_sn.models.ann import decoders, encoders
+from ehc_sn.models.ann.autoencoders import Autoencoder, AutoencoderParams
+from ehc_sn.models.ann.decoders import DecoderParams
+from ehc_sn.models.ann.decoders import SRTPLinear as SRTPDecoder
+from ehc_sn.models.ann.encoders import EncoderParams
+from ehc_sn.models.ann.encoders import Linear as LinearEncoder
 from ehc_sn.utils import load_settings
 
 # -------------------------------------------------------------------------------------------
@@ -70,8 +70,11 @@ class SRTPDecoderTrainingSettings(BaseModel):
     # Training Settings
     max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
     learning_rate: float = Field(default=1e-3, ge=1e-6, le=1e-1, description="Learning rate for optimizer")
-    sparsity_target: float = Field(default=0.00, ge=0.01, le=0.5, description="Target sparsity level")
-    sparsity_weight: float = Field(default=0.00, ge=0.0, le=1.0, description="Sparsity regularization weight")
+    gramian_center: bool = Field(default=True, description="Whether to center Gramian loss")
+    gramian_weight: float = Field(default=0.2, ge=0.0, le=1.0, description="Weight for Gramian loss component")
+    rate_target: float = Field(default=0.15, ge=0.01, le=0.5, description="Target activation rate")
+    min_active: int = Field(default=8, ge=1, le=64, description="Minimum active units in latent space")
+    homeo_weight: float = Field(default=0.2, ge=0.0, le=1.0, description="Weight for homeostatic loss component")
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
@@ -148,8 +151,12 @@ class SRTPDecoderTrainingSettings(BaseModel):
         return AutoencoderParams(
             encoder=encoder,
             decoder=decoder,
-            sparsity_weight=self.sparsity_weight,
-            sparsity_target=self.sparsity_target,
+            gramian_center=self.gramian_center,
+            gramian_weight=self.gramian_weight,
+            rate_target=self.rate_target,
+            min_active=self.min_active,
+            homeo_weight=self.homeo_weight,
+            detach_gradients=True,  # Detach gradients for SRTP decoder training
             optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
 
@@ -272,8 +279,6 @@ class SRTPDecoderTrainingPipeline:
         print(f"Latent Dim: {self.settings.latent_dim}")
         print(f"Max Epochs: {self.settings.max_epochs}")
         print(f"Learning Rate: {self.settings.learning_rate:.1e}")
-        print(f"Sparsity Target: {self.settings.sparsity_target:.1%}")
-        print(f"Sparsity Weight: {self.settings.sparsity_weight:.3f}")
         print(f"Log Directory: {self.settings.log_dir}")
         print(f"Experiment: {self.settings.experiment_name}")
 

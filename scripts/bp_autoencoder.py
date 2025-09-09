@@ -1,36 +1,31 @@
 """
-DRTP Decoder for Entorhinal-Hippocampal Circuit
+Backpropagation Baseline for Entorhinal-Hippocampal Circuit
 
-Simple script for training only the decoder part of a pretrained autoencoder
-using DRTP (Direct Random Target Projection). Uses TOML configuration files
-for parameter management.
+Simple script for running baseline autoencoder experiments using backpropagation
+training on cognitive maps. Uses TOML configuration files for parameter management.
 
 Usage:
-    python drtp_decoder.py
-    python drtp_decoder.py --config experiments/decoder.toml
-    python drtp_decoder.py --pretrained models/baseline.ckpt --epochs 100
+    python bp_baseline.py
+    python bp_baseline.py --config experiments/baseline.toml
+    python bp_baseline.py --epochs 300 --samples 8000
 """
 
 import argparse
 from functools import partial
-from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
 import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, RichModelSummary, RichProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
 from pydantic import BaseModel, Field
-from torch import nn
 
 from ehc_sn.data import cognitive_maps as data
 from ehc_sn.figures import cognitive_maps as figures
 from ehc_sn.models.ann import decoders, encoders
 from ehc_sn.models.ann.autoencoders import Autoencoder, AutoencoderParams
 from ehc_sn.models.ann.decoders import DecoderParams
-from ehc_sn.models.ann.decoders import DRTPLinear as DRTPDecoder
 from ehc_sn.models.ann.encoders import EncoderParams
-from ehc_sn.models.ann.encoders import Linear as LinearEncoder
 from ehc_sn.utils import load_settings
 
 # -------------------------------------------------------------------------------------------
@@ -38,17 +33,12 @@ from ehc_sn.utils import load_settings
 # -------------------------------------------------------------------------------------------
 
 
-class DRTPDecoderTrainingSettings(BaseModel):
+class ExperimentSettings(BaseModel):
     """
-    Configuration settings for DRTP decoder-only training experiment.
+    Configuration settings for the autoencoder baseline experiment.
 
     Loads parameters from TOML configuration files with validation.
     """
-
-    # Model Loading Settings
-    pretrained_path: str = Field(default="autoencoder.ckpt", description="Path to pretrained autoencoder checkpoint")
-    freeze_encoder: bool = Field(default=True, description="Whether to freeze encoder weights during training")
-    reinit_decoder: bool = Field(default=True, description="Whether to reinitialize decoder weights before training")
 
     # Data Generation Settings
     grid_width: int = Field(default=32, ge=8, le=128, description="Width of the cognitive map grid")
@@ -70,12 +60,18 @@ class DRTPDecoderTrainingSettings(BaseModel):
     # Training Settings
     max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
     learning_rate: float = Field(default=1e-3, ge=1e-6, le=1e-1, description="Learning rate for optimizer")
-    sparsity_target: float = Field(default=0.00, ge=0.01, le=0.5, description="Target sparsity level")
-    sparsity_weight: float = Field(default=0.00, ge=0.0, le=1.0, description="Sparsity regularization weight")
+
+    # Split Training Loss Settings
+    gramian_center: bool = Field(default=True, description="Center activations before Gramian computation")
+    gramian_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for Gramian orthogonality loss")
+    rate_target: float = Field(default=0.05, ge=0.0, le=1.0, description="Target mean firing rate regulation")
+    min_active: int = Field(default=8, ge=1, le=64, description="Minimum number of active neurons per sample")
+    homeo_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for homeostatic activity loss")
+    detach_gradients: bool = Field(default=False, description="Detach gradients for split loss components")
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
-    experiment_name: str = Field(default="drtp_decoder", description="Experiment name")
+    experiment_name: str = Field(default="bp_autoencoder", description="Experiment name")
     checkpoint_every_n_epochs: int = Field(default=5, ge=1, le=50, description="Checkpoint frequency")
     progress_refresh_rate: int = Field(default=5, ge=1, le=20, description="Progress bar refresh rate")
 
@@ -108,22 +104,6 @@ class DRTPDecoderTrainingSettings(BaseModel):
     # Component Configuration Methods
     # -----------------------------------------------------------------------------------
 
-    def create_encoder_params(self) -> EncoderParams:
-        """Create encoder parameters from settings."""
-        return EncoderParams(
-            input_shape=self.input_shape,
-            latent_dim=self.latent_dim,
-            activation_fn=nn.GELU,  # Used GELU for encoder
-        )
-
-    def create_decoder_params(self) -> DecoderParams:
-        """Create decoder parameters from settings."""
-        return DecoderParams(
-            output_shape=self.input_shape,
-            latent_dim=self.latent_dim,
-            activation_fn=nn.GELU,  # Used GELU for decoder
-        )
-
     def create_generator_params(self) -> data.BlockMapParams:
         """Create data generator parameters from settings."""
         return data.BlockMapParams(
@@ -143,13 +123,35 @@ class DRTPDecoderTrainingSettings(BaseModel):
             test_split=self.test_split,
         )
 
-    def create_autoencoder_params(self, encoder, decoder) -> AutoencoderParams:
+    def create_encoder_params(self) -> EncoderParams:
+        """Create encoder parameters from settings."""
+        return EncoderParams(
+            input_shape=self.input_shape,
+            latent_dim=self.latent_dim,
+            activation_fn=torch.nn.GELU,
+        )
+
+    def create_decoder_params(self) -> DecoderParams:
+        """Create decoder parameters from settings."""
+        return DecoderParams(
+            output_shape=self.input_shape,
+            latent_dim=self.latent_dim,
+            activation_fn=torch.nn.GELU,
+        )
+
+    def create_autoencoder_params(self) -> AutoencoderParams:
         """Create autoencoder parameters from settings."""
+        encoder = encoders.Linear(self.create_encoder_params())
+        decoder = decoders.Linear(self.create_decoder_params())
         return AutoencoderParams(
             encoder=encoder,
             decoder=decoder,
-            sparsity_weight=self.sparsity_weight,
-            sparsity_target=self.sparsity_target,
+            gramian_center=self.gramian_center,
+            gramian_weight=self.gramian_weight,
+            rate_target=self.rate_target,
+            min_active=self.min_active,
+            homeo_weight=self.homeo_weight,
+            detach_gradients=self.detach_gradients,
             optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
 
@@ -165,19 +167,19 @@ class DRTPDecoderTrainingSettings(BaseModel):
 
 
 # -------------------------------------------------------------------------------------------
-# DRTP Decoder Training Pipeline
+# Experiment Pipeline
 # -------------------------------------------------------------------------------------------
 
 
-class DRTPDecoderTrainingPipeline:
-    """Orchestrates the DRTP decoder-only training workflow."""
+class ExperimentPipeline:
+    """Orchestrates the complete experiment workflow."""
 
-    def __init__(self, settings: DRTPDecoderTrainingSettings):
+    def __init__(self, settings: ExperimentSettings):
         """
-        Initialize DRTP decoder training pipeline with settings.
+        Initialize experiment pipeline with settings.
 
         Args:
-            settings: Configuration settings
+            settings: CLI configuration settings
         """
         self.settings = settings
         self.components: Optional[Dict[str, Any]] = None
@@ -185,50 +187,13 @@ class DRTPDecoderTrainingPipeline:
     # -----------------------------------------------------------------------------------
 
     def setup_components(self) -> None:
-        """Initialize all experiment components and load pretrained model."""
-        print("🔧 Setting up DRTP decoder training components...")
+        """Initialize all experiment components based on settings."""
+        print("🔧 Setting up experiment components...")
 
-        # Create initial encoder and decoder for loading pretrained model
-        encoder = LinearEncoder(self.settings.create_encoder_params())
-        temp_decoder = decoders.Linear(self.settings.create_decoder_params())  # Temporary decoder for loading
-
-        # Create autoencoder with initial parameters to load pretrained weights
-        autoencoder_params = self.settings.create_autoencoder_params(encoder, temp_decoder)
-        model = Autoencoder(autoencoder_params)
-
-        # Load pretrained weights if available
-        if Path(self.settings.pretrained_path).exists():
-            print(f"📥 Loading pretrained model from: {self.settings.pretrained_path}")
-            checkpoint = torch.load(self.settings.pretrained_path, map_location="cpu")
-            if "state_dict" in checkpoint:
-                model.load_state_dict(checkpoint["state_dict"])
-            else:
-                model.load_state_dict(checkpoint)
-        else:
-            print(f"⚠️  Warning: Pretrained model not found at {self.settings.pretrained_path}")
-            print("   Proceeding with randomly initialized weights")
-
-        # Configure model for decoder-only training
-        if self.settings.freeze_encoder:
-            print("🔒 Freezing encoder parameters")
-            for param in model.encoder.parameters():
-                param.requires_grad = False
-
-        print("🔄 Replacing decoder with DRTPDecoder")
-        # Create DRTP decoder parameters with Tanh activation
-        drtp_decoder_params = DecoderParams(
-            output_shape=self.settings.input_shape,
-            latent_dim=self.settings.latent_dim,
-            activation_fn=nn.Tanh,  # Use Tanh for DRTP
-        )
-        model.decoder = DRTPDecoder(drtp_decoder_params)
-
-        # Update optimizer to include new decoder parameters
-        model.optimizer_init = self.settings.create_autoencoder_params(model.encoder, model.decoder).optimizer_init
-
-        # Initialize data components
+        # Initialize components directly from settings
         generator = data.BlockMapGenerator(self.settings.create_generator_params())
         datamodule = data.DataModule(generator, self.settings.create_datamodule_params())
+        model = Autoencoder(self.settings.create_autoencoder_params())
 
         # Create standard Lightning trainer
         trainer = pl.Trainer(
@@ -245,46 +210,45 @@ class DRTPDecoderTrainingPipeline:
             profiler="simple",
         )
 
-        # Initialize visualization
         fig_generator = figures.CompareCognitiveMaps(self.settings.create_figure_params())
 
         self.components = {
-            "model": model,
             "datamodule": datamodule,
+            "model": model,
             "trainer": trainer,
             "fig_generator": fig_generator,
         }
 
-        print("✅ Component setup completed!")
+        print("✅ Experiment setup completed!")
 
     # -----------------------------------------------------------------------------------
 
     def display_configuration(self) -> None:
         """Display experiment configuration summary."""
-        print("\n📋 DRTP DECODER TRAINING CONFIGURATION")
+        print("\n📋 EXPERIMENT CONFIGURATION")
         print("-" * 50)
-        print(f"Pretrained Path: {self.settings.pretrained_path}")
-        print(f"Freeze Encoder: {self.settings.freeze_encoder}")
-        print(f"Reinit Decoder: {self.settings.reinit_decoder}")
         print(f"Grid Size: {self.settings.grid_height}×{self.settings.grid_width}")
         print(f"Samples: {self.settings.num_samples:,}")
         print(f"Batch Size: {self.settings.batch_size}")
         print(f"Latent Dim: {self.settings.latent_dim}")
         print(f"Max Epochs: {self.settings.max_epochs}")
         print(f"Learning Rate: {self.settings.learning_rate:.1e}")
-        print(f"Sparsity Target: {self.settings.sparsity_target:.1%}")
-        print(f"Sparsity Weight: {self.settings.sparsity_weight:.3f}")
+        print("\n🧠 Split Training Loss Weights:")
+        print(f"  • Gramian Weight: {self.settings.gramian_weight:.3f}")
+        print(f"  • Homeostatic Weight: {self.settings.homeo_weight:.3f}")
+        print(f"  • Rate Target: {self.settings.rate_target:.3f}")
+        print(f"  • Min Active: {self.settings.min_active}")
         print(f"Log Directory: {self.settings.log_dir}")
         print(f"Experiment: {self.settings.experiment_name}")
 
     # -----------------------------------------------------------------------------------
 
-    def train_decoder(self) -> None:
-        """Execute the DRTP decoder training pipeline."""
+    def train(self) -> None:
+        """Execute the training pipeline."""
         if not self.components:
             raise RuntimeError("Components not initialized. Call setup_components() first.")
 
-        print("\n🚀 Starting DRTP decoder-only training...")
+        print("\n🚀 Starting model training...")
 
         # Setup data
         self.components["datamodule"].setup()
@@ -298,52 +262,41 @@ class DRTPDecoderTrainingPipeline:
         print(f"   • Validation samples: {val_samples:,}")
         print(f"   • Test samples: {test_samples:,}")
 
-        # Count trainable parameters
-        total_params = sum(p.numel() for p in self.components["model"].parameters())
-        trainable_params = sum(p.numel() for p in self.components["model"].parameters() if p.requires_grad)
-        frozen_params = total_params - trainable_params
-
-        print(f"   • Total parameters: {total_params:,}")
-        print(f"   • Trainable parameters: {trainable_params:,}")
-        print(f"   • Frozen parameters: {frozen_params:,}")
-
         # Execute training using standard Lightning trainer
         self.components["trainer"].fit(model=self.components["model"], datamodule=self.components["datamodule"])
 
-        print("🎉 DRTP decoder training completed successfully!")
+        print("🎉 Training completed successfully!")
 
     # -----------------------------------------------------------------------------------
 
     def evaluate_and_visualize(self) -> None:
-        """Evaluate DRTP decoder performance and generate visualizations."""
+        """Evaluate model and generate visualizations."""
         if not self.components:
             raise RuntimeError("Components not initialized. Call setup_components() first.")
 
-        print("\n📊 Evaluating DRTP decoder performance...")
+        print("\n📊 Evaluating model performance...")
 
         # Get test data
         test_batch = next(iter(self.components["datamodule"].test_dataloader()))
 
         # Handle batch input - extract tensor from tuple if needed
         if isinstance(test_batch, (list, tuple)):
-            inputs = test_batch[0]  # Extract the first element (cognitive map tensor)
+            test_data = test_batch[0]  # Extract the first element (cognitive map tensor)
         else:
-            inputs = test_batch
+            test_data = test_batch
 
-        original_targets = inputs.squeeze(1) if inputs.dim() > 3 else inputs
         model = self.components["model"]
 
         # Ensure device compatibility
-        device = inputs.device
-        model.to(device)
+        model.to(device=test_data.device)
 
         # Generate predictions
         model.eval()
         with torch.no_grad():
-            reconstructed, latent = model(inputs)
+            reconstructed, latent = model(test_data)
 
             # Calculate metrics
-            mse_loss = torch.nn.functional.mse_loss(reconstructed, inputs)
+            mse_loss = torch.nn.functional.mse_loss(reconstructed, test_data)
             sparsity = (latent.abs() < 1e-6).float().mean()
 
             print(f"   • Test MSE Loss: {mse_loss:.6f}")
@@ -351,14 +304,14 @@ class DRTPDecoderTrainingPipeline:
 
         # Generate visualization
         print("\n🎨 Generating visualization...")
-        comparison_pairs = list(
+        sample_pairs = list(
             zip(
                 reconstructed[: self.settings.num_visualization_samples].cpu(),
-                original_targets[: self.settings.num_visualization_samples].cpu(),
+                test_data[: self.settings.num_visualization_samples].squeeze(1).cpu(),
             )
         )
 
-        self.components["fig_generator"].plot(comparison_pairs)
+        self.components["fig_generator"].plot(sample_pairs)
         self.components["fig_generator"].show()
 
         print("✅ Evaluation completed!")
@@ -366,10 +319,10 @@ class DRTPDecoderTrainingPipeline:
     # -----------------------------------------------------------------------------------
 
     def run_complete_experiment(self) -> None:
-        """Execute the complete DRTP decoder training pipeline."""
+        """Execute the complete experiment pipeline."""
         self.display_configuration()
         self.setup_components()
-        self.train_decoder()
+        self.train()
         self.evaluate_and_visualize()
 
 
@@ -378,47 +331,62 @@ class DRTPDecoderTrainingPipeline:
 # -------------------------------------------------------------------------------------------
 
 
-def run_drtp_decoder_experiment(
+def run_experiment(
     config: Optional[str] = None,
-    pretrained: Optional[str] = None,
     epochs: Optional[int] = None,
     samples: Optional[int] = None,
+    batch_size: Optional[int] = None,
+    latent_dim: Optional[int] = None,
+    learning_rate: Optional[float] = None,
+    gramian_weight: Optional[float] = None,
+    homeo_weight: Optional[float] = None,
 ) -> None:
     """
-    Run the complete DRTP decoder training experiment.
+    Run the complete backpropagation baseline experiment.
 
     Args:
         config: Path to TOML configuration file
-        pretrained: Path to pretrained autoencoder checkpoint (overrides config)
         epochs: Maximum training epochs (overrides config)
         samples: Number of training samples (overrides config)
+        batch_size: Training batch size (overrides config)
+        latent_dim: Latent space dimension (overrides config)
+        learning_rate: Learning rate for optimizer (overrides config)
+        gramian_weight: Weight for Gramian orthogonality loss (overrides config)
+        homeo_weight: Weight for homeostatic activity loss (overrides config)
     """
     print("=" * 80)
-    print("🧠 ENTORHINAL-HIPPOCAMPAL CIRCUIT: DRTP DECODER TRAINING")
+    print("🧠 ENTORHINAL-HIPPOCAMPAL CIRCUIT: BACKPROPAGATION BASELINE")
     print("=" * 80)
 
     # Prepare overrides
-    overrides: Dict[str, Union[str, int, bool]] = {}
-    if pretrained is not None:
-        overrides["pretrained_path"] = pretrained
+    overrides = {}
     if epochs is not None:
         overrides["max_epochs"] = epochs
     if samples is not None:
         overrides["num_samples"] = samples
+    if batch_size is not None:
+        overrides["batch_size"] = batch_size
+    if latent_dim is not None:
+        overrides["latent_dim"] = latent_dim
+    if learning_rate is not None:
+        overrides["learning_rate"] = learning_rate
+    if gramian_weight is not None:
+        overrides["gramian_weight"] = gramian_weight
+    if homeo_weight is not None:
+        overrides["homeo_weight"] = homeo_weight
 
     # Load settings
-    if config:
-        print(f"📁 Loading configuration from: {config}")
+    print(f"📁 Loading configuration from: {config}")
     settings_dict = load_settings(config) if config else {}
     settings_dict.update(overrides)
-    settings = DRTPDecoderTrainingSettings(**settings_dict)
+    settings = ExperimentSettings(**settings_dict)
 
     # Run experiment pipeline
-    pipeline = DRTPDecoderTrainingPipeline(settings)
+    pipeline = ExperimentPipeline(settings)
     pipeline.run_complete_experiment()
 
     print("\n" + "=" * 80)
-    print("🎯 DRTP DECODER TRAINING COMPLETED SUCCESSFULLY!")
+    print("🎯 EXPERIMENT COMPLETED SUCCESSFULLY!")
     print("=" * 80)
 
 
@@ -430,14 +398,19 @@ def run_drtp_decoder_experiment(
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="DRTP Decoder training for Entorhinal-Hippocampal Circuit",
+        description="Backpropagation baseline for Entorhinal-Hippocampal Circuit",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     parser.add_argument("--config", "-c", type=str, help="Path to TOML configuration file")
-    parser.add_argument("--pretrained", "-p", type=str, help="Path to pretrained autoencoder checkpoint")
     parser.add_argument("--epochs", "-e", type=int, help="Maximum training epochs")
     parser.add_argument("--samples", "-s", type=int, help="Number of training samples")
+    parser.add_argument("--batch-size", "-b", type=int, help="Training batch size")
+    parser.add_argument("--latent-dim", "-l", type=int, help="Latent space dimension")
+    parser.add_argument("--learning-rate", "-lr", type=float, help="Learning rate for optimizer")
+    parser.add_argument("--gramian-weight", "-gw", type=float, help="Weight for Gramian orthogonality loss")
+    parser.add_argument("--homeo-weight", "-hw", type=float, help="Weight for homeostatic activity loss")
+    parser.add_argument("--l1-weight", "-l1w", type=float, help="Weight for L1 sparsity loss")
 
     return parser.parse_args()
 
@@ -449,13 +422,16 @@ def parse_arguments():
 if __name__ == "__main__":
     try:
         args = parse_arguments()
-
-        run_drtp_decoder_experiment(
+        run_experiment(
             config=args.config,
-            pretrained=args.pretrained,
             epochs=args.epochs,
             samples=args.samples,
+            batch_size=args.batch_size,
+            latent_dim=args.latent_dim,
+            learning_rate=args.learning_rate,
+            gramian_weight=args.gramian_weight,
+            homeo_weight=args.homeo_weight,
         )
     except Exception as e:
-        print(f"\n❌ DRTP DECODER TRAINING FAILED: {e}")
+        print(f"\n❌ EXPERIMENT FAILED: {e}")
         raise
