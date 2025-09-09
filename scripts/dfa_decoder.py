@@ -70,8 +70,14 @@ class DFADecoderTrainingSettings(BaseModel):
     # Training Settings
     max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
     learning_rate: float = Field(default=1e-3, ge=1e-6, le=1e-1, description="Learning rate for optimizer")
-    sparsity_target: float = Field(default=0.00, ge=0.01, le=0.5, description="Target sparsity level")
-    sparsity_weight: float = Field(default=0.00, ge=0.0, le=1.0, description="Sparsity regularization weight")
+
+    # Split Training Loss Settings
+    gramian_center: bool = Field(default=True, description="Center activations before Gramian computation")
+    gramian_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for Gramian orthogonality loss")
+    rate_target: float = Field(default=0.05, ge=0.0, le=1.0, description="Target mean firing rate regulation")
+    min_active: int = Field(default=8, ge=1, le=64, description="Minimum number of active neurons per sample")
+    homeo_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for homeostatic activity loss")
+    detach_gradients: bool = Field(default=False, description="Detach gradients for split loss components")
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
@@ -148,8 +154,12 @@ class DFADecoderTrainingSettings(BaseModel):
         return AutoencoderParams(
             encoder=encoder,
             decoder=decoder,
-            sparsity_weight=self.sparsity_weight,
-            sparsity_target=self.sparsity_target,
+            gramian_center=self.gramian_center,
+            gramian_weight=self.gramian_weight,
+            rate_target=self.rate_target,
+            min_active=self.min_active,
+            homeo_weight=self.homeo_weight,
+            detach_gradients=self.detach_gradients,
             optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
 
@@ -272,8 +282,10 @@ class DFADecoderTrainingPipeline:
         print(f"Latent Dim: {self.settings.latent_dim}")
         print(f"Max Epochs: {self.settings.max_epochs}")
         print(f"Learning Rate: {self.settings.learning_rate:.1e}")
-        print(f"Sparsity Target: {self.settings.sparsity_target:.1%}")
-        print(f"Sparsity Weight: {self.settings.sparsity_weight:.3f}")
+        print(f"Gramian Weight: {self.settings.gramian_weight:.3f}")
+        print(f"Rate Target: {self.settings.rate_target:.1%}")
+        print(f"Homeo Weight: {self.settings.homeo_weight:.3f}")
+        print(f"Detach Gradients: {self.settings.detach_gradients}")
         print(f"Log Directory: {self.settings.log_dir}")
         print(f"Experiment: {self.settings.experiment_name}")
 

@@ -46,7 +46,7 @@ from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn.hooks.registry import registry
-from ehc_sn.modules.dfa import DFALayer, clear_dfa_error, register_dfa_hook
+from ehc_sn.modules import dfa
 from ehc_sn.modules.drtp import DRTPLayer
 
 
@@ -403,12 +403,12 @@ class DFALinear(BaseEncoder):
         # First layer: 1024 units
         self.layer1 = nn.Linear(in_features, out_features=1024)
         self.activation1 = params.activation_fn()  # Usually Tanh
-        self.dfa1 = DFALayer(output_dim=self.latent_dim, hidden_dim=1024)
+        self.dfa1 = dfa.DFALayer(output_dim=self.latent_dim, hidden_dim=1024)
 
         # Second layer: 512 units
         self.layer2 = nn.Linear(in_features=1024, out_features=512)
         self.activation2 = params.activation_fn()  # Usually Tanh
-        self.dfa2 = DFALayer(output_dim=self.latent_dim, hidden_dim=512)
+        self.dfa2 = dfa.DFALayer(output_dim=self.latent_dim, hidden_dim=512)
 
         # Output layer (no DFA - uses standard gradients)
         self.layer3 = nn.Linear(512, out_features=self.latent_dim)
@@ -444,8 +444,8 @@ class DFALinear(BaseEncoder):
 
         # Register DFA hook on the current output every forward (per batch)
         if output.requires_grad:
-            clear_dfa_error()
-            register_dfa_hook(output)
+            dfa.clear_dfa_error()
+            dfa.register_dfa_hook(output)
 
         return output
 

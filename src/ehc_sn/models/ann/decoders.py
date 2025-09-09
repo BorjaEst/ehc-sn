@@ -46,7 +46,7 @@ from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn.hooks.registry import registry
-from ehc_sn.modules.dfa import DFALayer, clear_dfa_error, register_dfa_hook
+from ehc_sn.modules import dfa
 from ehc_sn.modules.drtp import DRTPLayer
 from ehc_sn.modules.srtp import SRTPLayer
 
@@ -390,12 +390,12 @@ class DFALinear(BaseDecoder):
         # First layer: expand from latent to first hidden layer (512 units)
         self.layer1 = nn.Linear(params.latent_dim, out_features=512, bias=True)
         self.activation1 = params.activation_fn()  # Usually Tanh
-        self.dfa1 = DFALayer(output_dim=params.output_shape, hidden_dim=512)
+        self.dfa1 = dfa.DFALayer(output_dim=params.output_shape, hidden_dim=512)
 
         # Second layer: 1024 units
         self.layer2 = nn.Linear(in_features=512, out_features=1024, bias=True)
         self.activation2 = params.activation_fn()  # Usually Tanh
-        self.dfa2 = DFALayer(output_dim=params.output_shape, hidden_dim=1024)
+        self.dfa2 = dfa.DFALayer(output_dim=params.output_shape, hidden_dim=1024)
 
         # Output layer (no DFA - uses standard gradients)
         self.layer3 = nn.Linear(in_features=1024, out_features=output_features)
@@ -428,8 +428,8 @@ class DFALinear(BaseDecoder):
 
         # Register DFA hook on the current output every forward (per batch)
         if output.requires_grad:
-            clear_dfa_error()
-            register_dfa_hook(output)
+            dfa.clear_dfa_error()
+            dfa.register_dfa_hook(output)
 
         # Reshape to original spatial dimensions
         return output.reshape(output.shape[0], *self.output_shape)

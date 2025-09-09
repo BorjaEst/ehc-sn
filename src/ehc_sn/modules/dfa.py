@@ -156,7 +156,7 @@ class DFALayer(nn.Module):
             passing is required.
         """
         # Apply DFA function which handles the custom backward pass
-        return DFAFunction.apply(inputs, self.fb_weights)
+        return dfa(inputs, self.fb_weights)
 
     # -----------------------------------------------------------------------------------
     def extra_repr(self) -> str:
