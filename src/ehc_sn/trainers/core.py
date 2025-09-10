@@ -37,22 +37,6 @@ class BaseTrainer(abc.ABC):
         super().__init__()
 
     @abc.abstractmethod
-    def configure_optimizers(self, model: pl.LightningModule) -> List[Optimizer]:
-        """Configure optimizers for the training strategy.
-
-        Each training strategy may require different optimizer configurations.
-        For example, some strategies might use separate optimizers for different
-        model components, while others use a single optimizer.
-
-        Args:
-            model: The Lightning module to configure optimizers for.
-
-        Returns:
-            List of optimizers needed for this training strategy.
-        """
-        raise NotImplementedError("configure_optimizers method not implemented")
-
-    @abc.abstractmethod
     def training_step(self, model: pl.LightningModule, batch: Tensor, batch_idx: int) -> Optional[Tensor]:
         """Execute one training step.
 

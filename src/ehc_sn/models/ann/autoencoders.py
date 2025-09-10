@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 import lightning.pytorch as pl
 import torch
@@ -10,7 +10,7 @@ from ehc_sn.hooks import registry
 from ehc_sn.models.ann import encoders
 from ehc_sn.models.ann.decoders import BaseDecoder, DecoderParams
 from ehc_sn.models.ann.encoders import BaseEncoder, EncoderParams
-from ehc_sn.modules.loss import GramianOrthogonalityLoss, HomeostaticActivityLoss, TargetL1SparsityLoss
+from ehc_sn.modules.loss import GramianOrthogonalityLoss, HomeostaticActivityLoss
 from ehc_sn.trainers.core import BaseTrainer
 
 
@@ -58,15 +58,37 @@ class AutoencoderParams(BaseModel):
 def validate_dimensions(params: AutoencoderParams) -> None:
     """Validate encoder and decoder dimension compatibility.
 
-    Ensures encoder and decoder can work together by checking:
-    1. Encoder input shape matches decoder output shape
-    2. Encoder latent dimension matches decoder latent dimension
+    Ensures encoder and decoder can work together by verifying dimensional
+    consistency between components. This validation prevents runtime errors
+    and ensures proper data flow through the autoencoder architecture.
+
+    The function performs two critical checks:
+    1. Encoder input shape matches decoder output shape (end-to-end consistency)
+    2. Encoder latent dimension matches decoder latent dimension (bottleneck compatibility)
 
     Args:
-        params: AutoencoderParams containing encoder and decoder configurations.
+        params: AutoencoderParams containing encoder and decoder configurations
+            to be validated for compatibility.
 
     Raises:
-        ValueError: If dimensions are incompatible.
+        ValueError: If encoder input shape does not match decoder output shape,
+            or if encoder latent dimension does not match decoder latent dimension.
+            The error message includes the specific dimensional mismatch details.
+
+    Example:
+        >>> encoder_params = EncoderParams(input_shape=(1, 64, 64), latent_dim=128)
+        >>> decoder_params = DecoderParams(output_shape=(1, 64, 64), latent_dim=128)
+        >>> params = AutoencoderParams(encoder=encoder, decoder=decoder)
+        >>> validate_dimensions(params)  # Should pass without error
+        >>>
+        >>> # This would raise ValueError due to shape mismatch:
+        >>> bad_decoder = DecoderParams(output_shape=(1, 32, 32), latent_dim=128)
+        >>> bad_params = AutoencoderParams(encoder=encoder, decoder=bad_decoder)
+        >>> validate_dimensions(bad_params)  # Raises ValueError
+
+    Note:
+        This function should be called before creating an Autoencoder instance
+        to catch configuration errors early in the model setup process.
     """
     if params.encoder.input_shape != params.decoder.output_shape:
         raise ValueError(
@@ -112,7 +134,7 @@ class Autoencoder(pl.LightningModule):
         >>> lightning_trainer.fit(model, dataloader)
     """
 
-    def __init__(self, params: AutoencoderParams, trainer: BaseTrainer):
+    def __init__(self, params: AutoencoderParams, trainer: BaseTrainer) -> None:
         """Initialize autoencoder with parameters and training strategy.
 
         Sets up model architecture, loss functions, and training configuration.
@@ -158,72 +180,172 @@ class Autoencoder(pl.LightningModule):
     # -----------------------------------------------------------------------------------
 
     def configure_optimizers(self) -> List[Optimizer]:
-        """Configure optimizers using the training strategy.
+        """Configure dual optimizers for independent encoder-decoder training.
+
+        Creates separate optimizers for encoder and decoder components to enable
+        independent optimization strategies essential for biological plausibility
+        in spatial navigation modeling. This dual-optimizer architecture allows
+        the encoder to focus on learning sparse, orthogonal representations
+        (mimicking hippocampal place cells) while the decoder optimizes purely
+        for reconstruction accuracy.
+
+        The optimizer configuration delegates to the training strategy to ensure
+        consistency with the chosen training approach (e.g., DetachedTrainer or
+        ClassicTrainer). Both optimizers use identical hyperparameters but
+        maintain separate optimization states and parameter groups.
 
         Returns:
-            List of optimizers configured by the training strategy.
+            List[Optimizer]: Two-element list containing optimizers in fixed order:
+                - Index 0: Encoder optimizer for representation learning objectives
+                  (sparsity, orthogonality, homeostatic regulation)
+                - Index 1: Decoder optimizer for reconstruction objectives
+                  (binary cross-entropy, output quality)
 
         Raises:
-            ValueError: If no trainer strategy is provided.
+            ValueError: If no training strategy is provided during model initialization.
+                The training strategy is required to supply the optimizer factory function.
+
+        Note:
+            The optimizer order is critical for training step implementation. The
+            training strategy relies on this fixed indexing to properly assign
+            loss functions to their corresponding optimizers during split training.
+
+        Example:
+            >>> # Optimizers are accessed in training via:
+            >>> enc_opt, dec_opt = self.optimizers()
+            >>> # enc_opt handles encoder-specific losses (sparsity, orthogonality)
+            >>> # dec_opt handles decoder-specific losses (reconstruction)
+
+        See Also:
+            - BaseTrainer.optimizer_init: Factory function for creating optimizers
+            - DetachedTrainer: Training strategy using independent optimization
+            - ClassicTrainer: Training strategy using joint optimization
         """
         if self.trainer_strategy is None:
-            raise ValueError("Trainer strategy must be provided to configure optimizers.")
-        return self.trainer_strategy.configure_optimizers(self)
+            raise ValueError("Trainer strategy must be provided for optimizer configuration.")
+        enc_opt = self.trainer_strategy.optimizer_init(self.encoder.parameters())
+        dec_opt = self.trainer_strategy.optimizer_init(self.decoder.parameters())
+        return [enc_opt, dec_opt]
 
     # -----------------------------------------------------------------------------------
     # Forward pass
     # -----------------------------------------------------------------------------------
 
-    def forward(self, x: Tensor, detach_gradients: bool = False, *args: Any, **kwds: dict) -> Tuple[Tensor, Tensor]:
-        """Forward pass through encoder and decoder.
+    def forward(self, x: Tensor, detach_grad: bool = False, *args: Any, **kwds: Any) -> List[Tensor]:
+        """Execute forward pass through encoder-decoder architecture.
+
+        Performs complete forward propagation from input through encoder to latent
+        representation, then through decoder to reconstruction. Supports optional
+        gradient detachment for implementing split training strategies essential
+        for biologically plausible representation learning.
+
+        The forward pass follows this sequence:
+        1. Encode input to sparse latent representation (mimicking place cell activity)
+        2. Optionally detach gradients at the latent bottleneck
+        3. Decode latent representation back to input space
+        4. Return both reconstruction and original (non-detached) embedding
 
         Args:
-            x: Input tensor matching encoder's expected shape.
-            detach_gradients: Whether to detach gradients between encoder and decoder.
-            *args: Additional arguments for interface compatibility.
-            **kwds: Additional keyword arguments for interface compatibility.
+            x: Input tensor with shape matching encoder's expected dimensions.
+                Typically spatial maps with shape (batch_size, channels, height, width).
+            detach_grad: Whether to detach gradients between encoder and decoder.
+                When True, prevents gradient flow from decoder losses to encoder,
+                enabling independent optimization of each component. Default: False.
+            *args: Additional positional arguments passed to encoder and decoder
+                for interface compatibility with different network architectures.
+            **kwds: Additional keyword arguments passed to encoder and decoder
+                for interface compatibility and extensibility.
 
         Returns:
-            Tuple of (reconstruction, embedding) tensors.
+            List[Tensor]: Two-element list containing:
+                - Index 0: Reconstructed output tensor with same shape as input
+                - Index 1: Original latent embedding tensor (never detached)
+                  with shape (batch_size, latent_dim)
 
         Note:
-            When detach_gradients=True, prevents gradient flow from decoder to encoder.
+            When detach_grad=True, gradients cannot flow from decoder losses back
+            to the encoder, implementing the split training strategy. However, the
+            returned embedding is always the original (non-detached) tensor to
+            preserve gradient information for encoder-specific losses.
+
+        Example:
+            >>> # Standard forward pass with full gradient flow
+            >>> reconstruction, embedding = model(input_tensor)
+            >>>
+            >>> # Forward pass with detached gradients for split training
+            >>> reconstruction, embedding = model(input_tensor, detach_grad=True)
+            >>> # Decoder receives detached embedding, encoder losses use original
         """
         embedding = self.encoder(x, *args, target=None, **kwds)  # No sparse target
 
         # Optionally detach gradients between encoder and decoder
-        z = embedding.detach() if detach_gradients else embedding
-
+        z = embedding.detach() if detach_grad else embedding
         reconstruction = self.decoder(z, *args, target=x, **kwds)
 
         # Return reconstruction and embedding (always return original embedding)
-        return reconstruction, embedding
+        return [reconstruction, embedding]
 
     # -----------------------------------------------------------------------------------
     # Loss computation
     # -----------------------------------------------------------------------------------
 
-    def compute_loss(self, x: Tensor, log_label: str, detach_gradients: bool = False) -> Tuple[Tensor, Tensor]:
-        """Compute and log decoder and encoder losses for a batch.
+    def compute_loss(self, x: Tensor, log_label: str, *args: Any, **kwds: Any) -> List[Tensor]:
+        """Compute and log component-specific losses for autoencoder training.
 
-        Performs forward pass and computes reconstruction, Gramian orthogonality,
-        and homeostatic activity losses with logging.
+        Executes forward pass and computes all loss components with comprehensive
+        logging for monitoring training progress. Implements biologically-inspired
+        loss functions that encourage sparse, orthogonal representations similar
+        to hippocampal place cell firing patterns.
+
+        The method computes three categories of losses:
+        1. Encoder losses: Gramian orthogonality and homeostatic activity regulation
+        2. Decoder losses: Binary cross-entropy reconstruction error
+        3. Auxiliary metrics: Sparsity rate for monitoring representation quality
+
+        Loss Components:
+            - Gramian Loss: Encourages orthogonal, decorrelated representations
+            - Homeostatic Loss: Regulates firing rates to maintain target sparsity
+            - Reconstruction Loss: Measures decoder's reconstruction accuracy
 
         Args:
-            x: Input batch tensor.
-            log_label: Namespace prefix for metric logging (e.g., 'train', 'val').
-            detach_gradients: Whether to detach gradients between encoder and decoder.
+            x: Input batch tensor with shape (batch_size, channels, height, width).
+                Contains spatial navigation maps or cognitive representations.
+            log_label: Namespace prefix for metric logging (e.g., 'train', 'val', 'test').
+                Used to organize metrics in logging systems like TensorBoard or Weights & Biases.
+            *args: Additional positional arguments passed to forward method
+                for compatibility with different training strategies.
+            **kwds: Additional keyword arguments passed to forward method,
+                including 'detach_grad' for controlling gradient flow.
 
         Returns:
-            Tuple of (decoder_loss, encoder_loss).
+            List[Tensor]: Two-element list containing computed losses:
+                - Index 0: Decoder loss (reconstruction error only)
+                - Index 1: Encoder loss (weighted combination of Gramian and homeostatic losses)
 
-        Logs:
-            - reconstruction_loss, gramian_loss, homeostatic_loss
-            - decoder_loss, encoder_loss (with progress bar)
-            - sparsity_rate
+        Logged Metrics:
+            - {log_label}/reconstruction_loss: BCE loss between input and reconstruction
+            - {log_label}/gramian_loss: Orthogonality constraint on latent representations
+            - {log_label}/homeostatic_loss: Firing rate regulation penalty
+            - {log_label}/decoder_loss: Total decoder optimization target (with progress bar)
+            - {log_label}/encoder_loss: Total encoder optimization target (with progress bar)
+            - {log_label}/sparsity_rate: Fraction of active neurons (> 0.01 threshold)
+
+        Example:
+            >>> # During training with detached gradients
+            >>> dec_loss, enc_loss = model.compute_loss(batch, "train", detach_grad=True)
+            >>> # Logged: train/reconstruction_loss, train/gramian_loss, etc.
+            >>>
+            >>> # During validation
+            >>> dec_loss, enc_loss = model.compute_loss(batch, "val", detach_grad=False)
+            >>> # Logged: val/reconstruction_loss, val/gramian_loss, etc.
+
+        Note:
+            Loss weights are configured during model initialization via AutoencoderParams.
+            The sparsity threshold (0.01) is chosen to identify meaningfully active neurons
+            while filtering out near-zero activations from numerical precision issues.
         """
         # Forward pass to get reconstruction and embedding
-        reconstruction, embedding = self.forward(x, detach_gradients)
+        reconstruction, embedding = self.forward(x, *args, **kwds)
 
         # Encoder-side losses
         gramian_loss = self.gramian_loss(embedding)
@@ -243,13 +365,14 @@ class Autoencoder(pl.LightningModule):
         decoder_loss = reconstruction_loss
         self.log(f"{log_label}/decoder_loss", decoder_loss, on_epoch=True, prog_bar=True)
 
-        return decoder_loss, encoder_loss
+        # Return the decoder and the encoder loss
+        return [decoder_loss, encoder_loss]
 
     # -----------------------------------------------------------------------------------
     # Training step
     # -----------------------------------------------------------------------------------
 
-    def on_train_batch_start(self, batch, batch_idx: int) -> None:
+    def on_train_batch_start(self, batch: Any, batch_idx: int) -> None:
         """Initialize registry and delegate to training strategy.
 
         Args:
@@ -268,7 +391,7 @@ class Autoencoder(pl.LightningModule):
         # Delegate to training strategy
         self.trainer_strategy.on_train_batch_start(self, batch, batch_idx)
 
-    def training_step(self, batch: Tensor, batch_idx: int) -> None:
+    def training_step(self, batch: Tensor, batch_idx: int) -> Optional[Any]:
         """Delegate training step to the training strategy.
 
         Args:
@@ -280,7 +403,7 @@ class Autoencoder(pl.LightningModule):
         """
         return self.trainer_strategy.training_step(self, batch, batch_idx)
 
-    def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
+    def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int) -> None:
         """Delegate batch end cleanup to training strategy.
 
         Args:
@@ -443,7 +566,7 @@ if __name__ == "__main__":
     class SimpleDataset(torch.utils.data.Dataset):
         """Dataset generating random binary obstacle maps."""
 
-        def __init__(self, size: int = 100):
+        def __init__(self, size: int = 100) -> None:
             """Initialize with specified dataset size."""
             self.size = size
 
@@ -451,7 +574,7 @@ if __name__ == "__main__":
             """Return dataset size."""
             return self.size
 
-        def __getitem__(self, idx):
+        def __getitem__(self, idx: int) -> Tuple[Tensor]:
             """Generate random obstacle map sample.
 
             Args:

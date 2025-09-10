@@ -1,11 +1,33 @@
-"""Backpropagation-based training strategies.
+"""Backpropagation-based training strategies for entorhinal-hippocampal circuit models.
 
-This module implements different variants of backpropagation training,
-including standard full backpropagation and detached gradient training
-for autoencoder architectures.
+This module provides training strategies that implement backpropagation variants
+specifically designed for autoencoder architectures in spatial navigation modeling.
+The strategies support both standard full gradient flow and detached gradient
+training for independent component optimization.
+
+Classes:
+    ClassicTrainer: Standard backpropagation with full gradient flow between components.
+    DetachedTrainer: Split training with detached gradients for independent optimization.
+
+The training strategies are designed to work with PyTorch Lightning modules and
+support the dual-optimizer pattern used in encoder-decoder architectures.
+
+Example:
+    >>> from functools import partial
+    >>> import torch.optim as optim
+    >>>
+    >>> # Standard backpropagation training
+    >>> classic_trainer = ClassicTrainer(
+    ...     optimizer_init=partial(optim.Adam, lr=1e-3)
+    ... )
+    >>>
+    >>> # Detached gradient training for independent component optimization
+    >>> detached_trainer = DetachedTrainer(
+    ...     optimizer_init=partial(optim.Adam, lr=1e-3)
+    ... )
 """
 
-from typing import List, Optional
+from typing import Any, Callable, List, Optional
 
 import lightning.pytorch as pl
 import torch
@@ -18,279 +40,342 @@ from ehc_sn.trainers.core import BaseTrainer
 class ClassicTrainer(BaseTrainer):
     """Standard backpropagation trainer with full gradient flow.
 
-    Implements classic backpropagation where gradients flow through
-    the entire model architecture. This is the standard training
-    approach for most neural networks.
+    Implements classic backpropagation where gradients flow through the entire
+    model architecture without interruption. This trainer combines all loss
+    components into a single optimization step, allowing gradients to propagate
+    from the decoder back through the encoder in autoencoder architectures.
 
-    Features:
-    - Full gradient flow between all model components
-    - Single or dual optimizer support
-    - Standard PyTorch Lightning optimization pattern
+    This is the conventional training approach for most neural networks and
+    provides the most direct optimization path. However, it may lead to
+    suboptimal encoder representations when the decoder loss dominates.
+
+    Key Characteristics:
+        - Full gradient flow between all model components
+        - Single combined loss for joint optimization
+        - Standard PyTorch Lightning optimization pattern
+        - Suitable for traditional end-to-end training
+
+    Use Cases:
+        - Standard autoencoder training where encoder and decoder should be
+          jointly optimized for reconstruction accuracy
+        - Models where component interdependence is desired
+        - Baseline training for comparison with alternative strategies
+
+    Note:
+        This trainer expects models with dual optimizers (encoder and decoder)
+        but trains them jointly using a combined loss function.
+
+    Example:
+        >>> from functools import partial
+        >>> import torch.optim as optim
+        >>>
+        >>> trainer = ClassicTrainer(
+        ...     optimizer_init=partial(optim.Adam, lr=1e-3, weight_decay=1e-4)
+        ... )
+        >>> model = Autoencoder(params, trainer)
+        >>> lightning_trainer = pl.Trainer(max_epochs=100)
+        >>> lightning_trainer.fit(model, dataloader)
     """
 
-    def __init__(self, optimizer_init, *args, **kwargs):
-        """Initialize classic backpropagation trainer.
+    def __init__(self, optimizer_init: Callable[[Any], Optimizer], *args: Any, **kwargs: Any) -> None:
+        """Initialize classic backpropagation trainer with optimizer configuration.
+
+        Sets up the trainer with a factory function for creating optimizers.
+        The same optimizer configuration will be used for both encoder and
+        decoder components, though they will be trained jointly.
 
         Args:
-            optimizer_init: Function to initialize optimizers.
-                Should be a partial function or lambda that takes model
-                parameters and returns an optimizer instance.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
+            optimizer_init: Factory function for creating optimizer instances.
+                Should be a callable that takes model parameters as input and
+                returns an optimizer. Typically a partial function like
+                `partial(torch.optim.Adam, lr=1e-3)` or a lambda function.
+            *args: Additional positional arguments passed to parent class.
+            **kwargs: Additional keyword arguments passed to parent class.
+
+        Example:
+            >>> from functools import partial
+            >>> import torch.optim as optim
+            >>>
+            >>> # Using partial function for optimizer configuration
+            >>> trainer = ClassicTrainer(
+            ...     optimizer_init=partial(optim.Adam, lr=1e-3, weight_decay=1e-4)
+            ... )
+            >>>
+            >>> # Using lambda function for custom configuration
+            >>> trainer = ClassicTrainer(
+            ...     optimizer_init=lambda params: optim.SGD(params, lr=0.01, momentum=0.9)
+            ... )
         """
         super().__init__(*args, **kwargs)
         self.optimizer_init = optimizer_init
 
-    def configure_optimizers(self, model: pl.LightningModule) -> List[Optimizer]:
-        """Configure optimizers for standard backpropagation.
-
-        Creates optimizers based on model architecture. For autoencoders
-        with separate encoder/decoder components, creates dual optimizers.
-        For unified models, creates a single optimizer.
-
-        Args:
-            model: The Lightning module to configure optimizers for.
-
-        Returns:
-            List of optimizers (1-2 optimizers depending on model structure).
-        """
-        if hasattr(model, "encoder") and hasattr(model, "decoder"):
-            # Dual optimizers for encoder/decoder architecture
-            enc_opt = self.optimizer_init(model.encoder.parameters())
-            dec_opt = self.optimizer_init(model.decoder.parameters())
-            return [enc_opt, dec_opt]
-        else:
-            # Single optimizer for unified model
-            return [self.optimizer_init(model.parameters())]
-
     def training_step(self, model: pl.LightningModule, batch: Tensor, batch_idx: int) -> None:
-        """Standard backpropagation training step with full gradient flow.
+        """Execute standard backpropagation training step with full gradient flow.
 
-        Performs forward pass, computes losses, and applies gradients
-        with full gradient flow between all model components.
+        Performs a complete training iteration using classic backpropagation:
+        1. Forward pass through the model with full gradient flow
+        2. Compute all loss components (reconstruction, regularization, etc.)
+        3. Combine losses into a single total loss
+        4. Backward pass with gradients flowing through all components
+        5. Simultaneous optimizer step for all active components
+
+        This approach ensures that encoder representations are optimized not only
+        for their specific objectives but also for reconstruction quality through
+        the decoder pathway.
 
         Args:
-            model: The Lightning module being trained.
-            batch: Training batch data.
-            batch_idx: Index of the current batch.
+            model: The PyTorch Lightning module being trained. Expected to have
+                encoder and decoder components with separate optimizers.
+            batch: Training batch containing input data. First element should be
+                the input tensor; additional elements are ignored.
+            batch_idx: Index of the current batch within the epoch. Used for
+                logging and debugging purposes.
+
+        Note:
+            The method uses manual optimization to support the dual-optimizer
+            pattern while maintaining joint gradient flow. Optimizers are only
+            stepped if their corresponding components have trainable parameters
+            and valid gradients.
+
+        Side Effects:
+            - Modifies model parameters through optimizer steps
+            - Logs training metrics through the model's logging system
+            - Clears and computes gradients for all active components
         """
         x, *_ = batch
 
-        if hasattr(model, "compute_loss"):
-            # Autoencoder-style loss computation with full gradient flow
-            dec_loss, enc_loss = model.compute_loss(x, "train", detach_gradients=False)
-            self._train_full_flow(model, enc_loss, dec_loss)
-        else:
-            # Standard model loss computation
-            loss = model(x)
-            if hasattr(loss, "loss"):
-                loss = loss.loss
-            opt = model.optimizers()[0]
-            opt.zero_grad()
-            model.manual_backward(loss)
-            opt.step()
+        # Autoencoder-style loss computation with full gradient flow
+        loss_list = model.compute_loss(x, "train", detach_grad=False)
+        optm_list = model.optimizers()
 
-    def _train_full_flow(self, model: pl.LightningModule, enc_loss: Tensor, dec_loss: Tensor) -> None:
-        """Train with full gradient flow between encoder and decoder.
+        # Check if optimizers need to step based on parameter gradients
+        do_step_list = [
+            any(p.requires_grad for p in component.parameters()) and loss.requires_grad
+            for component, loss in zip([model.encoder, model.decoder], loss_list)
+        ]
 
-        Combines encoder and decoder losses and performs a single backward
-        pass, allowing gradients to flow through the entire model.
-
-        Args:
-            model: The Lightning module being trained.
-            enc_loss: Encoder loss (sparsity/regularization).
-            dec_loss: Decoder loss (reconstruction).
-        """
-        enc_opt, dec_opt = model.optimizers()
-
-        # Check if components need training
-        enc_do_step = any(p.requires_grad for p in model.encoder.parameters()) and enc_loss.requires_grad
-        dec_do_step = any(p.requires_grad for p in model.decoder.parameters()) and dec_loss.requires_grad
-
-        if not (enc_do_step or dec_do_step):
+        if not any(do_step_list):
             return
 
         # Zero gradients for active optimizers
-        if enc_do_step:
-            enc_opt.zero_grad()
-        if dec_do_step:
-            dec_opt.zero_grad()
+        for optm, do_step in zip(optm_list, do_step_list):
+            if do_step:
+                optm.zero_grad()
 
         # Combined loss with full gradient flow
-        total_loss = enc_loss + dec_loss
+        total_loss = sum(loss_list)
         model.manual_backward(total_loss)
 
         # Step active optimizers
-        if enc_do_step:
-            enc_opt.step()
-        if dec_do_step:
-            dec_opt.step()
+        for optm, do_step in zip(optm_list, do_step_list):
+            if do_step:
+                optm.step()
 
     def validation_step(self, model: pl.LightningModule, batch: Tensor, batch_idx: int) -> Tensor:
-        """Standard validation step.
+        """Execute validation step with full gradient flow for loss computation.
 
-        Performs forward pass and loss computation without parameter updates.
+        Performs model evaluation on validation data using the same forward pass
+        and loss computation as training, but without parameter updates. This
+        ensures validation metrics are computed with the same gradient flow
+        configuration as training for consistency.
 
         Args:
-            model: The Lightning module being validated.
-            batch: Validation batch data.
-            batch_idx: Index of the current batch.
+            model: The PyTorch Lightning module being validated. Should be the
+                same model used in training with encoder and decoder components.
+            batch: Validation batch containing input data. First element should
+                be the input tensor; additional elements are ignored.
+            batch_idx: Index of the current validation batch. Used for logging
+                and potential batch-specific operations.
 
         Returns:
-            Combined validation loss.
+            Combined validation loss as a single tensor. This represents the
+            sum of all loss components (reconstruction, regularization, etc.)
+            that would be used for training optimization.
+
+        Note:
+            No gradient computation or parameter updates occur during validation.
+            The method maintains the same loss computation logic as training to
+            ensure consistent evaluation metrics.
         """
         x, *_ = batch
-        if hasattr(model, "compute_loss"):
-            dec_loss, enc_loss = model.compute_loss(x, "val", detach_gradients=False)
-            return dec_loss + enc_loss
-        else:
-            return model(x)
+        loss_list = model.compute_loss(x, "val", detach_grad=False)
+        return sum(loss_list)
 
 
 class DetachedTrainer(BaseTrainer):
-    """Detached gradient trainer for split training strategies.
+    """Detached gradient trainer for independent component optimization.
 
-    Implements training where gradients between model components are
-    detached, allowing independent optimization of different parts.
-    This is particularly useful for autoencoder architectures where
-    encoder and decoder can be trained with different objectives.
+    Implements a split training strategy where gradients between model components
+    are detached, enabling independent optimization of encoder and decoder with
+    their respective loss functions. This approach prevents the decoder's
+    reconstruction loss from overwhelming encoder-specific objectives like
+    sparsity or orthogonality constraints.
 
-    Features:
-    - Detached gradients between encoder and decoder
-    - Independent optimization of model components
-    - Support for different loss functions per component
+    The detached training strategy is particularly beneficial for autoencoder
+    architectures in spatial navigation modeling, where the encoder should learn
+    structured sparse representations (similar to hippocampal place cells) while
+    the decoder focuses purely on reconstruction accuracy.
+
+    Key Characteristics:
+        - Detached gradients between encoder and decoder components
+        - Independent optimization steps for each component
+        - Component-specific loss functions and optimization schedules
+        - Prevention of gradient interference between objectives
+
+    Advantages:
+        - Encoder can learn meaningful sparse representations without being
+          dominated by reconstruction objectives
+        - Decoder can focus purely on reconstruction quality
+        - More stable training for models with conflicting objectives
+        - Better control over individual component behavior
+
+    Trade-offs:
+        - Components may not learn optimal joint representations
+        - Requires careful tuning of component-specific loss weights
+        - May lead to suboptimal overall reconstruction if components diverge
+
+    Use Cases:
+        - Sparse autoencoder training where sparsity is critical
+        - Models with multiple competing objectives
+        - Research scenarios requiring controlled component behavior
+        - Biological plausibility experiments where independent learning is desired
+
+    Example:
+        >>> from functools import partial
+        >>> import torch.optim as optim
+        >>>
+        >>> trainer = DetachedTrainer(
+        ...     optimizer_init=partial(optim.Adam, lr=1e-3)
+        ... )
+        >>> # Encoder will be optimized with sparsity + orthogonality losses
+        >>> # Decoder will be optimized with reconstruction loss only
+        >>> model = Autoencoder(params, trainer)
     """
 
-    def __init__(self, optimizer_init, *args, **kwargs):
-        """Initialize detached gradient trainer.
+    def __init__(self, optimizer_init: Callable[[Any], Optimizer], *args: Any, **kwargs: Any) -> None:
+        """Initialize detached gradient trainer with optimizer configuration.
+
+        Sets up the trainer with a factory function for creating optimizers.
+        The same optimizer configuration will be used for both encoder and
+        decoder components, but they will be trained independently with
+        detached gradients.
 
         Args:
-            optimizer_init: Function to initialize optimizers.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
+            optimizer_init: Factory function for creating optimizer instances.
+                Should be a callable that takes model parameters as input and
+                returns an optimizer. The function will be called twice to create
+                separate optimizers for encoder and decoder components.
+                Typically a partial function like `partial(torch.optim.Adam, lr=1e-3)`.
+            *args: Additional positional arguments passed to parent class.
+            **kwargs: Additional keyword arguments passed to parent class.
+
+        Note:
+            While the same optimizer configuration is used for both components,
+            they maintain separate optimization states and are stepped independently.
+            This allows for different effective learning rates if components have
+            different gradient magnitudes.
+
+        Example:
+            >>> from functools import partial
+            >>> import torch.optim as optim
+            >>>
+            >>> # Both encoder and decoder use Adam with same hyperparameters
+            >>> trainer = DetachedTrainer(
+            ...     optimizer_init=partial(optim.Adam, lr=1e-3, weight_decay=1e-4)
+            ... )
         """
         super().__init__(*args, **kwargs)
         self.optimizer_init = optimizer_init
 
-    def configure_optimizers(self, model: pl.LightningModule) -> List[Optimizer]:
-        """Configure optimizers for detached training.
-
-        Creates separate optimizers for encoder and decoder components
-        to enable independent optimization.
-
-        Args:
-            model: The Lightning module to configure optimizers for.
-
-        Returns:
-            List containing encoder and decoder optimizers.
-        """
-        if hasattr(model, "encoder") and hasattr(model, "decoder"):
-            enc_opt = self.optimizer_init(model.encoder.parameters())
-            dec_opt = self.optimizer_init(model.decoder.parameters())
-            return [enc_opt, dec_opt]
-        else:
-            # Fallback for models without explicit encoder/decoder
-            return [self.optimizer_init(model.parameters())]
-
     def training_step(self, model: pl.LightningModule, batch: Tensor, batch_idx: int) -> None:
-        """Detached gradient training step.
+        """Execute detached gradient training step with independent component optimization.
 
-        Performs forward pass with detached gradients and independent
-        optimization of encoder and decoder components.
+        Performs a split training iteration where encoder and decoder are optimized
+        independently with detached gradients:
+        1. Forward pass through the model with gradient detachment at latent layer
+        2. Compute component-specific losses (encoder: sparsity/orthogonality, decoder: reconstruction)
+        3. Independent backward passes for each component
+        4. Separate optimizer steps without gradient interference
+
+        This approach allows the encoder to learn meaningful sparse representations
+        optimized for biological plausibility (sparsity, orthogonality) while the
+        decoder focuses purely on reconstruction accuracy without conflicting gradients.
 
         Args:
-            model: The Lightning module being trained.
-            batch: Training batch data.
-            batch_idx: Index of the current batch.
+            model: The PyTorch Lightning module being trained. Must have encoder
+                and decoder components with separate optimizers and a compute_loss
+                method that supports detached gradient computation.
+            batch: Training batch containing input data. First element should be
+                the input tensor; additional elements are ignored.
+            batch_idx: Index of the current batch within the epoch. Used for
+                logging and debugging purposes.
+
+        Note:
+            The detached training prevents gradients from flowing between components,
+            meaning the encoder's representation learning is not directly influenced
+            by reconstruction error. This can lead to more biologically plausible
+            representations but may reduce overall reconstruction quality.
+
+        Side Effects:
+            - Modifies encoder parameters based on sparsity and orthogonality losses
+            - Modifies decoder parameters based on reconstruction loss only
+            - Logs component-specific training metrics
+            - Maintains separate gradient computation graphs for each component
         """
         x, *_ = batch
 
-        if hasattr(model, "compute_loss"):
-            # For autoencoder models, compute losses with detached gradients
-            # Use the forward method with detach_gradients=True for proper separation
-            reconstruction, embedding = model.forward(x, detach_gradients=True)
+        # Autoencoder-style loss computation with detached gradients
+        loss_list = model.compute_loss(x, "train", detach_grad=True)
+        optm_list = model.optimizers()
 
-            # Compute losses separately
-            reconstruction_loss = model.reconstruction_loss(reconstruction, x)
-            gramian_loss = model.gramian_loss(embedding)
-            homeo_loss = model.homeo_loss(embedding)
+        # Check if optimizers need to step based on parameter gradients
+        do_step_list = [
+            any(p.requires_grad for p in component.parameters()) and loss.requires_grad
+            for component, loss in zip([model.encoder, model.decoder], loss_list)
+        ]
 
-            # Decoder loss (reconstruction only)
-            dec_loss = reconstruction_loss
+        if not any(do_step_list):
+            return
 
-            # Encoder loss (sparsity constraints only)
-            enc_loss = model.gramian_weight * gramian_loss + model.homeo_weight * homeo_loss
-
-            # Log losses
-            model.log("train/reconstruction_loss", reconstruction_loss, on_epoch=True)
-            model.log("train/gramian_loss", gramian_loss, on_epoch=True)
-            model.log("train/homeostatic_loss", homeo_loss, on_epoch=True)
-            model.log("train/decoder_loss", dec_loss, on_epoch=True, prog_bar=True)
-            model.log("train/encoder_loss", enc_loss, on_epoch=True, prog_bar=True)
-
-            # Log sparsity metrics
-            sparsity_rate = (embedding > 0.01).float().mean()
-            model.log("train/sparsity_rate", sparsity_rate, on_epoch=True)
-
-            self._train_detached(model, enc_loss, dec_loss)
-        else:
-            # Fallback for models without explicit loss computation
-            loss = model(x)
-            if hasattr(loss, "loss"):
-                loss = loss.loss
-            opt = model.optimizers()[0]
-            opt.zero_grad()
-            model.manual_backward(loss)
-            opt.step()
-
-    def _train_detached(self, model: pl.LightningModule, enc_loss: Tensor, dec_loss: Tensor) -> None:
-        """Train encoder and decoder independently with detached gradients.
-
-        Optimizes encoder and decoder separately, preventing gradients
-        from flowing between components. This allows each component to
-        focus on its specific objective.
-
-        Args:
-            model: The Lightning module being trained.
-            enc_loss: Encoder loss (sparsity/regularization).
-            dec_loss: Decoder loss (reconstruction).
-        """
-        enc_opt, dec_opt = model.optimizers()
-
-        # Check if components need training
-        enc_do_step = any(p.requires_grad for p in model.encoder.parameters()) and enc_loss.requires_grad
-        dec_do_step = any(p.requires_grad for p in model.decoder.parameters()) and dec_loss.requires_grad
-
-        # Train encoder independently
-        if enc_do_step:
-            enc_opt.zero_grad()
-            model.manual_backward(enc_loss)
-            enc_opt.step()
-
-        # Train decoder independently
-        if dec_do_step:
-            dec_opt.zero_grad()
-            model.manual_backward(dec_loss)
-            dec_opt.step()
+        # Train components independently with detached gradients
+        for optm, loss, do_step in zip(optm_list, loss_list, do_step_list):
+            if do_step:
+                optm.zero_grad()
+                model.manual_backward(loss)
+                optm.step()
 
     def validation_step(self, model: pl.LightningModule, batch: Tensor, batch_idx: int) -> Tensor:
-        """Detached validation step.
+        """Execute validation step with detached gradient computation for consistency.
 
-        Performs validation with the same detached logic as training
-        but without parameter updates.
+        Performs model evaluation on validation data using the same detached
+        gradient configuration as training. This ensures validation metrics
+        accurately reflect the training behavior where encoder and decoder
+        operate with independent gradient flows.
+
+        The validation uses detached gradients to maintain consistency with the
+        training regime, providing more accurate estimates of model performance
+        under the split training strategy.
 
         Args:
-            model: The Lightning module being validated.
-            batch: Validation batch data.
-            batch_idx: Index of the current batch.
+            model: The PyTorch Lightning module being validated. Should be the
+                same model used in detached training with encoder and decoder
+                components.
+            batch: Validation batch containing input data. First element should
+                be the input tensor; additional elements are ignored.
+            batch_idx: Index of the current validation batch. Used for logging
+                and potential batch-specific operations.
 
         Returns:
-            Combined validation loss.
+            Combined validation loss as a single tensor. Represents the sum of
+            all component losses (encoder-specific and decoder reconstruction)
+            computed with the same detached gradient configuration as training.
+
+        Note:
+            While gradients are computed in a detached manner for consistency,
+            no parameter updates occur during validation. The detached computation
+            ensures that validation metrics accurately reflect the model's behavior
+            under the split training regime.
         """
         x, *_ = batch
-        if hasattr(model, "compute_loss"):
-            dec_loss, enc_loss = model.compute_loss(x, "val", detach_gradients=True)
-            return dec_loss + enc_loss
-        else:
-            reconstruction, embedding = model.forward(x, detach_gradients=True)
-            return model.reconstruction_loss(reconstruction, x)
+        loss_list = model.compute_loss(x, "val", detach_grad=True)
+        return sum(loss_list)
