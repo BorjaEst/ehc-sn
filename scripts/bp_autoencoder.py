@@ -26,6 +26,7 @@ from ehc_sn.models.ann import decoders, encoders
 from ehc_sn.models.ann.autoencoders import Autoencoder, AutoencoderParams
 from ehc_sn.models.ann.decoders import DecoderParams
 from ehc_sn.models.ann.encoders import EncoderParams
+from ehc_sn.trainers.back_propagation import ClassicTrainer, DetachedTrainer
 from ehc_sn.utils import load_settings
 
 # -------------------------------------------------------------------------------------------
@@ -60,6 +61,7 @@ class ExperimentSettings(BaseModel):
     # Training Settings
     max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
     learning_rate: float = Field(default=1e-3, ge=1e-6, le=1e-1, description="Learning rate for optimizer")
+    trainer_type: str = Field(default="classic", description="Type of trainer: 'classic' or 'detached'")
 
     # Split Training Loss Settings
     gramian_center: bool = Field(default=True, description="Center activations before Gramian computation")
@@ -67,7 +69,6 @@ class ExperimentSettings(BaseModel):
     rate_target: float = Field(default=0.05, ge=0.0, le=1.0, description="Target mean firing rate regulation")
     min_active: int = Field(default=8, ge=1, le=64, description="Minimum number of active neurons per sample")
     homeo_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for homeostatic activity loss")
-    detach_gradients: bool = Field(default=False, description="Detach gradients for split loss components")
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
@@ -151,9 +152,16 @@ class ExperimentSettings(BaseModel):
             rate_target=self.rate_target,
             min_active=self.min_active,
             homeo_weight=self.homeo_weight,
-            detach_gradients=self.detach_gradients,
-            optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
+
+    def create_trainer(self):
+        """Create training strategy from settings."""
+        optimizer_init = partial(torch.optim.Adam, lr=self.learning_rate)
+
+        if self.trainer_type == "detached":
+            return DetachedTrainer(optimizer_init=optimizer_init)
+        else:
+            return ClassicTrainer(optimizer_init=optimizer_init)
 
     def create_figure_params(self) -> figures.CompareMapsFigParam:
         """Create figure parameters from settings."""
@@ -193,7 +201,11 @@ class ExperimentPipeline:
         # Initialize components directly from settings
         generator = data.BlockMapGenerator(self.settings.create_generator_params())
         datamodule = data.DataModule(generator, self.settings.create_datamodule_params())
-        model = Autoencoder(self.settings.create_autoencoder_params())
+
+        # Create autoencoder with trainer strategy
+        autoencoder_params = self.settings.create_autoencoder_params()
+        trainer_strategy = self.settings.create_trainer()
+        model = Autoencoder(autoencoder_params, trainer_strategy)
 
         # Create standard Lightning trainer
         trainer = pl.Trainer(
@@ -233,6 +245,7 @@ class ExperimentPipeline:
         print(f"Latent Dim: {self.settings.latent_dim}")
         print(f"Max Epochs: {self.settings.max_epochs}")
         print(f"Learning Rate: {self.settings.learning_rate:.1e}")
+        print(f"Trainer Type: {self.settings.trainer_type}")
         print("\n🧠 Split Training Loss Weights:")
         print(f"  • Gramian Weight: {self.settings.gramian_weight:.3f}")
         print(f"  • Homeostatic Weight: {self.settings.homeo_weight:.3f}")
@@ -338,6 +351,7 @@ def run_experiment(
     batch_size: Optional[int] = None,
     latent_dim: Optional[int] = None,
     learning_rate: Optional[float] = None,
+    trainer_type: Optional[str] = None,
     gramian_weight: Optional[float] = None,
     homeo_weight: Optional[float] = None,
 ) -> None:
@@ -351,6 +365,7 @@ def run_experiment(
         batch_size: Training batch size (overrides config)
         latent_dim: Latent space dimension (overrides config)
         learning_rate: Learning rate for optimizer (overrides config)
+        trainer_type: Type of trainer ('classic' or 'detached') (overrides config)
         gramian_weight: Weight for Gramian orthogonality loss (overrides config)
         homeo_weight: Weight for homeostatic activity loss (overrides config)
     """
@@ -370,6 +385,8 @@ def run_experiment(
         overrides["latent_dim"] = latent_dim
     if learning_rate is not None:
         overrides["learning_rate"] = learning_rate
+    if trainer_type is not None:
+        overrides["trainer_type"] = trainer_type
     if gramian_weight is not None:
         overrides["gramian_weight"] = gramian_weight
     if homeo_weight is not None:
@@ -408,9 +425,11 @@ def parse_arguments():
     parser.add_argument("--batch-size", "-b", type=int, help="Training batch size")
     parser.add_argument("--latent-dim", "-l", type=int, help="Latent space dimension")
     parser.add_argument("--learning-rate", "-lr", type=float, help="Learning rate for optimizer")
+    parser.add_argument(
+        "--trainer-type", "-t", type=str, choices=["classic", "detached"], help="Type of trainer to use"
+    )
     parser.add_argument("--gramian-weight", "-gw", type=float, help="Weight for Gramian orthogonality loss")
     parser.add_argument("--homeo-weight", "-hw", type=float, help="Weight for homeostatic activity loss")
-    parser.add_argument("--l1-weight", "-l1w", type=float, help="Weight for L1 sparsity loss")
 
     return parser.parse_args()
 
@@ -429,6 +448,7 @@ if __name__ == "__main__":
             batch_size=args.batch_size,
             latent_dim=args.latent_dim,
             learning_rate=args.learning_rate,
+            trainer_type=args.trainer_type,
             gramian_weight=args.gramian_weight,
             homeo_weight=args.homeo_weight,
         )
