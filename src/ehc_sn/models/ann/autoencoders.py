@@ -152,7 +152,7 @@ class Autoencoder(pl.LightningModule):
         >>> trainer.fit(model, dataloader)
     """
 
-    def __init__(self, params: AutoencoderParams, trainer: Optional[BaseTrainer] = None):
+    def __init__(self, params: AutoencoderParams, trainer: BaseTrainer):
         """Initialize the Autoencoder with given parameters and training strategy.
 
         Sets up the complete autoencoder architecture including encoder, decoder,
@@ -164,8 +164,8 @@ class Autoencoder(pl.LightningModule):
             params: AutoencoderParams instance containing model configuration.
                 Must include compatible encoder/decoder pairs and all required
                 hyperparameters.
-            trainer: Training strategy to use. If None, a DetachedTrainer will
-                be created using the optimizer_init from params.
+            trainer: Training strategy to use. This is now required to ensure
+                proper separation of model architecture and training logic.
 
         Raises:
             ValueError: If encoder and decoder dimensions are incompatible, as
@@ -232,16 +232,18 @@ class Autoencoder(pl.LightningModule):
     # Forward pass
     # -----------------------------------------------------------------------------------
 
-    def forward(self, x: Tensor, *args: Any, **kwds: dict) -> Tuple[Tensor, Tensor]:
+    def forward(self, x: Tensor, detach_gradients: bool = False, *args: Any, **kwds: dict) -> Tuple[Tensor, Tensor]:
         """Forward pass through the autoencoder.
 
         Processes input through the encoder to obtain a latent representation,
         then through the decoder to reconstruct the original input. The gradient
-        flow behavior depends on the training strategy being used.
+        flow behavior can be controlled by the detach_gradients parameter.
 
         Args:
             x: Input tensor with shape matching the encoder's expected input shape.
                 For cognitive maps, typically (batch_size, channels, height, width).
+            detach_gradients: Whether to detach gradients between encoder and decoder.
+                When True, prevents gradient flow from decoder to encoder.
             *args: Additional arguments (unused, maintained for interface compatibility).
             **kwds: Additional keyword arguments (unused, maintained for interface compatibility).
 
@@ -256,16 +258,20 @@ class Autoencoder(pl.LightningModule):
             input as target for potential supervised learning scenarios.
         """
         embedding = self.encoder(x, *args, target=None, **kwds)  # No sparse target
-        reconstruction = self.decoder(embedding, *args, target=x, **kwds)
 
-        # Return reconstruction and embedding
+        # Optionally detach gradients between encoder and decoder
+        z = embedding.detach() if detach_gradients else embedding
+
+        reconstruction = self.decoder(z, *args, target=x, **kwds)
+
+        # Return reconstruction and embedding (always return original embedding)
         return reconstruction, embedding
 
     # -----------------------------------------------------------------------------------
     # Loss computation
     # -----------------------------------------------------------------------------------
 
-    def compute_loss(self, x: Tensor, log_label: str) -> Tuple[Tensor, Tensor]:
+    def compute_loss(self, x: Tensor, log_label: str, detach_gradients: bool = False) -> Tuple[Tensor, Tensor]:
         """Compute and log decoder + encoder losses for a batch.
 
         Encapsulates the full loss decomposition used across training,
@@ -278,6 +284,7 @@ class Autoencoder(pl.LightningModule):
                shape excluding batch dimension matches ``self.input_shape``.
             log_label: Namespace prefix for metric logging (``train``,
                ``validation`` or ``test``).
+            detach_gradients: Whether to detach gradients between encoder and decoder.
 
         Returns:
             (decoder_loss, encoder_loss) where:
@@ -297,7 +304,7 @@ class Autoencoder(pl.LightningModule):
             disables grads automatically during validation/test evaluation.
         """
         # Forward pass to get reconstruction and embedding
-        reconstruction, embedding = self(x)
+        reconstruction, embedding = self.forward(x, detach_gradients)
 
         # Encoder-side losses
         gramian_loss = self.gramian_loss(embedding)
