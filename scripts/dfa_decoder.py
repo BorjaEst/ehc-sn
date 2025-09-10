@@ -31,6 +31,7 @@ from ehc_sn.models.ann.decoders import DecoderParams
 from ehc_sn.models.ann.decoders import DFALinear as DFADecoder
 from ehc_sn.models.ann.encoders import EncoderParams
 from ehc_sn.models.ann.encoders import Linear as LinearEncoder
+from ehc_sn.trainers.feedback_aligment import DFATrainer
 from ehc_sn.utils import load_settings
 
 # -------------------------------------------------------------------------------------------
@@ -77,7 +78,6 @@ class DFADecoderTrainingSettings(BaseModel):
     rate_target: float = Field(default=0.05, ge=0.0, le=1.0, description="Target mean firing rate regulation")
     min_active: int = Field(default=8, ge=1, le=64, description="Minimum number of active neurons per sample")
     homeo_weight: float = Field(default=1.0, ge=0.0, le=10.0, description="Weight for homeostatic activity loss")
-    detach_gradients: bool = Field(default=False, description="Detach gradients for split loss components")
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
@@ -159,9 +159,12 @@ class DFADecoderTrainingSettings(BaseModel):
             rate_target=self.rate_target,
             min_active=self.min_active,
             homeo_weight=self.homeo_weight,
-            detach_gradients=self.detach_gradients,
-            optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
         )
+
+    def create_trainer(self):
+        """Create DFA training strategy from settings."""
+        optimizer_init = partial(torch.optim.Adam, lr=self.learning_rate)
+        return DFATrainer(optimizer_init=optimizer_init)
 
     def create_figure_params(self) -> figures.CompareMapsFigParam:
         """Create figure parameters from settings."""
@@ -204,7 +207,8 @@ class DFADecoderTrainingPipeline:
 
         # Create autoencoder with initial parameters to load pretrained weights
         autoencoder_params = self.settings.create_autoencoder_params(encoder, temp_decoder)
-        model = Autoencoder(autoencoder_params)
+        temp_trainer = self.settings.create_trainer()  # Temporary trainer for loading
+        model = Autoencoder(autoencoder_params, temp_trainer)
 
         # Load pretrained weights if available
         if Path(self.settings.pretrained_path).exists():
@@ -233,8 +237,9 @@ class DFADecoderTrainingPipeline:
         )
         model.decoder = DFADecoder(dfa_decoder_params)
 
-        # Update optimizer to include new decoder parameters
-        model.optimizer_init = self.settings.create_autoencoder_params(model.encoder, model.decoder).optimizer_init
+        # Create final trainer with DFA strategy
+        trainer = self.settings.create_trainer()
+        model.trainer = trainer
 
         # Initialize data components
         generator = data.BlockMapGenerator(self.settings.create_generator_params())
@@ -285,7 +290,6 @@ class DFADecoderTrainingPipeline:
         print(f"Gramian Weight: {self.settings.gramian_weight:.3f}")
         print(f"Rate Target: {self.settings.rate_target:.1%}")
         print(f"Homeo Weight: {self.settings.homeo_weight:.3f}")
-        print(f"Detach Gradients: {self.settings.detach_gradients}")
         print(f"Log Directory: {self.settings.log_dir}")
         print(f"Experiment: {self.settings.experiment_name}")
 
