@@ -11,6 +11,7 @@ from ehc_sn.models.ann import encoders
 from ehc_sn.models.ann.decoders import BaseDecoder, DecoderParams
 from ehc_sn.models.ann.encoders import BaseEncoder, EncoderParams
 from ehc_sn.modules.loss import GramianOrthogonalityLoss, HomeostaticActivityLoss, TargetL1SparsityLoss
+from ehc_sn.trainers.core import BaseTrainer
 
 
 class AutoencoderParams(BaseModel):
@@ -42,12 +43,6 @@ class AutoencoderParams(BaseModel):
             Ensures robust distributed representations. Default: 8.
         homeo_weight: Weight coefficient for homeostatic activity loss term.
             Controls strength of firing rate regulation. Default: 1.0.
-        detach_gradients: Whether to detach gradients between decoder and encoder.
-            When True, prevents gradients from flowing from decoder to encoder during training.
-            This allows for split training behavior while using manual optimization. Default: True.
-        optimizer_init: Callable function to initialize optimizers.
-            Should be a partial function or lambda that takes model parameters as input
-            and returns an optimizer instance (e.g., functools.partial(torch.optim.Adam, lr=1e-3)).
 
     Example:
         >>> from functools import partial
@@ -57,8 +52,6 @@ class AutoencoderParams(BaseModel):
         ...     gramian_weight=1.0,
         ...     homeo_weight=1.0,
         ...     rate_target=0.10,
-        ...     detach_gradients=True,  # Use gradient detachment for split training
-        ...     optimizer_init=partial(torch.optim.Adam, lr=1e-3)
         ... )
     """
 
@@ -76,12 +69,6 @@ class AutoencoderParams(BaseModel):
     rate_target: float = Field(0.10, description="Target mean firing rate for codes.")
     min_active: int = Field(8, description="Min active neurons per-sample.")
     homeo_weight: float = Field(1.0, description="Weight for homeostatic term.")
-
-    # Gradient flow control
-    detach_gradients: bool = Field(True, description="Whether to detach gradients between decoder and encoder.")
-
-    # Optimizer initialization
-    optimizer_init: Callable = Field(..., description="Callable to initialize the optimizer.")
 
 
 def validate_dimensions(params: AutoencoderParams) -> None:
@@ -165,18 +152,20 @@ class Autoencoder(pl.LightningModule):
         >>> trainer.fit(model, dataloader)
     """
 
-    def __init__(self, params: Optional[AutoencoderParams] = None):
-        """Initialize the Autoencoder with given parameters.
+    def __init__(self, params: AutoencoderParams, trainer: Optional[BaseTrainer] = None):
+        """Initialize the Autoencoder with given parameters and training strategy.
 
         Sets up the complete autoencoder architecture including encoder, decoder,
-        loss functions, and training configuration. The model uses manual optimization
-        with configurable gradient flow between encoder and decoder components.
+        loss functions, and training configuration. The model delegates training
+        logic to the provided trainer strategy, maintaining clean separation
+        between model architecture and training algorithms.
 
         Args:
             params: AutoencoderParams instance containing model configuration.
                 Must include compatible encoder/decoder pairs and all required
-                hyperparameters. If None, default parameters will be used (not
-                recommended for production use).
+                hyperparameters.
+            trainer: Training strategy to use. If None, a DetachedTrainer will
+                be created using the optimizer_init from params.
 
         Raises:
             ValueError: If encoder and decoder dimensions are incompatible, as
@@ -185,30 +174,26 @@ class Autoencoder(pl.LightningModule):
         Sets up:
             - Model components: encoder, decoder
             - Loss functions: reconstruction (BCE), Gramian orthogonality, homeostatic
-            - Training configuration: manual optimization with configurable gradient flow
+            - Training strategy: delegates to provided trainer
             - Hyperparameter weights for loss combination
 
         Note:
-            Manual optimization is enabled to support dual optimizer training.
-            The detach_gradients parameter controls whether gradients flow from
-            decoder to encoder during training.
+            Manual optimization is enabled to support custom training strategies.
+            The trainer controls gradient flow and optimization behavior.
         """
         validate_dimensions(params)
         super(Autoencoder, self).__init__()
 
-        # Enable manual optimization for dual optimizer support
-        # Required by Lightning when using multiple optimizers in configure_optimizers()
+        # Enable manual optimization for custom training strategies
         self.automatic_optimization = False
+
+        # Set training strategy
+        # If trainer is None, model will not be able to train
+        self.trainer_strategy = trainer
 
         # Model components
         self.encoder = params.encoder
         self.decoder = params.decoder
-
-        # Gradient flow control
-        self.detach_gradients = params.detach_gradients
-
-        # Training hyperparameters
-        self.optimizer_init = params.optimizer_init
 
         # Loss functions
         self.reconstruction_loss = nn.BCELoss(reduction="mean")
@@ -219,59 +204,46 @@ class Autoencoder(pl.LightningModule):
         self.homeo_weight = params.homeo_weight
 
         # Save hyperparameters for checkpointing
-        self.save_hyperparameters(ignore=["encoder", "decoder"])
+        self.save_hyperparameters(ignore=["encoder", "decoder", "trainer"])
 
     # -----------------------------------------------------------------------------------
     # Optimizer configuration
     # -----------------------------------------------------------------------------------
 
     def configure_optimizers(self) -> List[Optimizer]:
-        """Configure two optimizers for split training architecture.
+        """Configure optimizers using the training strategy.
 
-        Creates separate optimizers for encoder and decoder components to enable
-        independent optimization with different loss functions. This split training
-        approach allows the encoder to focus on learning structured sparse
-        representations while the decoder focuses solely on reconstruction accuracy.
-
-        The optimizer configuration uses the same initialization function for both
-        components, ensuring consistent hyperparameters (learning rate, momentum, etc.)
-        while maintaining separate optimization states.
+        Delegates optimizer configuration to the training strategy,
+        allowing different training algorithms to configure optimizers
+        according to their specific requirements.
 
         Returns:
-            List containing two optimizers:
-                - Index 0: Encoder optimizer for representation learning losses
-                - Index 1: Decoder optimizer for reconstruction losses
+            List of optimizers configured by the training strategy.
 
         Note:
-            The order of optimizers in the returned list is important as it determines
-            how they are accessed in training_step() via self.optimizers(). The encoder
-            optimizer must be first, followed by the decoder optimizer.
-
-        Example:
-            >>> # In training_step:
-            >>> enc_opt, dec_opt = self.optimizers()
-            >>> # enc_opt trains encoder with composite loss
-            >>> # dec_opt trains decoder with reconstruction loss only
+            The training strategy determines the number and configuration
+            of optimizers based on the training algorithm requirements.
         """
-        enc_opt = self.optimizer_init(self.encoder.parameters())
-        dec_opt = self.optimizer_init(self.decoder.parameters())
-        return [enc_opt, dec_opt]
+        if self.trainer_strategy is None:
+            raise ValueError("Trainer strategy must be provided to configure optimizers.")
+        return self.trainer_strategy.configure_optimizers(self)
 
     # -----------------------------------------------------------------------------------
     # Forward pass
     # -----------------------------------------------------------------------------------
 
-    def forward(self, x: Tensor, *args: Any) -> Tuple[Tensor, Tensor]:
+    def forward(self, x: Tensor, *args: Any, **kwds: dict) -> Tuple[Tensor, Tensor]:
         """Forward pass through the autoencoder.
 
         Processes input through the encoder to obtain a latent representation,
-        then through the decoder to reconstruct the original input. This method
-        defines the complete forward computation graph for the autoencoder.
+        then through the decoder to reconstruct the original input. The gradient
+        flow behavior depends on the training strategy being used.
 
         Args:
             x: Input tensor with shape matching the encoder's expected input shape.
                 For cognitive maps, typically (batch_size, channels, height, width).
             *args: Additional arguments (unused, maintained for interface compatibility).
+            **kwds: Additional keyword arguments (unused, maintained for interface compatibility).
 
         Returns:
             Tuple containing:
@@ -283,9 +255,8 @@ class Autoencoder(pl.LightningModule):
             available during the forward pass. The decoder uses the original
             input as target for potential supervised learning scenarios.
         """
-        embedding = self.encoder(x, target=None)  # No sparse target available
-        z = embedding.detach() if self.detach_gradients else embedding
-        reconstruction = self.decoder(z, target=x)
+        embedding = self.encoder(x, *args, target=None, **kwds)  # No sparse target
+        reconstruction = self.decoder(embedding, *args, target=x, **kwds)
 
         # Return reconstruction and embedding
         return reconstruction, embedding
@@ -353,160 +324,73 @@ class Autoencoder(pl.LightningModule):
     # -----------------------------------------------------------------------------------
 
     def on_train_batch_start(self, batch, batch_idx: int) -> None:
-        """Initialize registry and hooks before training batch starts.
+        """Initialize registry and delegate to training strategy.
 
-        Clears the registry at the start of each batch to ensure clean state
-        for hook management and potential debugging/monitoring systems.
+        Clears the registry at the start of each batch and delegates
+        to the training strategy for any additional setup.
 
         Args:
-            batch: Training batch (unused in this implementation).
-            batch_idx: Index of the current batch (unused in this implementation).
-
-        Note:
-            This hook is called automatically by PyTorch Lightning before each
-            training batch is processed. The registry clearing ensures that any
-            batch-specific state from previous iterations doesn't interfere with
-            the current batch.
+            batch: Training batch.
+            batch_idx: Index of the current batch.
         """
+        if self.trainer_strategy is None:
+            raise ValueError("Trainer strategy must be provided for training.")
+
         # Clear registry at the start of each batch
         registry.clear("batch")
 
-    def training_step(self, batch: Tensor, batch_idx: int) -> None:
-        """Perform one training iteration (manual optimization).
+        # Delegate to training strategy
+        self.trainer_strategy.on_train_batch_start(self, batch, batch_idx)
 
-        Uses :meth:`compute_loss` to obtain the two loss components then
-        dispatches either split or joint optimization depending on
-        ``self.detach_gradients``.
+    def training_step(self, batch: Tensor, batch_idx: int) -> None:
+        """Delegate training step to the training strategy.
+
+        Uses the training strategy to perform the training step,
+        allowing different training algorithms to implement their
+        specific optimization logic.
 
         Args:
             batch: Batch tuple whose first element is the input tensor.
-            batch_idx: Index within the epoch (unused).
-
-        Notes:
-            Skips backward/step if a module is frozen or its loss does not
-            require gradients.
-        """
-        x, *_ = batch
-        dec_loss, enc_loss = self.compute_loss(x, log_label="train")
-        if self.detach_gradients:
-            self.train_detached(enc_loss, dec_loss)
-        else:
-            self.train_full(enc_loss, dec_loss)
-
-    def train_detached(self, enc_loss: Tensor, dec_loss: Tensor) -> None:
-        """Optimize encoder and decoder independently (split mode).
-
-        The latent embedding passed to the decoder was detached during the
-        forward pass, so reconstruction gradients cannot influence encoder
-        weights. Each component receives a separate backward pass and optimizer
-        step if (a) it has trainable parameters and (b) its loss requires
-        gradients.
-
-        Args:
-            enc_loss: Encoder composite sparsity / regularization loss.
-            dec_loss: Decoder reconstruction loss.
-
-        Notes:
-            - Ensures zeroed gradients per component before its backward pass.
-            - Safe-guards avoid unnecessary backward calls when modules are
-              frozen (supports curriculum or staged training).
-        """
-        enc_opt, dec_opt = self.optimizers()
-        enc_do_step = any(p.requires_grad for p in self.encoder.parameters()) and enc_loss.requires_grad
-        dec_do_step = any(p.requires_grad for p in self.decoder.parameters()) and dec_loss.requires_grad
-        if enc_do_step:
-            enc_opt.zero_grad()
-            self.manual_backward(enc_loss)
-            enc_opt.step()
-        if dec_do_step:
-            dec_opt.zero_grad()
-            self.manual_backward(dec_loss)
-            dec_opt.step()
-
-    def train_full(self, enc_loss: Tensor, dec_loss: Tensor) -> None:
-        """Optimize encoder + decoder jointly with full gradient flow.
-
-        Sums losses and performs a single backward pass so decoder (reconstruction)
-        gradients propagate through the encoder. Each optimizer steps if its
-        parameter set is trainable.
-
-        Args:
-            enc_loss: Encoder sparsity / regularization term.
-            dec_loss: Decoder reconstruction term.
-
-        Notes:
-            - Skips early if both modules are effectively frozen.
-            - Keeps separate optimizers to allow potential divergence of
-              schedulers or hyperparameters later while still sharing a
-              unified backward graph.
-        """
-        enc_opt, dec_opt = self.optimizers()
-        enc_do_step = any(p.requires_grad for p in self.encoder.parameters()) and enc_loss.requires_grad
-        dec_do_step = any(p.requires_grad for p in self.decoder.parameters()) and dec_loss.requires_grad
-        if not (enc_do_step or dec_do_step):
-            return
-        if enc_do_step:
-            enc_opt.zero_grad()
-        if dec_do_step:
-            dec_opt.zero_grad()
-        total_loss = enc_loss + dec_loss
-        self.manual_backward(total_loss)
-        if enc_do_step:
-            enc_opt.step()
-        if dec_do_step:
-            dec_opt.step()
-
-    def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
-        """Clean up registry after training batch completion.
-
-        Provides a hook for potential cleanup operations after each training batch.
-        Currently, registry cleanup is handled by the next batch's on_train_batch_start(),
-        and hook cleanup is managed by individual encoder/decoder models that register them.
-
-        Args:
-            outputs: Training step outputs (unused in this implementation).
-            batch: Training batch (unused in this implementation).
-            batch_idx: Index of the current batch (unused in this implementation).
+            batch_idx: Index within the epoch.
 
         Note:
-            This method complements on_train_batch_start() to provide complete
-            lifecycle management for the registry during training. The actual cleanup
-            operations are deferred to other parts of the system for efficiency.
+            All training logic is handled by the training strategy,
+            including gradient computation, optimizer steps, and
+            any special handling required by the algorithm.
         """
-        # Registry cleanup is handled by on_train_batch_start of next batch
-        # Hook cleanup is handled by individual models that register them
-        pass
+        return self.trainer_strategy.training_step(self, batch, batch_idx)
+
+    def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
+        """Delegate batch end cleanup to training strategy.
+
+        Provides a hook for training strategy-specific cleanup operations
+        after each training batch.
+
+        Args:
+            outputs: Training step outputs.
+            batch: Training batch.
+            batch_idx: Index of the current batch.
+        """
+        self.trainer_strategy.on_train_batch_end(self, outputs, batch, batch_idx)
 
     # -----------------------------------------------------------------------------------
     # Validation step
     # -----------------------------------------------------------------------------------
 
     def validation_step(self, batch: Tensor, batch_idx: int) -> Tensor:  # noqa: ARG002
-        """Run one validation iteration and return combined loss.
+        """Delegate validation step to the training strategy.
 
-        Performs a forward pass on a validation batch, computing both decoder
-        (reconstruction) and encoder (regularization / sparsity) losses via
-        :meth:`compute_loss`. Returns their sum so Lightning can aggregate it
-        for epoch metrics. Individual component losses are logged inside
-        :meth:`compute_loss` under the ``validation/`` namespace
-        (e.g. ``validation/reconstruction_loss``).
+        Uses the training strategy to perform the validation step,
+        ensuring consistency between training and validation logic.
 
         Args:
-            batch: Validation batch. Expected structure ``(x, *_)`` where ``x``
-                matches the model's ``input_shape``.
-            batch_idx: Index of the batch inside the validation epoch (unused).
+            batch: Validation batch.
+            batch_idx: Index of the batch (unused).
 
         Returns:
-            Scalar tensor: ``decoder_loss + encoder_loss`` for the batch.
-
-        Notes:
-            - Gradients are disabled automatically in eval mode.
-            - Wrapper keeps loop minimal; decomposition lives in
-              :meth:`compute_loss`.
+            Validation loss tensor.
         """
-        x, *_ = batch
-        dec_loss, enc_loss = self.compute_loss(x, log_label="val")
-        return dec_loss + enc_loss
+        return self.trainer_strategy.validation_step(self, batch, batch_idx)
 
     # -----------------------------------------------------------------------------------
     # Test step
@@ -717,6 +601,7 @@ if __name__ == "__main__":
     import lightning.pytorch as pl
 
     from ehc_sn.models.ann import decoders
+    from ehc_sn.trainers.back_propagation import DetachedTrainer
 
     # Simple dataset for testing
     class SimpleDataset(torch.utils.data.Dataset):
@@ -749,21 +634,18 @@ if __name__ == "__main__":
             x[0, torch.randint(0, 16, (num_obstacles,)), torch.randint(0, 32, (num_obstacles,))] = 1.0
             return (x,)  # Return as tuple for batch unpacking
 
-    # Create autoencoder with configurable gradient flow
+    # Create autoencoder with configurable training strategy
+    trainer = DetachedTrainer(optimizer_init=partial(torch.optim.Adam, lr=1e-3))
+    encoder_param = encoders.EncoderParams(input_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)
+    decoder_param = decoders.DecoderParams(output_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)
     autoencoder_params = AutoencoderParams(
-        encoder=encoders.Linear(
-            encoders.EncoderParams(input_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)
-        ),
-        decoder=decoders.Linear(
-            decoders.DecoderParams(output_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)
-        ),
+        encoder=encoders.Linear(encoder_param),
+        decoder=decoders.Linear(decoder_param),
         gramian_weight=1.0,
         homeo_weight=1.0,
         rate_target=0.10,
-        detach_gradients=True,  # Use gradient detachment for split training
-        optimizer_init=partial(torch.optim.Adam, lr=1e-3),
     )
-    model = Autoencoder(autoencoder_params)
+    model = Autoencoder(autoencoder_params, trainer)
 
     # Create training data
     dataset = SimpleDataset(200)
