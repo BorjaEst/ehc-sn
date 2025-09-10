@@ -15,37 +15,21 @@ from ehc_sn.trainers.core import BaseTrainer
 
 
 class AutoencoderParams(BaseModel):
-    """Parameters for configuring the Autoencoder model.
+    """Configuration parameters for the Autoencoder model.
 
-    This configuration class defines all the parameters needed to construct
-    and train an autoencoder for the entorhinal-hippocampal circuit modeling.
-    It ensures that the encoder and decoder components are properly configured
-    and compatible with each other.
-
-    The parameters are organized into several groups:
-    - Core components: encoder, decoder, optimizer initialization
-    - Legacy sparsity: backward compatibility parameters
-    - Gramian orthogonality: decorrelation loss parameters
-    - Homeostatic activity: firing rate regulation parameters
+    Defines parameters for constructing an autoencoder model for entorhinal-hippocampal
+    circuit modeling, ensuring encoder and decoder compatibility.
 
     Attributes:
-        encoder: The encoder component that transforms input into latent representations.
-            Must be an instance of BaseEncoder with appropriate input dimensions.
-        decoder: The decoder component that reconstructs outputs from latent representations.
-            Must be an instance of BaseDecoder with output dimensions matching encoder input.
+        encoder: Encoder component for transforming input to latent representations.
+        decoder: Decoder component for reconstructing output from latent representations.
         gramian_center: Whether to center activations before computing Gramian matrix.
-            Centering removes mean activation, improving correlation stability. Default: True.
-        gramian_weight: Weight coefficient for Gramian orthogonality loss term.
-            Controls strength of decorrelation constraint. Default: 1.0.
-        rate_target: Target mean firing rate for homeostatic regulation.
-            Should be between 0.0 and 1.0, typically 0.05-0.20. Default: 0.10.
-        min_active: Minimum number of neurons that should be active per sample.
-            Ensures robust distributed representations. Default: 8.
-        homeo_weight: Weight coefficient for homeostatic activity loss term.
-            Controls strength of firing rate regulation. Default: 1.0.
+        gramian_weight: Weight coefficient for Gramian orthogonality loss.
+        rate_target: Target mean firing rate for homeostatic regulation (0.0-1.0).
+        min_active: Minimum number of active neurons per sample.
+        homeo_weight: Weight coefficient for homeostatic activity loss.
 
     Example:
-        >>> from functools import partial
         >>> params = AutoencoderParams(
         ...     encoder=Linear(EncoderParams(...)),
         ...     decoder=Linear(DecoderParams(...)),
@@ -72,23 +56,17 @@ class AutoencoderParams(BaseModel):
 
 
 def validate_dimensions(params: AutoencoderParams) -> None:
-    """Validate that encoder and decoder dimensions are compatible.
+    """Validate encoder and decoder dimension compatibility.
 
-    This function performs essential compatibility checks between the encoder
-    and decoder components to ensure they can work together properly in the
-    autoencoder architecture.
+    Ensures encoder and decoder can work together by checking:
+    1. Encoder input shape matches decoder output shape
+    2. Encoder latent dimension matches decoder latent dimension
 
     Args:
-        params: AutoencoderParams instance containing encoder and decoder configurations.
+        params: AutoencoderParams containing encoder and decoder configurations.
 
     Raises:
-        ValueError: If encoder input shape doesn't match decoder output shape.
-        ValueError: If encoder latent dimension doesn't match decoder latent dimension.
-
-    Note:
-        This validation ensures that:
-        1. The decoder can reconstruct the same shape as the encoder input
-        2. The latent representations have matching dimensions for proper data flow
+        ValueError: If dimensions are incompatible.
     """
     if params.encoder.input_shape != params.decoder.output_shape:
         raise ValueError(
@@ -103,83 +81,52 @@ def validate_dimensions(params: AutoencoderParams) -> None:
 
 
 class Autoencoder(pl.LightningModule):
-    """Neural network autoencoder for the entorhinal-hippocampal circuit with configurable gradient flow.
+    """Autoencoder for entorhinal-hippocampal circuit spatial navigation modeling.
 
-    This autoencoder combines an encoder that transforms spatial input into a compact
-    embedding and a decoder that reconstructs the original input from the embedding.
-    It uses manual optimization with configurable gradient flow between encoder and decoder,
-    allowing for both standard training and split training strategies.
+    Combines an encoder that transforms spatial input into sparse latent representations
+    and a decoder that reconstructs the original input. Uses manual optimization with
+    configurable gradient flow to support different training strategies.
 
-    The autoencoder serves as a computational model for how the entorhinal-hippocampal
-    circuit might encode, store, and retrieve spatial information. It incorporates
-    biologically-inspired sparsity constraints that encourage the model to learn
-    efficient representations similar to those found in hippocampal place cells.
-
-    Key Features:
-        - Manual optimization with configurable gradient flow between components
-        - Sparse latent representations mimicking hippocampal neuron firing patterns
-        - Configurable encoder/decoder architectures for different input types
-        - Multiple sparsity regularization methods (Gramian, homeostatic)
-        - Lightning-based training with comprehensive logging and metrics
-        - Support for both training and inference modes with proper checkpointing
+    Incorporates biologically-inspired sparsity constraints mimicking hippocampal
+    place cell firing patterns for spatial memory encoding and retrieval.
 
     Architecture:
-        Input → Encoder → Sparse Latent Representation → Decoder → Reconstruction
-
-    Training Strategy:
-        When detach_gradients=True: Split training with encoder focused on sparsity losses
-        and decoder focused on reconstruction, with no gradient flow between them.
-        When detach_gradients=False: Standard autoencoder with full gradient flow.
+        Input → Encoder → Sparse Latent → Decoder → Reconstruction
 
     Args:
-        params: AutoencoderParams instance containing all configuration parameters.
-            Must include compatible encoder/decoder pairs and training hyperparameters.
+        params: Model configuration parameters.
+        trainer: Training strategy (required for proper separation of concerns).
 
     Attributes:
-        encoder: The encoder neural network component.
-        decoder: The decoder neural network component.
-        detach_gradients: Whether to detach gradients between decoder and encoder.
-        optimizer_init: Function to initialize optimizers for both components.
+        encoder: Encoder neural network component.
+        decoder: Decoder neural network component.
+        trainer_strategy: Training strategy handling optimization logic.
+        reconstruction_loss: BCE loss for reconstruction accuracy.
         gramian_loss: Gramian orthogonality loss for decorrelated representations.
         homeo_loss: Homeostatic activity loss for firing rate regulation.
-        reconstruction_loss: BCE loss for reconstruction accuracy.
 
     Example:
-        >>> # Create and train an autoencoder with configurable gradient flow
-        >>> params = AutoencoderParams(..., detach_gradients=True)
-        >>> model = Autoencoder(params)
-        >>> trainer = pl.Trainer(max_epochs=100)
-        >>> trainer.fit(model, dataloader)
+        >>> trainer = DetachedTrainer(optimizer_init=partial(torch.optim.Adam, lr=1e-3))
+        >>> model = Autoencoder(params, trainer)
+        >>> lightning_trainer = pl.Trainer(max_epochs=100)
+        >>> lightning_trainer.fit(model, dataloader)
     """
 
     def __init__(self, params: AutoencoderParams, trainer: BaseTrainer):
-        """Initialize the Autoencoder with given parameters and training strategy.
+        """Initialize autoencoder with parameters and training strategy.
 
-        Sets up the complete autoencoder architecture including encoder, decoder,
-        loss functions, and training configuration. The model delegates training
-        logic to the provided trainer strategy, maintaining clean separation
-        between model architecture and training algorithms.
+        Sets up model architecture, loss functions, and training configuration.
+        Delegates training logic to the provided trainer strategy.
 
         Args:
-            params: AutoencoderParams instance containing model configuration.
-                Must include compatible encoder/decoder pairs and all required
-                hyperparameters.
-            trainer: Training strategy to use. This is now required to ensure
-                proper separation of model architecture and training logic.
+            params: Model configuration including encoder/decoder and loss weights.
+            trainer: Training strategy for optimization logic.
 
         Raises:
-            ValueError: If encoder and decoder dimensions are incompatible, as
-                validated by validate_dimensions().
-
-        Sets up:
-            - Model components: encoder, decoder
-            - Loss functions: reconstruction (BCE), Gramian orthogonality, homeostatic
-            - Training strategy: delegates to provided trainer
-            - Hyperparameter weights for loss combination
+            ValueError: If encoder and decoder dimensions are incompatible.
 
         Note:
             Manual optimization is enabled to support custom training strategies.
-            The trainer controls gradient flow and optimization behavior.
         """
         validate_dimensions(params)
         super(Autoencoder, self).__init__()
@@ -213,16 +160,11 @@ class Autoencoder(pl.LightningModule):
     def configure_optimizers(self) -> List[Optimizer]:
         """Configure optimizers using the training strategy.
 
-        Delegates optimizer configuration to the training strategy,
-        allowing different training algorithms to configure optimizers
-        according to their specific requirements.
-
         Returns:
             List of optimizers configured by the training strategy.
 
-        Note:
-            The training strategy determines the number and configuration
-            of optimizers based on the training algorithm requirements.
+        Raises:
+            ValueError: If no trainer strategy is provided.
         """
         if self.trainer_strategy is None:
             raise ValueError("Trainer strategy must be provided to configure optimizers.")
@@ -233,29 +175,19 @@ class Autoencoder(pl.LightningModule):
     # -----------------------------------------------------------------------------------
 
     def forward(self, x: Tensor, detach_gradients: bool = False, *args: Any, **kwds: dict) -> Tuple[Tensor, Tensor]:
-        """Forward pass through the autoencoder.
-
-        Processes input through the encoder to obtain a latent representation,
-        then through the decoder to reconstruct the original input. The gradient
-        flow behavior can be controlled by the detach_gradients parameter.
+        """Forward pass through encoder and decoder.
 
         Args:
-            x: Input tensor with shape matching the encoder's expected input shape.
-                For cognitive maps, typically (batch_size, channels, height, width).
+            x: Input tensor matching encoder's expected shape.
             detach_gradients: Whether to detach gradients between encoder and decoder.
-                When True, prevents gradient flow from decoder to encoder.
-            *args: Additional arguments (unused, maintained for interface compatibility).
-            **kwds: Additional keyword arguments (unused, maintained for interface compatibility).
+            *args: Additional arguments for interface compatibility.
+            **kwds: Additional keyword arguments for interface compatibility.
 
         Returns:
-            Tuple containing:
-                - reconstruction: Decoded output tensor with same shape as input.
-                - embedding: Latent representation tensor from the encoder.
+            Tuple of (reconstruction, embedding) tensors.
 
         Note:
-            The encoder is called with target=None since no sparse target is
-            available during the forward pass. The decoder uses the original
-            input as target for potential supervised learning scenarios.
+            When detach_gradients=True, prevents gradient flow from decoder to encoder.
         """
         embedding = self.encoder(x, *args, target=None, **kwds)  # No sparse target
 
@@ -272,36 +204,23 @@ class Autoencoder(pl.LightningModule):
     # -----------------------------------------------------------------------------------
 
     def compute_loss(self, x: Tensor, log_label: str, detach_gradients: bool = False) -> Tuple[Tensor, Tensor]:
-        """Compute and log decoder + encoder losses for a batch.
+        """Compute and log decoder and encoder losses for a batch.
 
-        Encapsulates the full loss decomposition used across training,
-        validation, and test loops. Performs a forward pass, derives
-        regularization (Gramian + homeostatic) and reconstruction losses,
-        then logs them with a namespace prefix.
+        Performs forward pass and computes reconstruction, Gramian orthogonality,
+        and homeostatic activity losses with logging.
 
         Args:
-            x: Input batch tensor (first element of dataloader batch) whose
-               shape excluding batch dimension matches ``self.input_shape``.
-            log_label: Namespace prefix for metric logging (``train``,
-               ``validation`` or ``test``).
+            x: Input batch tensor.
+            log_label: Namespace prefix for metric logging (e.g., 'train', 'val').
             detach_gradients: Whether to detach gradients between encoder and decoder.
 
         Returns:
-            (decoder_loss, encoder_loss) where:
-              decoder_loss: Reconstruction criterion (BCE mean).
-              encoder_loss: Weighted sum of Gramian + homeostatic penalties.
+            Tuple of (decoder_loss, encoder_loss).
 
-        Logging:
-            Emits (step + epoch):
-              ``{log_label}/reconstruction_loss``
-              ``{log_label}/gramian_loss``
-              ``{log_label}/homeostatic_loss``
-              ``{log_label}/decoder_loss`` (prog bar)
-              ``{log_label}/encoder_loss`` (prog bar)
-
-        Notes:
-            Keeps gradient behaviour consistent with current mode; Lightning
-            disables grads automatically during validation/test evaluation.
+        Logs:
+            - reconstruction_loss, gramian_loss, homeostatic_loss
+            - decoder_loss, encoder_loss (with progress bar)
+            - sparsity_rate
         """
         # Forward pass to get reconstruction and embedding
         reconstruction, embedding = self.forward(x, detach_gradients)
@@ -333,12 +252,12 @@ class Autoencoder(pl.LightningModule):
     def on_train_batch_start(self, batch, batch_idx: int) -> None:
         """Initialize registry and delegate to training strategy.
 
-        Clears the registry at the start of each batch and delegates
-        to the training strategy for any additional setup.
-
         Args:
             batch: Training batch.
-            batch_idx: Index of the current batch.
+            batch_idx: Batch index.
+
+        Raises:
+            ValueError: If no trainer strategy is provided.
         """
         if self.trainer_strategy is None:
             raise ValueError("Trainer strategy must be provided for training.")
@@ -352,31 +271,22 @@ class Autoencoder(pl.LightningModule):
     def training_step(self, batch: Tensor, batch_idx: int) -> None:
         """Delegate training step to the training strategy.
 
-        Uses the training strategy to perform the training step,
-        allowing different training algorithms to implement their
-        specific optimization logic.
-
         Args:
-            batch: Batch tuple whose first element is the input tensor.
-            batch_idx: Index within the epoch.
+            batch: Training batch.
+            batch_idx: Batch index within the epoch.
 
         Note:
-            All training logic is handled by the training strategy,
-            including gradient computation, optimizer steps, and
-            any special handling required by the algorithm.
+            All training logic is handled by the training strategy.
         """
         return self.trainer_strategy.training_step(self, batch, batch_idx)
 
     def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
         """Delegate batch end cleanup to training strategy.
 
-        Provides a hook for training strategy-specific cleanup operations
-        after each training batch.
-
         Args:
             outputs: Training step outputs.
             batch: Training batch.
-            batch_idx: Index of the current batch.
+            batch_idx: Batch index.
         """
         self.trainer_strategy.on_train_batch_end(self, outputs, batch, batch_idx)
 
@@ -387,12 +297,9 @@ class Autoencoder(pl.LightningModule):
     def validation_step(self, batch: Tensor, batch_idx: int) -> Tensor:  # noqa: ARG002
         """Delegate validation step to the training strategy.
 
-        Uses the training strategy to perform the validation step,
-        ensuring consistency between training and validation logic.
-
         Args:
             batch: Validation batch.
-            batch_idx: Index of the batch (unused).
+            batch_idx: Batch index (unused).
 
         Returns:
             Validation loss tensor.
@@ -404,25 +311,17 @@ class Autoencoder(pl.LightningModule):
     # -----------------------------------------------------------------------------------
 
     def test_step(self, batch: Tensor, batch_idx: int) -> Tensor:  # noqa: ARG002
-        """Evaluate the model on a held-out test batch and return total loss.
-
-        Mirrors `validation_step` but logs metrics under the `test/` namespace
-        to clearly separate final evaluation from validation monitoring.
+        """Evaluate model on test batch and return total loss.
 
         Args:
-            batch: Test batch structured as `(x, *_)` where `x` conforms to
-                the expected input tensor shape.
-            batch_idx: Sequential index of the test batch (unused).
+            batch: Test batch with input tensor as first element.
+            batch_idx: Batch index (unused).
 
         Returns:
-            A scalar tensor equal to the sum of decoder reconstruction loss
-            and encoder regularization loss for this batch.
+            Sum of decoder and encoder losses for this batch.
 
-        Notes:
-            - No gradients are produced (evaluation mode).
-            - Individual component losses are already logged by `compute_loss`.
-            - Keeping symmetry with `training_step` and `validation_step`
-              simplifies downstream aggregation and comparisons.
+        Note:
+            Logs metrics under 'test/' namespace for clear separation from validation.
         """
         x, *_ = batch
         dec_loss, enc_loss = self.compute_loss(x, log_label="test")
@@ -433,26 +332,17 @@ class Autoencoder(pl.LightningModule):
     # -----------------------------------------------------------------------------------
 
     def predict_step(self, batch: Tensor, batch_idx: int) -> Tuple[Tensor, Tensor]:  # noqa: ARG002
-        """Prediction step returns reconstructions and embeddings.
-
-        Executes one prediction iteration by processing a batch through the model
-        and returning both the reconstructed outputs and the latent embeddings.
-        This method is useful for inference and analysis of learned representations.
+        """Return reconstructions and embeddings for inference.
 
         Args:
-            batch: Input batch containing tensors for prediction.
-                Expected format: (input_tensor, ...) where input_tensor has shape
-                (batch_size, channels, height, width).
-            batch_idx: Index of the current batch in prediction (unused).
+            batch: Input batch for prediction.
+            batch_idx: Batch index (unused).
 
         Returns:
-            Tuple containing:
-                - reconstruction: Reconstructed outputs with same shape as input.
-                - embedding: Latent representations from the encoder.
+            Tuple of (reconstruction, embedding) tensors.
 
         Note:
-            This method is typically used during inference phases or when
-            analyzing the learned latent representations for research purposes.
+            Useful for inference and analysis of learned representations.
         """
         x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
         return self(x)
@@ -463,59 +353,22 @@ class Autoencoder(pl.LightningModule):
 
     @property
     def input_shape(self) -> Tuple[int, int, int]:
-        """Returns the shape of the input feature map.
-
-        Returns:
-            3D tuple representing (channels, height, width) of expected input tensors.
-
-        Note:
-            This property provides convenient access to the encoder's expected
-            input dimensions for validation and preprocessing purposes.
-        """
+        """Input feature map shape as (channels, height, width)."""
         return self.encoder.input_shape
 
     @property
     def input_channels(self) -> int:
-        """Returns the number of input channels.
-
-        Returns:
-            Integer representing the number of channels in the input tensor.
-            For cognitive maps, this is typically 1 (single-channel obstacle grid).
-
-        Note:
-            This property extracts the channel dimension from the input shape
-            for convenient access during model configuration and debugging.
-        """
+        """Number of input channels."""
         return self.encoder.input_channels
 
     @property
     def spatial_dimensions(self) -> Tuple[int, int]:
-        """Returns the spatial dimensions as (height, width).
-
-        Returns:
-            2D tuple representing (height, width) of the spatial input dimensions.
-            For cognitive maps, this might be (32, 16) representing the grid size.
-
-        Note:
-            This property extracts the spatial dimensions from the input shape,
-            excluding the channel dimension, for convenient access during
-            spatial processing and visualization.
-        """
+        """Spatial dimensions as (height, width)."""
         return self.encoder.spatial_dimensions
 
     @property
     def latent_dim(self) -> int:
-        """Returns the dimensionality of the latent representation.
-
-        Returns:
-            Integer representing the size of the compressed latent space.
-            This dimension determines the bottleneck capacity of the autoencoder.
-
-        Note:
-            The latent dimension is crucial for controlling the representational
-            capacity and the degree of compression achieved by the autoencoder.
-            Smaller values force more compression but may lose information.
-        """
+        """Dimensionality of the latent representation."""
         return self.encoder.latent_dim
 
     # -----------------------------------------------------------------------------------
@@ -525,62 +378,42 @@ class Autoencoder(pl.LightningModule):
     def encode(self, x: Tensor) -> Tensor:
         """Encode input to latent representation.
 
-        Processes input through the encoder component only, returning the
-        compressed latent representation without reconstruction. Useful for
-        analyzing learned representations or using the encoder independently.
-
         Args:
-            x: Input tensor with shape matching the encoder's expected dimensions.
-                For cognitive maps, typically (batch_size, channels, height, width).
+            x: Input tensor matching encoder's expected dimensions.
 
         Returns:
             Latent representation tensor with shape (batch_size, latent_dim).
 
         Note:
-            This method bypasses the decoder, making it efficient for tasks
-            that only require the encoded representation, such as clustering
-            or dimensionality reduction analysis. The encoder is called with
-            target=None since no supervised target is available.
+            Efficient for tasks requiring only encoded representations.
         """
         return self.encoder(x, target=None)
 
     def decode(self, embedding: Tensor) -> Tensor:
         """Decode latent representation to reconstruction.
 
-        Processes latent representations through the decoder component only,
-        returning reconstructed outputs. Useful for generating new samples
-        from latent space or using the decoder independently.
-
         Args:
-            embedding: Latent representation tensor with shape (batch_size, latent_dim).
+            embedding: Latent representation tensor.
 
         Returns:
-            Reconstructed output tensor with shape matching the original input dimensions.
+            Reconstructed output tensor matching original input dimensions.
 
         Note:
-            This method can be used for generative tasks by providing custom
-            latent representations, or for analyzing the decoder's reconstruction
-            capabilities independently of the encoder.
+            Useful for generative tasks or analyzing decoder capabilities.
         """
         return self.decoder(embedding)
 
     def reconstruct(self, x: Tensor) -> Tensor:
-        """Full reconstruction from input.
-
-        Performs complete encode-decode cycle by processing input through both
-        the encoder and decoder components. This is equivalent to the forward
-        method but returns only the reconstruction without the embedding.
+        """Perform full encode-decode reconstruction.
 
         Args:
-            x: Input tensor with shape matching the encoder's expected dimensions.
+            x: Input tensor.
 
         Returns:
             Reconstructed output tensor with same shape as input.
 
         Note:
-            This method is convenient for evaluation and testing scenarios
-            where only the final reconstruction is needed, without access
-            to the intermediate latent representation.
+            Equivalent to forward() but returns only reconstruction.
         """
         embedding = self.encode(x)
         return self.decode(embedding)
@@ -591,17 +424,13 @@ class Autoencoder(pl.LightningModule):
 # -----------------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    """Example demonstrating autoencoder training with configurable gradient flow.
+    """Example: autoencoder training with configurable gradient flow.
 
-    This example shows how to:
-    1. Create a simple dataset of random obstacle maps
-    2. Configure autoencoder parameters with gradient flow control
-    3. Train the model using PyTorch Lightning with manual optimization
-    4. Test reconstruction performance and sparsity metrics
-
-    The example uses Linear encoder/decoder components with GELU activation
-    and demonstrates the gradient detachment approach using manual optimization
-    with a simple conditional for controlling gradient flow.
+    Demonstrates:
+    1. Creating random obstacle map dataset
+    2. Configuring autoencoder with training strategy
+    3. Training with PyTorch Lightning
+    4. Testing reconstruction performance and sparsity
     """
     from functools import partial
 
@@ -612,14 +441,10 @@ if __name__ == "__main__":
 
     # Simple dataset for testing
     class SimpleDataset(torch.utils.data.Dataset):
-        """Simple dataset generating random binary obstacle maps."""
+        """Dataset generating random binary obstacle maps."""
 
         def __init__(self, size: int = 100):
-            """Initialize dataset with specified size.
-
-            Args:
-                size: Number of samples in the dataset.
-            """
+            """Initialize with specified dataset size."""
             self.size = size
 
         def __len__(self):
@@ -627,13 +452,13 @@ if __name__ == "__main__":
             return self.size
 
         def __getitem__(self, idx):
-            """Generate a random obstacle map sample.
+            """Generate random obstacle map sample.
 
             Args:
                 idx: Sample index (unused, generates random data).
 
             Returns:
-                Tuple containing a single tensor with random obstacle placement.
+                Tuple containing tensor with random obstacle placement.
             """
             # Create random obstacle maps with random obstacle placement
             x = torch.zeros(1, 16, 32)
