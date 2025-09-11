@@ -411,6 +411,11 @@ class DFALinear(BaseDecoder):
         Returns:
             Reconstructed output of shape (batch_size, *output_shape) with values
             in range [0, 1] due to Sigmoid output activation.
+
+        Note:
+            Hook management for DFA error signal capture is now handled by
+            the DFATrainer, not in this forward method. This provides better
+            separation of concerns between model computation and training logic.
         """
         # First layer
         h1 = self.layer1(x)
@@ -425,11 +430,6 @@ class DFALinear(BaseDecoder):
         # Output layer (no DFA - uses standard gradients)
         output = self.layer3(h2)
         output = self.output_activation(output)
-
-        # Register DFA hook on the current output every forward (per batch)
-        if output.requires_grad:
-            dfa.clear_dfa_error()
-            dfa.register_dfa_hook(output)
 
         # Reshape to original spatial dimensions
         return output.reshape(output.shape[0], *self.output_shape)

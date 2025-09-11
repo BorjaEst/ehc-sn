@@ -5,208 +5,229 @@ direct feedback from the output error via random feedback weights,
 eliminating the need for symmetric weight transport.
 """
 
-from typing import Dict, List
+from typing import Any, Callable
 
 import lightning.pytorch as pl
 import torch
 from torch import Tensor
 from torch.optim import Optimizer
 
+from ehc_sn.hooks.registry import registry
 from ehc_sn.trainers.core import BaseTrainer
 
 
 class DFATrainer(BaseTrainer):
-    """Direct Feedback Alignment training strategy.
+    """DFA trainer implementing Direct Feedback Alignment with centralized hook management.
 
-    Implements DFA training where hidden layers receive direct feedback
-    from the output layer via fixed random feedback weights. This provides
-    a biologically plausible alternative to backpropagation that doesn't
-    require symmetric weight transport.
+    This trainer manages the complete DFA training process including:
+    - Hook registration and cleanup for error signal capture
+    - Manual optimization with proper gradient computation
+    - Centralized management of DFA error signals via registry system
 
-    Features:
-    - Direct feedback to hidden layers
-    - Fixed random feedback weights
-    - Biologically plausible learning mechanism
-    - Eliminates weight transport problem
+    The trainer follows the DFA algorithm where hidden layers receive direct
+    feedback from the output error via random feedback weights, eliminating
+    the need for symmetric weight transport and providing biologically
+    plausible learning.
+
+    Key features:
+    - Centralized hook management (no hooks in model forward methods)
+    - Manual optimization for precise control over DFA gradient flow
+    - Automatic error signal cleanup between batches
+    - Compatible with PyTorch Lightning training loops
+
+    Args:
+        optimizer_init: Function to initialize optimizers, typically a functools.partial
+            of an optimizer class with preset hyperparameters.
+
+    Example:
+        >>> from functools import partial
+        >>> import torch.optim as optim
+        >>>
+        >>> trainer = DFATrainer(
+        ...     optimizer_init=partial(optim.Adam, lr=1e-3, weight_decay=1e-4)
+        ... )
+        >>> model = Autoencoder(params, trainer)
+        >>> lightning_trainer = pl.Trainer(max_epochs=100)
+        >>> lightning_trainer.fit(model, dataloader)
+
+    References:
+        Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
+        error backpropagation for deep learning. Nature Communications, 7, 13276.
     """
 
-    def __init__(self, optimizer_init):
-        """Initialize DFA trainer.
+    def __init__(self, optimizer_init: Callable[[Any], Optimizer], *args: Any, **kwargs: Any) -> None:
+        """Initialize DFA trainer with optimizer configuration.
 
         Args:
-            optimizer_init: Function to initialize optimizers.
+            optimizer_init: Function to create optimizers, should accept model parameters
+                and return configured optimizer instance.
+            *args: Additional positional arguments (currently unused).
+            **kwargs: Additional keyword arguments (currently unused).
         """
         super().__init__()
         self.optimizer_init = optimizer_init
-        self._feedback_weights: Dict[str, Tensor] = {}
-        self._initialized = False
 
-    def configure_optimizers(self, model: pl.LightningModule) -> List[Optimizer]:
-        """Configure optimizers for DFA training.
-
-        Creates optimizers for all trainable parameters in the model.
-
-        Args:
-            model: The Lightning module to configure optimizers for.
-
-        Returns:
-            List containing model optimizer.
-        """
-        return [self.optimizer_init(model.parameters())]
-
+    # -----------------------------------------------------------------------------------
     def training_step(self, model: pl.LightningModule, batch: Tensor, batch_idx: int) -> None:
-        """DFA training step with direct feedback.
+        """Execute one DFA training step with manual optimization.
 
-        Implements DFA training logic where hidden layers receive
-        direct feedback from the output error via random feedback weights.
+        This method implements the complete DFA training procedure:
+        1. Clear any previous error signals from registry
+        2. Perform forward pass through the model
+        3. Register DFA hook on model output to capture error signal
+        4. Compute loss and perform backward pass (automatically uses DFA gradients)
+        5. Update model parameters via optimizer step
 
         Args:
-            model: The Lightning module being trained.
-            batch: Training batch data.
-            batch_idx: Index of the current batch.
+            model: The PyTorch Lightning module being trained. Should contain
+                encoder and decoder components with DFA layers.
+            batch: Training batch data. First element should be input tensor;
+                additional elements are ignored.
+            batch_idx: Index of the current batch within the epoch.
+
+        Note:
+            This method uses manual optimization to maintain precise control over
+            the DFA gradient computation and error signal management. The model's
+            automatic_optimization should be set to False when using this trainer.
         """
         x, *_ = batch
 
-        # Initialize feedback weights if needed
-        if not self._initialized:
-            self._init_feedback_weights(model)
-            self._initialized = True
-
-        # Forward pass
-        reconstruction, embedding = model(x)
-
-        # Compute output error
-        output_error = reconstruction - x
-
-        # Apply direct feedback to hidden layers
-        self._apply_direct_feedback(model, output_error, embedding)
-
-        # Compute reconstruction loss
-        loss = model.reconstruction_loss(reconstruction, x)
-
-        # Standard optimizer step
+        # Get optimizers configured by Lightning
         optimizers = model.optimizers()
-        if isinstance(optimizers, list) and len(optimizers) > 0:
-            opt = optimizers[0]
-        else:
-            opt = optimizers
-        opt.zero_grad()
-        model.manual_backward(loss)
-        opt.step()
+        if not isinstance(optimizers, list):
+            optimizers = [optimizers]
 
-        # Log metrics
-        model.log("train/reconstruction_loss", loss, on_epoch=True, prog_bar=True)
+        # Clear any previous DFA error signals from registry
+        registry.clear("batch")
 
-        # Log sparsity metrics
+        # Single forward pass to get reconstruction and embedding
+        # Note: Autoencoder forward returns [reconstruction, embedding]
+        outputs = model(x)
+        reconstruction, embedding = outputs[0], outputs[1]
+
+        # Register DFA hook on the reconstruction tensor to capture error signal
+        hook_remover = None
+        if reconstruction.requires_grad:
+            hook_remover = registry.register_output_error_hook(reconstruction, key="global")
+
+        # Manually compute losses using the reconstruction and embedding we just obtained
+        # This ensures DFA hook is connected to the same tensors used in loss computation
+
+        # Encoder-side losses (same as in model.compute_loss)
+        gramian_loss = model.gramian_loss(embedding)
+        model.log("train/gramian_loss", gramian_loss, on_epoch=True)
+        homeo_loss = model.homeo_loss(embedding)
+        model.log("train/homeostatic_loss", homeo_loss, on_epoch=True)
+        encoder_loss = model.gramian_weight * gramian_loss + model.homeo_weight * homeo_loss
+        model.log("train/encoder_loss", encoder_loss, on_epoch=True, prog_bar=True)
+
+        # Calculate and log sparsity metrics
         sparsity_rate = (embedding > 0.01).float().mean()
         model.log("train/sparsity_rate", sparsity_rate, on_epoch=True)
 
-    def _init_feedback_weights(self, model: pl.LightningModule) -> None:
-        """Initialize random feedback weights for DFA.
+        # Decoder-side losses (same as in model.compute_loss)
+        reconstruction_loss = model.reconstruction_loss(reconstruction, x)
+        model.log("train/reconstruction_loss", reconstruction_loss, on_epoch=True)
+        decoder_loss = reconstruction_loss
+        model.log("train/decoder_loss", decoder_loss, on_epoch=True, prog_bar=True)
 
-        Creates fixed random feedback weights that connect the output
-        layer directly to hidden layers, bypassing the need for
-        symmetric weight transport.
+        # Combine losses (same as in training step)
+        loss_components = [decoder_loss, encoder_loss]
+        total_loss = sum(loss_components)
 
-        Args:
-            model: The Lightning module to initialize feedback weights for.
-        """
-        if hasattr(model, "decoder"):
-            # Initialize feedback weights for decoder layers
-            for name, module in model.decoder.named_modules():
-                if isinstance(module, torch.nn.Linear) and "output" not in name.lower():
-                    # Create random feedback weight matrix
-                    # Shape: (hidden_size, output_size)
-                    output_size = model.input_shape[0] * model.input_shape[1] * model.input_shape[2]
-                    hidden_size = module.out_features
+        # Zero gradients before backward pass
+        for optimizer in optimizers:
+            optimizer.zero_grad()
 
-                    feedback_weight = (
-                        torch.randn(hidden_size, output_size, device=module.weight.device, dtype=module.weight.dtype)
-                        * 0.1
-                    )  # Small initialization
+        # Backward pass - DFA gradients are computed automatically via registered hooks
+        model.manual_backward(total_loss)
 
-                    self._feedback_weights[name] = feedback_weight
+        # Update parameters
+        for optimizer in optimizers:
+            optimizer.step()
 
-        if hasattr(model, "encoder"):
-            # Initialize feedback weights for encoder layers
-            for name, module in model.encoder.named_modules():
-                if isinstance(module, torch.nn.Linear) and "input" not in name.lower():
-                    # Create random feedback weight matrix
-                    output_size = model.input_shape[0] * model.input_shape[1] * model.input_shape[2]
-                    hidden_size = module.out_features
+        # Clean up: remove the hook and clear error signals
+        if hook_remover is not None:
+            hook_remover()
+        registry.clear("batch")
 
-                    feedback_weight = (
-                        torch.randn(hidden_size, output_size, device=module.weight.device, dtype=module.weight.dtype)
-                        * 0.1
-                    )
+        # Log training metrics
+        model.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True)
+        for i, loss_component in enumerate(loss_components):
+            model.log(f"train_loss_component_{i}", loss_component, on_step=False, on_epoch=True)
 
-                    self._feedback_weights[f"encoder.{name}"] = feedback_weight
-
-    def _apply_direct_feedback(self, model: pl.LightningModule, output_error: Tensor, embedding: Tensor) -> None:
-        """Apply direct feedback to hidden layers.
-
-        Computes and applies direct feedback signals to hidden layers
-        using the precomputed random feedback weights.
-
-        Args:
-            model: The Lightning module being trained.
-            output_error: Error signal from output layer.
-            embedding: Hidden layer activations.
-        """
-        # Flatten output error for feedback computation
-        batch_size = output_error.shape[0]
-        error_flat = output_error.view(batch_size, -1)
-
-        # Apply feedback to decoder layers
-        if hasattr(model, "decoder"):
-            for name, module in model.decoder.named_modules():
-                if name in self._feedback_weights:
-                    # Compute direct feedback signal
-                    feedback_matrix = self._feedback_weights[name]
-                    feedback_signal = torch.matmul(error_flat, feedback_matrix.T)
-
-                    # Apply feedback to layer parameters
-                    if hasattr(module, "weight") and module.weight.grad is not None:
-                        # Add direct feedback to gradient
-                        # This is a simplified implementation - full DFA would
-                        # require more sophisticated feedback application
-                        feedback_grad = torch.outer(feedback_signal.mean(0), module.weight.mean(0))
-                        module.weight.grad += feedback_grad * 0.01  # Small learning rate for feedback
-
+    # -----------------------------------------------------------------------------------
     def validation_step(self, model: pl.LightningModule, batch: Tensor, batch_idx: int) -> Tensor:
-        """DFA validation step.
+        """Execute validation step with standard gradient flow for loss computation.
 
-        Performs validation using standard forward pass without
-        the DFA feedback mechanism.
+        Performs model evaluation on validation data using the same forward pass
+        and loss computation as training, but without parameter updates or DFA
+        hook registration. This ensures validation metrics are computed consistently.
 
         Args:
-            model: The Lightning module being validated.
-            batch: Validation batch data.
-            batch_idx: Index of the current batch.
+            model: The PyTorch Lightning module being validated. Should be the
+                same model used in training with encoder and decoder components.
+            batch: Validation batch containing input data. First element should
+                be the input tensor; additional elements are ignored.
+            batch_idx: Index of the current validation batch. Used for logging
+                and potential batch-specific operations.
 
         Returns:
-            Validation loss tensor.
+            Combined validation loss as a single tensor. This represents the
+            sum of all loss components (reconstruction, regularization, etc.)
+            that would be used for training optimization.
+
+        Note:
+            No gradient computation, hook registration, or parameter updates occur
+            during validation. The method maintains the same loss computation logic
+            as training to ensure consistent evaluation metrics.
         """
         x, *_ = batch
 
-        if hasattr(model, "compute_loss"):
-            dec_loss, enc_loss = model.compute_loss(x, "val")
-            return dec_loss + enc_loss
-        else:
-            reconstruction, embedding = model(x)
-            return model.reconstruction_loss(reconstruction, x)
+        # Forward pass without DFA hooks (evaluation mode)
+        with torch.no_grad():
+            reconstruction = model(x)
 
-    def on_train_batch_start(self, model: pl.LightningModule, batch, batch_idx: int) -> None:
-        """Setup DFA-specific state before batch training.
+        # Compute validation loss (no gradients, no DFA hooks needed)
+        loss_components = model.compute_loss(x, "val", detach_grad=False)
+        total_loss = sum(loss_components)
 
-        Ensures feedback weights are properly initialized and
-        prepares any DFA-specific state.
+        # Log validation metrics
+        model.log("val_loss", total_loss, on_step=False, on_epoch=True, prog_bar=True)
+        for i, loss_component in enumerate(loss_components):
+            model.log(f"val_loss_component_{i}", loss_component, on_step=False, on_epoch=True)
+
+        return total_loss
+
+    # -----------------------------------------------------------------------------------
+    def on_train_batch_start(self, model: pl.LightningModule, batch: Any, batch_idx: int) -> None:
+        """Hook called before training batch starts.
+
+        Ensures clean state at the beginning of each training batch by clearing
+        any residual error signals or activations from the registry. This prevents
+        cross-batch contamination of DFA error signals.
 
         Args:
             model: The Lightning module being trained.
             batch: Training batch data.
             batch_idx: Index of the current batch.
         """
-        if not self._initialized:
-            self._init_feedback_weights(model)
-            self._initialized = True
+        # Clear any residual error signals and activations from previous batches
+        registry.clear("batch")
+
+    # -----------------------------------------------------------------------------------
+    def on_train_batch_end(self, model: pl.LightningModule, outputs: Any, batch: Any, batch_idx: int) -> None:
+        """Hook called after training batch ends.
+
+        Performs cleanup operations to ensure no residual state remains after
+        batch processing. This is important for memory management and preventing
+        cross-batch interference in DFA training.
+
+        Args:
+            model: The Lightning module being trained.
+            outputs: Training step outputs.
+            batch: Training batch data.
+            batch_idx: Index of the current batch.
+        """
+        # Clean up any remaining error signals and activations
+        registry.clear("batch")

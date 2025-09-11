@@ -424,6 +424,11 @@ class DFALinear(BaseEncoder):
         Returns:
             Latent representation of shape (batch_size, latent_dim) with values
             in range [0, 1] due to Sigmoid output activation.
+
+        Note:
+            Hook management for DFA error signal capture is now handled by
+            the DFATrainer, not in this forward method. This provides better
+            separation of concerns between model computation and training logic.
         """
         # Flatten the input tensor to a single feature vector
         x = x.reshape(x.shape[0], -1)  # Reshape to (batch_size, num_features)
@@ -441,11 +446,6 @@ class DFALinear(BaseEncoder):
         # Output layer (no DFA - uses standard gradients)
         output = self.layer3(h2)
         output = self.output_activation(output)
-
-        # Register DFA hook on the current output every forward (per batch)
-        if output.requires_grad:
-            dfa.clear_dfa_error()
-            dfa.register_dfa_hook(output)
 
         return output
 
