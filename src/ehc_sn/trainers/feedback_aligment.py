@@ -187,9 +187,8 @@ class DFATrainer(BaseTrainer):
         """
         x, *_ = batch
 
-        # Forward pass without DFA hooks (evaluation mode)
-        with torch.no_grad():
-            outputs = model(x, detach_grad=False)
+        # Forward pass without DFA hooks
+        outputs = model(x, detach_grad=False)
 
         # Compute validation loss (no gradients, no DFA hooks needed)
         loss_components = model.compute_loss(outputs, batch, "val")

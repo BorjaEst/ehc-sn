@@ -182,8 +182,16 @@ class ClassicTrainer(BaseTrainer):
             ensure consistent evaluation metrics.
         """
         x, *_ = batch
-        loss_components = model.compute_loss(x, "val", detach_grad=False)
-        return sum(loss_components)
+
+        # Forward pass without DFA hooks
+        outputs = model(x, detach_grad=False)
+
+        # Compute validation loss (no gradients, no DFA hooks needed)
+        loss_components = model.compute_loss(outputs, batch, "val")
+        total_loss = sum(loss_components)
+
+        # Return total validation loss for logging
+        return total_loss
 
 
 class DetachedTrainer(BaseTrainer):
@@ -358,5 +366,13 @@ class DetachedTrainer(BaseTrainer):
             under the split training regime.
         """
         x, *_ = batch
-        loss_components = model.compute_loss(x, "val", detach_grad=True)
-        return sum(loss_components)
+
+        # Forward pass without DFA hooks
+        outputs = model(x, detach_grad=True)
+
+        # Compute validation loss (no gradients, no DFA hooks needed)
+        loss_components = model.compute_loss(outputs, batch, "val")
+        total_loss = sum(loss_components)
+
+        # Return total validation loss for logging
+        return total_loss
