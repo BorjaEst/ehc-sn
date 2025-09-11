@@ -59,7 +59,7 @@ References:
 """
 
 from math import prod
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from pydantic import BaseModel, Field, model_validator
@@ -153,11 +153,17 @@ class BaseDecoder(nn.Module):
         super().__init__()
         self.params = params
 
-    def forward(self, x: Tensor, **kwds) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the decoder.
 
         Args:
             x: Input latent tensor of shape (batch_size, latent_dim).
+            *args: Additional positional arguments for interface compatibility
+                with different decoder architectures and training strategies.
+            **kwds: Additional keyword arguments including:
+                - target: Target tensor for some training methods (e.g., DFA, DRTP)
+                - seed: Random seed for stochastic methods (e.g., Zero-Order)
+                - Other method-specific parameters
 
         Returns:
             Reconstructed output tensor of shape (batch_size, *output_shape).
@@ -241,12 +247,16 @@ class Linear(BaseDecoder):
         self.layer3 = nn.Linear(in_features=1024, out_features=output_features, bias=True)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the linear decoder.
 
         Args:
             x: Input latent tensor of shape (batch_size, latent_dim).
-            target: Ignored for standard decoder, kept for API consistency.
+            *args: Additional positional arguments for interface compatibility.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for standard decoder, kept for API consistency
+                - seed: Ignored for standard decoder
+                - Other method-specific parameters
 
         Returns:
             Reconstructed output of shape (batch_size, *output_shape) with
@@ -329,13 +339,16 @@ class DRTPLinear(BaseDecoder):
         self.layer3 = nn.Linear(in_features=1024, out_features=output_features)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
+    def forward(self, x: Tensor, *args, target: Optional[Tensor] = None, **kwds) -> Tensor:
         """Forward pass through the DRTP linear decoder.
 
         Args:
             x: Input latent tensor of shape (batch_size, latent_dim).
+            *args: Additional positional arguments for interface compatibility.
             target: Target tensor for DRTP gradient computation during backward pass.
-                Can be None during forward-only inference.
+            **kwds: Additional keyword arguments including:
+                - seed: Ignored for DRTP decoder
+                - Other method-specific parameters
 
         Returns:
             Reconstructed output of shape (batch_size, *output_shape) with values
@@ -421,12 +434,16 @@ class DFALinear(BaseDecoder):
         self.layer3 = nn.Linear(in_features=1024, out_features=output_features)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the DFA linear decoder.
 
         Args:
             x: Input latent tensor of shape (batch_size, latent_dim).
-            target: Ignored for standard decoder, kept for API consistency.
+            *args: Additional positional arguments for interface compatibility.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for DFA decoder, kept for API consistency
+                - seed: Ignored for DFA decoder
+                - Other method-specific parameters
 
         Returns:
             Reconstructed output of shape (batch_size, *output_shape) with values
@@ -546,12 +563,16 @@ class SRTPLinear(BaseDecoder):
         # Set initialization flat to true
         self._srtp_initialized = True
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through SRTP linear decoder.
 
         Args:
             x: Latent tensor of shape (batch_size, latent_dim)
-            target: Optional target tensor (unused, kept for API consistency)
+            *args: Additional positional arguments for interface compatibility.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for SRTP decoder, kept for API consistency
+                - seed: Ignored for SRTP decoder
+                - Other method-specific parameters
 
         Returns:
             Reconstructed output tensor of shape (batch_size, *output_shape)
@@ -668,7 +689,7 @@ class ZOLinear(BaseDecoder):
         # Store epsilon for reference
         self.epsilon = epsilon
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, seed: Optional[int] = None, **kwds) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, seed: Optional[int] = None, **kwds) -> Tensor:
         """Forward pass through the ZO linear decoder.
 
         This method supports both inference mode (seed=None) and training mode
@@ -676,11 +697,11 @@ class ZOLinear(BaseDecoder):
         with the same seed for proper gradient estimation via finite differences.
 
         Args:
-            x: Input latent tensor of shape (batch_size, latent_dim).
-            target: Ignored for ZO decoder, kept for API consistency.
-            seed: Random seed for perturbation generation. If None, performs
-                standard inference. If provided, applies perturbations for
-                gradient estimation.
+            *args: Additional positional arguments for interface compatibility.
+            seed: Random seed for perturbation generation during training.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for SRTP decoder, kept for API consistency
+                - Other method-specific parameters
 
         Returns:
             Reconstructed output of shape (batch_size, *output_shape) with

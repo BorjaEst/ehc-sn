@@ -57,7 +57,7 @@ References:
 """
 
 from math import prod
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import torch
 from pydantic import BaseModel, Field, model_validator
@@ -150,11 +150,17 @@ class BaseEncoder(nn.Module):
         super().__init__()
         self.params = params
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the encoder.
 
         Args:
             x: Input tensor of shape (batch_size, *input_shape).
+            *args: Additional positional arguments for interface compatibility
+                with different encoder architectures and training strategies.
+            **kwds: Additional keyword arguments including:
+                - target: Optional target tensor for some training methods
+                - seed: Random seed for stochastic methods (e.g., Zero-Order)
+                - Other method-specific parameters
 
         Returns:
             Latent representation tensor of shape (batch_size, latent_dim).
@@ -242,12 +248,16 @@ class Linear(BaseEncoder):
         self.layer3 = nn.Linear(512, params.latent_dim, bias=True)
         self.output_activation = nn.GELU()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the linear encoder.
 
         Args:
             x: Input tensor of shape (batch_size, channels, height, width).
-            target: Ignored for standard encoder, kept for API consistency.
+            *args: Additional positional arguments for interface compatibility.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for standard encoder, kept for API consistency
+                - seed: Ignored for standard encoder
+                - Other method-specific parameters
 
         Returns:
             Latent representation of shape (batch_size, latent_dim) with
@@ -339,13 +349,16 @@ class DRTPLinear(BaseEncoder):
         self.layer3 = nn.Linear(512, out_features=self.latent_dim)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, target: Optional[Tensor] = None, **kwds: Any) -> Tensor:
         """Forward pass through the DRTP linear encoder.
 
         Args:
             x: Input tensor of shape (batch_size, channels, height, width).
-            target: Target tensor for DRTP gradient computation during backward pass.
-                Can be None during forward-only inference.
+            *args: Additional positional arguments for interface compatibility.
+            target: Target tensor for DRTP gradient computation (optional)
+            **kwds: Additional keyword arguments including:
+                - seed: Ignored for DRTP encoder
+                - Other method-specific parameters
 
         Returns:
             Latent representation of shape (batch_size, latent_dim) with values
@@ -432,12 +445,16 @@ class DFALinear(BaseEncoder):
         self.layer3 = nn.Linear(512, out_features=self.latent_dim)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the DFA linear encoder.
 
         Args:
             x: Input tensor of shape (batch_size, channels, height, width).
-            target: Ignored for standard encoder, kept for API consistency.
+            *args: Additional positional arguments for interface compatibility.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for DFA encoder, kept for API consistency
+                - seed: Ignored for DFA encoder
+                - Other method-specific parameters
 
         Returns:
             Latent representation of shape (batch_size, latent_dim) with values

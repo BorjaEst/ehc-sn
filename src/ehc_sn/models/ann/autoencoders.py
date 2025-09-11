@@ -345,6 +345,65 @@ class Autoencoder(pl.LightningModule):
         # Return reconstruction and embedding (always return original embedding)
         return [reconstruction, embedding]
 
+    def feedback(self, feedbacks: Union[float, List[float]]) -> None:
+        """Propagate feedback signals to components supporting gradient-free optimization.
+
+        Distributes feedback signals (loss differences or gradients) to model components
+        that implement feedback-based learning mechanisms such as Zero-Order optimization,
+        Direct Feedback Alignment (DFA), or Direct Random Target Projection (DRTP).
+        This method enables biologically plausible learning without traditional backpropagation.
+
+        The feedback mechanism works as follows:
+        1. Receive feedback signals from training strategy (e.g., loss differences in ZO)
+        2. Distribute signals to decoder and encoder components in that order
+        3. Components implement their own feedback processing (gradient estimation, etc.)
+        4. Only components with feedback capability receive signals (checked via hasattr)
+
+        Args:
+            feedbacks: Feedback signals to propagate to model components. Can be:
+                - Single float: Same feedback applied to all components with feedback capability
+                - List[float]: Individual feedback per component in [decoder, encoder] order
+                  Must have exactly 2 elements matching the expected component ordering
+
+        Raises:
+            ValueError: If feedbacks is a list but doesn't have exactly 2 elements
+                to match the [decoder, encoder] component ordering.
+
+        Note:
+            The component ordering [decoder, encoder] matches the loss ordering returned
+            by compute_loss() and expected by training strategies. Only components that
+            implement a feedback() method will receive signals - standard backpropagation
+            components are safely ignored.
+
+        Example:
+            >>> # Zero-Order optimization with loss differences
+            >>> loss_diff = loss_1 - loss_2  # From ZO trainer
+            >>> model.feedback([loss_diff, loss_diff])  # Same feedback to both components
+            >>>
+            >>> # Component-specific feedback
+            >>> model.feedback([decoder_feedback, encoder_feedback])
+            >>>
+            >>> # Single feedback for all components
+            >>> model.feedback(overall_feedback)
+
+        See Also:
+            - ZOLinear.feedback(): Zero-Order gradient estimation
+            - DFALinear.feedback(): Direct Feedback Alignment
+            - DRTPLinear.feedback(): Direct Random Target Projection
+        """
+        # Handle single feedback for all components
+        if isinstance(feedbacks, (int, float)):
+            feedbacks = [float(feedbacks)] * 2
+
+        # Validate feedback list length
+        if len(feedbacks) != 2:
+            raise ValueError(f"Expected 2 feedback values for [decoder, encoder], got {len(feedbacks)}")
+
+        # Distribute feedback to components with feedback capability
+        for component, projected_grad in zip([self.decoder, self.encoder], feedbacks):
+            if hasattr(component, "feedback"):
+                component.feedback(projected_grad)
+
     # -----------------------------------------------------------------------------------
     # Loss computation
     # -----------------------------------------------------------------------------------

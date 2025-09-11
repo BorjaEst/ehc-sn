@@ -53,6 +53,7 @@ Example:
     ...         layer.feedback(loss_diff.item())
 """
 
+import os
 from typing import Optional
 
 import torch
@@ -136,8 +137,6 @@ class Linear(nn.Linear):
         self._aux_seed: Optional[int] = None
         self._direction: Optional[Tensor] = None
         self._bias_direction: Optional[Tensor] = None
-        self._gen = torch.Generator(device=self.weight.device)
-        self._gen.manual_seed(torch.initial_seed())
 
     def forward(self, input: Tensor, seed: Optional[int] = None) -> Tensor:
         """
@@ -272,27 +271,24 @@ class Linear(nn.Linear):
             - b_direction (Tensor or None): Bias perturbation vector with shape
                 matching self.bias.shape if bias exists, otherwise None.
 
-        Example:
-            >>> layer = Linear(10, 5, bias=True)
-            >>> w_dir, b_dir = layer.perturbation_vector(42)
-            >>> print(w_dir.shape)  # torch.Size([5, 10])
-            >>> print(b_dir.shape)  # torch.Size([5])
-
         Note:
-            This method uses a per-layer random number generator to avoid
-            corrupting the global PyTorch random state, ensuring that other
-            random operations in the model remain unaffected.
+            Uses per-layer generator to avoid corrupting global PyTorch RNG state.
+            Generator device is guaranteed to match weight device via _apply override.
         """
-        # Use per-layer generator to avoid global RNG corruption
-        self._gen.manual_seed(seed)
-        w_direction = torch.randn(
-            self.weight.shape, generator=self._gen, device=self.weight.device, dtype=self.weight.dtype
-        )
+        # Generate weight perturbation using per-layer generator
+        # No device checks needed - _apply ensures generator matches weight device
+        gen = torch.Generator(device=self.weight.device)
+        gen.manual_seed(seed)
+        config = dict(generator=gen, device=self.weight.device, dtype=self.weight.dtype)
+
+        # Generate weight perturbation
+        w_direction = torch.randn(self.weight.shape, **config)
+
+        # Generate bias perturbation if bias exists
         b_direction = None
         if self.bias is not None:
-            b_direction = torch.randn(
-                self.bias.shape, generator=self._gen, device=self.bias.device, dtype=self.bias.dtype
-            )
+            b_direction = torch.randn(self.bias.shape, **config)
+
         return w_direction, b_direction
 
 
