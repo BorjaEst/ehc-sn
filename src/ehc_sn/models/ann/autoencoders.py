@@ -289,7 +289,7 @@ class Autoencoder(pl.LightningModule):
     # Loss computation
     # -----------------------------------------------------------------------------------
 
-    def compute_loss(self, x: Tensor, log_label: str, *args: Any, **kwds: Any) -> List[Tensor]:
+    def compute_loss(self, output: Any, batch: Any, log_label: str) -> List[Tensor]:
         """Compute and log component-specific losses for autoencoder training.
 
         Executes forward pass and computes all loss components with comprehensive
@@ -308,14 +308,7 @@ class Autoencoder(pl.LightningModule):
             - Reconstruction Loss: Measures decoder's reconstruction accuracy
 
         Args:
-            x: Input batch tensor with shape (batch_size, channels, height, width).
-                Contains spatial navigation maps or cognitive representations.
-            log_label: Namespace prefix for metric logging (e.g., 'train', 'val', 'test').
-                Used to organize metrics in logging systems like TensorBoard or Weights & Biases.
-            *args: Additional positional arguments passed to forward method
-                for compatibility with different training strategies.
-            **kwds: Additional keyword arguments passed to forward method,
-                including 'detach_grad' for controlling gradient flow.
+            TODO
 
         Returns:
             List[Tensor]: Two-element list containing computed losses:
@@ -344,8 +337,9 @@ class Autoencoder(pl.LightningModule):
             The sparsity threshold (0.01) is chosen to identify meaningfully active neurons
             while filtering out near-zero activations from numerical precision issues.
         """
-        # Forward pass to get reconstruction and embedding
-        reconstruction, embedding = self.forward(x, *args, **kwds)
+        # Recover reconstruction and embedding from forward output
+        target, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
+        reconstruction, embedding = output  # Unpack forward output
 
         # Encoder-side losses
         gramian_loss = self.gramian_loss(embedding)
@@ -360,13 +354,28 @@ class Autoencoder(pl.LightningModule):
         self.log(f"{log_label}/sparsity_rate", sparsity_rate, on_epoch=True)
 
         # Decoder-side losses
-        reconstruction_loss = self.reconstruction_loss(reconstruction, x)
+        reconstruction_loss = self.reconstruction_loss(reconstruction, target)
         self.log(f"{log_label}/reconstruction_loss", reconstruction_loss, on_epoch=True)
         decoder_loss = reconstruction_loss
         self.log(f"{log_label}/decoder_loss", decoder_loss, on_epoch=True, prog_bar=True)
 
         # Return the decoder and the encoder loss
         return [decoder_loss, encoder_loss]
+
+    def get_output_error(self, outputs: Any, batch: Any) -> List[Tensor]:
+        """Compute output error for feedback alignment training.
+
+        Args:
+            outputs: Model outputs from forward pass.
+            batch: Input batch containing target data.
+
+        Returns:
+            List[Tensor]: List containing the output error tensor.
+        """
+        target, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
+        reconstruction, _ = outputs  # Unpack forward output
+        error = reconstruction - target  # Compute output error
+        return [error]
 
     # -----------------------------------------------------------------------------------
     # Training step

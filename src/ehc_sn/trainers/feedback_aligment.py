@@ -35,10 +35,6 @@ class DFATrainer(BaseTrainer):
     - Automatic error signal cleanup between batches
     - Compatible with PyTorch Lightning training loops
 
-    Args:
-        optimizer_init: Function to initialize optimizers, typically a functools.partial
-            of an optimizer class with preset hyperparameters.
-
     Example:
         >>> from functools import partial
         >>> import torch.optim as optim
@@ -59,12 +55,14 @@ class DFATrainer(BaseTrainer):
         """Initialize DFA trainer with optimizer configuration.
 
         Args:
-            optimizer_init: Function to create optimizers, should accept model parameters
-                and return configured optimizer instance.
-            *args: Additional positional arguments (currently unused).
-            **kwargs: Additional keyword arguments (currently unused).
+            optimizer_init: Factory function for creating optimizer instances.
+                Should be a callable that takes model parameters as input and
+                returns an optimizer. Typically a partial function like
+                `partial(torch.optim.Adam, lr=1e-3)` or a lambda function.
+            *args: Additional positional arguments passed to parent class.
+            **kwargs: Additional keyword arguments passed to parent class.
         """
-        super().__init__()
+        super().__init__(*args, **kwargs)
         self.optimizer_init = optimizer_init
 
     # -----------------------------------------------------------------------------------
@@ -92,69 +90,43 @@ class DFATrainer(BaseTrainer):
         """
         x, *_ = batch
 
-        # Get optimizers configured by Lightning
-        optimizers = model.optimizers()
-        if not isinstance(optimizers, list):
-            optimizers = [optimizers]
-
         # Clear any previous DFA error signals from registry
         registry.clear("batch")
 
-        # Single forward pass to get reconstruction and embedding
-        # Note: Autoencoder forward returns [reconstruction, embedding]
-        outputs = model(x)
-        reconstruction, embedding = outputs[0], outputs[1]
+        # Autoencoder-style loss computation with full gradient flow
+        outputs = model(x, detach_grad=False)  # Forward pass
+        loss_components = model.compute_loss(outputs, batch, "train")
+        total_loss = sum(loss_components)  # Combine losses
+        optm_list = model.optimizers()
+
+        # Check if optimizers need to step based on parameter gradients
+        do_step_list = [
+            any(p.requires_grad for p in component.parameters()) and loss.requires_grad
+            for component, loss in zip([model.decoder, model.encoder], loss_components)
+        ]
 
         # Register DFA hook on the reconstruction tensor to capture error signal
-        hook_remover = None
-        if reconstruction.requires_grad:
-            hook_remover = registry.register_output_error_hook(reconstruction, key="global")
+        reconstruction, _ = outputs  # Get reconstruction from model outputs
+        errors = model.get_output_error(outputs, batch)
+        hook_remover = registry.register_output_error_hook(reconstruction, key="global")
 
-        # Manually compute losses using the reconstruction and embedding we just obtained
-        # This ensures DFA hook is connected to the same tensors used in loss computation
-
-        # Encoder-side losses (same as in model.compute_loss)
-        gramian_loss = model.gramian_loss(embedding)
-        model.log("train/gramian_loss", gramian_loss, on_epoch=True)
-        homeo_loss = model.homeo_loss(embedding)
-        model.log("train/homeostatic_loss", homeo_loss, on_epoch=True)
-        encoder_loss = model.gramian_weight * gramian_loss + model.homeo_weight * homeo_loss
-        model.log("train/encoder_loss", encoder_loss, on_epoch=True, prog_bar=True)
-
-        # Calculate and log sparsity metrics
-        sparsity_rate = (embedding > 0.01).float().mean()
-        model.log("train/sparsity_rate", sparsity_rate, on_epoch=True)
-
-        # Decoder-side losses (same as in model.compute_loss)
-        reconstruction_loss = model.reconstruction_loss(reconstruction, x)
-        model.log("train/reconstruction_loss", reconstruction_loss, on_epoch=True)
-        decoder_loss = reconstruction_loss
-        model.log("train/decoder_loss", decoder_loss, on_epoch=True, prog_bar=True)
-
-        # Combine losses (same as in training step)
-        loss_components = [decoder_loss, encoder_loss]
-        total_loss = sum(loss_components)
-
-        # Zero gradients before backward pass
-        for optimizer in optimizers:
-            optimizer.zero_grad()
+        # Zero gradients for active optimizers
+        for optm, do_step in zip(optm_list, do_step_list):
+            if do_step:
+                optm.zero_grad()
 
         # Backward pass - DFA gradients are computed automatically via registered hooks
         model.manual_backward(total_loss)
 
-        # Update parameters
-        for optimizer in optimizers:
-            optimizer.step()
+        # Step active optimizers
+        for optm, do_step in zip(optm_list, do_step_list):
+            if do_step:
+                optm.step()
 
         # Clean up: remove the hook and clear error signals
         if hook_remover is not None:
             hook_remover()
         registry.clear("batch")
-
-        # Log training metrics
-        model.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True)
-        for i, loss_component in enumerate(loss_components):
-            model.log(f"train_loss_component_{i}", loss_component, on_step=False, on_epoch=True)
 
     # -----------------------------------------------------------------------------------
     def validation_step(self, model: pl.LightningModule, batch: Tensor, batch_idx: int) -> Tensor:
@@ -186,17 +158,13 @@ class DFATrainer(BaseTrainer):
 
         # Forward pass without DFA hooks (evaluation mode)
         with torch.no_grad():
-            reconstruction = model(x)
+            outputs = model(x, detach_grad=False)
 
         # Compute validation loss (no gradients, no DFA hooks needed)
-        loss_components = model.compute_loss(x, "val", detach_grad=False)
+        loss_components = model.compute_loss(outputs, batch, "val")
         total_loss = sum(loss_components)
 
-        # Log validation metrics
-        model.log("val_loss", total_loss, on_step=False, on_epoch=True, prog_bar=True)
-        for i, loss_component in enumerate(loss_components):
-            model.log(f"val_loss_component_{i}", loss_component, on_step=False, on_epoch=True)
-
+        # Return total validation loss for logging
         return total_loss
 
     # -----------------------------------------------------------------------------------
