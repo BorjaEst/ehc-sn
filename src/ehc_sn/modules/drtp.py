@@ -55,15 +55,47 @@ from torch import Size, Tensor, autograd, nn
 
 # -------------------------------------------------------------------------------------------
 class DRTPFunction(autograd.Function):
-    """
-    Custom autograd function for Direct Random Target Projection (DRTP).
-    The backward pass uses a fixed random projection matrix to propagate the error.
+    """Custom autograd function implementing Direct Random Target Projection (DRTP).
+
+    This function provides the core DRTP mechanism where hidden layers receive
+    gradients computed using fixed random projections of the target signal,
+    rather than through standard backpropagation. This eliminates the weight
+    transport problem and provides a biologically plausible learning mechanism.
+
+    The key insight of DRTP is that effective learning can occur when gradients
+    are computed using random projections of the target signal directly, provided
+    the projection matrices are appropriately scaled and maintained throughout training.
+
+    Mathematical formulation:
+        Standard BP: grad = W^T @ upstream_grad
+        DRTP: grad = B^T @ target_signal
+        Where B is a fixed random matrix and target_signal is the desired output.
+
+    Biological motivation:
+        Real neurons cannot implement backpropagation due to the weight transport
+        problem - feedback connections don't have access to forward weights. DRTP
+        provides a plausible alternative using fixed random feedback connections.
+
+    Note:
+        This function maintains the computational graph by returning inputs unchanged
+        during forward pass, while implementing DRTP gradients during backward pass.
     """
 
     @staticmethod
     def forward(ctx, inputs: Tensor, fb_weights: Tensor, target: Tensor) -> Tensor:
-        """
-        Forward pass: returns the input unchanged to maintain computational graph.
+        """Forward pass: store context and return input unchanged.
+
+        Saves the feedback weights and target signal for use in the backward pass
+        while returning the input tensor unchanged to maintain computational graph.
+
+        Args:
+            ctx: Context object for saving information for backward pass.
+            inputs: Hidden layer activations of shape (batch_size, hidden_dim).
+            fb_weights: Fixed random projection matrix of shape (target_dim, hidden_dim).
+            target: Target signal of shape (batch_size, target_dim).
+
+        Returns:
+            Input tensor unchanged to preserve computational graph structure.
         """
         ctx.save_for_backward(fb_weights)
         ctx.target = target  # Save target signal for backward
@@ -71,10 +103,26 @@ class DRTPFunction(autograd.Function):
 
     # -----------------------------------------------------------------------------------
     @staticmethod
-    def backward(ctx, grad_output: Tensor, *gradients: Any) -> Tuple[Tensor, None, None]:
-        """
-        Backward pass: propagate the error using the fixed random matrix fb_weights.
-        Instead of using grad_output, we use fb_weights^T · target as the gradient signal.
+    def backward(ctx, grad_output: Tensor) -> Tuple[Tensor, None, None]:
+        """Backward pass: compute DRTP gradients using target projection.
+
+        Computes gradients using the DRTP algorithm where the gradient signal
+        is derived from the target projection rather than upstream gradients.
+        This breaks the dependence on symmetric weight transport.
+
+        Args:
+            ctx: Context object containing saved tensors and target signal.
+            grad_output: Upstream gradients (ignored in DRTP computation).
+
+        Returns:
+            Tuple containing:
+                - DRTP gradient for inputs based on target projection
+                - None for fb_weights (non-trainable)
+                - None for target (non-trainable)
+
+        Note:
+            The DRTP gradient is computed as B^T @ target, where B is the fixed
+            random projection matrix and target is the desired output signal.
         """
         (fb_weights,) = ctx.saved_tensors
         batch_size = grad_output.shape[0]
@@ -89,55 +137,101 @@ class DRTPFunction(autograd.Function):
 
 # -------------------------------------------------------------------------------------------
 def drtp(input: Tensor, fb_weights: Tensor, target: Tensor) -> Tensor:
-    """
-    DRTP layer wrapper for use in nn.Module.
+    """Apply Direct Random Target Projection to input activations.
+
+    Functional interface for applying DRTP learning mechanism to tensor inputs.
+    This function wraps the DRTPFunction autograd function for convenient use
+    in neural network forward passes.
+
+    The function implements the DRTP algorithm where gradients are computed
+    using fixed random projections of the target signal rather than standard
+    backpropagation, providing a biologically plausible learning mechanism.
 
     Args:
-        input: Hidden layer activations (batch_size, hidden_dim)
-        fb_weights: Fixed random projection matrix (target_dim, hidden_dim)
-        target: Target values (batch_size, target_dim)
+        input: Hidden layer activations of shape (batch_size, hidden_dim).
+            These are the activations that will receive DRTP gradients.
+        fb_weights: Fixed random projection matrix of shape (target_dim, hidden_dim).
+            Used to project target signal back to hidden layer dimensions.
+        target: Target signal of shape (batch_size, target_dim).
+            The desired output that drives the learning signal.
 
     Returns:
-        input: Unchanged input (to maintain computational graph)
+        Input tensor unchanged to maintain computational graph. The DRTP mechanism
+        is applied during the backward pass through the custom autograd function.
+
+    Examples:
+        >>> # Apply DRTP to hidden layer activations
+        >>> hidden = torch.randn(32, 128, requires_grad=True)
+        >>> fb_matrix = torch.randn(10, 128)  # target_dim=10, hidden_dim=128
+        >>> target_signal = torch.randn(32, 10)
+        >>> output = drtp(hidden, fb_matrix, target_signal)
+        >>> # output == hidden, but backward pass will use DRTP gradients
     """
     return DRTPFunction.apply(input, fb_weights, target)
 
 
 # -------------------------------------------------------------------------------------------
 class DRTPLayer(nn.Module):
-    """
-    DRTP (Direct Random Target Projection) layer module.
+    """Direct Random Target Projection (DRTP) layer for biologically plausible learning.
 
     This layer implements the DRTP learning mechanism where gradients are computed
-    using a fixed random projection of the target instead of standard backpropagation.
-    The layer maintains a fixed random projection matrix fb_weights that maps target signals
-    to the hidden layer dimensions.
+    using a fixed random projection of the target signal instead of standard
+    backpropagation. The layer maintains a fixed random projection matrix that
+    maps target signals to hidden layer dimensions.
 
     During forward pass, the layer returns its input unchanged to maintain the
     computational graph. During backward pass, it uses the custom DRTPFunction
-    to provide modulatory signals based on the target projection.
+    to provide modulatory signals based on the target projection, eliminating
+    the need for symmetric weight transport.
 
-    This implementation is biologically inspired and provides an alternative to
-    standard backpropagation that doesn't require symmetric weight transport.
+    The DRTP mechanism addresses the biological implausibility of backpropagation
+    by using fixed random feedback connections that don't require knowledge of
+    forward weights, while still enabling effective learning.
+
+    Attributes:
+        target_dim: Dimensionality of the target space (flattened if originally multi-dimensional)
+        hidden_dim: Dimensionality of the hidden layer (flattened if originally multi-dimensional)
+        fb_weights: Fixed random projection matrix of shape (target_dim, hidden_dim)
 
     Args:
-        target_dim: Dimensionality of the target space (output dimension)
-        hidden_dim: Dimensionality of the hidden layer where DRTP is applied
+        target_dim: Dimensionality of the target space. Can be int or list of ints.
+            If list, will be flattened to total number of elements.
+        hidden_dim: Dimensionality of the hidden layer. Can be int or list of ints.
+            If list, will be flattened to total number of elements.
 
     Example:
+        >>> # Create DRTP layer for projecting 10D targets to 128D hidden layer
         >>> drtp_layer = DRTPLayer(target_dim=10, hidden_dim=128)
         >>> hidden = torch.randn(32, 128)  # batch_size=32, hidden_dim=128
         >>> target = torch.randn(32, 10)   # batch_size=32, target_dim=10
-        >>> output = drtp(hidden, target)  # Returns hidden unchanged
+        >>> output = drtp_layer(hidden, target)  # Returns hidden unchanged
+        >>>
+        >>> # Multi-dimensional example
+        >>> drtp_layer = DRTPLayer(target_dim=[1, 32, 16], hidden_dim=256)
+        >>> # target_dim becomes 512 (1*32*16), hidden_dim stays 256
+
+    References:
+        Nøkland, A. (2016). Direct feedback alignment provides learning in deep neural
+        networks without loss gradients. arXiv preprint arXiv:1609.01596.
     """
 
     def __init__(self, target_dim: List[int] | int, hidden_dim: List[int] | int):
-        """
-        Initialize a DRTP layer with a fixed random projection matrix.
+        """Initialize DRTP layer with fixed random projection matrix.
+
+        Creates and initializes the fixed random projection matrix that will be
+        used to map target signals to hidden layer gradients. The matrix is
+        non-trainable and remains constant throughout training.
 
         Args:
-            target_dim: Dimensionality of the target space (e.g., output classes)
-            hidden_dim: Dimensionality of the hidden layer activations
+            target_dim: Dimensionality of the target space. If list, total size
+                is computed as the product of all dimensions.
+            hidden_dim: Dimensionality of the hidden layer. If list, total size
+                is computed as the product of all dimensions.
+
+        Note:
+            The projection matrix is initialized using Kaiming uniform initialization
+            and is set as non-trainable to maintain the DRTP property of fixed
+            random feedback connections.
         """
         super().__init__()
 
@@ -150,26 +244,34 @@ class DRTPLayer(nn.Module):
 
         # Convert to a non-trainable parameter to save (saves with the model)
         self.fb_weights = nn.Parameter(torch.Tensor(fb_weights_shape))
-        self.reset_weights()  # Initis weights and requires_grad=False
+        self.reset_weights()  # Initialize weights and set requires_grad=False
 
     # -----------------------------------------------------------------------------------
     def forward(self, inputs: Tensor, target: Tensor) -> Tensor:
-        """
-        Forward pass through the DRTP layer.
+        """Forward pass through the DRTP layer.
 
+        Applies the DRTP mechanism to the input activations using the target signal.
         During forward pass, the input is returned unchanged to maintain the
-        computational graph. The DRTP mechanism is applied during the backward
+        computational graph. The DRTP gradients are computed during the backward
         pass through the custom autograd function.
 
         Args:
-            inputs: Hidden layer activations with shape (batch_size, *hidden_dim)
-            target: Target values with shape (batch_size, *target_dim)
+            inputs: Hidden layer activations with shape (batch_size, hidden_dim).
+                These activations will receive DRTP-based gradients during backprop.
+            target: Target signal with shape (batch_size, target_dim).
+                Used to compute the projection-based gradients in backward pass.
 
         Returns:
-            Tensor: Input unchanged, maintaining computational graph for gradient flow
+            Input tensor unchanged, maintaining computational graph for gradient flow.
+            The DRTP mechanism modifies gradient computation during backward pass.
 
         Raises:
-            ValueError: If input or target dimensions don't match expected shapes
+            RuntimeError: If tensor shapes are incompatible with expected dimensions.
+
+        Note:
+            The target tensor is used only for gradient computation during backward
+            pass. The forward pass simply maintains the computational graph while
+            setting up the context for DRTP gradient calculation.
         """
 
         # Apply DRTP function which handles the custom backward pass
@@ -177,14 +279,24 @@ class DRTPLayer(nn.Module):
 
     # -----------------------------------------------------------------------------------
     def extra_repr(self) -> str:
-        """Return extra representation for better debugging and model inspection."""
+        """Return extra representation string for better debugging and model inspection.
+
+        Returns:
+            String representation showing target and hidden dimensions for debugging.
+        """
         return f"target_dim={self.target_dim}, hidden_dim={self.hidden_dim}"
 
     # -----------------------------------------------------------------------------------
     def reset_weights(self):
-        """
-        Reinitialize the random projection matrix fb_weights.
-        This can be useful for experimentation or resetting the DRTP behavior.
+        """Reinitialize the random projection matrix with new random values.
+
+        Resets the fixed random projection matrix fb_weights using Kaiming uniform
+        initialization. This can be useful for experimentation or resetting the
+        DRTP behavior to different random feedback connections.
+
+        Note:
+            After reinitialization, the matrix is set as non-trainable to maintain
+            the DRTP property of fixed feedback weights throughout training.
         """
         # Reinitialize the projection matrix with a new random matrix
         torch.nn.init.kaiming_uniform_(self.fb_weights)
