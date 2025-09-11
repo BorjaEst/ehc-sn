@@ -1,3 +1,50 @@
+"""Symmetric Random Target Projection (SRTP) module for biologically plausible learning.
+
+This module implements Symmetric Random Target Projection (SRTP), a variant of random
+target projection that uses local error signals combined with fixed random projections
+for gradient computation. SRTP provides another biologically plausible alternative to
+standard backpropagation by eliminating the weight transport problem.
+
+SRTP differs from DRTP by computing local error signals (activation - target) and then
+projecting these errors through fixed random matrices. This approach combines local
+learning principles with random feedback pathways, providing biological plausibility
+while maintaining effective learning capabilities.
+
+Key Features:
+    - SRTPFunction: Custom autograd function implementing SRTP gradient computation
+    - SRTPLayer: PyTorch module wrapper for easy integration into networks
+    - Local error signal computation (activations - targets)
+    - Fixed random projection matrices for error propagation
+
+Classes:
+    SRTPFunction: Core autograd function for SRTP gradient computation
+    SRTPLayer: Neural network module implementing SRTP learning mechanism
+
+Mathematical Formulation:
+    Local error: error = activations - target
+    SRTP gradient: grad = B^T @ error
+    Where B is a fixed random matrix and error is computed locally at each layer.
+
+Examples:
+    >>> # Create a network with SRTP learning
+    >>> srtp_layer = SRTPLayer(target_dim=10, hidden_dim=128)
+    >>> hidden = torch.randn(32, 128, requires_grad=True)
+    >>> target = torch.randn(32, 10)
+    >>>
+    >>> # Forward pass includes target for local error computation
+    >>> output = srtp_layer(hidden, target)
+    >>> loss.backward()  # Uses SRTP gradients automatically
+
+Biological Motivation:
+    SRTP addresses the weight transport problem by using local error signals combined
+    with random feedback connections. This provides a more biologically plausible
+    learning mechanism that doesn't require symmetric weight knowledge.
+
+References:
+    Derived from Direct Feedback Alignment and Random Target Projection principles
+    for enhanced biological plausibility in deep learning systems.
+"""
+
 from math import prod
 from typing import Any, List, Tuple
 

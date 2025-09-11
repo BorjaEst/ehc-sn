@@ -1,56 +1,72 @@
-"""
-Neural network decoders for the entorhinal-hippocampal circuit (EHC) spatial navigation library.
+"""Neural network decoders for entorhinal-hippocampal circuit spatial navigation modeling.
 
 This module implements various decoder architectures that transform latent representations
-back into reconstructed outputs (e.g., cognitive maps, obstacle maps). The decoders complement
-the encoders and support both standard backpropagation (BP), Direct Random Target
-Projection (DRTP), and Direct Feedback Alignment (DFA) training methods.
+back into reconstructed spatial outputs (e.g., cognitive maps, obstacle maps). The decoders
+complement the encoders in autoencoder architectures and support multiple biologically-inspired
+training methods including standard backpropagation (BP), Direct Random Target Projection
+(DRTP), Direct Feedback Alignment (DFA), and Symmetric Random Target Projection (SRTP).
 
-The module provides six main decoder types:
-1. Linear: Fully connected layers for reconstructing flattened outputs
-2. DRTPLinear: DRTP-enabled fully connected decoder
-3. DFALinear: DFA-enabled fully connected decoder
-4. Conv2D: Transpose convolutional decoder for spatial data reconstruction
-5. DRTPConv2D: DRTP-enabled transpose convolutional decoder
-6. DFAConv2D: DFA-enabled transpose convolutional decoder
-
-All decoders follow a consistent architecture pattern:
-- Input from latent representation
-- Progressive expansion through hidden layers
-- Output reconstruction matching original input dimensions
-- Appropriate activation functions for each training method
+The decoder architectures are designed to mimic the decoding properties of hippocampal
+regions (DG, CA3, CA2, CA1) that reconstruct spatial representations from compressed
+neural codes for spatial navigation and memory retrieval.
 
 Key Features:
-- Pydantic-based parameter validation and configuration
-- Dynamic dimension calculation for transpose convolutions
-- Symmetric architectures complementing encoder designs
-- Support for standard, DRTP, and DFA training algorithms
-- Consistent interface across all decoder types
+    - Pydantic-based parameter validation and configuration management
+    - Support for multiple biologically-motivated training algorithms
+    - Consistent interface across all decoder implementations
+    - Progressive expansion from latent to full spatial dimensions
+    - Appropriate activation functions optimized for each training method
 
-Example:
+Classes:
+    DecoderParams: Configuration parameters for decoder initialization
+    BaseDecoder: Abstract base class defining the decoder interface
+    Linear: Standard fully connected decoder for spatial reconstruction
+    DRTPLinear: DRTP-enabled decoder with target projection learning
+    DFALinear: DFA-enabled decoder with random feedback alignment
+    SRTPLinear: SRTP-enabled decoder with symmetric random projections
+    ZOLinear: Zero-Order decoder with gradient-free learning via perturbations
+
+Architecture Pattern:
+    All decoders follow a consistent expansion architecture:
+    - Input from latent representation (compressed spatial features)
+    - Progressive expansion through hidden layers
+    - Output reconstruction matching original spatial input dimensions
+    - Sigmoid activation for spatial probability maps
+
+Examples:
+    >>> # Standard decoder for spatial map reconstruction
     >>> params = DecoderParams(
-    ...     output_shape=(1, 32, 16),
-    ...     latent_dim=128,
-    ...     activation_fn=nn.GELU
+    ...     output_shape=(1, 32, 16),  # Target spatial map dimensions
+    ...     latent_dim=128,            # Input latent dimension
+    ...     activation_fn=nn.GELU      # Smooth activation for BP training
     ... )
     >>> decoder = Linear(params)
     >>> reconstruction = decoder(latent_tensor)
+    >>>
+    >>> # DRTP decoder with bounded activation
+    >>> drtp_params = DecoderParams(
+    ...     output_shape=(1, 32, 16),
+    ...     latent_dim=128,
+    ...     activation_fn=nn.Tanh  # Bounded activation for DRTP stability
+    ... )
+    >>> drtp_decoder = DRTPLinear(drtp_params)
 
 References:
     - Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
       error backpropagation for deep learning. Nature Communications, 7, 13276.
     - O'Keefe, J., & Nadel, L. (1978). The hippocampus as a cognitive map.
+      Oxford University Press.
 """
 
 from math import prod
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn.hooks.registry import registry
-from ehc_sn.modules.dfa import DFALayer, clear_dfa_error, register_dfa_hook
+from ehc_sn.modules import dfa, zo
 from ehc_sn.modules.drtp import DRTPLayer
 from ehc_sn.modules.srtp import SRTPLayer
 
@@ -129,7 +145,7 @@ class BaseDecoder(nn.Module):
         the concrete implementations:
 
         >>> params = DecoderParams(...)
-        >>> decoder = Linear(params)  # or Conv2D, DRTPLinear, etc.
+        >>> decoder = Linear(params)  # or DRTPLinear, DFALinear, SRTPLinear
         >>> reconstruction = decoder(latent_tensor)
     """
 
@@ -137,11 +153,17 @@ class BaseDecoder(nn.Module):
         super().__init__()
         self.params = params
 
-    def forward(self, x: Tensor, **kwds) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the decoder.
 
         Args:
             x: Input latent tensor of shape (batch_size, latent_dim).
+            *args: Additional positional arguments for interface compatibility
+                with different decoder architectures and training strategies.
+            **kwds: Additional keyword arguments including:
+                - target: Target tensor for some training methods (e.g., DFA, DRTP)
+                - seed: Random seed for stochastic methods (e.g., Zero-Order)
+                - Other method-specific parameters
 
         Returns:
             Reconstructed output tensor of shape (batch_size, *output_shape).
@@ -225,12 +247,16 @@ class Linear(BaseDecoder):
         self.layer3 = nn.Linear(in_features=1024, out_features=output_features, bias=True)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the linear decoder.
 
         Args:
             x: Input latent tensor of shape (batch_size, latent_dim).
-            target: Ignored for standard decoder, kept for API consistency.
+            *args: Additional positional arguments for interface compatibility.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for standard decoder, kept for API consistency
+                - seed: Ignored for standard decoder
+                - Other method-specific parameters
 
         Returns:
             Reconstructed output of shape (batch_size, *output_shape) with
@@ -313,13 +339,16 @@ class DRTPLinear(BaseDecoder):
         self.layer3 = nn.Linear(in_features=1024, out_features=output_features)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
+    def forward(self, x: Tensor, *args, target: Optional[Tensor] = None, **kwds) -> Tensor:
         """Forward pass through the DRTP linear decoder.
 
         Args:
             x: Input latent tensor of shape (batch_size, latent_dim).
+            *args: Additional positional arguments for interface compatibility.
             target: Target tensor for DRTP gradient computation during backward pass.
-                Can be None during forward-only inference.
+            **kwds: Additional keyword arguments including:
+                - seed: Ignored for DRTP decoder
+                - Other method-specific parameters
 
         Returns:
             Reconstructed output of shape (batch_size, *output_shape) with values
@@ -394,27 +423,36 @@ class DFALinear(BaseDecoder):
         # First layer: expand from latent to first hidden layer (512 units)
         self.layer1 = nn.Linear(params.latent_dim, out_features=512, bias=True)
         self.activation1 = params.activation_fn()  # Usually Tanh
-        self.dfa1 = DFALayer(output_dim=params.output_shape, hidden_dim=512)
+        self.dfa1 = dfa.DFALayer(output_dim=params.output_shape, hidden_dim=512)
 
         # Second layer: 1024 units
         self.layer2 = nn.Linear(in_features=512, out_features=1024, bias=True)
         self.activation2 = params.activation_fn()  # Usually Tanh
-        self.dfa2 = DFALayer(output_dim=params.output_shape, hidden_dim=1024)
+        self.dfa2 = dfa.DFALayer(output_dim=params.output_shape, hidden_dim=1024)
 
         # Output layer (no DFA - uses standard gradients)
         self.layer3 = nn.Linear(in_features=1024, out_features=output_features)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the DFA linear decoder.
 
         Args:
             x: Input latent tensor of shape (batch_size, latent_dim).
-            target: Ignored for standard decoder, kept for API consistency.
+            *args: Additional positional arguments for interface compatibility.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for DFA decoder, kept for API consistency
+                - seed: Ignored for DFA decoder
+                - Other method-specific parameters
 
         Returns:
             Reconstructed output of shape (batch_size, *output_shape) with values
             in range [0, 1] due to Sigmoid output activation.
+
+        Note:
+            Hook management for DFA error signal capture is now handled by
+            the DFATrainer, not in this forward method. This provides better
+            separation of concerns between model computation and training logic.
         """
         # First layer
         h1 = self.layer1(x)
@@ -429,11 +467,6 @@ class DFALinear(BaseDecoder):
         # Output layer (no DFA - uses standard gradients)
         output = self.layer3(h2)
         output = self.output_activation(output)
-
-        # Register DFA hook on the current output every forward (per batch)
-        if output.requires_grad:
-            clear_dfa_error()
-            register_dfa_hook(output)
 
         # Reshape to original spatial dimensions
         return output.reshape(output.shape[0], *self.output_shape)
@@ -530,12 +563,16 @@ class SRTPLinear(BaseDecoder):
         # Set initialization flat to true
         self._srtp_initialized = True
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through SRTP linear decoder.
 
         Args:
             x: Latent tensor of shape (batch_size, latent_dim)
-            target: Optional target tensor (unused, kept for API consistency)
+            *args: Additional positional arguments for interface compatibility.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for SRTP decoder, kept for API consistency
+                - seed: Ignored for SRTP decoder
+                - Other method-specific parameters
 
         Returns:
             Reconstructed output tensor of shape (batch_size, *output_shape)
@@ -570,318 +607,146 @@ class SRTPLinear(BaseDecoder):
         return output.reshape(output.shape[0], *self.output_shape)
 
 
-class Conv2D(BaseDecoder):
-    """Transpose convolutional neural network decoder using standard backpropagation training.
+class ZOLinear(BaseDecoder):
+    """Linear decoder using Zero-Order (ZO) optimization for gradient-free learning.
 
-    This decoder uses transpose convolutional layers to reconstruct spatial data while
-    preserving and enhancing spatial relationships. It mirrors the Conv2D encoder
-    architecture in reverse, expanding from latent space back to full spatial dimensions.
+    This decoder implements the Memory-efficient Zero-Order (MeZO) algorithm, which
+    estimates gradients using finite differences with random perturbations instead
+    of traditional backpropagation. It provides a biologically plausible learning
+    mechanism that doesn't require gradient computation or storage.
 
     Architecture:
-        Latent input → Linear(512) → GELU → Linear(intermediate_features) → GELU → Reshape → TransposeConv2d(5x5, 1) → Sigmoid
+        Latent input → ZOLinear(512) → GELU → ZOLinear(1024) → GELU → ZOLinear(output_size) → Sigmoid
 
-    Design choices:
-    - First linear layer expands latent to 512 units
-    - Second linear layer expands to match flattened conv feature size (calculated dynamically)
-    - Reshape to spatial dimensions that transpose conv can process
-    - 5x5 transpose convolution kernel reconstructs local spatial patterns
-    - Stride=2 and appropriate padding to double spatial dimensions
-    - GELU activations for smooth gradients and improved training
-    - Sigmoid output activation for bounded reconstruction values
+    Key features of ZO optimization:
+    - Gradient-free learning using finite difference approximation
+    - Memory-efficient implementation (no backward pass storage required)
+    - Biologically plausible learning mechanism without weight transport
+    - Compatible with standard PyTorch optimizers after gradient estimation
+    - Two-phase forward pass: +ε and -ε perturbations for gradient estimation
 
-    The decoder automatically calculates the correct intermediate dimensions based
-    on the output spatial dimensions and transpose convolution operations.
+    The ZO mechanism:
+    - Applies random perturbations to layer weights during forward passes
+    - Estimates gradients as: ∇θ ≈ (L(θ + εz) - L(θ - εz)) / (2ε) * z
+    - Uses deterministic perturbation generation with seed control
+    - Provides gradients via feedback mechanism for optimizer compatibility
+
+    Training process:
+    1. Forward pass with +ε perturbation (seed provided)
+    2. Forward pass with -ε perturbation (same seed)
+    3. Compute loss difference and apply feedback to all layers
+    4. Standard optimizer step using estimated gradients
 
     Args:
         params: DecoderParams with activation_fn typically set to nn.GELU.
 
     Example:
         >>> params = DecoderParams(
-        ...     output_shape=(1, 32, 16),  # Final output shape
+        ...     output_shape=(1, 32, 16),
         ...     latent_dim=128,
         ...     activation_fn=nn.GELU
         ... )
-        >>> decoder = Conv2D(params)
-        >>> latent_batch = torch.randn(4, 128)
-        >>> reconstruction = decoder(latent_batch)  # shape: (4, 1, 32, 16)
+        >>> decoder = ZOLinear(params)
+        >>>
+        >>> # Standard inference
+        >>> reconstruction = decoder(latent_batch)
+        >>>
+        >>> # Training with ZO optimization
+        >>> output_1 = decoder(latent_batch, seed=42)  # +ε perturbation
+        >>> output_2 = decoder(latent_batch, seed=42)  # -ε perturbation
+        >>>
+        >>> # Apply feedback with loss difference
+        >>> loss_diff = loss_1 - loss_2
+        >>> decoder.feedback(loss_diff.item())
 
-    Note:
-        Output spatial dimensions must be even numbers to work correctly with the
-        transpose convolution stride settings.
+    References:
+        - MeZO: Fine-Tuning Language Models with Just Forward Passes (Malladi et al., 2023)
+        - Zero-Order Optimization in Machine Learning (Chen et al., 2020)
     """
 
-    def __init__(self, params: DecoderParams):
+    def __init__(self, params: DecoderParams, epsilon: float = 1e-3):
+        """Initialize Zero-Order linear decoder.
+
+        Args:
+            params: DecoderParams containing configuration parameters.
+            epsilon: Perturbation magnitude for finite difference gradient estimation.
+                Smaller values provide more accurate gradients but may suffer from
+                numerical precision issues. Typical range: 1e-4 to 1e-2. Default: 1e-3.
+        """
         super().__init__(params)
+        output_features = prod(params.output_shape)
 
-        # Calculate intermediate dimensions (mirror of encoder conv calculations)
-        h, w = self.spatial_dimensions
-        # Before transpose conv: h//2 x w//2 (what encoder conv+pool produces)
-        intermediate_h, intermediate_w = h // 2, w // 2
-        intermediate_features = 32 * intermediate_h * intermediate_w
-
-        # Linear layer: expand from latent to 512 units
-        self.layer1 = nn.Linear(params.latent_dim, out_features=512, bias=True)
+        # Create ZO Linear layers with specified epsilon
+        self.layer1 = zo.Linear(params.latent_dim, 512, bias=True, epsilon=epsilon)
         self.activation1 = params.activation_fn()  # Usually GELU
 
-        # Second linear layer to match conv input size
-        self.layer2 = nn.Linear(in_features=512, out_features=intermediate_features, bias=True)
+        self.layer2 = zo.Linear(512, 1024, bias=True, epsilon=epsilon)
         self.activation2 = params.activation_fn()  # Usually GELU
 
-        # Store intermediate dimensions for reshape
-        self.intermediate_shape = (32, intermediate_h, intermediate_w)
-
-        # Transpose convolution: 32 channels -> 1 channel, 5x5 kernel, stride=2
-        kwds = {"stride": 2, "padding": 2, "output_padding": 1, "bias": True}
-        self.conv3 = nn.ConvTranspose2d(32, self.output_channels, kernel_size=5, **kwds)
+        self.layer3 = zo.Linear(1024, output_features, bias=True, epsilon=epsilon)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
-        """Forward pass through the transpose convolutional decoder.
+        # Store epsilon for reference
+        self.epsilon = epsilon
+
+    def forward(self, x: Tensor, *args: Any, seed: Optional[int] = None, **kwds) -> Tensor:
+        """Forward pass through the ZO linear decoder.
+
+        This method supports both inference mode (seed=None) and training mode
+        (seed provided). During training, the method expects to be called twice
+        with the same seed for proper gradient estimation via finite differences.
 
         Args:
-            x: Input latent tensor of shape (batch_size, latent_dim).
-            target: Ignored for standard decoder, kept for API consistency.
+            *args: Additional positional arguments for interface compatibility.
+            seed: Random seed for perturbation generation during training.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for SRTP decoder, kept for API consistency
+                - Other method-specific parameters
 
         Returns:
-            Reconstructed output of shape (batch_size, *output_shape) with values
-            in range [0, 1] due to Sigmoid output activation.
+            Reconstructed output of shape (batch_size, *output_shape) with
+            values in range [0, 1] due to Sigmoid output activation.
+
+        Note:
+            During training, this method must be called twice with the same seed:
+            1. First call: applies +ε perturbation to all layers
+            2. Second call: applies -ε perturbation to all layers
+            The gradient estimation is completed by calling feedback() on all layers.
         """
-        # First linear layer
-        h1 = self.layer1(x)
+        # First layer
+        h1 = self.layer1(x, seed=seed)
         h1 = self.activation1(h1)
 
-        # Second linear layer
-        h2 = self.layer2(h1)
+        # Second layer
+        h2 = self.layer2(h1, seed=seed)
         h2 = self.activation2(h2)
 
-        # Reshape to spatial format for transpose convolution
-        h2 = h2.reshape(h2.size(0), *self.intermediate_shape)
-
-        # Transpose convolution to final output size
-        output = self.conv3(h2)
+        # Output layer
+        output = self.layer3(h2, seed=seed)
         output = self.output_activation(output)
 
-        return output
+        # Reshape to original spatial dimensions
+        return output.reshape(output.shape[0], *self.output_shape)
 
+    def feedback(self, projected_grad: float) -> None:
+        """Apply gradient feedback to all ZO layers using finite difference estimate.
 
-class DRTPConv2D(BaseDecoder):
-    """Transpose convolutional decoder using Direct Random Target Projection (DRTP) training.
-
-    This decoder combines the spatial reconstruction capabilities of transpose
-    convolutional layers with the biologically plausible learning mechanism of DRTP.
-    It mirrors the DRTPConv2D encoder architecture in reverse.
-
-    Architecture:
-        Latent input → Linear(512) → Tanh → DRTP → Linear(intermediate_features) → Tanh → DRTP → Reshape → TransposeConv2d(5x5, 1) → Sigmoid
-
-    Key features:
-    - Transpose convolutional layer reconstructs spatial patterns from feature maps
-    - DRTP applied to both fully connected hidden layers
-    - Uses Tanh activation functions for compatibility with DRTP
-    - Random feedback weights enable biologically plausible learning
-    - Output layer uses standard backpropagation for final reconstruction
-    - Second linear layer size is calculated dynamically based on output dimensions
-
-    The combination of transpose convolution and DRTP makes this decoder suitable for:
-    - Spatial navigation tasks requiring biological plausibility
-    - Investigating how spatial reconstruction might work in biological neural networks
-    - Research comparing biological vs. standard learning mechanisms
-    - Applications where spatial features and learning constraints both matter
-
-    Args:
-        params: DecoderParams with activation_fn typically set to nn.Tanh.
-
-    Example:
-        >>> params = DecoderParams(
-        ...     output_shape=(1, 32, 16),
-        ...     latent_dim=128,
-        ...     activation_fn=nn.Tanh
-        ... )
-        >>> decoder = DRTPConv2D(params)
-        >>> latent_batch = torch.randn(4, 128)
-        >>> reconstruction = decoder(latent_batch)  # shape: (4, 1, 32, 16), target=None is default
-        >>> # During training: reconstruction = decoder(latent_batch, target_batch)
-
-    Note:
-        Target tensor is only required during backward pass for DRTP computation.
-        Forward pass accepts optional target parameter for consistent API.
-        Output spatial dimensions should be even numbers for transpose conv compatibility.
-
-    References:
-        Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
-        error backpropagation for deep learning. Nature Communications, 7, 13276.
-    """
-
-    def __init__(self, params: DecoderParams):
-        super().__init__(params)
-
-        # Calculate intermediate dimensions (mirror of encoder conv calculations)
-        h, w = self.spatial_dimensions
-        intermediate_h, intermediate_w = h // 2, w // 2
-        intermediate_features = 32 * intermediate_h * intermediate_w
-
-        # Define layers separately since we need to apply DRTP manually
-        self.layer1 = nn.Linear(in_features=params.latent_dim, out_features=512, bias=True)
-        self.activation1 = params.activation_fn()  # Usually Tanh
-        self.drtp1 = DRTPLayer(target_dim=params.output_shape, hidden_dim=512)
-
-        # Second linear layer to match conv input size
-        self.layer2 = nn.Linear(in_features=512, out_features=intermediate_features, bias=True)
-        self.activation2 = params.activation_fn()  # Usually Tanh
-        self.drtp2 = DRTPLayer(target_dim=params.output_shape, hidden_dim=intermediate_features)
-
-        # Store intermediate dimensions for reshape
-        self.intermediate_shape = (32, intermediate_h, intermediate_w)
-
-        # Transpose convolution: 32 channels -> 1 channel, 5x5 kernel, stride=2
-        # No DRTP on transpose conv layer (uses standard gradients)
-        kwds = {"stride": 2, "padding": 2, "output_padding": 1, "bias": True}
-        self.conv3 = nn.ConvTranspose2d(32, self.output_channels, kernel_size=5, **kwds)
-        self.output_activation = nn.Sigmoid()
-
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
-        """Forward pass through the DRTP transpose convolutional decoder.
+        This method propagates the projected gradient (loss difference) to all
+        ZO layers in the decoder, allowing them to compute parameter gradients
+        for the subsequent optimizer step.
 
         Args:
-            x: Input latent tensor of shape (batch_size, latent_dim).
-            target: Target tensor for DRTP gradient computation during backward pass.
-                Can be None during forward-only inference.
+            projected_grad: The finite difference value (loss_1 - loss_2) from
+                the two perturbed forward passes. This represents the directional
+                derivative along the random perturbation directions.
 
-        Returns:
-            Reconstructed output of shape (batch_size, *output_shape) with values
-            in range [0, 1] due to Sigmoid output activation.
+        Note:
+            This method must be called after completing the two-phase forward pass
+            (with +ε and -ε perturbations) and before the optimizer step.
         """
-        # First layer with DRTP
-        h1 = self.layer1(x)
-        h1 = self.activation1(h1)
-        h1 = self.drtp1(h1, target)
-
-        # Second layer with DRTP
-        h2 = self.layer2(h1)
-        h2 = self.activation2(h2)
-        h2 = self.drtp2(h2, target)
-
-        # Reshape to spatial format for transpose convolution
-        h2 = h2.reshape(h2.size(0), *self.intermediate_shape)
-
-        # Transpose convolution to final output size (no DRTP)
-        output = self.conv3(h2)
-        output = self.output_activation(output)
-
-        return output
-
-
-class DFAConv2D(BaseDecoder):
-    """Transpose convolutional decoder using Direct Feedback Alignment (DFA) training.
-
-    This decoder combines the spatial reconstruction capabilities of transpose
-    convolutional layers with the biologically plausible learning mechanism of DFA.
-    It provides an alternative to both standard backpropagation and DRTP while
-    maintaining spatial processing capabilities.
-
-    Architecture:
-        Latent input → Linear(512) → Tanh → DFA → Linear(intermediate_features) → Tanh → DFA → Reshape → TransposeConv2d(5x5, 1) → Sigmoid
-
-    Key features:
-    - Transpose convolutional layer reconstructs spatial patterns from feature maps
-    - DFA applied to both fully connected hidden layers
-    - Uses Tanh activation functions for compatibility with DFA
-    - Random feedback weights enable biologically plausible learning
-    - Output layer uses standard backpropagation for final reconstruction
-    - Second linear layer size is calculated dynamically based on output dimensions
-    - Error signals are propagated directly from output to hidden layers
-
-    The combination of transpose convolution and DFA makes this decoder suitable for:
-    - Spatial navigation tasks requiring biological plausibility
-    - Investigating how spatial reconstruction might work in biological neural networks
-    - Research comparing biological vs. standard learning mechanisms
-    - Applications where spatial features and learning constraints both matter
-
-    Args:
-        params: DecoderParams with activation_fn typically set to nn.Tanh.
-
-    Example:
-        >>> params = DecoderParams(
-        ...     output_shape=(1, 32, 16),
-        ...     latent_dim=128,
-        ...     activation_fn=nn.Tanh
-        ... )
-        >>> decoder = DFAConv2D(params)
-        >>> latent_batch = torch.randn(4, 128)
-        >>> reconstruction = decoder(latent_batch)  # shape: (4, 1, 32, 16), error_signal=None is default
-        >>> # During training: reconstruction = decoder(latent_batch, grad_output_batch)
-
-    Note:
-        Error signal is only required during backward pass for DFA computation.
-        Forward pass accepts optional error_signal parameter for consistent API.
-        Output spatial dimensions should be even numbers for transpose conv compatibility.
-
-    References:
-        Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
-        error backpropagation for deep learning. Nature Communications, 7, 13276.
-    """
-
-    def __init__(self, params: DecoderParams):
-        super().__init__(params)
-
-        # Calculate intermediate dimensions (mirror of encoder conv calculations)
-        h, w = self.spatial_dimensions
-        intermediate_h, intermediate_w = h // 2, w // 2
-        intermediate_features = 32 * intermediate_h * intermediate_w
-
-        # Define layers separately since we need to apply DFA manually
-        self.layer1 = nn.Linear(in_features=params.latent_dim, out_features=512, bias=True)
-        self.activation1 = params.activation_fn()  # Usually Tanh
-        self.dfa1 = DFALayer(output_dim=params.output_shape, hidden_dim=512)
-
-        # Second linear layer to match conv input size
-        self.layer2 = nn.Linear(in_features=512, out_features=intermediate_features, bias=True)
-        self.activation2 = params.activation_fn()  # Usually Tanh
-        self.dfa2 = DFALayer(output_dim=params.output_shape, hidden_dim=intermediate_features)
-
-        # Store intermediate dimensions for reshape
-        self.intermediate_shape = (32, intermediate_h, intermediate_w)
-
-        # Transpose convolution: 32 channels -> 1 channel, 5x5 kernel, stride=2
-        # No DFA on transpose conv layer (uses standard gradients)
-        kwds = {"stride": 2, "padding": 2, "output_padding": 1, "bias": True}
-        self.conv3 = nn.ConvTranspose2d(32, self.output_channels, kernel_size=5, **kwds)
-        self.output_activation = nn.Sigmoid()
-
-    def forward(self, x: Tensor, target: Optional[Tensor] = None, **kwds) -> Tensor:
-        """Forward pass through the DFA transpose convolutional decoder.
-
-        Args:
-            x: Input latent tensor of shape (batch_size, latent_dim).
-            target: Ignored for standard decoder, kept for API consistency.
-
-        Returns:
-            Reconstructed output of shape (batch_size, *output_shape) with values
-            in range [0, 1] due to Sigmoid output activation.
-        """
-        # First layer with DFA
-        h1 = self.layer1(x)
-        h1 = self.activation1(h1)
-        h1 = self.dfa1(h1)
-
-        # Second layer with DFA
-        h2 = self.layer2(h1)
-        h2 = self.activation2(h2)
-        h2 = self.dfa2(h2)
-
-        # Reshape to spatial format for transpose convolution
-        h2 = h2.reshape(h2.size(0), *self.intermediate_shape)
-
-        # Transpose convolution to final output size (no DFA)
-        output = self.conv3(h2)
-        output = self.output_activation(output)
-
-        # Register DFA hook on the current output every forward (per batch)
-        if output.requires_grad:
-            clear_dfa_error()
-            register_dfa_hook(output)
-
-        return output
+        self.layer1.feedback(projected_grad)
+        self.layer2.feedback(projected_grad)
+        self.layer3.feedback(projected_grad)
 
 
 # -------------------------------------------------------------------------------------------
@@ -920,6 +785,9 @@ if __name__ == "__main__":
 
     # Parameters for DFA decoders (typically use Tanh)
     dfa_params = DecoderParams(output_shape=(1, 32, 16), latent_dim=128, activation_fn=nn.Tanh)
+
+    # Parameters for ZO decoders (typically use GELU)
+    zo_params = DecoderParams(output_shape=(1, 32, 16), latent_dim=128, activation_fn=nn.GELU)
 
     # Create sample latent input batch (4 samples)
     batch_size = 4
@@ -977,62 +845,27 @@ if __name__ == "__main__":
     print(f"   Mean activation: {dfa_linear_output.mean():.3f}\n")
 
     # -----------------------------------------------------------------------------------
-    # Conv2D Decoder Example
+    # ZO Linear Decoder Example
     # -----------------------------------------------------------------------------------
 
-    print("4. Conv2D Decoder:")
-    conv_decoder = Conv2D(params)
+    print("4. ZO Linear Decoder:")
+    zo_linear_decoder = ZOLinear(zo_params, epsilon=1e-3)
 
-    # Calculate expected intermediate dimensions
-    h, w = params.output_shape[1], params.output_shape[2]
-    intermediate_features = 32 * (h // 2) * (w // 2)
-
+    # Forward pass (inference mode)
     with torch.no_grad():
-        conv_output = conv_decoder(sample_latent)
+        zo_linear_output = zo_linear_decoder(sample_latent)
 
-    print(f"   Spatial dimensions: {h}x{w}")
-    print(f"   Intermediate features: 32x{h//2}x{w//2} = {intermediate_features}")
-    print(f"   Output shape: {conv_output.shape}")
-    print(f"   Output range: [{conv_output.min():.3f}, {conv_output.max():.3f}]")
-    print(f"   Mean activation: {conv_output.mean():.3f}\n")
-
-    # -----------------------------------------------------------------------------------
-    # DRTP Conv2D Decoder Example
-    # -----------------------------------------------------------------------------------
-
-    print("5. DRTP Conv2D Decoder:")
-    drtp_conv_decoder = DRTPConv2D(drtp_params)
-
-    with torch.no_grad():
-        drtp_conv_output = drtp_conv_decoder(sample_latent)
-
-    print(f"   Spatial dimensions: {h}x{w}")
-    print(f"   Intermediate features: 32x{h//2}x{w//2} = {intermediate_features}")
-    print(f"   Output shape: {drtp_conv_output.shape}")
-    print(f"   Output range: [{drtp_conv_output.min():.3f}, {drtp_conv_output.max():.3f}]")
-    print(f"   Mean activation: {drtp_conv_output.mean():.3f}\n")
-
-    # -----------------------------------------------------------------------------------
-    # DFA Conv2D Decoder Example
-    # -----------------------------------------------------------------------------------
-
-    print("6. DFA Conv2D Decoder:")
-    dfa_conv_decoder = DFAConv2D(dfa_params)
-
-    with torch.no_grad():
-        dfa_conv_output = dfa_conv_decoder(sample_latent)
-
-    print(f"   Spatial dimensions: {h}x{w}")
-    print(f"   Intermediate features: 32x{h//2}x{w//2} = {intermediate_features}")
-    print(f"   Output shape: {dfa_conv_output.shape}")
-    print(f"   Output range: [{dfa_conv_output.min():.3f}, {dfa_conv_output.max():.3f}]")
-    print(f"   Mean activation: {dfa_conv_output.mean():.3f}\n")
+    print(f"   Output features: {prod(zo_params.output_shape)}")
+    print(f"   Output shape: {zo_linear_output.shape}")
+    print(f"   Output range: [{zo_linear_output.min():.3f}, {zo_linear_output.max():.3f}]")
+    print(f"   Mean activation: {zo_linear_output.mean():.3f}")
+    print(f"   Epsilon (perturbation): {zo_linear_decoder.epsilon}\n")
 
     # -----------------------------------------------------------------------------------
     # Model comparison
     # -----------------------------------------------------------------------------------
 
-    print("7. Model Size Comparison:")
+    print("5. Model Size Comparison:")
 
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1041,13 +874,53 @@ if __name__ == "__main__":
         "Linear": linear_decoder,
         "DRTP Linear": drtp_linear_decoder,
         "DFA Linear": dfa_linear_decoder,
-        "Conv2D": conv_decoder,
-        "DRTP Conv2D": drtp_conv_decoder,
-        "DFA Conv2D": dfa_conv_decoder,
+        "ZO Linear": zo_linear_decoder,
     }
 
     for name, model in models.items():
         param_count = count_parameters(model)
         print(f"   {name}: {param_count:,} parameters")
+
+    # -----------------------------------------------------------------------------------
+    # ZO Training Example
+    # -----------------------------------------------------------------------------------
+
+    print("\n6. ZO Training Example:")
+
+    # Create sample data for ZO training demonstration
+    sample_target = torch.randn(batch_size, *params.output_shape)
+
+    # Simulate ZO training steps
+    print("   Demonstrating ZO gradient estimation...")
+
+    # Two forward passes with same seed for gradient estimation
+    output_plus = zo_linear_decoder(sample_latent, seed=42)  # +ε perturbation
+    output_minus = zo_linear_decoder(sample_latent, seed=42)  # -ε perturbation
+
+    # Compute losses
+    criterion = nn.MSELoss()
+    loss_plus = criterion(output_plus, sample_target)
+    loss_minus = criterion(output_minus, sample_target)
+    loss_diff = loss_plus - loss_minus
+
+    print(f"   Loss (+ε): {loss_plus.item():.6f}")
+    print(f"   Loss (-ε): {loss_minus.item():.6f}")
+    print(f"   Loss difference: {loss_diff.item():.6f}")
+
+    # Apply feedback for gradient estimation
+    zo_linear_decoder.feedback(loss_diff.item())
+    print("   ✓ Gradient feedback applied to all ZO layers")
+
+    # Check that gradients were computed
+    grad_norms = []
+    for name, param in zo_linear_decoder.named_parameters():
+        if param.grad is not None:
+            grad_norms.append(param.grad.norm().item())
+
+    if grad_norms:
+        avg_grad_norm = sum(grad_norms) / len(grad_norms)
+        print(f"   Average gradient norm: {avg_grad_norm:.6f}")
+    else:
+        print("   No gradients computed (unexpected)")
 
     print("\n=== Examples completed ===")

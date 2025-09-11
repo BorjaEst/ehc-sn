@@ -1,56 +1,70 @@
-"""
-Neural network encoders for the entorhinal-hippocampal circuit (EHC) spatial navigation library.
+"""Neural network encoders for entorhinal-hippocampal circuit spatial navigation modeling.
 
 This module implements various encoder architectures that transform sensory inputs
 (e.g., obstacle maps, cognitive maps) into latent representations suitable for spatial
-navigation and memory tasks. The encoders support both standard backpropagation (BP),
-Direct Random Target Projection (DRTP), and Direct Feedback Alignment (DFA) training methods.
+navigation and memory tasks. The encoders support multiple biologically-inspired
+training methods including standard backpropagation (BP), Direct Random Target
+Projection (DRTP), and Direct Feedback Alignment (DFA).
 
-The module provides six main encoder types:
-1. Linear: Fully connected layers for flattened inputs
-2. DRTPLinear: DRTP-enabled fully connected encoder
-3. DFALinear: DFA-enabled fully connected encoder
-4. Conv2D: Convolutional encoder for spatial data
-5. DRTPConv2D: DRTP-enabled convolutional encoder
-6. DFAConv2D: DFA-enabled convolutional encoder
-
-All encoders follow a consistent architecture pattern:
-- Input processing (flattening or convolution)
-- Two hidden layers with 1024 and 512 units respectively
-- Output layer projecting to latent dimension
-- Appropriate activation functions for each training method
+The encoder architectures are designed to mimic the encoding properties of the
+medial entorhinal cortex (MEC), which processes spatial information and projects
+to hippocampal regions for memory formation and spatial navigation.
 
 Key Features:
-- Pydantic-based parameter validation and configuration
-- Dynamic dimension calculation for convolutional layers
-- Biologically plausible sparse representations
-- Support for standard, DRTP, and DFA training algorithms
-- Consistent interface across all encoder types
+    - Pydantic-based parameter validation and configuration management
+    - Biologically plausible sparse representations mimicking place cell activity
+    - Support for standard BP, DRTP, and DFA training algorithms
+    - Consistent interface across all encoder implementations
+    - Configurable activation functions optimized for each training method
 
-Example:
+Classes:
+    EncoderParams: Configuration parameters for encoder initialization
+    BaseEncoder: Abstract base class defining the encoder interface
+    Linear: Fully connected encoder for flattened spatial inputs
+    DRTPLinear: DRTP-enabled encoder with target projection learning
+    DFALinear: DFA-enabled encoder with random feedback alignment
+
+Architecture Pattern:
+    All encoders follow a consistent three-layer architecture:
+    - Input processing layer (flattening of spatial inputs)
+    - Two hidden layers (1024 and 512 units) for feature extraction
+    - Output projection layer to specified latent dimension
+    - Appropriate activation functions for biological plausibility
+
+Examples:
+    >>> # Standard encoder for spatial navigation tasks
     >>> params = EncoderParams(
-    ...     input_shape=(1, 32, 16),
-    ...     latent_dim=128,
-    ...     activation_fn=nn.GELU
+    ...     input_shape=(1, 32, 16),  # Single-channel obstacle map
+    ...     latent_dim=128,           # Compressed representation
+    ...     activation_fn=nn.GELU     # Smooth activation for BP training
     ... )
     >>> encoder = Linear(params)
-    >>> latent = encoder(input_tensor)
+    >>> latent = encoder(spatial_input)
+    >>>
+    >>> # DRTP encoder with biologically motivated activation
+    >>> drtp_params = EncoderParams(
+    ...     input_shape=(1, 32, 16),
+    ...     latent_dim=128,
+    ...     activation_fn=nn.Tanh  # Bounded activation for DRTP stability
+    ... )
+    >>> drtp_encoder = DRTPLinear(drtp_params)
 
 References:
     - Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
       error backpropagation for deep learning. Nature Communications, 7, 13276.
     - O'Keefe, J., & Nadel, L. (1978). The hippocampus as a cognitive map.
+      Oxford University Press.
 """
 
 from math import prod
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import torch
 from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn.hooks.registry import registry
-from ehc_sn.modules.dfa import DFALayer, clear_dfa_error, register_dfa_hook
+from ehc_sn.modules import dfa
 from ehc_sn.modules.drtp import DRTPLayer
 
 
@@ -128,7 +142,7 @@ class BaseEncoder(nn.Module):
         the concrete implementations:
 
         >>> params = EncoderParams(...)
-        >>> encoder = Linear(params)  # or Conv2D, DRTPLinear, etc.
+        >>> encoder = Linear(params)  # or DRTPLinear, DFALinear
         >>> latent = encoder(input_tensor)
     """
 
@@ -136,11 +150,17 @@ class BaseEncoder(nn.Module):
         super().__init__()
         self.params = params
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the encoder.
 
         Args:
             x: Input tensor of shape (batch_size, *input_shape).
+            *args: Additional positional arguments for interface compatibility
+                with different encoder architectures and training strategies.
+            **kwds: Additional keyword arguments including:
+                - target: Optional target tensor for some training methods
+                - seed: Random seed for stochastic methods (e.g., Zero-Order)
+                - Other method-specific parameters
 
         Returns:
             Latent representation tensor of shape (batch_size, latent_dim).
@@ -228,12 +248,16 @@ class Linear(BaseEncoder):
         self.layer3 = nn.Linear(512, params.latent_dim, bias=True)
         self.output_activation = nn.GELU()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the linear encoder.
 
         Args:
             x: Input tensor of shape (batch_size, channels, height, width).
-            target: Ignored for standard encoder, kept for API consistency.
+            *args: Additional positional arguments for interface compatibility.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for standard encoder, kept for API consistency
+                - seed: Ignored for standard encoder
+                - Other method-specific parameters
 
         Returns:
             Latent representation of shape (batch_size, latent_dim) with
@@ -325,13 +349,16 @@ class DRTPLinear(BaseEncoder):
         self.layer3 = nn.Linear(512, out_features=self.latent_dim)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, target: Optional[Tensor] = None, **kwds: Any) -> Tensor:
         """Forward pass through the DRTP linear encoder.
 
         Args:
             x: Input tensor of shape (batch_size, channels, height, width).
-            target: Target tensor for DRTP gradient computation during backward pass.
-                Can be None during forward-only inference.
+            *args: Additional positional arguments for interface compatibility.
+            target: Target tensor for DRTP gradient computation (optional)
+            **kwds: Additional keyword arguments including:
+                - seed: Ignored for DRTP encoder
+                - Other method-specific parameters
 
         Returns:
             Latent representation of shape (batch_size, latent_dim) with values
@@ -407,27 +434,36 @@ class DFALinear(BaseEncoder):
         # First layer: 1024 units
         self.layer1 = nn.Linear(in_features, out_features=1024)
         self.activation1 = params.activation_fn()  # Usually Tanh
-        self.dfa1 = DFALayer(output_dim=self.latent_dim, hidden_dim=1024)
+        self.dfa1 = dfa.DFALayer(output_dim=self.latent_dim, hidden_dim=1024)
 
         # Second layer: 512 units
         self.layer2 = nn.Linear(in_features=1024, out_features=512)
         self.activation2 = params.activation_fn()  # Usually Tanh
-        self.dfa2 = DFALayer(output_dim=self.latent_dim, hidden_dim=512)
+        self.dfa2 = dfa.DFALayer(output_dim=self.latent_dim, hidden_dim=512)
 
         # Output layer (no DFA - uses standard gradients)
         self.layer3 = nn.Linear(512, out_features=self.latent_dim)
         self.output_activation = nn.Sigmoid()
 
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, **kwds: Any) -> Tensor:
         """Forward pass through the DFA linear encoder.
 
         Args:
             x: Input tensor of shape (batch_size, channels, height, width).
-            target: Ignored for standard encoder, kept for API consistency.
+            *args: Additional positional arguments for interface compatibility.
+            **kwds: Additional keyword arguments including:
+                - target: Ignored for DFA encoder, kept for API consistency
+                - seed: Ignored for DFA encoder
+                - Other method-specific parameters
 
         Returns:
             Latent representation of shape (batch_size, latent_dim) with values
             in range [0, 1] due to Sigmoid output activation.
+
+        Note:
+            Hook management for DFA error signal capture is now handled by
+            the DFATrainer, not in this forward method. This provides better
+            separation of concerns between model computation and training logic.
         """
         # Flatten the input tensor to a single feature vector
         x = x.reshape(x.shape[0], -1)  # Reshape to (batch_size, num_features)
@@ -445,325 +481,6 @@ class DFALinear(BaseEncoder):
         # Output layer (no DFA - uses standard gradients)
         output = self.layer3(h2)
         output = self.output_activation(output)
-
-        # Register DFA hook on the current output every forward (per batch)
-        if output.requires_grad:
-            clear_dfa_error()
-            register_dfa_hook(output)
-
-        return output
-
-
-class Conv2D(BaseEncoder):
-    """Convolutional neural network encoder using standard backpropagation training.
-
-    This encoder uses convolutional layers to process spatial data while preserving
-    spatial relationships in the input. It's particularly effective for obstacle maps,
-    cognitive maps, and other spatially structured data where local patterns and
-    spatial features are important.
-
-    Architecture:
-        Input → Conv2d(5x5, 32) → GELU → MaxPool(2x2) → Flatten → Linear(512) → GELU → Linear(latent_dim) → Sigmoid
-
-    Design choices:
-    - 5x5 convolution kernel captures local spatial patterns effectively
-    - 32 output channels provide sufficient feature diversity
-    - Padding=2 with kernel=5 preserves spatial dimensions before pooling
-    - MaxPool with 2x2 stride reduces spatial dimensions by half
-    - Single fully connected layer (512 units) for final feature processing
-    - GELU activations for smooth gradients and improved training
-
-    The encoder automatically calculates the correct linear layer input size based
-    on the spatial dimensions and convolution/pooling operations, making it adaptable
-    to different input sizes.
-
-    Args:
-        params: EncoderParams with activation_fn typically set to nn.GELU.
-
-    Example:
-        >>> params = EncoderParams(
-        ...     input_shape=(1, 32, 16),  # After conv+pool: 32 channels × 16×8 = 4096 features
-        ...     latent_dim=128,
-        ...     activation_fn=nn.GELU
-        ... )
-        >>> encoder = Conv2D(params)
-        >>> input_batch = torch.randn(4, 1, 32, 16)
-        >>> latent = encoder(input_batch)  # shape: (4, 128)
-
-    Note:
-        Spatial dimensions must be even numbers to work correctly with MaxPool(2x2).
-        The target parameter in forward() is ignored but kept for API consistency.
-    """
-
-    def __init__(self, params: EncoderParams):
-        super().__init__(params)
-
-        # Conv layer 1: 32 channels, 5x5 kernel, stride=1, padding=2
-        self.conv1 = nn.Conv2d(self.input_channels, out_channels=32, kernel_size=5, stride=1, padding=2, bias=True)
-        self.activation1 = params.activation_fn()  # Usually GELU
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-
-        # Calculate the output size after conv and pooling
-        h, w = self.spatial_dimensions
-        # After conv (same size due to padding=2, kernel=5): h x w
-        # After maxpool (stride=2): h//2 x w//2
-        conv_output_size = 32 * (h // 2) * (w // 2)
-
-        # Linear layer 2: 512 units
-        self.layer2 = nn.Linear(conv_output_size, 512, bias=True)
-        self.activation2 = params.activation_fn()  # Usually GELU
-
-        # Linear layer 3 (output): latent_dim units
-        self.layer3 = nn.Linear(in_features=512, out_features=self.latent_dim, bias=True)
-        self.output_activation = nn.Sigmoid()
-
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
-        """Forward pass through the convolutional encoder.
-
-        Args:
-            x: Input tensor of shape (batch_size, channels, height, width).
-            target: Ignored for standard encoder, kept for API consistency.
-
-        Returns:
-            Latent representation of shape (batch_size, latent_dim) with values
-            in range [0, 1] due to Sigmoid output activation.
-        """
-        # First layer: convolution → activation → pooling
-        h1 = self.conv1(x)
-        h1 = self.activation1(h1)
-        h1 = self.pool1(h1)
-
-        # Flatten for FC layers
-        h1 = h1.reshape(h1.size(0), -1)
-
-        # Second layer: fully connected
-        h2 = self.layer2(h1)
-        h2 = self.activation2(h2)
-
-        # Output layer
-        output = self.layer3(h2)
-        output = self.output_activation(output)
-
-        return output
-
-
-class DRTPConv2D(BaseEncoder):
-    """Convolutional encoder using Direct Random Target Projection (DRTP) training.
-
-    This encoder combines the spatial processing capabilities of convolutional layers
-    with the biologically plausible learning mechanism of DRTP. It's designed for
-    scenarios where both spatial feature extraction and biological learning
-    constraints are important.
-
-    Architecture:
-        Input → Conv2d(5x5, 32) → Tanh → DRTP → MaxPool(2x2) → Flatten → Linear(512) → Tanh → DRTP → Linear(latent_dim) → Sigmoid
-
-    Key features:
-    - Convolutional layer processes spatial patterns while preserving local structure
-    - DRTP applied to both convolutional and fully connected hidden layers
-    - Uses Tanh activation functions for compatibility with DRTP
-    - Random feedback weights enable biologically plausible learning
-    - Output layer uses standard backpropagation for final projection
-
-    The combination of convolution and DRTP makes this encoder suitable for:
-    - Spatial navigation tasks requiring biological plausibility
-    - Investigating how spatial processing might work in biological neural networks
-    - Research comparing biological vs. standard learning mechanisms
-    - Applications where spatial features and learning constraints both matter
-
-    Args:
-        params: EncoderParams with activation_fn typically set to nn.Tanh.
-
-    Example:
-        >>> params = EncoderParams(
-        ...     input_shape=(1, 32, 16),
-        ...     latent_dim=128,
-        ...     activation_fn=nn.Tanh
-        ... )
-        >>> encoder = DRTPConv2D(params)
-        >>> input_batch = torch.randn(4, 1, 32, 16)
-        >>> latent = encoder(input_batch)  # shape: (4, 128), target=None is default
-        >>> # During training: latent = encoder(input_batch, target_batch)
-
-    Note:
-        Target tensor is only required during backward pass for DRTP computation.
-        Forward pass accepts optional target parameter for consistent API.
-        Spatial dimensions should be even numbers for MaxPool compatibility.
-
-    References:
-        Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
-        error backpropagation for deep learning. Nature Communications, 7, 13276.
-    """
-
-    def __init__(self, params: EncoderParams):
-        super().__init__(params)
-
-        # Get spatial dimensions
-        h, w = self.spatial_dimensions
-
-        # Conv layer 1: 32 channels, 5x5 kernel, stride=1, padding=2
-        self.conv1 = nn.Conv2d(self.input_channels, out_channels=32, kernel_size=5, stride=1, padding=2, bias=True)
-        self.activation1 = params.activation_fn()  # Usually Tanh
-        self.drtp1 = DRTPLayer(target_dim=self.latent_dim, hidden_dim=[32, h, w])
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-
-        # Calculate the output size after conv and pooling
-        # After conv (same size due to padding=2, kernel=5): h x w
-        # After maxpool (stride=2): h//2 x w//2
-        conv_output_size = 32 * (h // 2) * (w // 2)
-
-        # Linear layer 2: 512 units
-        self.layer2 = nn.Linear(conv_output_size, out_features=512, bias=True)
-        self.activation2 = params.activation_fn()  # Usually Tanh
-        self.drtp2 = DRTPLayer(target_dim=self.latent_dim, hidden_dim=[512])
-
-        # Linear layer 3 (output): latent_dim units
-        self.layer3 = nn.Linear(in_features=512, out_features=self.latent_dim, bias=True)
-        self.output_activation = nn.Sigmoid()
-        # No DRTP on output layer (uses standard gradients)
-
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
-        """Forward pass through the DRTP convolutional encoder.
-
-        Args:
-            x: Input tensor of shape (batch_size, channels, height, width).
-            target: Target tensor for DRTP gradient computation during backward pass.
-                Can be None during forward-only inference.
-
-        Returns:
-            Latent representation of shape (batch_size, latent_dim) with values
-            in range [0, 1] due to Sigmoid output activation.
-        """
-        # First layer: convolution → activation → DRTP → pooling
-        h1 = self.conv1(x)
-        h1 = self.activation1(h1)
-        h1 = self.drtp1(h1, target)  # Apply DRTP to conv layer
-        h1 = self.pool1(h1)
-
-        # Flatten for FC layers
-        h1 = h1.reshape(h1.size(0), -1)
-
-        # Second layer: fully connected with DRTP
-        h2 = self.layer2(h1)
-        h2 = self.activation2(h2)
-        h2 = self.drtp2(h2, target)  # Apply DRTP to linear layer
-
-        # Output layer (standard backpropagation)
-        output = self.layer3(h2)
-        output = self.output_activation(output)
-
-        return output
-
-
-class DFAConv2D(BaseEncoder):
-    """Convolutional encoder using Direct Feedback Alignment (DFA) training.
-
-    This encoder combines the spatial processing capabilities of convolutional layers
-    with the biologically plausible learning mechanism of DFA. It's designed for
-    scenarios where both spatial feature extraction and biological learning
-    constraints are important, providing an alternative to both standard backprop and DRTP.
-
-    Architecture:
-        Input → Conv2d(5x5, 32) → Tanh → DFA → MaxPool(2x2) → Flatten → Linear(512) → Tanh → DFA → Linear(latent_dim) → Sigmoid
-
-    Key features:
-    - Convolutional layer processes spatial patterns while preserving local structure
-    - DFA applied to both convolutional and fully connected hidden layers
-    - Uses Tanh activation functions for compatibility with DFA
-    - Random feedback weights enable biologically plausible learning
-    - Output layer uses standard backpropagation for final projection
-    - Error signals are propagated directly from output to hidden layers
-
-    The combination of convolution and DFA makes this encoder suitable for:
-    - Spatial navigation tasks requiring biological plausibility
-    - Investigating how spatial processing might work in biological neural networks
-    - Research comparing biological vs. standard learning mechanisms
-    - Applications where spatial features and learning constraints both matter
-
-    Args:
-        params: EncoderParams with activation_fn typically set to nn.Tanh.
-
-    Example:
-        >>> params = EncoderParams(
-        ...     input_shape=(1, 32, 16),
-        ...     latent_dim=128,
-        ...     activation_fn=nn.Tanh
-        ... )
-        >>> encoder = DFAConv2D(params)
-        >>> input_batch = torch.randn(4, 1, 32, 16)
-        >>> latent = encoder(input_batch)  # shape: (4, 128), grad_output=None is default
-        >>> # During training: latent = encoder(input_batch, grad_output_batch)
-
-    Note:
-        Error signal is only required during backward pass for DFA computation.
-        Forward pass accepts optional grad_output parameter for consistent API.
-        Spatial dimensions should be even numbers for MaxPool compatibility.
-
-    References:
-        Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
-        error backpropagation for deep learning. Nature Communications, 7, 13276.
-    """
-
-    def __init__(self, params: EncoderParams):
-        super().__init__(params)
-
-        # Get spatial dimensions
-        h, w = self.spatial_dimensions
-
-        # Conv layer 1: 32 channels, 5x5 kernel, stride=1, padding=2
-        self.conv1 = nn.Conv2d(self.input_channels, out_channels=32, kernel_size=5, stride=1, padding=2, bias=True)
-        self.activation1 = params.activation_fn()  # Usually Tanh
-        self.dfa1 = DFALayer(output_dim=self.latent_dim, hidden_dim=[32, h, w])
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-
-        # Calculate the output size after conv and pooling
-        # After conv (same size due to padding=2, kernel=5): h x w
-        # After maxpool (stride=2): h//2 x w//2
-        conv_output_size = 32 * (h // 2) * (w // 2)
-
-        # Linear layer 2: 512 units
-        self.layer2 = nn.Linear(conv_output_size, out_features=512, bias=True)
-        self.activation2 = params.activation_fn()  # Usually Tanh
-        self.dfa2 = DFALayer(output_dim=self.latent_dim, hidden_dim=[512])
-
-        # Linear layer 3 (output): latent_dim units
-        self.layer3 = nn.Linear(in_features=512, out_features=self.latent_dim, bias=True)
-        self.output_activation = nn.Sigmoid()
-        # No DFA on output layer (uses standard gradients)
-
-    def forward(self, x: Tensor, target: Optional[Tensor] = None) -> Tensor:
-        """Forward pass through the DFA convolutional encoder.
-
-        Args:
-            x: Input tensor of shape (batch_size, channels, height, width).
-            target: Ignored for standard encoder, kept for API consistency.
-
-        Returns:
-            Latent representation of shape (batch_size, latent_dim) with values
-            in range [0, 1] due to Sigmoid output activation.
-        """
-        # First layer: convolution → activation → DFA → pooling
-        h1 = self.conv1(x)
-        h1 = self.activation1(h1)
-        h1 = self.dfa1(h1)  # Apply DFA to conv layer
-        h1 = self.pool1(h1)
-
-        # Flatten for FC layers
-        h1 = h1.reshape(h1.size(0), -1)
-
-        # Second layer: fully connected with DFA
-        h2 = self.layer2(h1)
-        h2 = self.activation2(h2)
-        h2 = self.dfa2(h2)  # Apply DFA to linear layer
-
-        # Output layer (standard backpropagation)
-        output = self.layer3(h2)
-        output = self.output_activation(output)
-
-        # Register DFA hook on the current output every forward (per batch)
-        if output.requires_grad:
-            clear_dfa_error()
-            register_dfa_hook(output)
 
         return output
 
@@ -860,62 +577,10 @@ if __name__ == "__main__":
     print(f"   Sparsity (zeros): {(dfa_linear_output == 0).float().mean():.3f}\n")
 
     # -----------------------------------------------------------------------------------
-    # Conv2D Encoder Example
-    # -----------------------------------------------------------------------------------
-
-    print("4. Conv2D Encoder:")
-    conv_encoder = Conv2D(params)
-
-    # Calculate expected conv output size
-    h, w = params.input_shape[1], params.input_shape[2]
-    expected_conv_features = 32 * (h // 2) * (w // 2)
-
-    with torch.no_grad():
-        conv_output = conv_encoder(sample_input)
-
-    print(f"   Spatial dimensions: {h}x{w}")
-    print(f"   After conv+pool: 32x{h//2}x{w//2} = {expected_conv_features} features")
-    print(f"   Output shape: {conv_output.shape}")
-    print(f"   Output range: [{conv_output.min():.3f}, {conv_output.max():.3f}]")
-    print(f"   Sparsity (zeros): {(conv_output == 0).float().mean():.3f}\n")
-
-    # -----------------------------------------------------------------------------------
-    # DRTP Conv2D Encoder Example
-    # -----------------------------------------------------------------------------------
-
-    print("5. DRTP Conv2D Encoder:")
-    drtp_conv_encoder = DRTPConv2D(drtp_params)
-
-    with torch.no_grad():
-        drtp_conv_output = drtp_conv_encoder(sample_input)
-
-    print(f"   Spatial dimensions: {h}x{w}")
-    print(f"   After conv+pool: 32x{h//2}x{w//2} = {expected_conv_features} features")
-    print(f"   Output shape: {drtp_conv_output.shape}")
-    print(f"   Output range: [{drtp_conv_output.min():.3f}, {drtp_conv_output.max():.3f}]")
-    print(f"   Sparsity (zeros): {(drtp_conv_output == 0).float().mean():.3f}\n")
-
-    # -----------------------------------------------------------------------------------
-    # DFA Conv2D Encoder Example
-    # -----------------------------------------------------------------------------------
-
-    print("6. DFA Conv2D Encoder:")
-    dfa_conv_encoder = DFAConv2D(dfa_params)
-
-    with torch.no_grad():
-        dfa_conv_output = dfa_conv_encoder(sample_input)
-
-    print(f"   Spatial dimensions: {h}x{w}")
-    print(f"   After conv+pool: 32x{h//2}x{w//2} = {expected_conv_features} features")
-    print(f"   Output shape: {dfa_conv_output.shape}")
-    print(f"   Output range: [{dfa_conv_output.min():.3f}, {dfa_conv_output.max():.3f}]")
-    print(f"   Sparsity (zeros): {(dfa_conv_output == 0).float().mean():.3f}\n")
-
-    # -----------------------------------------------------------------------------------
     # Model comparison
     # -----------------------------------------------------------------------------------
 
-    print("7. Model Size Comparison:")
+    print("4. Model Size Comparison:")
 
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -924,9 +589,6 @@ if __name__ == "__main__":
         "Linear": linear_encoder,
         "DRTP Linear": drtp_linear_encoder,
         "DFA Linear": dfa_linear_encoder,
-        "Conv2D": conv_encoder,
-        "DRTP Conv2D": drtp_conv_encoder,
-        "DFA Conv2D": dfa_conv_encoder,
     }
 
     for name, model in models.items():

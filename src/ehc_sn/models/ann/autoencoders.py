@@ -1,4 +1,64 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+"""Autoencoder models for entorhinal-hippocampal circuit spatial navigation modeling.
+
+This module implements autoencoder architectures specifically designed for modeling
+the entorhinal-hippocampal circuit's spatial navigation and memory functions. The
+autoencoders combine configurable encoder and decoder components with biologically-
+inspired sparsity constraints to mimic hippocampal place cell firing patterns.
+
+The autoencoders support multiple training strategies through a pluggable trainer
+interface, enabling experimentation with standard backpropagation, biologically
+plausible alternatives (DFA, DRTP), and custom optimization schemes.
+
+Key Features:
+    - Configurable encoder-decoder architectures with dimension validation
+    - Biologically-inspired sparsity constraints (Gramian orthogonality, homeostatic activity)
+    - Pluggable training strategies via BaseTrainer interface
+    - Manual optimization with configurable gradient flow control
+    - PyTorch Lightning integration for efficient training and logging
+
+Classes:
+    AutoencoderParams: Configuration parameters with Pydantic validation
+    Autoencoder: Main autoencoder model with trainer strategy pattern
+
+Functions:
+    validate_dimensions: Ensures encoder-decoder compatibility validation
+
+Architecture:
+    Input → Encoder → Sparse Latent Representation → Decoder → Reconstruction
+
+    The sparse latent representation mimics hippocampal place cell activity patterns,
+    incorporating biological constraints like firing rate homeostasis and decorrelated
+    representations essential for effective spatial memory encoding.
+
+Examples:
+    >>> from functools import partial
+    >>> from ehc_sn.trainers.back_propagation import DetachedTrainer
+    >>>
+    >>> # Configure autoencoder with detached gradient training
+    >>> trainer = DetachedTrainer(optimizer_init=partial(torch.optim.Adam, lr=1e-3))
+    >>> params = AutoencoderParams(
+    ...     encoder=Linear(EncoderParams(...)),
+    ...     decoder=Linear(DecoderParams(...)),
+    ...     gramian_weight=1.0,
+    ...     homeo_weight=1.0,
+    ...     rate_target=0.10,
+    ... )
+    >>> model = Autoencoder(params, trainer)
+    >>> lightning_trainer = pl.Trainer(max_epochs=100)
+    >>> lightning_trainer.fit(model, dataloader)
+
+Biological Motivation:
+    The autoencoder architecture models the information flow in the entorhinal-
+    hippocampal circuit where sensory inputs are compressed into sparse neural
+    codes (similar to place cells) and then reconstructed for spatial navigation
+    and memory retrieval tasks.
+
+References:
+    - O'Keefe, J., & Nadel, L. (1978). The hippocampus as a cognitive map.
+    - Hafting, T., et al. (2005). Microstructure of a spatial map in the entorhinal cortex.
+"""
+
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 import lightning.pytorch as pl
 import torch
@@ -10,55 +70,32 @@ from ehc_sn.hooks import registry
 from ehc_sn.models.ann import encoders
 from ehc_sn.models.ann.decoders import BaseDecoder, DecoderParams
 from ehc_sn.models.ann.encoders import BaseEncoder, EncoderParams
-from ehc_sn.modules.loss import GramianOrthogonalityLoss, HomeostaticActivityLoss, TargetL1SparsityLoss
+from ehc_sn.modules.loss import GramianOrthogonalityLoss, HomeostaticActivityLoss
+from ehc_sn.trainers.core import BaseTrainer
 
 
 class AutoencoderParams(BaseModel):
-    """Parameters for configuring the Autoencoder model.
+    """Configuration parameters for the Autoencoder model.
 
-    This configuration class defines all the parameters needed to construct
-    and train an autoencoder for the entorhinal-hippocampal circuit modeling.
-    It ensures that the encoder and decoder components are properly configured
-    and compatible with each other.
-
-    The parameters are organized into several groups:
-    - Core components: encoder, decoder, optimizer initialization
-    - Legacy sparsity: backward compatibility parameters
-    - Gramian orthogonality: decorrelation loss parameters
-    - Homeostatic activity: firing rate regulation parameters
+    Defines parameters for constructing an autoencoder model for entorhinal-hippocampal
+    circuit modeling, ensuring encoder and decoder compatibility.
 
     Attributes:
-        encoder: The encoder component that transforms input into latent representations.
-            Must be an instance of BaseEncoder with appropriate input dimensions.
-        decoder: The decoder component that reconstructs outputs from latent representations.
-            Must be an instance of BaseDecoder with output dimensions matching encoder input.
+        encoder: Encoder component for transforming input to latent representations.
+        decoder: Decoder component for reconstructing output from latent representations.
         gramian_center: Whether to center activations before computing Gramian matrix.
-            Centering removes mean activation, improving correlation stability. Default: True.
-        gramian_weight: Weight coefficient for Gramian orthogonality loss term.
-            Controls strength of decorrelation constraint. Default: 1.0.
-        rate_target: Target mean firing rate for homeostatic regulation.
-            Should be between 0.0 and 1.0, typically 0.05-0.20. Default: 0.10.
-        min_active: Minimum number of neurons that should be active per sample.
-            Ensures robust distributed representations. Default: 8.
-        homeo_weight: Weight coefficient for homeostatic activity loss term.
-            Controls strength of firing rate regulation. Default: 1.0.
-        detach_gradients: Whether to detach gradients between decoder and encoder.
-            When True, prevents gradients from flowing from decoder to encoder during training.
-            This allows for split training behavior while using manual optimization. Default: True.
-        optimizer_init: Callable function to initialize optimizers.
-            Should be a partial function or lambda that takes model parameters as input
-            and returns an optimizer instance (e.g., functools.partial(torch.optim.Adam, lr=1e-3)).
+        gramian_weight: Weight coefficient for Gramian orthogonality loss.
+        rate_target: Target mean firing rate for homeostatic regulation (0.0-1.0).
+        min_active: Minimum number of active neurons per sample.
+        homeo_weight: Weight coefficient for homeostatic activity loss.
 
     Example:
-        >>> from functools import partial
         >>> params = AutoencoderParams(
         ...     encoder=Linear(EncoderParams(...)),
         ...     decoder=Linear(DecoderParams(...)),
         ...     gramian_weight=1.0,
         ...     homeo_weight=1.0,
         ...     rate_target=0.10,
-        ...     detach_gradients=True,  # Use gradient detachment for split training
-        ...     optimizer_init=partial(torch.optim.Adam, lr=1e-3)
         ... )
     """
 
@@ -77,31 +114,41 @@ class AutoencoderParams(BaseModel):
     min_active: int = Field(8, description="Min active neurons per-sample.")
     homeo_weight: float = Field(1.0, description="Weight for homeostatic term.")
 
-    # Gradient flow control
-    detach_gradients: bool = Field(True, description="Whether to detach gradients between decoder and encoder.")
-
-    # Optimizer initialization
-    optimizer_init: Callable = Field(..., description="Callable to initialize the optimizer.")
-
 
 def validate_dimensions(params: AutoencoderParams) -> None:
-    """Validate that encoder and decoder dimensions are compatible.
+    """Validate encoder and decoder dimension compatibility.
 
-    This function performs essential compatibility checks between the encoder
-    and decoder components to ensure they can work together properly in the
-    autoencoder architecture.
+    Ensures encoder and decoder can work together by verifying dimensional
+    consistency between components. This validation prevents runtime errors
+    and ensures proper data flow through the autoencoder architecture.
+
+    The function performs two critical checks:
+    1. Encoder input shape matches decoder output shape (end-to-end consistency)
+    2. Encoder latent dimension matches decoder latent dimension (bottleneck compatibility)
 
     Args:
-        params: AutoencoderParams instance containing encoder and decoder configurations.
+        params: AutoencoderParams containing encoder and decoder configurations
+            to be validated for compatibility.
 
     Raises:
-        ValueError: If encoder input shape doesn't match decoder output shape.
-        ValueError: If encoder latent dimension doesn't match decoder latent dimension.
+        ValueError: If encoder input shape does not match decoder output shape,
+            or if encoder latent dimension does not match decoder latent dimension.
+            The error message includes the specific dimensional mismatch details.
+
+    Example:
+        >>> encoder_params = EncoderParams(input_shape=(1, 64, 64), latent_dim=128)
+        >>> decoder_params = DecoderParams(output_shape=(1, 64, 64), latent_dim=128)
+        >>> params = AutoencoderParams(encoder=encoder, decoder=decoder)
+        >>> validate_dimensions(params)  # Should pass without error
+        >>>
+        >>> # This would raise ValueError due to shape mismatch:
+        >>> bad_decoder = DecoderParams(output_shape=(1, 32, 32), latent_dim=128)
+        >>> bad_params = AutoencoderParams(encoder=encoder, decoder=bad_decoder)
+        >>> validate_dimensions(bad_params)  # Raises ValueError
 
     Note:
-        This validation ensures that:
-        1. The decoder can reconstruct the same shape as the encoder input
-        2. The latent representations have matching dimensions for proper data flow
+        This function should be called before creating an Autoencoder instance
+        to catch configuration errors early in the model setup process.
     """
     if params.encoder.input_shape != params.decoder.output_shape:
         raise ValueError(
@@ -116,99 +163,66 @@ def validate_dimensions(params: AutoencoderParams) -> None:
 
 
 class Autoencoder(pl.LightningModule):
-    """Neural network autoencoder for the entorhinal-hippocampal circuit with configurable gradient flow.
+    """Autoencoder for entorhinal-hippocampal circuit spatial navigation modeling.
 
-    This autoencoder combines an encoder that transforms spatial input into a compact
-    embedding and a decoder that reconstructs the original input from the embedding.
-    It uses manual optimization with configurable gradient flow between encoder and decoder,
-    allowing for both standard training and split training strategies.
+    Combines an encoder that transforms spatial input into sparse latent representations
+    and a decoder that reconstructs the original input. Uses manual optimization with
+    configurable gradient flow to support different training strategies.
 
-    The autoencoder serves as a computational model for how the entorhinal-hippocampal
-    circuit might encode, store, and retrieve spatial information. It incorporates
-    biologically-inspired sparsity constraints that encourage the model to learn
-    efficient representations similar to those found in hippocampal place cells.
-
-    Key Features:
-        - Manual optimization with configurable gradient flow between components
-        - Sparse latent representations mimicking hippocampal neuron firing patterns
-        - Configurable encoder/decoder architectures for different input types
-        - Multiple sparsity regularization methods (Gramian, homeostatic)
-        - Lightning-based training with comprehensive logging and metrics
-        - Support for both training and inference modes with proper checkpointing
+    Incorporates biologically-inspired sparsity constraints mimicking hippocampal
+    place cell firing patterns for spatial memory encoding and retrieval.
 
     Architecture:
-        Input → Encoder → Sparse Latent Representation → Decoder → Reconstruction
-
-    Training Strategy:
-        When detach_gradients=True: Split training with encoder focused on sparsity losses
-        and decoder focused on reconstruction, with no gradient flow between them.
-        When detach_gradients=False: Standard autoencoder with full gradient flow.
+        Input → Encoder → Sparse Latent → Decoder → Reconstruction
 
     Args:
-        params: AutoencoderParams instance containing all configuration parameters.
-            Must include compatible encoder/decoder pairs and training hyperparameters.
+        params: Model configuration parameters.
+        trainer: Training strategy (required for proper separation of concerns).
 
     Attributes:
-        encoder: The encoder neural network component.
-        decoder: The decoder neural network component.
-        detach_gradients: Whether to detach gradients between decoder and encoder.
-        optimizer_init: Function to initialize optimizers for both components.
+        encoder: Encoder neural network component.
+        decoder: Decoder neural network component.
+        trainer_strategy: Training strategy handling optimization logic.
+        reconstruction_loss: BCE loss for reconstruction accuracy.
         gramian_loss: Gramian orthogonality loss for decorrelated representations.
         homeo_loss: Homeostatic activity loss for firing rate regulation.
-        reconstruction_loss: BCE loss for reconstruction accuracy.
 
     Example:
-        >>> # Create and train an autoencoder with configurable gradient flow
-        >>> params = AutoencoderParams(..., detach_gradients=True)
-        >>> model = Autoencoder(params)
-        >>> trainer = pl.Trainer(max_epochs=100)
-        >>> trainer.fit(model, dataloader)
+        >>> trainer = DetachedTrainer(optimizer_init=partial(torch.optim.Adam, lr=1e-3))
+        >>> model = Autoencoder(params, trainer)
+        >>> lightning_trainer = pl.Trainer(max_epochs=100)
+        >>> lightning_trainer.fit(model, dataloader)
     """
 
-    def __init__(self, params: Optional[AutoencoderParams] = None):
-        """Initialize the Autoencoder with given parameters.
+    def __init__(self, params: AutoencoderParams, trainer: BaseTrainer) -> None:
+        """Initialize autoencoder with parameters and training strategy.
 
-        Sets up the complete autoencoder architecture including encoder, decoder,
-        loss functions, and training configuration. The model uses manual optimization
-        with configurable gradient flow between encoder and decoder components.
+        Sets up model architecture, loss functions, and training configuration.
+        Delegates training logic to the provided trainer strategy.
 
         Args:
-            params: AutoencoderParams instance containing model configuration.
-                Must include compatible encoder/decoder pairs and all required
-                hyperparameters. If None, default parameters will be used (not
-                recommended for production use).
+            params: Model configuration including encoder/decoder and loss weights.
+            trainer: Training strategy for optimization logic.
 
         Raises:
-            ValueError: If encoder and decoder dimensions are incompatible, as
-                validated by validate_dimensions().
-
-        Sets up:
-            - Model components: encoder, decoder
-            - Loss functions: reconstruction (BCE), Gramian orthogonality, homeostatic
-            - Training configuration: manual optimization with configurable gradient flow
-            - Hyperparameter weights for loss combination
+            ValueError: If encoder and decoder dimensions are incompatible.
 
         Note:
-            Manual optimization is enabled to support dual optimizer training.
-            The detach_gradients parameter controls whether gradients flow from
-            decoder to encoder during training.
+            Manual optimization is enabled to support custom training strategies.
         """
         validate_dimensions(params)
         super(Autoencoder, self).__init__()
 
-        # Enable manual optimization for dual optimizer support
-        # Required by Lightning when using multiple optimizers in configure_optimizers()
+        # Enable manual optimization for custom training strategies
         self.automatic_optimization = False
+
+        # Set training strategy
+        # If trainer is None, model will not be able to train
+        self.trainer_strategy = trainer
 
         # Model components
         self.encoder = params.encoder
         self.decoder = params.decoder
-
-        # Gradient flow control
-        self.detach_gradients = params.detach_gradients
-
-        # Training hyperparameters
-        self.optimizer_init = params.optimizer_init
 
         # Loss functions
         self.reconstruction_loss = nn.BCELoss(reduction="mean")
@@ -219,114 +233,232 @@ class Autoencoder(pl.LightningModule):
         self.homeo_weight = params.homeo_weight
 
         # Save hyperparameters for checkpointing
-        self.save_hyperparameters(ignore=["encoder", "decoder"])
+        self.save_hyperparameters(ignore=["encoder", "decoder", "trainer"])
 
     # -----------------------------------------------------------------------------------
     # Optimizer configuration
     # -----------------------------------------------------------------------------------
 
     def configure_optimizers(self) -> List[Optimizer]:
-        """Configure two optimizers for split training architecture.
+        """Configure dual optimizers for independent encoder-decoder training.
 
         Creates separate optimizers for encoder and decoder components to enable
-        independent optimization with different loss functions. This split training
-        approach allows the encoder to focus on learning structured sparse
-        representations while the decoder focuses solely on reconstruction accuracy.
+        independent optimization strategies essential for biological plausibility
+        in spatial navigation modeling. This dual-optimizer architecture allows
+        the encoder to focus on learning sparse, orthogonal representations
+        (mimicking hippocampal place cells) while the decoder optimizes purely
+        for reconstruction accuracy.
 
-        The optimizer configuration uses the same initialization function for both
-        components, ensuring consistent hyperparameters (learning rate, momentum, etc.)
-        while maintaining separate optimization states.
+        The optimizer configuration delegates to the training strategy to ensure
+        consistency with the chosen training approach (e.g., DetachedTrainer or
+        ClassicTrainer). Both optimizers use identical hyperparameters but
+        maintain separate optimization states and parameter groups.
 
         Returns:
-            List containing two optimizers:
-                - Index 0: Encoder optimizer for representation learning losses
-                - Index 1: Decoder optimizer for reconstruction losses
+            List[Optimizer]: Two-element list containing optimizers in fixed order:
+                - Index 0: Encoder optimizer for representation learning objectives
+                  (sparsity, orthogonality, homeostatic regulation)
+                - Index 1: Decoder optimizer for reconstruction objectives
+                  (binary cross-entropy, output quality)
+
+        Raises:
+            ValueError: If no training strategy is provided during model initialization.
+                The training strategy is required to supply the optimizer factory function.
 
         Note:
-            The order of optimizers in the returned list is important as it determines
-            how they are accessed in training_step() via self.optimizers(). The encoder
-            optimizer must be first, followed by the decoder optimizer.
+            The optimizer order is critical for training step implementation. The
+            training strategy relies on this fixed indexing to properly assign
+            loss functions to their corresponding optimizers during split training.
 
         Example:
-            >>> # In training_step:
+            >>> # Optimizers are accessed in training via:
             >>> enc_opt, dec_opt = self.optimizers()
-            >>> # enc_opt trains encoder with composite loss
-            >>> # dec_opt trains decoder with reconstruction loss only
+            >>> # enc_opt handles encoder-specific losses (sparsity, orthogonality)
+            >>> # dec_opt handles decoder-specific losses (reconstruction)
+
+        See Also:
+            - BaseTrainer.optimizer_init: Factory function for creating optimizers
+            - DetachedTrainer: Training strategy using independent optimization
+            - ClassicTrainer: Training strategy using joint optimization
         """
-        enc_opt = self.optimizer_init(self.encoder.parameters())
-        dec_opt = self.optimizer_init(self.decoder.parameters())
+        if self.trainer_strategy is None:
+            raise ValueError("Trainer strategy must be provided for optimizer configuration.")
+        enc_opt = self.trainer_strategy.optimizer_init(self.encoder.parameters())
+        dec_opt = self.trainer_strategy.optimizer_init(self.decoder.parameters())
         return [enc_opt, dec_opt]
 
     # -----------------------------------------------------------------------------------
     # Forward pass
     # -----------------------------------------------------------------------------------
 
-    def forward(self, x: Tensor, *args: Any) -> Tuple[Tensor, Tensor]:
-        """Forward pass through the autoencoder.
+    def forward(self, x: Tensor, detach_grad: bool = False, *args: Any, **kwds: Any) -> List[Tensor]:
+        """Execute forward pass through encoder-decoder architecture.
 
-        Processes input through the encoder to obtain a latent representation,
-        then through the decoder to reconstruct the original input. This method
-        defines the complete forward computation graph for the autoencoder.
+        Performs complete forward propagation from input through encoder to latent
+        representation, then through decoder to reconstruction. Supports optional
+        gradient detachment for implementing split training strategies essential
+        for biologically plausible representation learning.
+
+        The forward pass follows this sequence:
+        1. Encode input to sparse latent representation (mimicking place cell activity)
+        2. Optionally detach gradients at the latent bottleneck
+        3. Decode latent representation back to input space
+        4. Return both reconstruction and original (non-detached) embedding
 
         Args:
-            x: Input tensor with shape matching the encoder's expected input shape.
-                For cognitive maps, typically (batch_size, channels, height, width).
-            *args: Additional arguments (unused, maintained for interface compatibility).
+            x: Input tensor with shape matching encoder's expected dimensions.
+                Typically spatial maps with shape (batch_size, channels, height, width).
+            detach_grad: Whether to detach gradients between encoder and decoder.
+                When True, prevents gradient flow from decoder losses to encoder,
+                enabling independent optimization of each component. Default: False.
+            *args: Additional positional arguments passed to encoder and decoder
+                for interface compatibility with different network architectures.
+            **kwds: Additional keyword arguments passed to encoder and decoder
+                for interface compatibility and extensibility.
 
         Returns:
-            Tuple containing:
-                - reconstruction: Decoded output tensor with same shape as input.
-                - embedding: Latent representation tensor from the encoder.
+            List[Tensor]: Two-element list containing:
+                - Index 0: Reconstructed output tensor with same shape as input
+                - Index 1: Original latent embedding tensor (never detached)
+                  with shape (batch_size, latent_dim)
 
         Note:
-            The encoder is called with target=None since no sparse target is
-            available during the forward pass. The decoder uses the original
-            input as target for potential supervised learning scenarios.
-        """
-        embedding = self.encoder(x, target=None)  # No sparse target available
-        z = embedding.detach() if self.detach_gradients else embedding
-        reconstruction = self.decoder(z, target=x)
+            When detach_grad=True, gradients cannot flow from decoder losses back
+            to the encoder, implementing the split training strategy. However, the
+            returned embedding is always the original (non-detached) tensor to
+            preserve gradient information for encoder-specific losses.
 
-        # Return reconstruction and embedding
-        return reconstruction, embedding
+        Example:
+            >>> # Standard forward pass with full gradient flow
+            >>> reconstruction, embedding = model(input_tensor)
+            >>>
+            >>> # Forward pass with detached gradients for split training
+            >>> reconstruction, embedding = model(input_tensor, detach_grad=True)
+            >>> # Decoder receives detached embedding, encoder losses use original
+        """
+        embedding = self.encoder(x, *args, target=None, **kwds)  # No sparse target
+
+        # Optionally detach gradients between encoder and decoder
+        z = embedding.detach() if detach_grad else embedding
+        reconstruction = self.decoder(z, *args, target=x, **kwds)
+
+        # Return reconstruction and embedding (always return original embedding)
+        return [reconstruction, embedding]
+
+    def feedback(self, feedbacks: Union[float, List[float]]) -> None:
+        """Propagate feedback signals to components supporting gradient-free optimization.
+
+        Distributes feedback signals (loss differences or gradients) to model components
+        that implement feedback-based learning mechanisms such as Zero-Order optimization,
+        Direct Feedback Alignment (DFA), or Direct Random Target Projection (DRTP).
+        This method enables biologically plausible learning without traditional backpropagation.
+
+        The feedback mechanism works as follows:
+        1. Receive feedback signals from training strategy (e.g., loss differences in ZO)
+        2. Distribute signals to decoder and encoder components in that order
+        3. Components implement their own feedback processing (gradient estimation, etc.)
+        4. Only components with feedback capability receive signals (checked via hasattr)
+
+        Args:
+            feedbacks: Feedback signals to propagate to model components. Can be:
+                - Single float: Same feedback applied to all components with feedback capability
+                - List[float]: Individual feedback per component in [decoder, encoder] order
+                  Must have exactly 2 elements matching the expected component ordering
+
+        Raises:
+            ValueError: If feedbacks is a list but doesn't have exactly 2 elements
+                to match the [decoder, encoder] component ordering.
+
+        Note:
+            The component ordering [decoder, encoder] matches the loss ordering returned
+            by compute_loss() and expected by training strategies. Only components that
+            implement a feedback() method will receive signals - standard backpropagation
+            components are safely ignored.
+
+        Example:
+            >>> # Zero-Order optimization with loss differences
+            >>> loss_diff = loss_1 - loss_2  # From ZO trainer
+            >>> model.feedback([loss_diff, loss_diff])  # Same feedback to both components
+            >>>
+            >>> # Component-specific feedback
+            >>> model.feedback([decoder_feedback, encoder_feedback])
+            >>>
+            >>> # Single feedback for all components
+            >>> model.feedback(overall_feedback)
+
+        See Also:
+            - ZOLinear.feedback(): Zero-Order gradient estimation
+            - DFALinear.feedback(): Direct Feedback Alignment
+            - DRTPLinear.feedback(): Direct Random Target Projection
+        """
+        # Handle single feedback for all components
+        if isinstance(feedbacks, (int, float)):
+            feedbacks = [float(feedbacks)] * 2
+
+        # Validate feedback list length
+        if len(feedbacks) != 2:
+            raise ValueError(f"Expected 2 feedback values for [decoder, encoder], got {len(feedbacks)}")
+
+        # Distribute feedback to components with feedback capability
+        for component, projected_grad in zip([self.decoder, self.encoder], feedbacks):
+            if hasattr(component, "feedback"):
+                component.feedback(projected_grad)
 
     # -----------------------------------------------------------------------------------
     # Loss computation
     # -----------------------------------------------------------------------------------
 
-    def compute_loss(self, x: Tensor, log_label: str) -> Tuple[Tensor, Tensor]:
-        """Compute and log decoder + encoder losses for a batch.
+    def compute_loss(self, output: Any, batch: Any, log_label: str) -> List[Tensor]:
+        """Compute and log component-specific losses for autoencoder training.
 
-        Encapsulates the full loss decomposition used across training,
-        validation, and test loops. Performs a forward pass, derives
-        regularization (Gramian + homeostatic) and reconstruction losses,
-        then logs them with a namespace prefix.
+        Executes forward pass and computes all loss components with comprehensive
+        logging for monitoring training progress. Implements biologically-inspired
+        loss functions that encourage sparse, orthogonal representations similar
+        to hippocampal place cell firing patterns.
+
+        The method computes three categories of losses:
+        1. Encoder losses: Gramian orthogonality and homeostatic activity regulation
+        2. Decoder losses: Binary cross-entropy reconstruction error
+        3. Auxiliary metrics: Sparsity rate for monitoring representation quality
+
+        Loss Components:
+            - Gramian Loss: Encourages orthogonal, decorrelated representations
+            - Homeostatic Loss: Regulates firing rates to maintain target sparsity
+            - Reconstruction Loss: Measures decoder's reconstruction accuracy
 
         Args:
-            x: Input batch tensor (first element of dataloader batch) whose
-               shape excluding batch dimension matches ``self.input_shape``.
-            log_label: Namespace prefix for metric logging (``train``,
-               ``validation`` or ``test``).
+            TODO
 
         Returns:
-            (decoder_loss, encoder_loss) where:
-              decoder_loss: Reconstruction criterion (BCE mean).
-              encoder_loss: Weighted sum of Gramian + homeostatic penalties.
+            List[Tensor]: Two-element list containing computed losses:
+                - Index 0: Decoder loss (reconstruction error only)
+                - Index 1: Encoder loss (weighted combination of Gramian and homeostatic losses)
 
-        Logging:
-            Emits (step + epoch):
-              ``{log_label}/reconstruction_loss``
-              ``{log_label}/gramian_loss``
-              ``{log_label}/homeostatic_loss``
-              ``{log_label}/decoder_loss`` (prog bar)
-              ``{log_label}/encoder_loss`` (prog bar)
+        Logged Metrics:
+            - {log_label}/reconstruction_loss: BCE loss between input and reconstruction
+            - {log_label}/gramian_loss: Orthogonality constraint on latent representations
+            - {log_label}/homeostatic_loss: Firing rate regulation penalty
+            - {log_label}/decoder_loss: Total decoder optimization target (with progress bar)
+            - {log_label}/encoder_loss: Total encoder optimization target (with progress bar)
+            - {log_label}/sparsity_rate: Fraction of active neurons (> 0.01 threshold)
 
-        Notes:
-            Keeps gradient behaviour consistent with current mode; Lightning
-            disables grads automatically during validation/test evaluation.
+        Example:
+            >>> # During training with detached gradients
+            >>> dec_loss, enc_loss = model.compute_loss(batch, "train", detach_grad=True)
+            >>> # Logged: train/reconstruction_loss, train/gramian_loss, etc.
+            >>>
+            >>> # During validation
+            >>> dec_loss, enc_loss = model.compute_loss(batch, "val", detach_grad=False)
+            >>> # Logged: val/reconstruction_loss, val/gramian_loss, etc.
+
+        Note:
+            Loss weights are configured during model initialization via AutoencoderParams.
+            The sparsity threshold (0.01) is chosen to identify meaningfully active neurons
+            while filtering out near-zero activations from numerical precision issues.
         """
-        # Forward pass to get reconstruction and embedding
-        reconstruction, embedding = self(x)
+        # Recover reconstruction and embedding from forward output
+        target, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
+        reconstruction, embedding = output  # Unpack forward output
 
         # Encoder-side losses
         gramian_loss = self.gramian_loss(embedding)
@@ -341,197 +473,106 @@ class Autoencoder(pl.LightningModule):
         self.log(f"{log_label}/sparsity_rate", sparsity_rate, on_epoch=True)
 
         # Decoder-side losses
-        reconstruction_loss = self.reconstruction_loss(reconstruction, x)
+        reconstruction_loss = self.reconstruction_loss(reconstruction, target)
         self.log(f"{log_label}/reconstruction_loss", reconstruction_loss, on_epoch=True)
         decoder_loss = reconstruction_loss
         self.log(f"{log_label}/decoder_loss", decoder_loss, on_epoch=True, prog_bar=True)
 
-        return decoder_loss, encoder_loss
+        # Return the decoder and the encoder loss
+        return [decoder_loss, encoder_loss]
+
+    def get_output_error(self, outputs: Any, batch: Any) -> List[Tensor]:
+        """Compute output error for feedback alignment training.
+
+        Args:
+            outputs: Model outputs from forward pass.
+            batch: Input batch containing target data.
+
+        Returns:
+            List[Tensor]: List containing the output error tensor.
+        """
+        target, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
+        reconstruction, _ = outputs  # Unpack forward output
+        error = reconstruction - target  # Compute output error
+        return [error]
 
     # -----------------------------------------------------------------------------------
     # Training step
     # -----------------------------------------------------------------------------------
 
-    def on_train_batch_start(self, batch, batch_idx: int) -> None:
-        """Initialize registry and hooks before training batch starts.
-
-        Clears the registry at the start of each batch to ensure clean state
-        for hook management and potential debugging/monitoring systems.
+    def on_train_batch_start(self, batch: Any, batch_idx: int) -> None:
+        """Initialize registry and delegate to training strategy.
 
         Args:
-            batch: Training batch (unused in this implementation).
-            batch_idx: Index of the current batch (unused in this implementation).
+            batch: Training batch.
+            batch_idx: Batch index.
 
-        Note:
-            This hook is called automatically by PyTorch Lightning before each
-            training batch is processed. The registry clearing ensures that any
-            batch-specific state from previous iterations doesn't interfere with
-            the current batch.
+        Raises:
+            ValueError: If no trainer strategy is provided.
         """
+        if self.trainer_strategy is None:
+            raise ValueError("Trainer strategy must be provided for training.")
+
         # Clear registry at the start of each batch
         registry.clear("batch")
 
-    def training_step(self, batch: Tensor, batch_idx: int) -> None:
-        """Perform one training iteration (manual optimization).
+        # Delegate to training strategy
+        self.trainer_strategy.on_train_batch_start(self, batch, batch_idx)
 
-        Uses :meth:`compute_loss` to obtain the two loss components then
-        dispatches either split or joint optimization depending on
-        ``self.detach_gradients``.
-
-        Args:
-            batch: Batch tuple whose first element is the input tensor.
-            batch_idx: Index within the epoch (unused).
-
-        Notes:
-            Skips backward/step if a module is frozen or its loss does not
-            require gradients.
-        """
-        x, *_ = batch
-        dec_loss, enc_loss = self.compute_loss(x, log_label="train")
-        if self.detach_gradients:
-            self.train_detached(enc_loss, dec_loss)
-        else:
-            self.train_full(enc_loss, dec_loss)
-
-    def train_detached(self, enc_loss: Tensor, dec_loss: Tensor) -> None:
-        """Optimize encoder and decoder independently (split mode).
-
-        The latent embedding passed to the decoder was detached during the
-        forward pass, so reconstruction gradients cannot influence encoder
-        weights. Each component receives a separate backward pass and optimizer
-        step if (a) it has trainable parameters and (b) its loss requires
-        gradients.
+    def training_step(self, batch: Tensor, batch_idx: int) -> Optional[Any]:
+        """Delegate training step to the training strategy.
 
         Args:
-            enc_loss: Encoder composite sparsity / regularization loss.
-            dec_loss: Decoder reconstruction loss.
-
-        Notes:
-            - Ensures zeroed gradients per component before its backward pass.
-            - Safe-guards avoid unnecessary backward calls when modules are
-              frozen (supports curriculum or staged training).
-        """
-        enc_opt, dec_opt = self.optimizers()
-        enc_do_step = any(p.requires_grad for p in self.encoder.parameters()) and enc_loss.requires_grad
-        dec_do_step = any(p.requires_grad for p in self.decoder.parameters()) and dec_loss.requires_grad
-        if enc_do_step:
-            enc_opt.zero_grad()
-            self.manual_backward(enc_loss)
-            enc_opt.step()
-        if dec_do_step:
-            dec_opt.zero_grad()
-            self.manual_backward(dec_loss)
-            dec_opt.step()
-
-    def train_full(self, enc_loss: Tensor, dec_loss: Tensor) -> None:
-        """Optimize encoder + decoder jointly with full gradient flow.
-
-        Sums losses and performs a single backward pass so decoder (reconstruction)
-        gradients propagate through the encoder. Each optimizer steps if its
-        parameter set is trainable.
-
-        Args:
-            enc_loss: Encoder sparsity / regularization term.
-            dec_loss: Decoder reconstruction term.
-
-        Notes:
-            - Skips early if both modules are effectively frozen.
-            - Keeps separate optimizers to allow potential divergence of
-              schedulers or hyperparameters later while still sharing a
-              unified backward graph.
-        """
-        enc_opt, dec_opt = self.optimizers()
-        enc_do_step = any(p.requires_grad for p in self.encoder.parameters()) and enc_loss.requires_grad
-        dec_do_step = any(p.requires_grad for p in self.decoder.parameters()) and dec_loss.requires_grad
-        if not (enc_do_step or dec_do_step):
-            return
-        if enc_do_step:
-            enc_opt.zero_grad()
-        if dec_do_step:
-            dec_opt.zero_grad()
-        total_loss = enc_loss + dec_loss
-        self.manual_backward(total_loss)
-        if enc_do_step:
-            enc_opt.step()
-        if dec_do_step:
-            dec_opt.step()
-
-    def on_train_batch_end(self, outputs, batch, batch_idx: int) -> None:
-        """Clean up registry after training batch completion.
-
-        Provides a hook for potential cleanup operations after each training batch.
-        Currently, registry cleanup is handled by the next batch's on_train_batch_start(),
-        and hook cleanup is managed by individual encoder/decoder models that register them.
-
-        Args:
-            outputs: Training step outputs (unused in this implementation).
-            batch: Training batch (unused in this implementation).
-            batch_idx: Index of the current batch (unused in this implementation).
+            batch: Training batch.
+            batch_idx: Batch index within the epoch.
 
         Note:
-            This method complements on_train_batch_start() to provide complete
-            lifecycle management for the registry during training. The actual cleanup
-            operations are deferred to other parts of the system for efficiency.
+            All training logic is handled by the training strategy.
         """
-        # Registry cleanup is handled by on_train_batch_start of next batch
-        # Hook cleanup is handled by individual models that register them
-        pass
+        return self.trainer_strategy.training_step(self, batch, batch_idx)
+
+    def on_train_batch_end(self, outputs: Any, batch: Any, batch_idx: int) -> None:
+        """Delegate batch end cleanup to training strategy.
+
+        Args:
+            outputs: Training step outputs.
+            batch: Training batch.
+            batch_idx: Batch index.
+        """
+        self.trainer_strategy.on_train_batch_end(self, outputs, batch, batch_idx)
 
     # -----------------------------------------------------------------------------------
     # Validation step
     # -----------------------------------------------------------------------------------
 
     def validation_step(self, batch: Tensor, batch_idx: int) -> Tensor:  # noqa: ARG002
-        """Run one validation iteration and return combined loss.
-
-        Performs a forward pass on a validation batch, computing both decoder
-        (reconstruction) and encoder (regularization / sparsity) losses via
-        :meth:`compute_loss`. Returns their sum so Lightning can aggregate it
-        for epoch metrics. Individual component losses are logged inside
-        :meth:`compute_loss` under the ``validation/`` namespace
-        (e.g. ``validation/reconstruction_loss``).
+        """Delegate validation step to the training strategy.
 
         Args:
-            batch: Validation batch. Expected structure ``(x, *_)`` where ``x``
-                matches the model's ``input_shape``.
-            batch_idx: Index of the batch inside the validation epoch (unused).
+            batch: Validation batch.
+            batch_idx: Batch index (unused).
 
         Returns:
-            Scalar tensor: ``decoder_loss + encoder_loss`` for the batch.
-
-        Notes:
-            - Gradients are disabled automatically in eval mode.
-            - Wrapper keeps loop minimal; decomposition lives in
-              :meth:`compute_loss`.
+            Validation loss tensor.
         """
-        x, *_ = batch
-        dec_loss, enc_loss = self.compute_loss(x, log_label="val")
-        return dec_loss + enc_loss
+        return self.trainer_strategy.validation_step(self, batch, batch_idx)
 
     # -----------------------------------------------------------------------------------
     # Test step
     # -----------------------------------------------------------------------------------
 
     def test_step(self, batch: Tensor, batch_idx: int) -> Tensor:  # noqa: ARG002
-        """Evaluate the model on a held-out test batch and return total loss.
-
-        Mirrors `validation_step` but logs metrics under the `test/` namespace
-        to clearly separate final evaluation from validation monitoring.
+        """Evaluate model on test batch and return total loss.
 
         Args:
-            batch: Test batch structured as `(x, *_)` where `x` conforms to
-                the expected input tensor shape.
-            batch_idx: Sequential index of the test batch (unused).
+            batch: Test batch with input tensor as first element.
+            batch_idx: Batch index (unused).
 
         Returns:
-            A scalar tensor equal to the sum of decoder reconstruction loss
-            and encoder regularization loss for this batch.
+            Sum of decoder and encoder losses for this batch.
 
-        Notes:
-            - No gradients are produced (evaluation mode).
-            - Individual component losses are already logged by `compute_loss`.
-            - Keeping symmetry with `training_step` and `validation_step`
-              simplifies downstream aggregation and comparisons.
+        Note:
+            Logs metrics under 'test/' namespace for clear separation from validation.
         """
         x, *_ = batch
         dec_loss, enc_loss = self.compute_loss(x, log_label="test")
@@ -542,26 +583,17 @@ class Autoencoder(pl.LightningModule):
     # -----------------------------------------------------------------------------------
 
     def predict_step(self, batch: Tensor, batch_idx: int) -> Tuple[Tensor, Tensor]:  # noqa: ARG002
-        """Prediction step returns reconstructions and embeddings.
-
-        Executes one prediction iteration by processing a batch through the model
-        and returning both the reconstructed outputs and the latent embeddings.
-        This method is useful for inference and analysis of learned representations.
+        """Return reconstructions and embeddings for inference.
 
         Args:
-            batch: Input batch containing tensors for prediction.
-                Expected format: (input_tensor, ...) where input_tensor has shape
-                (batch_size, channels, height, width).
-            batch_idx: Index of the current batch in prediction (unused).
+            batch: Input batch for prediction.
+            batch_idx: Batch index (unused).
 
         Returns:
-            Tuple containing:
-                - reconstruction: Reconstructed outputs with same shape as input.
-                - embedding: Latent representations from the encoder.
+            Tuple of (reconstruction, embedding) tensors.
 
         Note:
-            This method is typically used during inference phases or when
-            analyzing the learned latent representations for research purposes.
+            Useful for inference and analysis of learned representations.
         """
         x, *_ = batch  # Unpack batch, assuming first element is the cognitive map tensor
         return self(x)
@@ -572,59 +604,22 @@ class Autoencoder(pl.LightningModule):
 
     @property
     def input_shape(self) -> Tuple[int, int, int]:
-        """Returns the shape of the input feature map.
-
-        Returns:
-            3D tuple representing (channels, height, width) of expected input tensors.
-
-        Note:
-            This property provides convenient access to the encoder's expected
-            input dimensions for validation and preprocessing purposes.
-        """
+        """Input feature map shape as (channels, height, width)."""
         return self.encoder.input_shape
 
     @property
     def input_channels(self) -> int:
-        """Returns the number of input channels.
-
-        Returns:
-            Integer representing the number of channels in the input tensor.
-            For cognitive maps, this is typically 1 (single-channel obstacle grid).
-
-        Note:
-            This property extracts the channel dimension from the input shape
-            for convenient access during model configuration and debugging.
-        """
+        """Number of input channels."""
         return self.encoder.input_channels
 
     @property
     def spatial_dimensions(self) -> Tuple[int, int]:
-        """Returns the spatial dimensions as (height, width).
-
-        Returns:
-            2D tuple representing (height, width) of the spatial input dimensions.
-            For cognitive maps, this might be (32, 16) representing the grid size.
-
-        Note:
-            This property extracts the spatial dimensions from the input shape,
-            excluding the channel dimension, for convenient access during
-            spatial processing and visualization.
-        """
+        """Spatial dimensions as (height, width)."""
         return self.encoder.spatial_dimensions
 
     @property
     def latent_dim(self) -> int:
-        """Returns the dimensionality of the latent representation.
-
-        Returns:
-            Integer representing the size of the compressed latent space.
-            This dimension determines the bottleneck capacity of the autoencoder.
-
-        Note:
-            The latent dimension is crucial for controlling the representational
-            capacity and the degree of compression achieved by the autoencoder.
-            Smaller values force more compression but may lose information.
-        """
+        """Dimensionality of the latent representation."""
         return self.encoder.latent_dim
 
     # -----------------------------------------------------------------------------------
@@ -634,62 +629,42 @@ class Autoencoder(pl.LightningModule):
     def encode(self, x: Tensor) -> Tensor:
         """Encode input to latent representation.
 
-        Processes input through the encoder component only, returning the
-        compressed latent representation without reconstruction. Useful for
-        analyzing learned representations or using the encoder independently.
-
         Args:
-            x: Input tensor with shape matching the encoder's expected dimensions.
-                For cognitive maps, typically (batch_size, channels, height, width).
+            x: Input tensor matching encoder's expected dimensions.
 
         Returns:
             Latent representation tensor with shape (batch_size, latent_dim).
 
         Note:
-            This method bypasses the decoder, making it efficient for tasks
-            that only require the encoded representation, such as clustering
-            or dimensionality reduction analysis. The encoder is called with
-            target=None since no supervised target is available.
+            Efficient for tasks requiring only encoded representations.
         """
         return self.encoder(x, target=None)
 
     def decode(self, embedding: Tensor) -> Tensor:
         """Decode latent representation to reconstruction.
 
-        Processes latent representations through the decoder component only,
-        returning reconstructed outputs. Useful for generating new samples
-        from latent space or using the decoder independently.
-
         Args:
-            embedding: Latent representation tensor with shape (batch_size, latent_dim).
+            embedding: Latent representation tensor.
 
         Returns:
-            Reconstructed output tensor with shape matching the original input dimensions.
+            Reconstructed output tensor matching original input dimensions.
 
         Note:
-            This method can be used for generative tasks by providing custom
-            latent representations, or for analyzing the decoder's reconstruction
-            capabilities independently of the encoder.
+            Useful for generative tasks or analyzing decoder capabilities.
         """
         return self.decoder(embedding)
 
     def reconstruct(self, x: Tensor) -> Tensor:
-        """Full reconstruction from input.
-
-        Performs complete encode-decode cycle by processing input through both
-        the encoder and decoder components. This is equivalent to the forward
-        method but returns only the reconstruction without the embedding.
+        """Perform full encode-decode reconstruction.
 
         Args:
-            x: Input tensor with shape matching the encoder's expected dimensions.
+            x: Input tensor.
 
         Returns:
             Reconstructed output tensor with same shape as input.
 
         Note:
-            This method is convenient for evaluation and testing scenarios
-            where only the final reconstruction is needed, without access
-            to the intermediate latent representation.
+            Equivalent to forward() but returns only reconstruction.
         """
         embedding = self.encode(x)
         return self.decode(embedding)
@@ -700,48 +675,41 @@ class Autoencoder(pl.LightningModule):
 # -----------------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    """Example demonstrating autoencoder training with configurable gradient flow.
+    """Example: autoencoder training with configurable gradient flow.
 
-    This example shows how to:
-    1. Create a simple dataset of random obstacle maps
-    2. Configure autoencoder parameters with gradient flow control
-    3. Train the model using PyTorch Lightning with manual optimization
-    4. Test reconstruction performance and sparsity metrics
-
-    The example uses Linear encoder/decoder components with GELU activation
-    and demonstrates the gradient detachment approach using manual optimization
-    with a simple conditional for controlling gradient flow.
+    Demonstrates:
+    1. Creating random obstacle map dataset
+    2. Configuring autoencoder with training strategy
+    3. Training with PyTorch Lightning
+    4. Testing reconstruction performance and sparsity
     """
     from functools import partial
 
     import lightning.pytorch as pl
 
     from ehc_sn.models.ann import decoders
+    from ehc_sn.trainers.back_propagation import DetachedTrainer
 
     # Simple dataset for testing
     class SimpleDataset(torch.utils.data.Dataset):
-        """Simple dataset generating random binary obstacle maps."""
+        """Dataset generating random binary obstacle maps."""
 
-        def __init__(self, size: int = 100):
-            """Initialize dataset with specified size.
-
-            Args:
-                size: Number of samples in the dataset.
-            """
+        def __init__(self, size: int = 100) -> None:
+            """Initialize with specified dataset size."""
             self.size = size
 
         def __len__(self):
             """Return dataset size."""
             return self.size
 
-        def __getitem__(self, idx):
-            """Generate a random obstacle map sample.
+        def __getitem__(self, idx: int) -> Tuple[Tensor]:
+            """Generate random obstacle map sample.
 
             Args:
                 idx: Sample index (unused, generates random data).
 
             Returns:
-                Tuple containing a single tensor with random obstacle placement.
+                Tuple containing tensor with random obstacle placement.
             """
             # Create random obstacle maps with random obstacle placement
             x = torch.zeros(1, 16, 32)
@@ -749,21 +717,18 @@ if __name__ == "__main__":
             x[0, torch.randint(0, 16, (num_obstacles,)), torch.randint(0, 32, (num_obstacles,))] = 1.0
             return (x,)  # Return as tuple for batch unpacking
 
-    # Create autoencoder with configurable gradient flow
+    # Create autoencoder with configurable training strategy
+    trainer = DetachedTrainer(optimizer_init=partial(torch.optim.Adam, lr=1e-3))
+    encoder_param = encoders.EncoderParams(input_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)
+    decoder_param = decoders.DecoderParams(output_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)
     autoencoder_params = AutoencoderParams(
-        encoder=encoders.Linear(
-            encoders.EncoderParams(input_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)
-        ),
-        decoder=decoders.Linear(
-            decoders.DecoderParams(output_shape=(1, 16, 32), latent_dim=32, activation_fn=torch.nn.GELU)
-        ),
+        encoder=encoders.Linear(encoder_param),
+        decoder=decoders.Linear(decoder_param),
         gramian_weight=1.0,
         homeo_weight=1.0,
         rate_target=0.10,
-        detach_gradients=True,  # Use gradient detachment for split training
-        optimizer_init=partial(torch.optim.Adam, lr=1e-3),
     )
-    model = Autoencoder(autoencoder_params)
+    model = Autoencoder(autoencoder_params, trainer)
 
     # Create training data
     dataset = SimpleDataset(200)

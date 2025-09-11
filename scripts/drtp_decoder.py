@@ -31,6 +31,7 @@ from ehc_sn.models.ann.decoders import DecoderParams
 from ehc_sn.models.ann.decoders import DRTPLinear as DRTPDecoder
 from ehc_sn.models.ann.encoders import EncoderParams
 from ehc_sn.models.ann.encoders import Linear as LinearEncoder
+from ehc_sn.trainers.target_projection import DRTPTrainer
 from ehc_sn.utils import load_settings
 
 # -------------------------------------------------------------------------------------------
@@ -148,9 +149,9 @@ class DRTPDecoderTrainingSettings(BaseModel):
         return AutoencoderParams(
             encoder=encoder,
             decoder=decoder,
-            sparsity_weight=self.sparsity_weight,
-            sparsity_target=self.sparsity_target,
-            optimizer_init=partial(torch.optim.Adam, lr=self.learning_rate),
+            gramian_weight=1.0,  # Default Gramian weight
+            homeo_weight=self.sparsity_weight,  # Use sparsity weight for homeostatic
+            rate_target=self.sparsity_target,
         )
 
     def create_figure_params(self) -> figures.CompareMapsFigParam:
@@ -194,7 +195,8 @@ class DRTPDecoderTrainingPipeline:
 
         # Create autoencoder with initial parameters to load pretrained weights
         autoencoder_params = self.settings.create_autoencoder_params(encoder, temp_decoder)
-        model = Autoencoder(autoencoder_params)
+        trainer = DRTPTrainer(optimizer_init=partial(torch.optim.Adam, lr=self.settings.learning_rate))
+        model = Autoencoder(autoencoder_params, trainer)
 
         # Load pretrained weights if available
         if Path(self.settings.pretrained_path).exists():
@@ -222,9 +224,6 @@ class DRTPDecoderTrainingPipeline:
             activation_fn=nn.Tanh,  # Use Tanh for DRTP
         )
         model.decoder = DRTPDecoder(drtp_decoder_params)
-
-        # Update optimizer to include new decoder parameters
-        model.optimizer_init = self.settings.create_autoencoder_params(model.encoder, model.decoder).optimizer_init
 
         # Initialize data components
         generator = data.BlockMapGenerator(self.settings.create_generator_params())

@@ -1,32 +1,37 @@
 """
-Backpropagation Baseline for Entorhinal-Hippocampal Circuit
+Zero-Order (ZO) Decoder for Entorhinal-Hippocampal Circuit
 
-Simple script for running baseline autoencoder experiments using backpropagation
-training on cognitive maps. Uses TOML configuration files for parameter management.
+Simple script for training only the decoder part of a pretrained autoencoder
+using Zero-Order optimization (MeZO algorithm). Uses TOML configuration files
+for parameter management.
 
 Usage:
-    python bp_baseline.py
-    python bp_baseline.py --config experiments/baseline.toml
-    python bp_baseline.py --epochs 300 --samples 8000
+    python zo_decoder.py
+    python zo_decoder.py --config experiments/decoder.toml
+    python zo_decoder.py --pretrained models/baseline.ckpt --epochs 100
 """
 
 import argparse
 from functools import partial
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional, Union
 
 import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import ModelCheckpoint, RichModelSummary, RichProgressBar
 from lightning.pytorch.loggers import TensorBoardLogger
 from pydantic import BaseModel, Field
+from torch import nn
 
 from ehc_sn.data import cognitive_maps as data
 from ehc_sn.figures import cognitive_maps as figures
 from ehc_sn.models.ann import decoders, encoders
 from ehc_sn.models.ann.autoencoders import Autoencoder, AutoencoderParams
 from ehc_sn.models.ann.decoders import DecoderParams
+from ehc_sn.models.ann.decoders import ZOLinear as ZODecoder
 from ehc_sn.models.ann.encoders import EncoderParams
-from ehc_sn.trainers.back_propagation import ClassicTrainer, DetachedTrainer
+from ehc_sn.models.ann.encoders import Linear as LinearEncoder
+from ehc_sn.trainers.zeroth_order import ZOTrainer
 from ehc_sn.utils import load_settings
 
 # -------------------------------------------------------------------------------------------
@@ -34,12 +39,17 @@ from ehc_sn.utils import load_settings
 # -------------------------------------------------------------------------------------------
 
 
-class ExperimentSettings(BaseModel):
+class ZODecoderTrainingSettings(BaseModel):
     """
-    Configuration settings for the autoencoder baseline experiment.
+    Configuration settings for Zero-Order decoder-only training experiment.
 
     Loads parameters from TOML configuration files with validation.
     """
+
+    # Model Loading Settings
+    pretrained_path: str = Field(default="autoencoder.ckpt", description="Path to pretrained autoencoder checkpoint")
+    freeze_encoder: bool = Field(default=True, description="Whether to freeze encoder weights during training")
+    reinit_decoder: bool = Field(default=True, description="Whether to reinitialize decoder weights before training")
 
     # Data Generation Settings
     grid_width: int = Field(default=32, ge=8, le=128, description="Width of the cognitive map grid")
@@ -61,7 +71,6 @@ class ExperimentSettings(BaseModel):
     # Training Settings
     max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
     learning_rate: float = Field(default=1e-3, ge=1e-6, le=1e-1, description="Learning rate for optimizer")
-    trainer_type: str = Field(default="classic", description="Type of trainer: 'classic' or 'detached'")
 
     # Split Training Loss Settings
     gramian_center: bool = Field(default=True, description="Center activations before Gramian computation")
@@ -72,9 +81,12 @@ class ExperimentSettings(BaseModel):
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
-    experiment_name: str = Field(default="bp_autoencoder", description="Experiment name")
+    experiment_name: str = Field(default="zo_decoder", description="Experiment name")
     checkpoint_every_n_epochs: int = Field(default=5, ge=1, le=50, description="Checkpoint frequency")
     progress_refresh_rate: int = Field(default=5, ge=1, le=20, description="Progress bar refresh rate")
+
+    # Zero-Order Optimization Settings
+    epsilon: float = Field(default=1e-3, ge=1e-5, le=1e-1, description="Perturbation magnitude for ZO optimization")
 
     # Visualization Settings
     figure_width: int = Field(default=10, ge=6, le=20, description="Figure width in inches")
@@ -105,6 +117,22 @@ class ExperimentSettings(BaseModel):
     # Component Configuration Methods
     # -----------------------------------------------------------------------------------
 
+    def create_encoder_params(self) -> EncoderParams:
+        """Create encoder parameters from settings."""
+        return EncoderParams(
+            input_shape=self.input_shape,
+            latent_dim=self.latent_dim,
+            activation_fn=nn.GELU,  # Used GELU for encoder
+        )
+
+    def create_decoder_params(self) -> DecoderParams:
+        """Create decoder parameters from settings."""
+        return DecoderParams(
+            output_shape=self.input_shape,
+            latent_dim=self.latent_dim,
+            activation_fn=nn.GELU,  # Used GELU for decoder
+        )
+
     def create_generator_params(self) -> data.BlockMapParams:
         """Create data generator parameters from settings."""
         return data.BlockMapParams(
@@ -124,26 +152,8 @@ class ExperimentSettings(BaseModel):
             test_split=self.test_split,
         )
 
-    def create_encoder_params(self) -> EncoderParams:
-        """Create encoder parameters from settings."""
-        return EncoderParams(
-            input_shape=self.input_shape,
-            latent_dim=self.latent_dim,
-            activation_fn=torch.nn.GELU,
-        )
-
-    def create_decoder_params(self) -> DecoderParams:
-        """Create decoder parameters from settings."""
-        return DecoderParams(
-            output_shape=self.input_shape,
-            latent_dim=self.latent_dim,
-            activation_fn=torch.nn.GELU,
-        )
-
-    def create_autoencoder_params(self) -> AutoencoderParams:
+    def create_autoencoder_params(self, encoder, decoder) -> AutoencoderParams:
         """Create autoencoder parameters from settings."""
-        encoder = encoders.Linear(self.create_encoder_params())
-        decoder = decoders.Linear(self.create_decoder_params())
         return AutoencoderParams(
             encoder=encoder,
             decoder=decoder,
@@ -155,13 +165,9 @@ class ExperimentSettings(BaseModel):
         )
 
     def create_trainer(self):
-        """Create training strategy from settings."""
+        """Create Zero-Order training strategy from settings."""
         optimizer_init = partial(torch.optim.Adam, lr=self.learning_rate)
-
-        if self.trainer_type == "detached":
-            return DetachedTrainer(optimizer_init=optimizer_init)
-        else:
-            return ClassicTrainer(optimizer_init=optimizer_init)
+        return ZOTrainer(optimizer_init=optimizer_init)
 
     def create_figure_params(self) -> figures.CompareMapsFigParam:
         """Create figure parameters from settings."""
@@ -175,19 +181,19 @@ class ExperimentSettings(BaseModel):
 
 
 # -------------------------------------------------------------------------------------------
-# Experiment Pipeline
+# Zero-Order Decoder Training Pipeline
 # -------------------------------------------------------------------------------------------
 
 
-class ExperimentPipeline:
-    """Orchestrates the complete experiment workflow."""
+class ZODecoderTrainingPipeline:
+    """Orchestrates the Zero-Order decoder-only training workflow."""
 
-    def __init__(self, settings: ExperimentSettings):
+    def __init__(self, settings: ZODecoderTrainingSettings):
         """
-        Initialize experiment pipeline with settings.
+        Initialize Zero-Order decoder training pipeline with settings.
 
         Args:
-            settings: CLI configuration settings
+            settings: Configuration settings
         """
         self.settings = settings
         self.components: Optional[Dict[str, Any]] = None
@@ -195,17 +201,52 @@ class ExperimentPipeline:
     # -----------------------------------------------------------------------------------
 
     def setup_components(self) -> None:
-        """Initialize all experiment components based on settings."""
-        print("🔧 Setting up experiment components...")
+        """Initialize all experiment components and load pretrained model."""
+        print("🔧 Setting up Zero-Order decoder training components...")
 
-        # Initialize components directly from settings
+        # Create initial encoder and decoder for loading pretrained model
+        encoder = LinearEncoder(self.settings.create_encoder_params())
+        temp_decoder = decoders.Linear(self.settings.create_decoder_params())  # Temporary decoder for loading
+
+        # Create autoencoder with initial parameters to load pretrained weights
+        autoencoder_params = self.settings.create_autoencoder_params(encoder, temp_decoder)
+        temp_trainer = self.settings.create_trainer()  # Temporary trainer for loading
+        model = Autoencoder(autoencoder_params, temp_trainer)
+
+        # Load pretrained weights if available
+        if Path(self.settings.pretrained_path).exists():
+            print(f"📥 Loading pretrained model from: {self.settings.pretrained_path}")
+            checkpoint = torch.load(self.settings.pretrained_path, map_location="cpu")
+            if "state_dict" in checkpoint:
+                model.load_state_dict(checkpoint["state_dict"])
+            else:
+                model.load_state_dict(checkpoint)
+        else:
+            print(f"⚠️  Warning: Pretrained model not found at {self.settings.pretrained_path}")
+            print("   Proceeding with randomly initialized weights")
+
+        # Configure model for decoder-only training
+        if self.settings.freeze_encoder:
+            print("🔒 Freezing encoder parameters")
+            for param in model.encoder.parameters():
+                param.requires_grad = False
+
+        print("🔄 Replacing decoder with ZODecoder")
+        # Create ZO decoder parameters with GELU activation
+        zo_decoder_params = DecoderParams(
+            output_shape=self.settings.input_shape,
+            latent_dim=self.settings.latent_dim,
+            activation_fn=nn.GELU,  # Use GELU for ZO
+        )
+        model.decoder = ZODecoder(zo_decoder_params, epsilon=self.settings.epsilon)
+
+        # Create final trainer with Zero-Order strategy
+        trainer = self.settings.create_trainer()
+        model.trainer = trainer
+
+        # Initialize data components
         generator = data.BlockMapGenerator(self.settings.create_generator_params())
         datamodule = data.DataModule(generator, self.settings.create_datamodule_params())
-
-        # Create autoencoder with trainer strategy
-        autoencoder_params = self.settings.create_autoencoder_params()
-        trainer_strategy = self.settings.create_trainer()
-        model = Autoencoder(autoencoder_params, trainer_strategy)
 
         # Create standard Lightning trainer
         trainer = pl.Trainer(
@@ -222,46 +263,48 @@ class ExperimentPipeline:
             profiler="simple",
         )
 
+        # Initialize visualization
         fig_generator = figures.CompareCognitiveMaps(self.settings.create_figure_params())
 
         self.components = {
-            "datamodule": datamodule,
             "model": model,
+            "datamodule": datamodule,
             "trainer": trainer,
             "fig_generator": fig_generator,
         }
 
-        print("✅ Experiment setup completed!")
+        print("✅ Component setup completed!")
 
     # -----------------------------------------------------------------------------------
 
     def display_configuration(self) -> None:
         """Display experiment configuration summary."""
-        print("\n📋 EXPERIMENT CONFIGURATION")
+        print("\n📋 ZERO-ORDER DECODER TRAINING CONFIGURATION")
         print("-" * 50)
+        print(f"Pretrained Path: {self.settings.pretrained_path}")
+        print(f"Freeze Encoder: {self.settings.freeze_encoder}")
+        print(f"Reinit Decoder: {self.settings.reinit_decoder}")
         print(f"Grid Size: {self.settings.grid_height}×{self.settings.grid_width}")
         print(f"Samples: {self.settings.num_samples:,}")
         print(f"Batch Size: {self.settings.batch_size}")
         print(f"Latent Dim: {self.settings.latent_dim}")
         print(f"Max Epochs: {self.settings.max_epochs}")
         print(f"Learning Rate: {self.settings.learning_rate:.1e}")
-        print(f"Trainer Type: {self.settings.trainer_type}")
-        print("\n🧠 Split Training Loss Weights:")
-        print(f"  • Gramian Weight: {self.settings.gramian_weight:.3f}")
-        print(f"  • Homeostatic Weight: {self.settings.homeo_weight:.3f}")
-        print(f"  • Rate Target: {self.settings.rate_target:.3f}")
-        print(f"  • Min Active: {self.settings.min_active}")
+        print(f"ZO Epsilon: {self.settings.epsilon:.1e}")
+        print(f"Gramian Weight: {self.settings.gramian_weight:.3f}")
+        print(f"Rate Target: {self.settings.rate_target:.1%}")
+        print(f"Homeo Weight: {self.settings.homeo_weight:.3f}")
         print(f"Log Directory: {self.settings.log_dir}")
         print(f"Experiment: {self.settings.experiment_name}")
 
     # -----------------------------------------------------------------------------------
 
-    def train(self) -> None:
-        """Execute the training pipeline."""
+    def train_decoder(self) -> None:
+        """Execute the Zero-Order decoder training pipeline."""
         if not self.components:
             raise RuntimeError("Components not initialized. Call setup_components() first.")
 
-        print("\n🚀 Starting model training...")
+        print("\n🚀 Starting Zero-Order decoder-only training...")
 
         # Setup data
         self.components["datamodule"].setup()
@@ -275,41 +318,52 @@ class ExperimentPipeline:
         print(f"   • Validation samples: {val_samples:,}")
         print(f"   • Test samples: {test_samples:,}")
 
+        # Count trainable parameters
+        total_params = sum(p.numel() for p in self.components["model"].parameters())
+        trainable_params = sum(p.numel() for p in self.components["model"].parameters() if p.requires_grad)
+        frozen_params = total_params - trainable_params
+
+        print(f"   • Total parameters: {total_params:,}")
+        print(f"   • Trainable parameters: {trainable_params:,}")
+        print(f"   • Frozen parameters: {frozen_params:,}")
+
         # Execute training using standard Lightning trainer
         self.components["trainer"].fit(model=self.components["model"], datamodule=self.components["datamodule"])
 
-        print("🎉 Training completed successfully!")
+        print("🎉 Zero-Order decoder training completed successfully!")
 
     # -----------------------------------------------------------------------------------
 
     def evaluate_and_visualize(self) -> None:
-        """Evaluate model and generate visualizations."""
+        """Evaluate Zero-Order decoder performance and generate visualizations."""
         if not self.components:
             raise RuntimeError("Components not initialized. Call setup_components() first.")
 
-        print("\n📊 Evaluating model performance...")
+        print("\n📊 Evaluating Zero-Order decoder performance...")
 
         # Get test data
         test_batch = next(iter(self.components["datamodule"].test_dataloader()))
 
         # Handle batch input - extract tensor from tuple if needed
         if isinstance(test_batch, (list, tuple)):
-            test_data = test_batch[0]  # Extract the first element (cognitive map tensor)
+            inputs = test_batch[0]  # Extract the first element (cognitive map tensor)
         else:
-            test_data = test_batch
+            inputs = test_batch
 
+        original_targets = inputs.squeeze(1) if inputs.dim() > 3 else inputs
         model = self.components["model"]
 
         # Ensure device compatibility
-        model.to(device=test_data.device)
+        device = inputs.device
+        model.to(device)
 
         # Generate predictions
         model.eval()
         with torch.no_grad():
-            reconstructed, latent = model(test_data)
+            reconstructed, latent = model(inputs)
 
             # Calculate metrics
-            mse_loss = torch.nn.functional.mse_loss(reconstructed, test_data)
+            mse_loss = torch.nn.functional.mse_loss(reconstructed, inputs)
             sparsity = (latent.abs() < 1e-6).float().mean()
 
             print(f"   • Test MSE Loss: {mse_loss:.6f}")
@@ -317,14 +371,14 @@ class ExperimentPipeline:
 
         # Generate visualization
         print("\n🎨 Generating visualization...")
-        sample_pairs = list(
+        comparison_pairs = list(
             zip(
                 reconstructed[: self.settings.num_visualization_samples].cpu(),
-                test_data[: self.settings.num_visualization_samples].squeeze(1).cpu(),
+                original_targets[: self.settings.num_visualization_samples].cpu(),
             )
         )
 
-        self.components["fig_generator"].plot(sample_pairs)
+        self.components["fig_generator"].plot(comparison_pairs)
         self.components["fig_generator"].show()
 
         print("✅ Evaluation completed!")
@@ -332,10 +386,10 @@ class ExperimentPipeline:
     # -----------------------------------------------------------------------------------
 
     def run_complete_experiment(self) -> None:
-        """Execute the complete experiment pipeline."""
+        """Execute the complete Zero-Order decoder training pipeline."""
         self.display_configuration()
         self.setup_components()
-        self.train()
+        self.train_decoder()
         self.evaluate_and_visualize()
 
 
@@ -344,66 +398,47 @@ class ExperimentPipeline:
 # -------------------------------------------------------------------------------------------
 
 
-def run_experiment(
+def run_zo_decoder_experiment(
     config: Optional[str] = None,
+    pretrained: Optional[str] = None,
     epochs: Optional[int] = None,
     samples: Optional[int] = None,
-    batch_size: Optional[int] = None,
-    latent_dim: Optional[int] = None,
-    learning_rate: Optional[float] = None,
-    trainer_type: Optional[str] = None,
-    gramian_weight: Optional[float] = None,
-    homeo_weight: Optional[float] = None,
 ) -> None:
     """
-    Run the complete backpropagation baseline experiment.
+    Run the complete Zero-Order decoder training experiment.
 
     Args:
         config: Path to TOML configuration file
+        pretrained: Path to pretrained autoencoder checkpoint (overrides config)
         epochs: Maximum training epochs (overrides config)
         samples: Number of training samples (overrides config)
-        batch_size: Training batch size (overrides config)
-        latent_dim: Latent space dimension (overrides config)
-        learning_rate: Learning rate for optimizer (overrides config)
-        trainer_type: Type of trainer ('classic' or 'detached') (overrides config)
-        gramian_weight: Weight for Gramian orthogonality loss (overrides config)
-        homeo_weight: Weight for homeostatic activity loss (overrides config)
     """
     print("=" * 80)
-    print("🧠 ENTORHINAL-HIPPOCAMPAL CIRCUIT: BACKPROPAGATION BASELINE")
+    print("🧠 ENTORHINAL-HIPPOCAMPAL CIRCUIT: ZERO-ORDER DECODER TRAINING")
     print("=" * 80)
 
     # Prepare overrides
-    overrides = {}
+    overrides: Dict[str, Union[str, int, bool]] = {}
+    if pretrained is not None:
+        overrides["pretrained_path"] = pretrained
     if epochs is not None:
         overrides["max_epochs"] = epochs
     if samples is not None:
         overrides["num_samples"] = samples
-    if batch_size is not None:
-        overrides["batch_size"] = batch_size
-    if latent_dim is not None:
-        overrides["latent_dim"] = latent_dim
-    if learning_rate is not None:
-        overrides["learning_rate"] = learning_rate
-    if trainer_type is not None:
-        overrides["trainer_type"] = trainer_type
-    if gramian_weight is not None:
-        overrides["gramian_weight"] = gramian_weight
-    if homeo_weight is not None:
-        overrides["homeo_weight"] = homeo_weight
 
     # Load settings
-    print(f"📁 Loading configuration from: {config}")
+    if config:
+        print(f"📁 Loading configuration from: {config}")
     settings_dict = load_settings(config) if config else {}
     settings_dict.update(overrides)
-    settings = ExperimentSettings(**settings_dict)
+    settings = ZODecoderTrainingSettings(**settings_dict)
 
     # Run experiment pipeline
-    pipeline = ExperimentPipeline(settings)
+    pipeline = ZODecoderTrainingPipeline(settings)
     pipeline.run_complete_experiment()
 
     print("\n" + "=" * 80)
-    print("🎯 EXPERIMENT COMPLETED SUCCESSFULLY!")
+    print("🎯 ZERO-ORDER DECODER TRAINING COMPLETED SUCCESSFULLY!")
     print("=" * 80)
 
 
@@ -415,21 +450,14 @@ def run_experiment(
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Backpropagation baseline for Entorhinal-Hippocampal Circuit",
+        description="Zero-Order Decoder training for Entorhinal-Hippocampal Circuit",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
     parser.add_argument("--config", "-c", type=str, help="Path to TOML configuration file")
+    parser.add_argument("--pretrained", "-p", type=str, help="Path to pretrained autoencoder checkpoint")
     parser.add_argument("--epochs", "-e", type=int, help="Maximum training epochs")
     parser.add_argument("--samples", "-s", type=int, help="Number of training samples")
-    parser.add_argument("--batch-size", "-b", type=int, help="Training batch size")
-    parser.add_argument("--latent-dim", "-l", type=int, help="Latent space dimension")
-    parser.add_argument("--learning-rate", "-lr", type=float, help="Learning rate for optimizer")
-    parser.add_argument(
-        "--trainer-type", "-t", type=str, choices=["classic", "detached"], help="Type of trainer to use"
-    )
-    parser.add_argument("--gramian-weight", "-gw", type=float, help="Weight for Gramian orthogonality loss")
-    parser.add_argument("--homeo-weight", "-hw", type=float, help="Weight for homeostatic activity loss")
 
     return parser.parse_args()
 
@@ -441,17 +469,13 @@ def parse_arguments():
 if __name__ == "__main__":
     try:
         args = parse_arguments()
-        run_experiment(
+
+        run_zo_decoder_experiment(
             config=args.config,
+            pretrained=args.pretrained,
             epochs=args.epochs,
             samples=args.samples,
-            batch_size=args.batch_size,
-            latent_dim=args.latent_dim,
-            learning_rate=args.learning_rate,
-            trainer_type=args.trainer_type,
-            gramian_weight=args.gramian_weight,
-            homeo_weight=args.homeo_weight,
         )
     except Exception as e:
-        print(f"\n❌ EXPERIMENT FAILED: {e}")
+        print(f"\n❌ ZERO-ORDER DECODER TRAINING FAILED: {e}")
         raise
