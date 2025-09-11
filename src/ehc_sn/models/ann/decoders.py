@@ -24,6 +24,7 @@ Classes:
     DRTPLinear: DRTP-enabled decoder with target projection learning
     DFALinear: DFA-enabled decoder with random feedback alignment
     SRTPLinear: SRTP-enabled decoder with symmetric random projections
+    ZOLinear: Zero-Order decoder with gradient-free learning via perturbations
 
 Architecture Pattern:
     All decoders follow a consistent expansion architecture:
@@ -65,7 +66,7 @@ from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn.hooks.registry import registry
-from ehc_sn.modules import dfa
+from ehc_sn.modules import dfa, zo
 from ehc_sn.modules.drtp import DRTPLayer
 from ehc_sn.modules.srtp import SRTPLayer
 
@@ -585,6 +586,148 @@ class SRTPLinear(BaseDecoder):
         return output.reshape(output.shape[0], *self.output_shape)
 
 
+class ZOLinear(BaseDecoder):
+    """Linear decoder using Zero-Order (ZO) optimization for gradient-free learning.
+
+    This decoder implements the Memory-efficient Zero-Order (MeZO) algorithm, which
+    estimates gradients using finite differences with random perturbations instead
+    of traditional backpropagation. It provides a biologically plausible learning
+    mechanism that doesn't require gradient computation or storage.
+
+    Architecture:
+        Latent input → ZOLinear(512) → GELU → ZOLinear(1024) → GELU → ZOLinear(output_size) → Sigmoid
+
+    Key features of ZO optimization:
+    - Gradient-free learning using finite difference approximation
+    - Memory-efficient implementation (no backward pass storage required)
+    - Biologically plausible learning mechanism without weight transport
+    - Compatible with standard PyTorch optimizers after gradient estimation
+    - Two-phase forward pass: +ε and -ε perturbations for gradient estimation
+
+    The ZO mechanism:
+    - Applies random perturbations to layer weights during forward passes
+    - Estimates gradients as: ∇θ ≈ (L(θ + εz) - L(θ - εz)) / (2ε) * z
+    - Uses deterministic perturbation generation with seed control
+    - Provides gradients via feedback mechanism for optimizer compatibility
+
+    Training process:
+    1. Forward pass with +ε perturbation (seed provided)
+    2. Forward pass with -ε perturbation (same seed)
+    3. Compute loss difference and apply feedback to all layers
+    4. Standard optimizer step using estimated gradients
+
+    Args:
+        params: DecoderParams with activation_fn typically set to nn.GELU.
+
+    Example:
+        >>> params = DecoderParams(
+        ...     output_shape=(1, 32, 16),
+        ...     latent_dim=128,
+        ...     activation_fn=nn.GELU
+        ... )
+        >>> decoder = ZOLinear(params)
+        >>>
+        >>> # Standard inference
+        >>> reconstruction = decoder(latent_batch)
+        >>>
+        >>> # Training with ZO optimization
+        >>> output_1 = decoder(latent_batch, seed=42)  # +ε perturbation
+        >>> output_2 = decoder(latent_batch, seed=42)  # -ε perturbation
+        >>>
+        >>> # Apply feedback with loss difference
+        >>> loss_diff = loss_1 - loss_2
+        >>> decoder.feedback(loss_diff.item())
+
+    References:
+        - MeZO: Fine-Tuning Language Models with Just Forward Passes (Malladi et al., 2023)
+        - Zero-Order Optimization in Machine Learning (Chen et al., 2020)
+    """
+
+    def __init__(self, params: DecoderParams, epsilon: float = 1e-3):
+        """Initialize Zero-Order linear decoder.
+
+        Args:
+            params: DecoderParams containing configuration parameters.
+            epsilon: Perturbation magnitude for finite difference gradient estimation.
+                Smaller values provide more accurate gradients but may suffer from
+                numerical precision issues. Typical range: 1e-4 to 1e-2. Default: 1e-3.
+        """
+        super().__init__(params)
+        output_features = prod(params.output_shape)
+
+        # Create ZO Linear layers with specified epsilon
+        self.layer1 = zo.Linear(params.latent_dim, 512, bias=True, epsilon=epsilon)
+        self.activation1 = params.activation_fn()  # Usually GELU
+
+        self.layer2 = zo.Linear(512, 1024, bias=True, epsilon=epsilon)
+        self.activation2 = params.activation_fn()  # Usually GELU
+
+        self.layer3 = zo.Linear(1024, output_features, bias=True, epsilon=epsilon)
+        self.output_activation = nn.Sigmoid()
+
+        # Store epsilon for reference
+        self.epsilon = epsilon
+
+    def forward(self, x: Tensor, target: Optional[Tensor] = None, seed: Optional[int] = None, **kwds) -> Tensor:
+        """Forward pass through the ZO linear decoder.
+
+        This method supports both inference mode (seed=None) and training mode
+        (seed provided). During training, the method expects to be called twice
+        with the same seed for proper gradient estimation via finite differences.
+
+        Args:
+            x: Input latent tensor of shape (batch_size, latent_dim).
+            target: Ignored for ZO decoder, kept for API consistency.
+            seed: Random seed for perturbation generation. If None, performs
+                standard inference. If provided, applies perturbations for
+                gradient estimation.
+
+        Returns:
+            Reconstructed output of shape (batch_size, *output_shape) with
+            values in range [0, 1] due to Sigmoid output activation.
+
+        Note:
+            During training, this method must be called twice with the same seed:
+            1. First call: applies +ε perturbation to all layers
+            2. Second call: applies -ε perturbation to all layers
+            The gradient estimation is completed by calling feedback() on all layers.
+        """
+        # First layer
+        h1 = self.layer1(x, seed=seed)
+        h1 = self.activation1(h1)
+
+        # Second layer
+        h2 = self.layer2(h1, seed=seed)
+        h2 = self.activation2(h2)
+
+        # Output layer
+        output = self.layer3(h2, seed=seed)
+        output = self.output_activation(output)
+
+        # Reshape to original spatial dimensions
+        return output.reshape(output.shape[0], *self.output_shape)
+
+    def feedback(self, projected_grad: float) -> None:
+        """Apply gradient feedback to all ZO layers using finite difference estimate.
+
+        This method propagates the projected gradient (loss difference) to all
+        ZO layers in the decoder, allowing them to compute parameter gradients
+        for the subsequent optimizer step.
+
+        Args:
+            projected_grad: The finite difference value (loss_1 - loss_2) from
+                the two perturbed forward passes. This represents the directional
+                derivative along the random perturbation directions.
+
+        Note:
+            This method must be called after completing the two-phase forward pass
+            (with +ε and -ε perturbations) and before the optimizer step.
+        """
+        self.layer1.feedback(projected_grad)
+        self.layer2.feedback(projected_grad)
+        self.layer3.feedback(projected_grad)
+
+
 # -------------------------------------------------------------------------------------------
 # Examples and demonstrations
 # -------------------------------------------------------------------------------------------
@@ -621,6 +764,9 @@ if __name__ == "__main__":
 
     # Parameters for DFA decoders (typically use Tanh)
     dfa_params = DecoderParams(output_shape=(1, 32, 16), latent_dim=128, activation_fn=nn.Tanh)
+
+    # Parameters for ZO decoders (typically use GELU)
+    zo_params = DecoderParams(output_shape=(1, 32, 16), latent_dim=128, activation_fn=nn.GELU)
 
     # Create sample latent input batch (4 samples)
     batch_size = 4
@@ -678,10 +824,27 @@ if __name__ == "__main__":
     print(f"   Mean activation: {dfa_linear_output.mean():.3f}\n")
 
     # -----------------------------------------------------------------------------------
+    # ZO Linear Decoder Example
+    # -----------------------------------------------------------------------------------
+
+    print("4. ZO Linear Decoder:")
+    zo_linear_decoder = ZOLinear(zo_params, epsilon=1e-3)
+
+    # Forward pass (inference mode)
+    with torch.no_grad():
+        zo_linear_output = zo_linear_decoder(sample_latent)
+
+    print(f"   Output features: {prod(zo_params.output_shape)}")
+    print(f"   Output shape: {zo_linear_output.shape}")
+    print(f"   Output range: [{zo_linear_output.min():.3f}, {zo_linear_output.max():.3f}]")
+    print(f"   Mean activation: {zo_linear_output.mean():.3f}")
+    print(f"   Epsilon (perturbation): {zo_linear_decoder.epsilon}\n")
+
+    # -----------------------------------------------------------------------------------
     # Model comparison
     # -----------------------------------------------------------------------------------
 
-    print("4. Model Size Comparison:")
+    print("5. Model Size Comparison:")
 
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -690,10 +853,53 @@ if __name__ == "__main__":
         "Linear": linear_decoder,
         "DRTP Linear": drtp_linear_decoder,
         "DFA Linear": dfa_linear_decoder,
+        "ZO Linear": zo_linear_decoder,
     }
 
     for name, model in models.items():
         param_count = count_parameters(model)
         print(f"   {name}: {param_count:,} parameters")
+
+    # -----------------------------------------------------------------------------------
+    # ZO Training Example
+    # -----------------------------------------------------------------------------------
+
+    print("\n6. ZO Training Example:")
+
+    # Create sample data for ZO training demonstration
+    sample_target = torch.randn(batch_size, *params.output_shape)
+
+    # Simulate ZO training steps
+    print("   Demonstrating ZO gradient estimation...")
+
+    # Two forward passes with same seed for gradient estimation
+    output_plus = zo_linear_decoder(sample_latent, seed=42)  # +ε perturbation
+    output_minus = zo_linear_decoder(sample_latent, seed=42)  # -ε perturbation
+
+    # Compute losses
+    criterion = nn.MSELoss()
+    loss_plus = criterion(output_plus, sample_target)
+    loss_minus = criterion(output_minus, sample_target)
+    loss_diff = loss_plus - loss_minus
+
+    print(f"   Loss (+ε): {loss_plus.item():.6f}")
+    print(f"   Loss (-ε): {loss_minus.item():.6f}")
+    print(f"   Loss difference: {loss_diff.item():.6f}")
+
+    # Apply feedback for gradient estimation
+    zo_linear_decoder.feedback(loss_diff.item())
+    print("   ✓ Gradient feedback applied to all ZO layers")
+
+    # Check that gradients were computed
+    grad_norms = []
+    for name, param in zo_linear_decoder.named_parameters():
+        if param.grad is not None:
+            grad_norms.append(param.grad.norm().item())
+
+    if grad_norms:
+        avg_grad_norm = sum(grad_norms) / len(grad_norms)
+        print(f"   Average gradient norm: {avg_grad_norm:.6f}")
+    else:
+        print("   No gradients computed (unexpected)")
 
     print("\n=== Examples completed ===")
