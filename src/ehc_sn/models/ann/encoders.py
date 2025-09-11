@@ -1,41 +1,59 @@
-"""
-Neural network encoders for the entorhinal-hippocampal circuit (EHC) spatial navigation library.
+"""Neural network encoders for entorhinal-hippocampal circuit spatial navigation modeling.
 
 This module implements various encoder architectures that transform sensory inputs
 (e.g., obstacle maps, cognitive maps) into latent representations suitable for spatial
-navigation and memory tasks. The encoders support both standard backpropagation (BP),
-Direct Random Target Projection (DRTP), and Direct Feedback Alignment (DFA) training methods.
+navigation and memory tasks. The encoders support multiple biologically-inspired
+training methods including standard backpropagation (BP), Direct Random Target
+Projection (DRTP), and Direct Feedback Alignment (DFA).
 
-The module provides three main encoder types:
-1. Linear: Fully connected layers for flattened inputs
-2. DRTPLinear: DRTP-enabled fully connected encoder
-3. DFALinear: DFA-enabled fully connected encoder
-
-All encoders follow a consistent architecture pattern:
-- Input processing (flattening)
-- Two hidden layers with 1024 and 512 units respectively
-- Output layer projecting to latent dimension
-- Appropriate activation functions for each training method
+The encoder architectures are designed to mimic the encoding properties of the
+medial entorhinal cortex (MEC), which processes spatial information and projects
+to hippocampal regions for memory formation and spatial navigation.
 
 Key Features:
-- Pydantic-based parameter validation and configuration
-- Biologically plausible sparse representations
-- Support for standard, DRTP, and DFA training algorithms
-- Consistent interface across all encoder types
+    - Pydantic-based parameter validation and configuration management
+    - Biologically plausible sparse representations mimicking place cell activity
+    - Support for standard BP, DRTP, and DFA training algorithms
+    - Consistent interface across all encoder implementations
+    - Configurable activation functions optimized for each training method
 
-Example:
+Classes:
+    EncoderParams: Configuration parameters for encoder initialization
+    BaseEncoder: Abstract base class defining the encoder interface
+    Linear: Fully connected encoder for flattened spatial inputs
+    DRTPLinear: DRTP-enabled encoder with target projection learning
+    DFALinear: DFA-enabled encoder with random feedback alignment
+
+Architecture Pattern:
+    All encoders follow a consistent three-layer architecture:
+    - Input processing layer (flattening of spatial inputs)
+    - Two hidden layers (1024 and 512 units) for feature extraction
+    - Output projection layer to specified latent dimension
+    - Appropriate activation functions for biological plausibility
+
+Examples:
+    >>> # Standard encoder for spatial navigation tasks
     >>> params = EncoderParams(
-    ...     input_shape=(1, 32, 16),
-    ...     latent_dim=128,
-    ...     activation_fn=nn.GELU
+    ...     input_shape=(1, 32, 16),  # Single-channel obstacle map
+    ...     latent_dim=128,           # Compressed representation
+    ...     activation_fn=nn.GELU     # Smooth activation for BP training
     ... )
     >>> encoder = Linear(params)
-    >>> latent = encoder(input_tensor)
+    >>> latent = encoder(spatial_input)
+    >>>
+    >>> # DRTP encoder with biologically motivated activation
+    >>> drtp_params = EncoderParams(
+    ...     input_shape=(1, 32, 16),
+    ...     latent_dim=128,
+    ...     activation_fn=nn.Tanh  # Bounded activation for DRTP stability
+    ... )
+    >>> drtp_encoder = DRTPLinear(drtp_params)
 
 References:
     - Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
       error backpropagation for deep learning. Nature Communications, 7, 13276.
     - O'Keefe, J., & Nadel, L. (1978). The hippocampus as a cognitive map.
+      Oxford University Press.
 """
 
 from math import prod

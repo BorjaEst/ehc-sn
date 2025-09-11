@@ -1,8 +1,39 @@
-"""Direct Feedback Alignment (DFA) training strategies.
+"""Direct Feedback Alignment (DFA) training strategies for biologically plausible learning.
 
-This module implements DFA-based training where hidden layers receive
-direct feedback from the output error via random feedback weights,
-eliminating the need for symmetric weight transport.
+This module implements DFA-based training strategies where hidden layers receive
+direct feedback from the output error via fixed random feedback weights, eliminating
+the need for symmetric weight transport. This provides a biologically plausible
+alternative to standard backpropagation for neural network training.
+
+The DFA approach addresses the weight transport problem in biological neural networks
+by using random feedback connections that don't require knowledge of forward weights.
+Despite using random projections, DFA can achieve effective learning through the
+feedback alignment principle.
+
+Key Features:
+    - Centralized hook management for error signal capture and cleanup
+    - Manual optimization with precise control over gradient computation
+    - Registry-based error signal management for multi-layer coordination
+    - Biologically plausible learning without symmetric weight constraints
+
+Classes:
+    DFATrainer: Complete DFA training strategy with hook management and optimization.
+
+Examples:
+    >>> from functools import partial
+    >>> import torch.optim as optim
+    >>>
+    >>> # Create DFA trainer with Adam optimization
+    >>> trainer = DFATrainer(
+    ...     optimizer_init=partial(optim.Adam, lr=1e-3, weight_decay=1e-4)
+    ... )
+    >>> model = Autoencoder(params, trainer)
+    >>> lightning_trainer = pl.Trainer(max_epochs=100)
+    >>> lightning_trainer.fit(model, dataloader)
+
+References:
+    Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
+    error backpropagation for deep learning. Nature Communications, 7, 13276.
 """
 
 from typing import Any, Callable

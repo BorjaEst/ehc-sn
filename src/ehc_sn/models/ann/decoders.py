@@ -1,41 +1,60 @@
-"""
-Neural network decoders for the entorhinal-hippocampal circuit (EHC) spatial navigation library.
+"""Neural network decoders for entorhinal-hippocampal circuit spatial navigation modeling.
 
 This module implements various decoder architectures that transform latent representations
-back into reconstructed outputs (e.g., cognitive maps, obstacle maps). The decoders complement
-the encoders and support both standard backpropagation (BP), Direct Random Target
-Projection (DRTP), and Direct Feedback Alignment (DFA) training methods.
+back into reconstructed spatial outputs (e.g., cognitive maps, obstacle maps). The decoders
+complement the encoders in autoencoder architectures and support multiple biologically-inspired
+training methods including standard backpropagation (BP), Direct Random Target Projection
+(DRTP), Direct Feedback Alignment (DFA), and Symmetric Random Target Projection (SRTP).
 
-The module provides four main decoder types:
-1. Linear: Fully connected layers for reconstructing flattened outputs
-2. DRTPLinear: DRTP-enabled fully connected decoder
-3. DFALinear: DFA-enabled fully connected decoder
-4. SRTPLinear: SRTP-enabled fully connected decoder
-
-All decoders follow a consistent architecture pattern:
-- Input from latent representation
-- Progressive expansion through hidden layers
-- Output reconstruction matching original input dimensions
-- Appropriate activation functions for each training method
+The decoder architectures are designed to mimic the decoding properties of hippocampal
+regions (DG, CA3, CA2, CA1) that reconstruct spatial representations from compressed
+neural codes for spatial navigation and memory retrieval.
 
 Key Features:
-- Pydantic-based parameter validation and configuration
-- Support for standard, DRTP, DFA, and SRTP training algorithms
-- Consistent interface across all decoder types
+    - Pydantic-based parameter validation and configuration management
+    - Support for multiple biologically-motivated training algorithms
+    - Consistent interface across all decoder implementations
+    - Progressive expansion from latent to full spatial dimensions
+    - Appropriate activation functions optimized for each training method
 
-Example:
+Classes:
+    DecoderParams: Configuration parameters for decoder initialization
+    BaseDecoder: Abstract base class defining the decoder interface
+    Linear: Standard fully connected decoder for spatial reconstruction
+    DRTPLinear: DRTP-enabled decoder with target projection learning
+    DFALinear: DFA-enabled decoder with random feedback alignment
+    SRTPLinear: SRTP-enabled decoder with symmetric random projections
+
+Architecture Pattern:
+    All decoders follow a consistent expansion architecture:
+    - Input from latent representation (compressed spatial features)
+    - Progressive expansion through hidden layers
+    - Output reconstruction matching original spatial input dimensions
+    - Sigmoid activation for spatial probability maps
+
+Examples:
+    >>> # Standard decoder for spatial map reconstruction
     >>> params = DecoderParams(
-    ...     output_shape=(1, 32, 16),
-    ...     latent_dim=128,
-    ...     activation_fn=nn.GELU
+    ...     output_shape=(1, 32, 16),  # Target spatial map dimensions
+    ...     latent_dim=128,            # Input latent dimension
+    ...     activation_fn=nn.GELU      # Smooth activation for BP training
     ... )
     >>> decoder = Linear(params)
     >>> reconstruction = decoder(latent_tensor)
+    >>>
+    >>> # DRTP decoder with bounded activation
+    >>> drtp_params = DecoderParams(
+    ...     output_shape=(1, 32, 16),
+    ...     latent_dim=128,
+    ...     activation_fn=nn.Tanh  # Bounded activation for DRTP stability
+    ... )
+    >>> drtp_decoder = DRTPLinear(drtp_params)
 
 References:
     - Lillicrap, T. P., et al. (2016). Random synaptic feedback weights support
       error backpropagation for deep learning. Nature Communications, 7, 13276.
     - O'Keefe, J., & Nadel, L. (1978). The hippocampus as a cognitive map.
+      Oxford University Press.
 """
 
 from math import prod

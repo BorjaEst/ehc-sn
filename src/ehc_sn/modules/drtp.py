@@ -1,3 +1,51 @@
+"""Direct Random Target Projection (DRTP) module for biologically plausible learning.
+
+This module implements Direct Random Target Projection (DRTP), a biologically plausible
+learning algorithm that uses fixed random projection matrices to propagate target signals
+directly to hidden layers. Unlike standard backpropagation, DRTP eliminates the need for
+symmetric weight transport by providing each layer with direct random projections of the
+target signal.
+
+DRTP addresses the weight transport problem in biological neural networks while maintaining
+effective learning capabilities. The algorithm uses fixed random matrices to project target
+signals to each hidden layer, enabling local learning without requiring knowledge of forward
+path weights.
+
+Key Features:
+    - DRTPFunction: Custom autograd function implementing DRTP gradient computation
+    - DRTPLayer: PyTorch module wrapper for easy integration into networks
+    - Fixed random projection matrices that remain constant during training
+    - Direct target signal propagation to all hidden layers
+
+Classes:
+    DRTPFunction: Core autograd function for DRTP gradient computation
+    DRTPLayer: Neural network module implementing DRTP learning mechanism
+
+Mathematical Formulation:
+    Standard BP: grad = W^T @ upstream_grad
+    DRTP: grad = B^T @ target_signal
+    Where B is a fixed random matrix and target_signal is the desired output.
+
+Examples:
+    >>> # Create a network with DRTP learning
+    >>> drtp_layer = DRTPLayer(target_dim=10, hidden_dim=128)
+    >>> hidden = torch.randn(32, 128, requires_grad=True)
+    >>> target = torch.randn(32, 10)
+    >>>
+    >>> # Forward pass includes target for gradient computation
+    >>> output = drtp_layer(hidden, target)
+    >>> loss.backward()  # Uses DRTP gradients automatically
+
+Biological Motivation:
+    DRTP provides a biologically plausible alternative to backpropagation by using
+    random feedback connections that don't require symmetric weights. This addresses
+    fundamental biological constraints while maintaining effective learning.
+
+References:
+    Nøkland, A. (2016). Direct feedback alignment provides learning in deep neural
+    networks without loss gradients. arXiv preprint arXiv:1609.01596.
+"""
+
 from math import prod
 from typing import Any, List, Tuple
 

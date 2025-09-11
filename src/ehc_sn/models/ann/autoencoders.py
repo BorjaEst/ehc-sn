@@ -1,3 +1,63 @@
+"""Autoencoder models for entorhinal-hippocampal circuit spatial navigation modeling.
+
+This module implements autoencoder architectures specifically designed for modeling
+the entorhinal-hippocampal circuit's spatial navigation and memory functions. The
+autoencoders combine configurable encoder and decoder components with biologically-
+inspired sparsity constraints to mimic hippocampal place cell firing patterns.
+
+The autoencoders support multiple training strategies through a pluggable trainer
+interface, enabling experimentation with standard backpropagation, biologically
+plausible alternatives (DFA, DRTP), and custom optimization schemes.
+
+Key Features:
+    - Configurable encoder-decoder architectures with dimension validation
+    - Biologically-inspired sparsity constraints (Gramian orthogonality, homeostatic activity)
+    - Pluggable training strategies via BaseTrainer interface
+    - Manual optimization with configurable gradient flow control
+    - PyTorch Lightning integration for efficient training and logging
+
+Classes:
+    AutoencoderParams: Configuration parameters with Pydantic validation
+    Autoencoder: Main autoencoder model with trainer strategy pattern
+
+Functions:
+    validate_dimensions: Ensures encoder-decoder compatibility validation
+
+Architecture:
+    Input → Encoder → Sparse Latent Representation → Decoder → Reconstruction
+
+    The sparse latent representation mimics hippocampal place cell activity patterns,
+    incorporating biological constraints like firing rate homeostasis and decorrelated
+    representations essential for effective spatial memory encoding.
+
+Examples:
+    >>> from functools import partial
+    >>> from ehc_sn.trainers.back_propagation import DetachedTrainer
+    >>>
+    >>> # Configure autoencoder with detached gradient training
+    >>> trainer = DetachedTrainer(optimizer_init=partial(torch.optim.Adam, lr=1e-3))
+    >>> params = AutoencoderParams(
+    ...     encoder=Linear(EncoderParams(...)),
+    ...     decoder=Linear(DecoderParams(...)),
+    ...     gramian_weight=1.0,
+    ...     homeo_weight=1.0,
+    ...     rate_target=0.10,
+    ... )
+    >>> model = Autoencoder(params, trainer)
+    >>> lightning_trainer = pl.Trainer(max_epochs=100)
+    >>> lightning_trainer.fit(model, dataloader)
+
+Biological Motivation:
+    The autoencoder architecture models the information flow in the entorhinal-
+    hippocampal circuit where sensory inputs are compressed into sparse neural
+    codes (similar to place cells) and then reconstructed for spatial navigation
+    and memory retrieval tasks.
+
+References:
+    - O'Keefe, J., & Nadel, L. (1978). The hippocampus as a cognitive map.
+    - Hafting, T., et al. (2005). Microstructure of a spatial map in the entorhinal cortex.
+"""
+
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 import lightning.pytorch as pl

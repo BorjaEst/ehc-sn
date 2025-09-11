@@ -91,20 +91,6 @@ class ClassicTrainer(BaseTrainer):
                 `partial(torch.optim.Adam, lr=1e-3)` or a lambda function.
             *args: Additional positional arguments passed to parent class.
             **kwargs: Additional keyword arguments passed to parent class.
-
-        Example:
-            >>> from functools import partial
-            >>> import torch.optim as optim
-            >>>
-            >>> # Using partial function for optimizer configuration
-            >>> trainer = ClassicTrainer(
-            ...     optimizer_init=partial(optim.Adam, lr=1e-3, weight_decay=1e-4)
-            ... )
-            >>>
-            >>> # Using lambda function for custom configuration
-            >>> trainer = ClassicTrainer(
-            ...     optimizer_init=lambda params: optim.SGD(params, lr=0.01, momentum=0.9)
-            ... )
         """
         super().__init__(*args, **kwargs)
         self.optimizer_init = optimizer_init
@@ -145,25 +131,23 @@ class ClassicTrainer(BaseTrainer):
         x, *_ = batch
 
         # Autoencoder-style loss computation with full gradient flow
-        loss_list = model.compute_loss(x, "train", detach_grad=False)
+        outputs = model(x, detach_grad=False)  # Forward pass
+        loss_components = model.compute_loss(outputs, batch, "train")
+        total_loss = sum(loss_components)  # Combine losses
         optm_list = model.optimizers()
 
         # Check if optimizers need to step based on parameter gradients
         do_step_list = [
             any(p.requires_grad for p in component.parameters()) and loss.requires_grad
-            for component, loss in zip([model.encoder, model.decoder], loss_list)
+            for component, loss in zip([model.decoder, model.encoder], loss_components)
         ]
-
-        if not any(do_step_list):
-            return
 
         # Zero gradients for active optimizers
         for optm, do_step in zip(optm_list, do_step_list):
             if do_step:
                 optm.zero_grad()
 
-        # Combined loss with full gradient flow
-        total_loss = sum(loss_list)
+        # Backward pass
         model.manual_backward(total_loss)
 
         # Step active optimizers
@@ -198,8 +182,8 @@ class ClassicTrainer(BaseTrainer):
             ensure consistent evaluation metrics.
         """
         x, *_ = batch
-        loss_list = model.compute_loss(x, "val", detach_grad=False)
-        return sum(loss_list)
+        loss_components = model.compute_loss(x, "val", detach_grad=False)
+        return sum(loss_components)
 
 
 class DetachedTrainer(BaseTrainer):
@@ -325,20 +309,17 @@ class DetachedTrainer(BaseTrainer):
         x, *_ = batch
 
         # Autoencoder-style loss computation with detached gradients
-        loss_list = model.compute_loss(x, "train", detach_grad=True)
+        loss_components = model.compute_loss(x, "train", detach_grad=True)
         optm_list = model.optimizers()
 
         # Check if optimizers need to step based on parameter gradients
         do_step_list = [
             any(p.requires_grad for p in component.parameters()) and loss.requires_grad
-            for component, loss in zip([model.encoder, model.decoder], loss_list)
+            for component, loss in zip([model.decoder, model.encoder], loss_components)
         ]
 
-        if not any(do_step_list):
-            return
-
         # Train components independently with detached gradients
-        for optm, loss, do_step in zip(optm_list, loss_list, do_step_list):
+        for optm, loss, do_step in zip(optm_list, loss_components, do_step_list):
             if do_step:
                 optm.zero_grad()
                 model.manual_backward(loss)
@@ -377,5 +358,5 @@ class DetachedTrainer(BaseTrainer):
             under the split training regime.
         """
         x, *_ = batch
-        loss_list = model.compute_loss(x, "val", detach_grad=True)
-        return sum(loss_list)
+        loss_components = model.compute_loss(x, "val", detach_grad=True)
+        return sum(loss_components)
