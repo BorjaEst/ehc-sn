@@ -65,6 +65,7 @@ import torch
 from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
+from ehc_sn import utils
 from ehc_sn.hooks.registry import registry
 from ehc_sn.modules import dfa, zo
 from ehc_sn.modules.drtp import DRTPLayer
@@ -718,9 +719,7 @@ class ZOLinear(BaseDecoder):
         if seed is None:
             seeds = [None for _ in range(3)]
         else:
-            gen = torch.Generator(device=x.device)
-            gen.manual_seed(self._seed if seed is None else seed)
-            seeds = [gen.randint(0, 2**32 - 1).item() for _ in range(3)]
+            seeds = utils.seeds(3, seed, x.device)
 
         # First layer
         h1 = self.layer1(x, seed=seeds[0])
