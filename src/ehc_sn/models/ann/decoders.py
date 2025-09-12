@@ -713,16 +713,25 @@ class ZOLinear(BaseDecoder):
             2. Second call: applies -ε perturbation to all layers
             The gradient estimation is completed by calling feedback() on all layers.
         """
+
+        # Generate independent seeds for each layer if not provided
+        if seed is None:
+            seeds = [None for _ in range(3)]
+        else:
+            gen = torch.Generator(device=x.device)
+            gen.manual_seed(self._seed if seed is None else seed)
+            seeds = [gen.randint(0, 2**32 - 1).item() for _ in range(3)]
+
         # First layer
-        h1 = self.layer1(x, seed=seed)
+        h1 = self.layer1(x, seed=seeds[0])
         h1 = self.activation1(h1)
 
         # Second layer
-        h2 = self.layer2(h1, seed=seed)
+        h2 = self.layer2(h1, seed=seeds[1])
         h2 = self.activation2(h2)
 
         # Output layer
-        output = self.layer3(h2, seed=seed)
+        output = self.layer3(h2, seed=seeds[2])
         output = self.output_activation(output)
 
         # Reshape to original spatial dimensions
