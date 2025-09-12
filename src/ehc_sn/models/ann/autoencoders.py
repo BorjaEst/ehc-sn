@@ -272,7 +272,7 @@ class Autoencoder(pl.LightningModule):
 
         Example:
             >>> # Optimizers are accessed in training via:
-            >>> enc_opt, dec_opt = self.optimizers()
+            >>> dec_opt, enc_opt = self.optimizers()
             >>> # enc_opt handles encoder-specific losses (sparsity, orthogonality)
             >>> # dec_opt handles decoder-specific losses (reconstruction)
 
@@ -283,9 +283,9 @@ class Autoencoder(pl.LightningModule):
         """
         if self.trainer_strategy is None:
             raise ValueError("Trainer strategy must be provided for optimizer configuration.")
-        enc_opt = self.trainer_strategy.optimizer_init(self.encoder.parameters())
         dec_opt = self.trainer_strategy.optimizer_init(self.decoder.parameters())
-        return [enc_opt, dec_opt]
+        enc_opt = self.trainer_strategy.optimizer_init(self.encoder.parameters())
+        return [dec_opt, enc_opt]
 
     # -----------------------------------------------------------------------------------
     # Forward pass
