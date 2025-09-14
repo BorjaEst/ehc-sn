@@ -135,6 +135,7 @@ class Layer(nn.Module):
 
     def dfa(self, e: Dict[str, Tensor]) -> None:
         delta = torch.matmul(e["fa"], self.synapses["fa"].weight.detach().t())
+        delta = torch.clamp(delta, -0.2, 0.2)  # Gradient clipping
         torch.autograd.backward(self.neurons, delta, retain_graph=True)
 
 
