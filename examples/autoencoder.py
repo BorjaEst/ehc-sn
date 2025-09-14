@@ -20,7 +20,7 @@ LATENT_DIM = 32
 BATCH_SIZE = 16
 EPOCHS = 80
 LR = 1e-3
-SPARSITY_WEIGHT = 0.1
+SPARSITY_WEIGHT = 0.01
 SPARSITY_TARGET = 0.2
 
 
@@ -128,16 +128,13 @@ class Layer(nn.Module):
         self.neurons = self.activation(currents)
         return self.neurons
 
-    def target(self, y: Dict[str, Tensor]) -> Tensor:
+    def target(self, y: Dict[str, Tensor]) -> None:
         h_hat = self.activation(self.synapses["inputs"](y["inputs"].detach()))
         # h_hat = self.forward(y)  Uncomment if state update does not impact
-        return mse_loss(h_hat, y["fb"].detach())
+        mse_loss(h_hat, y["fb"].detach()).backward(retain_graph=True)
 
     def dfa(self, e: Dict[str, Tensor]) -> None:
-        delta: Tensor = torch.zeros_like(self.neurons)
-        for syn in e:  # Detach fb weights to prevent gradient flow to fb provider
-            fb_weights = self.synapses[syn].weight.detach()
-            delta += torch.matmul(e[syn], fb_weights.t())
+        delta = torch.matmul(e["fa"], self.synapses["fa"].weight.detach().t())
         torch.autograd.backward(self.neurons, delta, retain_graph=True)
 
 
@@ -159,7 +156,10 @@ class Encoder(nn.Module):
         return self.latent({"inputs": x})
 
     def feedback(self, sensors: Tensor, decoder: "Decoder") -> Tensor:
-        pass
+        e_out = (decoder.output.neurons - sensors).detach()
+        # self.latent.dfa({"fa": e_out})  # top layer
+        # self.layer2.dfa({"fa": e_out})  # middle layer
+        # self.layer1.dfa({"fa": e_out})  # bottom layer
 
 
 class Decoder(nn.Module):
@@ -175,10 +175,9 @@ class Decoder(nn.Module):
         return self.output({"inputs": x})
 
     def feedback(self, sensors: Tensor, encoder: Encoder) -> None:
-        loss_l2 = self.layer2.target({"fb": encoder.layer2.neurons, "inputs": encoder.latent.neurons})
-        loss_l1 = self.layer1.target({"fb": encoder.layer1.neurons, "inputs": encoder.layer2.neurons})
-        loss_output = self.output.target({"fb": sensors, "inputs": encoder.layer1.neurons})
-        (loss_l2 + loss_l1 + loss_output).backward()
+        self.layer2.target({"fb": encoder.layer2.neurons, "inputs": encoder.latent.neurons})
+        self.layer1.target({"fb": encoder.layer1.neurons, "inputs": encoder.layer2.neurons})
+        self.output.target({"fb": sensors, "inputs": encoder.layer1.neurons})
 
 
 class Autoencoder(nn.Module):
