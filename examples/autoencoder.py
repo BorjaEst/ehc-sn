@@ -11,14 +11,15 @@ from torch.utils.data import DataLoader, TensorDataset
 # Constants (no CLI)
 # -------------------------------------------------------------------------------------------
 
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 N_SAMPLES = 320
 INPUT_DIM = 256
 HIDDEN_DIM = 512
-LATENT_DIM = 64
+LATENT_DIM = 32
 BATCH_SIZE = 16
 EPOCHS = 80
-LR = 1e-4
+LR = 1e-3
 SPARSITY_WEIGHT = 0.1
 SPARSITY_TARGET = 0.2
 
@@ -30,6 +31,7 @@ SPARSITY_TARGET = 0.2
 
 def create_synthetic_dataset(n: int, input_dim: int, latent_dim: int) -> Tuple[Tensor, Tensor]:
     # Create sparse latent factors
+    g = torch.Generator().manual_seed(50)
     latent = torch.zeros(n, latent_dim)
 
     # Each sample activates only a subset of latent dimensions (sparsity)
@@ -119,26 +121,17 @@ class Layer(nn.Module):
         self.synapses = nn.ModuleDict({k: nn.Linear(v, units) for k, v in synapses.items()})
         self.register_buffer("neurons", torch.zeros(BATCH_SIZE, units))  # State of neurons
         self.activation = nn.ReLU()
+        self.activation = nn.Identity()  # Linear activation using PyTorch Identity
 
     def forward(self, x: Dict[str, Tensor]) -> Tensor:
-        currents = self.currents(x)
+        currents = self.synapses["inputs"](x["inputs"])
         self.neurons = self.activation(currents)
         return self.neurons
 
-    def currents(self, x: Dict[str, Tensor]) -> Tensor:
-        total_current = torch.zeros_like(self.neurons)
-        for syn in x:
-            # Detach inputs so grads don't flow back into the sending unit
-            total_current += self.synapses[syn](x[syn].detach())
-        return total_current
-
     def target(self, y: Dict[str, Tensor]) -> None:
-        loss: Tensor = torch.tensor(0.0, device=self.neurons.device)
-        for syn in y:  # Detach fb weights to prevent gradient flow to fb provider
-            fb_weights = self.synapses[syn].weight.detach()
-            projected_target = torch.matmul(y[syn].detach(), fb_weights.t())
-            loss += mse_loss(self.neurons, projected_target)
-        loss.backward(retain_graph=True)  # Backprop through this layer only
+        h2_hat = self.activation(self.synapses["inputs"](y["inputs"]))  # Need to be the same syns
+        # h2_hat = self.forward(y)  Uncomment if state update does not impact
+        mse_loss(h2_hat, y["fb"].detach()).backward(retain_graph=True)
 
     def dfa(self, e: Dict[str, Tensor]) -> None:
         delta: Tensor = torch.zeros_like(self.neurons)
@@ -151,9 +144,9 @@ class Layer(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, n_sensors: int, n_hidden: List[int], n_latents: int):
         super().__init__()
-        self.layer1 = Layer(n_hidden[0], {"inputs": n_sensors, "fb": n_sensors})
-        self.layer2 = Layer(n_hidden[1], {"inputs": n_hidden[0], "fb": n_sensors})
-        self.latent = Layer(n_latents, {"inputs": n_hidden[1], "fb": n_sensors})
+        self.layer1 = Layer(n_hidden[0], {"inputs": n_sensors, "fb": n_sensors, "fb2": n_latents})
+        self.layer2 = Layer(n_hidden[1], {"inputs": n_hidden[0], "fb": n_sensors, "fb2": n_latents})
+        self.latent = Layer(n_latents, {"inputs": n_hidden[1], "fb": n_sensors, "fb2": n_latents})
 
     def forward(self, sensors: Tensor) -> Tensor:
         x = self.layer1({"inputs": sensors})
@@ -161,10 +154,13 @@ class Encoder(nn.Module):
         return self.latent({"inputs": x})
 
     def feedback(self, sensors: Tensor, decoder: "Decoder") -> Tensor:
-        global_error = (decoder.output.neurons - sensors).detach()
-        self.layer1.dfa({"fb": global_error})
-        self.layer2.dfa({"fb": global_error})
-        self.latent.dfa({"fb": global_error})
+        sparsity_error = (self.latent.neurons - SPARSITY_TARGET).detach()
+        reconstruction_error = (decoder.output.neurons - sensors).detach()
+        # self.layer1.dfa({"fb": reconstruction_error, "fb2": SPARSITY_WEIGHT * sparsity_error})
+        # self.layer2.dfa({"fb": reconstruction_error, "fb2": SPARSITY_WEIGHT * sparsity_error})
+        # self.layer2.dfa({"fb": reconstruction_error, "fb2": SPARSITY_WEIGHT * sparsity_error})
+        # (SPARSITY_WEIGHT * kl_loss(self.latent.neurons)).backward()
+        stop = 1
 
 
 class Decoder(nn.Module):
@@ -180,9 +176,9 @@ class Decoder(nn.Module):
         return self.output({"inputs": x})
 
     def feedback(self, sensors: Tensor, encoder: Encoder) -> None:
-        self.layer1.target({"fb": encoder.layer1.neurons})
-        self.layer2.target({"fb": encoder.layer2.neurons})
-        self.output.target({"fb": sensors})
+        self.layer2.target({"fb": encoder.layer2.neurons, "inputs": encoder.latent.neurons})
+        self.layer1.target({"fb": encoder.layer1.neurons, "inputs": encoder.layer2.neurons})
+        self.output.target({"fb": sensors, "inputs": encoder.layer1.neurons})
 
 
 class Autoencoder(nn.Module):
@@ -190,21 +186,18 @@ class Autoencoder(nn.Module):
         super().__init__(*args, **kwargs)
         self.encoder = Encoder(n_sensors, [HIDDEN_DIM, HIDDEN_DIM], n_latents)
         self.decoder = Decoder(n_sensors, [HIDDEN_DIM, HIDDEN_DIM], n_latents)
-        self.sorting = nn.Linear(n_sensors, n_sensors)  # Ideally SE(n) trans
+        # self.sorting = nn.Linear(n_sensors, n_sensors)  # Ideally SE(n) trans
 
     def forward(self, sensors: Tensor) -> Tuple[Tensor, Tensor]:
         latent = self.encoder(sensors)
         reconstruction = self.decoder(latent)
+        return reconstruction, latent
         return self.sorting(reconstruction), latent
 
     def feedback(self, sensors: Tensor) -> List[Tensor]:
         self.encoder.feedback(sensors, self.decoder)
         self.decoder.feedback(sensors, self.encoder)
-        # Allow gradients from reconstruction MSE to flow into the decoder by not detaching
-        sorted_out = self.sorting(self.decoder.output.neurons)
-        # Retain graph so we can also backpropagate sparsity loss afterward
-        mse_loss(sorted_out, sensors).backward(retain_graph=True)
-        kl_loss(self.encoder.latent.neurons).backward()
+        # mse_loss(self.sorting(self.decoder.output.neurons), sensors).backward()
 
 
 # -------------------------------------------------------------------------------------------
