@@ -124,7 +124,7 @@ class Layer(nn.Module):
         self.activation = nn.Identity()  # Linear activation using PyTorch Identity
 
     def forward(self, x: Dict[str, Tensor]) -> Tensor:
-        currents = self.synapses["inputs"](x["inputs"])
+        currents = self.synapses["inputs"](x["inputs"].detach())
         self.neurons = self.activation(currents)
         return self.neurons
 
@@ -144,9 +144,9 @@ class Layer(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, n_sensors: int, n_hidden: List[int], n_latents: int):
         super().__init__()
-        self.layer1 = Layer(n_hidden[0], {"inputs": n_sensors, "fb": n_sensors, "fb2": n_latents})
-        self.layer2 = Layer(n_hidden[1], {"inputs": n_hidden[0], "fb": n_sensors, "fb2": n_latents})
-        self.latent = Layer(n_latents, {"inputs": n_hidden[1], "fb": n_sensors, "fb2": n_latents})
+        self.layer1 = Layer(n_hidden[0], {"inputs": n_sensors, "fa": n_sensors})
+        self.layer2 = Layer(n_hidden[1], {"inputs": n_hidden[0], "fa": n_sensors})
+        self.latent = Layer(n_latents, {"inputs": n_hidden[1], "fa": n_sensors})
 
     def forward(self, sensors: Tensor) -> Tensor:
         x = self.layer1({"inputs": sensors})
@@ -192,12 +192,13 @@ class Autoencoder(nn.Module):
         latent = self.encoder(sensors)
         reconstruction = self.decoder(latent)
         return reconstruction, latent
-        return self.sorting(reconstruction), latent
+        # return self.sorting(reconstruction), latent
 
     def feedback(self, sensors: Tensor) -> List[Tensor]:
         self.encoder.feedback(sensors, self.decoder)
         self.decoder.feedback(sensors, self.encoder)
         # mse_loss(self.sorting(self.decoder.output.neurons), sensors).backward()
+        (SPARSITY_WEIGHT * kl_loss(self.encoder.latent.neurons)).backward()
 
 
 # -------------------------------------------------------------------------------------------
