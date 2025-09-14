@@ -20,8 +20,8 @@ LATENT_DIM = 32
 BATCH_SIZE = 16
 EPOCHS = 80
 LR = 1e-3
-SPARSITY_WEIGHT = 0.01
-SPARSITY_TARGET = 0.2
+SPARSITY_WEIGHT = 0.1
+SPARSITY_TARGET = 0.05
 
 
 # -------------------------------------------------------------------------------------------
@@ -134,7 +134,9 @@ class Layer(nn.Module):
         mse_loss(h_hat, y["fb"].detach()).backward(retain_graph=True)
 
     def dfa(self, e: Dict[str, Tensor]) -> None:
-        delta = torch.matmul(e["fa"], self.synapses["fa"].weight.detach().t())
+        delta = torch.zeros_like(self.neurons)
+        for syn in e:
+            delta += torch.matmul(e[syn], self.synapses[syn].weight.detach().t())
         delta = torch.clamp(delta, -0.2, 0.2)  # Gradient clipping
         torch.autograd.backward(self.neurons, delta, retain_graph=True)
 
@@ -142,14 +144,17 @@ class Layer(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, n_sensors: int, n_hidden: List[int], n_latents: int):
         super().__init__()
-        self.layer1 = Layer(n_hidden[0], {"inputs": n_sensors, "fa": n_sensors})
-        self.layer2 = Layer(n_hidden[1], {"inputs": n_hidden[0], "fa": n_sensors})
-        self.latent = Layer(n_latents, {"inputs": n_hidden[1], "fa": n_sensors})
+        self.layer1 = Layer(n_hidden[0], {"inputs": n_sensors, "fa1": n_sensors, "fa2": n_latents})
+        self.layer2 = Layer(n_hidden[1], {"inputs": n_hidden[0], "fa1": n_sensors, "fa2": n_latents})
+        self.latent = Layer(n_latents, {"inputs": n_hidden[1], "fa1": n_sensors, "fa2": n_latents})
 
-        # Freeze DFA feedback weights (fixed random projections)
+        # I WOULD LIKE TO REMOVE THIS VIA DETACHING TENSORS
+        # Freeze all feedback weights (both 'fa' and 'fa_latent')
         for layer in (self.layer1, self.layer2, self.latent):
-            for p in layer.synapses["fa"].parameters():
-                p.requires_grad = False
+            for name, mod in layer.synapses.items():
+                if name.startswith("fa"):
+                    for p in mod.parameters():
+                        p.requires_grad = False
 
     def forward(self, sensors: Tensor) -> Tensor:
         x = self.layer1({"inputs": sensors})
@@ -158,9 +163,10 @@ class Encoder(nn.Module):
 
     def feedback(self, sensors: Tensor, decoder: "Decoder") -> Tensor:
         e_out = (decoder.output.neurons - sensors).detach()
-        self.latent.dfa({"fa": e_out})  # top layer
-        self.layer2.dfa({"fa": e_out})  # middle layer
-        self.layer1.dfa({"fa": e_out})  # bottom layer
+        e_lat = SPARSITY_WEIGHT * torch.tanh(self.latent.neurons - SPARSITY_TARGET).detach()
+        self.latent.dfa({"fa1": e_out, "fa2": e_lat})  # top layer
+        self.layer2.dfa({"fa1": e_out, "fa2": e_lat})  # middle layer
+        self.layer1.dfa({"fa1": e_out, "fa2": e_lat})  # bottom layer
 
 
 class Decoder(nn.Module):
@@ -275,7 +281,7 @@ test_model(model, X, Y)
 
 # Training loop
 optm_args = [
-    {"params": model.encoder.parameters(), "lr": 1e-4},
+    {"params": model.encoder.parameters(), "lr": 1e-5},
     {"params": model.decoder.parameters(), "lr": 1e-3},
 ]
 optm = Adam(optm_args)
