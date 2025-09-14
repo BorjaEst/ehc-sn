@@ -128,10 +128,10 @@ class Layer(nn.Module):
         self.neurons = self.activation(currents)
         return self.neurons
 
-    def target(self, y: Dict[str, Tensor]) -> None:
-        h2_hat = self.activation(self.synapses["inputs"](y["inputs"]))  # Need to be the same syns
-        # h2_hat = self.forward(y)  Uncomment if state update does not impact
-        mse_loss(h2_hat, y["fb"].detach()).backward(retain_graph=True)
+    def target(self, y: Dict[str, Tensor]) -> Tensor:
+        h_hat = self.activation(self.synapses["inputs"](y["inputs"].detach()))
+        # h_hat = self.forward(y)  Uncomment if state update does not impact
+        return mse_loss(h_hat, y["fb"].detach())
 
     def dfa(self, e: Dict[str, Tensor]) -> None:
         delta: Tensor = torch.zeros_like(self.neurons)
@@ -148,19 +148,18 @@ class Encoder(nn.Module):
         self.layer2 = Layer(n_hidden[1], {"inputs": n_hidden[0], "fa": n_sensors})
         self.latent = Layer(n_latents, {"inputs": n_hidden[1], "fa": n_sensors})
 
+        # Freeze DFA feedback weights (fixed random projections)
+        for layer in (self.layer1, self.layer2, self.latent):
+            for p in layer.synapses["fa"].parameters():
+                p.requires_grad = False
+
     def forward(self, sensors: Tensor) -> Tensor:
         x = self.layer1({"inputs": sensors})
         x = self.layer2({"inputs": x})
         return self.latent({"inputs": x})
 
     def feedback(self, sensors: Tensor, decoder: "Decoder") -> Tensor:
-        sparsity_error = (self.latent.neurons - SPARSITY_TARGET).detach()
-        reconstruction_error = (decoder.output.neurons - sensors).detach()
-        # self.layer1.dfa({"fb": reconstruction_error, "fb2": SPARSITY_WEIGHT * sparsity_error})
-        # self.layer2.dfa({"fb": reconstruction_error, "fb2": SPARSITY_WEIGHT * sparsity_error})
-        # self.layer2.dfa({"fb": reconstruction_error, "fb2": SPARSITY_WEIGHT * sparsity_error})
-        # (SPARSITY_WEIGHT * kl_loss(self.latent.neurons)).backward()
-        stop = 1
+        pass
 
 
 class Decoder(nn.Module):
@@ -176,9 +175,10 @@ class Decoder(nn.Module):
         return self.output({"inputs": x})
 
     def feedback(self, sensors: Tensor, encoder: Encoder) -> None:
-        self.layer2.target({"fb": encoder.layer2.neurons, "inputs": encoder.latent.neurons})
-        self.layer1.target({"fb": encoder.layer1.neurons, "inputs": encoder.layer2.neurons})
-        self.output.target({"fb": sensors, "inputs": encoder.layer1.neurons})
+        loss_l2 = self.layer2.target({"fb": encoder.layer2.neurons, "inputs": encoder.latent.neurons})
+        loss_l1 = self.layer1.target({"fb": encoder.layer1.neurons, "inputs": encoder.layer2.neurons})
+        loss_output = self.output.target({"fb": sensors, "inputs": encoder.layer1.neurons})
+        (loss_l2 + loss_l1 + loss_output).backward()
 
 
 class Autoencoder(nn.Module):
@@ -198,7 +198,7 @@ class Autoencoder(nn.Module):
         self.encoder.feedback(sensors, self.decoder)
         self.decoder.feedback(sensors, self.encoder)
         # mse_loss(self.sorting(self.decoder.output.neurons), sensors).backward()
-        (SPARSITY_WEIGHT * kl_loss(self.encoder.latent.neurons)).backward()
+        # (SPARSITY_WEIGHT * kl_loss(self.encoder.latent.neurons)).backward()
 
 
 # -------------------------------------------------------------------------------------------
