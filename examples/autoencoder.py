@@ -157,9 +157,9 @@ class Encoder(nn.Module):
 
     def feedback(self, sensors: Tensor, decoder: "Decoder") -> Tensor:
         e_out = (decoder.output.neurons - sensors).detach()
-        # self.latent.dfa({"fa": e_out})  # top layer
-        # self.layer2.dfa({"fa": e_out})  # middle layer
-        # self.layer1.dfa({"fa": e_out})  # bottom layer
+        self.latent.dfa({"fa": e_out})  # top layer
+        self.layer2.dfa({"fa": e_out})  # middle layer
+        self.layer1.dfa({"fa": e_out})  # bottom layer
 
 
 class Decoder(nn.Module):
@@ -273,7 +273,11 @@ print(model)
 test_model(model, X, Y)
 
 # Training loop
-optm = Adam(model.parameters(), lr=LR)
+optm_args = [
+    {"params": model.encoder.parameters(), "lr": 1e-4},
+    {"params": model.decoder.parameters(), "lr": 1e-3},
+]
+optm = Adam(optm_args)
 train_loop(optm, model, dl)
 
 # Test the model
