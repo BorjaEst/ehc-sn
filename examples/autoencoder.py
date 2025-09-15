@@ -238,14 +238,8 @@ def train_step(optm: Optimizer, model: nn.Module, batch) -> List[Tensor]:
     # Reconstruction error (normalize)
     error = (output - sensors).detach()
     error -= error.mean(dim=0, keepdim=True)
-    error /= error.std(dim=0, keepdim=True).clamp_min(1e-3)
 
-    # Call feedback to propagate errors
     model.feedback(sensors, error)
-
-    # tame spikes from DFA/local targets
-    nn.utils.clip_grad_norm_(model.encoder.parameters(), max_norm=1.0)
-    nn.utils.clip_grad_norm_(model.decoder.parameters(), max_norm=1.0)
     optm.step()
 
     # Compute losses for logging
@@ -304,7 +298,7 @@ test_model(model, X, Y)
 
 # Training loop
 optm_args = [
-    {"params": model.encoder.parameters(), "lr": 1e-4},
+    {"params": model.encoder.parameters(), "lr": 2e-5},
     {"params": model.decoder.parameters(), "lr": 1e-3},
 ]
 optm = Adam(optm_args)
