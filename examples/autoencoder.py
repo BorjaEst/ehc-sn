@@ -1,5 +1,5 @@
 import math
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 import matplotlib.pyplot as plt
 import torch
@@ -19,8 +19,6 @@ HIDDEN_DIM = 512
 LATENT_DIM = 32
 BATCH_SIZE = 16
 EPOCHS = 80
-SPARSITY_WEIGHT = 0.1
-SPARSITY_TARGET = 0.05
 
 
 # -------------------------------------------------------------------------------------------
@@ -100,13 +98,38 @@ def make_figure(original: Tensor, reconstruction: Tensor, n_samples: int = 4) ->
     plt.show()
 
 
+class ModuleFB(nn.Module):
+    def __init__(self, units: int, synapses: Dict[str, int]):
+        super().__init__()
+        for k, v in synapses.items():
+            fb_weights_shape = torch.Size([units, v])
+            self.register_buffer(k, torch.Tensor(fb_weights_shape))
+        self.reset_weigths()
+
+    def __getitem__(self, key: str) -> Tensor:
+        return getattr(self, key)
+
+    def keys(self) -> Iterable[str]:
+        return self._buffers.keys()
+
+    def items(self) -> Iterable[Tuple[str, Tensor]]:
+        for k in self.keys():
+            yield k, self[k]
+
+    def reset_weigths(self):
+        for k in self.keys():
+            torch.nn.init.kaiming_uniform_(self[k])
+            with torch.no_grad():
+                self[k].div_(self[k].norm(dim=1, keepdim=True).clamp_min(1e-6))
+                self[k].mul_(0.1)
+
+
 def mse_loss(activations: Tensor, sensors: Tensor) -> Tensor:
     return nn.functional.mse_loss(activations, sensors, reduction="mean")
 
 
-def kl_loss(embedding: Tensor) -> Tensor:
-    avg_activation = torch.mean(embedding, dim=0)  # Average across batch
-    return torch.mean(torch.abs(avg_activation - SPARSITY_TARGET))
+def rate_loss(activations: Tensor, rate: float = 0.1) -> Tensor:
+    return ((activations.mean(dim=0) - rate) ** 2).mean()
 
 
 # -------------------------------------------------------------------------------------------
@@ -115,64 +138,59 @@ def kl_loss(embedding: Tensor) -> Tensor:
 
 
 class Layer(nn.Module):
-    def __init__(self, units: int, synapses: Dict[str, int]):
+    def __init__(self, units: int, x: Dict[str, int], fb: Dict[str, int] = None, activation: nn.Module = None):
         super().__init__()
-        self.synapses = nn.ModuleDict({k: nn.Linear(v, units) for k, v in synapses.items()})
+        self.synapses = nn.ModuleDict({k: nn.Linear(v, units) for k, v in x.items()})
+        self.feedback = ModuleFB(units, synapses=fb) if fb is not None else None
+        self.units = units
+        self.register_buffer("currents", torch.zeros(BATCH_SIZE, units))  # State of currents
         self.register_buffer("neurons", torch.zeros(BATCH_SIZE, units))  # State of neurons
-        self.activation = nn.Tanh()
+        self.activation = nn.Tanh() if activation is None else activation
 
     def forward(self, x: Dict[str, Tensor]) -> Tensor:
-        currents = self.synapses["inputs"](x["inputs"].detach())
-        self.neurons = self.activation(currents)
+        self.currents = 1e-3 * torch.ones_like(self.currents)  # Small leak to avoid dead neurons
+        for syn in x:  # Loop over input synapse types to calculate total current
+            self.currents += self.synapses[syn](x[syn].detach())  # Detach pre-synaptic
+        self.neurons = self.activation(self.currents)  # Update neuron states
         return self.neurons
 
-    def target(self, y: Dict[str, Tensor]) -> None:
-        h_hat = self.activation(self.synapses["inputs"](y["inputs"].detach()))
-        # h_hat = self.forward(y)  Uncomment if state update does not impact
-        mse_loss(h_hat, y["fb"].detach()).backward(retain_graph=True)
-
     def dfa(self, e: Dict[str, Tensor]) -> None:
-        delta = torch.zeros_like(self.neurons)
-        for syn in e:
-            delta += torch.matmul(e[syn], self.synapses[syn].weight.detach().t())
-        delta = torch.clamp(delta, -0.2, 0.2)  # Gradient clipping
-        torch.autograd.backward(self.neurons, delta, retain_graph=True)
+        delta = torch.zeros_like(self.currents)
+        for syn in e:  # Loop over feedback error types to calculate total delta
+            delta += torch.matmul(e[syn], self.feedback[syn].t())
+        torch.autograd.backward(self.currents, delta)
+
+    def target(self, x: Dict[str, Tensor], target: Tensor) -> None:
+        ctxt_currents = torch.zeros_like(self.currents)
+        for syn in x:  # Loop over input synapse types to calculate total current
+            ctxt_currents += self.synapses[syn](x[syn].detach())  # Detach pre-synaptic
+        mse_loss(ctxt_currents, target.detach()).backward()
 
 
 class Encoder(nn.Module):
     def __init__(self, n_sensors: int, n_hidden: List[int], n_latents: int):
         super().__init__()
-        self.layer1 = Layer(n_hidden[0], {"inputs": n_sensors, "fa1": n_sensors, "fa2": n_latents})
-        self.layer2 = Layer(n_hidden[1], {"inputs": n_hidden[0], "fa1": n_sensors, "fa2": n_latents})
-        self.latent = Layer(n_latents, {"inputs": n_hidden[1], "fa1": n_sensors, "fa2": n_latents})
-
-        # I WOULD LIKE TO REMOVE THIS VIA DETACHING TENSORS
-        # Freeze all feedback weights (both 'fa' and 'fa_latent')
-        for layer in (self.layer1, self.layer2, self.latent):
-            for name, mod in layer.synapses.items():
-                if name.startswith("fa"):
-                    for p in mod.parameters():
-                        p.requires_grad = False
+        self.layer1 = Layer(n_hidden[0], {"input": n_sensors}, {"dfa": n_sensors, "fr": n_latents})
+        self.layer2 = Layer(n_hidden[1], {"input": n_hidden[0]}, {"dfa": n_sensors, "fr": n_latents})
+        self.latent = Layer(n_latents, {"input": n_hidden[1]}, {"dfa": n_sensors, "fr": n_latents})
 
     def forward(self, sensors: Tensor) -> Tensor:
-        x = self.layer1({"inputs": sensors})
-        x = self.layer2({"inputs": x})
-        return self.latent({"inputs": x})
+        x = self.layer1({"input": sensors})
+        x = self.layer2({"input": x})
+        return self.latent({"input": x})
 
-    def feedback(self, sensors: Tensor, decoder: "Decoder") -> Tensor:
-        e_out = (decoder.output.neurons - sensors).detach()
-        e_lat = SPARSITY_WEIGHT * torch.tanh(self.latent.neurons - SPARSITY_TARGET).detach()
-        self.latent.dfa({"fa1": e_out, "fa2": e_lat})  # top layer
-        self.layer2.dfa({"fa1": e_out, "fa2": e_lat})  # middle layer
-        self.layer1.dfa({"fa1": e_out, "fa2": e_lat})  # bottom layer
+    def feedback(self, reconstruction: Tensor) -> None:
+        self.latent.dfa({"dfa": reconstruction})
+        self.layer2.dfa({"dfa": reconstruction})
+        self.layer1.dfa({"dfa": reconstruction})
 
 
 class Decoder(nn.Module):
     def __init__(self, n_sensors: int, n_hidden: List[int], n_latents: int):
         super().__init__()
-        self.layer2 = Layer(n_hidden[1], {"inputs": n_latents, "fb": n_hidden[1]})
-        self.layer1 = Layer(n_hidden[0], {"inputs": n_hidden[1], "fb": n_hidden[0]})
-        self.output = Layer(n_sensors, {"inputs": n_hidden[0], "fb": n_sensors})
+        self.layer2 = Layer(n_hidden[1], {"inputs": n_latents})
+        self.layer1 = Layer(n_hidden[0], {"inputs": n_hidden[1]})
+        self.output = Layer(n_sensors, {"inputs": n_hidden[0]}, activation=nn.GELU())
 
     def forward(self, latent: Tensor) -> Tensor:
         x = self.layer2({"inputs": latent})
@@ -180,9 +198,9 @@ class Decoder(nn.Module):
         return self.output({"inputs": x})
 
     def feedback(self, sensors: Tensor, encoder: Encoder) -> None:
-        self.layer2.target({"fb": encoder.layer2.neurons, "inputs": encoder.latent.neurons})
-        self.layer1.target({"fb": encoder.layer1.neurons, "inputs": encoder.layer2.neurons})
-        self.output.target({"fb": sensors, "inputs": encoder.layer1.neurons})
+        self.layer2.target({"inputs": encoder.latent.neurons}, target=encoder.layer2.currents)
+        self.layer1.target({"inputs": encoder.layer2.neurons}, target=encoder.layer1.currents)
+        self.output.target({"inputs": encoder.layer1.neurons}, target=sensors)
 
 
 class Autoencoder(nn.Module):
@@ -190,19 +208,15 @@ class Autoencoder(nn.Module):
         super().__init__(*args, **kwargs)
         self.encoder = Encoder(n_sensors, [HIDDEN_DIM, HIDDEN_DIM], n_latents)
         self.decoder = Decoder(n_sensors, [HIDDEN_DIM, HIDDEN_DIM], n_latents)
-        # self.sorting = nn.Linear(n_sensors, n_sensors)  # Ideally SE(n) trans
 
     def forward(self, sensors: Tensor) -> Tuple[Tensor, Tensor]:
         latent = self.encoder(sensors)
         reconstruction = self.decoder(latent)
         return reconstruction, latent
-        # return self.sorting(reconstruction), latent
 
-    def feedback(self, sensors: Tensor) -> List[Tensor]:
-        self.encoder.feedback(sensors, self.decoder)
+    def feedback(self, sensors: Tensor, error: Tensor) -> None:
+        self.encoder.feedback(error)
         self.decoder.feedback(sensors, self.encoder)
-        # mse_loss(self.sorting(self.decoder.output.neurons), sensors).backward()
-        # (SPARSITY_WEIGHT * kl_loss(self.encoder.latent.neurons)).backward()
 
 
 # -------------------------------------------------------------------------------------------
@@ -220,12 +234,23 @@ def train_step(optm: Optimizer, model: nn.Module, batch) -> List[Tensor]:
     # Forward pass through the EHC model
     optm.zero_grad()
     output, embedding = model(sensors)
-    model.feedback(sensors)
+
+    # Reconstruction error (normalize)
+    error = (output - sensors).detach()
+    error -= error.mean(dim=0, keepdim=True)
+    error /= error.std(dim=0, keepdim=True).clamp_min(1e-3)
+
+    # Call feedback to propagate errors
+    model.feedback(sensors, error)
+
+    # tame spikes from DFA/local targets
+    nn.utils.clip_grad_norm_(model.encoder.parameters(), max_norm=1.0)
+    nn.utils.clip_grad_norm_(model.decoder.parameters(), max_norm=1.0)
     optm.step()
 
     # Compute losses for logging
     loss_reconstruction = mse_loss(output, sensors)
-    loss_sparsity = kl_loss(embedding)
+    loss_sparsity = rate_loss(embedding)
 
     return [loss_reconstruction, loss_sparsity]
 
@@ -258,8 +283,8 @@ def test_model(model: nn.Module, X: Tensor, Y: Tensor) -> None:
     with torch.no_grad():
         xb, yb = next(iter(DataLoader(TensorDataset(X, Y), batch_size=BATCH_SIZE)))
         output, embeding = model(xb)
-        l1, l2 = mse_loss(output, xb), kl_loss(embeding)
-        print(f"Test | Recon: {l1:.6f} | Sparsity: {l2:.6f}")
+        l1, l2 = mse_loss(output, xb), rate_loss(embeding)
+        print(f"Test | Reconstruction: {l1:.6f} | Sparsity: {l2:.6f}")
 
 
 # -------------------------------------------------------------------------------------------
@@ -279,7 +304,7 @@ test_model(model, X, Y)
 
 # Training loop
 optm_args = [
-    {"params": model.encoder.parameters(), "lr": 1e-5},
+    {"params": model.encoder.parameters(), "lr": 1e-4},
     {"params": model.decoder.parameters(), "lr": 1e-3},
 ]
 optm = Adam(optm_args)
