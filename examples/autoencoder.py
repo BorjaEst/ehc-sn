@@ -19,7 +19,6 @@ HIDDEN_DIM = 512
 LATENT_DIM = 32
 BATCH_SIZE = 16
 EPOCHS = 80
-LR = 1e-3
 SPARSITY_WEIGHT = 0.1
 SPARSITY_TARGET = 0.05
 
@@ -120,8 +119,7 @@ class Layer(nn.Module):
         super().__init__()
         self.synapses = nn.ModuleDict({k: nn.Linear(v, units) for k, v in synapses.items()})
         self.register_buffer("neurons", torch.zeros(BATCH_SIZE, units))  # State of neurons
-        self.activation = nn.ReLU()
-        self.activation = nn.Identity()  # Linear activation using PyTorch Identity
+        self.activation = nn.Tanh()
 
     def forward(self, x: Dict[str, Tensor]) -> Tensor:
         currents = self.synapses["inputs"](x["inputs"].detach())
