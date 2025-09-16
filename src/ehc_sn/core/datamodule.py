@@ -2,7 +2,7 @@ import collections.abc
 import math
 import random
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Literal, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Type, Union
 
 import lightning.pytorch as pl
 import numpy as np
@@ -45,64 +45,8 @@ class DataModuleParams(BaseModel):
 
 
 # -------------------------------------------------------------------------------------------
-class GeneratedDataset(Dataset):
-    """
-    Dataset that generates data on-demand using a generator.
-
-    This dataset creates samples dynamically using the provided generator,
-    ensuring memory efficiency for large datasets.
-    """
-
-    def __init__(self, generator, num_samples: int, seed: Optional[int] = None):
-        """
-        Initialize dataset with generator.
-
-        Args:
-            generator: Data generator instance with generate() method
-            num_samples: Number of samples in this dataset
-            seed: Random seed for reproducible generation
-        """
-        self.generator = generator
-        self.num_samples = num_samples
-        self.seed = seed
-
-        # Set seed if provided for reproducible generation
-        if seed is not None:
-            torch.manual_seed(seed)
-            np.random.seed(seed)
-            random.seed(seed)
-
-    def __len__(self) -> int:
-        """Return the number of samples in the dataset."""
-        return self.num_samples
-
-    def __getitem__(self, idx: int) -> Any:
-        """
-        Generate and return a single sample.
-
-        Args:
-            idx: Sample index
-
-        Returns:
-            Generated sample from the generator
-        """
-        if idx >= self.num_samples:
-            raise IndexError(f"Index {idx} out of range for dataset of size {self.num_samples}")
-
-        # Generate sample using the generator
-        # For reproducible results, set seed based on idx
-        if self.seed is not None:
-            sample_seed = self.seed + idx
-            torch.manual_seed(sample_seed)
-            np.random.seed(sample_seed)
-            random.seed(sample_seed)
-
-        return self.generator.generate()
-
-
-# -------------------------------------------------------------------------------------------
 class BaseDataModule(pl.LightningDataModule):
-    def __init__(self, generator, params: Optional[DataModuleParams] = None):
+    def __init__(self, generator: Callable[[int], Dataset], params: Optional[DataModuleParams] = None):
         super().__init__()
         self.params = DataModuleParams() if params is None else params
         self.datasets = {"fit": None, "validate": None, "test": None, "predict": None}
@@ -114,14 +58,12 @@ class BaseDataModule(pl.LightningDataModule):
 
     def gen_dataset(self, n_samples: int) -> Tuple[Dataset, Dict[str, Any]]:
         # create dataset
-        dataset = GeneratedDataset(self.generator, n_samples)
+        dataset = self.generator(n_samples)
 
-        # count number of classes
-        # build vocabulary
         # apply transforms (defined explicitly in your datamodule)
-        pass  # TODO
+        metadata = {}  # Can be extended for future use (class counts, vocabulary, etc.)
 
-        return dataset, {}
+        return dataset, metadata
 
     def setup(self, stage: Optional[str] = None):
         if stage in (None, "fit"):
@@ -162,14 +104,9 @@ class BaseDataModule(pl.LightningDataModule):
 # -------------------------------------------------------------------------------------------
 if __name__ == "__main__":
     # Example usage for testing
-    class DummyGenerator:
-        """Simple generator for testing purposes."""
-
-        def generate(self):
-            return torch.randn(3, 32, 32)  # Example tensor
 
     # Create generator and data module
-    generator = DummyGenerator()
+    generator = lambda n: TensorDataset(torch.randn(n, 10), torch.randn(n, 10))
     params = DataModuleParams(num_samples=1000, batch_size=32)
     dm = BaseDataModule(generator, params)
 
