@@ -25,21 +25,6 @@ class Experiment(BaseModel):
     figure_1: Figure1Params = Field(default_factory=Figure1Params, description="Reconstruction figure parameters")
     figure_2: Figure2Params = Field(default_factory=Figure2Params, description="Sparsity figure parameters")
 
-    @property
-    def input_units(self) -> int:
-        """Input dimensionality derived from model parameters."""
-        return self.model.output_units
-
-    @property
-    def output_units(self) -> int:
-        """Output dimensionality derived from model parameters."""
-        return self.model.output_units
-
-    @property
-    def latent_units(self) -> int:
-        """Latent dimensionality derived from model parameters."""
-        return self.model.latent_units
-
     def run(self):
         """Run the experiment with the specified settings."""
         # Setup data and training
