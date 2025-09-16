@@ -70,7 +70,7 @@ class TrainerParams(BaseModel):
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
-    experiment_name: str = Field(default="hybrid_feedback", description="Experiment name")
+    experiment_name: str = Field(..., description="Experiment name")
     checkpoint_freq: int = Field(default=5, ge=1, le=50, description="Checkpoint frequency")
 
 
