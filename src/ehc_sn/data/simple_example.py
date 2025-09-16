@@ -1,21 +1,11 @@
-import collections.abc
 import math
-import random
-from abc import ABC, abstractmethod
-from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Tuple, Type, Union
 
-import lightning.pytorch as pl
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
 from pydantic import BaseModel, Field, field_validator, model_validator
-from torch import Tensor, nn
-from torch.optim import Adam, Optimizer
-from torch.utils.data import DataLoader, Dataset, TensorDataset
-
-from ehc_sn.modules import dfa, srtp
-from ehc_sn.trainers.feed_forward import FeedbackTainer
+from torch import Tensor
+from torch.utils.data import DataLoader, Dataset
 
 
 # -------------------------------------------------------------------------------------------
@@ -127,53 +117,6 @@ class DataGenerator:
 
 
 # -------------------------------------------------------------------------------------------
-def create_dataset(n: int, input_dim: int, latent_dim: int, seed: int = 42) -> Tuple[Tensor, Tensor]:
-    """Create batch dataset (legacy function, prefer SyntheticDataset for new code).
-
-    Args:
-        n: Number of samples
-        input_dim: Input dimensionality
-        latent_dim: Latent dimensionality
-        seed: Random seed for reproducibility
-
-    Returns:
-        Tuple of (input, target) tensors
-    """
-    # Create sparse latent factors
-    g = torch.Generator().manual_seed(seed)
-    latent = torch.zeros(n, latent_dim)
-
-    # Each sample activates only a subset of latent dimensions (sparsity)
-    n_active_per_sample = max(1, latent_dim // 4)  # 25% sparsity in latent space
-
-    for i in range(n):
-        # Randomly select which latent dimensions to activate
-        active_dims = torch.randperm(latent_dim, generator=g)[:n_active_per_sample]
-        latent[i, active_dims] = torch.randn(n_active_per_sample, generator=g).abs()  # Positive activations
-
-    # Create feature groups - each latent dimension controls a group of input features
-    features_per_latent = input_dim // latent_dim
-    x = torch.zeros(n, input_dim)
-
-    for lat_idx in range(latent_dim):
-        # Define which input features this latent dimension controls
-        start_feat = lat_idx * features_per_latent
-        end_feat = min(start_feat + features_per_latent, input_dim)
-
-        # Generate patterns for this feature group
-        for feat_idx in range(start_feat, end_feat):
-            # Create distinct patterns with some correlation within groups
-            pattern_weight = 0.8 + 0.4 * torch.sin(torch.tensor(feat_idx * math.pi / features_per_latent))
-            x[:, feat_idx] = latent[:, lat_idx] * pattern_weight
-
-    # Add small amount of noise and ensure values are in [0, 1]
-    noise = 0.05 * torch.randn(x.shape, generator=g)
-    x = torch.clamp(x + noise, 0.0, 1.0)
-
-    return x, x
-
-
-# -------------------------------------------------------------------------------------------
 def make_figure(original: Tensor, reconstruction: Tensor, n_samples: int = 4) -> None:
     """Plot original batch data vs reconstructions side by side."""
     # Convert to numpy for plotting
@@ -239,22 +182,3 @@ if __name__ == "__main__":
 
     # Visualize some samples
     make_figure(batch_x, batch_y, n_samples=4)
-
-    print("\n=== Testing Legacy create_dataset Function ===")
-
-    # Test legacy function for comparison
-    x_legacy, y_legacy = create_dataset(100, 64, 16, seed=42)
-    print(f"Legacy shapes: x={x_legacy.shape}, y={y_legacy.shape}")
-
-    # Create TensorDataset for comparison
-    legacy_dataset = TensorDataset(x_legacy, y_legacy)
-    legacy_dataloader = DataLoader(legacy_dataset, batch_size=32, shuffle=False)
-
-    # Compare first samples (should be very similar with same seed)
-    legacy_batch_x, legacy_batch_y = next(iter(legacy_dataloader))
-    print(f"Legacy batch shapes: x={legacy_batch_x.shape}, y={legacy_batch_y.shape}")
-
-    # Check if first samples are similar (they should be with same seed)
-    x_first_new, _ = dataset[0]
-    x_first_legacy = legacy_batch_x[0]
-    print(f"First samples similar: {torch.allclose(x_first_new, x_first_legacy, atol=1e-4)}")

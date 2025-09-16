@@ -17,7 +17,7 @@ class DataModuleParams(BaseModel):
     model_config = {"extra": "forbid", "arbitrary_types_allowed": True}
 
     # Dataset Settings
-    num_samples: int = Field(default=4000, ge=100, le=50000, description="Total number of samples")
+    num_samples: int = Field(default=400, ge=100, le=50000, description="Total number of samples")
     val_split: float = Field(default=0.1, ge=0.05, le=0.3, description="Validation split fraction")
     test_split: float = Field(default=0.1, ge=0.05, le=0.3, description="Test split fraction")
     n_predict: int = Field(default=10, ge=0, le=10000, description="Number of prediction samples")

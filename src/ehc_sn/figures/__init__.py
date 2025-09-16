@@ -1,44 +1,52 @@
-"""Visualization and plotting tools for entorhinal-hippocampal circuit analysis.
+"""Figures module for ehc_sn library.
 
-This module provides comprehensive visualization capabilities for analyzing and
-presenting results from entorhinal-hippocampal circuit models. It includes tools
-for plotting cognitive maps, model performance metrics, neural activations, and
-other spatial navigation-related visualizations.
+This module provides figure classes for visualizing different types of data and results
+from the entorhinal-hippocampal circuit models. Each figure class encapsulates both
+the plotting logic and configuration parameters.
 
-The figures module integrates with matplotlib and seaborn to provide publication-
-quality plots and interactive visualizations for model analysis, debugging, and
-result presentation. All plotting functions are designed to work seamlessly with
-the data structures and outputs from the EHC modeling framework.
+Available figure types:
+- ReconstructionTraceFigure: 1D signal reconstruction comparison
+- ReconstructionMapFigure: 2D spatial data reconstruction comparison
+- SimpleExampleFigure: Specialized figure for simple_example data module
 
 Key Features:
-    - Cognitive map visualization with customizable styling and overlays
-    - Model performance plotting (loss curves, accuracy metrics, etc.)
-    - Neural activation visualization (firing patterns, connectivity maps)
-    - Spatial navigation trajectory plotting and analysis
-    - Publication-ready figure generation with consistent styling
+    - One class per figure type with encapsulated plotting logic
+    - Pydantic-based parameter configuration and validation
+    - Matplotlib/Seaborn integration for publication-quality plots
+    - Modular design allowing easy extension of new figure types
+    - Consistent API across all figure classes
 
-Modules:
-    cognitive_maps: Visualization tools for spatial cognitive representations
+Design Principles:
+    - Each figure accepts tensors directly (no adapters needed)
+    - Figures create their own canvas but can work with external axes
+    - Minimal inheritance hierarchy with shared utilities in BaseFigure
+    - Domain-specific figures organized by data dimensionality
 
-Visualization Principles:
-    - Consistent color schemes and styling across all plots
-    - Support for both static and interactive visualizations
-    - Configurable plot parameters via Pydantic models
-    - Integration with matplotlib/seaborn ecosystem
-    - Publication-quality output formatting
-
-Examples:
-    >>> from ehc_sn.figures import cognitive_maps
-    >>> from ehc_sn.figures.cognitive_maps import CognitiveMapFigure
+Usage:
+    >>> from ehc_sn.figures import ReconstructionTraceFigure, ReconstructionTraceParams
     >>>
-    >>> # Create and display cognitive map visualization
-    >>> fig = CognitiveMapFigure(title="Spatial Navigation Results")
-    >>> fig.plot_obstacle_map(obstacle_data)
+    >>> params = ReconstructionTraceParams(n_samples=4, title="Results")
+    >>> figure = ReconstructionTraceFigure(params)
+    >>> fig = figure.plot(inputs, outputs)
     >>> fig.show()
 
-References:
-    - Visualization best practices for neuroscience data
-    - Spatial navigation analysis and presentation methods
+Extension:
+    To add new figure types:
+    1. Create new module: figures/my_figure.py
+    2. Inherit from BaseFigure and implement plot() method
+    3. Define specific parameters class if needed
+    4. Add imports to this __init__.py
 """
 
-from ehc_sn.figures import cognitive_maps
+from ehc_sn.figures.reconstruction_1d import ReconstructionTraceFigure, ReconstructionTraceParams
+from ehc_sn.figures.reconstruction_map import ReconstructionMapFigure, ReconstructionMapParams
+from ehc_sn.figures.sparsity import SparsityFigure, SparsityParams
+
+__all__ = [
+    "ReconstructionTraceFigure",
+    "ReconstructionTraceParams",
+    "ReconstructionMapFigure",
+    "ReconstructionMapParams",
+    "SparsityFigure",
+    "SparsityParams",
+]
