@@ -117,45 +117,8 @@ class DataGenerator:
 
 
 # -------------------------------------------------------------------------------------------
-def make_figure(original: Tensor, reconstruction: Tensor, n_samples: int = 4) -> None:
-    """Plot original batch data vs reconstructions side by side."""
-    # Convert to numpy for plotting
-    x = original.cpu().numpy()
-    y = reconstruction.cpu().numpy()
-
-    # Limit number of samples to plot
-    n_samples = min(n_samples, original.shape[0])
-
-    fig, axes = plt.subplots(2, n_samples, figsize=(n_samples * 3, 6))
-    if n_samples == 1:
-        axes = axes.reshape(2, 1)
-
-    for i in range(n_samples):
-        # Plot original data
-        axes[0, i].plot(x[i], "b-", linewidth=1, alpha=0.7, label="Original")
-        axes[0, i].set_title(f"Sample {i+1}")
-        axes[0, i].set_ylim(0, 1)
-        axes[0, i].grid(True, alpha=0.3)
-        if i == 0:
-            axes[0, i].set_ylabel("Original")
-
-        # Plot reconstruction
-        axes[1, i].plot(y[i], "r-", linewidth=1, alpha=0.7, label="Reconstruction")
-        axes[1, i].set_ylim(0, 1)
-        axes[1, i].set_xlabel("Feature Index")
-        axes[1, i].grid(True, alpha=0.3)
-        if i == 0:
-            axes[1, i].set_ylabel("Reconstructed")
-
-    # Calculate and display MSE in title
-    plt.suptitle(f"Data vs Reconstruction")
-    plt.tight_layout()
-    plt.show()
-
-
-# -------------------------------------------------------------------------------------------
 if __name__ == "__main__":
-    # Test both the new SyntheticDataset and legacy create_dataset function
+    # Test SyntheticDataset
     print("=== Testing SyntheticDataset (Recommended) ===")
 
     # Create parameters and generator
@@ -179,6 +142,3 @@ if __name__ == "__main__":
     # Get first batch and visualize
     batch_x, batch_y = next(iter(dataloader))
     print(f"Batch shapes: x={batch_x.shape}, y={batch_y.shape}")
-
-    # Visualize some samples
-    make_figure(batch_x, batch_y, n_samples=4)
