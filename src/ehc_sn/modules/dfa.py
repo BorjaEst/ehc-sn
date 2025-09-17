@@ -7,7 +7,7 @@ from torch import Tensor, nn
 
 # -------------------------------------------------------------------------------------------
 class Linear(nn.Linear):
-    def __init__(self, error_features: int, *args, device=None, dtype=None, **kwargs) -> None:
+    def __init__(self, *args, error_features: int, device=None, dtype=None, **kwargs) -> None:
         super().__init__(*args, device=device, dtype=dtype, **kwargs)
         self.error_features = error_features
         fb_weights = torch.zeros(error_features, self.out_features, device=device, dtype=dtype)
@@ -19,7 +19,7 @@ class Linear(nn.Linear):
         return super().forward(input.detach())
 
     def feedback(self, error: Tensor, context: Tensor) -> None:
-        delta = error @ self.fb_weight  # (batch_size, out_features)
+        delta = error.detach() @ self.fb_weight  # (batch_size, out_features)
         torch.autograd.backward(context, delta)
 
     def extra_repr(self) -> str:

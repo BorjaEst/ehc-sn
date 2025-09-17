@@ -42,9 +42,9 @@ class AutoencoderParams(BaseModel):
 class Encoder(nn.Module):
     def __init__(self, n_inputs: int, n_h1: int, n_h2: int, n_latents: int):
         super().__init__()
-        self.layer1 = ann.Layer(drtp.Linear(n_inputs, n_inputs, n_h1), nn.LeakyReLU(0.02))
-        self.layer2 = ann.Layer(drtp.Linear(n_inputs, n_h1, n_h2), nn.LeakyReLU(0.02))
-        self.latent = ann.Layer(drtp.Linear(n_inputs, n_h2, n_latents), nn.LeakyReLU(0.02))
+        self.layer1 = ann.Layer(drtp.Linear(n_inputs, n_h1, target_features=n_inputs), nn.GELU())
+        self.layer2 = ann.Layer(drtp.Linear(n_h1, n_h2, target_features=n_inputs), nn.GELU())
+        self.latent = ann.Layer(drtp.Linear(n_h2, n_latents, target_features=n_inputs), nn.GELU())
 
     def forward(self, sensors: Tensor) -> Tensor:
         x = self.layer1(sensors)
@@ -61,8 +61,8 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, n_outputs: int, n_h1: int, n_h2: int, n_latents: int):
         super().__init__()
-        self.layer2 = ann.Layer(drtp.Linear(n_outputs, n_latents, n_h2), nn.LeakyReLU(0.02))
-        self.layer1 = ann.Layer(drtp.Linear(n_outputs, n_h2, n_h1), nn.LeakyReLU(0.02))
+        self.layer2 = ann.Layer(drtp.Linear(n_latents, n_h2, target_features=n_outputs), nn.GELU())
+        self.layer1 = ann.Layer(drtp.Linear(n_h2, n_h1, target_features=n_outputs), nn.GELU())
         self.output = ann.Layer(nn.Linear(n_h1, n_outputs), nn.Sigmoid())
 
     def forward(self, latent: Tensor) -> Tensor:
