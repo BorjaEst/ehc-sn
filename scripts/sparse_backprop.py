@@ -1,12 +1,11 @@
 """
-Hybrid Feedback Autoencoder Training Script.
+Backpropagation Autoencoder Training Script.
 
-Trains a hybrid feedback autoencoder combining forward and feedback learning
-mechanisms for pattern separation and completion tasks. Supports CLI configuration
-and visualization of results.
+Trains a sparse autoencoder using standard backpropagation for pattern separation
+and completion tasks. Supports CLI configuration and visualization of results.
 
 Usage:
-    python scripts/hybrid_feedback.py [OPTIONS]
+    python scripts/bp_autoencoder.py [OPTIONS]
 """
 
 import matplotlib.pyplot as plt
@@ -21,13 +20,13 @@ from ehc_sn.figures.reconstruction_map import ReconstructionMapFigure
 from ehc_sn.figures.reconstruction_map import ReconstructionMapParams as Figure1Params
 from ehc_sn.figures.sparsity import SparsityFigure
 from ehc_sn.figures.sparsity import SparsityParams as Figure2Params
-from ehc_sn.models.ann.hybrid_autoencoder import Autoencoder, AutoencoderParams
-from ehc_sn.trainers.feed_forward import FeedbackTainer
+from ehc_sn.models.ann.sparse_autoencoder import Autoencoder, AutoencoderParams
+from ehc_sn.trainers.back_propagation import BackwardTrainer
 
 
 # -------------------------------------------------------------------------------------------
 class Experiment(BaseSettings):
-    """Configuration settings for the hybrid feedback autoencoder experiment."""
+    """Configuration settings for the backpropagation autoencoder experiment."""
 
     model_config = SettingsConfigDict(extra="forbid", cli_parse_args=True)
 
@@ -41,14 +40,14 @@ class Experiment(BaseSettings):
 
 # -------------------------------------------------------------------------------------------
 def main(experiment: Experiment) -> None:
-    """Run the complete hybrid feedback autoencoder experiment."""
+    """Run the complete backpropagation autoencoder experiment."""
     # Generate data and initialize components
     data_gen = DataGenerator(experiment.data)
     datamodule = BaseDataModule(data_gen, experiment.datamodule)
-    trainer = FeedbackTainer(experiment.trainer)
+    trainer = BackwardTrainer(experiment.trainer)
     model = Autoencoder(experiment.model, trainer)
 
-    # Train model using hybrid feedback algorithm
+    # Train model using backpropagation
     trainer.fit(model, datamodule)
 
     # Evaluate on test data
@@ -71,6 +70,6 @@ def main(experiment: Experiment) -> None:
 
 
 if __name__ == "__main__":
-    """Main entry point for the hybrid feedback autoencoder experiment."""
+    """Main entry point for the backpropagation autoencoder experiment."""
     experiment = Experiment()
     main(experiment)
