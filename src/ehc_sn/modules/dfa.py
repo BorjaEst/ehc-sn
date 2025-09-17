@@ -13,6 +13,7 @@ class Linear(nn.Linear):
         self.register_buffer("fb_weight", fb_weights)
         self.reset_weights()  # Initialize weights properly
 
+    # -----------------------------------------------------------------------------------
     def forward(self, input: Tensor) -> Tensor:
         return super().forward(input.detach())
 
