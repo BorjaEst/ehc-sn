@@ -101,7 +101,6 @@ class Autoencoder(pl.LightningModule):
         reconstruction, _ = outputs
         sensors, *_ = batch
         reconstruction_err = reconstruction - sensors.detach()
-        # reconstruction_err -= reconstruction_err.mean(dim=0, keepdim=True)
         return [reconstruction_err]
 
     def apply_feedback(self, feedback: List[Tensor]) -> None:
