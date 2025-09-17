@@ -20,9 +20,6 @@ class Linear(nn.Linear):
 
     def feedback(self, error: Tensor, context: Tensor) -> None:
         delta = error @ self.fb_weight  # (batch_size, out_features)
-        # Normalize by batch size to keep gradient scale stable
-        if delta.dim() > 0:
-            delta = delta / max(1, delta.shape[0])
         torch.autograd.backward(context, delta)
 
     def extra_repr(self) -> str:
