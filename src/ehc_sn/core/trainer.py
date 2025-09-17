@@ -66,7 +66,7 @@ class TrainerParams(BaseModel):
     model_config = {"extra": "forbid", "arbitrary_types_allowed": True}
 
     # Training Settings
-    max_epochs: int = Field(default=80, ge=1, le=1000, description="Maximum training epochs")
+    max_epochs: int = Field(default=200, ge=1, le=1000, description="Maximum training epochs")
 
     # Logging and Output Settings
     log_dir: str = Field(default="logs", description="Directory for experiment logs")
@@ -131,8 +131,8 @@ class BaseTrainer(abc.ABC):
         """
         return [
             callbacks.ModelCheckpoint(every_n_epochs=self.params.checkpoint_freq, save_weights_only=True),
-            callbacks.RichProgressBar(),
             callbacks.RichModelSummary(max_depth=2),
+            # callbacks.RichProgressBar(),  # Currently impacts training with 48% of training time
         ]
 
     # -----------------------------------------------------------------------------------
