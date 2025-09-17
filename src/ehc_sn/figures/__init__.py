@@ -38,11 +38,14 @@ Extension:
     4. Add imports to this __init__.py
 """
 
+from ehc_sn.figures.binary_map import BinaryMapFigure, BinaryMapParams
 from ehc_sn.figures.reconstruction_1d import ReconstructionTraceFigure, ReconstructionTraceParams
 from ehc_sn.figures.reconstruction_map import ReconstructionMapFigure, ReconstructionMapParams
 from ehc_sn.figures.sparsity import SparsityFigure, SparsityParams
 
 __all__ = [
+    "BinaryMapFigure",
+    "BinaryMapParams",
     "ReconstructionTraceFigure",
     "ReconstructionTraceParams",
     "ReconstructionMapFigure",
