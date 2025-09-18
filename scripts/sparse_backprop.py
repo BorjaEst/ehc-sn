@@ -33,9 +33,14 @@ class Experiment(BaseSettings):
     data: DataParams = Field(default_factory=DataParams, description="Data generation parameters")
     datamodule: DataModuleParams = Field(default_factory=DataModuleParams, description="Data module parameters")
     model: AutoencoderParams = Field(default_factory=AutoencoderParams, description="Autoencoder parameters")
-    trainer: TrainerParams = Field(default_factory=TrainerParams, description="Trainer parameters")
+
     figure_1: Figure1Params = Field(default_factory=Figure1Params, description="Reconstruction figure parameters")
     figure_2: Figure2Params = Field(default_factory=Figure2Params, description="Sparsity figure parameters")
+
+    trainer: TrainerParams = Field(
+        default_factory=lambda: TrainerParams(experiment_name="sparse_backprop"),
+        description="Trainer parameters",
+    )
 
 
 # -------------------------------------------------------------------------------------------
