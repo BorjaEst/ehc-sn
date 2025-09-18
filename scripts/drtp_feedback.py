@@ -11,7 +11,7 @@ from ehc_sn.figures.reconstruction_map import ReconstructionMapParams as Figure1
 from ehc_sn.figures.sparsity import SparsityFigure
 from ehc_sn.figures.sparsity import SparsityParams as Figure2Params
 from ehc_sn.models.ann.drtp_autoencoder import Autoencoder, AutoencoderParams
-from ehc_sn.trainers.feed_forward import DFATainer
+from ehc_sn.trainers.feed_forward import FeedbackTainer
 
 
 # -------------------------------------------------------------------------------------------
@@ -21,9 +21,14 @@ class Experiment(BaseSettings):
     data: DataParams = Field(default_factory=DataParams, description="Data generation parameters")
     datamodule: DataModuleParams = Field(default_factory=DataModuleParams, description="Data module parameters")
     model: AutoencoderParams = Field(default_factory=AutoencoderParams, description="Autoencoder parameters")
-    trainer: TrainerParams = Field(default_factory=TrainerParams, description="Trainer parameters")
+
     figure_1: Figure1Params = Field(default_factory=Figure1Params, description="Reconstruction figure parameters")
     figure_2: Figure2Params = Field(default_factory=Figure2Params, description="Sparsity figure parameters")
+
+    trainer: TrainerParams = Field(
+        default_factory=lambda: TrainerParams(experiment_name="drtp_feedback"),
+        description="Trainer parameters",
+    )
 
 
 # -------------------------------------------------------------------------------------------
@@ -31,7 +36,7 @@ def main(experiment: Experiment) -> None:
     # Generate data and initialize components
     data_gen = DataGenerator(experiment.data)
     datamodule = BaseDataModule(data_gen, experiment.datamodule)
-    trainer = DFATainer(experiment.trainer)
+    trainer = FeedbackTainer(experiment.trainer)
     model = Autoencoder(experiment.model, trainer)
 
     # Train till end of training or keyboard interup
