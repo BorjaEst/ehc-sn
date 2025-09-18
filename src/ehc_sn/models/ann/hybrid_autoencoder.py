@@ -1,7 +1,6 @@
 import math
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
 
-import lightning.pytorch as pl
 from lightning import pytorch as pl
 from pydantic import BaseModel, Field, field_validator
 from torch import Tensor, nn, utils, zeros_like
@@ -10,6 +9,7 @@ from torch.optim import Adam, Optimizer
 from ehc_sn.core import ann
 from ehc_sn.core.trainer import BaseTrainer
 from ehc_sn.modules import dfa, srtp
+from ehc_sn.modules.loss import GramianOrthogonalityLoss as SparsityLoss
 
 
 # -------------------------------------------------------------------------------------------
@@ -21,6 +21,10 @@ class AutoencoderParams(BaseModel):
     layer2_units: int = Field(default=512, gt=0, description="Number of hidden units per layer.")
     layer1_units: int = Field(default=1024, gt=0, description="Number of hidden units per layer.")
     output_shape: List[int] = Field([25, 25], description="Dimensionality of the input and output.")
+
+    # Gramian orthogonality loss parameters
+    sparsity_weight: float = Field(5e-2, ge=0, le=1, description="Weight for Gramian orthogonality term.")
+    gramian_center: bool = Field(True, description="Center activations before normalization.")
 
     # Training parameters
     encoder_lr: float = Field(2e-6, description="Learning rate for the encoder.")
@@ -42,42 +46,36 @@ class AutoencoderParams(BaseModel):
 class Encoder(nn.Module):
     def __init__(self, n_inputs: int, n_h1: int, n_h2: int, n_latents: int):
         super().__init__()
-        self.layer1 = ann.Layer(dfa.Linear(n_inputs, n_inputs, n_h1), nn.LeakyReLU(0.02))
-        self.layer2 = ann.Layer(dfa.Linear(n_inputs, n_h1, n_h2), nn.LeakyReLU(0.02))
-        self.latent = ann.Layer(dfa.Linear(n_inputs, n_h2, n_latents), nn.LeakyReLU(0.02))
+        self.layer1 = ann.Layer(dfa.Linear(n_inputs, n_h1, error_features=n_inputs), nn.GELU())
+        self.layer2 = ann.Layer(dfa.Linear(n_h1, n_h2, error_features=n_inputs), nn.GELU())
+        self.latent = ann.Layer(dfa.Linear(n_h2, n_latents, error_features=n_inputs), nn.GELU())
 
     def forward(self, sensors: Tensor) -> Tensor:
         x = self.layer1(sensors)
-        # x = nn.LayerNorm(x.size(1)).to(x.device)(x)
         x = self.layer2(x)
-        # x = nn.LayerNorm(x.size(1)).to(x.device)(x)
         return self.latent(x)
 
     def feedback(self, reconstruction_err: Tensor) -> None:
-        self.latent.synapses.feedback(reconstruction_err, context=self.latent.currents)
-        self.layer2.synapses.feedback(reconstruction_err, context=self.layer2.currents)
-        self.layer1.synapses.feedback(reconstruction_err, context=self.layer1.currents)
+        self.layer2.synapses.feedback(reconstruction_err, context=self.layer2.neurons)
+        self.layer1.synapses.feedback(reconstruction_err, context=self.layer1.neurons)
 
 
 # -------------------------------------------------------------------------------------------
 class Decoder(nn.Module):
     def __init__(self, n_outputs: int, n_h1: int, n_h2: int, n_latents: int):
         super().__init__()
-        self.layer2 = ann.Layer(srtp.Linear(n_latents, n_h2), nn.LeakyReLU(0.02))
-        self.layer1 = ann.Layer(srtp.Linear(n_h2, n_h1), nn.LeakyReLU(0.02))
-        self.output = ann.Layer(srtp.Linear(n_h1, n_outputs), nn.Sigmoid())
+        self.layer2 = ann.Layer(srtp.Linear(n_latents, n_h2), nn.GELU())
+        self.layer1 = ann.Layer(srtp.Linear(n_h2, n_h1), nn.GELU())
+        self.output = ann.Layer(nn.Linear(n_h1, n_outputs), nn.Sigmoid())
 
     def forward(self, latent: Tensor) -> Tensor:
         x = self.layer2(latent)
-        # x = nn.LayerNorm(x.size(1)).to(x.device)(x)
         x = self.layer1(x)
-        # x = nn.LayerNorm(x.size(1)).to(x.device)(x)
-        return self.output(x)
+        return self.output(x.detach())
 
-    def feedback(self, sensors: Tensor, encoder: Encoder) -> None:
-        self.layer2.synapses.feedback(encoder.layer2.currents, context=encoder.latent.neurons)
-        self.layer1.synapses.feedback(encoder.layer1.currents, context=encoder.layer2.neurons)
-        self.output.synapses.feedback(sensors, context=encoder.layer1.neurons)
+    def feedback(self, encoder: Encoder) -> None:
+        self.layer2.synapses.feedback(encoder.layer2.neurons, context=encoder.latent.neurons)
+        self.layer1.synapses.feedback(encoder.layer1.neurons, context=encoder.layer2.neurons)
 
 
 # -------------------------------------------------------------------------------------------
@@ -103,31 +101,23 @@ class Autoencoder(pl.LightningModule):
         return reconstruction, latent
 
     def compute_feedback(self, outputs: Tensor, batch: Tensor) -> List[Tensor]:
-        reconstruction, _ = outputs
+        reconstruction, latent = outputs
         sensors, *_ = batch
-        error = (reconstruction - sensors).detach()
-        error -= error.mean(dim=0, keepdim=True)
-        return sensors, error
+        return [sensors, reconstruction, latent]
 
     def apply_feedback(self, feedback: List[Tensor]) -> None:
-        sensors, error = feedback
-        self.encoder.feedback(self.flatten(error))
-        self.decoder.feedback(self.flatten(sensors), self.encoder)
-
-    def compute_loss(self, outputs: Tensor, batch: Tensor) -> List[Tensor]:
-        sensors, *_ = batch
-        reconstruction, latent = outputs
-        reconstruction_loss = nn.BCEWithLogitsLoss(reduction="mean")(reconstruction, sensors)
-        # reconstruction_loss = nn.BCELoss(reduction="mean")(reconstruction, sensors)
-        sparsity_loss = nn.L1Loss(reduction="mean")(latent, zeros_like(latent))
-        return [reconstruction_loss, sparsity_loss]
+        (sensors, reconstruction, latent) = feedback
+        self.encoder.feedback(self.flatten((reconstruction - sensors).detach()))
+        SparsityLoss(self.config.gramian_center)(latent).backward()
+        self.decoder.feedback(self.encoder)
+        nn.BCELoss(reduction="mean")(reconstruction, sensors).backward()
 
     def training_step(self, batch: Tensor, batch_idx: int) -> None:
         self.trainer_strategy.training_step(self, batch, batch_idx)
 
     def validation_step(self, batch: Tensor, batch_idx: int) -> List[Tensor]:
         outputs = self(batch[0])
-        reconstruction_loss, sparsity_rate = self.compute_loss(outputs, batch)
+        reconstruction_loss = nn.MSELoss(reduction="mean")(outputs[0], batch[0])
         sparsity_rate = (outputs[1] > 0.01).float().mean()
         self.log("val/sparsity_rate", sparsity_rate, prog_bar=True)
         self.log("val/reconstruction_loss", reconstruction_loss, prog_bar=True)
