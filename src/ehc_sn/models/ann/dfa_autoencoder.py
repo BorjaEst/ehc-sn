@@ -1,7 +1,6 @@
 import math
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
 
-import lightning.pytorch as pl
 from lightning import pytorch as pl
 from pydantic import BaseModel, Field, field_validator
 from torch import Tensor, flatten, nn, unflatten
