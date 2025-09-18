@@ -1,13 +1,3 @@
-"""
-Backpropagation Autoencoder Training Script.
-
-Trains a sparse autoencoder using standard backpropagation for pattern separation
-and completion tasks. Supports CLI configuration and visualization of results.
-
-Usage:
-    python scripts/bp_autoencoder.py [OPTIONS]
-"""
-
 import matplotlib.pyplot as plt
 import torch
 from pydantic import Field
@@ -20,14 +10,12 @@ from ehc_sn.figures.reconstruction_map import ReconstructionMapFigure
 from ehc_sn.figures.reconstruction_map import ReconstructionMapParams as Figure1Params
 from ehc_sn.figures.sparsity import SparsityFigure
 from ehc_sn.figures.sparsity import SparsityParams as Figure2Params
-from ehc_sn.models.ann.autoencoders.sparse_autoencoder import Autoencoder, AutoencoderParams
-from ehc_sn.trainers.back_propagation import BackwardTrainer
+from ehc_sn.models.ann.dfa_autoencoder import Autoencoder, AutoencoderParams
+from ehc_sn.trainers.feed_forward import DFATainer
 
 
 # -------------------------------------------------------------------------------------------
 class Experiment(BaseSettings):
-    """Configuration settings for the backpropagation autoencoder experiment."""
-
     model_config = SettingsConfigDict(extra="forbid", cli_parse_args=True)
 
     data: DataParams = Field(default_factory=DataParams, description="Data generation parameters")
@@ -40,26 +28,37 @@ class Experiment(BaseSettings):
 
 # -------------------------------------------------------------------------------------------
 def main(experiment: Experiment) -> None:
-    """Run the complete backpropagation autoencoder experiment."""
     # Generate data and initialize components
     data_gen = DataGenerator(experiment.data)
     datamodule = BaseDataModule(data_gen, experiment.datamodule)
-    trainer = BackwardTrainer(experiment.trainer)
+    trainer = DFATainer(experiment.trainer)
     model = Autoencoder(experiment.model, trainer)
 
-    # Train model using backpropagation
-    trainer.fit(model, datamodule)
+    # Train till end of training or keyboard interup
+    try:
+        trainer.fit(model, datamodule)
+    except KeyboardInterrupt:
+        print("Training interrupted by user. Generating figures...")
+    finally:
+        gen_figures(model, datamodule, experiment)
 
-    # Evaluate on test data
+
+# -------------------------------------------------------------------------------------------
+def gen_figures(model: Autoencoder, datamodule: BaseDataModule, experiment: Experiment) -> None:
+    """Evaluate current model state and render figures."""
     model.eval()
     datamodule.setup("test")
     test_dataloader = datamodule.test_dataloader()
-    inputs, _ = next(iter(test_dataloader))
+
+    try:
+        inputs, _ = next(iter(test_dataloader))
+    except StopIteration:
+        print("No test data available for plotting.")
+        return
 
     with torch.inference_mode():
         outputs, activations = model(inputs)
 
-    # Generate visualizations
     fig_reconstruction = ReconstructionMapFigure(experiment.figure_1)
     _ = fig_reconstruction.plot(inputs, outputs)
     plt.show()

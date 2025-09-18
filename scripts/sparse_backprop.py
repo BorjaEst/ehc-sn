@@ -47,19 +47,31 @@ def main(experiment: Experiment) -> None:
     trainer = BackwardTrainer(experiment.trainer)
     model = Autoencoder(experiment.model, trainer)
 
-    # Train model using backpropagation
-    trainer.fit(model, datamodule)
+    # Train till end of training or keyboard interup
+    try:
+        trainer.fit(model, datamodule)
+    except KeyboardInterrupt:
+        print("Training interrupted by user. Generating figures...")
+    finally:
+        gen_figures(model, datamodule, experiment)
 
-    # Evaluate on test data
+
+# -------------------------------------------------------------------------------------------
+def gen_figures(model: Autoencoder, datamodule: BaseDataModule, experiment: Experiment) -> None:
+    """Evaluate current model state and render figures."""
     model.eval()
     datamodule.setup("test")
     test_dataloader = datamodule.test_dataloader()
-    inputs, _ = next(iter(test_dataloader))
+
+    try:
+        inputs, _ = next(iter(test_dataloader))
+    except StopIteration:
+        print("No test data available for plotting.")
+        return
 
     with torch.inference_mode():
         outputs, activations = model(inputs)
 
-    # Generate visualizations
     fig_reconstruction = ReconstructionMapFigure(experiment.figure_1)
     _ = fig_reconstruction.plot(inputs, outputs)
     plt.show()
