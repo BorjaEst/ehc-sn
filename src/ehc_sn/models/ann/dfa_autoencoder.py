@@ -10,6 +10,7 @@ from torch.optim import Adam, Optimizer
 from ehc_sn.core import ann
 from ehc_sn.core.trainer import BaseTrainer
 from ehc_sn.modules import dfa, srtp
+from ehc_sn.modules.loss import GramianOrthogonalityLoss as SparsityLoss
 
 
 # -------------------------------------------------------------------------------------------
@@ -21,6 +22,10 @@ class AutoencoderParams(BaseModel):
     layer2_units: int = Field(default=512, gt=0, description="Number of hidden units per layer.")
     layer1_units: int = Field(default=1024, gt=0, description="Number of hidden units per layer.")
     output_shape: List[int] = Field([25, 25], description="Dimensionality of the input and output.")
+
+    # Gramian orthogonality loss parameters
+    sparsity_weight: float = Field(5e-2, ge=0, le=1, description="Weight for Gramian orthogonality term.")
+    gramian_center: bool = Field(True, description="Center activations before normalization.")
 
     # Training parameters
     encoder_lr: float = Field(2e-6, description="Learning rate for the encoder.")
@@ -52,7 +57,6 @@ class Encoder(nn.Module):
         return self.latent(x)
 
     def feedback(self, reconstruction_err: Tensor) -> None:
-        self.latent.synapses.feedback(reconstruction_err, context=self.latent.neurons)
         self.layer2.synapses.feedback(reconstruction_err, context=self.layer2.neurons)
         self.layer1.synapses.feedback(reconstruction_err, context=self.layer1.neurons)
 
@@ -98,28 +102,24 @@ class Autoencoder(pl.LightningModule):
         return reconstruction, latent
 
     def compute_feedback(self, outputs: Tensor, batch: Tensor) -> List[Tensor]:
-        reconstruction, _ = outputs
+        reconstruction, latent = outputs
         sensors, *_ = batch
-        reconstruction_err = reconstruction - sensors.detach()
-        return [reconstruction_err]
+        return [sensors, reconstruction, latent]
 
     def apply_feedback(self, feedback: List[Tensor]) -> None:
-        (error,) = feedback
-        self.encoder.feedback(self.flatten(error))
-        self.decoder.feedback(self.flatten(error))
-
-    def compute_loss(self, outputs: Tensor, batch: Tensor) -> List[Tensor]:
-        sensors, *_ = batch
-        reconstruction, _ = outputs
-        reconstruction_loss = nn.BCELoss(reduction="mean")(reconstruction, sensors)
-        return [reconstruction_loss]
+        (sensors, reconstruction, latent) = feedback
+        error = self.flatten((reconstruction - sensors).detach())
+        self.encoder.feedback(error)
+        SparsityLoss(self.config.gramian_center)(latent).backward()
+        self.decoder.feedback(error)
+        nn.BCELoss(reduction="mean")(reconstruction, sensors).backward()
 
     def training_step(self, batch: Tensor, batch_idx: int) -> None:
         self.trainer_strategy.training_step(self, batch, batch_idx)
 
     def validation_step(self, batch: Tensor, batch_idx: int) -> List[Tensor]:
         outputs = self(batch[0])
-        (reconstruction_loss,) = self.compute_loss(outputs, batch)
+        reconstruction_loss = nn.MSELoss(reduction="mean")(outputs[0], batch[0])
         sparsity_rate = (outputs[1] > 0.01).float().mean()
         self.log("val/sparsity_rate", sparsity_rate, prog_bar=True)
         self.log("val/reconstruction_loss", reconstruction_loss, prog_bar=True)
