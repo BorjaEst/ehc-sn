@@ -1,3 +1,5 @@
+"""DFA Autoencoder training script with feedback learning."""
+
 import matplotlib.pyplot as plt
 import torch
 from pydantic import Field
@@ -50,7 +52,7 @@ def main(experiment: Experiment) -> None:
 
 # -------------------------------------------------------------------------------------------
 def gen_figures(model: Autoencoder, datamodule: BaseDataModule, experiment: Experiment) -> None:
-    """Evaluate current model state and render figures."""
+    """Generate reconstruction and sparsity figures from model outputs."""
     model.eval()
     datamodule.setup("test")
     test_dataloader = datamodule.test_dataloader()
@@ -74,6 +76,6 @@ def gen_figures(model: Autoencoder, datamodule: BaseDataModule, experiment: Expe
 
 
 if __name__ == "__main__":
-    """Main entry point for the backpropagation autoencoder experiment."""
+    """Main entry point for DFA autoencoder experiment."""
     experiment = Experiment()
     main(experiment)

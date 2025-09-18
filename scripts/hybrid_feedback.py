@@ -1,13 +1,4 @@
-"""
-Hybrid Feedback Autoencoder Training Script.
-
-Trains a hybrid feedback autoencoder combining forward and feedback learning
-mechanisms for pattern separation and completion tasks. Supports CLI configuration
-and visualization of results.
-
-Usage:
-    python scripts/hybrid_feedback.py [OPTIONS]
-"""
+"""Hybrid Autoencoder training script with combined feedback learning."""
 
 import matplotlib.pyplot as plt
 import torch
@@ -27,7 +18,7 @@ from ehc_sn.trainers.feed_forward import FeedbackTainer
 
 # -------------------------------------------------------------------------------------------
 class Experiment(BaseSettings):
-    """Configuration settings for the hybrid feedback autoencoder experiment."""
+    """Configuration settings for the hybrid autoencoder experiment."""
 
     model_config = SettingsConfigDict(extra="forbid", cli_parse_args=True)
 
@@ -46,7 +37,7 @@ class Experiment(BaseSettings):
 
 # -------------------------------------------------------------------------------------------
 def main(experiment: Experiment) -> None:
-    """Run the complete hybrid feedback autoencoder experiment."""
+    """Run the hybrid autoencoder experiment."""
     # Generate data and initialize components
     data_gen = DataGenerator(experiment.data)
     datamodule = BaseDataModule(data_gen, experiment.datamodule)
@@ -64,7 +55,7 @@ def main(experiment: Experiment) -> None:
 
 # -------------------------------------------------------------------------------------------
 def gen_figures(model: Autoencoder, datamodule: BaseDataModule, experiment: Experiment) -> None:
-    """Evaluate current model state and render figures."""
+    """Generate reconstruction and sparsity figures from model outputs."""
     model.eval()
     datamodule.setup("test")
     test_dataloader = datamodule.test_dataloader()
@@ -88,6 +79,6 @@ def gen_figures(model: Autoencoder, datamodule: BaseDataModule, experiment: Expe
 
 
 if __name__ == "__main__":
-    """Main entry point for the backpropagation autoencoder experiment."""
+    """Main entry point for hybrid autoencoder experiment."""
     experiment = Experiment()
     main(experiment)
