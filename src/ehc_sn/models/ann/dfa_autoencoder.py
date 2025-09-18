@@ -101,10 +101,10 @@ class Autoencoder(pl.LightningModule):
 
     def apply_feedback(self, feedback: List[Tensor]) -> None:
         (sensors, reconstruction, latent) = feedback
-        error = flatten(reconstruction - sensors, start_dim=1)
-        self.encoder.feedback(error)
+        reconstruction_err = flatten(reconstruction - sensors, start_dim=1)
+        self.encoder.feedback(reconstruction_err)
         SparsityLoss(center=True)(latent).backward()
-        self.decoder.feedback(error)
+        self.decoder.feedback(reconstruction_err)
         nn.BCELoss(reduction="mean")(reconstruction, sensors).backward()
 
     def training_step(self, batch: Tensor, batch_idx: int) -> None:
