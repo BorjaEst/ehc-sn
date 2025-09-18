@@ -1,10 +1,9 @@
 import math
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
 
-import lightning.pytorch as pl
 from lightning import pytorch as pl
 from pydantic import BaseModel, Field, field_validator
-from torch import Tensor, nn, zeros_like
+from torch import Tensor, flatten, nn, unflatten
 from torch.optim import Adam, Optimizer
 
 from ehc_sn.core import ann
@@ -74,10 +73,8 @@ class Decoder(nn.Module):
 class Autoencoder(pl.LightningModule):
     def __init__(self, params: ModelParams, trainer: BaseTrainer) -> None:
         super().__init__()
-        self.flatten = nn.Flatten()
         self.encoder = Encoder(*params.units())
         self.decoder = Decoder(*params.units())
-        self.unflatten = nn.Unflatten(1, params.output_shape)
         self.config = params
         self.automatic_optimization = False
         self.trainer_strategy = trainer
@@ -88,8 +85,8 @@ class Autoencoder(pl.LightningModule):
         return Adam([optm_pe, optm_pd])
 
     def forward(self, sensors: Tensor) -> Tuple[Tensor, Tensor]:
-        latent = self.encoder(self.flatten(sensors))
-        reconstruction = self.unflatten(self.decoder(latent))
+        latent = self.encoder(flatten(sensors, start_dim=1))
+        reconstruction = unflatten(self.decoder(latent), 1, sensors.shape[1:])
         return reconstruction, latent
 
     def compute_loss(self, outputs: Tensor, batch: Tensor) -> List[Tensor]:
