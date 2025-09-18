@@ -13,7 +13,7 @@ from ehc_sn.modules.loss import GramianOrthogonalityLoss as SparsityLoss
 
 
 # -------------------------------------------------------------------------------------------
-class AutoencoderParams(BaseModel):
+class ModelParams(BaseModel):
     model_config = {"extra": "forbid", "arbitrary_types_allowed": True}
 
     # Encoder and decoder components
@@ -72,7 +72,7 @@ class Decoder(nn.Module):
 
 # -------------------------------------------------------------------------------------------
 class Autoencoder(pl.LightningModule):
-    def __init__(self, params: AutoencoderParams, trainer: BaseTrainer) -> None:
+    def __init__(self, params: ModelParams, trainer: BaseTrainer) -> None:
         super().__init__()
         self.flatten = nn.Flatten()
         self.encoder = Encoder(*params.units())

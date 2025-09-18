@@ -12,7 +12,7 @@ from ehc_sn.figures.reconstruction_map import ReconstructionMapFigure
 from ehc_sn.figures.reconstruction_map import ReconstructionMapParams as Figure1Params
 from ehc_sn.figures.sparsity import SparsityFigure
 from ehc_sn.figures.sparsity import SparsityParams as Figure2Params
-from ehc_sn.models.ann.sparse_autoencoder import Autoencoder, AutoencoderParams
+from ehc_sn.models.ann.sparse_autoencoder import Autoencoder, ModelParams
 from ehc_sn.trainers.back_propagation import BackwardTrainer
 
 
@@ -24,7 +24,7 @@ class Experiment(BaseSettings):
 
     data: DataParams = Field(default_factory=DataParams, description="Data generation parameters")
     datamodule: DataModuleParams = Field(default_factory=DataModuleParams, description="Data module parameters")
-    model: AutoencoderParams = Field(default_factory=AutoencoderParams, description="Autoencoder parameters")
+    model: ModelParams = Field(default_factory=ModelParams, description="Autoencoder parameters")
 
     figure_1: Figure1Params = Field(default_factory=Figure1Params, description="Reconstruction figure parameters")
     figure_2: Figure2Params = Field(default_factory=Figure2Params, description="Sparsity figure parameters")
