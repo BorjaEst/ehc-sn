@@ -4,12 +4,12 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type, U
 import lightning.pytorch as pl
 from lightning import pytorch as pl
 from pydantic import BaseModel, Field, field_validator
-from torch import Tensor, nn, utils, zeros_like
+from torch import Tensor, flatten, nn, unflatten
 from torch.optim import Adam, Optimizer
 
 from ehc_sn.core import ann
 from ehc_sn.core.trainer import BaseTrainer
-from ehc_sn.modules import dfa, srtp
+from ehc_sn.modules import dfa
 from ehc_sn.modules.loss import GramianOrthogonalityLoss as SparsityLoss
 
 
@@ -22,10 +22,6 @@ class ModelParams(BaseModel):
     layer2_units: int = Field(default=512, gt=0, description="Number of hidden units per layer.")
     layer1_units: int = Field(default=1024, gt=0, description="Number of hidden units per layer.")
     output_shape: List[int] = Field([25, 25], description="Dimensionality of the input and output.")
-
-    # Gramian orthogonality loss parameters
-    sparsity_weight: float = Field(5e-2, ge=0, le=1, description="Weight for Gramian orthogonality term.")
-    gramian_center: bool = Field(True, description="Center activations before normalization.")
 
     # Training parameters
     encoder_lr: float = Field(2e-6, description="Learning rate for the encoder.")
@@ -83,10 +79,8 @@ class Decoder(nn.Module):
 class Autoencoder(pl.LightningModule):
     def __init__(self, params: ModelParams, trainer: BaseTrainer) -> None:
         super().__init__()
-        self.flatten = nn.Flatten()
         self.encoder = Encoder(*params.units())
         self.decoder = Decoder(*params.units())
-        self.unflatten = nn.Unflatten(1, params.output_shape)
         self.config = params
         self.automatic_optimization = False
         self.trainer_strategy = trainer
@@ -97,8 +91,8 @@ class Autoencoder(pl.LightningModule):
         return Adam([optm_pe, optm_pd])
 
     def forward(self, sensors: Tensor) -> Tuple[Tensor, Tensor]:
-        latent = self.encoder(self.flatten(sensors))
-        reconstruction = self.unflatten(self.decoder(latent))
+        latent = self.encoder(flatten(sensors, start_dim=1))
+        reconstruction = unflatten(self.decoder(latent), 1, sensors.shape[1:])
         return reconstruction, latent
 
     def compute_feedback(self, outputs: Tensor, batch: Tensor) -> List[Tensor]:
@@ -108,9 +102,9 @@ class Autoencoder(pl.LightningModule):
 
     def apply_feedback(self, feedback: List[Tensor]) -> None:
         (sensors, reconstruction, latent) = feedback
-        error = self.flatten((reconstruction - sensors).detach())
+        error = flatten(reconstruction - sensors, start_dim=1)
         self.encoder.feedback(error)
-        SparsityLoss(self.config.gramian_center)(latent).backward()
+        SparsityLoss(center=True)(latent).backward()
         self.decoder.feedback(error)
         nn.BCELoss(reduction="mean")(reconstruction, sensors).backward()
 
