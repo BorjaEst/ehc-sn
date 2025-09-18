@@ -1,251 +1,92 @@
-"""Symmetric Random Target Projection (SRTP) module for biologically plausible learning.
-
-This module implements Symmetric Random Target Projection (SRTP), a variant of random
-target projection that uses local error signals combined with fixed random projections
-for gradient computation. SRTP provides another biologically plausible alternative to
-standard backpropagation by eliminating the weight transport problem.
-
-SRTP differs from DRTP by computing local error signals (activation - target) and then
-projecting these errors through fixed random matrices. This approach combines local
-learning principles with random feedback pathways, providing biological plausibility
-while maintaining effective learning capabilities.
-
-Key Features:
-    - SRTPFunction: Custom autograd function implementing SRTP gradient computation
-    - SRTPLayer: PyTorch module wrapper for easy integration into networks
-    - Local error signal computation (activations - targets)
-    - Fixed random projection matrices for error propagation
-
-Classes:
-    SRTPFunction: Core autograd function for SRTP gradient computation
-    SRTPLayer: Neural network module implementing SRTP learning mechanism
-
-Mathematical Formulation:
-    Local error: error = activations - target
-    SRTP gradient: grad = B^T @ error
-    Where B is a fixed random matrix and error is computed locally at each layer.
-
-Examples:
-    >>> # Create a network with SRTP learning
-    >>> srtp_layer = SRTPLayer(target_dim=10, hidden_dim=128)
-    >>> hidden = torch.randn(32, 128, requires_grad=True)
-    >>> target = torch.randn(32, 10)
-    >>>
-    >>> # Forward pass includes target for local error computation
-    >>> output = srtp_layer(hidden, target)
-    >>> loss.backward()  # Uses SRTP gradients automatically
-
-Biological Motivation:
-    SRTP addresses the weight transport problem by using local error signals combined
-    with random feedback connections. This provides a more biologically plausible
-    learning mechanism that doesn't require symmetric weight knowledge.
-
-References:
-    Derived from Direct Feedback Alignment and Random Target Projection principles
-    for enhanced biological plausibility in deep learning systems.
-"""
-
-from math import prod
-from typing import Any, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
 import torch
-from torch import Size, Tensor, autograd, nn
+from torch import Tensor, nn
 
 
 # -------------------------------------------------------------------------------------------
-class SRTPFunction(autograd.Function):
-    """
-    Custom autograd function for Selective Random Target Projection (SRTP).
-    The backward pass uses a fixed random projection matrix to propagate the error.
-    """
-
-    @staticmethod
-    def forward(ctx, inputs: Tensor, fb_weights: Tensor, target: Tensor) -> Tensor:
-        """
-        Forward pass: returns the input unchanged to maintain computational graph.
-        """
-        ctx.save_for_backward(inputs, fb_weights)  # As wraps, inputs are the activations
-        ctx.target = target  # Save target signal for backward
-        return inputs
+class Linear(nn.Linear):
 
     # -----------------------------------------------------------------------------------
-    @staticmethod
-    def backward(ctx, grad_output: Tensor, *gradients: Any) -> Tuple[Tensor, None, None]:
-        """
-        Backward pass: propagate the error using the fixed random matrix fb_weights.
-        Uses the local error signal (activations-target) projected through fb_weights.
-        """
-        activations, fb_weights = ctx.saved_tensors
-        batch_size = grad_output.shape[0]
-
-        # Project target through random feedback weights to fit hidden layer space
-        # target: (batch_size, target_dim)
-        # fb_weights: (target_dim, hidden_dim)
-        projected_targets = torch.matmul(ctx.target, fb_weights)
-        grad_est = activations - projected_targets
-
-        # Return gradients for input, fb_weights, target (None for non-learnable parameters)
-        return grad_est, None, None
-
-
-# -------------------------------------------------------------------------------------------
-def srtp(input: Tensor, fb_weights: Tensor, target: Tensor) -> Tensor:
-    """
-    SRTP layer wrapper for use in nn.Module.
-
-    Args:
-        input: Hidden layer activations (batch_size, hidden_dim)
-        fb_weights: Fixed random projection matrix (target_dim, hidden_dim)
-        target: Target values (batch_size, target_dim)
-
-    Returns:
-        input: Unchanged input (to maintain computational graph)
-    """
-    return SRTPFunction.apply(input, fb_weights, target)
-
-
-# -------------------------------------------------------------------------------------------
-class SRTPLayer(nn.Module):
-    """
-    SRTP (Selective Random Target Projection) layer module.
-
-    This layer implements the SRTP learning mechanism where gradients are computed
-    using a fixed random projection of the target instead of standard backpropagation.
-    The layer maintains a fixed random projection matrix fb_weights that maps target signals
-    to the hidden layer dimensions.
-
-    During forward pass, the layer returns its input unchanged to maintain the
-    computational graph. During backward pass, it uses the custom SRTPFunction
-    to provide modulatory signals based on the target projection.
-
-    This implementation is biologically inspired and provides an alternative to
-    standard backpropagation that doesn't require symmetric weight transport.
-
-    Args:
-        target_dim: Dimensionality of the target space (output dimension)
-        hidden_dim: Dimensionality of the hidden layer where SRTP is applied
-
-    Example:
-        >>> srtp_layer = SRTPLayer(target_dim=10, hidden_dim=128)
-        >>> hidden = torch.randn(32, 128)  # batch_size=32, hidden_dim=128
-        >>> target = torch.randn(32, 10)   # batch_size=32, target_dim=10
-        >>> output = srtp(hidden, target)  # Returns hidden unchanged
-    """
-
-    def __init__(self, target_dim: List[int] | int, hidden_dim: List[int] | int):
-        """
-        Initialize a SRTP layer with a fixed random projection matrix.
-
-        Args:
-            target_dim: Dimensionality of the target space (e.g., output classes)
-            hidden_dim: Dimensionality of the hidden layer activations
-        """
-        super().__init__()
-
-        # Store dimensions for reference
-        self.target_dim = target_dim if isinstance(target_dim, int) else prod(target_dim)
-        self.hidden_dim = hidden_dim if isinstance(hidden_dim, int) else prod(hidden_dim)
-
-        # Shape: (target_dim, hidden_dim) to project target to hidden space
-        fb_weights_shape = Size([self.target_dim, self.hidden_dim])
-
-        # Register as buffer so it moves with model.to(device) and gets saved in state_dic
-        self.register_buffer("fb_weights", torch.Tensor(fb_weights_shape))
-        self.reset_weights()  # Initialize weights properly
+    def forward(self, input: Tensor) -> Tensor:
+        return super().forward(input.detach())
 
     # -----------------------------------------------------------------------------------
-    def forward(self, inputs: Tensor, target: Tensor) -> Tensor:
-        """
-        Forward pass through the SRTP layer.
-
-        During forward pass, the input is returned unchanged to maintain the
-        computational graph. The SRTP mechanism is applied during the backward
-        pass through the custom autograd function.
-
-        Args:
-            inputs: Hidden layer activations with shape (batch_size, *hidden_dim)
-            target: Target values with shape (batch_size, *target_dim)
-
-        Returns:
-            Tensor: Input unchanged, maintaining computational graph for gradient flow
-
-        Raises:
-            ValueError: If input or target dimensions don't match expected shapes
-        """
-        # Apply SRTP function which handles the custom backward pass
-        return srtp(inputs, self.fb_weights, target)
-
-    # -----------------------------------------------------------------------------------
-    def extra_repr(self) -> str:
-        """Return extra representation for better debugging and model inspection."""
-        return f"target_dim={self.target_dim}, hidden_dim={self.hidden_dim}"
-
-    # -----------------------------------------------------------------------------------
-    def reset_weights(self):
-        """
-        Reinitialize the random projection matrix fb_weights.
-        This can be useful for experimentation or resetting the SRTP behavior.
-        """
-        # Reinitialize the projection matrix with a new random matrix
-        torch.nn.init.kaiming_uniform_(self.fb_weights)
+    def feedback(self, target: Tensor, context: Tensor) -> None:
+        output = self(context.detach())  # Detach pre-synaptic
+        nn.functional.mse_loss(output, target.detach(), reduction="mean").backward()
 
 
 # -------------------------------------------------------------------------------------------
 if __name__ == "__main__":
     # Example usage of SRTP in a simple neural network
     print("=== SRTP Layer Example ===")
+    torch.manual_seed(0)
 
     # Network parameters
-    input_dim, hidden1_dim, hidden2_dim, latent_dim = 5, 4, 3, 2
+    input_dim, hidden1_dim, hidden2_dim, output_dim = 5, 4, 3, 2
     batch_size = 2
 
-    # Create network layers
-    layer1 = nn.Linear(input_dim, hidden1_dim)
-    layer2 = nn.Linear(hidden1_dim, hidden2_dim)
-    layer3 = nn.Linear(hidden2_dim, latent_dim)
-    layer4 = nn.Linear(latent_dim, hidden2_dim)
-    srtp4 = SRTPLayer(target_dim=hidden2_dim, hidden_dim=hidden2_dim)
+    # Create network layers with SRTP
+    layer1 = Linear(input_dim, hidden1_dim, error_features=output_dim)
+    layer2 = Linear(hidden1_dim, hidden2_dim, error_features=output_dim)
+    layer3 = nn.Linear(hidden2_dim, output_dim)  # Output layer (no SRTP)
+
+    # Optimizer
+    parameters = list(layer1.parameters()) + list(layer2.parameters()) + list(layer3.parameters())
+    optimizer = torch.optim.SGD(parameters, lr=1e-2)
+    optimizer.zero_grad()
 
     # Create input and target
     x = torch.randn(batch_size, input_dim, requires_grad=True)
-    label = torch.randn(batch_size, latent_dim)
+    target = torch.randn(batch_size, output_dim)
 
     print(f"Input shape: {x.shape}")
-    print(f"Target shape: {hidden2_dim}")
-    print(f"SRTP4 projection matrix shape: {srtp4.fb_weights.shape}")
+    print(f"Target shape: {target.shape}")
+    print(f"SRTP1 projection matrix shape: {layer1.fb_weight.shape}")
+    print(f"SRTP2 projection matrix shape: {layer2.fb_weight.shape}")
 
     # Forward pass
-    h1 = layer1(x)  # (batch_size, hidden1_dim)
-    h2 = layer2(h1)  # (batch_size, hidden2_dim)
-    output = layer3(h2)  # (batch_size, latent_dim)
-    h4 = layer4(output)  # (batch_size, hidden2_dim)
-    h4_srtp = srtp4(h4, target=h2)  # Apply SRTP on h4
+    h1 = torch.relu(layer1(x))  # (batch_size, hidden1_dim)
+    h2 = torch.relu(layer2(h1))  # (batch_size, hidden2_dim)
+    output = torch.sigmoid(layer3(h2.detach()))  # detach to isolate output path
 
-    # Compute loss
-    loss = nn.MSELoss()(output, label)
+    # Retain grads to verify SRTP deltas
+    h1.retain_grad()
+    h2.retain_grad()
 
-    print(f"\nForward pass:")
+    print("\nForward pass:")
     print(f"  Hidden 1 shape: {h1.shape}")
     print(f"  Hidden 2 shape: {h2.shape}")
     print(f"  Output shape: {output.shape}")
+
+    # Compute loss
+    loss = nn.MSELoss()(output, target)
     print(f"  Loss: {loss.item():.6f}")
 
-    # Backward pass
-    print(f"\nBefore backward:")
-    print(f"  Layer1 grad: {layer1.weight.grad}")
-    print(f"  Layer2 grad: {layer2.weight.grad}")
-    print(f"  Layer3 grad: {layer3.weight.grad}")
+    # Global error for SRTP
+    global_error = (output - target).detach()  # (batch_size, output_dim)
 
+    # SRTP feedback (hidden layers)
+    layer1.feedback(global_error, context=h1)
+    layer2.feedback(global_error, context=h2)
+
+    # Standard BP only for output layer
     loss.backward()
 
-    print(f"\nAfter backward:")
-    print(f"  Layer1 grad shape: {layer1.weight.grad.shape if layer1.weight.grad is not None else None}")
-    print(f"  Layer2 grad shape: {layer2.weight.grad.shape if layer2.weight.grad is not None else None}")
-    print(f"  Layer3 grad shape: {layer3.weight.grad.shape if layer3.weight.grad is not None else None}")
+    print("\nAfter backward:")
+    print(f"  Layer1 grad shape: {tuple(layer1.weight.grad.shape)}")
+    print(f"  Layer2 grad shape: {tuple(layer2.weight.grad.shape)}")
+    print(f"  Layer3 grad shape: {tuple(layer3.weight.grad.shape)}")
 
-    # Verify SRTP projections
-    print(f"\nSRTP projections:")
-    expected_grad = torch.matmul(h2, srtp4.fb_weights)  # Should match h2 gradients
-    print(f"  Expected SRTP1 gradient shape: {expected_grad.shape}")
+    # Verify SRTP projections equal activation grads
+    expected_grad1 = global_error @ layer1.fb_weight
+    expected_grad2 = global_error @ layer2.fb_weight
+    print("\nSRTP projection vs activation grad (norm diffs):")
+    print(f"  h1 grad diff: {(h1.grad - expected_grad1).norm().item():.4e}")
+    print(f"  h2 grad diff: {(h2.grad - expected_grad2).norm().item():.4e}")
 
-    print(f"\nSRTP Layer example completed successfully!")
+    # Optimize hidden weights
+    optimizer.step()
+
+    print("\nSRTP Layer example completed successfully!")
