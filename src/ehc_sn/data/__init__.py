@@ -18,8 +18,8 @@ Key Features:
     - Support for various spatial representation formats
 
 Modules:
-    cognitive_maps: Generation and management of cognitive spatial representations
-    obstacle_maps: Creation of obstacle-based spatial navigation environments
+    simple_example: 1D synthetic data generation for autoencoder baselines
+    obstacle_maps: 2D obstacle cognitive map generation for spatial navigation
     _base: Base classes and utilities for data module implementation
 
 Classes:
@@ -27,16 +27,40 @@ Classes:
     DataModuleParams: Configuration parameters for data module initialization
 
 Examples:
-    >>> from ehc_sn.data import cognitive_maps, DataModule
-    >>> from ehc_sn.data.cognitive_maps import CognitiveMapParams
+    >>> from ehc_sn.data.simple_example import DataGenerator, DataParams
+    >>> from ehc_sn.data.obstacle_maps import ObstacleMapGenerator, ObstacleMapParams
+    >>> from ehc_sn.core.datamodule import DataModuleParams
     >>>
-    >>> # Create cognitive map dataset
-    >>> params = CognitiveMapParams(map_size=(32, 16), num_obstacles=5)
-    >>> datamodule = DataModule(params)
-    >>> datamodule.setup()
-    >>> train_loader = datamodule.train_dataloader()
+    >>> # Create 1D synthetic dataset
+    >>> data_params = DataModuleParams(batch_size=32, train_size=1000)
+    >>> simple_params = DataParams(input_dim=50, noise_level=0.1)
+    >>> datamodule = DataGenerator.create(data_params, simple_params)
+    >>>
+    >>> # Create 2D obstacle map dataset
+    >>> obstacle_params = ObstacleMapParams(grid_size=(16, 16), obstacle_density=0.3)
+    >>> datamodule = ObstacleMapGenerator.create(data_params, obstacle_params)
 
 References:
     - O'Keefe, J., & Nadel, L. (1978). The hippocampus as a cognitive map.
     - Hafting, T., et al. (2005). Microstructure of a spatial map in the entorhinal cortex.
 """
+
+# Core data module components
+from ehc_sn.core.datamodule import BaseDataModule, DataModuleParams
+from ehc_sn.data.obstacle_maps import DataGenerator as ObstacleMapGenerator
+from ehc_sn.data.obstacle_maps import DataParams as ObstacleMapParams
+
+# Data generators
+from ehc_sn.data.simple_example import DataGenerator, DataParams
+
+__all__ = [
+    # Core components
+    "BaseDataModule",
+    "DataModuleParams",
+    # 1D synthetic data
+    "DataGenerator",
+    "DataParams",
+    # 2D obstacle maps
+    "ObstacleMapGenerator",
+    "ObstacleMapParams",
+]
