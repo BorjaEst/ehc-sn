@@ -201,9 +201,4 @@ example_checkpoints/
 sparse_training_loss.png
 
 # Project-specific files
-temp/
 Copilot-Processing.md
-
-# For now until project publised
-notes*.md
-public/
