@@ -14,7 +14,7 @@ def main():
     # Setup parameters
     # -----------------------------------------------------------------------------------
     # Use MiniGrid environment for realistic maze generation
-    obstacle_params = DataParams(env_id="MiniGrid-MultiRoom-N6-v0", seed=42, invert_walls=False)  # 1=wall, 0=free space
+    obstacle_params = DataParams(env_id="MiniGrid-MultiRoom-N6-v0", seed=42)
 
     # Configure binary map visualization
     figure_params = BinaryMapParams(
@@ -22,7 +22,6 @@ def main():
         fig_height=8.0,
         fig_dpi=100,
         title="MiniGrid Obstacle Maps - Realistic Maze Structures",
-        invert=True,  # Dark walls, light free space
         grid=True,
         frame=True,
     )
@@ -43,10 +42,9 @@ def main():
     batch = next(iter(dataloader))
     inputs, targets = batch
 
+    density = torch.mean(inputs, dim=(1, 2)).cpu().numpy()
     print(f"Generated batch: {inputs.shape}")
-    print(
-        f"Obstacle density range: {torch.mean(inputs, dim=(1,2)).min():.3f} - {torch.mean(inputs, dim=(1,2)).max():.3f}"
-    )
+    print(f"Obstacle density range: {density.min():.3f} - {density.max():.3f}")
 
     # -----------------------------------------------------------------------------------
     # Visualize with BinaryMapFigure
