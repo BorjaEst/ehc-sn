@@ -7,7 +7,9 @@ the plotting logic and configuration parameters.
 Available figure types:
 - ReconstructionTraceFigure: 1D signal reconstruction comparison
 - ReconstructionMapFigure: 2D spatial data reconstruction comparison
-- SimpleExampleFigure: Specialized figure for simple_example data module
+- DecoderMontageFigure: Decoder weight montage showing individual latent unit reconstructions
+- BinaryMapFigure: Binary 2D spatial data visualization
+- SparsityFigure: Neural activation sparsity analysis
 
 Key Features:
     - One class per figure type with encapsulated plotting logic
@@ -39,6 +41,7 @@ Extension:
 """
 
 from ehc_sn.figures.binary_map import BinaryMapFigure, BinaryMapParams
+from ehc_sn.figures.decoder_montage import DecoderMontageFigure, DecoderMontageParams
 from ehc_sn.figures.reconstruction_1d import ReconstructionTraceFigure, ReconstructionTraceParams
 from ehc_sn.figures.reconstruction_map import ReconstructionMapFigure, ReconstructionMapParams
 from ehc_sn.figures.sparsity import SparsityFigure, SparsityParams
@@ -46,6 +49,8 @@ from ehc_sn.figures.sparsity import SparsityFigure, SparsityParams
 __all__ = [
     "BinaryMapFigure",
     "BinaryMapParams",
+    "DecoderMontageFigure",
+    "DecoderMontageParams",
     "ReconstructionTraceFigure",
     "ReconstructionTraceParams",
     "ReconstructionMapFigure",
