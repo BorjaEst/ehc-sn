@@ -145,7 +145,7 @@ class Autoencoder(pl.LightningModule):
         reconstruction, latent = outputs
         reconstruction_loss = self.reconstruction_loss(reconstruction, sensors)
         sparsity_loss = self.sparsity_loss(latent)
-        return [reconstruction_loss, sparsity_loss]
+        return [reconstruction_loss, 2e-1 * sparsity_loss]
 
     # -----------------------------------------------------------------------------------
     def prepare_perturbations(self) -> None:
