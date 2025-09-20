@@ -28,7 +28,7 @@ class Experiment(BaseSettings):
     figure_2: Figure2Params = Field(default_factory=Figure2Params, description="Sparsity figure parameters")
 
     trainer: TrainerParams = Field(
-        default_factory=lambda: TrainerParams(experiment_name="spsa_perturbation"),
+        default_factory=lambda: TrainerParams(experiment_name="spsa_feedback"),
         description="Trainer parameters",
     )
 
