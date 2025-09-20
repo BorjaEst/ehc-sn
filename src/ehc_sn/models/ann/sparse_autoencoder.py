@@ -1,6 +1,7 @@
 import math
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
 
+import torch
 from lightning import pytorch as pl
 from pydantic import BaseModel, Field, field_validator
 from torch import Tensor, flatten, nn, unflatten
@@ -86,7 +87,6 @@ class Autoencoder(pl.LightningModule):
         self.reconstruction_loss = nn.BCELoss(reduction="mean")
         self.sparsity_loss = SparsityLoss(center=True)
 
-    # -----------------------------------------------------------------------------------
     def configure_optimizers(self) -> Optimizer:
         optm_pe = {"params": self.encoder.parameters(), "lr": self.config.encoder_lr}
         optm_pd = {"params": self.decoder.parameters(), "lr": self.config.decoder_lr}
@@ -98,6 +98,14 @@ class Autoencoder(pl.LightningModule):
         reconstruction = unflatten(self.decoder(latent), 1, sensors.shape[1:])
         return reconstruction, latent
 
+    @torch.inference_mode()
+    def encode(self, sensors: Tensor) -> Tensor:
+        return self.encoder(flatten(sensors, start_dim=1))
+
+    @torch.inference_mode()
+    def decode(self, latent: Tensor) -> Tensor:
+        return unflatten(self.decoder(latent), 1, self.config.output_shape)
+
     # -----------------------------------------------------------------------------------
     def compute_loss(self, outputs: Tensor, batch: Tensor) -> List[Tensor]:
         sensors, *_ = batch
@@ -106,11 +114,9 @@ class Autoencoder(pl.LightningModule):
         reconstruction_loss = self.reconstruction_loss(reconstruction, sensors)
         return [reconstruction_loss, self.config.sparsity_weight * sparsity_loss]
 
-    # -----------------------------------------------------------------------------------
     def training_step(self, batch: Tensor, batch_idx: int) -> None:
         self.trainer_module.training_step(self, batch, batch_idx)
 
-    # -----------------------------------------------------------------------------------
     def validation_step(self, batch: Tensor, batch_idx: int) -> List[Tensor]:
         outputs = self(batch[0])
         reconstruction_loss = nn.MSELoss(reduction="mean")(outputs[0], batch[0])
@@ -119,7 +125,6 @@ class Autoencoder(pl.LightningModule):
         self.log("val/reconstruction_loss", reconstruction_loss, prog_bar=True)
 
 
-# -------------------------------------------------------------------------------------------
 if __name__ == "__main__":
     # Usage example
     pass  # TODO
