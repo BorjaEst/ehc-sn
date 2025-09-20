@@ -73,32 +73,44 @@ class Decoder(nn.Module):
 class Autoencoder(pl.LightningModule):
     def __init__(self, params: ModelParams, trainer: BaseTrainer) -> None:
         super().__init__()
-        self.encoder = Encoder(*params.units())
-        self.decoder = Decoder(*params.units())
+        self.save_hyperparameters(ignore=["trainer"])
         self.config = params
         self.automatic_optimization = False
-        self.trainer_strategy = trainer
+        self.trainer_module = trainer
 
+        # Initialize encoder and decoder with DFA layers
+        self.encoder = Encoder(*params.units())
+        self.decoder = Decoder(*params.units())
+
+        # Loss functions
+        self.reconstruction_loss = nn.BCELoss(reduction="mean")
+        self.sparsity_loss = SparsityLoss(center=True)
+
+    # -----------------------------------------------------------------------------------
     def configure_optimizers(self) -> Optimizer:
         optm_pe = {"params": self.encoder.parameters(), "lr": self.config.encoder_lr}
         optm_pd = {"params": self.decoder.parameters(), "lr": self.config.decoder_lr}
         return Adam([optm_pe, optm_pd])
 
+    # -----------------------------------------------------------------------------------
     def forward(self, sensors: Tensor) -> Tuple[Tensor, Tensor]:
         latent = self.encoder(flatten(sensors, start_dim=1))
         reconstruction = unflatten(self.decoder(latent), 1, sensors.shape[1:])
         return reconstruction, latent
 
+    # -----------------------------------------------------------------------------------
     def compute_loss(self, outputs: Tensor, batch: Tensor) -> List[Tensor]:
         sensors, *_ = batch
         reconstruction, latent = outputs
-        reconstruction_loss = nn.BCELoss(reduction="mean")(reconstruction, sensors)
-        sparsity_loss = SparsityLoss(self.config.gramian_center)(latent)
+        sparsity_loss = self.sparsity_loss(latent)
+        reconstruction_loss = self.reconstruction_loss(reconstruction, sensors)
         return [reconstruction_loss, self.config.sparsity_weight * sparsity_loss]
 
+    # -----------------------------------------------------------------------------------
     def training_step(self, batch: Tensor, batch_idx: int) -> None:
-        self.trainer_strategy.training_step(self, batch, batch_idx)
+        self.trainer_module.training_step(self, batch, batch_idx)
 
+    # -----------------------------------------------------------------------------------
     def validation_step(self, batch: Tensor, batch_idx: int) -> List[Tensor]:
         outputs = self(batch[0])
         reconstruction_loss = nn.MSELoss(reduction="mean")(outputs[0], batch[0])

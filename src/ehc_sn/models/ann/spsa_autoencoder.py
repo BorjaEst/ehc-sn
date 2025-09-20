@@ -114,12 +114,10 @@ class Autoencoder(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters(ignore=["trainer"])
         self.config = params
-
-        # Optimization and trainer
         self.automatic_optimization = False
         self.trainer_module = trainer
 
-        # Initialize encoder and decoder with ZO layers
+        # Initialize encoder and decoder with DFA layers
         self.encoder = Encoder(*params.units())
         self.decoder = Decoder(*params.units())
 
