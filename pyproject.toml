@@ -1,0 +1,66 @@
+[build-system]
+    requires      = ["setuptools>=61.0", "wheel"]
+    build-backend = "setuptools.build_meta"
+
+[project]
+    name = "ehc-sn"
+    description = "Entorhinal-Hippocampal Complex (EHC) Spatial Navigation library"
+    authors = [{ name = "Borja Esteban Sanchis" }]
+    license = { text = "GNU General Public License v3.0" }
+    classifiers = [
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.10",
+        "Topic :: Scientific/Engineering :: Artificial Intelligence",
+        "Topic :: Scientific/Engineering :: Bio-Informatics",
+        "Topic :: Scientific/Engineering :: Neuroscience",
+    ]
+    keywords = [
+        "neuroscience",
+        "spatial navigation",
+        "hippocampus",
+        "entorhinal cortex",
+        "neural modeling",
+    ]
+    requires-python = ">=3.10"
+    dynamic = ["version", "readme"]
+    dependencies = []
+
+[project.optional-dependencies]
+    dev = []
+
+[project.urls]
+    "Homepage"      = "https://github.com/BorjaEst/ehc-sn"
+    "Bug Tracker"   = "https://github.com/BorjaEst/ehc-sn/issues"
+    "Documentation" = "https://ehc-sn.readthedocs.io"
+
+[tool.setuptools]
+    package-dir = { "" = "src" }
+
+[tool.setuptools.dynamic]
+    version = { file = "src/ehc_sn/VERSION" }
+    readme  = { file = ["README.md"] }
+
+[tool.black]
+    line-length    = 180
+    target-version = ["py310"]
+
+[tool.isort]
+    profile     = "black"
+    line_length = 180
+
+[tool.mypy]
+    python_version           = "3.10"
+    warn_return_any          = false
+    warn_unused_configs      = false
+    disallow_untyped_defs    = false
+    disallow_incomplete_defs = false
+
+[tool.pytest.ini_options]
+    pythonpath       = [".", "src"]
+    testpaths        = ["tests"]
+    python_files     = "test_*.py"
+    python_classes   = "Test*"
+    python_functions = "test_*"
+    addopts          = "--import-mode=importlib"
