@@ -1,5 +1,5 @@
 [build-system]
-    requires      = ["setuptools>=61.0", "wheel"]
+    requires      = ["setuptools>=68,<81", "wheel"]
     build-backend = "setuptools.build_meta"
 
 [project]
@@ -11,7 +11,7 @@
         "Intended Audience :: Science/Research",
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.12",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
         "Topic :: Scientific/Engineering :: Bio-Informatics",
         "Topic :: Scientific/Engineering :: Neuroscience",
@@ -28,7 +28,7 @@
     dependencies = []
 
 [project.optional-dependencies]
-    dev = []
+    dev = ["pytest", "black", "flake", "mypy"]
 
 [project.urls]
     "Homepage"      = "https://github.com/BorjaEst/ehc-sn"
@@ -38,17 +38,25 @@
 [tool.setuptools]
     package-dir = { "" = "src" }
 
+[tool.setuptools.packages.find]
+    where = ["src"]
+
 [tool.setuptools.dynamic]
     version = { file = "src/ehc_sn/VERSION" }
     readme  = { file = ["README.md"] }
 
+[tool.setuptools.package-data]
+    hrm_sn = ["py.typed", "**/*.yaml", "**/*.yml"]
+
 [tool.black]
-    line-length    = 180
-    target-version = ["py310"]
+    line-length    = 105
+    target-version = ["py312"]
+    include        = '\.pyi?$'
 
 [tool.isort]
-    profile     = "black"
-    line_length = 180
+    profile           = "black"
+    line_length       = 105
+    known_first_party = ["ehc_sn"]
 
 [tool.mypy]
     python_version           = "3.10"
