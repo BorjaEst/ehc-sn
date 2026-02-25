@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from torchmetrics import MetricCollection
 
-from hrm_sn.metrics.types import StepMetrics
+from ehc_sn.metrics.types import StepMetrics
 
 __all__ = ["update_metrics_from_step"]
 

@@ -1,8 +1,8 @@
 from torchmetrics import MetricCollection
 
-from hrm_sn.metrics.adapter import update_metrics_from_step
-from hrm_sn.metrics.torchmetrics import LastRatioMetric, RatioMetric
-from hrm_sn.metrics.types import HaltedAgg, LossAgg, StepMetrics, TokenAgg
+from ehc_sn.metrics.adapter import update_metrics_from_step
+from ehc_sn.metrics.torchmetrics import LastRatioMetric, RatioMetric
+from ehc_sn.metrics.types import HaltedAgg, LossAgg, StepMetrics, TokenAgg
 
 __all__ = [
     "RatioMetric",

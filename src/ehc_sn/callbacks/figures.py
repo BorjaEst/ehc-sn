@@ -1,6 +1,6 @@
 """PyTorch Lightning callback for periodic figure generation.
 
-This module provides :class:`~hrm_sn.callbacks.figures.FiguresCallback`, a
+This module provides :class:`~ehc_sn.callbacks.figures.FiguresCallback`, a
 rank-zero-only callback that captures a single rollout trace from the selected
 evaluation split and uses the figure registry to render and persist figures.
 
@@ -22,9 +22,9 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from matplotlib.figure import Figure
 from pydantic import BaseModel, Field
 
-from hrm_sn.figures import register, sinks
-from hrm_sn.figures.registry import REGISTRY, FigureContext
-from hrm_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.figures import register, sinks
+from ehc_sn.figures.registry import REGISTRY, FigureContext
+from ehc_sn.rollouts.trace_tree import TraceTree
 
 
 # =================================================================================================
@@ -35,7 +35,7 @@ class FigureCallbackSettings(BaseModel, extra="forbid"):
     to persist them.
 
     Notes:
-        - Figure names are resolved via :data:`hrm_sn.figures.registry.REGISTRY`.
+        - Figure names are resolved via :data:`ehc_sn.figures.registry.REGISTRY`.
         - When ``output_dir`` is not set, PDFs default to the TensorBoard
           logger's ``log_dir`` (if present).
     """
@@ -212,7 +212,7 @@ class FiguresCallback(pl.Callback):
     def figure_context(  # ------------------------------------------------------------------------
         self, trainer: Trainer, split_name: Optional[str],
     ) -> FigureContext:  # fmt: skip
-        """Build a :class:`~hrm_sn.figures.registry.FigureContext`.
+        """Build a :class:`~ehc_sn.figures.registry.FigureContext`.
 
         The context bundles user-configured visualization indices plus trainer
         state (e.g. global step) so figure specs can label and condition plots.
@@ -290,7 +290,7 @@ class FiguresCallback(pl.Callback):
     def _extract_trace(  # ------------------------------------------------------------------------
         self, outputs: Any,
     ) -> Optional[TraceTree]:  # fmt: skip
-        """Extract a :class:`~hrm_sn.rollouts.trace_tree.TraceTree` from ``outputs``.
+        """Extract a :class:`~ehc_sn.rollouts.trace_tree.TraceTree` from ``outputs``.
 
         Supports common Lightning return conventions:
             - Directly returning a ``TraceTree``

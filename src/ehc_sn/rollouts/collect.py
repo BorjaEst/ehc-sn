@@ -6,7 +6,7 @@ from typing import Any, Callable, Generic, Mapping, Sequence, TypeAlias, TypeVar
 import numpy as np
 import torch
 
-from hrm_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.rollouts.trace_tree import TraceTree
 
 Context = TypeVar("Context")
 

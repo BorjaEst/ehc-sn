@@ -1,5 +1,5 @@
-"""Figure modules for the hrm_sn figures registry."""
+"""Figure modules for the ehc_sn figures registry."""
 
-from hrm_sn.figures.modules import dummy, evolution, overlay
+from ehc_sn.figures.modules import dummy, evolution, overlay
 
 __all__ = ["dummy", "overlay", "evolution"]

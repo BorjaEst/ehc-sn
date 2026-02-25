@@ -5,7 +5,7 @@ from typing import Dict, Sequence
 import torch
 from torch import Tensor
 
-from hrm_sn.training.buffers import FifoBuffer
+from ehc_sn.training.buffers import FifoBuffer
 
 
 class PartialResetBatchAssembler:
@@ -16,7 +16,9 @@ class PartialResetBatchAssembler:
     def make_step_batch(self, *, incoming: Dict[str, Tensor], reset_mask: Tensor) -> Dict[str, Tensor]:
         return self.ingest_and_make_step_batch(incoming=incoming, reset_mask=reset_mask)
 
-    def ingest_and_make_step_batch(self, *, incoming: Dict[str, Tensor], reset_mask: Tensor) -> Dict[str, Tensor]:
+    def ingest_and_make_step_batch(
+        self, *, incoming: Dict[str, Tensor], reset_mask: Tensor
+    ) -> Dict[str, Tensor]:
         """
         incoming: tensors on GPU (Lightning already moved them).
         reset_mask: bool tensor on GPU, shape (B,). True => this slot will load new data now.

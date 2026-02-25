@@ -22,11 +22,11 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
-from hrm_sn.modules.attention import Attention, AttentionConfig
-from hrm_sn.modules.mlp import MLPConfig, SwiGLU
-from hrm_sn.types import Device, Dtype
-from hrm_sn.utils import trunc_normal_init_
-from hrm_sn.utils.norms import rms_norm
+from ehc_sn.modules.attention import Attention, AttentionConfig
+from ehc_sn.modules.mlp import MLPConfig, SwiGLU
+from ehc_sn.types import Device, Dtype
+from ehc_sn.utils import trunc_normal_init_
+from ehc_sn.utils.norms import rms_norm
 
 
 # =================================================================================================
@@ -273,7 +273,9 @@ class HRModel(nn.Module):
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, device=device, dtype=dtype)
         self.embed_pos = nn.Embedding(config.seq_length, config.hidden_size, device=device, dtype=dtype)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)
+        self.lm_head = nn.Linear(
+            config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype
+        )
 
         # Reasoning Layers
         self.high_level = ReasoningModule(config.h_layers)
@@ -343,7 +345,9 @@ class HRModel(nn.Module):
         """
         batch_size = state.z_H.shape[0]
         if reset_flag.numel() not in {1, batch_size}:
-            raise ValueError(f"reset_flag must be broadcastable to [batch], got numel={reset_flag.numel()} for batch_size={batch_size}.")
+            raise ValueError(
+                f"reset_flag must be broadcastable to [batch], got numel={reset_flag.numel()} for batch_size={batch_size}."
+            )
 
         reset_flag = reset_flag.to(torch.bool)
         init_H = self.high_reset_vector.view(1, 1, -1).expand_as(state.z_H)
@@ -434,7 +438,9 @@ class HRModel(nn.Module):
 
         seq_length = input.shape[1]
         if seq_length != self.config.seq_length:
-            raise ValueError(f"Input must match configured seq_length ({self.config.seq_length}); got {seq_length}.")
+            raise ValueError(
+                f"Input must match configured seq_length ({self.config.seq_length}); got {seq_length}."
+            )
 
         token_embeddings = self.embed_tokens(input.to(torch.int32))
         positions = torch.arange(seq_length, device=input.device)

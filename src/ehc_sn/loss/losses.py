@@ -10,15 +10,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import Normal
-from torch_tem import utils
-from torch_tem.data.world import WorldStep
-from torch_tem.model import TEMOutput, TEMState
-from torch_tem.settings import AbstractLocationSettings  # fmt: skip
-from torch_tem.settings import GroundedLocationSettings  # fmt: skip
-from torch_tem.settings import LossSettings  # fmt: skip
-from torch_tem.settings import RegularizationSettings  # fmt: skip
-from torch_tem.settings import SensoryReconstructionSettings  # fmt: skip
-from torch_tem.types import AbstractLocation, GroundedLocation, Prediction, Reduction, Scalar
+
+from ehc_sn import utils
+from ehc_sn.data.world import WorldStep
+from ehc_sn.model import TEMOutput, TEMState
+from ehc_sn.settings import AbstractLocationSettings  # fmt: skip
+from ehc_sn.settings import GroundedLocationSettings  # fmt: skip
+from ehc_sn.settings import LossSettings  # fmt: skip
+from ehc_sn.settings import RegularizationSettings  # fmt: skip
+from ehc_sn.settings import SensoryReconstructionSettings  # fmt: skip
+from ehc_sn.types import AbstractLocation, GroundedLocation, Prediction, Reduction, Scalar
 
 
 @dataclass
@@ -657,7 +658,7 @@ class TEMLoss(nn.Module):
 
     Note:
         Default ``reduction="none"`` produces per-environment vectors ``(B,)``
-        to support visit masking in :class:`~torch_tem.training.TrainingLoop`.
+        to support visit masking in :class:`~ehc_sn.training.TrainingLoop`.
     """
 
     def __init__(self, config: LossSettings):
@@ -698,4 +699,5 @@ class TEMLoss(nn.Module):
         lp: LossP = self.loss_p_fn(p_inf, p_gen_gi, p_xi)
         lreg: LossReg = self.loss_reg_fn(g_inf, p_inf)
 
+        return LossOutput(x=lx, p=lp, g=lg, reg=lreg)
         return LossOutput(x=lx, p=lp, g=lg, reg=lreg)

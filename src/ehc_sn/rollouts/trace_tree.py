@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 import numpy as np
 
-from hrm_sn.utils import torch_pytree
+from ehc_sn.utils import torch_pytree
 
 
 # =================================================================================================

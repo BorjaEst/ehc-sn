@@ -31,15 +31,16 @@ from typing import List, Literal, Optional, Sequence, Tuple, Union
 import torch
 from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor, nn
-from torch_tem import utils
-from torch_tem.data.world import World, WorldStep
-from torch_tem.modules.autoencoder import AutoencoderModule
-from torch_tem.modules.hpc import HPCModel, HPCState
-from torch_tem.modules.lec import LECModel, LECState
-from torch_tem.modules.mec import MECModel, MECState
-from torch_tem.modules.projection import ProjectionModule
-from torch_tem.settings import *
-from torch_tem.types import *
+
+from ehc_sn import utils
+from ehc_sn.data.world import World, WorldStep
+from ehc_sn.modules.autoencoder import AutoencoderModule
+from ehc_sn.modules.hpc import HPCModel, HPCState
+from ehc_sn.modules.lec import LECModel, LECState
+from ehc_sn.modules.mec import MECModel, MECState
+from ehc_sn.modules.projection import ProjectionModule
+from ehc_sn.settings import *
+from ehc_sn.types import *
 
 
 class TEMConfig(BaseModel):
@@ -488,9 +489,9 @@ Settings composition:
     - Instantiated in run.py from individual settings components
 
 See Also:
-    :class:`torch_tem.losses.TEMLoss`: Loss computation
-    :class:`torch_tem.model.Model`: Core TEM model
-    :class:`torch_tem.model.RolloutStream`: Streaming rollout iterator
+    :class:`ehc_sn.losses.TEMLoss`: Loss computation
+    :class:`ehc_sn.model.Model`: Core TEM model
+    :class:`ehc_sn.model.RolloutStream`: Streaming rollout iterator
 """
 
 from __future__ import annotations
@@ -501,14 +502,14 @@ import lightning.pytorch as pl
 import numpy as np
 import torch
 from pydantic import BaseModel, ConfigDict, Field
+from temp.tem.src.ehc_sn.tem_v1 import Model, RolloutStep, RolloutStream, TEMState
 from torch import Tensor
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ExponentialLR
-from torch_tem import losses, metrics, settings
-from torch_tem.losses import AccumLoss, LossG, LossOutput, LossP, LossReg, LossX, StepLoss
-from torch_tem.metrics import AccuracyO
 
-from temp.tem.src.torch_tem.tem_v1 import Model, RolloutStep, RolloutStream, TEMState
+from ehc_sn import losses, metrics, settings
+from ehc_sn.losses import AccumLoss, LossG, LossOutput, LossP, LossReg, LossX, StepLoss
+from ehc_sn.metrics import AccuracyO
 
 
 class TrainerConfig(BaseModel):
@@ -992,4 +993,5 @@ def mean_step_losses(losses_per_env: list[StepLoss]) -> Optional[StepLoss]:
     total = losses_per_env[0]
     for loss in losses_per_env[1:]:
         total = total + loss
+    return total / len(losses_per_env)
     return total / len(losses_per_env)

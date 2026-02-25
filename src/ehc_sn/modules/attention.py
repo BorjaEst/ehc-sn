@@ -16,8 +16,8 @@ import torch.nn.functional as F
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from torch import Tensor, nn
 
-from hrm_sn.types import Device, Dtype
-from hrm_sn.utils import trunc_normal_init_
+from ehc_sn.types import Device, Dtype
+from ehc_sn.utils import trunc_normal_init_
 
 
 # =================================================================================================
@@ -115,8 +115,12 @@ class Attention(nn.Module):
 
         self._qkv_head_count = config.num_heads + 2 * (config.num_kv_heads or config.num_heads)
         self._qkv_proj_out_dim = self._qkv_head_count * config.head_dim
-        self.in_proj = nn.Linear(config.embedding_dim, self._qkv_proj_out_dim, bias=False, device=device, dtype=dtype)
-        self.out_proj = nn.Linear(config.output_size, config.embedding_dim, bias=False, device=device, dtype=dtype)
+        self.in_proj = nn.Linear(
+            config.embedding_dim, self._qkv_proj_out_dim, bias=False, device=device, dtype=dtype
+        )
+        self.out_proj = nn.Linear(
+            config.output_size, config.embedding_dim, bias=False, device=device, dtype=dtype
+        )
         self.reset_parameters()
 
     def reset_parameters(self) -> None:  # -------------------------------------------------------

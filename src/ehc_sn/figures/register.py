@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from hrm_sn.figures.modules import dummy
-from hrm_sn.figures.registry import REGISTRY, FigureSpec
+from ehc_sn.figures.modules import dummy
+from ehc_sn.figures.registry import REGISTRY, FigureSpec
 
 
 def register_builtin_figures() -> None:

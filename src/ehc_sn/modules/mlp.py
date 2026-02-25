@@ -4,10 +4,11 @@ from typing import Optional
 import numpy as np
 import torch
 import torch.nn.functional as F
-from hrm_sn.types import Device, Dtype
-from hrm_sn.utils import _find_multiple, trunc_normal_init_
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
+
+from ehc_sn.types import Device, Dtype
+from ehc_sn.utils import _find_multiple, trunc_normal_init_
 
 
 # =================================================================================================
@@ -90,7 +91,7 @@ class SwiGLU(nn.Module):
         Notes:
             - This module is shape-preserving in the last dimension.
             - The underlying projections are performed by
-              :class:`~hrm_sn.modules.projections.CastedLinear`.
+              :class:`~ehc_sn.modules.projections.CastedLinear`.
         """
         gate, up = self.gate_up_proj(x).chunk(2, dim=-1)
         return self.down_proj(F.silu(gate) * up)
@@ -185,4 +186,5 @@ class MLP(torch.nn.Module):
         if not self.is_list:
             output = output[0]
         # And return output
+        return output
         return output

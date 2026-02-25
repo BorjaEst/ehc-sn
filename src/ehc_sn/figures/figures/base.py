@@ -12,7 +12,7 @@ from matplotlib.axes import Axes
 from matplotlib.cm import ScalarMappable
 from matplotlib.figure import Figure
 
-from hrm_sn.figures.registry import FigureContext
+from ehc_sn.figures.registry import FigureContext
 
 
 @dataclass(frozen=True)

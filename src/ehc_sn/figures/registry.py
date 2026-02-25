@@ -9,7 +9,7 @@ import matplotlib.figure as mpl_figure
 import pub_ready_plots as prp
 import scienceplots  # noqa: F401 (registers "science", "nature", ...)
 
-from hrm_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.rollouts.trace_tree import TraceTree
 
 
 @dataclass(frozen=True)

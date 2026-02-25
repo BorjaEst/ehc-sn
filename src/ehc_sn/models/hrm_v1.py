@@ -29,21 +29,21 @@ from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.optim import Optimizer
 
-from hrm_sn.data.maze_vocab import O_ID
-from hrm_sn.loss.act_head import ACTLossConfig, ACTLossHead
-from hrm_sn.metrics import build_metrics, update_metrics_from_step
-from hrm_sn.modules.halting_head import LinearHaltingHead
-from hrm_sn.modules.hrm import HRMConfig, HRModel
-from hrm_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
-from hrm_sn.rollouts.trace_tree import TraceTree
-from hrm_sn.training.act_controller import ACTController, ACTControllerConfig
-from hrm_sn.training.buffers import FifoBuffer
-from hrm_sn.training.optim import AdamATan2, AdamATan2Config
-from hrm_sn.training.partial_reset import PartialResetBatchAssembler
-from hrm_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
-from hrm_sn.training.step_loop import StepContext, StepLoop
+from ehc_sn.data.maze_vocab import O_ID
+from ehc_sn.loss.act_head import ACTLossConfig, ACTLossHead
+from ehc_sn.metrics import build_metrics, update_metrics_from_step
+from ehc_sn.modules.halting_head import LinearHaltingHead
+from ehc_sn.modules.hrm import HRMConfig, HRModel
+from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
+from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.training.act_controller import ACTController, ACTControllerConfig
+from ehc_sn.training.buffers import FifoBuffer
+from ehc_sn.training.optim import AdamATan2, AdamATan2Config
+from ehc_sn.training.partial_reset import PartialResetBatchAssembler
+from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
+from ehc_sn.training.step_loop import StepContext, StepLoop
 
-# TODO: Consider moving these aliases to `hrm_sn/types.py` once stabilized.
+# TODO: Consider moving these aliases to `ehc_sn/types.py` once stabilized.
 # NOTE: The training pipeline uses a "named split" batch to support multi-dataloader setups.
 # - `set_name`: split identifier (e.g. "train", "test", "val")
 # - `batch_dict`: tensor payload (expected keys depend on dataset; typically "inputs"/"labels")

@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 from torch import Tensor
 
-from hrm_sn.training.partial_reset import PartialResetBatchAssembler
+from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 
 BatchDict = Dict[str, Tensor]
 
@@ -31,7 +31,9 @@ class PartialResetCollector(Iterator[BatchDict]):
     def __next__(self) -> BatchDict:
         if not self._started:
             self._started = True
-            return self._assembler.ingest_and_make_step_batch(incoming=self._incoming, reset_mask=self._reset_mask)
+            return self._assembler.ingest_and_make_step_batch(
+                incoming=self._incoming, reset_mask=self._reset_mask
+            )
 
         if not self._reset_mask.any():
             return self._template

@@ -1,6 +1,6 @@
 """Adaptive Computation Time (ACT) loss head.
 
-This module defines the loss/metrics head used together with :class:`hrm_sn.training.act_controller.ACTController`.
+This module defines the loss/metrics head used together with :class:`ehc_sn.training.act_controller.ACTController`.
 
 At each ACT step the controller produces:
 
@@ -28,10 +28,10 @@ import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
-import hrm_sn.loss.cross_entropy as cross_entropy_module
-from hrm_sn.loss.cross_entropy import LossType
-from hrm_sn.metrics import HaltedAgg, LossAgg, StepMetrics, TokenAgg
-from hrm_sn.training.act_controller import ACTController, ACTOutput, ACTState
+import ehc_sn.loss.cross_entropy as cross_entropy_module
+from ehc_sn.loss.cross_entropy import LossType
+from ehc_sn.metrics import HaltedAgg, LossAgg, StepMetrics, TokenAgg
+from ehc_sn.training.act_controller import ACTController, ACTOutput, ACTState
 
 Batch = Dict[str, Tensor]  # Generic batch type, can be specialized as needed
 IGNORE_LABEL_ID = -100
@@ -45,7 +45,7 @@ class ACTLossConfig(BaseModel, extra="forbid"):
     ----------
     function:
         Name of the token-level modeling loss function to use. This is resolved as an
-        attribute on :mod:`hrm_sn.loss.cross_entropy`.
+        attribute on :mod:`ehc_sn.loss.cross_entropy`.
     """
 
     function: LossType = Field(
@@ -128,7 +128,7 @@ class ACTLossHead(nn.Module):
     """Loss head for ACT rollouts.
 
     The head is called once per rollout step. It delegates state transitions to the
-    :class:`~hrm_sn.training.act_controller.ACTController`, computes losses, and
+    :class:`~ehc_sn.training.act_controller.ACTController`, computes losses, and
     returns both the scalar loss and aggregated metrics.
     """
 
@@ -164,7 +164,7 @@ class ACTLossHead(nn.Module):
         """Resolved token-level loss function.
 
         The config stores a string/enum name which is resolved on
-        :mod:`hrm_sn.loss.cross_entropy`.
+        :mod:`ehc_sn.loss.cross_entropy`.
         """
         return getattr(cross_entropy_module, self._config.function)
 

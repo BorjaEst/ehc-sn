@@ -11,7 +11,8 @@ import torch
 import torch.nn.functional as F
 from scipy.special import comb
 from torch import Tensor, nn
-from torch_tem.types import LocationBelief, Matrix, Reduction, Vector
+
+from ehc_sn.types import LocationBelief, Matrix, Reduction, Vector
 
 
 def trunc_normal_init_(tensor: Tensor, std: float = 1.0, lower: float = -2.0, upper: float = 2.0):
@@ -709,4 +710,5 @@ def make_hebbian_write_mask(n_stages: int, shape: List[int], f_init: List[float]
     widths = torch.as_tensor(shape, dtype=torch.long)
     module_id = module.repeat_interleave(widths)
     mask = allow[module_id[:, None], module_id[None, :]]
+    return mask
     return mask
