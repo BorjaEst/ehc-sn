@@ -1,23 +1,26 @@
 strict = true
 
 [required]
-files = [
-    "spec/spec-manifest.toml",
-    "spec/spec-architecture.md",
-    "spec/spec-requirements.md",
-    "spec/spec-standards.md",
-]
+    files = [
+        "spec/spec-manifest.toml",
+        "spec/spec-architecture.md",
+        "spec/spec-requirements.md",
+        "spec/spec-standards.md",
+    ]
 
 [canonical_paths]
-plans_root = ".copilot-tracking/plans"
-plan_details_root = ".copilot-tracking/details"
-plan_changes_root = ".copilot-tracking/changes"
-docs_root = "docs"
+    plans_root        = ".copilot-tracking/plans"
+    plan_details_root = ".copilot-tracking/details"
+    plan_changes_root = ".copilot-tracking/changes"
+    docs_root         = "docs"
 
+# Precedence: earlier entries override later ones when specs conflict.
+# This is the single source of truth for precedence; other specs reference
+# this table rather than duplicating it.
 [precedence]
-order = [
-    "spec/spec-manifest.toml",
-    "spec/spec-architecture.md",
-    "spec/spec-requirements.md",
-    "spec/spec-standards.md",
-]
+    order = [
+        "spec/spec-manifest.toml",
+        "spec/spec-architecture.md",
+        "spec/spec-requirements.md",
+        "spec/spec-standards.md",
+    ]
