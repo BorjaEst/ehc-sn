@@ -330,3 +330,10 @@ class Prediction:
 Activation = Literal["leaky_relu", "sigmoid", "none"]
 ProjectionMode = Literal["identity", "tiling", "low_rank", "random"]
 InitStrategy = Literal["identity", "random"]
+
+
+import torch
+from torch import Tensor
+
+Device = torch.device
+Dtype = torch.dtype

@@ -25,7 +25,21 @@
     ]
     requires-python = ">=3.12"
     dynamic = ["version", "readme"]
-    dependencies = []
+    dependencies = [
+        "setuptools~=80.0",
+        "gymnasium~=1.2.0",
+        "torch",
+        "lightning",
+        "pydantic",
+        "pydantic_settings",
+        "rich",
+        "scipy",
+        "matplotlib",
+        "tensorboard",
+        "networkx",
+        "SciencePlots",
+        "pub-ready-plots",
+    ]
 
 [project.optional-dependencies]
     dev = ["pytest", "black", "flake", "mypy"]
@@ -39,14 +53,15 @@
     package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
-    where = ["src"]
+    where   = ["src"]
+    include = ["ehc_sn*", "mazes*"]
 
 [tool.setuptools.dynamic]
     version = { file = "src/ehc_sn/VERSION" }
     readme  = { file = ["README.md"] }
 
 [tool.setuptools.package-data]
-    hrm_sn = ["py.typed", "**/*.yaml", "**/*.yml"]
+    ehc_sn = ["py.typed", "**/*.yaml", "**/*.yml"]
 
 [tool.black]
     line-length    = 110

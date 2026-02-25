@@ -1,5 +1,6 @@
 import datetime
 import logging
+import math
 import os
 from itertools import combinations
 from pathlib import Path
@@ -9,9 +10,36 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.special import comb
-from torch import Tensor
-
+from torch import Tensor, nn
 from torch_tem.types import LocationBelief, Matrix, Reduction, Vector
+
+
+def trunc_normal_init_(tensor: Tensor, std: float = 1.0, lower: float = -2.0, upper: float = 2.0):
+    # NOTE: PyTorch nn.init.trunc_normal_ is not mathematically correct, the std dev is not actually the std dev of initialized tensor
+    # This function is a PyTorch version of jax truncated normal init (default init method in flax)
+    # https://github.com/jax-ml/jax/blob/main/jax/_src/random.py#L807-L848
+    # https://github.com/jax-ml/jax/blob/main/jax/_src/nn/initializers.py#L162-L199
+
+    with torch.no_grad():
+        if std == 0:
+            tensor.zero_()
+        else:
+            sqrt2 = math.sqrt(2)
+            a = math.erf(lower / sqrt2)
+            b = math.erf(upper / sqrt2)
+            z = (b - a) / 2
+
+            c = (2 * math.pi) ** -0.5
+            pdf_u = c * math.exp(-0.5 * lower**2)
+            pdf_l = c * math.exp(-0.5 * upper**2)
+            comp_std = std / math.sqrt(1 - (upper * pdf_u - lower * pdf_l) / z - ((pdf_u - pdf_l) / z) ** 2)
+
+            tensor.uniform_(a, b)
+            tensor.erfinv_()
+            tensor.mul_(sqrt2 * comp_std)
+            tensor.clip_(lower * comp_std, upper * comp_std)
+
+    return tensor
 
 
 def sample_diag_gaussian(transition: LocationBelief, *, scale: float = 1.0) -> List[Tensor]:
@@ -28,7 +56,9 @@ def sample_diag_gaussian(transition: LocationBelief, *, scale: float = 1.0) -> L
     return [mu_f + float(scale) * sigma_f * torch.randn_like(mu_f) for mu_f, sigma_f in zip(mu, sigma)]
 
 
-def inv_var_trans(base: LocationBelief, corr: LocationBelief, mask: Optional[Tensor] = None, freqs: Optional[range] = None) -> LocationBelief:
+def inv_var_trans(
+    base: LocationBelief, corr: LocationBelief, mask: Optional[Tensor] = None, freqs: Optional[range] = None
+) -> LocationBelief:
     """Fuse correction into base using inverse-variance weighting.
 
     Supports selective fusion by frequency range and batch masking.
@@ -40,7 +70,9 @@ def inv_var_trans(base: LocationBelief, corr: LocationBelief, mask: Optional[Ten
 
     for i, f in enumerate(freqs):
         mu_f, sigma_f = base.mean[f].clone(), base.uncertainty[f].clone()
-        mu_f[idx], sigma_f[idx] = inv_var_weight([base.mean[f][idx], corr.mean[i]], [base.uncertainty[f][idx], corr.uncertainty[i]])
+        mu_f[idx], sigma_f[idx] = inv_var_weight(
+            [base.mean[f][idx], corr.mean[i]], [base.uncertainty[f][idx], corr.uncertainty[i]]
+        )
         mu_out[f], sigma_out[f] = mu_f, sigma_f
 
     return LocationBelief(mean=mu_out, uncertainty=sigma_out)
@@ -126,7 +158,10 @@ def squared_error(value, target):
     """
     # Return torch MSE loss
     if type(value) is list:
-        loss = [0.5 * torch.sum(torch.nn.MSELoss(reduction="none")(value[i], target[i]), dim=-1) for i in range(len(value))]
+        loss = [
+            0.5 * torch.sum(torch.nn.MSELoss(reduction="none")(value[i], target[i]), dim=-1)
+            for i in range(len(value))
+        ]
     else:
         loss = 0.5 * torch.sum(torch.nn.MSELoss(reduction="none")(value, target), dim=-1)
     return loss
@@ -158,7 +193,9 @@ def downsample(value, target_dim):
     downsample = torch.zeros((value_dim, target_dim), dtype=torch.float)
     # Fill downsampling matrix with chunks
     for curr_entry in range(target_dim):
-        downsample[edges[curr_entry] : edges[curr_entry + 1], curr_entry] = torch.tensor(1.0 / (edges[curr_entry + 1] - edges[curr_entry]), dtype=torch.float)
+        downsample[edges[curr_entry] : edges[curr_entry + 1], curr_entry] = torch.tensor(
+            1.0 / (edges[curr_entry + 1] - edges[curr_entry]), dtype=torch.float
+        )
     # Do downsampling by matrix multiplication
     return torch.matmul(value, downsample)
 
@@ -185,7 +222,11 @@ def make_directories():
         envs_path = script_path + "/envs"
         run += 1
         # And once a path doesn't exist yet: create new folders
-        if not os.path.exists(train_path) and not os.path.exists(model_path) and not os.path.exists(save_path):
+        if (
+            not os.path.exists(train_path)
+            and not os.path.exists(model_path)
+            and not os.path.exists(save_path)
+        ):
             os.makedirs(train_path)
             os.makedirs(model_path)
             os.makedirs(save_path)
@@ -301,7 +342,15 @@ def create_downsample_matrix(n: List[int], n_subsampled: List[int]) -> List[Matr
     """
     # Matrix shape: [n_in, n_out] where we select first n_out columns
     # For input o: [B, n_in], result is o @ W_down = [B, n_out]
-    return [torch.cat([torch.eye(dim_out, dtype=torch.float), torch.zeros((dim_in - dim_out, dim_out), dtype=torch.float)]) for dim_in, dim_out in zip(n, n_subsampled)]
+    return [
+        torch.cat(
+            [
+                torch.eye(dim_out, dtype=torch.float),
+                torch.zeros((dim_in - dim_out, dim_out), dtype=torch.float),
+            ]
+        )
+        for dim_in, dim_out in zip(n, n_subsampled)
+    ]
 
 
 def create_repeat_matrices(n_subsampled: List[int], n: List[int]) -> List[Matrix]:
@@ -320,7 +369,10 @@ def create_repeat_matrices(n_subsampled: List[int], n: List[int]) -> List[Matrix
     # Matrix shape: [n_subsampled, n_p] where each row is repeated
     # For input g: [B, n_subsampled], result is g @ W_repeat = [B, n_p]
     # Uses Kronecker product: eye(n_subsampled) ⊗ ones(1, n_p/n_subsampled)
-    return [torch.tensor(np.kron(np.eye(dim_in), np.ones((1, dim_out // dim_in))), dtype=torch.float) for dim_in, dim_out in zip(n_subsampled, n)]
+    return [
+        torch.tensor(np.kron(np.eye(dim_in), np.ones((1, dim_out // dim_in))), dtype=torch.float)
+        for dim_in, dim_out in zip(n_subsampled, n)
+    ]
 
 
 def create_tiling_matrices(n_in: List[int], n_out: List[int]) -> List[Matrix]:
@@ -345,10 +397,15 @@ def create_tiling_matrices(n_in: List[int], n_out: List[int]) -> List[Matrix]:
     if any(out % inp != 0 for out, inp in zip(n_out, n_in)):
         raise ValueError(f"n_out must be divisible by n_in. Got n_out={n_out}, n_in={n_in}")
 
-    return [torch.tensor(np.kron(np.ones((1, out // inp)), np.eye(inp)), dtype=torch.float) for inp, out in zip(n_in, n_out)]
+    return [
+        torch.tensor(np.kron(np.ones((1, out // inp)), np.eye(inp)), dtype=torch.float)
+        for inp, out in zip(n_in, n_out)
+    ]
 
 
-def create_random_projection(n_in: List[int], n_out: List[int], sparsity: float = 1.0, seed: Optional[int] = None) -> List[Matrix]:
+def create_random_projection(
+    n_in: List[int], n_out: List[int], sparsity: float = 1.0, seed: Optional[int] = None
+) -> List[Matrix]:
     """Create random fixed projection matrices.
 
     Biologically-inspired alternative to downsampling + W_repeat expansion.
@@ -444,7 +501,10 @@ def create_encoding_table(n_in: int, n_out: int, n_hot: int = 2) -> List[Vector]
     # Validate: number of observations must not exceed possible n-hot codes
     max_codes = int(comb(n_out, n_hot))
     if n_in > max_codes:
-        raise ValueError(f"Cannot encode {n_in} observations with {n_hot}-hot codes in {n_out} dimensions. " f"Maximum possible codes: C({n_out}, {n_hot}) = {max_codes}")
+        raise ValueError(
+            f"Cannot encode {n_in} observations with {n_hot}-hot codes in {n_out} dimensions. "
+            f"Maximum possible codes: C({n_out}, {n_hot}) = {max_codes}"
+        )
 
     # Generate all possible n-hot codes using combinations
     # combinations(range(n_out), n_hot) gives all ways to choose n_hot positions
@@ -478,7 +538,9 @@ def uncat_to_list(x: Tensor, dims: List[int]) -> List[Tensor]:
     return list(torch.split(x, dims, dim=1))
 
 
-def one_hot_with_zero(action: list[int | None], num_actions: int, device: torch.device | None = None) -> torch.Tensor:
+def one_hot_with_zero(
+    action: list[int | None], num_actions: int, device: torch.device | None = None
+) -> torch.Tensor:
     """
     Convert actions to one-hot encoding where action 0/None = all-zeros (static action).
 
@@ -580,7 +642,9 @@ def make_update_full(n_stages: int, n_freq: int, *, device=None) -> torch.Tensor
     return torch.ones((n_stages, n_freq), dtype=torch.bool, device=device)
 
 
-def make_update_hierarchical(n_stages: int, n_freq: int, *, ramp_len: int | None = None, device=None) -> torch.Tensor:
+def make_update_hierarchical(
+    n_stages: int, n_freq: int, *, ramp_len: int | None = None, device=None
+) -> torch.Tensor:
     """Hierarchical update matrix.
 
     ramp_len controls how many frequency modules participate in the triangular ramp.
