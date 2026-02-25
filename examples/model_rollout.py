@@ -60,7 +60,7 @@ logger = logging.getLogger(NAME)
 # =================================================================================================
 # Configuration
 # =================================================================================================
-class ExampleArguments(BaseSettings, extra="ignore", cli_parse_args=True):
+class ExampleArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     """CLI + config-file arguments for this example.
 
     Notes:

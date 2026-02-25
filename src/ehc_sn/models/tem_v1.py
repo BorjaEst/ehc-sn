@@ -33,20 +33,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor, nn
 
 from ehc_sn import utils
-from ehc_sn.data.world import World, WorldStep
 from ehc_sn.modules.autoencoder import AutoencoderModule
 from ehc_sn.modules.hpc import HPCModel, HPCState
 from ehc_sn.modules.lec import LECModel, LECState
 from ehc_sn.modules.mec import MECModel, MECState
 from ehc_sn.modules.projection import ProjectionModule
-from ehc_sn.settings import *
 from ehc_sn.types import *
 
 
 class TEMConfig(BaseModel):
     """Complete settings tree for TEM model configuration."""
 
-    model_config = ConfigDict(extra="ignore", strict=False, arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="forbid", strict=False, arbitrary_types_allowed=True)
 
     space_contract: SpaceContractSettings = Field(
         default_factory=SpaceContractSettings,

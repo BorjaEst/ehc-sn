@@ -8,18 +8,114 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.distributions import Normal
 
 from ehc_sn import utils
-from ehc_sn.data.world import WorldStep
-from ehc_sn.model import TEMOutput, TEMState
-from ehc_sn.settings import AbstractLocationSettings  # fmt: skip
-from ehc_sn.settings import GroundedLocationSettings  # fmt: skip
-from ehc_sn.settings import LossSettings  # fmt: skip
-from ehc_sn.settings import RegularizationSettings  # fmt: skip
-from ehc_sn.settings import SensoryReconstructionSettings  # fmt: skip
 from ehc_sn.types import AbstractLocation, GroundedLocation, Prediction, Reduction, Scalar
+
+
+# =================================================================================================
+class SensoryReconstructionSettings(BaseModel, extra="forbid", strict=False, arbitrary_types_allowed=True):
+    """Settings for sensory reconstruction loss ($L_x$)."""
+
+    reduction: Reduction = Field(
+        default="none",
+        description="Reduction for sensory reconstruction loss.",
+    )
+    weight: float = Field(
+        default=1.0,
+        ge=0,
+        description="Weight multiplier for all L_x components.",
+    )
+
+
+# =================================================================================================
+class AbstractLocationSettings(BaseModel, extra="forbid", strict=False, arbitrary_types_allowed=True):
+    """Settings for abstract location transition loss ($L_g$)."""
+
+    mode: Literal["mse", "nll"] = Field(
+        default="mse",
+        description="Loss mode: 'mse' (legacy surrogate), 'nll' (with uncertainty).",
+    )
+    reduction: Reduction = Field(
+        default="none",
+        description="Reduction for abstract location loss.",
+    )
+    weight: float = Field(
+        default=1.0,
+        ge=0,
+        description="Weight multiplier for L_g.transition.",
+    )
+
+
+# =================================================================================================
+class GroundedLocationSettings(BaseModel, extra="ignore", strict=False, arbitrary_types_allowed=True):
+    """Settings for grounded location consistency loss ($L_p$)."""
+
+    use_x_cued_recall: bool = Field(  # TODO: We should remove this an allow p_xi to be None
+        default=True,
+        description="Whether to use inferred grounded location loss.",
+    )
+    reduction: Reduction = Field(
+        default="none",
+        description="Reduction for grounded location loss.",
+    )
+    weight: float = Field(
+        default=1.0,
+        ge=0,
+        description="Weight multiplier for all L_p components.",
+    )
+
+
+# =================================================================================================
+class RegularizationSettings(BaseModel, extra="ignore", strict=False, arbitrary_types_allowed=True):
+    """Settings for regularization penalties."""
+
+    reduction: Reduction = Field(
+        default="none",
+        description="Reduction for regularization losses.",
+    )
+    weight_g_l2: float = Field(
+        default=0.01,
+        ge=0,
+        description="Weight for abstract location L2 penalty.",
+    )
+    weight_p_l1: float = Field(
+        default=0.02,
+        ge=0,
+        description="Weight for grounded location L1 penalty.",
+    )
+
+
+# =================================================================================================
+class LossSettings(BaseModel, extra="forbid", strict=False, arbitrary_types_allowed=True):
+    """Complete settings tree for TEM loss computation.
+
+    Attributes:
+        x: Settings for sensory reconstruction losses.
+        g: Settings for abstract location transition losses.
+        p: Settings for grounded location consistency losses.
+        reg: Settings for regularization penalties.
+    """
+
+    x: SensoryReconstructionSettings = Field(
+        default_factory=SensoryReconstructionSettings,
+        description="Sensory reconstruction loss settings.",
+    )
+    g: AbstractLocationSettings = Field(
+        default_factory=AbstractLocationSettings,
+        description="Abstract location loss settings.",
+    )
+    p: GroundedLocationSettings = Field(
+        default_factory=GroundedLocationSettings,
+        description="Grounded location loss settings.",
+    )
+    reg: RegularizationSettings = Field(
+        default_factory=RegularizationSettings,
+        description="Regularization loss settings.",
+    )
 
 
 @dataclass
