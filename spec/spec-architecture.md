@@ -91,20 +91,42 @@ names, no multi-scale iteration, no orchestration logic.
 
 ### 3.5 Training
 
-Shared training infrastructure and model-specific training extensions.
+Shared training infrastructure. Components are named by algorithmic
+function, not by consuming model. Models compose these building blocks in
+their `LightningModule.training_step` / `configure_optimizers`.
 
-| Component    | Path        | Responsibility                                                                                                                                                                                                                           |
-| ------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Training** | `training/` | Shared: step-loop protocol (`StepLoop`, `StepModule`), optimizer configs (`AdamATan2Config`), LR schedulers (`CosineAnnealingLRWithWarmup`, `SequentialLR`). Model-specific: ACT controller, partial-reset batch assembler, FIFO buffer. |
+#### 3.5.1 Components
 
-**Migration target**: Model-specific training code (`ACTController`,
-partial resets, FIFO buffer) currently lives alongside shared infrastructure.
-The target is a pluggable/registerable pattern where model-specific training
-extensions are clearly namespaced (e.g., `training/hrm/`) while shared
-protocols remain at the `training/` root. `ACTController` consumes the
-protocols defined by `modules/str/` and remains training infrastructure;
-when model-specific code migrates to `training/hrm/`, the controller moves
-with it.
+| Component         | Path(s)             | Responsibility                                                                                          |
+| ----------------- | ------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Step-Loop**     | `step_loop.py`      | Generic step iteration: `StepLoop`, `StepModule` protocol, `StepContext`.                               |
+| **Loss Heads**    | `act_head.py`       | `StepModule` implementations that wire a controller + `loss/` primitives into a step-level contract.    |
+| **ACT**           | `act_controller.py` | Adaptive Computation Time (Graves 2016): `ACTController`, `ACTState`, `ACTOutput`, protocol interfaces. |
+| **Partial-Reset** | `partial_reset.py`  | Stateful batch assembly: replace completed rows with fresh examples from a buffer.                      |
+| **Collector**     | `collector.py`      | Per-step state collection for partial-reset pipelines.                                                  |
+| **Buffers**       | `buffers.py`        | Bounded FIFO storage for batch examples.                                                                |
+| **Optimizers**    | `optim.py`          | Typed optimizer configs and wrappers (currently `AdamATan2`).                                           |
+| **Schedulers**    | `schedules.py`      | LR schedules: `CosineAnnealingLRWithWarmup`, `SequentialLR`, `SchedulerConfig`.                         |
+
+#### 3.5.2 Design Rules
+
+1. **Named by function, not by model.** No model-specific imports inside
+   `training/`. If a training module needs model output types, those types
+   must be defined in a neutral location (`types.py` or `training/` itself).
+
+2. **Loss heads implement `StepModule`.** Each loss head composes a controller
+   (or model callable) with stateless primitives from `loss/` and returns
+   `(outputs, carry, done)`. The concrete output dataclass is head-specific
+   (e.g., `ACTStepOutput`); `StepLoop` treats it as opaque. Models
+   instantiate and wire loss heads in their `LightningModule.__init__`.
+
+3. **Models own the wiring, not the algorithms.** The `LightningModule`
+   instantiates modules, controllers, and loss heads, then calls `StepLoop`
+   in `training_step`. The training package provides the building blocks.
+
+4. **Extend by addition.** New training algorithms (e.g., advantage estimation,
+   replay buffers, policy optimization) are added as new modules in
+   `training/`. Existing modules are not modified to accommodate new models.
 
 ### 3.6 Data
 
