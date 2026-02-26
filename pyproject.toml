@@ -29,6 +29,7 @@
         "setuptools~=80.0",
         "gymnasium~=1.2.0",
         "torch",
+        "adam-atan2-pytorch",
         "lightning",
         "pydantic",
         "pydantic_settings",
@@ -39,6 +40,9 @@
         "networkx",
         "SciencePlots",
         "pub-ready-plots",
+        "huggingface_hub",
+        "maze-nd",
+        "dungeongen",
     ]
 
 [project.optional-dependencies]
@@ -54,7 +58,7 @@
 
 [tool.setuptools.packages.find]
     where   = ["src"]
-    include = ["ehc_sn*", "mazes*"]
+    include = ["ehc_sn*"]
 
 [tool.setuptools.dynamic]
     version = { file = "src/ehc_sn/VERSION" }

@@ -130,13 +130,147 @@ their `LightningModule.training_step` / `configure_optimizers`.
 
 ### 3.6 Data
 
-Environments, datasets, DataModules, and the data processing pipeline.
+The data component owns the full data pipeline: maze structure generation,
+on-disk storage, dataset loading, gymnasium environments, and Lightning
+DataModules. It is organized as three sub-layers with a strict internal
+dependency direction:
 
-| Component               | Path                                     | Responsibility                                                             |
-| ----------------------- | ---------------------------------------- | -------------------------------------------------------------------------- |
-| **Data (package)**      | `data/` (under `ehc_sn`)                 | DataModules, datasets, environment validation, maze vocabulary, collation. |
-| **Mazes (package)**     | `mazes/` (under `src/`)                  | Auxiliary maze-environment package.                                        |
-| **Data (project root)** | `data/{raw,interim,processed,external}/` | On-disk data directories. Not committed (see data pipeline below).         |
+```
+data/mazes/  (numpy + generator libs only, no torch/gymnasium)
+     ↑
+data/envs/   (gymnasium, depends on mazes/)
+     ↑
+data/*.py    (torch + lightning, depends on envs/ and mazes/)
+```
+
+No reverse dependency is permitted within this stack.
+
+#### 3.6.1 Mazes (`data/mazes/`)
+
+Pure maze infrastructure with **no ML or framework dependencies**. This
+sub-package defines maze structures, generation wrappers, augmentation
+operations, and I/O for the canonical on-disk format.
+
+| Module        | Responsibility                                                                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `types.py`    | `MazeGraph`, `Cell`, `Wall`, grid metadata. No neural types.                                                                                           |
+| `generators/` | Thin wrappers around external generators: `maze_nd.py`, `dungeongen.py`, `huggingface.py`.                                                             |
+| `ops.py`      | Pure augmentation functions: `solve()`, `add_start_goal()`, `generate_observations()`, `add_landmarks()`. Operate on `MazeGraph` or raw channel dicts. |
+| `io.py`       | Read/write canonical channel NPZ files and JSONL index entries.                                                                                        |
+
+**Dependency rule:** `ehc_sn.data.mazes` may import only stdlib, `numpy`, and
+the declared generator libraries (`maze-nd`, `dungeongen`, `huggingface_hub`).
+It must **not** import `torch`, `gymnasium`, `lightning`, or any other
+`ehc_sn` subpackage.
+
+#### 3.6.2 Canonical On-Disk Format
+
+Processed maze data lives in `data/processed/` as **one NPZ file per maze**
+plus a JSONL index. Each NPZ contains a `dict[str, numpy.ndarray]` of named
+channels with heterogeneous dtypes (channels vary between `bool` and `int32`).
+Optional channels are represented by key absence, not by zero-filled arrays.
+
+**Mandatory channel:**
+
+| Channel  | Name       | dtype  | Shape    | Description                                |
+| -------- | ---------- | ------ | -------- | ------------------------------------------ |
+| Topology | `topology` | `bool` | `(H, W)` | Passable cells (`True`) vs walls (`False`) |
+
+**Optional channels:**
+
+| Channel      | Name           | dtype   | Shape    | Description                                   | Primary consumers                                                |
+| ------------ | -------------- | ------- | -------- | --------------------------------------------- | ---------------------------------------------------------------- |
+| Observations | `observations` | `int32` | `(H, W)` | Unique observation ID per cell                | TEM, EHC                                                         |
+| Start        | `start`        | `bool`  | `(H, W)` | Start position(s)                             | HRM, EHC                                                         |
+| Goals        | `goals`        | `bool`  | `(H, W)` | Goal position(s)                              | HRM, EHC                                                         |
+| Landmarks    | `landmarks`    | `int32` | `(H, W)` | Special object IDs ("shiny")                  | TEM, EHC                                                         |
+| Solution     | `solution`     | `int32` | `(H, W)` | Shortest-path distance or step labels         | HRM (supervision)                                                |
+| Regions      | `regions`      | `int32` | `(H, W)` | Room/region ID                                | Future                                                           |
+| Valid mask   | `mask_valid`   | `bool`  | `(H, W)` | Legal agent positions (explicit reachability) | All (when topology alone is insufficient, e.g. dungeongen voids) |
+
+**JSONL index** (`data/processed/index.jsonl`): one JSON object per line.
+
+| Field            | Type        | Description                                |
+| ---------------- | ----------- | ------------------------------------------ |
+| `id`             | `str`       | Unique maze identifier                     |
+| `file`           | `str`       | Relative path to NPZ file                  |
+| `source`         | `str`       | Generator that produced the raw maze       |
+| `split`          | `str`       | Dataset split: `train`, `val`, or `test`   |
+| `height`         | `int`       | Grid height                                |
+| `width`          | `int`       | Grid width                                 |
+| `channels`       | `list[str]` | Channel names present in the NPZ           |
+| `n_observations` | `int`       | Observation vocabulary size (0 if absent)  |
+| `n_goals`        | `int`       | Number of goal cells (0 if absent)         |
+| `difficulty`     | `str`       | Source-defined difficulty label (optional) |
+
+**On-disk layout:**
+
+```
+data/
+├── raw/                          # Untouched generator output
+│   ├── maze-nd/
+│   ├── dungeongen/
+│   └── huggingface/
+├── interim/                      # Source-specific augmented output
+│   ├── maze-nd/                  #   (solved, start/goal added, etc.)
+│   ├── dungeongen/
+│   └── huggingface/
+└── processed/                    # Canonical channel NPZ format
+    ├── index.jsonl
+    ├── train/
+    │   ├── maze_00001.npz
+    │   └── ...
+    ├── val/
+    └── test/
+```
+
+#### 3.6.3 Data Pipeline Modules (`data/`)
+
+ML data infrastructure: datasets, DataModules, environments, and collation.
+
+| Module           | Responsibility                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| `schema.py`      | Channel name constants, dtype contracts, and validation for the canonical format.                    |
+| `index.py`       | JSONL index parsing, dataset splitting, channel-availability queries.                                |
+| `datasets.py`    | Map-style `torch.utils.data.Dataset` subclasses loading NPZ → tensors.                               |
+| `datamodules.py` | Lightning `DataModule` implementations. One per model or a unified module with mode selection.       |
+| `collation.py`   | Model-specific batch assembly (`WalkBatch` for TEM, `Dict[str, Tensor]` for HRM, RL episode format). |
+| `vocabulary.py`  | Observation token mappings (current `maze_vocab`).                                                   |
+| `transforms.py`  | Channel → tensor conversions, normalization, augmentation at load time.                              |
+
+#### 3.6.4 Gymnasium Environments (`data/envs/`)
+
+Gymnasium `Env` wrappers that load a processed maze NPZ and expose
+`step(action) → (obs, reward, terminated, truncated, info)`. The base
+environment returns a rich observation dict; model-specific
+`ObservationWrapper` subclasses adapt it to each model's expected input
+(Pattern A — the standard gymnasium wrapper pattern).
+
+| Module        | Responsibility                                                                                                                 |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `maze_env.py` | Base `MazeEnv(gymnasium.Env)`: loads canonical NPZ, manages agent position, computes reward from goals. Returns rich obs dict. |
+| `wrappers.py` | `ObservationWrapper` subclasses: `TEMObsWrapper` (one-hot vectors), `HRMObsWrapper` (token sequences), etc.                    |
+
+#### 3.6.5 Model–Data Consumption Paths
+
+Each model consumes processed maze data through a different path. HRM
+bypasses the environment layer entirely; TEM and EHC interact with mazes
+at runtime via `MazeEnv`.
+
+```
+                         ┌── datasets.py ── PuzzleDataset ────── HRM DataLoader
+                         │    (static NPZ, no env interaction)
+data/processed/*.npz ────┤
+                         ├── envs/maze_env.py ── TEMObsWrapper ── TEM runtime walks
+                         │         │
+                         └─────────┴──────────── (base env) ──── EHC RL episodes
+```
+
+| Model   | Data path                                         | Interaction mode  |
+| ------- | ------------------------------------------------- | ----------------- |
+| **TEM** | NPZ → `MazeEnv` + `TEMObsWrapper` → runtime walks | Online (env.step) |
+| **HRM** | NPZ → `PuzzleDataset` → `DataLoader`              | Offline (static)  |
+| **EHC** | NPZ → `MazeEnv` → RL episodes                     | Online (env.step) |
 
 ### 3.7 Evaluation
 
@@ -165,22 +299,64 @@ utilities.
 ## 4 Data Pipeline
 
 ```
-maze-nd (external)          scripts/data-gen/
-       │                         │
-       ▼                         ▼
-  data/raw/  ──────────►  data/processed/  ──────►  ehc_sn.data DataModules
-       │                                                │
-       └── data/interim/ (optional intermediate)        ▼
-                                                   Training loop
+Generators (maze-nd, dungeongen, HF)      scripts/data-gen/
+          │                                      │
+          ▼                                      │ augmentation calls
+     data/raw/                                   │ (ehc_sn.data.mazes.ops)
+          │                                      │
+          ▼                                      ▼
+     data/interim/  ◄────── source-specific augmentation
+          │                 (solve, add start/goal, generate obs IDs)
+          ▼
+     data/processed/  ◄──── canonical NPZ + index.jsonl
+          │
+          ├──► ehc_sn.data.datasets    (static)  ──► HRM DataModule
+          │
+          └──► ehc_sn.data.envs.MazeEnv (runtime) ──► TEM DataModule
+                    │                               ──► EHC RL training
+                    └──► ObservationWrappers
 ```
 
-- **maze-nd**: External tool/library used to generate raw maze structures.
-  Dev/script-only dependency (not declared in package `[project.dependencies]`).
-- **`scripts/data-gen/build_maze.py`**: CLI script that processes raw mazes
-  (add labels, goals, start positions, solve). Uses `typer` (see known
-  dependency bug in `spec-requirements.md`).
-- **`data/raw/`**: Unprocessed maze-nd output. Not committed to version control.
-- **`data/processed/`**: Labeled, solved mazes ready for DataModule consumption.
+### 4.1 Raw Sources
+
+| Source          | Output                       | Dependency        |
+| --------------- | ---------------------------- | ----------------- |
+| `maze-nd`       | Grid graph with connectivity | `maze-nd`         |
+| `dungeongen`    | Room-based layouts           | `dungeongen`      |
+| HuggingFace Hub | Pre-built maze datasets      | `huggingface_hub` |
+
+All three are declared runtime dependencies in `pyproject.toml`. Raw output
+is stored in `data/raw/<source>/` and is **not** committed to version control.
+
+### 4.2 Augmentation (raw → interim)
+
+Source-specific augmentation scripts in `scripts/data-gen/` call pure
+functions from `ehc_sn.data.mazes.ops`:
+
+- **dungeongen** → add start/goal positions, optionally compute shortest paths.
+- **maze-nd** → solve maze, generate observation IDs, assign landmarks.
+- **HuggingFace** → relabel goals, extract topology from images, normalize
+  format.
+
+Scripts are thin CLI orchestrators; all logic lives in `ehc_sn.data.mazes.ops`.
+Output is stored in `data/interim/<source>/`.
+
+### 4.3 Canonicalization (interim → processed)
+
+A final processing step converts augmented interim data into the canonical
+channel NPZ format defined in §3.6.2. This step is source-agnostic: it reads
+whatever channels are available and writes a conformant NPZ with a
+corresponding JSONL index entry.
+
+Output is stored in `data/processed/{train,val,test}/`.
+
+### 4.4 Consumption Paths
+
+| Model   | Data path                                         | Interaction mode  |
+| ------- | ------------------------------------------------- | ----------------- |
+| **TEM** | NPZ → `MazeEnv` + `TEMObsWrapper` → runtime walks | Online (env.step) |
+| **HRM** | NPZ → `PuzzleDataset` → `DataLoader`              | Offline (static)  |
+| **EHC** | NPZ → `MazeEnv` → RL episodes                     | Online (env.step) |
 
 ---
 
@@ -245,12 +421,14 @@ Each model (`TEM v1`, `HRM v1`) follows this pattern:
 
 ## 9 Migration Status (as of 2026-02-26)
 
-| Item                                   | Status                                                                                                                        |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Namespace consolidation (`ehc_sn`)     | **Complete**. Legacy code archived in `temp/`.                                                                                |
-| STR module (`modules/str/`)            | **Minimal**. `LinearHaltingHead` implemented. Protocols (`HaltingHead`, `ACTBackbone`) still in `training/act_controller.py`. |
-| STR protocol migration                 | **Pending**. Move `HaltingHead` and `ACTBackbone` protocols from `training/` into `modules/str/`.                             |
-| PFC subcomponent generalization        | **Pending**. HRModel is monolithic; target is separated subcomponents.                                                        |
-| Training infrastructure generalization | **Pending**. ACT-specific code mixed with shared protocols.                                                                   |
-| `config/defaults_ehc.toml`             | **Empty**. Needs population for default experiment configs.                                                                   |
-| `README.md`                            | **Populated**. Project overview, install, quick start, layout.                                                                |
+| Item                                   | Status                                                                                                                            |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Namespace consolidation (`ehc_sn`)     | **Complete**. Legacy code archived in `temp/`.                                                                                    |
+| `mazes` migration into `ehc_sn.data`   | **Pending**. Move `src/mazes/` into `src/ehc_sn/data/mazes/`; remove `"mazes*"` from `pyproject.toml` packages; clean `types.py`. |
+| Data pipeline implementation           | **Pending**. Canonical NPZ format, JSONL index, `data.mazes.ops`, `data.envs.MazeEnv`, `data.datasets` — all to be built.         |
+| STR module (`modules/str/`)            | **Minimal**. `LinearHaltingHead` implemented. Protocols (`HaltingHead`, `ACTBackbone`) still in `training/act_controller.py`.     |
+| STR protocol migration                 | **Pending**. Move `HaltingHead` and `ACTBackbone` protocols from `training/` into `modules/str/`.                                 |
+| PFC subcomponent generalization        | **Pending**. HRModel is monolithic; target is separated subcomponents.                                                            |
+| Training infrastructure generalization | **Pending**. ACT-specific code mixed with shared protocols.                                                                       |
+| `config/defaults_ehc.toml`             | **Empty**. Needs population for default experiment configs.                                                                       |
+| `README.md`                            | **Populated**. Project overview, install, quick start, layout.                                                                    |
