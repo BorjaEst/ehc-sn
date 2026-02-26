@@ -78,13 +78,13 @@ namespace.
 
 ### 4.4 Dev / Script-Only Dependencies
 
-| Dependency | Role                          | Where Used                                                              |
-| ---------- | ----------------------------- | ----------------------------------------------------------------------- |
-| `maze-nd`  | Raw maze structure generation | `scripts/data-gen/` pipeline input. External tool, not a Python import. |
-| `typer`    | CLI framework                 | `scripts/data-gen/build_maze.py`                                        |
-| `pytest`   | Testing                       | `tests/`                                                                |
-| `black`    | Formatting                    | Dev tooling                                                             |
-| `mypy`     | Type checking                 | Dev tooling                                                             |
+| Dependency | Role                          | Where Used                          |
+| ---------- | ----------------------------- | ----------------------------------- |
+| `maze-nd`  | Raw maze structure generation | `scripts/data-gen/` pipeline input. |
+| `typer`    | CLI framework                 | `scripts/data-gen/build_maze.py`    |
+| `pytest`   | Testing                       | `tests/`                            |
+| `black`    | Formatting                    | Dev tooling                         |
+| `mypy`     | Type checking                 | Dev tooling                         |
 
 ### 4.5 New Dependency Policy
 
