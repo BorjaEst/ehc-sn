@@ -360,22 +360,17 @@ Output is stored in `data/processed/{train,val,test}/`.
 
 ---
 
-## 5 Utils Cap
+## 5 Utils
 
 `utils/` may contain only genuine cross-cutting helpers with no domain semantics.
 Current modules (as of spec creation):
 
-1. `__init__.py` — tensor ops, Gaussian sampling, Hebbian helpers, connection
-   logic
+1. `__init__.py` — tensor ops, Gaussian sampling, Hebbian helpers, connection logic
 2. `logging.py` — logging configuration
 3. `norms.py` — normalization functions (RMS norm)
 4. `seed.py` — random seed management
 5. `symmetry.py` — dihedral symmetry transforms
 6. `torch_pytree.py` — PyTorch pytree registration
-
-**Hard cap: 8 modules maximum.** Any addition beyond the cap, or any module
-that encodes domain-specific logic (model, loss, data), requires a spec
-amendment tracked in `.copilot-tracking/plans/`.
 
 ---
 
