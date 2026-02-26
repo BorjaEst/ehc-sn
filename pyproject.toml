@@ -4,7 +4,7 @@
 
 [project]
     name = "ehc-sn"
-    description = "Entorhinal-Hippocampal Complex (EHC) Spatial Navigation library"
+    description = "Entorhinal-Hippocampal Circuit (EHC) Spatial Navigation library"
     authors = [{ name = "Borja Esteban Sanchis" }]
     license = { text = "GNU General Public License v3.0" }
     classifiers = [

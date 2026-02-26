@@ -5,16 +5,22 @@
 
 ## 1 Project Identity
 
-**EHC-SN** (_Entorhinal-Hippocampal Complex — Spatial Navigation_) is a research
+**EHC-SN** (_Entorhinal-Hippocampal Circuit — Spatial Navigation_) is a research
 library for biologically-inspired spatial navigation models built on PyTorch and
 Lightning.
 
 **Goal**: Resolve complex navigation tasks (mazes) using advanced neural models
-(TEM, HRM, future TRM) that capture how the hippocampal formation (HPC) and
+(i.e. TEM, HRM) that capture how the hippocampal formation (HPC) and
 prefrontal cortex (PFC) interact for goal-directed generalization. The project is
 inspired by the work of Zheng, Wolf, Ranganath, O'Reilly & McKee (_"Flexible
 Prefrontal Control over Hippocampal Episodic Memory for Goal-Directed
 Generalization"_).
+
+**TEM** (_Tolman-Eichenbaum Machine_) is a multi-scale spatial memory model that
+composes LEC, MEC, and HPC modules.
+
+**HRM** (_Hierarchical Reasoning Model_) is a PFC-based recurrent reasoning architecture
+with Adaptive Computation Time (ACT).
 
 **Target users**: Computational neuroscience researchers and ML practitioners
 studying hippocampal/entorhinal spatial models.
@@ -25,9 +31,9 @@ studying hippocampal/entorhinal spatial models.
 
 The sole canonical import namespace is **`ehc_sn`**.
 
-Legacy namespaces `torch_tem` and `hrm_sn` are retired. The migration is
-complete; remnants exist only under `temp/` (archived legacy code, not on the
-Python path). No new code may import from `torch_tem` or `hrm_sn`.
+Legacy namespaces, e.g. `torch_tem` and `hrm_sn` are retired; legacy code exist under
+`temp/` (archived legacy code, not on the Python path). No new code may import from
+`torch_tem` or `hrm_sn`.
 
 ---
 
@@ -41,12 +47,13 @@ If a new package is created, this table must be updated.
 These implement neuroscience-grounded circuit components. Each is a `nn.Module`
 (or collection of modules) that can be composed by a top-level model.
 
-| Component | Path           | Responsibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| --------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **LEC**   | `modules/lec/` | Sensory encoding and temporal frequency filtering. Transforms raw observations into multi-scale feature codes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| **MEC**   | `modules/mec/` | Path integration, grid-cell dynamics, object-vector cells (OVC), and abstract-location projections.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| **HPC**   | `modules/hpc/` | Hebbian associative memory, attractor dynamics, grounded-location inference, and place-code maintenance.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **PFC**   | `modules/pfc/` | Biological working-memory and adaptive computation time (ACT) reasoning. Models the prefrontal cortex's role in goal-directed control over episodic memory. The current implementation (`HRModel`) is a two-level recurrent architecture with high-level state $z_H$ and low-level state $z_L$ updated in alternating cycles, composed of transformer blocks, SwiGLU MLPs, and a linear halting head. This is the first implementation approach; the target is to generalize into clearly separated subcomponents (e.g., working-memory buffer, reasoning stack, halting mechanism) while preserving the single biological design. PFC is **not** intended to hold a family of alternative architectures. |
+| Component | Path           | Biological Role                                                                                                                                                         | Computational Responsibility                                                                                                                                                                          |
+| --------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **LEC**   | `modules/lec/` | Lateral entorhinal cortex: sensory encoding and temporal frequency filtering.                                                                                           | Transforms raw observations into multi-scale feature codes.                                                                                                                                           |
+| **MEC**   | `modules/mec/` | Medial entorhinal cortex: path integration, grid-cell spatial coding, and object-vector cell (OVC) representations.                                                     | Grid-cell dynamics, abstract-location projections, and OVC encoding.                                                                                                                                  |
+| **HPC**   | `modules/hpc/` | Hippocampus: episodic memory formation, pattern completion via attractor dynamics, and place-cell spatial coding.                                                       | Hebbian associative memory, attractor retrieval, and grounded-location inference.                                                                                                                     |
+| **PFC**   | `modules/pfc/` | Prefrontal cortex: working memory maintenance and goal-directed reasoning over episodic memory.                                                                         | Two-level recurrent architecture ($z_H$, $z_L$) with transformer blocks and alternating update cycles.                                                                                                |
+| **STR**   | `modules/str/` | Striatum: action selection and gating via Go/NoGo (D1/D2-like) pathways. Receives projections from PFC and HPC; modulates when to act (halt) vs. continue deliberation. | Binary halt/continue Q-value heads with TD(0) targets and exploration gating. Current scope: adaptive computation time. Migration target: generalized N-action selection with external reward signal. |
 
 ### 3.2 Shared Neural-Network Building Blocks
 
@@ -62,11 +69,10 @@ Top-level composed `LightningModule` wrappers. Each model composes brain-region
 modules and shared NN blocks, manages explicit recurrent state via dataclasses,
 and exposes a step-level forward interface.
 
-| Model      | File               | Status              | Composes                                        |
-| ---------- | ------------------ | ------------------- | ----------------------------------------------- |
-| **TEM v1** | `models/tem_v1.py` | Active              | LEC + MEC + HPC + Autoencoder + Projections     |
-| **HRM v1** | `models/hrm_v1.py` | Active              | PFC (HRModel) + ACT controller + partial resets |
-| **TRM v1** | `models/trm_v1.py` | Placeholder (empty) | TBD                                             |
+| Model      | File               | Status | Composes                                        |
+| ---------- | ------------------ | ------ | ----------------------------------------------- |
+| **TEM v1** | `models/tem_v1.py` | Active | LEC + MEC + HPC + Autoencoder + Projections     |
+| **HRM v1** | `models/hrm_v1.py` | Active | PFC (HRModel) + ACT controller + partial resets |
 
 ### 3.4 Loss
 
@@ -168,7 +174,7 @@ amendment tracked in `.copilot-tracking/plans/`.
 
 ## 6 Model Composition Pattern
 
-Each model (`TEM v1`, `HRM v1`, future `TRM v1`) follows this pattern:
+Each model (`TEM v1`, `HRM v1`) follows this pattern:
 
 1. **Config**: A Pydantic `BaseModel` tree that composes sub-configs for each
    brain-region module.
@@ -211,7 +217,6 @@ Each model (`TEM v1`, `HRM v1`, future `TRM v1`) follows this pattern:
 | Item                                   | Status                                                                 |
 | -------------------------------------- | ---------------------------------------------------------------------- |
 | Namespace consolidation (`ehc_sn`)     | **Complete**. Legacy code archived in `temp/`.                         |
-| `trm_v1.py`                            | **Placeholder** (empty file).                                          |
 | PFC subcomponent generalization        | **Pending**. HRModel is monolithic; target is separated subcomponents. |
 | Training infrastructure generalization | **Pending**. ACT-specific code mixed with shared protocols.            |
 | `config/defaults_ehc.toml`             | **Empty**. Needs population for default experiment configs.            |

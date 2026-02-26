@@ -1,6 +1,6 @@
 # EHC-SN
 
-**Entorhinal-Hippocampal Complex — Spatial Navigation**
+**Entorhinal-Hippocampal Circuit — Spatial Navigation**
 
 A research library for biologically-inspired spatial navigation models,
 built on PyTorch and Lightning. EHC-SN implements neural architectures
@@ -13,11 +13,10 @@ Generalization."_
 
 ## Models
 
-| Model      | Description                                                                                       | Status  |
-| ---------- | ------------------------------------------------------------------------------------------------- | ------- |
-| **TEM v1** | Tolman-Eichenbaum Machine — composes LEC, MEC, and HPC modules for multi-scale spatial memory     | Active  |
-| **HRM v1** | Hierarchical Reasoning Model — PFC-based recurrent reasoning with Adaptive Computation Time (ACT) | Active  |
-| **TRM v1** | Tiny Reasoning Model                                                                              | Planned |
+| Model      | Description                                                                                       | Status |
+| ---------- | ------------------------------------------------------------------------------------------------- | ------ |
+| **TEM v1** | Tolman-Eichenbaum Machine — composes LEC, MEC, and HPC modules for multi-scale spatial memory     | Active |
+| **HRM v1** | Hierarchical Reasoning Model — PFC-based recurrent reasoning with Adaptive Computation Time (ACT) | Active |
 
 ## Architecture
 
@@ -91,7 +90,7 @@ python examples/model_rollout.py
 ```
 src/ehc_sn/          Main package
   modules/           Brain-region modules (LEC, MEC, HPC, PFC)
-  models/            Composed LightningModules (TEM, HRM, TRM)
+  models/            Composed LightningModules (TEM, HRM, etc.)
   loss/              Per-model loss computation
   training/          Step loop, optimizers, schedulers
   data/              DataModules and datasets

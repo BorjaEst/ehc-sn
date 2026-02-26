@@ -1,29 +1,6 @@
+""" """
+
 from __future__ import annotations
-
-"""ACT halting controller with TD(0) bootstrapping.
-
-This module implements a lightweight, RL-inspired controller around a recurrent
-backbone that exposes differentiable features plus a halting head that produces
-two scalar “Q-logits” per batch element:
-
-- ``q_halt``: preference for halting at the current step
-- ``q_continue``: preference for continuing to another recurrent step
-
-The controller runs the model for multiple *ACT steps* and manages partial
-resets on a per-batch-element (“slot”) basis. Conceptually, each slot is an
-independent short episode:
-
-- **State**: the model’s recurrent state + per-slot step counter.
-- **Action**: ``halt`` or ``continue`` chosen greedily from Q-logits.
-- **Done**: a slot terminates by reaching ``halt_max_steps`` (always), and may
-    also terminate early on the ``halt`` action when ``allow_halt=True`` (subject
-    to the exploration constraint when ``explore=True``).
-
-Unlike standard RL, there is no explicit external reward here. Task supervision
-comes from the main prediction head/loss (``logits``). The continue head is
-trained with an explicit TD(0) target bootstrapped from the *next* recurrent
-state, which encourages temporal consistency of the halting policy.
-"""
 
 from dataclasses import dataclass
 from typing import Any, Dict, Protocol, Tuple
@@ -263,8 +240,7 @@ class ACTController:
         """
         data, halted = state.data, state.halted
         return {
-            k: torch.where(halted.view((-1,) + (1,) * (batch[k].ndim - 1)), batch[k], data[k])
-            for k in batch
+            k: torch.where(halted.view((-1,) + (1,) * (batch[k].ndim - 1)), batch[k], data[k]) for k in batch
         }
 
     def _select_action_and_done(  # ---------------------------------------------------------------
@@ -303,4 +279,5 @@ class ACTController:
         return action, done
 
 
+__all__ = ["ACTBackbone", "ACTControllerConfig", "ACTController", "ACTState", "HaltingHead"]
 __all__ = ["ACTBackbone", "ACTControllerConfig", "ACTController", "ACTState", "HaltingHead"]
