@@ -362,21 +362,51 @@ Output is stored in `data/processed/{train,val,test}/`.
 
 ## 5 Utils
 
-`utils/` may contain only genuine cross-cutting helpers with no domain semantics.
-Current modules (as of spec creation):
+Path: `utils/`
 
-1. `__init__.py` — tensor ops, Gaussian sampling, Hebbian helpers, connection logic
-2. `logging.py` — logging configuration
-3. `norms.py` — normalization functions (RMS norm)
-4. `seed.py` — random seed management
-5. `symmetry.py` — dihedral symmetry transforms
-6. `torch_pytree.py` — PyTorch pytree registration
+### 5.1 Dependency Rule
+
+`utils/` must **not** import from `ehc_sn` or any of its subpackages.
+External dependencies (PyTorch, NumPy, SciPy, stdlib) are allowed.
+
+A function that requires an `ehc_sn` type or module is domain logic and
+belongs in the component that owns that type.
+
+### 5.2 Scope
+
+Generic, reusable helpers with no brain-region, model, or training semantics.
+A function belongs here only if it could be moved to an unrelated ML project
+unchanged.
+
+### 5.3 Allowed Concerns
+
+| Concern           | Examples                                              |
+| ----------------- | ----------------------------------------------------- |
+| Tensor ops        | Shape manipulation, one-hot encoding, reductions.     |
+| Initialization    | Weight init (truncated normal, Xavier, etc.).         |
+| Linear algebra    | Projection matrices, downsampling, encoding tables.   |
+| Normalization     | Stateless norms (RMS norm, layer norm).               |
+| Reproducibility   | Seeding, deterministic mode.                          |
+| Filesystem / IO   | Path resolution, directory creation, file validation. |
+| Logging config    | Logger setup and formatting.                          |
+| Framework helpers | PyTree registration, device/dtype utilities.          |
+| Geometry          | Symmetry transforms, coordinate conversions.          |
+
+### 5.4 Exclusions
+
+The following do **not** belong in `utils/`:
+
+- Functions referencing brain regions (HPC, MEC, LEC, PFC, STR).
+- Functions operating on project types (`LocationBelief`, `MultiScaleCode`, etc.).
+- Loss or metric computation (→ `loss/`, `metrics/`).
+- Activation functions (→ `activations/`).
+- Data loading or dataset logic (→ `data/`).
 
 ---
 
 ## 6 Model Composition Pattern
 
-Each model (`TEM v1`, `HRM v1`) follows this pattern:
+Each model follows this pattern:
 
 1. **Config**: A Pydantic `BaseModel` tree that composes sub-configs for each
    brain-region module.
