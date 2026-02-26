@@ -77,12 +77,17 @@ and exposes a step-level forward interface.
 
 ### 3.4 Loss
 
-Per-model loss computation. Lives as a top-level sibling (`loss/`), not nested
-under `training/`.
+Generic, composable loss primitives operating on flat tensors. Each module
+provides stateless functions as the primary API, with optional thin
+`nn.Module` wrappers that co-locate a Pydantic config. No model-specific
+names, no multi-scale iteration, no orchestration logic.
 
-| Component | Path    | Responsibility                                                                                                                |
-| --------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Loss**  | `loss/` | Loss heads: sensory reconstruction loss ($L_x$, $L_g$, $L_p$) for TEM; ACT loss head for HRM; shared cross-entropy utilities. |
+| Module              | Responsibility                                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `cross_entropy.py`  | Token-/observation-level cross-entropy: `stablemax_cross_entropy`, `softmax_cross_entropy`. `(logits, labels, ignore_index) → (*)`.  |
+| `consistency.py`    | Representation consistency: `mse_consistency(pred, target) → (B,)`, `nll_consistency(pred, mean, std) → (B,)`. Flat `(B, D)` inputs. |
+| `regularization.py` | Activation penalties: L1 sparsity, L2 norm on flat `(B, D)` codes.                                                                   |
+| `decision.py`       | Gating losses: BCE for halt/continue. Extensible to N-action selection.                                                              |
 
 ### 3.5 Training
 

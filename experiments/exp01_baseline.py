@@ -17,10 +17,10 @@ from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.data.puzzle_datamodule import PuzzleDatamodule, PuzzleDatamoduleConfig
 from ehc_sn.data.puzzle_dataset import PuzzleDatasetSettings
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.loss.act_head import ACTLossConfig
 from ehc_sn.models.hrm_v1 import Model, ModelConfig_HRM_V1
 from ehc_sn.modules.hrm import HRMConfig
 from ehc_sn.training.act_controller import ACTControllerConfig
+from ehc_sn.training.act_head import ACTLossConfig
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
 
