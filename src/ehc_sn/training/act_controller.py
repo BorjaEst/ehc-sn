@@ -37,6 +37,10 @@ class ACTControllerConfig(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
+# NOTE: ACTBackbone and HaltingHead protocols are STR's public contract and
+# will move to modules/str/ (see spec-architecture.md §9 "STR protocol
+# migration"). After the move, act_controller.py will import them from there.
+# =================================================================================================
 class ACTBackbone(Protocol):
     """Minimal interface required by the ACT controller backbone.
 
@@ -279,5 +283,4 @@ class ACTController:
         return action, done
 
 
-__all__ = ["ACTBackbone", "ACTControllerConfig", "ACTController", "ACTState", "HaltingHead"]
 __all__ = ["ACTBackbone", "ACTControllerConfig", "ACTController", "ACTState", "HaltingHead"]

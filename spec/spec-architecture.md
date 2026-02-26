@@ -20,7 +20,7 @@ Generalization"_).
 composes LEC, MEC, and HPC modules.
 
 **HRM** (_Hierarchical Reasoning Model_) is a PFC-based recurrent reasoning architecture
-with Adaptive Computation Time (ACT).
+with striatal gating (STR) for adaptive computation time.
 
 **Target users**: Computational neuroscience researchers and ML practitioners
 studying hippocampal/entorhinal spatial models.
@@ -47,13 +47,13 @@ If a new package is created, this table must be updated.
 These implement neuroscience-grounded circuit components. Each is a `nn.Module`
 (or collection of modules) that can be composed by a top-level model.
 
-| Component | Path           | Biological Role                                                                                                                                                         | Computational Responsibility                                                                                                                                                                          |
-| --------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **LEC**   | `modules/lec/` | Lateral entorhinal cortex: sensory encoding and temporal frequency filtering.                                                                                           | Transforms raw observations into multi-scale feature codes.                                                                                                                                           |
-| **MEC**   | `modules/mec/` | Medial entorhinal cortex: path integration, grid-cell spatial coding, and object-vector cell (OVC) representations.                                                     | Grid-cell dynamics, abstract-location projections, and OVC encoding.                                                                                                                                  |
-| **HPC**   | `modules/hpc/` | Hippocampus: episodic memory formation, pattern completion via attractor dynamics, and place-cell spatial coding.                                                       | Hebbian associative memory, attractor retrieval, and grounded-location inference.                                                                                                                     |
-| **PFC**   | `modules/pfc/` | Prefrontal cortex: working memory maintenance and goal-directed reasoning over episodic memory.                                                                         | Two-level recurrent architecture ($z_H$, $z_L$) with transformer blocks and alternating update cycles.                                                                                                |
-| **STR**   | `modules/str/` | Striatum: action selection and gating via Go/NoGo (D1/D2-like) pathways. Receives projections from PFC and HPC; modulates when to act (halt) vs. continue deliberation. | Binary halt/continue Q-value heads with TD(0) targets and exploration gating. Current scope: adaptive computation time. Migration target: generalized N-action selection with external reward signal. |
+| Component | Path           | Biological Role                                                                                                                                                          | Computational Responsibility                                                                                                                                                                                                                                                            |
+| --------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **LEC**   | `modules/lec/` | Lateral entorhinal cortex (LEC): sensory encoding and temporal frequency filtering.                                                                                      | Transforms raw observations into multi-scale feature codes.                                                                                                                                                                                                                             |
+| **MEC**   | `modules/mec/` | Medial entorhinal cortex (MEC): path integration, grid-cell spatial coding, and object-vector cell (OVC) representations.                                                | Grid-cell dynamics, abstract-location projections, and OVC encoding.                                                                                                                                                                                                                    |
+| **HPC**   | `modules/hpc/` | Hippocampus (HPC): episodic memory formation, pattern completion via attractor dynamics, and place-cell spatial coding.                                                  | Hebbian associative memory, attractor retrieval, and grounded-location inference.                                                                                                                                                                                                       |
+| **PFC**   | `modules/pfc/` | Prefrontal cortex (PFC): working memory maintenance and goal-directed reasoning over episodic memory.                                                                    | Two-level recurrent architecture ($z_H$, $z_L$) with transformer blocks and alternating update cycles.                                                                                                                                                                                  |
+| **STR**   | `modules/str/` | Striatum (STR): action selection and gating via Go/NoGo (D1/D2-like) pathways. Receives projections from PFC and (optionally) HPC; modulates when to act vs. deliberate. | `nn.Module`(s) and protocols defining STR's public contract (`HaltingHead`, `ACTBackbone`). Current scope: binary halt/continue head consuming PFC features. Migration target: multi-input interface with separate PFC/HPC projections, external reward signal, and N-action selection. |
 
 ### 3.2 Shared Neural-Network Building Blocks
 
@@ -69,10 +69,10 @@ Top-level composed `LightningModule` wrappers. Each model composes brain-region
 modules and shared NN blocks, manages explicit recurrent state via dataclasses,
 and exposes a step-level forward interface.
 
-| Model      | File               | Status | Composes                                        |
-| ---------- | ------------------ | ------ | ----------------------------------------------- |
-| **TEM v1** | `models/tem_v1.py` | Active | LEC + MEC + HPC + Autoencoder + Projections     |
-| **HRM v1** | `models/hrm_v1.py` | Active | PFC (HRModel) + ACT controller + partial resets |
+| Model      | File               | Status | Composes                                    |
+| ---------- | ------------------ | ------ | ------------------------------------------- |
+| **TEM v1** | `models/tem_v1.py` | Active | LEC + MEC + HPC + Autoencoder + Projections |
+| **HRM v1** | `models/hrm_v1.py` | Active | PFC + STR + partial resets                  |
 
 ### 3.4 Loss
 
@@ -91,11 +91,14 @@ Shared training infrastructure and model-specific training extensions.
 | ------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Training** | `training/` | Shared: step-loop protocol (`StepLoop`, `StepModule`), optimizer configs (`AdamATan2Config`), LR schedulers (`CosineAnnealingLRWithWarmup`, `SequentialLR`). Model-specific: ACT controller, partial-reset batch assembler, FIFO buffer. |
 
-**Migration target**: Model-specific training code (ACT controller, partial
-resets, FIFO buffer) currently lives alongside shared infrastructure. The target
-is a pluggable/registerable pattern where model-specific training extensions are
-clearly namespaced (e.g., `training/hrm/`) while shared protocols remain at the
-`training/` root.
+**Migration target**: Model-specific training code (`ACTController`,
+partial resets, FIFO buffer) currently lives alongside shared infrastructure.
+The target is a pluggable/registerable pattern where model-specific training
+extensions are clearly namespaced (e.g., `training/hrm/`) while shared
+protocols remain at the `training/` root. `ACTController` consumes the
+protocols defined by `modules/str/` and remains training infrastructure;
+when model-specific code migrates to `training/hrm/`, the controller moves
+with it.
 
 ### 3.6 Data
 
@@ -212,12 +215,14 @@ Each model (`TEM v1`, `HRM v1`) follows this pattern:
 
 ---
 
-## 9 Migration Status (as of 2025-02-25)
+## 9 Migration Status (as of 2026-02-26)
 
-| Item                                   | Status                                                                 |
-| -------------------------------------- | ---------------------------------------------------------------------- |
-| Namespace consolidation (`ehc_sn`)     | **Complete**. Legacy code archived in `temp/`.                         |
-| PFC subcomponent generalization        | **Pending**. HRModel is monolithic; target is separated subcomponents. |
-| Training infrastructure generalization | **Pending**. ACT-specific code mixed with shared protocols.            |
-| `config/defaults_ehc.toml`             | **Empty**. Needs population for default experiment configs.            |
-| `README.md`                            | **Populated**. Project overview, install, quick start, layout.         |
+| Item                                   | Status                                                                                                                        |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Namespace consolidation (`ehc_sn`)     | **Complete**. Legacy code archived in `temp/`.                                                                                |
+| STR module (`modules/str/`)            | **Minimal**. `LinearHaltingHead` implemented. Protocols (`HaltingHead`, `ACTBackbone`) still in `training/act_controller.py`. |
+| STR protocol migration                 | **Pending**. Move `HaltingHead` and `ACTBackbone` protocols from `training/` into `modules/str/`.                             |
+| PFC subcomponent generalization        | **Pending**. HRModel is monolithic; target is separated subcomponents.                                                        |
+| Training infrastructure generalization | **Pending**. ACT-specific code mixed with shared protocols.                                                                   |
+| `config/defaults_ehc.toml`             | **Empty**. Needs population for default experiment configs.                                                                   |
+| `README.md`                            | **Populated**. Project overview, install, quick start, layout.                                                                |

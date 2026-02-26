@@ -32,8 +32,8 @@ from torch.optim import Optimizer
 from ehc_sn.data.maze_vocab import O_ID
 from ehc_sn.loss.act_head import ACTLossConfig, ACTLossHead
 from ehc_sn.metrics import build_metrics, update_metrics_from_step
-from ehc_sn.modules.halting_head import LinearHaltingHead
-from ehc_sn.modules.hrm import HRMConfig, HRModel
+from ehc_sn.modules.pfc import HRMConfig, HRModel
+from ehc_sn.modules.str import LinearHaltingHead
 from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
 from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.act_controller import ACTController, ACTControllerConfig
