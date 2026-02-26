@@ -65,15 +65,33 @@ Model-agnostic modules reused across brain-region components.
 
 ### 3.3 Models
 
-Top-level composed `LightningModule` wrappers. Each model composes brain-region
-modules and shared NN blocks, manages explicit recurrent state via dataclasses,
-and exposes a step-level forward interface.
+Each model is a self-contained unit living in `models/` as a flat file (one
+file per model version). A model file co-locates:
 
-| Model      | File               | Status         | Composes                                       |
-| ---------- | ------------------ | -------------- | ---------------------------------------------- |
-| **TEM v1** | `models/tem_v1.py` | Needs refactor | LEC + MEC + HPC + Autoencoder + Projections    |
-| **HRM v1** | `models/hrm_v1.py` | Needs refactor | PFC + STR + partial resets                     |
-| **EHC v1** | `models/ehc_v1.py` | Pending        | LEC + MEC + HPC + PFC + STR + shared NN blocks |
+- A **pure `nn.Module`** — framework-agnostic forward pass.
+- One or more **`LightningModule` trainers** — model-specific training wiring.
+- **Pydantic configs** — architecture config and training config.
+- **State dataclasses** — explicit recurrent state.
+
+| Model      | `nn.Module`  | `LightningModule` | Config      | State      | Composes                                       | Status         |
+| ---------- | ------------ | ----------------- | ----------- | ---------- | ---------------------------------------------- | -------------- |
+| **TEM v1** | `TEMModelV1` | `TEMTrainerV1`    | `TEMConfig` | `TEMState` | LEC + MEC + HPC + Autoencoder + Projections    | Needs refactor |
+| **HRM v1** | `HRMModelV1` | `HRMTrainerV1`    | `HRMConfig` | `HRMState` | PFC + STR                                      | Needs refactor |
+| **EHC v1** | `EHCModelV1` | `EHCTrainerV1`    | `EHCConfig` | `EHCState` | LEC + MEC + HPC + PFC + STR + shared NN blocks | Pending        |
+
+**Multiple trainers per model.** A model may have multiple trainers for
+different paradigms. For example, `EHCModelV1` might have both
+`EHCTrainerV1` (RL) and `EHCPretrainV1` (supervised). All live in the
+same model file (or package, if the file grows).
+
+Models compose modules and import from training; they do not subclass or
+extend brain-region modules. The allowed import directions are:
+
+```text
+models/ → modules/, training/, loss/, rollouts/, types.py   (allowed)
+modules/ → models/                                          (forbidden)
+training/ → models/                                         (forbidden)
+```
 
 ### 3.4 Loss
 
@@ -91,42 +109,30 @@ names, no multi-scale iteration, no orchestration logic.
 
 ### 3.5 Training
 
-Shared training infrastructure. Components are named by algorithmic
-function, not by consuming model. Models compose these building blocks in
-their `LightningModule.training_step` / `configure_optimizers`.
+The `training/` package is **100% generic** — it contains no model-specific
+code and no `LightningModule` implementations.
+Algorithmic building blocks with **no model-specific imports**. Reusable
+across any model or training paradigm.
 
-#### 3.5.1 Components
+| Component         | Path(s)             | Paradigm   | Responsibility                                                                                                |
+| ----------------- | ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
+| **Step-Loop**     | `step_loop.py`      |            | Generic step iteration: `StepLoop`, `StepModule` protocol, `StepContext`.                                     |
+| **Loss Heads**    | `act_head.py`       |            | `StepModule` implementations that wire a controller + `loss/` primitives into a step-level contract.          |
+| **ACT**           | `act_controller.py` |            | Adaptive Computation Time (Graves 2016): `ACTController`, `ACTState`, `ACTOutput`, protocol interfaces.       |
+| **Partial-Reset** | `partial_reset.py`  |            | Stateful batch assembly: replace completed rows with fresh examples from a buffer.                            |
+| **Collector**     | `collector.py`      |            | Per-step state collection for partial-reset pipelines.                                                        |
+| **Buffers**       | `buffers.py`        |            | Bounded FIFO storage for batch examples.                                                                      |
+| **Optimizers**    | `optim.py`          |            | Typed optimizer configs and wrappers (currently `AdamATan2`).                                                 |
+| **Schedulers**    | `schedules.py`      |            | LR schedules: `CosineAnnealingLRWithWarmup`, `SequentialLR`, `SchedulerConfig`.                               |
+|                   | `supervised.py`     | Supervised | Curriculum scheduling, label-smoothing helpers, supervised step patterns.                                     |
+|                   | `rl.py`             | RL         | `compute_gae()`, `policy_gradient_loss()`, advantage estimation, rollout buffer utils, discount calculations. |
+|                   | `elbo.py`           | VAE / ELBO | KL divergence utilities, ELBO loss aggregation, reconstruction + KL balancing, annealing schedules.           |
 
-| Component         | Path(s)             | Responsibility                                                                                          |
-| ----------------- | ------------------- | ------------------------------------------------------------------------------------------------------- |
-| **Step-Loop**     | `step_loop.py`      | Generic step iteration: `StepLoop`, `StepModule` protocol, `StepContext`.                               |
-| **Loss Heads**    | `act_head.py`       | `StepModule` implementations that wire a controller + `loss/` primitives into a step-level contract.    |
-| **ACT**           | `act_controller.py` | Adaptive Computation Time (Graves 2016): `ACTController`, `ACTState`, `ACTOutput`, protocol interfaces. |
-| **Partial-Reset** | `partial_reset.py`  | Stateful batch assembly: replace completed rows with fresh examples from a buffer.                      |
-| **Collector**     | `collector.py`      | Per-step state collection for partial-reset pipelines.                                                  |
-| **Buffers**       | `buffers.py`        | Bounded FIFO storage for batch examples.                                                                |
-| **Optimizers**    | `optim.py`          | Typed optimizer configs and wrappers (currently `AdamATan2`).                                           |
-| **Schedulers**    | `schedules.py`      | LR schedules: `CosineAnnealingLRWithWarmup`, `SequentialLR`, `SchedulerConfig`.                         |
+**No model imports.** Nothing in `training/` may import from `models/` or `modules/`.
 
-#### 3.5.2 Design Rules
-
-1. **Named by function, not by model.** No model-specific imports inside
-   `training/`. If a training module needs model output types, those types
-   must be defined in a neutral location (`types.py` or `training/` itself).
-
-2. **Loss heads implement `StepModule`.** Each loss head composes a controller
-   (or model callable) with stateless primitives from `loss/` and returns
-   `(outputs, carry, done)`. The concrete output dataclass is head-specific
-   (e.g., `ACTStepOutput`); `StepLoop` treats it as opaque. Models
-   instantiate and wire loss heads in their `LightningModule.__init__`.
-
-3. **Models own the wiring, not the algorithms.** The `LightningModule`
-   instantiates modules, controllers, and loss heads, then calls `StepLoop`
-   in `training_step`. The training package provides the building blocks.
-
-4. **Extend by addition.** New training algorithms (e.g., advantage estimation,
-   replay buffers, policy optimization) are added as new modules in
-   `training/`. Existing modules are not modified to accommodate new models.
+**Named by function.** Root-level files are named by algorithmic function
+(`act_controller.py`, `buffers.py`). Regime files are named by paradigm
+(`supervised.py`, `rl.py`, `elbo.py`).
 
 ### 3.6 Data
 
@@ -406,26 +412,152 @@ The following do **not** belong in `utils/`:
 
 ## 6 Model Composition Pattern
 
-Each model follows this pattern:
+Each model is composed of co-located artifacts in `models/`: a **config**,
+a **pure `nn.Module`**, a **state dataclass**, and one or more **trainers**
+(`LightningModule`). Generic training infrastructure lives in `training/`.
 
-1. **Config**: A Pydantic `BaseModel` tree that composes sub-configs for each
-   brain-region module.
-2. **State**: An explicit frozen/mutable `dataclass` holding per-module recurrent
-   state. No hidden state in module attributes.
-3. **Step interface**: A `forward(observation, action, state) → (output, state)`
-   signature (or equivalent) that makes the recurrent contract explicit.
-4. **LightningModule wrapper**: The `models/*.py` file wraps the core `nn.Module`
-   with Lightning hooks (`training_step`, `configure_optimizers`, etc.).
+### 6.1 Separation of Concerns
+
+| Layer          | Contains                                      | Knows about                                               |
+| -------------- | --------------------------------------------- | --------------------------------------------------------- |
+| `experiments/` | CLI parsing, Trainer construction, seed       | Everything (top of the DAG)                               |
+| `models/`      | nn.Module + LightningModule + configs + state | `modules/`, `training/`, `loss/`, `rollouts/`, `types.py` |
+| `training/`    | Generic algorithms + paradigm building blocks | `loss/`, `types.py`, peers in `training/`                 |
+| `modules/`     | Brain-region and shared nn.Modules            | Peers in `modules/`, `types.py`, `utils/`                 |
+
+### 6.2 Configuration Hierarchy
+
+Configuration is split by concern. Architectural parameters live with the
+model; training parameters live with the regime.
+
+| Config type           | Scope                                                    | Lives in                        | Example                  |
+| --------------------- | -------------------------------------------------------- | ------------------------------- | ------------------------ |
+| **Model config**      | Architecture only: dimensions, layer counts, activations | `models/*.py` or `modules/*.py` | `TEMConfig`, `HRMConfig` |
+| **Training config**   | Optimizer, LR schedule, loss weights, buffer sizes       | `models/*.py` (with trainer)    | `HRMTrainingConfig`      |
+| **Data config**       | Dataset paths, batch size, workers, augmentation         | `data/*.py`                     | `PuzzleDatamoduleConfig` |
+| **Experiment config** | Composes all of the above + Trainer knobs                | `experiments/*.py`              | `RunArguments`           |
+
+Model configs use `pydantic.BaseModel(extra="forbid")`. Architectural
+dimensions that must not change after construction use `frozen=True`.
+
+Training configs are kept separate from model configs. A trainer receives
+both but passes only the architecture config to the `nn.Module` constructor.
+
+### 6.3 State Management
+
+Each model defines an explicit `dataclass` for its recurrent state.
+
+- State is passed into and returned from `forward()`.
+- No hidden state is stored in module attributes between calls.
+- State dataclasses provide `detach()`.
+- Composed models nest sub-states (e.g., `TEMState` contains `LECState`,
+  `MECState`, `HPCState`; `EHCState` would contain `TEMState` +
+  `HRMState` or their components).
+
+### 6.4 Step Interface
+
+Each model exposes a step-level `forward()` that processes one timestep:
+
+```python
+def forward(self, ..., state: ModelState) -> tuple[ModelState, Logits, Features]:
+    ...
+```
+
+The trainer's `training_step` calls `StepLoop` as the iteration engine,
+in a for loop to generate t and step.
+
+### 6.5 Module Reuse Protocol
+
+Module configs use stable, module-oriented field names across all
+models that share that module.
+
+- The Pydantic type behind the field is the same class in every model
+  that uses that module.
+- Model-specific fields (fields that only one model needs) are named
+  freely, but must not collide with shared module field names.
+
+Pre-trained module weights can be loaded from a standalone model's
+checkpoint into a composite model. The protocol is:
+
+1. Module state_dicts are extractable from a parent checkpoint
+   by parameter name prefix (e.g., model.hpc.\*).
+2. When a checkpoint path is provided, the model's **init** loads
+   the extracted weights into the corresponding sub-module.
+3. Composite model configs include optional checkpoint path fields:
+
+```python
+hpc_checkpoint: Optional[Path] = None
+pfc_checkpoint: Optional[Path] = None
+```
+
+Both forms of reuse require the same prerequisite: module configs and
+module parameter names must be consistent across all models that share
+those modules.
 
 ---
 
 ## 7 Configuration Pattern
 
-- **Component configs**: `pydantic.BaseModel(extra="forbid")` for strictness.
-- **CLI entry points**: `pydantic_settings.BaseSettings(cli_parse_args=True)`.
-- **Static defaults**: TOML files under `config/`.
-- **Experiment configs**: Composed in `experiments/*.py` by nesting component
-  configs inside a `RunArguments` settings class.
+### 7.1 Config Types
+
+| Type                    | Base class                                            | Purpose                                                             |
+| ----------------------- | ----------------------------------------------------- | ------------------------------------------------------------------- |
+| **Component config**    | `pydantic.BaseModel(extra="forbid")`                  | Single-component settings (e.g., `AttractorSettings`, `MLPConfig`)  |
+| **Model config**        | `pydantic.BaseModel(extra="forbid")`                  | Composed tree of component configs for one model                    |
+| **Training config**     | `pydantic.BaseModel(extra="forbid")`                  | Optimizer + scheduler + loss + buffer settings for one trainer      |
+| **Experiment settings** | `pydantic_settings.BaseSettings(cli_parse_args=True)` | Top-level CLI entry point; composes model + training + data configs |
+
+### 7.2 Static Defaults
+
+TOML files under `config/` provide default values. The experiment
+entry point loads defaults first, then CLI arguments override:
+
+```python
+defaults = tomllib.load(Path("config/defaults_ehc.toml").open("rb"))
+settings = RunArguments(**defaults)  # CLI overrides via pydantic_settings
+```
+
+### 7.3 Leaf Composition Pattern
+
+Experiment settings are structured as a flat tree of **leaf configs**.
+Composed configs for downstream consumers (model, datamodule, regime) are
+assembled via `@property` methods using `model_validate(self, from_attributes=True)`.
+
+```
+RunArguments(BaseSettings)                    ← CLI + TOML
+  ├── architecture: HRMConfig                 ← model architecture (frozen dims)
+  ├── loss: ACTLossConfig                     ← loss weights / targets
+  ├── optimizer: AdamATan2Config              ← optimizer hyperparams
+  ├── scheduler: SchedulerConfig              ← LR schedule
+  ├── dataset: PuzzleDatasetSettings          ← dataset paths, seed
+  ├── global_batch_size: int                  ← shared by model + data
+  ├── logger: LoggerSettings                  ← TensorBoard config
+  ├── checkpoint: CheckpointSettings          ← checkpoint config
+  │
+  └── composed via @property:
+      ├── .model → ModelConfig_HRM_V1         (architecture + loss + optimizer + ...)
+      └── .datamodule → PuzzleDatamoduleConfig (dataset + batch_size + workers + ...)
+```
+
+This pattern ensures:
+
+- **CLI ergonomics**: Any leaf field can be overridden from the command line
+  (e.g., `--optimizer.lr=1e-4`, `--epochs=100`).
+- **No duplication**: Shared fields (e.g., `global_batch_size`) are defined
+  once and composed into multiple downstream configs.
+- **Reproducibility**: The full `RunArguments` can be serialized to
+  reproduce any experiment.
+
+### 7.4 Config Placement Rules
+
+- Component configs live in the same file as the `nn.Module` they configure
+  (e.g., `AttractorSettings` in `modules/hpc/attractor.py`).
+- Model configs live in the model file (e.g., `TEMConfig` in
+  `models/tem_v1.py`).
+- Training configs live in the model file alongside the trainer (e.g.,
+  `HRMTrainingConfig` in `models/hrm_v1.py`).
+- Experiment settings live in `experiments/*.py`.
+- Architectural dimensions use `frozen=True` on the Pydantic `Field`.
 
 ---
 
@@ -446,14 +578,19 @@ Each model follows this pattern:
 
 ## 9 Migration Status (as of 2026-02-26)
 
-| Item                                   | Status                                                                                                                            |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Namespace consolidation (`ehc_sn`)     | **Complete**. Legacy code archived in `temp/`.                                                                                    |
-| `mazes` migration into `ehc_sn.data`   | **Pending**. Move `src/mazes/` into `src/ehc_sn/data/mazes/`; remove `"mazes*"` from `pyproject.toml` packages; clean `types.py`. |
-| Data pipeline implementation           | **Pending**. Canonical NPZ format, JSONL index, `data.mazes.ops`, `data.envs.MazeEnv`, `data.datasets` — all to be built.         |
-| STR module (`modules/str/`)            | **Minimal**. `LinearHaltingHead` implemented. Protocols (`HaltingHead`, `ACTBackbone`) still in `training/act_controller.py`.     |
-| STR protocol migration                 | **Pending**. Move `HaltingHead` and `ACTBackbone` protocols from `training/` into `modules/str/`.                                 |
-| PFC subcomponent generalization        | **Pending**. HRModel is monolithic; target is separated subcomponents.                                                            |
-| Training infrastructure generalization | **Pending**. ACT-specific code mixed with shared protocols.                                                                       |
-| `config/defaults_ehc.toml`             | **Empty**. Needs population for default experiment configs.                                                                       |
-| `README.md`                            | **Populated**. Project overview, install, quick start, layout.                                                                    |
+| Item                                   | Status                                                                                                                                 |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Namespace consolidation (`ehc_sn`)     | **Complete**. Legacy code archived in `temp/`.                                                                                         |
+| `mazes` migration into `ehc_sn.data`   | **Pending**. Move `src/mazes/` into `src/ehc_sn/data/mazes/`; remove `"mazes*"` from `pyproject.toml` packages; clean `types.py`.      |
+| Data pipeline implementation           | **Pending**. Canonical NPZ format, JSONL index, `data.mazes.ops`, `data.envs.MazeEnv`, `data.datasets` — all to be built.              |
+| STR module (`modules/str/`)            | **Minimal**. `LinearHaltingHead` implemented. Protocols (`HaltingHead`, `ACTBackbone`) still in `training/act_controller.py`.          |
+| STR protocol migration                 | **Pending**. Move `HaltingHead` and `ACTBackbone` protocols from `training/` into `modules/str/`.                                      |
+| PFC subcomponent generalization        | **Pending**. HRModel is monolithic; target is separated subcomponents.                                                                 |
+| Model/training split                   | **Pending**. Extract pure `nn.Module` from `LightningModule` for both TEM and HRM. Co-locate trainers in `models/`.                    |
+| HRModel relocation                     | **Pending**. Move `HRModel` from `modules/pfc/hrm.py` to `models/hrm_v1.py` as `HRMModelV1`. PFC subcomponents stay in `modules/pfc/`. |
+| `RolloutStream` relocation             | **Pending**. Move from `models/tem_v1.py` to `rollouts/`.                                                                              |
+| `training/regimes/` creation           | **Pending**. Create sub-package with generic paradigm building blocks: `supervised.py`, `rl.py`, `elbo.py`.                            |
+| Batch types to `types.py`              | **Pending**. Move `WalkBatch`, `PuzzleBatch`, and similar batch container types from `data/` into `types.py`.                          |
+| Training infrastructure generalization | **Pending**. ACT-specific code mixed with shared protocols.                                                                            |
+| `config/defaults_ehc.toml`             | **Empty**. Needs population for default experiment configs.                                                                            |
+| `README.md`                            | **Populated**. Project overview, install, quick start, layout.                                                                         |
