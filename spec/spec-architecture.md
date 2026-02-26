@@ -69,10 +69,11 @@ Top-level composed `LightningModule` wrappers. Each model composes brain-region
 modules and shared NN blocks, manages explicit recurrent state via dataclasses,
 and exposes a step-level forward interface.
 
-| Model      | File               | Status | Composes                                    |
-| ---------- | ------------------ | ------ | ------------------------------------------- |
-| **TEM v1** | `models/tem_v1.py` | Active | LEC + MEC + HPC + Autoencoder + Projections |
-| **HRM v1** | `models/hrm_v1.py` | Active | PFC + STR + partial resets                  |
+| Model      | File               | Status         | Composes                                       |
+| ---------- | ------------------ | -------------- | ---------------------------------------------- |
+| **TEM v1** | `models/tem_v1.py` | Needs refactor | LEC + MEC + HPC + Autoencoder + Projections    |
+| **HRM v1** | `models/hrm_v1.py` | Needs refactor | PFC + STR + partial resets                     |
+| **EHC v1** | `models/ehc_v1.py` | Pending        | LEC + MEC + HPC + PFC + STR + shared NN blocks |
 
 ### 3.4 Loss
 
