@@ -242,7 +242,7 @@ Generators (maze-nd, dungeongen, HF)      scripts/data-gen/
           ▼
      data/processed/  ◄──── canonical NPZ + index.jsonl
           │
-          ├──► ehc_sn.data.datasets    (static)  ──► HRM DataModule
+          ├──► ehc_sn.data.datasets    (static)  ──► DataModule → model adapters
           │
           └──► ehc_sn.data.envs.MazeEnv (runtime) ──► TEM DataModule
                     │                               ──► EHC RL training
@@ -281,17 +281,35 @@ Output is stored in `data/processed/{train,val,test}/`.
 
 ML data infrastructure: datasets, DataModules, environments, and collation.
 
-| Module           | Responsibility                                                                                       |
-| ---------------- | ---------------------------------------------------------------------------------------------------- |
-| `schema.py`      | Channel name constants, dtype contracts, and validation for the canonical format.                    |
-| `index.py`       | JSONL index parsing, dataset splitting, channel-availability queries.                                |
-| `datasets.py`    | Map-style `torch.utils.data.Dataset` subclasses loading NPZ → tensors.                               |
-| `datamodules.py` | Lightning `DataModule` implementations. One per model or a unified module with mode selection.       |
-| `collation.py`   | Model-specific batch assembly (`WalkBatch` for TEM, `Dict[str, Tensor]` for HRM, RL episode format). |
-| `vocabulary.py`  | Observation token mappings (current `maze_vocab`).                                                   |
-| `transforms.py`  | Channel → tensor conversions, normalization, augmentation at load time.                              |
+| Module           | Responsibility                                                                                      |
+| ---------------- | --------------------------------------------------------------------------------------------------- |
+| `schema.py`      | Channel name constants, dtype contracts, and validation for the canonical on-disk format.           |
+| `index.py`       | JSONL index parsing, dataset splitting, channel-availability queries.                               |
+| `datasets.py`    | Map-style `torch.utils.data.Dataset` returning the canonical maze representation (see §4.6.5).      |
+| `datamodules.py` | Generic Lightning `DataModule`. Model-specific adaptation is external (model-owned adapters).       |
+| `vocabulary.py`  | Canonical maze semantic enum (SEM IDs: PAD, WALL, EMPTY, START, GOAL) and debug character mappings. |
+| `transforms.py`  | Model-agnostic channel transforms: augmentation (dihedral symmetry), canonical grid construction.   |
 
-#### 4.6.5 Gymnasium Environments (`data/envs/`)
+#### 4.6.5 Canonical Dataset Output
+
+`MazeDataset.__getitem__` returns a model-agnostic canonical representation:
+
+| Key        | Type                | Shape    | Description                                                                      |
+| ---------- | ------------------- | -------- | -------------------------------------------------------------------------------- |
+| `grid`     | `IntTensor`         | `(H, W)` | Semantic grid using canonical SEM IDs (PAD=0, WALL=1, EMPTY=2, START=3, GOAL=4). |
+| `channels` | `dict[str, Tensor]` | `(H, W)` | Original binary/int channels (e.g., `solution`). Optional.                       |
+| `metadata` | `dict[str, Any]`    | —        | Index fields: maze ID, difficulty, source, etc.                                  |
+
+The `grid` encodes environment state semantics. It does **not** contain
+task-specific annotations (e.g., `solution`). Channel priority when
+building the grid: `WALL < EMPTY < START < GOAL` (later assignments win).
+
+Model-specific input construction (tokenization, label building, flattening)
+is performed by model-owned adapters operating on this canonical output.
+Adapters are named by data concern (e.g., "supervised maze adapter"), not
+by consuming model.
+
+#### 4.6.6 Gymnasium Environments (`data/envs/`)
 
 Gymnasium wrappers over processed maze NPZs. Base environment returns
 a rich observation dict; model-specific `ObservationWrapper` subclasses
@@ -302,13 +320,13 @@ adapt it to each model's expected input.
 | `maze_env.py` | Base `MazeEnv(gymnasium.Env)`: loads canonical NPZ, manages agent position, computes reward from goals. Returns rich obs dict. |
 | `wrappers.py` | `ObservationWrapper` subclasses: `TEMObsWrapper` (one-hot vectors), `HRMObsWrapper` (token sequences), etc.                    |
 
-#### 4.6.6 Model–Data Consumption Paths
+#### 4.6.7 Model–Data Consumption Paths
 
-| Model   | Data path                                         | Interaction mode  |
-| ------- | ------------------------------------------------- | ----------------- |
-| **TEM** | NPZ → `MazeEnv` + `TEMObsWrapper` → runtime walks | Online (env.step) |
-| **HRM** | NPZ → `PuzzleDataset` → `DataLoader`              | Offline (static)  |
-| **EHC** | NPZ → `MazeEnv` → RL episodes                     | Online (env.step) |
+| Model   | Data path                                            | Interaction mode  |
+| ------- | ---------------------------------------------------- | ----------------- |
+| **TEM** | NPZ → `MazeEnv` + `TEMObsWrapper` → runtime walks    | Online (env.step) |
+| **HRM** | NPZ → `MazeDataset` → canonical grid → model adapter | Offline (static)  |
+| **EHC** | NPZ → `MazeEnv` → RL episodes                        | Online (env.step) |
 
 ### 4.7 Evaluation
 
@@ -434,7 +452,7 @@ those modules.
 | **Component config**    | `pydantic.BaseModel(extra="forbid")`                  | Single-component settings                     | Same file as the `nn.Module` | `AttractorSettings`      |
 | **Model config**        | `pydantic.BaseModel(extra="forbid")`                  | Architecture: dimensions, layers, activations | `models/*.py`                | `TEMConfig`, `HRMConfig` |
 | **Training config**     | `pydantic.BaseModel(extra="forbid")`                  | Optimizer, LR schedule, loss weights, buffers | `models/*.py` (with trainer) | `HRMTrainingConfig`      |
-| **Data config**         | `pydantic.BaseModel(extra="forbid")`                  | Dataset paths, batch size, workers            | `data/*.py`                  | `PuzzleDatamoduleConfig` |
+| **Data config**         | `pydantic.BaseModel(extra="forbid")`                  | Dataset paths, batch size, workers            | `data/*.py`                  | `DatamoduleConfig`       |
 | **Experiment settings** | `pydantic_settings.BaseSettings(cli_parse_args=True)` | Composes all above + Trainer knobs            | `experiments/*.py`           | `RunArguments`           |
 
 Architectural dimensions use `frozen=True`. Training configs are separate
@@ -463,14 +481,14 @@ RunArguments(BaseSettings)                    ← CLI + TOML
   ├── loss: ACTLossConfig                     ← loss weights / targets
   ├── optimizer: AdamATan2Config              ← optimizer hyperparams
   ├── scheduler: SchedulerConfig              ← LR schedule
-  ├── dataset: PuzzleDatasetSettings          ← dataset paths, seed
+  ├── dataset: DatasetSettings                ← dataset paths, seed
   ├── global_batch_size: int                  ← shared by model + data
   ├── logger: LoggerSettings                  ← TensorBoard config
   ├── checkpoint: CheckpointSettings          ← checkpoint config
   │
   └── composed via @property:
       ├── .model → ModelConfig_HRM_V1         (architecture + loss + optimizer + ...)
-      └── .datamodule → PuzzleDatamoduleConfig (dataset + batch_size + workers + ...)
+      └── .datamodule → DatamoduleConfig (dataset + batch_size + workers + ...)
 ```
 
 This pattern ensures:
