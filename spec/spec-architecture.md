@@ -30,10 +30,8 @@ studying hippocampal/entorhinal spatial models.
 ## 2 Canonical Import Namespace
 
 The sole canonical import namespace is **`ehc_sn`**.
-
-Legacy namespaces, e.g. `torch_tem` and `hrm_sn`, are retired; legacy code exists under
-`temp/` (archived legacy code, not on the Python path). No new code may import from
-`torch_tem` or `hrm_sn`.
+Legacy namespaces (`torch_tem`, `hrm_sn`) are retired and archived under
+`temp/` (not on the Python path).
 
 ---
 
@@ -77,21 +75,12 @@ file per model version). A model file co-locates:
 | ---------- | ------------ | ----------------- | ----------- | ---------- | ---------------------------------------------- | -------------- |
 | **TEM v1** | `TEMModelV1` | `TEMTrainerV1`    | `TEMConfig` | `TEMState` | LEC + MEC + HPC + Autoencoder + Projections    | Needs refactor |
 | **HRM v1** | `HRMModelV1` | `HRMTrainerV1`    | `HRMConfig` | `HRMState` | PFC + STR                                      | Needs refactor |
-| **EHC v1** | `EHCModelV1` | `EHCTrainerV1`    | `EHCConfig` | `EHCState` | LEC + MEC + HPC + PFC + STR + shared NN blocks | Pending        |
+| **EHC v1** | `EHCModelV1` | `EHCTrainerV1`    | `EHCConfig` | `EHCState` | LEC + MEC + HPC + PFC + STR + shared NN blocks | `NOT_STARTED`  |
 
-**Multiple trainers per model.** A model may have multiple trainers for
-different paradigms. For example, `EHCModelV1` might have both
+**Multiple trainers per model.** E.g., `EHCModelV1` might have both
 `EHCTrainerV1` (RL) and `EHCPretrainV1` (supervised). All live in the
-same model file (or package, if the file grows).
-
-Models compose modules and import from training; they do not subclass or
-extend brain-region modules. The allowed import directions are:
-
-```text
-models/ → modules/, training/, loss/, rollouts/, types.py   (allowed)
-modules/ → models/                                          (forbidden)
-training/ → models/                                         (forbidden)
-```
+same model file. Models compose modules; they do not subclass them.
+See §6.6 for import-direction rules.
 
 ### 3.4 Loss
 
@@ -109,26 +98,24 @@ names, no multi-scale iteration, no orchestration logic.
 
 ### 3.5 Training
 
-The `training/` package is **100% generic** — it contains no model-specific
-code and no `LightningModule` implementations.
-Algorithmic building blocks with **no model-specific imports**. Reusable
-across any model or training paradigm.
+100% generic algorithmic building blocks — no model-specific code,
+no `LightningModule` implementations, no model imports.
 
 | Component         | Path(s)             | Paradigm   | Responsibility                                                                                                |
 | ----------------- | ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
-| **Step-Loop**     | `step_loop.py`      | ?          | Generic step iteration: `StepLoop`, `StepModule` protocol, `StepContext`.                                     |
-| **Loss Heads**    | `act_head.py`       | ?          | `StepModule` implementations that wire a controller + `loss/` primitives into a step-level contract.          |
-| **ACT**           | `act_controller.py` | ?          | Adaptive Computation Time (Graves 2016): `ACTController`, `ACTState`, `ACTOutput`, protocol interfaces.       |
-| **Partial-Reset** | `partial_reset.py`  | ?          | Stateful batch assembly: replace completed rows with fresh examples from a buffer.                            |
-| **Collector**     | `collector.py`      | ?          | Per-step state collection for partial-reset pipelines.                                                        |
-| **Buffers**       | `buffers.py`        | ?          | Bounded FIFO storage for batch examples.                                                                      |
-| **Optimizers**    | `optim.py`          | ?          | Typed optimizer configs and wrappers (currently `AdamATan2`).                                                 |
-| **Schedulers**    | `schedules.py`      | ?          | LR schedules: `CosineAnnealingLRWithWarmup`, `SequentialLR`, `SchedulerConfig`.                               |
-| **?**             | `supervised.py`     | Supervised | Curriculum scheduling, label-smoothing helpers, supervised step patterns.                                     |
-| **?**             | `rl.py`             | RL         | `compute_gae()`, `policy_gradient_loss()`, advantage estimation, rollout buffer utils, discount calculations. |
-| **?**             | `elbo.py`           | VAE / ELBO | KL divergence utilities, ELBO loss aggregation, reconstruction + KL balancing, annealing schedules.           |
+| **Step-Loop**     | `step_loop.py`      | Generic    | Generic step iteration: `StepLoop`, `StepModule` protocol, `StepContext`.                                     |
+| **Loss Heads**    | `act_head.py`       | Generic    | `StepModule` implementations that wire a controller + `loss/` primitives into a step-level contract.          |
+| **ACT**           | `act_controller.py` | Generic    | Adaptive Computation Time (Graves 2016): `ACTController`, `ACTState`, `ACTOutput`, protocol interfaces.       |
+| **Partial-Reset** | `partial_reset.py`  | Generic    | Stateful batch assembly: replace completed rows with fresh examples from a buffer.                            |
+| **Collector**     | `collector.py`      | Generic    | Per-step state collection for partial-reset pipelines.                                                        |
+| **Buffers**       | `buffers.py`        | Generic    | Bounded FIFO storage for batch examples.                                                                      |
+| **Optimizers**    | `optim.py`          | Generic    | Typed optimizer configs and wrappers (currently `AdamATan2`).                                                 |
+| **Schedulers**    | `schedules.py`      | Generic    | LR schedules: `CosineAnnealingLRWithWarmup`, `SequentialLR`, `SchedulerConfig`.                               |
+| **Supervised**    | `supervised.py`     | Supervised | Curriculum scheduling, label-smoothing helpers, supervised step patterns.                                     |
+| **RL**            | `rl.py`             | RL         | `compute_gae()`, `policy_gradient_loss()`, advantage estimation, rollout buffer utils, discount calculations. |
+| **ELBO**          | `elbo.py`           | VAE / ELBO | KL divergence utilities, ELBO loss aggregation, reconstruction + KL balancing, annealing schedules.           |
 
-**No model imports.** Nothing in `training/` may import from `models/` or `modules/`.
+> **RULE**: Nothing in `training/` may import from `models/` or `modules/`.
 
 **Named by function.** Root-level files are named by algorithmic function
 (`act_controller.py`, `buffers.py`). Regime files are named by paradigm
@@ -136,22 +123,10 @@ across any model or training paradigm.
 
 ### 3.6 Data
 
-The data component owns the full data pipeline: maze structure generation,
-on-disk storage, dataset loading, gymnasium environments, and Lightning
-DataModules. It is organized as three sub-layers with a strict internal
-dependency direction:
-
-```text
-data/*.py    (torch + lightning, depends on envs/ and mazes/)
-     │ imports
-     ▼
-data/envs/   (gymnasium, depends on mazes/)
-     │ imports
-     ▼
-data/mazes/  (numpy + generator libs only, no torch/gymnasium)
-```
-
-No reverse dependency is permitted within this stack.
+Data pipeline: maze generation, on-disk storage, dataset loading,
+gymnasium environments, and Lightning DataModules. Three sub-layers
+with strict top-down imports (no reverse dependency):
+`data/*.py` (torch + lightning) → `data/envs/` (gymnasium) → `data/mazes/` (numpy only).
 
 #### 3.6.1 Mazes (`data/mazes/`)
 
@@ -248,11 +223,9 @@ ML data infrastructure: datasets, DataModules, environments, and collation.
 
 #### 3.6.4 Gymnasium Environments (`data/envs/`)
 
-Gymnasium `Env` wrappers that load a processed maze NPZ and expose
-`step(action) → (obs, reward, terminated, truncated, info)`. The base
-environment returns a rich observation dict; model-specific
-`ObservationWrapper` subclasses adapt it to each model's expected input
-(Pattern A — the standard gymnasium wrapper pattern).
+Gymnasium wrappers over processed maze NPZs. Base environment returns
+a rich observation dict; model-specific `ObservationWrapper` subclasses
+adapt it to each model's expected input.
 
 | Module        | Responsibility                                                                                                                 |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -260,19 +233,6 @@ environment returns a rich observation dict; model-specific
 | `wrappers.py` | `ObservationWrapper` subclasses: `TEMObsWrapper` (one-hot vectors), `HRMObsWrapper` (token sequences), etc.                    |
 
 #### 3.6.5 Model–Data Consumption Paths
-
-Each model consumes processed maze data through a different path. HRM
-bypasses the environment layer entirely; TEM and EHC interact with mazes
-at runtime via `MazeEnv`.
-
-```text
-                         ┌── datasets.py ── PuzzleDataset ────── HRM DataLoader
-                         │    (static NPZ, no env interaction)
-data/processed/*.npz ────┤
-                         ├── envs/maze_env.py ── TEMObsWrapper ── TEM runtime walks
-                         │         │
-                         └─────────┴──────────── (base env) ──── EHC RL episodes
-```
 
 | Model   | Data path                                         | Interaction mode  |
 | ------- | ------------------------------------------------- | ----------------- |
@@ -490,18 +450,9 @@ those modules.
 
 ### 6.6 Import-Direction Rules
 
-#### External dependencies
-
-Any `ehc_sn` component may freely import external libraries declared in
-`pyproject.toml` (e.g., `torch`, `numpy`, `lightning`, `gymnasium`,
-`matplotlib`, `pydantic`). External imports are not restricted by the
-layer rules below.
-
-#### Internal import layers
-
-Internal imports within `ehc_sn` follow a strict top-down DAG.
-A component may import from its own layer or any layer below it.
-A component must **never** import from a layer above it.
+External libraries declared in `pyproject.toml` may be imported freely.
+Internal imports follow a strict top-down DAG — import from your own
+layer or below, **never** upward.
 
 | Layer | Components                                                                                               |
 | ----- | -------------------------------------------------------------------------------------------------------- |
@@ -527,12 +478,17 @@ A component must **never** import from a layer above it.
 
 ### 7.1 Config Types
 
-| Type                    | Base class                                            | Purpose                                                             |
-| ----------------------- | ----------------------------------------------------- | ------------------------------------------------------------------- |
-| **Component config**    | `pydantic.BaseModel(extra="forbid")`                  | Single-component settings (e.g., `AttractorSettings`, `MLPConfig`)  |
-| **Model config**        | `pydantic.BaseModel(extra="forbid")`                  | Composed tree of component configs for one model                    |
-| **Training config**     | `pydantic.BaseModel(extra="forbid")`                  | Optimizer + scheduler + loss + buffer settings for one trainer      |
-| **Experiment settings** | `pydantic_settings.BaseSettings(cli_parse_args=True)` | Top-level CLI entry point; composes model + training + data configs |
+| Type                    | Base class                                            | Scope                                         | Lives in                     | Example                  |
+| ----------------------- | ----------------------------------------------------- | --------------------------------------------- | ---------------------------- | ------------------------ |
+| **Component config**    | `pydantic.BaseModel(extra="forbid")`                  | Single-component settings                     | Same file as the `nn.Module` | `AttractorSettings`      |
+| **Model config**        | `pydantic.BaseModel(extra="forbid")`                  | Architecture: dimensions, layers, activations | `models/*.py`                | `TEMConfig`, `HRMConfig` |
+| **Training config**     | `pydantic.BaseModel(extra="forbid")`                  | Optimizer, LR schedule, loss weights, buffers | `models/*.py` (with trainer) | `HRMTrainingConfig`      |
+| **Data config**         | `pydantic.BaseModel(extra="forbid")`                  | Dataset paths, batch size, workers            | `data/*.py`                  | `PuzzleDatamoduleConfig` |
+| **Experiment settings** | `pydantic_settings.BaseSettings(cli_parse_args=True)` | Composes all above + Trainer knobs            | `experiments/*.py`           | `RunArguments`           |
+
+Architectural dimensions use `frozen=True`. Training configs are separate
+from model configs; the trainer passes only the architecture config to
+the `nn.Module` constructor.
 
 ### 7.2 Static Defaults
 
@@ -574,17 +530,6 @@ This pattern ensures:
   once and composed into multiple downstream configs.
 - **Reproducibility**: The full `RunArguments` can be serialized to
   reproduce any experiment.
-
-### 7.4 Config Placement Rules
-
-- Component configs live in the same file as the `nn.Module` they configure
-  (e.g., `AttractorSettings` in `modules/hpc/attractor.py`).
-- Model configs live in the model file (e.g., `TEMConfig` in
-  `models/tem_v1.py`).
-- Training configs live in the model file alongside the trainer (e.g.,
-  `HRMTrainingConfig` in `models/hrm_v1.py`).
-- Experiment settings live in `experiments/*.py`.
-- Architectural dimensions use `frozen=True` on the Pydantic `Field`.
 
 ---
 

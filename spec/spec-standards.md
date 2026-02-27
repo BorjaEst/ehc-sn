@@ -101,10 +101,9 @@ cli_parse_args=True)`. CLI source must have highest precedence.
 
 ### 5.2 Code Documentation
 
-- Docstrings are the primary code-level documentation (see §1.3).
-- Module-level docstrings should describe the module's purpose and key classes.
-- Shape conventions for tensors must be documented wherever tensors are
-  created, transformed, or consumed.
+Docstrings are the primary code-level documentation (see §1.3). Module-level
+docstrings describe purpose and key classes. Tensor shape conventions must
+be documented wherever tensors are created, transformed, or consumed.
 
 ### 5.3 Specs as Documentation
 
@@ -117,24 +116,11 @@ cli_parse_args=True)`. CLI source must have highest precedence.
 
 ## 6 Artifact Standards
 
-### 6.1 Plans
-
-- Location: `.copilot-tracking/plans/`.
-- Format: Markdown. One file per plan.
-- Required sections: Goal, Scope, Steps, Acceptance Criteria.
-
-### 6.2 Plan Details
-
-- Location: `.copilot-tracking/details/`.
-- Format: Markdown. Linked from the parent plan.
-
-### 6.3 Change Records
-
-- Location: `.copilot-tracking/changes/`.
-- Format: Markdown. One file per significant change.
-- Required sections: What Changed, Why, Files Affected, Testing.
-
-### 6.4 Precedence
+| Artifact       | Location                     | Format   | Required sections                          |
+| -------------- | ---------------------------- | -------- | ------------------------------------------ |
+| Plans          | `.copilot-tracking/plans/`   | Markdown | Goal, Scope, Steps, Acceptance Criteria    |
+| Plan details   | `.copilot-tracking/details/` | Markdown | Linked from parent plan                    |
+| Change records | `.copilot-tracking/changes/` | Markdown | What Changed, Why, Files Affected, Testing |
 
 Spec file precedence is defined in `spec/spec-manifest.toml [precedence]` and
 is the single source of truth. Do not duplicate the precedence order elsewhere.
@@ -164,33 +150,3 @@ is the single source of truth. Do not duplicate the precedence order elsewhere.
 - Axis utilities in `figures/utils/` for consistent subplot layout.
 
 ---
-
-## 9 Exemplar Criteria
-
-"Good" code in this repository exhibits:
-
-1. **Explicit state**: Recurrent state in frozen or mutable dataclasses, not
-   hidden in module attributes.
-2. **Composed modules**: Brain-region modules (LEC, MEC, HPC, PFC) composed by
-   top-level models, not monolithic classes.
-3. **Pydantic configs**: `extra="forbid"`, `Field(...)` with descriptions,
-   `frozen=True` on architectural dimensions.
-4. **Type-annotated public APIs** with tensor shape conventions in docstrings.
-5. **Deterministic, focused tests** that exercise one behavior per test.
-6. **Minimal surface area**: Prefer deletion and simplification over addition.
-   Code that can be removed without loss of correctness should be removed.
-
----
-
-## 10 Anti-Patterns (Forbidden)
-
-1. **God modules**: Files exceeding ~500 lines should be split.
-2. **Implicit state**: Storing recurrent state in `self._hidden` or similar
-   module attributes that are not part of an explicit state dataclass.
-3. **Catch-all imports**: `from module import *` outside `__init__.py`
-   re-exports.
-4. **Silent error swallowing**: Bare `except:` or `except Exception: pass`.
-5. **Hard-coded paths**: Absolute paths to data, models, or outputs. Use
-   configuration.
-6. **Undeclared dependencies**: Every import must be traceable to a declared
-   dependency in `pyproject.toml` (see `typer` bug in `spec-requirements.md`).

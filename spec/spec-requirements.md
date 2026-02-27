@@ -21,12 +21,8 @@ The only exception is the **Bootstrap Mode** override defined in the
 ## 2 Namespace Constraint
 
 All new code under `src/ehc_sn/` **MUST** use `ehc_sn` as the sole import
-namespace.
-
-- **Forbidden**: `from torch_tem ...`, `from hrm_sn ...`, `import torch_tem`,
-  `import hrm_sn`.
-- Legacy remnants under `temp/` are archived and not on the Python path.
-- This constraint is enforced at review time; no automated linter exists yet.
+namespace. Forbidden: `torch_tem`, `hrm_sn`. Legacy code is archived
+under `temp/` (not on the Python path).
 
 ---
 
@@ -97,18 +93,13 @@ namespace.
 
 ## 5 Data Handling Constraints
 
-- **Raw data** is generated externally by maze-nd and placed in `data/raw/`.
-  Raw data is **not** committed to version control.
-- **Processing scripts** live in `scripts/data-gen/`. They transform raw data
-  into labeled, processed datasets in `data/processed/`.
-- **Interim data** (`data/interim/`) is optional scratch space for intermediate
-  pipeline stages.
-- **External data** (`data/external/`) is for third-party reference datasets.
-- The `data/` project-root directory structure follows the convention:
-  `raw → interim → processed`. DataModules in `ehc_sn.data` consume only
-  `processed` data.
-- Do not hard-code absolute paths to data directories. Use configuration
-  (Pydantic settings or CLI args) to resolve data paths.
+- **Pipeline**: `data/raw/` → `data/interim/` → `data/processed/`.
+  DataModules consume only `processed` data.
+- Raw data is **not** committed to version control.
+- Processing scripts live in `scripts/data-gen/`.
+- `data/interim/` is optional scratch space; `data/external/` is for
+  third-party datasets.
+- No hard-coded absolute paths. Use Pydantic settings or CLI args.
 
 ---
 
@@ -124,17 +115,10 @@ namespace.
 
 ## 7 Training Infrastructure Constraints
 
-- All code in `training/` is **model-agnostic**. It contains algorithmic
-  building blocks (step-loop, optimizer configs, LR schedules, paradigm
-  primitives) with **no model-specific imports** (see `spec-architecture.md`
-  §3.5).
-- Model-specific training orchestration (loss aggregation, step assembly,
-  partial-reset policies) lives in the `LightningModule` trainer co-located
-  in `models/*.py`.
-- If a training primitive currently serves only one model, it must be
-  generalized or relocated to the model file before the next release.
-- Shared protocols (`StepLoop`, `StepModule`), optimizer configs, and LR
-  schedulers remain at the `training/` root.
+All code in `training/` is **model-agnostic** with no model-specific
+imports (see `spec-architecture.md` §3.5, §6.6). Model-specific
+orchestration lives in the `LightningModule` trainer in `models/*.py`.
+Single-model primitives must be generalized or relocated before next release.
 
 ---
 
