@@ -117,23 +117,24 @@ namespace.
 - **Python**: ≥ 3.12 (as declared in `pyproject.toml`).
 - **Build backend**: `setuptools` with `pyproject.toml`-based configuration.
 - **Package layout**: `src/` layout (`tool.setuptools.package-dir = {"" = "src"}`).
-- **Packages**: `ehc_sn` (main) and `mazes` (auxiliary).
+- **Packages**: `ehc_sn` (main). `mazes` is a legacy auxiliary package
 - **Version**: Single-source in `src/ehc_sn/VERSION`.
 
 ---
 
 ## 7 Training Infrastructure Constraints
 
-- **Shared vs. model-specific**: The step-loop protocol (`StepLoop`,
-  `StepModule`), optimizer configs, and LR schedulers are shared
-  infrastructure. Model-specific training logic (ACT controller, partial
-  resets, FIFO buffer) must be clearly separated.
-- **Migration target**: Model-specific training extensions should be namespaced
-  under `training/<model>/` (e.g., `training/hrm/`). Shared protocols remain
-  at the `training/` root.
-- Until migration is complete, model-specific training code in `training/` must
-  be documented with a module-level docstring indicating which model(s) it
-  serves.
+- All code in `training/` is **model-agnostic**. It contains algorithmic
+  building blocks (step-loop, optimizer configs, LR schedules, paradigm
+  primitives) with **no model-specific imports** (see `spec-architecture.md`
+  §3.5).
+- Model-specific training orchestration (loss aggregation, step assembly,
+  partial-reset policies) lives in the `LightningModule` trainer co-located
+  in `models/*.py`.
+- If a training primitive currently serves only one model, it must be
+  generalized or relocated to the model file before the next release.
+- Shared protocols (`StepLoop`, `StepModule`), optimizer configs, and LR
+  schedulers remain at the `training/` root.
 
 ---
 

@@ -31,7 +31,7 @@ studying hippocampal/entorhinal spatial models.
 
 The sole canonical import namespace is **`ehc_sn`**.
 
-Legacy namespaces, e.g. `torch_tem` and `hrm_sn` are retired; legacy code exist under
+Legacy namespaces, e.g. `torch_tem` and `hrm_sn`, are retired; legacy code exists under
 `temp/` (archived legacy code, not on the Python path). No new code may import from
 `torch_tem` or `hrm_sn`.
 
@@ -116,17 +116,17 @@ across any model or training paradigm.
 
 | Component         | Path(s)             | Paradigm   | Responsibility                                                                                                |
 | ----------------- | ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
-| **Step-Loop**     | `step_loop.py`      |            | Generic step iteration: `StepLoop`, `StepModule` protocol, `StepContext`.                                     |
-| **Loss Heads**    | `act_head.py`       |            | `StepModule` implementations that wire a controller + `loss/` primitives into a step-level contract.          |
-| **ACT**           | `act_controller.py` |            | Adaptive Computation Time (Graves 2016): `ACTController`, `ACTState`, `ACTOutput`, protocol interfaces.       |
-| **Partial-Reset** | `partial_reset.py`  |            | Stateful batch assembly: replace completed rows with fresh examples from a buffer.                            |
-| **Collector**     | `collector.py`      |            | Per-step state collection for partial-reset pipelines.                                                        |
-| **Buffers**       | `buffers.py`        |            | Bounded FIFO storage for batch examples.                                                                      |
-| **Optimizers**    | `optim.py`          |            | Typed optimizer configs and wrappers (currently `AdamATan2`).                                                 |
-| **Schedulers**    | `schedules.py`      |            | LR schedules: `CosineAnnealingLRWithWarmup`, `SequentialLR`, `SchedulerConfig`.                               |
-|                   | `supervised.py`     | Supervised | Curriculum scheduling, label-smoothing helpers, supervised step patterns.                                     |
-|                   | `rl.py`             | RL         | `compute_gae()`, `policy_gradient_loss()`, advantage estimation, rollout buffer utils, discount calculations. |
-|                   | `elbo.py`           | VAE / ELBO | KL divergence utilities, ELBO loss aggregation, reconstruction + KL balancing, annealing schedules.           |
+| **Step-Loop**     | `step_loop.py`      | ?          | Generic step iteration: `StepLoop`, `StepModule` protocol, `StepContext`.                                     |
+| **Loss Heads**    | `act_head.py`       | ?          | `StepModule` implementations that wire a controller + `loss/` primitives into a step-level contract.          |
+| **ACT**           | `act_controller.py` | ?          | Adaptive Computation Time (Graves 2016): `ACTController`, `ACTState`, `ACTOutput`, protocol interfaces.       |
+| **Partial-Reset** | `partial_reset.py`  | ?          | Stateful batch assembly: replace completed rows with fresh examples from a buffer.                            |
+| **Collector**     | `collector.py`      | ?          | Per-step state collection for partial-reset pipelines.                                                        |
+| **Buffers**       | `buffers.py`        | ?          | Bounded FIFO storage for batch examples.                                                                      |
+| **Optimizers**    | `optim.py`          | ?          | Typed optimizer configs and wrappers (currently `AdamATan2`).                                                 |
+| **Schedulers**    | `schedules.py`      | ?          | LR schedules: `CosineAnnealingLRWithWarmup`, `SequentialLR`, `SchedulerConfig`.                               |
+| **?**             | `supervised.py`     | Supervised | Curriculum scheduling, label-smoothing helpers, supervised step patterns.                                     |
+| **?**             | `rl.py`             | RL         | `compute_gae()`, `policy_gradient_loss()`, advantage estimation, rollout buffer utils, discount calculations. |
+| **?**             | `elbo.py`           | VAE / ELBO | KL divergence utilities, ELBO loss aggregation, reconstruction + KL balancing, annealing schedules.           |
 
 **No model imports.** Nothing in `training/` may import from `models/` or `modules/`.
 
@@ -141,12 +141,14 @@ on-disk storage, dataset loading, gymnasium environments, and Lightning
 DataModules. It is organized as three sub-layers with a strict internal
 dependency direction:
 
-```
-data/mazes/  (numpy + generator libs only, no torch/gymnasium)
-     ↑
-data/envs/   (gymnasium, depends on mazes/)
-     ↑
+```text
 data/*.py    (torch + lightning, depends on envs/ and mazes/)
+     │ imports
+     ▼
+data/envs/   (gymnasium, depends on mazes/)
+     │ imports
+     ▼
+data/mazes/  (numpy + generator libs only, no torch/gymnasium)
 ```
 
 No reverse dependency is permitted within this stack.
@@ -211,7 +213,7 @@ Optional channels are represented by key absence, not by zero-filled arrays.
 
 **On-disk layout:**
 
-```
+```text
 data/
 ├── raw/                          # Untouched generator output
 │   ├── maze-nd/
@@ -263,7 +265,7 @@ Each model consumes processed maze data through a different path. HRM
 bypasses the environment layer entirely; TEM and EHC interact with mazes
 at runtime via `MazeEnv`.
 
-```
+```text
                          ┌── datasets.py ── PuzzleDataset ────── HRM DataLoader
                          │    (static NPZ, no env interaction)
 data/processed/*.npz ────┤
@@ -304,7 +306,7 @@ utilities.
 
 ## 4 Data Pipeline
 
-```
+```text
 Generators (maze-nd, dungeongen, HF)      scripts/data-gen/
           │                                      │
           ▼                                      │ augmentation calls
@@ -355,14 +357,6 @@ whatever channels are available and writes a conformant NPZ with a
 corresponding JSONL index entry.
 
 Output is stored in `data/processed/{train,val,test}/`.
-
-### 4.4 Consumption Paths
-
-| Model   | Data path                                         | Interaction mode  |
-| ------- | ------------------------------------------------- | ----------------- |
-| **TEM** | NPZ → `MazeEnv` + `TEMObsWrapper` → runtime walks | Online (env.step) |
-| **HRM** | NPZ → `PuzzleDataset` → `DataLoader`              | Offline (static)  |
-| **EHC** | NPZ → `MazeEnv` → RL episodes                     | Online (env.step) |
 
 ---
 
@@ -449,7 +443,7 @@ Each model defines an explicit `dataclass` for its recurrent state.
 
 - State is passed into and returned from `forward()`.
 - No hidden state is stored in module attributes between calls.
-- State dataclasses provide `detach()`.
+- State dataclasses provide `detach()` (for TBPTT truncation, etc.).
 - Composed models nest sub-states (e.g., `TEMState` contains `LECState`,
   `MECState`, `HPCState`; `EHCState` would contain `TEMState` +
   `HRMState` or their components).
@@ -463,8 +457,8 @@ def forward(self, ..., state: ModelState) -> tuple[ModelState, Logits, Features]
     ...
 ```
 
-The trainer's `training_step` calls `StepLoop` as the iteration engine,
-in a for loop to generate t and step.
+The trainer's `training_step` iterates over `StepLoop`, yielding
+`(t, step_output)` pairs per timestep.
 
 ### 6.5 Module Reuse Protocol
 
@@ -493,6 +487,39 @@ pfc_checkpoint: Optional[Path] = None
 Both forms of reuse require the same prerequisite: module configs and
 module parameter names must be consistent across all models that share
 those modules.
+
+### 6.6 Import-Direction Rules
+
+#### External dependencies
+
+Any `ehc_sn` component may freely import external libraries declared in
+`pyproject.toml` (e.g., `torch`, `numpy`, `lightning`, `gymnasium`,
+`matplotlib`, `pydantic`). External imports are not restricted by the
+layer rules below.
+
+#### Internal import layers
+
+Internal imports within `ehc_sn` follow a strict top-down DAG.
+A component may import from its own layer or any layer below it.
+A component must **never** import from a layer above it.
+
+| Layer | Components                                                                                               |
+| ----- | -------------------------------------------------------------------------------------------------------- |
+| **4** | `experiments/`                                                                                           |
+| **3** | `models/`                                                                                                |
+| **2** | `modules/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/` |
+| **1** | `activations/`, `utils/`, `types.py`                                                                     |
+
+#### Additional constraints
+
+| Rule | Constraint                                                              |
+| ---- | ----------------------------------------------------------------------- |
+| R1   | `training/` must not import from `modules/` (same layer, but forbidden) |
+| R2   | `modules/` must not import from `training/` (same layer, but forbidden) |
+| R3   | `data/` must not import from `modules/` or `training/`                  |
+| R4   | `utils/` must not import from any `ehc_sn` subpackage (layer 1 rule)    |
+| R5   | Peer imports within a component (e.g., `modules/hpc/` → `modules/mec/`) |
+|      | are allowed                                                             |
 
 ---
 
@@ -523,7 +550,7 @@ Experiment settings are structured as a flat tree of **leaf configs**.
 Composed configs for downstream consumers (model, datamodule, regime) are
 assembled via `@property` methods using `model_validate(self, from_attributes=True)`.
 
-```
+```text
 RunArguments(BaseSettings)                    ← CLI + TOML
   ├── architecture: HRMConfig                 ← model architecture (frozen dims)
   ├── loss: ACTLossConfig                     ← loss weights / targets
@@ -575,22 +602,3 @@ This pattern ensures:
    file under `src/ehc_sn/`.
 
 ---
-
-## 9 Migration Status (as of 2026-02-26)
-
-| Item                                   | Status                                                                                                                                 |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Namespace consolidation (`ehc_sn`)     | **Complete**. Legacy code archived in `temp/`.                                                                                         |
-| `mazes` migration into `ehc_sn.data`   | **Pending**. Move `src/mazes/` into `src/ehc_sn/data/mazes/`; remove `"mazes*"` from `pyproject.toml` packages; clean `types.py`.      |
-| Data pipeline implementation           | **Pending**. Canonical NPZ format, JSONL index, `data.mazes.ops`, `data.envs.MazeEnv`, `data.datasets` — all to be built.              |
-| STR module (`modules/str/`)            | **Minimal**. `LinearHaltingHead` implemented. Protocols (`HaltingHead`, `ACTBackbone`) still in `training/act_controller.py`.          |
-| STR protocol migration                 | **Pending**. Move `HaltingHead` and `ACTBackbone` protocols from `training/` into `modules/str/`.                                      |
-| PFC subcomponent generalization        | **Pending**. HRModel is monolithic; target is separated subcomponents.                                                                 |
-| Model/training split                   | **Pending**. Extract pure `nn.Module` from `LightningModule` for both TEM and HRM. Co-locate trainers in `models/`.                    |
-| HRModel relocation                     | **Pending**. Move `HRModel` from `modules/pfc/hrm.py` to `models/hrm_v1.py` as `HRMModelV1`. PFC subcomponents stay in `modules/pfc/`. |
-| `RolloutStream` relocation             | **Pending**. Move from `models/tem_v1.py` to `rollouts/`.                                                                              |
-| `training/regimes/` creation           | **Pending**. Create sub-package with generic paradigm building blocks: `supervised.py`, `rl.py`, `elbo.py`.                            |
-| Batch types to `types.py`              | **Pending**. Move `WalkBatch`, `PuzzleBatch`, and similar batch container types from `data/` into `types.py`.                          |
-| Training infrastructure generalization | **Pending**. ACT-specific code mixed with shared protocols.                                                                            |
-| `config/defaults_ehc.toml`             | **Empty**. Needs population for default experiment configs.                                                                            |
-| `README.md`                            | **Populated**. Project overview, install, quick start, layout.                                                                         |
