@@ -1,51 +1,128 @@
-#!/usr/bin/env python3
-import json
+from __future__ import annotations
+
+import csv
+import math
 from pathlib import Path
 
-import typer
+import numpy as np
+from huggingface_hub import hf_hub_download
+from typer import Option, Typer, echo
 
-from mazes import DataProcessConfig, convert_subset
+from ehc_sn.data.index import MazeIndexEntry, write_index
+from ehc_sn.data.schema import CHANNEL_GOALS, CHANNEL_SOLUTION, CHANNEL_START, CHANNEL_TOPOLOGY
 
-app = typer.Typer()
+app = Typer(pretty_exceptions_enable=False)
+MAZEHARD_REPO = "sapientinc/maze-30x30-hard-1k"
 
 
+# =================================================================================================
+# CLI command
+# -------------------------------------------------------------------------------------------------
+
+
+# =================================================================================================
 @app.command()
-def generate_mazes(  # ----------------------------------------------------------------------------
-):  # fmt: skip
-    """Use Maze-nd to generate raw maze data."""
+def process_huggingface(  # -----------------------------------------------------------------------
+    out_dir: Path = Option(Path("data/processed"), "--out-dir", help="Output directory for processed data."),
+    repo: str = Option(MAZEHARD_REPO, "--repo", help="HuggingFace dataset repo ID."),
+    splits: list[str] = Option(["train", "val", "test"], "--splits", help="Dataset splits to download and process."),
+) -> None:  # fmt: skip
+    """Download mazes from HuggingFace and build canonical NPZ + JSONL index."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    index_path = out_dir / "index.jsonl"
+
+    # Remove existing index so we rebuild from scratch on each run.
+    if index_path.exists():
+        index_path.unlink()
+        echo(f"Removed existing index: {index_path}")
+
+    maze_id = 0
+    for split in splits:
+        echo(f"Downloading {repo} / {split}.csv …")
+        csv_path = Path(hf_hub_download(repo_id=repo, filename=f"{split}.csv", repo_type="dataset"))
+        echo(f"Processing split '{split}' from {csv_path} …")
+        entries = _process_csv(csv_path, split=split, out_dir=out_dir, source=repo, start_id=maze_id)
+        write_index(entries, index_path, append=True)
+        maze_id += len(entries)
+        echo(f"  → {len(entries)} mazes written (total so far: {maze_id})")
+
+    echo(f"\nDone. Index written to {index_path}")
 
 
-@app.command()
-def process_mazes(  # -----------------------------------------------------------------------------
-):  # fmt: skip
-    """Convert the raw maze into ready to use train and test datasets."""
+# =================================================================================================
+# Internal helpers
+# -------------------------------------------------------------------------------------------------
 
 
-@app.command()
-def generate_dungeon(  # --------------------------------------------------------------------------
-):  # fmt: skip
-    """Use dungeongen to generate raw dungeons maps."""
+# =================================================================================================
+def _grid_to_array(  # ----------------------------------------------------------------------------
+    flat: str,
+) -> np.ndarray:  # fmt: skip
+    """Convert a flat character string to a 2-D character array.
+
+    Supports both newline-delimited rows and a pure flat string (assumed square).
+    """
+    flat = flat.strip()
+    if "\n" in flat:
+        rows = [list(line) for line in flat.split("\n")]
+    else:
+        side = int(math.isqrt(len(flat)))
+        if side * side != len(flat):
+            raise ValueError(f"Flat grid string length {len(flat)} is not a perfect square.")
+        rows = [list(flat[i * side : (i + 1) * side]) for i in range(side)]
+    return np.array(rows, dtype="U1")
 
 
-@app.command()
-def add_markers(  # -------------------------------------------------------------------------------
-):  # fmt: skip
-    """Add markers to the raw maze and dungeon data to indicate the start and end points."""
+# =================================================================================================
+def _channels_from_grids(  # ----------------------------------------------------------------------
+    q_grid: np.ndarray, a_grid: np.ndarray,
+) -> dict[str, np.ndarray]:  # fmt: skip
+    """Convert parsed character grids to canonical boolean/int32 channel arrays."""
+    return {
+        CHANNEL_TOPOLOGY: (q_grid != "#"),
+        CHANNEL_START: (q_grid == "S"),
+        CHANNEL_GOALS: (q_grid == "G"),
+        CHANNEL_SOLUTION: np.where(a_grid == "o", 1, 0).astype(np.int32),
+    }
 
 
-@app.command()
-def process_dungeons(  # --------------------------------------------------------------------------
-):  # fmt: skip
-    """Convert the raw dungeons into ready to use train and test datasets."""
+# =================================================================================================
+def _process_csv(  # ------------------------------------------------------------------------------
+    csv_path: Path, split: str, out_dir: Path, source: str, start_id: int,
+) -> list[MazeIndexEntry]:  # fmt: skip
+    """Parse one CSV split file, write NPZ files, and return index entries."""
+    out_split = out_dir / split
+    out_split.mkdir(parents=True, exist_ok=True)
+
+    entries: list[MazeIndexEntry] = []
+    with csv_path.open(newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        for local_idx, row in enumerate(reader):
+            maze_id = start_id + local_idx
+            idx_entry = _gen_maze(maze_id, row, split, source)
+            np.savez_compressed(out_dir / idx_entry.file, **idx_entry.channels)
+            entries.append(idx_entry)
+
+    return entries
 
 
-@app.command()
-def generate(  # ----------------------------------------------------------------------------------
-):  # fmt: skip
-    """Run all the steps to generate the maze or dungeon data."""
+# =================================================================================================
+def _gen_maze(  # ---------------------------------------------------------------------------------
+    maze_id: str, row: dict[str, str], split: str, source: str,
+) -> MazeIndexEntry:  # fmt: skip
+    q_grid = _grid_to_array(row["q"])
+    a_grid = _grid_to_array(row["a"])
+    return MazeIndexEntry(
+        id=maze_id,
+        file=f"{split}/maze_{maze_id:05d}.npz",
+        source=source,
+        split=split,
+        shape=q_grid.shape,
+        channels=_channels_from_grids(q_grid, a_grid),
+        difficulty=row.get("rating", ""),
+    )
 
 
-if __name__ == "__main__":
-    app()
+# =================================================================================================
 if __name__ == "__main__":
     app()
