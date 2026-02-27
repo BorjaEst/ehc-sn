@@ -9,11 +9,7 @@ from typing import Literal
 
 import torch
 import torch.nn as nn
-from temp.tem.src.ehc_sn.tem_v1 import TEMOutput
 from torch import Tensor
-
-from ehc_sn.data.world import WorldStep
-from ehc_sn.types import Prediction
 
 
 @dataclass
