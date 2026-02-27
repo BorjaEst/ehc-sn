@@ -43,6 +43,7 @@
         "huggingface_hub",
         "maze-nd",
         "dungeongen",
+        "typer",
     ]
 
 [project.optional-dependencies]
