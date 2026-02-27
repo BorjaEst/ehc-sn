@@ -1,7 +1,7 @@
 # EHC-SN Standards Specification
 
 > Canonical source of truth for coding, testing, documentation, and artifact
-> standards. See `spec/spec-manifest.toml` for precedence rules.
+> standards.
 
 ## 1 Code Style
 
@@ -101,9 +101,10 @@ cli_parse_args=True)`. CLI source must have highest precedence.
 
 ### 5.2 Code Documentation
 
-Docstrings are the primary code-level documentation (see §1.3). Module-level
-docstrings describe purpose and key classes. Tensor shape conventions must
-be documented wherever tensors are created, transformed, or consumed.
+Docstrings are the primary code-level documentation.
+Module-level docstrings describe purpose and key classes. Tensor shape
+conventions must be documented wherever tensors are created, transformed,
+or consumed.
 
 ### 5.3 Specs as Documentation
 

@@ -1,7 +1,7 @@
 # EHC-SN Architecture Specification
 
-> Canonical source of truth for component boundaries, vocabulary, and composition
-> patterns. See `spec/spec-manifest.toml` for precedence rules.
+> Canonical source of truth for component boundaries, vocabulary, and
+> composition patterns.
 
 ## 1 Project Identity
 
@@ -35,12 +35,38 @@ Legacy namespaces (`torch_tem`, `hrm_sn`) are retired and archived under
 
 ---
 
-## 3 Component Taxonomy
+## 3 Import and Dependency Rules
+
+Any component may import external dependencies declared in `pyproject.toml`.
+Internal imports follow a top-down DAG: import from your own layer or below,
+**never** upward.
+
+| Layer | Components                                                                                               |
+| ----- | -------------------------------------------------------------------------------------------------------- |
+| **4** | `experiments/`                                                                                           |
+| **3** | `models/`                                                                                                |
+| **2** | `modules/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/` |
+| **1** | `activations/`, `utils/`, `types.py`                                                                     |
+
+**Additional constraints:**
+
+| Rule | Constraint                                                              |
+| ---- | ----------------------------------------------------------------------- |
+| R1   | `training/` must not import from `modules/`                             |
+| R2   | `modules/` must not import from `training/`                             |
+| R3   | `data/` must not import from `modules/` or `training/`                  |
+| R4   | `utils/` must not import from any `ehc_sn` subpackage                   |
+| R5   | Peer imports within a component (e.g., `modules/hpc/` → `modules/mec/`) |
+|      | are allowed                                                             |
+
+---
+
+## 4 Component Taxonomy
 
 Every top-level package under `src/ehc_sn/` maps to exactly one component below.
 If a new package is created, this table must be updated.
 
-### 3.1 Brain-Region Modules
+### 4.1 Brain-Region Modules
 
 These implement neuroscience-grounded circuit components. Each is a `nn.Module`
 (or collection of modules) that can be composed by a top-level model.
@@ -53,15 +79,15 @@ These implement neuroscience-grounded circuit components. Each is a `nn.Module`
 | **PFC**   | `modules/pfc/` | Prefrontal cortex (PFC): working memory maintenance and goal-directed reasoning over episodic memory.                                                                    | Two-level recurrent architecture ($z_H$, $z_L$) with transformer blocks and alternating update cycles.                                                                                                                                                                                  |
 | **STR**   | `modules/str/` | Striatum (STR): action selection and gating via Go/NoGo (D1/D2-like) pathways. Receives projections from PFC and (optionally) HPC; modulates when to act vs. deliberate. | `nn.Module`(s) and protocols defining STR's public contract (`HaltingHead`, `ACTBackbone`). Current scope: binary halt/continue head consuming PFC features. Migration target: multi-input interface with separate PFC/HPC projections, external reward signal, and N-action selection. |
 
-### 3.2 Shared Neural-Network Building Blocks
+### 4.2 Shared Neural-Network Building Blocks
 
 Model-agnostic modules reused across brain-region components.
 
-| Component     | Path                                                            | Responsibility                                                                          |
-| ------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| **Shared NN** | `modules/{attention.py, autoencoder.py, mlp.py, projection.py}` | Attention, autoencoder, MLP (SwiGLU), and projection layers. No brain-region semantics. |
+| Component     | Path                                                                  | Responsibility                                                                          |
+| ------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **Shared NN** | `modules/{attention.py, autoencoder.py, mlp.py, projection.py, etc.}` | Attention, autoencoder, MLP (SwiGLU), and projection layers. No brain-region semantics. |
 
-### 3.3 Models
+### 4.3 Models
 
 Each model is a self-contained unit living in `models/` as a flat file (one
 file per model version). A model file co-locates:
@@ -80,9 +106,8 @@ file per model version). A model file co-locates:
 **Multiple trainers per model.** E.g., `EHCModelV1` might have both
 `EHCTrainerV1` (RL) and `EHCPretrainV1` (supervised). All live in the
 same model file. Models compose modules; they do not subclass them.
-See §6.6 for import-direction rules.
 
-### 3.4 Loss
+### 4.4 Loss
 
 Generic, composable loss primitives operating on flat tensors. Each module
 provides stateless functions as the primary API, with optional thin
@@ -96,10 +121,9 @@ names, no multi-scale iteration, no orchestration logic.
 | `regularization.py` | Activation penalties: L1 sparsity, L2 norm on flat `(B, D)` codes.                                                                   |
 | `decision.py`       | Gating losses: BCE for halt/continue. Extensible to N-action selection.                                                              |
 
-### 3.5 Training
+### 4.5 Training
 
-100% generic algorithmic building blocks — no model-specific code,
-no `LightningModule` implementations, no model imports.
+Generic algorithmic building blocks — no model-specific code, no model imports.
 
 | Component         | Path(s)             | Paradigm   | Responsibility                                                                                                |
 | ----------------- | ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
@@ -115,20 +139,18 @@ no `LightningModule` implementations, no model imports.
 | **RL**            | `rl.py`             | RL         | `compute_gae()`, `policy_gradient_loss()`, advantage estimation, rollout buffer utils, discount calculations. |
 | **ELBO**          | `elbo.py`           | VAE / ELBO | KL divergence utilities, ELBO loss aggregation, reconstruction + KL balancing, annealing schedules.           |
 
-> **RULE**: Nothing in `training/` may import from `models/` or `modules/`.
-
 **Named by function.** Root-level files are named by algorithmic function
 (`act_controller.py`, `buffers.py`). Regime files are named by paradigm
 (`supervised.py`, `rl.py`, `elbo.py`).
 
-### 3.6 Data
+### 4.6 Data
 
 Data pipeline: maze generation, on-disk storage, dataset loading,
 gymnasium environments, and Lightning DataModules. Three sub-layers
 with strict top-down imports (no reverse dependency):
-`data/*.py` (torch + lightning) → `data/envs/` (gymnasium) → `data/mazes/` (numpy only).
+`data/*.py` (torch + lightning) → `data/envs/` (gymnasium) → `data/mazes/` (framework-free).
 
-#### 3.6.1 Mazes (`data/mazes/`)
+#### 4.6.1 Mazes (`data/mazes/`)
 
 Pure maze infrastructure with **no ML or framework dependencies**. This
 sub-package defines maze structures, generation wrappers, augmentation
@@ -141,12 +163,11 @@ operations, and I/O for the canonical on-disk format.
 | `ops.py`      | Pure augmentation functions: `solve()`, `add_start_goal()`, `generate_observations()`, `add_landmarks()`. Operate on `MazeGraph` or raw channel dicts. |
 | `io.py`       | Read/write canonical channel NPZ files and JSONL index entries.                                                                                        |
 
-**Dependency rule:** `ehc_sn.data.mazes` may import only stdlib, `numpy`, and
-the declared generator libraries (`maze-nd`, `dungeongen`, `huggingface_hub`).
-It must **not** import `torch`, `gymnasium`, `lightning`, or any other
-`ehc_sn` subpackage.
+**Dependency rule:** `ehc_sn.data.mazes` must remain framework-free (no `torch`, `gymnasium`,
+`lightning`, or `ehc_sn.*`). External dependencies are allowed when declared in `pyproject.toml`
+and when they preserve this constraint.
 
-#### 3.6.2 Canonical On-Disk Format
+#### 4.6.2 Canonical On-Disk Format
 
 Processed maze data lives in `data/processed/` as **one NPZ file per maze**
 plus a JSONL index. Each NPZ contains a `dict[str, numpy.ndarray]` of named
@@ -207,64 +228,7 @@ data/
     └── test/
 ```
 
-#### 3.6.3 Data Pipeline Modules (`data/`)
-
-ML data infrastructure: datasets, DataModules, environments, and collation.
-
-| Module           | Responsibility                                                                                       |
-| ---------------- | ---------------------------------------------------------------------------------------------------- |
-| `schema.py`      | Channel name constants, dtype contracts, and validation for the canonical format.                    |
-| `index.py`       | JSONL index parsing, dataset splitting, channel-availability queries.                                |
-| `datasets.py`    | Map-style `torch.utils.data.Dataset` subclasses loading NPZ → tensors.                               |
-| `datamodules.py` | Lightning `DataModule` implementations. One per model or a unified module with mode selection.       |
-| `collation.py`   | Model-specific batch assembly (`WalkBatch` for TEM, `Dict[str, Tensor]` for HRM, RL episode format). |
-| `vocabulary.py`  | Observation token mappings (current `maze_vocab`).                                                   |
-| `transforms.py`  | Channel → tensor conversions, normalization, augmentation at load time.                              |
-
-#### 3.6.4 Gymnasium Environments (`data/envs/`)
-
-Gymnasium wrappers over processed maze NPZs. Base environment returns
-a rich observation dict; model-specific `ObservationWrapper` subclasses
-adapt it to each model's expected input.
-
-| Module        | Responsibility                                                                                                                 |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `maze_env.py` | Base `MazeEnv(gymnasium.Env)`: loads canonical NPZ, manages agent position, computes reward from goals. Returns rich obs dict. |
-| `wrappers.py` | `ObservationWrapper` subclasses: `TEMObsWrapper` (one-hot vectors), `HRMObsWrapper` (token sequences), etc.                    |
-
-#### 3.6.5 Model–Data Consumption Paths
-
-| Model   | Data path                                         | Interaction mode  |
-| ------- | ------------------------------------------------- | ----------------- |
-| **TEM** | NPZ → `MazeEnv` + `TEMObsWrapper` → runtime walks | Online (env.step) |
-| **HRM** | NPZ → `PuzzleDataset` → `DataLoader`              | Offline (static)  |
-| **EHC** | NPZ → `MazeEnv` → RL episodes                     | Online (env.step) |
-
-### 3.7 Evaluation
-
-Metrics, trace/rollout collection, and publication-ready visualization.
-
-| Component    | Path        | Responsibility                                                                                                                                                    |
-| ------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Metrics**  | `metrics/`  | TorchMetrics-based evaluation (accuracy, loss ratios, halting stats). Adapter pattern for model-output → metric update.                                           |
-| **Rollouts** | `rollouts/` | Trace collection (`TraceCollector`, `TraceSpec`) and tree-structured rollout data (`TraceTree`). Feeds both training diagnostics and figures.                     |
-| **Figures**  | `figures/`  | Publication-ready plotting. Registry pattern (`FigureSpec`, `REGISTRY`), plot modules, sinks (PDF/show), and axis utilities. Uses SciencePlots + pub-ready-plots. |
-
-### 3.8 Infrastructure
-
-Cross-cutting support that wraps external frameworks or provides generic
-utilities.
-
-| Component       | Path           | Responsibility                                                                                                                                                                                  |
-| --------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Callbacks**   | `callbacks/`   | Lightning `Callback` wrappers (checkpoint, figures). Used by experiments only.                                                                                                                  |
-| **Logging**     | `logging/`     | Lightning `TensorBoardLogger` wrapper. Used by experiments only.                                                                                                                                |
-| **Activations** | `activations/` | Custom activation functions (e.g., `stablemax`). Consumed by `loss/cross_entropy.py`. Small (single file); lives here rather than in `loss/` because activations are a general-purpose concern. |
-| **Utils**       | `utils/`       | Genuine cross-cutting helpers only: tensor operations, normalization, seeding, symmetry transforms, pytree registration, logging config. See §5 Utils Cap.                                      |
-
----
-
-## 4 Data Pipeline
+#### 4.6.3 Pipeline
 
 ```text
 Generators (maze-nd, dungeongen, HF)      scripts/data-gen/
@@ -285,7 +249,7 @@ Generators (maze-nd, dungeongen, HF)      scripts/data-gen/
                     └──► ObservationWrappers
 ```
 
-### 4.1 Raw Sources
+**Raw sources:**
 
 | Source          | Output                       | Dependency        |
 | --------------- | ---------------------------- | ----------------- |
@@ -296,8 +260,7 @@ Generators (maze-nd, dungeongen, HF)      scripts/data-gen/
 All three are declared runtime dependencies in `pyproject.toml`. Raw output
 is stored in `data/raw/<source>/` and is **not** committed to version control.
 
-### 4.2 Augmentation (raw → interim)
-
+**Augmentation (raw → interim):**
 Source-specific augmentation scripts in `scripts/data-gen/` call pure
 functions from `ehc_sn.data.mazes.ops`:
 
@@ -309,36 +272,65 @@ functions from `ehc_sn.data.mazes.ops`:
 Scripts are thin CLI orchestrators; all logic lives in `ehc_sn.data.mazes.ops`.
 Output is stored in `data/interim/<source>/`.
 
-### 4.3 Canonicalization (interim → processed)
-
-A final processing step converts augmented interim data into the canonical
-channel NPZ format defined in §3.6.2. This step is source-agnostic: it reads
-whatever channels are available and writes a conformant NPZ with a
-corresponding JSONL index entry.
-
+**Canonicalization (interim → processed):**
+A final source-agnostic step reads whatever channels are available and writes
+a conformant NPZ with a corresponding JSONL index entry.
 Output is stored in `data/processed/{train,val,test}/`.
 
----
+#### 4.6.4 Data Pipeline Modules (`data/`)
 
-## 5 Utils
+ML data infrastructure: datasets, DataModules, environments, and collation.
 
-Path: `utils/`
+| Module           | Responsibility                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| `schema.py`      | Channel name constants, dtype contracts, and validation for the canonical format.                    |
+| `index.py`       | JSONL index parsing, dataset splitting, channel-availability queries.                                |
+| `datasets.py`    | Map-style `torch.utils.data.Dataset` subclasses loading NPZ → tensors.                               |
+| `datamodules.py` | Lightning `DataModule` implementations. One per model or a unified module with mode selection.       |
+| `collation.py`   | Model-specific batch assembly (`WalkBatch` for TEM, `Dict[str, Tensor]` for HRM, RL episode format). |
+| `vocabulary.py`  | Observation token mappings (current `maze_vocab`).                                                   |
+| `transforms.py`  | Channel → tensor conversions, normalization, augmentation at load time.                              |
 
-### 5.1 Dependency Rule
+#### 4.6.5 Gymnasium Environments (`data/envs/`)
 
-`utils/` must **not** import from `ehc_sn` or any of its subpackages.
-External dependencies (PyTorch, NumPy, SciPy, stdlib) are allowed.
+Gymnasium wrappers over processed maze NPZs. Base environment returns
+a rich observation dict; model-specific `ObservationWrapper` subclasses
+adapt it to each model's expected input.
 
-A function that requires an `ehc_sn` type or module is domain logic and
-belongs in the component that owns that type.
+| Module        | Responsibility                                                                                                                 |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `maze_env.py` | Base `MazeEnv(gymnasium.Env)`: loads canonical NPZ, manages agent position, computes reward from goals. Returns rich obs dict. |
+| `wrappers.py` | `ObservationWrapper` subclasses: `TEMObsWrapper` (one-hot vectors), `HRMObsWrapper` (token sequences), etc.                    |
 
-### 5.2 Scope
+#### 4.6.6 Model–Data Consumption Paths
 
-Generic, reusable helpers with no brain-region, model, or training semantics.
+| Model   | Data path                                         | Interaction mode  |
+| ------- | ------------------------------------------------- | ----------------- |
+| **TEM** | NPZ → `MazeEnv` + `TEMObsWrapper` → runtime walks | Online (env.step) |
+| **HRM** | NPZ → `PuzzleDataset` → `DataLoader`              | Offline (static)  |
+| **EHC** | NPZ → `MazeEnv` → RL episodes                     | Online (env.step) |
+
+### 4.7 Evaluation
+
+Metrics, trace/rollout collection, and publication-ready visualization.
+
+| Component    | Path        | Responsibility                                                                                                                                                    |
+| ------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Metrics**  | `metrics/`  | TorchMetrics-based evaluation (accuracy, loss ratios, halting stats). Adapter pattern for model-output → metric update.                                           |
+| **Rollouts** | `rollouts/` | Trace collection (`TraceCollector`, `TraceSpec`) and tree-structured rollout data (`TraceTree`). Feeds both training diagnostics and figures.                     |
+| **Figures**  | `figures/`  | Publication-ready plotting. Registry pattern (`FigureSpec`, `REGISTRY`), plot modules, sinks (PDF/show), and axis utilities. Uses SciencePlots + pub-ready-plots. |
+
+### 4.8 Utils
+
+Path: `utils/` — generic, reusable helpers with no brain-region, model, or
+training semantics. Must **not** import from any `ehc_sn` subpackage.
+External dependencies are allowed when declared in `pyproject.toml`; keep
+`utils/` broadly reusable and dependency-light.
 A function belongs here only if it could be moved to an unrelated ML project
-unchanged.
+unchanged. Anything requiring an `ehc_sn` type is domain logic and belongs
+in its owning component.
 
-### 5.3 Allowed Concerns
+**Allowed concerns:**
 
 | Concern           | Examples                                              |
 | ----------------- | ----------------------------------------------------- |
@@ -352,7 +344,7 @@ unchanged.
 | Framework helpers | PyTree registration, device/dtype utilities.          |
 | Geometry          | Symmetry transforms, coordinate conversions.          |
 
-### 5.4 Exclusions
+**Exclusions:**
 
 The following do **not** belong in `utils/`:
 
@@ -362,42 +354,25 @@ The following do **not** belong in `utils/`:
 - Activation functions (→ `activations/`).
 - Data loading or dataset logic (→ `data/`).
 
+### 4.9 Infrastructure
+
+Cross-cutting support that wraps external frameworks.
+
+| Component       | Path           | Responsibility                                                                                                                                                                                  |
+| --------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Callbacks**   | `callbacks/`   | Lightning `Callback` wrappers (checkpoint, figures). Used by experiments only.                                                                                                                  |
+| **Logging**     | `logging/`     | Lightning `TensorBoardLogger` wrapper. Used by experiments only.                                                                                                                                |
+| **Activations** | `activations/` | Custom activation functions (e.g., `stablemax`). Consumed by `loss/cross_entropy.py`. Small (single file); lives here rather than in `loss/` because activations are a general-purpose concern. |
+
 ---
 
-## 6 Model Composition Pattern
+## 5 Model Composition
 
-Each model is composed of co-located artifacts in `models/`: a **config**,
-a **pure `nn.Module`**, a **state dataclass**, and one or more **trainers**
-(`LightningModule`). Generic training infrastructure lives in `training/`.
+Each model co-locates a **config**, a **pure `nn.Module`**, a **state
+dataclass**, and one or more **trainers** (`LightningModule`) in
+`models/`. Generic training infrastructure lives in `training/`.
 
-### 6.1 Separation of Concerns
-
-| Layer          | Contains                                      | Knows about                                               |
-| -------------- | --------------------------------------------- | --------------------------------------------------------- |
-| `experiments/` | CLI parsing, Trainer construction, seed       | Everything (top of the DAG)                               |
-| `models/`      | nn.Module + LightningModule + configs + state | `modules/`, `training/`, `loss/`, `rollouts/`, `types.py` |
-| `training/`    | Generic algorithms + paradigm building blocks | `loss/`, `types.py`, peers in `training/`                 |
-| `modules/`     | Brain-region and shared nn.Modules            | Peers in `modules/`, `types.py`, `utils/`                 |
-
-### 6.2 Configuration Hierarchy
-
-Configuration is split by concern. Architectural parameters live with the
-model; training parameters live with the regime.
-
-| Config type           | Scope                                                    | Lives in                        | Example                  |
-| --------------------- | -------------------------------------------------------- | ------------------------------- | ------------------------ |
-| **Model config**      | Architecture only: dimensions, layer counts, activations | `models/*.py` or `modules/*.py` | `TEMConfig`, `HRMConfig` |
-| **Training config**   | Optimizer, LR schedule, loss weights, buffer sizes       | `models/*.py` (with trainer)    | `HRMTrainingConfig`      |
-| **Data config**       | Dataset paths, batch size, workers, augmentation         | `data/*.py`                     | `PuzzleDatamoduleConfig` |
-| **Experiment config** | Composes all of the above + Trainer knobs                | `experiments/*.py`              | `RunArguments`           |
-
-Model configs use `pydantic.BaseModel(extra="forbid")`. Architectural
-dimensions that must not change after construction use `frozen=True`.
-
-Training configs are kept separate from model configs. A trainer receives
-both but passes only the architecture config to the `nn.Module` constructor.
-
-### 6.3 State Management
+### 5.1 State Management
 
 Each model defines an explicit `dataclass` for its recurrent state.
 
@@ -408,7 +383,7 @@ Each model defines an explicit `dataclass` for its recurrent state.
   `MECState`, `HPCState`; `EHCState` would contain `TEMState` +
   `HRMState` or their components).
 
-### 6.4 Step Interface
+### 5.2 Step Interface
 
 Each model exposes a step-level `forward()` that processes one timestep:
 
@@ -420,7 +395,7 @@ def forward(self, ..., state: ModelState) -> tuple[ModelState, Logits, Features]
 The trainer's `training_step` iterates over `StepLoop`, yielding
 `(t, step_output)` pairs per timestep.
 
-### 6.5 Module Reuse Protocol
+### 5.3 Module Reuse Protocol
 
 Module configs use stable, module-oriented field names across all
 models that share that module.
@@ -448,35 +423,11 @@ Both forms of reuse require the same prerequisite: module configs and
 module parameter names must be consistent across all models that share
 those modules.
 
-### 6.6 Import-Direction Rules
-
-External libraries declared in `pyproject.toml` may be imported freely.
-Internal imports follow a strict top-down DAG — import from your own
-layer or below, **never** upward.
-
-| Layer | Components                                                                                               |
-| ----- | -------------------------------------------------------------------------------------------------------- |
-| **4** | `experiments/`                                                                                           |
-| **3** | `models/`                                                                                                |
-| **2** | `modules/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/` |
-| **1** | `activations/`, `utils/`, `types.py`                                                                     |
-
-#### Additional constraints
-
-| Rule | Constraint                                                              |
-| ---- | ----------------------------------------------------------------------- |
-| R1   | `training/` must not import from `modules/` (same layer, but forbidden) |
-| R2   | `modules/` must not import from `training/` (same layer, but forbidden) |
-| R3   | `data/` must not import from `modules/` or `training/`                  |
-| R4   | `utils/` must not import from any `ehc_sn` subpackage (layer 1 rule)    |
-| R5   | Peer imports within a component (e.g., `modules/hpc/` → `modules/mec/`) |
-|      | are allowed                                                             |
-
 ---
 
-## 7 Configuration Pattern
+## 6 Configuration
 
-### 7.1 Config Types
+### 6.1 Config Types
 
 | Type                    | Base class                                            | Scope                                         | Lives in                     | Example                  |
 | ----------------------- | ----------------------------------------------------- | --------------------------------------------- | ---------------------------- | ------------------------ |
@@ -490,7 +441,7 @@ Architectural dimensions use `frozen=True`. Training configs are separate
 from model configs; the trainer passes only the architecture config to
 the `nn.Module` constructor.
 
-### 7.2 Static Defaults
+### 6.2 Static Defaults
 
 TOML files under `config/` provide default values. The experiment
 entry point loads defaults first, then CLI arguments override:
@@ -500,7 +451,7 @@ defaults = tomllib.load(Path("config/defaults_ehc.toml").open("rb"))
 settings = RunArguments(**defaults)  # CLI overrides via pydantic_settings
 ```
 
-### 7.3 Leaf Composition Pattern
+### 6.3 Leaf Composition Pattern
 
 Experiment settings are structured as a flat tree of **leaf configs**.
 Composed configs for downstream consumers (model, datamodule, regime) are
@@ -533,12 +484,12 @@ This pattern ensures:
 
 ---
 
-## 8 Forbidden Architectural Patterns
+## 7 Forbidden Architectural Patterns
 
 1. **Web-framework layering**: No controllers, views, routers, serializers,
    schemas (in the web sense), or similar patterns from Django/FastAPI/Flask.
-2. **Flat utils dump**: `utils/` has a hard cap (§5). Domain logic must live in
-   its owning component.
+2. **Flat utils dump**: Domain logic must live in its owning component, not
+   in `utils/`.
 3. **`core`/`common`/`shared` mega-packages**: Do not create catch-all packages
    that aggregate unrelated code.
 4. **Wildcard star imports** in non-`__init__` files: `from X import *` is

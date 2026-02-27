@@ -1,7 +1,7 @@
 # EHC-SN Requirements Specification
 
 > Canonical source of truth for repo-level constraints, gating rules, and
-> dependency contracts. See `spec/spec-manifest.toml` for precedence rules.
+> dependency contracts.
 
 ## 1 Spec Gate (Mandatory for Agents)
 
@@ -115,17 +115,16 @@ under `temp/` (not on the Python path).
 
 ## 7 Training Infrastructure Constraints
 
-All code in `training/` is **model-agnostic** with no model-specific
-imports (see `spec-architecture.md` §3.5, §6.6). Model-specific
-orchestration lives in the `LightningModule` trainer in `models/*.py`.
-Single-model primitives must be generalized or relocated before next release.
+All code in `training/` is **model-agnostic**: it must not import from
+`models/` or `modules/`. Model-specific orchestration lives in the
+`LightningModule` trainer in `models/*.py`. Single-model primitives
+must be generalized or relocated before next release.
 
 ---
 
 ## 8 Cross-Component Change Policy
 
-Code changes that cross component boundaries (as defined in
-`spec-architecture.md` §3) require a tracked plan in
+Code changes that cross component boundaries require a tracked plan in
 `.copilot-tracking/plans/` **before** implementation begins. This includes:
 
 - Adding a new top-level package under `ehc_sn/`.
