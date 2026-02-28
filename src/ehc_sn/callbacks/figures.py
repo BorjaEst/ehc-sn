@@ -246,10 +246,11 @@ class FiguresCallback(pl.Callback):
     ) -> dict[str, object]:  # fmt: skip
         if not self._required_extras_keys:
             return {}
-        if not isinstance(batch, tuple) or len(batch) < 2:
-            return {}
-        batch_dict = batch[1]
-        if not isinstance(batch_dict, dict):
+        if isinstance(batch, dict):
+            batch_dict = batch
+        elif isinstance(batch, (tuple, list)) and len(batch) >= 2 and isinstance(batch[1], dict):
+            batch_dict = batch[1]
+        else:
             return {}
         extras: dict[str, object] = {}
         for key in self._required_extras_keys:
