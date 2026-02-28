@@ -32,11 +32,6 @@ class PFCSettings(BaseModel, extra="forbid"):
     """ """
 
     # Model parameters for features
-    vocab_size: int = Field(
-        ...,
-        ge=1,
-        description="Vocabulary size for token embeddings and LM head.",
-    )
 
     seq_length: int = Field(
         ...,

@@ -54,43 +54,21 @@ O_ID: int = 5
 
 
 # =================================================================================================
-def supervised_maze_tokenize(channels: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
-    """Convert raw maze channels into flattened input/label token sequences.
-
-    Uses :func:`~ehc_sn.data.transforms.channels_to_grid` to merge topology,
-    start, and goals into a canonical ``int32`` grid, then flattens to a 1-D
-    token sequence.  The label sequence is a copy where solution-path cells are
-    overwritten with :data:`O_ID` (HRM-private supervision token).
-
-    Args:
-        channels: Raw NPZ channel dict (as returned by ``MazeDataset``).
-
-    Returns:
-        ``{"inputs": int32 (H*W,), "labels": int32 (H*W,)}``.
-    """
-    grid = channels_to_grid(channels)["grid"]  # (H, W) int32
-    inputs = grid.ravel()
-    labels = inputs.copy()
-    if CHANNEL_SOLUTION in channels:
-        labels[channels[CHANNEL_SOLUTION].ravel() > 0] = O_ID
-    return {"inputs": inputs, "labels": labels}
-
-
-# =================================================================================================
 class ModelSettings_V1(BaseModel, extra="forbid"):
     """Model-level settings composing a PFC module with embedding/LM-head parameters."""
 
     pfc: PFCSettings = Field(..., description="Settings for the core PFC model architecture.")
 
+    vocab_size: int = Field(
+        ...,
+        ge=1,
+        description="Vocabulary size for token embeddings and LM head.",
+    )
+
     @property
     def hidden_size(self) -> int:
         """Convenience property to access hidden size from the PFC settings."""
         return self.pfc.hidden_size
-
-    @property
-    def vocab_size(self) -> int:
-        """Vocabulary size (delegated to PFC settings)."""
-        return self.pfc.vocab_size
 
     @property
     def seq_length(self) -> int:
@@ -582,3 +560,28 @@ def cosine_lr(  # --------------------------------------------------------------
     progress = float(step - warmup) / float(max(1, total - warmup))
     ratio = min_ratio + max(0.0, (1 - min_ratio) * 0.5 * (1.0 + math.cos(progress * math.pi)))
     return base_lr * ratio
+
+
+# =================================================================================================
+def supervised_maze_tokenize(  # ------------------------------------------------------------------
+    channels: dict[str, np.ndarray],
+) -> dict[str, np.ndarray]:  # fmt: skip
+    """Convert raw maze channels into flattened input/label token sequences.
+
+    Uses :func:`~ehc_sn.data.transforms.channels_to_grid` to merge topology,
+    start, and goals into a canonical ``int32`` grid, then flattens to a 1-D
+    token sequence.  The label sequence is a copy where solution-path cells are
+    overwritten with :data:`O_ID` (HRM-private supervision token).
+
+    Args:
+        channels: Raw NPZ channel dict (as returned by ``MazeDataset``).
+
+    Returns:
+        ``{"inputs": int32 (H*W,), "labels": int32 (H*W,)}``.
+    """
+    grid = channels_to_grid(channels)["grid"]  # (H, W) int32
+    inputs = grid.ravel()
+    labels = inputs.copy()
+    if CHANNEL_SOLUTION in channels:
+        labels[channels[CHANNEL_SOLUTION].ravel() > 0] = O_ID
+    return {"inputs": inputs, "labels": labels}
