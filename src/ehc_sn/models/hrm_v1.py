@@ -205,6 +205,10 @@ def trace_fields() -> List[TraceField[StepContext]]:
 class HRMState:
     pfc: PFCState
 
+    def detach(self) -> "HRMState":
+        """Return a copy with the PFC state detached from the computation graph."""
+        return HRMState(pfc=self.pfc.detach())
+
 
 # =================================================================================================
 class HRModelV1(nn.Module):
@@ -387,22 +391,6 @@ class TrainingModel(L.LightningModule):
         config = self.config.scheduler
         return [CosineAnnealingLRWithWarmup(opt, total_steps, config) for opt in optimizers]
 
-    def transfer_batch_to_device(  # --------------------------------------------------------------
-        self, batch: Batch, device: Device,
-        dataloader_idx: int = 0,
-    ) -> Batch:  # fmt: skip
-        """Move batch tensors to the target device.
-
-        Args:
-            batch: ``dict[str, Tensor]`` returned by the DataLoader.
-            device: Target device.
-            dataloader_idx: Index of the dataloader (unused).
-
-        Returns:
-            The same dict with all tensors moved to ``device``.
-        """
-        return {k: v.to(device, non_blocking=True) for k, v in batch.items()}
-
     def on_train_epoch_start(  # ------------------------------------------------------------------
         self,
     ) -> None:  # fmt: skip
@@ -456,7 +444,7 @@ class TrainingModel(L.LightningModule):
             pass  # TODO: Sum loss across steps if horizon > 1
         if step is None:
             raise ValueError("RolloutLoop did not yield any steps, cannot proceed with training step.")
-        self._train_carry = step.carry
+        self._train_carry = step.carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = int(batch_dict["inputs"].shape[0])
@@ -505,8 +493,8 @@ class TrainingModel(L.LightningModule):
 
         update_metrics_from_step(self.val_metrics, step.outputs.metrics)
         vals = self.val_metrics.compute()  # Compute metrics based on accumulated state
-        self.log_dict(vals, on_step=False, on_epoch=True, prog_bar=False, logger=True)
-        self.log("val/accuracy", vals["val/all/accuracy"], prog_bar=True, logger=True)
+        self.log_dict(vals, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        self.log("val/accuracy", vals["val/all/accuracy"], prog_bar=True, logger=True, sync_dist=True)
 
         return {"trace": collector.tree}
 

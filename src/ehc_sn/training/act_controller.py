@@ -87,12 +87,28 @@ class ACTState:
         ``halted`` acts as a per-slot "needs reset" flag: when True, that slot
         will be refreshed with a new sample from the incoming batch and its
         recurrent state will be reset before the next model step.
+
+        ``model_state`` must implement ``.detach()`` to support
+        :meth:`ACTState.detach`.
     """
 
     model_state: Any  # Recurrent state of the model (e.g. LSTM hidden states)
     steps: Tensor  # Per-slot step counter, shape: (B,)
     halted: Tensor  # Per-slot reset/done flag, shape: (B,)
     data: Dict[str, Tensor]  # Per-slot buffers that persist across steps until reset
+
+    def detach(self) -> "ACTState":
+        """Return a copy with ``model_state`` detached from the computation graph.
+
+        ``steps``, ``halted``, and ``data`` are integer/bool tensors that never
+        carry gradients, so only ``model_state`` needs to be detached.
+        """
+        return ACTState(
+            model_state=self.model_state.detach(),
+            steps=self.steps,
+            halted=self.halted,
+            data=self.data,
+        )
 
 
 # =================================================================================================
