@@ -1,5 +1,5 @@
 """Static plotting utilities, typically tools for evaluation"""
 
-from ehc_sn.figures.modules import dummy, evolution, overlay
+from ehc_sn.figures.modules import dataset, dummy
 
-__all__ = ["dummy", "overlay", "evolution"]
+__all__ = ["dummy", "dataset"]

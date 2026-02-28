@@ -1,5 +1,5 @@
 """Figure modules for the ehc_sn figures registry."""
 
-from ehc_sn.figures.modules import dummy, evolution, overlay
+from ehc_sn.figures.modules import dataset, dummy
 
-__all__ = ["dummy", "overlay", "evolution"]
+__all__ = ["dummy", "dataset"]

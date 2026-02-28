@@ -14,10 +14,9 @@ from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSetti
 
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
-from ehc_sn.data.puzzle_datamodule import PuzzleDatamodule, PuzzleDatamoduleConfig
-from ehc_sn.data.puzzle_dataset import PuzzleDatasetSettings
+from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.models.hrm_v1 import Model, ModelConfig_HRM_V1
+from ehc_sn.models.hrm_v1 import Model, ModelConfig_HRM_V1, supervised_maze_tokenize
 from ehc_sn.modules.hrm import HRMConfig
 from ehc_sn.training.act_controller import ACTControllerConfig
 from ehc_sn.training.act_head import ACTLossConfig
@@ -101,13 +100,18 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     )
 
     # ---------------------------------------------------------------------------------------------
-    # Data settings (passed as configs to DataModule)
-    dataset: PuzzleDatasetSettings = Field(
+    # Data settings (flat fields composed into DatamoduleConfig)
+    dataset_path: Path = Field(
         ...,
-        description=(
-            "Configuration for the PuzzleDataset. "
-            "This includes parameters like dataset path, random seed, etc."
-        ),
+        description="Path to the processed dataset directory (contains index.jsonl + NPZ files).",
+    )
+    seed: int = Field(
+        42,
+        description="RNG seed for training-split dihedral augmentation and reproducibility.",
+    )
+    augment: bool = Field(
+        True,
+        description="Apply RandomDihedral augmentation to training samples.",
     )
     global_batch_size: int = Field(
         ...,
@@ -117,11 +121,11 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ),
     )
     num_workers: int = Field(
-        1,
-        description="Number of workers for DataLoader, currently expects 1 worker.",
+        4,
+        description="Number of workers for DataLoader.",
     )
     prefetch_factor: int = Field(
-        8,
+        2,
         description="Number of batches to prefetch per worker.",
     )
     pin_memory: bool = Field(
@@ -223,9 +227,9 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         return ModelConfig_HRM_V1.model_validate(self, from_attributes=True)
 
     @property
-    def datamodule(self) -> PuzzleDatamoduleConfig:
-        """Compose PuzzleDatamoduleConfig from leaf settings."""
-        return PuzzleDatamoduleConfig.model_validate(self, from_attributes=True)
+    def datamodule(self) -> DatamoduleConfig:
+        """Compose DatamoduleConfig from leaf settings."""
+        return DatamoduleConfig.model_validate(self, from_attributes=True)
 
 
 # =================================================================================================
@@ -260,7 +264,7 @@ if __name__ == "__main__":
     _validate_global_batch_size(settings)
 
     # Seed everything for reproducibility.
-    seed_everything(settings.dataset.seed)
+    seed_everything(settings.seed)
 
     # Prepare callbacks: checkpointing + optional figure generation.
     callbacks_list = []
@@ -294,7 +298,7 @@ if __name__ == "__main__":
         # Lightning module: training step, optimizer and schedule setup.
         model=Model(settings.model),
         # Data module: dataset + DataLoader construction.
-        datamodule=PuzzleDatamodule(settings.datamodule),
+        datamodule=Datamodule(settings.datamodule, transform=supervised_maze_tokenize),
         # Optional: resume training from a checkpoint.
         ckpt_path=settings.checkpoint_path,
     )

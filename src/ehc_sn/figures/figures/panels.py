@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Any, Callable, Sequence
 
 
-def colorbar(*, group: str, label: str | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+# =================================================================================================
+def colorbar(  # ----------------------------------------------------------------------------------
+    *, group: str, label: str | None = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:  # fmt: skip
     """Attach colorbar grouping metadata to a panel method.
 
     Args:
@@ -23,12 +26,10 @@ def colorbar(*, group: str, label: str | None = None) -> Callable[[Callable[...,
     return decorator
 
 
-def panel(
-    *,
-    slots: Sequence[str] | None = None,
-    primary: str | None = None,
-    order: int | None = None,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+# =================================================================================================
+def panel(  # -------------------------------------------------------------------------------------
+    *, slots: Sequence[str] | None = None, primary: str | None = None, order: int | None = None,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:  # fmt: skip
     """Mark a method as a panel renderer.
 
     Args:

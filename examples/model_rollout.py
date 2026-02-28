@@ -33,10 +33,10 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn import figures
-from ehc_sn.data.puzzle_dataset import PuzzleDataset, PuzzleDatasetRuntime, PuzzleDatasetSettings
+from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.sinks import save_pdf
-from ehc_sn.models.hrm_v1 import Model, ModelConfig_HRM_V1
+from ehc_sn.models.hrm_v1 import Model, ModelConfig_HRM_V1, supervised_maze_tokenize
 from ehc_sn.modules.hrm import HRMConfig
 from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
@@ -121,13 +121,18 @@ class ExampleArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         return ModelConfig_HRM_V1.model_validate(self, from_attributes=True)
 
     # ---------------------------------------------------------------------------------------------
-    # Data settings (passed as configs to DataModule)
-    dataset: PuzzleDatasetSettings = Field(
+    # Data settings (flat fields composed into DatamoduleConfig)
+    dataset_path: Path = Field(
         ...,
-        description=(
-            "Configuration for the PuzzleDataset. "
-            "This includes parameters like dataset path, random seed, etc."
-        ),
+        description="Path to the processed dataset directory (contains index.jsonl + NPZ files).",
+    )
+    seed: int = Field(
+        42,
+        description="RNG seed for reproducibility.",
+    )
+    augment: bool = Field(
+        False,
+        description="Apply RandomDihedral augmentation (disabled by default for eval rollouts).",
     )
     global_batch_size: int = Field(
         ...,
@@ -135,8 +140,9 @@ class ExampleArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     )
 
     @property
-    def runtime(self) -> PuzzleDatasetRuntime:
-        return PuzzleDatasetRuntime.model_validate(self, from_attributes=True)
+    def datamodule(self) -> DatamoduleConfig:
+        """Construct DatamoduleConfig from flat fields."""
+        return DatamoduleConfig.model_validate(self, from_attributes=True)
 
     # ---------------------------------------------------------------------------------------------
     # Other settings
@@ -186,11 +192,12 @@ def main() -> None:
     print()
 
     # ---------------------------------------------------------------------------------------------
-    # Step 1: Instantiate Dataset and build runtime objects.
+    # Step 1: Initialise DataModule and fetch a single test batch.
     # ---------------------------------------------------------------------------------------------
-    dataset = PuzzleDataset(args.dataset, args.runtime, mode="eval")
+    dm = Datamodule(args.datamodule, transform=supervised_maze_tokenize)
+    dm.setup("test")
 
-    print("Step 1/5: Dataset initialized.")
+    print("Step 1/5: DataModule initialised.")
     print()
 
     # ---------------------------------------------------------------------------------------------
@@ -220,7 +227,7 @@ def main() -> None:
     # ---------------------------------------------------------------------------------------------
     # Step 3: Collect rollout trace from the model on the dataset.
     # ---------------------------------------------------------------------------------------------
-    set_name, batch, effective_bs = next(iter(dataset))
+    batch = next(iter(dm.test_dataloader()))
     collector = TraceCollector(TraceTree(), model.trace_specs)
     step_batches = repeat(batch)
     act_options = {"allow_halt": False, "explore": False}  # Disable halting and exploration during eval
@@ -233,8 +240,6 @@ def main() -> None:
     trace.finalize()
 
     print("Step 3/5: Rollout trace collected.")
-    print(f" - Split: {set_name}")
-    print(f" - Effective batch size: {effective_bs}")
     print(f" - Local batch size: {batch['inputs'].shape[0]}")
     print(f" - Inputs shape: {tuple(batch['inputs'].shape)}")
     print(f" - Labels shape: {tuple(batch['labels'].shape)}")
