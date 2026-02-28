@@ -15,6 +15,7 @@ Longer background notes live in `docs/foundations.md`.
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Tuple, TypeAlias, Union
 
+import numpy as np
 from torch import Tensor
 
 # =============================================================================
@@ -337,3 +338,4 @@ from torch import Tensor
 
 Device = torch.device
 Dtype = torch.dtype
+Channels = dict[str, np.ndarray]
