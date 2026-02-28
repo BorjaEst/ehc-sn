@@ -70,7 +70,7 @@ class ProcessedSampleFigure(BaseFigureTemplate):
     Dynamically builds its MOSAIC from whichever overlay channels are present.
     """
 
-    HEIGHT_FRAC: float = 0.35
+    HEIGHT_FRAC: float = 0.22
     MOSAIC: list[list[str]] = [["navigation", "structure", "perception"]]
 
     def __init__(  # ------------------------------------------------------------------------------
