@@ -1,0 +1,40 @@
+"""MazeHard plot helpers."""
+
+from __future__ import annotations
+
+from typing import Optional, Tuple
+
+import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.colors import ListedColormap
+from matplotlib.image import AxesImage
+
+from ehc_sn.figures.utils.colors import maze_cmap
+
+
+def plot_maze_with_overlay(
+    ax: Axes,
+    inputs_grid: np.ndarray,
+    overlay_mask: np.ndarray,
+    *,
+    title: Optional[str] = None,
+) -> Tuple[AxesImage, AxesImage]:
+    """Render maze inputs with a semi-transparent overlay mask.
+
+    Returns the base and overlay images for downstream composition.
+    """
+    base = np.asarray(inputs_grid)
+    overlay = np.asarray(overlay_mask).astype(float)
+
+    base_img = ax.imshow(base, cmap=maze_cmap(), vmin=0, vmax=5, interpolation="nearest")
+    overlay_img = ax.imshow(
+        overlay,
+        cmap=ListedColormap(["none", "#e53e3e"]),
+        alpha=0.6,
+        interpolation="nearest",
+    )
+    ax.set_xticks([])
+    ax.set_yticks([])
+    if title:
+        ax.set_title(title, fontsize=9)
+    return base_img, overlay_img

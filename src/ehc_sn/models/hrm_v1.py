@@ -22,12 +22,15 @@ from itertools import repeat
 from typing import Any, Dict, List, Optional, Tuple, TypeAlias
 
 import lightning as L
+import numpy as np
 import torch
 from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
+from ehc_sn.data.schema import CHANNEL_SOLUTION
+from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.metrics import build_metrics, update_metrics_from_step
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.str import LinearHaltingHead
@@ -48,6 +51,29 @@ Batch: TypeAlias = Dict[str, Tensor]
 
 # HRM-private: solution-path token, not part of the canonical SEM vocabulary.
 O_ID: int = 5
+
+
+# =================================================================================================
+def supervised_maze_tokenize(channels: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    """Convert raw maze channels into flattened input/label token sequences.
+
+    Uses :func:`~ehc_sn.data.transforms.channels_to_grid` to merge topology,
+    start, and goals into a canonical ``int32`` grid, then flattens to a 1-D
+    token sequence.  The label sequence is a copy where solution-path cells are
+    overwritten with :data:`O_ID` (HRM-private supervision token).
+
+    Args:
+        channels: Raw NPZ channel dict (as returned by ``MazeDataset``).
+
+    Returns:
+        ``{"inputs": int32 (H*W,), "labels": int32 (H*W,)}``.
+    """
+    grid = channels_to_grid(channels)["grid"]  # (H, W) int32
+    inputs = grid.ravel()
+    labels = inputs.copy()
+    if CHANNEL_SOLUTION in channels:
+        labels[channels[CHANNEL_SOLUTION].ravel() > 0] = O_ID
+    return {"inputs": inputs, "labels": labels}
 
 
 # =================================================================================================
