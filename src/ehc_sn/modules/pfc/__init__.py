@@ -32,7 +32,6 @@ class PFCSettings(BaseModel, extra="forbid"):
     """ """
 
     # Model parameters for features
-
     seq_length: int = Field(
         ...,
         ge=1,
@@ -40,7 +39,7 @@ class PFCSettings(BaseModel, extra="forbid"):
     )
 
     # Model parameters for the core HRM architecture
-    transformer_block: TransformerBlockConfig = Field(
+    cortex: TransformerBlockConfig = Field(
         ...,
         description="Base transformer block configuration.",
     )
@@ -48,18 +47,18 @@ class PFCSettings(BaseModel, extra="forbid"):
     @property
     def hidden_size(self) -> int:
         """Convenience property to access hidden size from the transformer block config."""
-        return self.transformer_block.hidden_size
+        return self.cortex.hidden_size
 
     @property
     def embedding_scale(self) -> float:
         """Convenience property for scaling embeddings to maintain variance."""
         # scale by 1/sqrt(2) to maintain forward variance
-        return 0.707106781 * math.sqrt(self.transformer_block.embedding_dim)
+        return 0.707106781 * math.sqrt(self.cortex.embedding_dim)
 
     @property
     def init_std(self) -> float:
         """Convenience property for standard deviation of truncated normal initialization."""
-        return 1.0 / math.sqrt(self.transformer_block.embedding_dim)
+        return 1.0 / math.sqrt(self.cortex.embedding_dim)
 
     # Reasoning module configs
     reasoning_h: ReasoningSettings = Field(
@@ -75,12 +74,12 @@ class PFCSettings(BaseModel, extra="forbid"):
     @property
     def h_layers(self) -> List[TransformerBlockConfig]:
         """Convenience property to construct the list of transformer block configs for the high-level reasoning module."""
-        return [self.transformer_block for _ in range(self.reasoning_h.layers)]
+        return [self.cortex for _ in range(self.reasoning_h.layers)]
 
     @property
     def l_layers(self) -> List[TransformerBlockConfig]:
         """Convenience property to construct the list of transformer block configs for the low-level reasoning module."""
-        return [self.transformer_block for _ in range(self.reasoning_l.layers)]
+        return [self.cortex for _ in range(self.reasoning_l.layers)]
 
 
 # =================================================================================================
