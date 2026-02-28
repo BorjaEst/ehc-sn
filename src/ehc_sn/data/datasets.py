@@ -48,7 +48,7 @@ class MazeDataset(Dataset):
         sample = {k: v[idx] for k, v in self._arrays.items()}
         if self._transform:
             sample = self._transform(sample)
-        return {k: torch.from_numpy(np.ascontiguousarray(v)) for k, v in sample.items()}
+        return {k: torch.from_numpy(np.array(v)) for k, v in sample.items()}
 
 
 # =================================================================================================
