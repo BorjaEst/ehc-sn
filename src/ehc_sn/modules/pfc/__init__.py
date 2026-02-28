@@ -63,18 +63,18 @@ class PFCSettings(BaseModel, extra="forbid"):
     # Reasoning module configs
     reasoning_h: ReasoningSettings = Field(
         default_factory=ReasoningSettings,
-        description="Configuration for the high-level reasoning module.",
-    )
-
-    reasoning_l: ReasoningSettings = Field(
-        default_factory=ReasoningSettings,
-        description="Configuration for the low-level reasoning module.",
+        description="Configuration for the high-level reasoning module (anterior dlPFC).",
     )
 
     @property
     def h_layers(self) -> List[TransformerBlockConfig]:
         """Convenience property to construct the list of transformer block configs for the high-level reasoning module."""
         return [self.cortex for _ in range(self.reasoning_h.layers)]
+
+    reasoning_l: ReasoningSettings = Field(
+        default_factory=ReasoningSettings,
+        description="Configuration for the low-level reasoning module (posterior dlPFC).",
+    )
 
     @property
     def l_layers(self) -> List[TransformerBlockConfig]:
