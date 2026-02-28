@@ -1,38 +1,40 @@
 # =============================================================================
 # HRM v1 Baseline — Default Configuration
 # =============================================================================
-# Override any value via CLI:  --model.pfc.transformer_block.embedding_dim=256
+# Override any value via CLI:  --model.pfc.cortex.embedding_dim=256
 # Or via env var:              HRM_V1_CONFIGURATION_PATH=config/my_config.toml
 
 # -- Dataset & training -------------------------------------------------------
-dataset_path = "data/processed/maze-30x30-hard-1k"
+dataset_path      = "data/processed/maze-30x30-hard-1k"
 global_batch_size = 8
-epochs = 100
-seed = 42
-augment = true
+epochs            = 100
+seed              = 42
+augment           = true
 
 # -- Model architecture -------------------------------------------------------
-[model.pfc]
-vocab_size = 6         # 5 canonical SEM IDs + O_ID (solution-path token)
-seq_length = 900       # 30 × 30
+[model]
+    vocab_size = 6 # 5 canonical SEM IDs + O_ID (solution-path token)
 
-[model.pfc.transformer_block]
-embedding_dim = 128
-num_heads = 4
+[model.pfc]
+    seq_length = 900 # 30 × 30
+
+[model.pfc.cortex] # Transformer block config for both H and L reasoning modules
+    embedding_dim = 128
+    num_heads     = 4
 
 # -- ACT controller -----------------------------------------------------------
 [act_controller]
-exploration_prob = 0.1
-halt_max_steps = 10
+    exploration_prob = 0.1
+    halt_max_steps   = 10
 
 # -- Loss, optimizer, scheduler (defaults are fine; override here if needed) ---
 [loss]
-function = "stablemax_cross_entropy"
+    function = "stablemax_cross_entropy"
 
 [optimizer]
-lr = 1e-4
-weight_decay = 1e-2
+    lr           = 1e-4
+    weight_decay = 1e-2
 
 [scheduler]
-warmup_steps = 1000
-min_ratio = 0.01
+    warmup_steps = 1000
+    min_ratio    = 0.01
