@@ -154,7 +154,7 @@ class HPCState:
 
 # =================================================================================================
 class HPCModel(nn.Module):
-    """HPC façade that composes retrieval, inference, and memory write.
+    """HPC facade that composes retrieval, inference, and memory write.
 
     The HPC module provides TEM-compatible methods:
 

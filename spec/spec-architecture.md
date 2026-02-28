@@ -97,11 +97,11 @@ file per model version). A model file co-locates:
 - **Pydantic configs** — architecture config and training config.
 - **State dataclasses** — explicit recurrent state.
 
-| Model      | `nn.Module`  | `LightningModule` | Config      | State      | Composes                                       | Status         |
-| ---------- | ------------ | ----------------- | ----------- | ---------- | ---------------------------------------------- | -------------- |
-| **TEM v1** | `TEMModelV1` | `TEMTrainerV1`    | `TEMConfig` | `TEMState` | LEC + MEC + HPC + Autoencoder + Projections    | Needs refactor |
-| **HRM v1** | `HRMModelV1` | `HRMTrainerV1`    | `HRMConfig` | `HRMState` | PFC + STR                                      | Needs refactor |
-| **EHC v1** | `EHCModelV1` | `EHCTrainerV1`    | `EHCConfig` | `EHCState` | LEC + MEC + HPC + PFC + STR + shared NN blocks | `NOT_STARTED`  |
+| Model      | `nn.Module`  | `LightningModule` | Config        | State      | Composes                                       | Status         |
+| ---------- | ------------ | ----------------- | ------------- | ---------- | ---------------------------------------------- | -------------- |
+| **TEM v1** | `TEMModelV1` | `TEMTrainerV1`    | `TEMConfig`   | `TEMState` | LEC + MEC + HPC + Autoencoder + Projections    | Needs refactor |
+| **HRM v1** | `HRMModelV1` | `HRMTrainerV1`    | `PFCSettings` | `HRMState` | PFC + STR                                      | Needs refactor |
+| **EHC v1** | `EHCModelV1` | `EHCTrainerV1`    | `EHCConfig`   | `EHCState` | LEC + MEC + HPC + PFC + STR + shared NN blocks | `NOT_STARTED`  |
 
 **Multiple trainers per model.** E.g., `EHCModelV1` might have both
 `EHCTrainerV1` (RL) and `EHCPretrainV1` (supervised). All live in the
@@ -447,13 +447,13 @@ those modules.
 
 ### 6.1 Config Types
 
-| Type                    | Base class                                            | Scope                                         | Lives in                     | Example                  |
-| ----------------------- | ----------------------------------------------------- | --------------------------------------------- | ---------------------------- | ------------------------ |
-| **Component config**    | `pydantic.BaseModel(extra="forbid")`                  | Single-component settings                     | Same file as the `nn.Module` | `AttractorSettings`      |
-| **Model config**        | `pydantic.BaseModel(extra="forbid")`                  | Architecture: dimensions, layers, activations | `models/*.py`                | `TEMConfig`, `HRMConfig` |
-| **Training config**     | `pydantic.BaseModel(extra="forbid")`                  | Optimizer, LR schedule, loss weights, buffers | `models/*.py` (with trainer) | `HRMTrainingConfig`      |
-| **Data config**         | `pydantic.BaseModel(extra="forbid")`                  | Dataset paths, batch size, workers            | `data/*.py`                  | `DatamoduleConfig`       |
-| **Experiment settings** | `pydantic_settings.BaseSettings(cli_parse_args=True)` | Composes all above + Trainer knobs            | `experiments/*.py`           | `RunArguments`           |
+| Type                    | Base class                                            | Scope                                         | Lives in                     | Example                    |
+| ----------------------- | ----------------------------------------------------- | --------------------------------------------- | ---------------------------- | -------------------------- |
+| **Component config**    | `pydantic.BaseModel(extra="forbid")`                  | Single-component settings                     | Same file as the `nn.Module` | `AttractorSettings`        |
+| **Model config**        | `pydantic.BaseModel(extra="forbid")`                  | Architecture: dimensions, layers, activations | `models/*.py`                | `TEMConfig`, `PFCSettings` |
+| **Training config**     | `pydantic.BaseModel(extra="forbid")`                  | Optimizer, LR schedule, loss weights, buffers | `models/*.py` (with trainer) | `HRMTrainingConfig`        |
+| **Data config**         | `pydantic.BaseModel(extra="forbid")`                  | Dataset paths, batch size, workers            | `data/*.py`                  | `DatamoduleConfig`         |
+| **Experiment settings** | `pydantic_settings.BaseSettings(cli_parse_args=True)` | Composes all above + Trainer knobs            | `experiments/*.py`           | `RunArguments`             |
 
 Architectural dimensions use `frozen=True`. Training configs are separate
 from model configs; the trainer passes only the architecture config to
@@ -477,7 +477,7 @@ assembled via `@property` methods using `model_validate(self, from_attributes=Tr
 
 ```text
 RunArguments(BaseSettings)                    ← CLI + TOML
-  ├── architecture: HRMConfig                 ← model architecture (frozen dims)
+  ├── architecture: PFCSettings                 ← model architecture (frozen dims)
   ├── loss: ACTLossConfig                     ← loss weights / targets
   ├── optimizer: AdamATan2Config              ← optimizer hyperparams
   ├── scheduler: SchedulerConfig              ← LR schedule

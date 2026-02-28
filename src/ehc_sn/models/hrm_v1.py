@@ -12,9 +12,8 @@ Key behaviors:
         - **Partial reset batching**: halted examples are replaced with fresh rows using a FIFO buffer
             and `PartialResetBatchAssembler`.
 
-The batch structure used throughout this file is:
-        `(set_name, batch_dict, effective_bs)`
-where `effective_bs` is used for distributed-safe normalization of loss/metrics.
+The batch structure used throughout this file is a plain ``dict[str, Tensor]``
+with keys ``"inputs"`` and ``"labels"``.
 """
 
 import math
@@ -26,12 +25,11 @@ import lightning as L
 import torch
 from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 from pydantic import BaseModel, Field
-from torch import Tensor
+from torch import Tensor, nn
 from torch.optim import Optimizer
 
-from ehc_sn.data.maze_vocab import O_ID
 from ehc_sn.metrics import build_metrics, update_metrics_from_step
-from ehc_sn.modules.pfc import HRMConfig, HRModel
+from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.str import LinearHaltingHead
 from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
 from ehc_sn.rollouts.trace_tree import TraceTree
@@ -42,14 +40,46 @@ from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
 from ehc_sn.training.step_loop import StepContext, StepLoop
+from ehc_sn.types import Device, Dtype
+from ehc_sn.utils import trunc_normal_init_
 
-# TODO: Consider moving these aliases to `ehc_sn/types.py` once stabilized.
-# NOTE: The training pipeline uses a "named split" batch to support multi-dataloader setups.
-# - `set_name`: split identifier (e.g. "train", "test", "val")
-# - `batch_dict`: tensor payload (expected keys depend on dataset; typically "inputs"/"labels")
-# - `effective_bs`: effective batch size across all devices for metric/loss normalization
-Batch: TypeAlias = Tuple[str, Dict[str, Tensor], int]
-Device = torch.device
+# Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
+Batch: TypeAlias = Dict[str, Tensor]
+
+# HRM-private: solution-path token, not part of the canonical SEM vocabulary.
+O_ID: int = 5
+
+
+# =================================================================================================
+class ModelSettings_V1(BaseModel, extra="forbid"):
+    """Model-level settings composing a PFC module with embedding/LM-head parameters."""
+
+    pfc: PFCSettings = Field(..., description="Settings for the core PFC model architecture.")
+
+    @property
+    def hidden_size(self) -> int:
+        """Convenience property to access hidden size from the PFC settings."""
+        return self.pfc.hidden_size
+
+    @property
+    def vocab_size(self) -> int:
+        """Vocabulary size (delegated to PFC settings)."""
+        return self.pfc.vocab_size
+
+    @property
+    def seq_length(self) -> int:
+        """Sequence length (delegated to PFC settings)."""
+        return self.pfc.seq_length
+
+    @property
+    def embedding_scale(self) -> float:
+        """Embedding scale factor (delegated to PFC settings)."""
+        return self.pfc.embedding_scale
+
+    @property
+    def init_std(self) -> float:
+        """Truncated-normal init std (delegated to PFC settings)."""
+        return self.pfc.init_std
 
 
 # =================================================================================================
@@ -65,12 +95,9 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
         - `global_batch_size` is used for scaling losses/metrics in a distributed setup.
     """
 
-    architecture: HRMConfig = Field(
+    model: ModelSettings_V1 = Field(
         ...,
-        description=(
-            "Architecture config for the HRM model. "
-            "The keys in `architecture` are passed to the HRModel constructor."
-        ),
+        description="",
     )
 
     act_controller: ACTControllerConfig = Field(
@@ -170,7 +197,94 @@ def trace_fields() -> List[TraceField[StepContext]]:
 
 
 # =================================================================================================
-class Model(L.LightningModule):
+@dataclass
+class HRMState:
+    pfc: PFCState
+
+
+# =================================================================================================
+class HRModelV1(nn.Module):
+
+    def __init__(  # ------------------------------------------------------------------------------
+        self, config: ModelSettings_V1, *,
+        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
+    ) -> None:  # fmt: skip
+        super().__init__()
+        self._config = config
+
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, device=device, dtype=dtype)
+        self.embed_pos = nn.Embedding(config.seq_length, config.hidden_size, device=device, dtype=dtype)
+        self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)  # fmt: skip
+
+    @property
+    def config(self) -> ModelSettings_V1:
+        return self._config
+
+    def reset_parameters(  # ----------------------------------------------------------------------
+        self,
+    ) -> None:  # fmt: skip
+        """Initialize parameters and buffers.
+
+        Matches legacy ``CastedEmbedding`` / ``CastedLinear`` initialization so that
+        the input embedding magnitude ``||x||`` and recurrent state magnitude ``||z_H||``
+        are comparable (~1:1 ratio at init), which is required for multi-step reasoning
+        dynamics to emerge during training.
+
+        Std formulas (truncated normal, legacy parity):
+            - Embeddings: ``std = 1 / sqrt(hidden_size)``  (= ``config.init_std``)
+            - lm_head:    ``std = 1 / sqrt(hidden_size)``  (fan_in = hidden_size)
+            - Reset vecs: ``std = 1``
+        """
+        init_std = self.config.init_std  # 1 / sqrt(hidden_size)
+        trunc_normal_init_(self.embed_tokens.weight, std=init_std)
+        trunc_normal_init_(self.embed_pos.weight, std=init_std)
+        trunc_normal_init_(self.lm_head.weight, std=init_std)
+        trunc_normal_init_(self.pfc.high_reset_vector, std=1)
+        trunc_normal_init_(self.pfc.low_reset_vector, std=1)
+
+    def init_state(  # ---------------------------------------------------------------------------
+        self, batch_size: int,
+    ) -> HRMState:  # fmt: skip
+        """Create a fresh recurrent state (``ACTBackbone`` protocol)."""
+        return HRMState(pfc=self.pfc.init_state(batch_size))
+
+    def reset_state(  # --------------------------------------------------------------------------
+        self, reset_flag: Tensor, state: HRMState,
+    ) -> HRMState:  # fmt: skip
+        """Selectively reset rows of the recurrent state (``ACTBackbone`` protocol)."""
+        return HRMState(
+            pfc=self.pfc.init_state(
+                batch_size=state.pfc.z_H.shape[0],
+                state=state.pfc,
+                reset_flag=reset_flag,
+            )
+        )
+
+    def forward(  # -------------------------------------------------------------------------------
+        self, inputs: Tensor, state: Optional[HRMState] = None,
+    ) -> Tuple[HRMState, Tensor, Tensor]:  # fmt: skip
+        """Forward pass through the HRM (``ACTBackbone`` protocol)."""
+        state = state or self.init_state(batch_size=inputs.shape[0])
+        x = self.embed_inputs(inputs)  # Shape: [batch, seq_length, hidden_size]
+        state_pfc, z_H = self.pfc(x, state=state.pfc)  # z_H shape: [batch, seq_length, hidden_size]
+        output = self.lm_head(z_H)  # Language-modeling head predicts a token distribution at each position.
+        return HRMState(pfc=state_pfc), output, z_H[:, 0]
+
+    def embed_inputs(  # --------------------------------------------------------------------------
+        self, input: Tensor,
+    ) -> Tensor:  # fmt: skip
+        """ """
+        token_embeddings = self.embed_tokens(input.to(torch.int32))
+        positions = torch.arange(self.config.seq_length, device=input.device)
+        pos_embeddings = self.embed_pos(positions).unsqueeze(0)
+
+        # Scale embeddings to keep activations in a reasonable range.
+        return self.config.embedding_scale * (token_embeddings + pos_embeddings)
+
+
+# =================================================================================================
+class TrainingModel(L.LightningModule):
     """LightningModule wrapper for HRM v1 training.
 
     This module composes:
@@ -196,8 +310,8 @@ class Model(L.LightningModule):
             - `_train_carry` is initialized lazily from the first batch via `step_module`.
         """
         super().__init__()
-        self.model = HRModel(config.architecture)
-        self.halt_head = LinearHaltingHead(config.architecture.hidden_size)
+        self.model = HRModelV1(config.model)
+        self.halt_head = LinearHaltingHead(config.model.hidden_size)
         self.controller = ACTController(self.model, self.halt_head, config.act_controller)
         self.step_module = ACTLossHead(self.controller, config.loss)
         self._config = config
@@ -273,21 +387,17 @@ class Model(L.LightningModule):
         self, batch: Batch, device: Device,
         dataloader_idx: int = 0,
     ) -> Batch:  # fmt: skip
-        """Move a structured batch to the target device.
-
-        Lightning calls this hook when using custom batch structures.
+        """Move batch tensors to the target device.
 
         Args:
-            batch: `(set_name, batch_dict, effective_bs)` tuple.
+            batch: ``dict[str, Tensor]`` returned by the DataLoader.
             device: Target device.
             dataloader_idx: Index of the dataloader (unused).
 
         Returns:
-            The same structured batch with all tensors moved to `device`.
+            The same dict with all tensors moved to ``device``.
         """
-        set_name, batch_dict, effective_bs = batch
-        batch_dict = {k: v.to(device, non_blocking=True) for k, v in batch_dict.items()}
-        return set_name, batch_dict, effective_bs
+        return {k: v.to(device, non_blocking=True) for k, v in batch.items()}
 
     def on_train_epoch_start(  # ------------------------------------------------------------------
         self,
@@ -318,7 +428,7 @@ class Model(L.LightningModule):
             - Horizon is effectively 1: we run exactly one rollout step per mini-batch.
             - Loss is normalized by the *global* effective batch size for parity with legacy code.
         """
-        set_name, batch_dict, effective_bs = batch
+        batch_dict = batch
 
         # Initialize carry/state on the first batch
         if self._train_carry is None:
@@ -359,13 +469,13 @@ class Model(L.LightningModule):
             sch.step()  # type: ignore
 
         update_metrics_from_step(self.train_metrics, step.outputs.metrics)
-        loss_gm = step.outputs.loss / float(effective_bs)
+        loss_gm = step.outputs.loss / float(local_bs)
         if (self.global_step + 1) % self.trainer.log_every_n_steps == 0:  # type: ignore
             self.log_dict(self.train_metrics.compute(), on_step=True, on_epoch=False, logger=True)
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
         self.log("train/loss_gm", loss_gm.detach(), on_step=True, on_epoch=False, logger=True)
 
-        return {"loss": loss.detach(), "effective_bs": effective_bs}
+        return {"loss": loss.detach()}
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
@@ -375,7 +485,7 @@ class Model(L.LightningModule):
         Validation uses `EvaluationLoop` (no carry is persisted across batches here) and logs
         normalized metrics.
         """
-        set_name, batch_dict, effective_bs = batch
+        batch_dict = batch
 
         # Run a full ACT rollout so halted-only metrics are meaningful.
         step_batches = repeat(batch_dict)  # Run until all examples halt
@@ -394,7 +504,7 @@ class Model(L.LightningModule):
         self.log_dict(vals, on_step=False, on_epoch=True, prog_bar=False, logger=True)
         self.log("val/accuracy", vals["val/all/accuracy"], prog_bar=True, logger=True)
 
-        return {"trace": collector.tree, "effective_bs": effective_bs}
+        return {"trace": collector.tree}
 
 
 # =================================================================================================

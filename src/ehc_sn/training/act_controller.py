@@ -53,17 +53,17 @@ class ACTBackbone(Protocol):
     """
 
     def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int
+        self, batch_size: int,
     ) -> Any:  # fmt: skip
         ...  # fmt: skip
 
     def reset_state(  # ---------------------------------------------------------------------------
-        self, reset_flag: Tensor, state: Any
+        self, reset_flag: Tensor, state: Any,
     ) -> Any:   # fmt: skip
         ...  # fmt: skip
 
     def __call__(  # ------------------------------------------------------------------------------
-        self, inputs: Tensor, state: Any | None = None
+        self, inputs: Tensor, state: Any | None = None,
     ) -> Tuple[Any, Tensor, Tensor]:  # fmt: skip
         ...  # fmt: skip
 
