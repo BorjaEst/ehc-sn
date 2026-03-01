@@ -16,9 +16,6 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
-from ehc_sn import utils
-from ehc_sn.types import Activation
-
 
 # =================================================================================================
 class HebbianUpdateSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
