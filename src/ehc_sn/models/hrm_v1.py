@@ -66,24 +66,25 @@ class ModelSettings_V1(BaseModel, extra="forbid"):
     )
 
     @property
-    def hidden_size(self) -> int:
-        """Convenience property to access hidden size from the PFC settings."""
-        return self.pfc.hidden_size
-
-    @property
     def seq_length(self) -> int:
-        """Sequence length (delegated to PFC settings)."""
+        """Convenience property to access sequence length from the PFC settings."""
         return self.pfc.seq_length
 
     @property
+    def hidden_size(self) -> int:
+        """Convenience property to access hidden size from the PFC settings."""
+        return self.pfc.reasoning_h.cortex.embedding_dim
+
+    @property
     def embedding_scale(self) -> float:
-        """Embedding scale factor (delegated to PFC settings)."""
-        return self.pfc.embedding_scale
+        """Convenience property for scaling embeddings to maintain variance."""
+        # scale by 1/sqrt(2) to maintain forward variance
+        return 0.707106781 * math.sqrt(self.hidden_size)
 
     @property
     def init_std(self) -> float:
-        """Truncated-normal init std (delegated to PFC settings)."""
-        return self.pfc.init_std
+        """Convenience property for standard deviation of truncated normal initialization."""
+        return 1.0 / math.sqrt(self.hidden_size)
 
 
 # =================================================================================================
@@ -224,6 +225,7 @@ class HRModelV1(nn.Module):
         self.embed_pos = nn.Embedding(config.seq_length, config.hidden_size, device=device, dtype=dtype)
         self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)  # fmt: skip
+        self.reset_parameters()
 
     @property
     def config(self) -> ModelSettings_V1:
@@ -248,8 +250,8 @@ class HRModelV1(nn.Module):
         trunc_normal_init_(self.embed_tokens.weight, std=init_std)
         trunc_normal_init_(self.embed_pos.weight, std=init_std)
         trunc_normal_init_(self.lm_head.weight, std=init_std)
-        trunc_normal_init_(self.pfc.high_reset_vector, std=1)
-        trunc_normal_init_(self.pfc.low_reset_vector, std=1)
+        trunc_normal_init_(self.pfc.high_level.reset_vector, std=1)
+        trunc_normal_init_(self.pfc.low_level.reset_vector, std=1)
 
     def init_state(  # ---------------------------------------------------------------------------
         self, batch_size: int,
@@ -261,13 +263,7 @@ class HRModelV1(nn.Module):
         self, reset_flag: Tensor, state: HRMState,
     ) -> HRMState:  # fmt: skip
         """Selectively reset rows of the recurrent state (``ACTBackbone`` protocol)."""
-        return HRMState(
-            pfc=self.pfc.init_state(
-                batch_size=state.pfc.z_H.shape[0],
-                state=state.pfc,
-                reset_flag=reset_flag,
-            )
-        )
+        return HRMState(pfc=self.pfc.reset_state(state.pfc, reset_flag))
 
     def forward(  # -------------------------------------------------------------------------------
         self, inputs: Tensor, state: Optional[HRMState] = None,

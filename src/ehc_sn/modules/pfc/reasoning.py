@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Generator, List, Optional
+from typing import Any, Generator, List, Optional, cast
 
 import torch
 from pydantic import BaseModel, Field
@@ -34,7 +34,7 @@ class ReasoningSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True)
         return [self.cortex for _ in range(self.n_layers)]
 
     n_cycles: int = Field(
-        default=2,
+        default=4,
         ge=1,
         description="Number of cycles to reason.",
     )
@@ -62,7 +62,10 @@ class ReasoningModule(nn.Module):
     ) -> None:  # fmt: skip
         super().__init__()
         self._config = config
+
         self.cortex = TransformerStack(config.layers, device=device, dtype=dtype)
+        self.register_buffer("reset_vector", torch.empty((config.cortex.hidden_size,)), persistent=True)
+        self.reset_vector = cast(Tensor, self.reset_vector)
 
     @property
     def config(self) -> ReasoningSettings:
@@ -105,3 +108,29 @@ def reasoning_gen(  # ----------------------------------------------------------
             yield memory
         memory = high_module(x, memory)
         yield memory
+
+
+# ==================================================================================================
+def init_memory(  # ----------------------------------------------------------------------------------
+    batch_size: int, seq_length: int,  high_module: HighLvRModule, low_module: LowLvRModule,
+) -> WorkingMemory:  # fmt: skip
+    """ """
+    return WorkingMemory(
+        z_H=high_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1).clone(),
+        z_L=low_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1).clone(),
+    )
+
+
+# ==================================================================================================
+def reset_memory(  # ----------------------------------------------------------------------------------
+    memory: WorkingMemory, reset_flag: Tensor, high_module: HighLvRModule, low_module: LowLvRModule,
+) -> WorkingMemory:  # fmt: skip
+    """ """
+    batch_size, seq_length, _ = memory.z_H.shape
+    init_H = high_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1)
+    init_L = low_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1)
+    mask = reset_flag.view(-1, 1, 1)
+    return WorkingMemory(
+        z_H=torch.where(mask, init_H, memory.z_H),
+        z_L=torch.where(mask, init_L, memory.z_L),
+    )

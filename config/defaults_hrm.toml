@@ -16,11 +16,17 @@ augment           = true
     vocab_size = 6 # 5 canonical SEM IDs + O_ID (solution-path token)
 
 [model.pfc]
-    seq_length = 900 # 30 × 30
+    seq_length = 900 # 30 × 30 for mazehard puzzle
 
-[model.pfc.cortex] # Transformer block config for both H and L reasoning modules
-    embedding_dim = 128
-    num_heads     = 4
+
+[model.pfc.reasoning_h] # Transformer block config for both H and L reasoning modules
+    cortex.embedding_dim = 32
+    cortex.num_heads     = 4
+
+[model.pfc.reasoning_l] # Transformer block config for both H and L reasoning modules
+    cortex.embedding_dim = 32
+    cortex.num_heads     = 4
+
 
 # -- ACT controller -----------------------------------------------------------
 [act_controller]

@@ -9,6 +9,10 @@
         "--config",
         "${workspaceFolder}/pyproject.toml"
     ],
+    "isort.args": [
+        "--settings-path",
+        "${workspaceFolder}/pyproject.toml"
+    ],
     // TOML configuration
     "evenBetterToml.formatter.alignEntries": true,
     "evenBetterToml.formatter.indentEntries": true,
@@ -20,8 +24,4 @@
         "git": false,
         "sudo": false,
     },
-    // Mypy configuration
-    "mypy-type-checker.args": [
-        "--config-file=pyproject.toml"
-    ]
 }
