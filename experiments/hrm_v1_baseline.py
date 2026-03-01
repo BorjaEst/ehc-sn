@@ -257,7 +257,6 @@ if __name__ == "__main__":
     # CLI arguments override TOML values; Pydantic defaults fill in anything missing.
     defaults_from_path = tomllib.load(Path(CONFIGURATION_PATH).open("rb"))
     settings = RunArguments(**defaults_from_path)
-    strategy = None if settings.trainer_strategy == "auto" else settings.trainer_strategy
     _validate_global_batch_size(settings)
 
     # Seed everything for reproducibility.
@@ -278,7 +277,7 @@ if __name__ == "__main__":
         callbacks=callbacks_list if callbacks_list else None,
         # Lightning Trainer kwargs (extracted from config)
         accelerator=settings.trainer_accelerator,
-        strategy=strategy,  # type: ignore
+        strategy=settings.trainer_strategy,
         devices=settings.trainer_devices,
         num_nodes=settings.trainer_num_nodes,
         max_steps=settings.max_steps,
