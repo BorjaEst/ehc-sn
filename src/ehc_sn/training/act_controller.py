@@ -225,7 +225,8 @@ class ACTController:
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
         model_state, logits, features = self.backbone(data["inputs"], model_state)
-        q_halt, q_continue = self.halt_head(features)
+        q = self.halt_head(features)
+        q_halt, q_continue = q[..., 0], q[..., 1]
 
         # Reset the step counter when a slot starts a fresh episode.
         steps = torch.where(state.halted, 0, state.steps) + 1
@@ -237,7 +238,8 @@ class ACTController:
         # TD(0) bootstrap target for the continue head.
         with torch.no_grad():
             _, _, next_features = self.backbone(data["inputs"], model_state)
-            next_q_halt, next_q_continue = self.halt_head(next_features)
+            next_q = self.halt_head(next_features)
+            next_q_halt, next_q_continue = next_q[..., 0], next_q[..., 1]
         is_last_step = steps >= self._config.halt_max_steps
         next_q = torch.where(is_last_step, next_q_halt, torch.maximum(next_q_halt, next_q_continue))
         output.target_continue = torch.sigmoid(next_q)  # Sigmoid to convert logits to probabilities

@@ -18,6 +18,7 @@ from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.models import hrm_v1
 from ehc_sn.models.hrm_v1 import ModelConfig_HRM_V1, ModelSettings_V1, TrainingModel
+from ehc_sn.modules.pfc.values import QEstimatorSettings
 from ehc_sn.training.act_controller import ACTControllerConfig
 from ehc_sn.training.act_head import ACTLossConfig
 from ehc_sn.training.optim import AdamATan2Config
@@ -69,6 +70,11 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="HRM v1 model architecture settings (PFC + embedding/LM-head).",
     )
+    value_head: QEstimatorSettings = Field(
+        ...,
+        description="",
+    )  # TODO: Remove once it is in the pfc
+
     act_controller: ACTControllerConfig = Field(
         ...,
         description=(

@@ -28,6 +28,14 @@ augment           = true
     cortex.num_heads     = 4
 
 
+[value_head]
+    hidden_size = 32 # Should match the PFC reasoning module's embedding_dim
+    n_actions   = 2
+    pool_mode   = "first"
+    pool_index  = 0
+    init_bias   = -5.0
+
+
 # -- ACT controller -----------------------------------------------------------
 [act_controller]
     exploration_prob = 0.1
