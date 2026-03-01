@@ -69,16 +69,6 @@ class ACTBackbone(Protocol):
 
 
 # =================================================================================================
-class HaltingHead(Protocol):
-    """Minimal interface for converting features into halting logits."""
-
-    def __call__(  # ------------------------------------------------------------------------------
-        self, features: Tensor
-    ) -> Tuple[Tensor, Tensor]:  # fmt: skip
-        ...  # fmt: skip
-
-
-# =================================================================================================
 @dataclass
 class ACTState:
     """Per-slot controller state.
@@ -160,27 +150,21 @@ class ACTController:
     CONTINUE_ACTION = 1
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: ACTBackbone, halt_head: HaltingHead, config: ACTControllerConfig
+        self, backbone: ACTBackbone,  config: ACTControllerConfig
     ) -> None:  # fmt: skip
         """Initialize the ACT controller.
 
         Args:
             backbone: The recurrent backbone to control, which must implement the
                 :class:`ACTBackbone` protocol.
-            halt_head: Module that converts backbone features into halting logits.
             config: Configuration for the controller behavior.
         """
         self._backbone = backbone
-        self._halt_head = halt_head
         self._config = config
 
     @property
     def backbone(self) -> ACTBackbone:
         return self._backbone
-
-    @property
-    def halt_head(self) -> HaltingHead:
-        return self._halt_head
 
     @property
     def config(self) -> ACTControllerConfig:
@@ -224,9 +208,8 @@ class ACTController:
         """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, logits, features = self.backbone(data["inputs"], model_state)
-        q = self.halt_head(features)
-        q_halt, q_continue = q[..., 0], q[..., 1]
+        model_state, logits, q = self.backbone(data["inputs"], model_state)
+        q_halt, q_continue = q[..., self.HALT_ACTION], q[..., self.CONTINUE_ACTION]
 
         # Reset the step counter when a slot starts a fresh episode.
         steps = torch.where(state.halted, 0, state.steps) + 1
@@ -237,9 +220,8 @@ class ACTController:
 
         # TD(0) bootstrap target for the continue head.
         with torch.no_grad():
-            _, _, next_features = self.backbone(data["inputs"], model_state)
-            next_q = self.halt_head(next_features)
-            next_q_halt, next_q_continue = next_q[..., 0], next_q[..., 1]
+            _, _, next_q = self.backbone(data["inputs"], model_state)
+            next_q_halt, next_q_continue = next_q[..., self.HALT_ACTION], next_q[..., self.CONTINUE_ACTION]
         is_last_step = steps >= self._config.halt_max_steps
         next_q = torch.where(is_last_step, next_q_halt, torch.maximum(next_q_halt, next_q_continue))
         output.target_continue = torch.sigmoid(next_q)  # Sigmoid to convert logits to probabilities
@@ -301,4 +283,4 @@ class ACTController:
         return action, done
 
 
-__all__ = ["ACTBackbone", "ACTControllerConfig", "ACTController", "ACTState", "HaltingHead"]
+__all__ = ["ACTBackbone", "ACTControllerConfig", "ACTController", "ACTState", "ACTOutput"]

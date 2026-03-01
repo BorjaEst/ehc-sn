@@ -128,16 +128,17 @@ class QValueEstimator(nn.Module):
             return z.max(dim=1).values
         raise ValueError(f"Unknown pool_mode: {mode!r}")
 
-    def forward(self, z: Tensor) -> Tensor:
+    def forward(self, z_H: Tensor, z_L: Tensor) -> Tensor:
         """Estimate Q-values from dlPFC features.
 
         Args:
-            z: Either spatial features ``(B, S, D)`` or pre-pooled ``(B, D)``.
+            z_H: High-level (theta) features from dlPFC, shape (B, S, D) or (B, D).
+            z_L: Low-level (gamma) features from dlPFC, shape (B, S, D) or (B, D).
 
         Returns:
             Q-value logits ``(B, n_actions)``.
         """
-        features = self._pool(z) if z.ndim == 3 else z
+        features = self._pool(z_H) if z_H.ndim == 3 else z_H
         x = self.trunk(features.to(torch.float32))
         return self.head(x)
 

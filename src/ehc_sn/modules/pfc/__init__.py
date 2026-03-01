@@ -11,6 +11,7 @@ from torch import Tensor, nn
 from ehc_sn import utils
 from ehc_sn.modules.pfc import reasoning as r
 from ehc_sn.modules.pfc.reasoning import HighLvRModule, LowLvRModule, ReasoningSettings, WorkingMemory
+from ehc_sn.modules.pfc.values import QEstimatorSettings, QValueEstimator
 from ehc_sn.types import Device, Dtype
 
 
@@ -33,6 +34,12 @@ class PFCSettings(BaseModel, extra="forbid"):
     reasoning_l: ReasoningSettings = Field(
         default_factory=ReasoningSettings,
         description="Configuration for the low-level reasoning module (posterior dlPFC).",
+    )
+
+    # Value estimator config (vmPFC analogue)
+    value_head: QEstimatorSettings = Field(
+        ...,
+        description="Configuration for the Q-value estimator (vmPFC analogue).",
     )
 
 
@@ -75,9 +82,9 @@ class PFCModel(nn.Module):
         super().__init__()
         self._config = config
 
-        self.estimator = None  # Placeholder for future vmPFC q-value estimator
         self.high_level = HighLvRModule(config.reasoning_h, device=device, dtype=dtype)
         self.low_level = LowLvRModule(config.reasoning_l, device=device, dtype=dtype)
+        self.estimator = QValueEstimator(config.value_head, device=device, dtype=dtype)
         self.optimizer = None  # Placeholder for optimizer future dACC reward-based updates
 
     @property
@@ -101,7 +108,7 @@ class PFCModel(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, x: Tensor, state: Optional[PFCState] = None,
-    ) -> Tuple[PFCState, Tensor]:  # fmt: skip
+    ) -> Tuple[PFCState, Tensor, Tensor]:  # fmt: skip
         """ """
         state = state or self.init_state(batch_size=x.shape[0])
         total_steps = self.config.reasoning_h.n_cycles * (self.config.reasoning_l.n_cycles + 1)
@@ -117,5 +124,9 @@ class PFCModel(nn.Module):
         memory = next(memory_gen)  # N-2 step to update low-level state with gradients
         memory = next(memory_gen)  # N-1 step to update high-level state with gradients
 
-        # Return the final state and the high-level state (theta cells) for downstream use.
-        return PFCState(memory=memory.detach()), memory.z_H
+        # Estimate Q-values from the updated state.
+        q_estimation = self.estimator(memory.z_H, memory.z_L)
+
+        # Important: detach only the carry, not the outputs used for supervised learning.
+        # Downstream heads (LM head, value head) must see tensors that keep gradients.
+        return PFCState(memory=memory.detach()), memory.z_H, q_estimation

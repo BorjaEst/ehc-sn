@@ -33,7 +33,6 @@ from ehc_sn.data.schema import CHANNEL_SOLUTION
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.metrics import build_metrics, update_metrics_from_step
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
-from ehc_sn.modules.pfc.values import QEstimatorSettings, QValueEstimator
 from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
 from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.act_controller import ACTController, ACTControllerConfig
@@ -104,11 +103,6 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
         ...,
         description="",
     )
-
-    value_head: QEstimatorSettings = Field(
-        ...,
-        description="",
-    )  # TODO: Remove once it is in the pfc
 
     act_controller: ACTControllerConfig = Field(
         ...,
@@ -276,9 +270,9 @@ class HRModelV1(nn.Module):
         """Forward pass through the HRM (``ACTBackbone`` protocol)."""
         state = state or self.init_state(batch_size=inputs.shape[0])
         x = self.embed_inputs(inputs)  # Shape: [batch, seq_length, hidden_size]
-        state_pfc, z_H = self.pfc(x, state=state.pfc)  # z_H shape: [batch, seq_length, hidden_size]
-        output = self.lm_head(z_H)  # Language-modeling head predicts a token distribution at each position.
-        return HRMState(pfc=state_pfc), output, z_H
+        state_pfc, z_H, q = self.pfc(x, state=state.pfc)
+        output = self.lm_head(z_H)  # Shape: [batch, seq_length, vocab_size]
+        return HRMState(pfc=state_pfc), output, q
 
     def embed_inputs(  # --------------------------------------------------------------------------
         self, input: Tensor,
@@ -320,8 +314,7 @@ class TrainingModel(L.LightningModule):
         """
         super().__init__()
         self.model = HRModelV1(config.model)
-        self.halt_head = QValueEstimator(config.value_head)
-        self.controller = ACTController(self.model, self.halt_head, config.act_controller)
+        self.controller = ACTController(self.model, config.act_controller)
         self.step_module = ACTLossHead(self.controller, config.loss)
         self._config = config
 
@@ -373,7 +366,6 @@ class TrainingModel(L.LightningModule):
             List containing a single `AdamATan2` optimizer for the HRM parameters.
         """
         params = [p for p in self.model.parameters() if p.requires_grad]
-        params.extend(p for p in self.halt_head.parameters() if p.requires_grad)
         optimizer = AdamATan2(params, self.config.optimizer)
         return [optimizer]
 

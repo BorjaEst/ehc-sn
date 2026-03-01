@@ -18,7 +18,6 @@ augment           = true
 [model.pfc]
     seq_length = 900 # 30 × 30 for mazehard puzzle
 
-
 [model.pfc.reasoning_h] # Transformer block config for both H and L reasoning modules
     cortex.embedding_dim = 32
     cortex.num_heads     = 4
@@ -27,14 +26,12 @@ augment           = true
     cortex.embedding_dim = 32
     cortex.num_heads     = 4
 
-
-[value_head]
+[model.pfc.value_head]
     hidden_size = 32 # Should match the PFC reasoning module's embedding_dim
     n_actions   = 2
     pool_mode   = "first"
     pool_index  = 0
     init_bias   = -5.0
-
 
 # -- ACT controller -----------------------------------------------------------
 [act_controller]
