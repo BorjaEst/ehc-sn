@@ -41,12 +41,8 @@ class PFCSettings(BaseModel, extra="forbid"):
 class PFCState:
     """ """
 
+    # Working memory state of the PFC, containing the theta and gamma cell activations.
     memory: WorkingMemory
-
-    @property
-    def z_H(self) -> Tensor:
-        """Higher-level state tensor of shape [batch, seq_length, hidden_size]."""
-        return self.memory.z_H
 
     @property
     def theta_cells(self) -> Tensor:
@@ -54,12 +50,7 @@ class PFCState:
         Biologically ($4-8$ Hz): These represent the Sequence and Context.
         Theta acts as the "metronome" that organizes the Gamma bursts into a logical order.
         """
-        return self.z_H
-
-    @property
-    def z_L(self) -> Tensor:
-        """Lower-level state tensor of shape [batch, seq_length, hidden_size]."""
-        return self.memory.z_L
+        return self.memory.z_H
 
     @property
     def gamma_cells(self) -> Tensor:
@@ -67,7 +58,7 @@ class PFCState:
         Biologically ($>30$ Hz): These represent the Active Content.
         If you are holding a specific rule in your head that rule is "loaded" into Gamma bursts.
         """
-        return self.z_L
+        return self.memory.z_L
 
     def detach(self) -> "PFCState":
         """Return a detached copy of the state."""
