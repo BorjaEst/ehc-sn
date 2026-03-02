@@ -37,7 +37,7 @@ from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.sinks import save_pdf
 from ehc_sn.models.hrm_v1 import Model, ModelConfig_HRM_V1, supervised_maze_tokenize
-from ehc_sn.modules.hrm import HRMConfig
+from ehc_sn.modules.pfc import PFCSettings
 from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.act_controller import ACTControllerConfig
@@ -91,7 +91,7 @@ class ExampleArguments(BaseSettings, extra="forbid", cli_parse_args=True):
 
     # ---------------------------------------------------------------------------------------------
     # Model architecture and data
-    architecture: HRMConfig = Field(
+    architecture: PFCSettings = Field(
         ...,
         description=(
             "Architecture config for the HRM model. The keys in `architecture` are passed to the"
