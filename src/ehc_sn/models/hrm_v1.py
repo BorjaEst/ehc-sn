@@ -516,33 +516,6 @@ def _normalize_loss_for_backward(  # -------------------------------------------
 
 
 # =================================================================================================
-def cosine_lr(  # ---------------------------------------------------------------------------------
-    step: int, base_lr: float, warmup: int, total: int, min_ratio: float,
-) -> float:  # fmt: skip
-    """Compute a warmup + cosine-decay learning rate multiplier.
-
-    This helper mirrors the common schedule:
-        - Linear warmup for `warmup` steps
-        - Cosine annealing from `base_lr` down to `base_lr * min_ratio` over the remaining steps
-
-    Args:
-        step: Current step (0-indexed).
-        base_lr: Peak learning rate.
-        warmup: Number of warmup steps.
-        total: Total number of steps in the schedule.
-        min_ratio: Minimum LR ratio at the end of the cosine schedule.
-
-    Returns:
-        The learning rate for the given step.
-    """
-    if step < warmup:
-        return base_lr * float(step) / float(max(1, warmup))
-    progress = float(step - warmup) / float(max(1, total - warmup))
-    ratio = min_ratio + max(0.0, (1 - min_ratio) * 0.5 * (1.0 + math.cos(progress * math.pi)))
-    return base_lr * ratio
-
-
-# =================================================================================================
 def supervised_maze_tokenize(  # ------------------------------------------------------------------
     channels: dict[str, np.ndarray],
 ) -> dict[str, np.ndarray]:  # fmt: skip
