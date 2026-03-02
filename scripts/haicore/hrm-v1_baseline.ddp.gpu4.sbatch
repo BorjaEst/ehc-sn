@@ -30,7 +30,7 @@ export EXP01_CONFIGURATION_PATH="config/haicore-full:4_hrm.toml"
 
 # Run the training script with srun for proper resource allocation and binding
 srun --cpu-bind=cores \
-    python experiments/exp01_baseline.py \
+    python experiments/hrm_v1_baseline.py \
     --trainer_strategy=ddp \
     --trainer_devices=4 \
     --trainer_num_nodes=1 \
