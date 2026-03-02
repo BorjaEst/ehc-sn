@@ -13,8 +13,7 @@
 # Set strict bash options for better error handling
 set -euo pipefail
 
-# Load HAICORE modules (micromamba + NVIDIA tools)
-module load micromamba_icon
+# Load HAICORE modules (NVIDIA tools)
 module load toolkit/nvidia-hpc-sdk/25.3
 
 # Ensure we run from the repo root where .venv exists
@@ -26,7 +25,7 @@ source "${SLURM_SUBMIT_DIR}/.venv/bin/activate"
 # Set environment variables for optimal performance
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export NCCL_ASYNC_ERROR_HANDLING=1
-export EXP01_CONFIGURATION_PATH="config/haicore-full:4_hrm.toml"
+export HRM_V1_CONFIGURATION_PATH="config/haicore_hrm-mazehard.toml"
 
 # Run the training script with srun for proper resource allocation and binding
 srun --cpu-bind=cores \
@@ -37,4 +36,4 @@ srun --cpu-bind=cores \
     --trainer_accelerator=gpu \
     --max_steps=200000 \
     --val_check_interval=60 \
-    --log_every_n_steps=20 \
+    --log_every_n_steps=20
