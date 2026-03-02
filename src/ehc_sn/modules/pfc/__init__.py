@@ -13,6 +13,7 @@ from ehc_sn.modules.pfc import reasoning as r
 from ehc_sn.modules.pfc.reasoning import HighLvRModule, LowLvRModule, ReasoningSettings, WorkingMemory
 from ehc_sn.modules.pfc.values import QEstimatorSettings, QValueEstimator
 from ehc_sn.types import Device, Dtype
+from ehc_sn.utils import trunc_normal_init_
 
 
 # =================================================================================================
@@ -35,6 +36,11 @@ class PFCSettings(BaseModel, extra="forbid"):
         default_factory=ReasoningSettings,
         description="Configuration for the low-level reasoning module (posterior dlPFC).",
     )
+
+    @property
+    def hidden_size(self) -> int:
+        """Convenience property to get the hidden size from the reasoning module config."""
+        return self.reasoning_h.cortex.hidden_size
 
     # Value estimator config (vmPFC analogue)
     value_head: QEstimatorSettings = Field(
@@ -85,18 +91,29 @@ class PFCModel(nn.Module):
         self.high_level = HighLvRModule(config.reasoning_h, device=device, dtype=dtype)
         self.low_level = LowLvRModule(config.reasoning_l, device=device, dtype=dtype)
         self.estimator = QValueEstimator(config.value_head, device=device, dtype=dtype)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, config.hidden_size, device=device, dtype=dtype))
         self.optimizer = None  # Placeholder for optimizer future dACC reward-based updates
+        self.reset_parameters()
 
     @property
     def config(self) -> PFCSettings:
         """PFC module settings."""
         return self._config
 
+    def reset_parameters(  # ----------------------------------------------------------------------
+        self,
+    ) -> None:  # fmt: skip
+        """Initialize parameters and buffers."""
+        trunc_normal_init_(self.high_level.reset_vector, std=1)
+        trunc_normal_init_(self.low_level.reset_vector, std=1)
+        self.cls_token.data.zero_()  # Legacy parity: puzzle prefix initialized to zero
+
     def init_state(  # ---------------------------------------------------------------------------
         self, batch_size: int, 
     ) -> PFCState:  # fmt: skip
         """ """
-        memory = r.init_memory(batch_size, self.config.seq_length, self.high_level, self.low_level)
+        # seq_length + 1: CLS prefix occupies position 0; cell tokens fill positions 1..S.
+        memory = r.init_memory(batch_size, self.config.seq_length + 1, self.high_level, self.low_level)
         return PFCState(memory=memory)
 
     def reset_state(  # --------------------------------------------------------------------------
@@ -112,6 +129,10 @@ class PFCModel(nn.Module):
         """ """
         state = state or self.init_state(batch_size=x.shape[0])
         total_steps = self.config.reasoning_h.n_cycles * (self.config.reasoning_l.n_cycles + 1)
+
+        # Prepend CLS to cell embeddings: (B, S, D) → (B, S+1, D).
+        # Reasoning modules are CLS-agnostic; they see a uniform sequence.
+        x = torch.cat([self.cls_token.expand(x.shape[0], -1, -1), x], dim=1)
 
         # Forward iterations without grad for memory efficiency.
         # The final update at each level is executed with gradients below.

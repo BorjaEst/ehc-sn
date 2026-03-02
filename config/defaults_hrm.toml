@@ -30,7 +30,7 @@ augment           = true
     hidden_size = 32 # Should match the PFC reasoning module's embedding_dim
     n_actions   = 2
     pool_mode   = "first"
-    pool_index  = 0
+    pool_index  = 0   # Reads the CLS summary slot (position 0), not a maze cell
     init_bias   = -5.0
 
 # -- ACT controller -----------------------------------------------------------

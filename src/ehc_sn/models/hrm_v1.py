@@ -249,8 +249,7 @@ class HRModelV1(nn.Module):
         trunc_normal_init_(self.embed_tokens.weight, std=init_std)
         trunc_normal_init_(self.embed_pos.weight, std=init_std)
         trunc_normal_init_(self.lm_head.weight, std=init_std)
-        trunc_normal_init_(self.pfc.high_level.reset_vector, std=1)
-        trunc_normal_init_(self.pfc.low_level.reset_vector, std=1)
+        # self.pfc.reset_parameters()  # Already done when pfc is initialized
 
     def init_state(  # ---------------------------------------------------------------------------
         self, batch_size: int,
@@ -269,9 +268,9 @@ class HRModelV1(nn.Module):
     ) -> Tuple[HRMState, Tensor, Tensor]:  # fmt: skip
         """Forward pass through the HRM (``ACTBackbone`` protocol)."""
         state = state or self.init_state(batch_size=inputs.shape[0])
-        x = self.embed_inputs(inputs)  # Shape: [batch, seq_length, hidden_size]
-        state_pfc, z_H, q = self.pfc(x, state=state.pfc)
-        output = self.lm_head(z_H)  # Shape: [batch, seq_length, vocab_size]
+        x = self.embed_inputs(inputs)  # (B, S, D) — cell tokens only
+        state_pfc, z_H, q = self.pfc(x, state=state.pfc)  # z_H is (B, S+1, D)
+        output = self.lm_head(z_H[:, 1:])  # Strip CLS → (B, S, vocab_size)
         return HRMState(pfc=state_pfc), output, q
 
     def embed_inputs(  # --------------------------------------------------------------------------
