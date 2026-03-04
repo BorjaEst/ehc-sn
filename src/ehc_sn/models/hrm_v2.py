@@ -253,13 +253,19 @@ class HRModelV2(nn.Module):
         self, batch_size: int,
     ) -> HRMState:  # fmt: skip
         """ """
-        return HRMState(pfc=self.pfc.init_state(batch_size))
+        return HRMState(
+            pfc=self.pfc.init_state(batch_size),
+            str=self.str.init_state(batch_size),
+        )
 
     def reset_state(  # --------------------------------------------------------------------------
         self, reset_flag: Tensor, state: HRMState,
     ) -> HRMState:  # fmt: skip
         """ """
-        return HRMState(pfc=self.pfc.reset_state(state.pfc, reset_flag))
+        return HRMState(
+            pfc=self.pfc.reset_state(state.pfc, reset_flag),
+            str=self.str.reset_state(state.str, reset_flag),
+        )
 
     def forward(  # -------------------------------------------------------------------------------
         self, inputs: Tensor, state: Optional[HRMState] = None,
@@ -270,7 +276,7 @@ class HRModelV2(nn.Module):
         state_pfc, z_H, q_values = self.pfc(x, state=state.pfc)  # z_H: (B, S+1, D)
         logits = self.lm_head(z_H[:, 1:])  # strip CLS → (B, S, vocab)
         theta_cls = z_H[:, 0]  # (B, D) — theta / CLS summary
-        return HRMState(pfc=state_pfc), logits, theta_cls, q_values
+        return HRMState(pfc=state_pfc, str=state.str), logits, theta_cls, q_values
 
     def embed_inputs(  # --------------------------------------------------------------------------
         self, input: Tensor,
@@ -316,16 +322,37 @@ class RPEController(Protocol):
     """ """
 
 
+class RLControllerSettings(BaseModel, extra="forbid"):
+    """ """
+
+    halt_max_steps: int = Field(
+        default=10,
+        ge=1,
+        description="Maximum number of deliberation steps before forced halt.",
+    )
+
+    gamma: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Discount factor for TD learning. Default 1.0 (no discount) for optimal stopping "
+            "with additive ponder costs. Reduce if training oscillates."
+        ),
+    )
+
+
 # =================================================================================================
 class RLController:
     """ """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: HRModelV2, rpe_controller: RPEController, halt_max_steps: int,
+        self, backbone: HRModelV2, rpe_controller: RPEController, config: RLControllerSettings,
     ) -> None:  # fmt: skip
+        """ """
         self._backbone = backbone
         self._controller = rpe_controller
-        self._halt_max_steps = halt_max_steps
+        self._config = config
 
     @property
     def backbone(self) -> HRModelV2:
@@ -334,6 +361,10 @@ class RLController:
     @property
     def rpe_controller(self) -> STRModel:
         return self._controller
+
+    @property
+    def config(self) -> RLControllerSettings:
+        return self._config
 
     def initial_state(  # -------------------------------------------------------------------------
         self, batch_sample: Batch,
@@ -349,23 +380,9 @@ class RLController:
             data={k: torch.empty_like(v) for k, v in batch_sample.items()},
         )
 
-    def refresh_slot_data(  # --------------------------------------------------------------------
-        self, batch: Batch, state: RLState,
-    ) -> Dict[str, Tensor]:  # fmt: skip
-        """Replace halted slots with fresh incoming batch data."""
-        halted = state.halted
-        return {
-            k: torch.where(
-                halted.view((-1,) + (1,) * (batch[k].ndim - 1)),
-                batch[k],
-                state.data[k],
-            )
-            for k in batch
-        }
-
     def step(  # ----------------------------------------------------------------------------------
-        self, state: RLState, batch: Batch,
-        *, explore: bool, allow_halt: bool, gamma: float,
+        self, state: RLState, batch: Batch, *,
+        allow_halt: bool = True, explore: bool = True,
     ) -> Tuple[RLState, RLOutput]:  # fmt: skip
         """Run one RLController step.
 
@@ -377,6 +394,16 @@ class RLController:
             5. Action selection: Categorical sample (explore=True) or argmax (False).
             6. Compute done mask (max steps OR halt action when allow_halt=True).
             7. Bootstrap V(s_{t+1}) and max Q(s_{t+1}) under ``torch.no_grad()``.
+
+        Args:
+            state: Current per-slot state.
+            batch: Current batch of data (inputs and labels).
+            allow_halt: If True, halt actions can terminate slots; otherwise, only max steps.
+            explore: If True, sample stochastically from the policy; otherwise, take argmax.
+
+        Returns:
+            new_state: Updated per-slot state after this step.
+            output: RLOutput containing all relevant tensors for loss computation and tracing.
         """
         # 1. Refresh slot data; reset prev_outcome to 0.0 for newly refreshed slots
         data = self.refresh_slot_data(batch, state)
@@ -400,7 +427,7 @@ class RLController:
 
         # 6. Step counter + done mask
         steps = torch.where(state.halted, torch.zeros_like(state.steps), state.steps) + 1
-        done = steps >= self._halt_max_steps
+        done = steps >= self.config.halt_max_steps
         if allow_halt:
             done = done | (action == HALT_ACTION)
 
@@ -430,6 +457,16 @@ class RLController:
             next_q_max=next_q_max,
         )
         return new_state, output
+
+    def refresh_slot_data(  # --------------------------------------------------------------------
+        self, batch: Batch, state: RLState,
+    ) -> Dict[str, Tensor]:  # fmt: skip
+        """ """
+        halted, data = state.halted, state.data
+        return {
+            k: torch.where(halted.view((-1,) + (1,) * (batch[k].ndim - 1)), batch[k], data[k])
+            for k in batch
+        }  # fmt: skip
 
 
 # =================================================================================================
