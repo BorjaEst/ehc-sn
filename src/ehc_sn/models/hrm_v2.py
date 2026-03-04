@@ -318,10 +318,26 @@ class RLOutput(DetachMixin):
 
 
 # =================================================================================================
-class RPEController(Protocol):
+class RPEController[RPEState](Protocol):
     """ """
 
+    def init_state(  # ----------------------------------------------------------------------------
+        self, batch_size: int, *, device: Optional[Device] = None,
+    ) -> RPEState:  # fmt: skip
+        ...  # fmt: skip
 
+    def reset_state(  # ---------------------------------------------------------------------------
+        self, state: RPEState, reset_flag: Tensor,
+    ) -> RPEState:  # fmt: skip
+        ...  # fmt: skip
+
+    def __call__(  # ------------------------------------------------------------------------------
+        self, features: Tensor, state: RPEState,
+    ) -> Tuple[Tensor, Tensor, RPEState]:  # fmt: skip
+        ...  # fmt: skip
+
+
+# =================================================================================================
 class RLControllerSettings(BaseModel, extra="forbid"):
     """ """
 
@@ -414,10 +430,12 @@ class RLController:
 
         # 3. Backbone forward (gradients flow for supervised loss via logits; q_values → vmPFC)
         new_model_state, logits, theta_cls, q_values = self._backbone(data["inputs"], model_state)
+        q_values = q_values.detach()  # detach q_values to prevent vmPFC gradients flowing into PFC
 
         # 4. STR forward — features MUST be detached (REQ-006: no RL grads into PFC)
         features = theta_cls.detach()  # (B, D)
-        policy_logits, value = self._controller(features)  # (B, 2), (B,)
+        policy_logits, value, str_state = self._controller(features, new_model_state.str)
+        new_model_state = HRMState(pfc=new_model_state.pfc, str=str_state)
 
         # 5. Action selection
         if explore:
@@ -434,7 +452,7 @@ class RLController:
         # 7. Bootstrap V(s_{t+1}) and max Q(s_{t+1}) — no_grad; zero for done slots
         with torch.no_grad():
             _, _, next_theta_cls, next_q_values = self._backbone(data["inputs"], new_model_state)
-            _, next_value = self._controller(next_theta_cls.detach())
+            _, next_value, _ = self._controller(next_theta_cls.detach())
             next_value = torch.where(done, torch.zeros_like(next_value), next_value)
             next_q_max = next_q_values.max(dim=-1).values
             next_q_max = torch.where(done, torch.zeros_like(next_q_max), next_q_max)
