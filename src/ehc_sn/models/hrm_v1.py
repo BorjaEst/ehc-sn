@@ -56,7 +56,10 @@ O_ID: int = 5
 class ModelSettings_V1(BaseModel, extra="forbid"):
     """Model-level settings composing a PFC module with embedding/LM-head parameters."""
 
-    pfc: PFCSettings = Field(..., description="Settings for the core PFC model architecture.")
+    pfc: PFCSettings = Field(
+        ...,
+        description="Settings for the core PFC model architecture.",
+    )
 
     vocab_size: int = Field(
         ...,
