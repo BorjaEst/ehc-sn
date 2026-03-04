@@ -716,4 +716,3 @@ def make_hebbian_write_mask(n_stages: int, shape: List[int], f_init: List[float]
     module_id = module.repeat_interleave(widths)
     mask = allow[module_id[:, None], module_id[None, :]]
     return mask
-    return mask
