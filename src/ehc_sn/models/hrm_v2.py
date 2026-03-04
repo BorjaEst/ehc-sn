@@ -19,7 +19,7 @@ from ehc_sn.data.schema import CHANNEL_SOLUTION
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
-from ehc_sn.modules.str import STRModel, STRSettings
+from ehc_sn.modules.str import STRModel, STRSettings, STRState
 from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
 from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.buffers import FifoBuffer
