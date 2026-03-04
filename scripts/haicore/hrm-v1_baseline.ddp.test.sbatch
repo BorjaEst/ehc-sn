@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --partition=normal
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:full:4
-#SBATCH --ntasks-per-node=4
-#SBATCH --cpus-per-task=38
-#SBATCH --time=48:00:00
-#SBATCH --job-name=hrm-v1-baseline.gpu4
-#SBATCH --output=slurm-%x-%j.gpu4.out
-#SBATCH --error=slurm-%x-%j.gpu4.err
+#SBATCH --gres=gpu:1g.5gb:1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=1
+#SBATCH --time=00:01:00
+#SBATCH --job-name=hrm-v1-baseline.test
+#SBATCH --output=slurm-%x-%j.test.out
+#SBATCH --error=slurm-%x-%j.test.err
 
 
 # Set strict bash options for better error handling
@@ -25,13 +25,13 @@ source "${SLURM_SUBMIT_DIR}/.venv/bin/activate"
 # Set environment variables for optimal performance
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
-export HRM_V1_CONFIGURATION_PATH="config/haicore_hrm-mazehard.toml"
+export HRM_V1_CONFIGURATION_PATH="config/defaults_hrm-mazehard.toml"
 
 # Run the training script with srun for proper resource allocation and binding
 srun --cpu-bind=cores \
     python experiments/hrm_v1_baseline.py \
     --trainer_strategy=ddp \
-    --trainer_devices=4 \
+    --trainer_devices=1 \
     --trainer_num_nodes=1 \
     --trainer_accelerator=gpu \
     --max_steps=200000 \
