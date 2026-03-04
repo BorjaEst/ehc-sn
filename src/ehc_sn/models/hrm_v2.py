@@ -1,19 +1,33 @@
-"""HRM v1 Lightning module.
+"""HRM v2 Lightning module — STR actor-critic gating.
 
-This module defines a PyTorch Lightning `LightningModule` wrapper around the core HRM
-architecture (`HRModel`) with Adaptive Computation Time (ACT) control and loss
-computation.
+This module implements HRM v2, which replaces the ACT (Adaptive Computation Time)
+correctness-driven BCE gate with a biologically motivated STR (Striatum) actor–critic
+policy trained by pure RL (TD(0) with terminal exact-correctness reward).
 
-Key behaviors:
-        - **Manual optimization**: uses `automatic_optimization = False` and explicitly performs
-            backward/optimizer/scheduler steps for legacy parity.
-        - **Stateful training carry**: forwards a `carry` object across mini-batches to support
-            continuation/halting semantics.
-        - **Partial reset batching**: halted examples are replaced with fresh rows using a FIFO buffer
-            and `PartialResetBatchAssembler`.
+Architecture
+------------
+- **dlPFC** (``HRModelV2``): working-memory recurrent backbone (PFC + embeddings + LM head).
+  Learns exclusively via supervised token cross-entropy.
+- **STR** (``STRModel``): halt/continue policy + value estimator trained by RL.
+  Receives *detached* theta-level CLS features (``z_H[:, 0]``) from dlPFC.
 
-The batch structure used throughout this file is a plain ``dict[str, Tensor]``
-with keys ``"inputs"`` and ``"labels"``.
+Key differences from HRM v1
+----------------------------
+- No correctness-driven BCE halting loss.  No ``ACTLossHead``.  No ``ACTController``.
+- STR policy is stochastic during training (``Categorical`` sampling);
+  deterministic argmax at eval.
+- Reward: strict optimal stopping — ``r_t = -λ(t)`` per continue;
+  ``r_T = 1`` iff exact sequence correct at halt, else 0.
+- λ ramps from 0 → ``lambda_target`` over ``lambda_warmup_steps`` opt-steps
+  (developmental schedule; prevents "halt immediately" collapse while λ ≈ 0).
+- **Dual optimizers**: supervised (PFC params) and RL (STR params) are stepped independently.
+- ``γ = 1.0`` by default (no discount for an optimal stopping problem).
+- Gradient isolation: STR input is ``z_H[:, 0].detach()``; actor/critic grads cannot
+  reach dlPFC.
+
+Batch format
+------------
+Plain ``dict[str, Tensor]`` with keys ``"inputs"`` and ``"labels"``.
 """
 
 import math
@@ -53,10 +67,11 @@ O_ID: int = 5
 
 
 # =================================================================================================
-class ModelSettings_V1(BaseModel, extra="forbid"):
-    """Model-level settings composing a PFC module with embedding/LM-head parameters."""
+class ModelSettings_V2(BaseModel, extra="forbid"):
+    """Backbone settings for HRM v2 (PFC + embeddings + LM head)."""
 
     pfc: PFCSettings = Field(..., description="Settings for the core PFC model architecture.")
+    str: STRSettings = Field(..., description="Settings for the STR actor-critic architecture.")
 
     vocab_size: int = Field(
         ...,
@@ -87,21 +102,20 @@ class ModelSettings_V1(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
-    """Configuration for the HRM v1 Lightning module.
+class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
+    """Full configuration for HRM v2 with STR actor–critic gating.
 
-    This config is intentionally "spec-first": it wires together the HRM core model,
-    the ACT controller (adaptive computation time / halting logic), the loss head, and
-    the optimizer/scheduler settings used during training.
+    Wires backbone (PFC), STR gating, optimal-stopping RL parameters,
+    explicit RL loss coefficients, and separate optimizer/scheduler settings.
 
     Notes:
-        - `extra="forbid"` ensures unknown keys fail fast when parsing configs.
-        - `global_batch_size` is used for scaling losses/metrics in a distributed setup.
+        - ``extra="forbid"`` fails fast on unknown config keys.
+        - ``global_batch_size`` is used for loss normalisation in distributed training.
     """
 
-    model: ModelSettings_V1 = Field(
+    model: ModelSettings_V2 = Field(
         ...,
-        description="",
+        description="PFC backbone configuration.",
     )
 
     act_controller: ACTControllerConfig = Field(
@@ -211,7 +225,16 @@ class HRMState:
 
 
 # =================================================================================================
-class HRModelV1(nn.Module):
+class HRModelV2(nn.Module):
+    """HRM backbone: dlPFC (PFC + embeddings + LM head).
+
+    Returns token logits and the theta-level CLS feature ``z_H[:, 0]``.
+    The PFC's built-in value head (``QValueEstimator``) output is discarded;
+    ``STRActorCritic`` replaces it as the gating mechanism.
+
+    The caller is responsible for calling ``.detach()`` on ``theta_cls`` before
+    passing it to STR, enforcing STR-only RL learning (REQ-005/REQ-006).
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: ModelSettings_V1, *,
@@ -523,8 +546,8 @@ def supervised_maze_tokenize(  # -----------------------------------------------
 
     Uses :func:`~ehc_sn.data.transforms.channels_to_grid` to merge topology,
     start, and goals into a canonical ``int32`` grid, then flattens to a 1-D
-    token sequence.  The label sequence is a copy where solution-path cells are
-    overwritten with :data:`O_ID` (HRM-private supervision token).
+    token sequence.  The label sequence overwrites solution-path cells with
+    :data:`O_ID` (HRM-private supervision token).
 
     Args:
         channels: Raw NPZ channel dict (as returned by ``MazeDataset``).
