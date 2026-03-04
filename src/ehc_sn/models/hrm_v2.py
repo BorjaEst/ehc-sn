@@ -3,7 +3,7 @@
 import math
 from dataclasses import dataclass
 from itertools import repeat
-from typing import Any, Dict, List, Optional, Tuple, TypeAlias
+from typing import Any, Dict, List, Optional, Protocol, Tuple, TypeAlias
 
 import lightning as L
 import numpy as np
@@ -29,6 +29,7 @@ from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConf
 from ehc_sn.training.step_loop import StepContext, StepLoop
 from ehc_sn.types import Device, Dtype
 from ehc_sn.utils import trunc_normal_init_
+from ehc_sn.utils.detach import DetachMixin
 
 # Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
 Batch: TypeAlias = Dict[str, Tensor]
@@ -194,7 +195,8 @@ class TraceFields:
 
 
 # =================================================================================================
-def trace_fields() -> List[TraceField[StepContext]]:
+def trace_fields(  # ------------------------------------------------------------------------------
+) -> List[TraceField[StepContext]]:  # fmt: skip
     """ """
     return [
         TraceField(name="loss", get=TraceFields.get_model_loss),
@@ -210,15 +212,11 @@ def trace_fields() -> List[TraceField[StepContext]]:
 
 # =================================================================================================
 @dataclass
-class HRMState:
+class HRMState(DetachMixin):
     """ """
 
-    pfc: PFCState
-    str: STRState
-
-    def detach(self) -> "HRMState":
-        """Return a copy with PFC state detached from the computation graph."""
-        return HRMState(pfc=self.pfc.detach(), str=self.str.detach())
+    pfc: PFCState  # Prefrontal Cortex state, containing working memory and reasoning module states.
+    str: STRState  # STR actor-critic state, containing any recurrent state for the STR module (if needed).
 
 
 # =================================================================================================
@@ -288,12 +286,8 @@ class HRModelV2(nn.Module):
 
 # =================================================================================================
 @dataclass
-class RLState:
-    """Per-slot state for the RL training loop.
-
-    ``halted``: per-slot "episode done / needs refresh" flag.  When ``True``, that
-    slot is replaced with a fresh sample on the next ``RLController.step()`` call.
-    """
+class RLState(DetachMixin):
+    """ """
 
     model_state: HRMState  # Recurrent backbone state
     steps: Tensor  # (B,) int32 — per-slot deliberation step counter
@@ -301,24 +295,11 @@ class RLState:
     prev_outcome: Tensor  # (B,) float32 — outcome from previous step (improvement baseline)
     data: Dict[str, Tensor]  # Per-slot buffered "inputs" and "labels"
 
-    def detach(self) -> "RLState":
-        return RLState(
-            model_state=self.model_state.detach(),
-            steps=self.steps,
-            halted=self.halted,
-            prev_outcome=self.prev_outcome,
-            data=self.data,
-        )
-
 
 # =================================================================================================
 @dataclass
-class RLOutput:
-    """Outputs from a single :class:`RLController` step.
-
-    All fields are kept *live* (not detached) inside the controller; the loss head
-    detaches selectively.  ``next_value`` is always produced under ``torch.no_grad()``.
-    """
+class RLOutput(DetachMixin):
+    """ """
 
     logits: Tensor  # LM logits (B, S, vocab) — for supervised loss
     policy_logits: Tensor  # STR policy logits (B, 2) — for actor and entropy losses
@@ -329,39 +310,21 @@ class RLOutput:
     q_values: Tensor  # vmPFC Q-estimates (B, n_actions) — for vmPFC TD-Q loss
     next_q_max: Tensor  # max Q for next state (B,), under no_grad — vmPFC TD target
 
-    def detach(self) -> "RLOutput":
-        return RLOutput(
-            logits=self.logits.detach(),
-            policy_logits=self.policy_logits.detach(),
-            value=self.value.detach(),
-            next_value=self.next_value.detach(),
-            action=self.action.detach(),
-            theta_cls=self.theta_cls.detach(),
-            q_values=self.q_values.detach(),
-            next_q_max=self.next_q_max.detach(),
-        )
+
+# =================================================================================================
+class RPEController(Protocol):
+    """ """
 
 
 # =================================================================================================
 class RLController:
-    """Manages per-slot resets, backbone + STR forward passes, and action selection.
-
-    Responsibilities:
-        - Refresh per-slot data for finished episodes (same as ACTController slot refresh).
-        - Reset backbone recurrent state for finished slots.
-        - Run backbone forward to get LM logits + theta-level CLS features.
-        - Feed *detached* CLS features to STR → policy logits + value.
-        - Sample (train) or argmax (eval) the action from the STR policy.
-        - Compute the done mask and bootstrap ``V_{t+1}`` under ``no_grad``.
-
-    Does NOT compute any loss.  Does NOT use correctness as a gate supervision signal.
-    """
+    """ """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: HRModelV2, str_module: STRModel, halt_max_steps: int,
+        self, backbone: HRModelV2, rpe_controller: RPEController, halt_max_steps: int,
     ) -> None:  # fmt: skip
         self._backbone = backbone
-        self._str = str_module
+        self._controller = rpe_controller
         self._halt_max_steps = halt_max_steps
 
     @property
@@ -369,8 +332,8 @@ class RLController:
         return self._backbone
 
     @property
-    def str_module(self) -> STRModel:
-        return self._str
+    def rpe_controller(self) -> STRModel:
+        return self._controller
 
     def initial_state(  # -------------------------------------------------------------------------
         self, batch_sample: Batch,
@@ -427,7 +390,7 @@ class RLController:
 
         # 4. STR forward — features MUST be detached (REQ-006: no RL grads into PFC)
         features = theta_cls.detach()  # (B, D)
-        policy_logits, value = self._str(features)  # (B, 2), (B,)
+        policy_logits, value = self._controller(features)  # (B, 2), (B,)
 
         # 5. Action selection
         if explore:
@@ -444,7 +407,7 @@ class RLController:
         # 7. Bootstrap V(s_{t+1}) and max Q(s_{t+1}) — no_grad; zero for done slots
         with torch.no_grad():
             _, _, next_theta_cls, next_q_values = self._backbone(data["inputs"], new_model_state)
-            _, next_value = self._str(next_theta_cls.detach())
+            _, next_value = self._controller(next_theta_cls.detach())
             next_value = torch.where(done, torch.zeros_like(next_value), next_value)
             next_q_max = next_q_values.max(dim=-1).values
             next_q_max = torch.where(done, torch.zeros_like(next_q_max), next_q_max)
