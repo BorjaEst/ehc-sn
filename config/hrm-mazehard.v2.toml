@@ -1,0 +1,66 @@
+dataset_path      = "data/processed/maze-30x30-hard-1k"
+global_batch_size = 128
+epochs            = 100
+seed              = 42
+augment           = true
+
+
+gamma          = 1.0
+warmup_steps   = 5000
+halt_max_steps = 10
+
+c_actor   = 1.0
+c_critic  = 0.5
+c_entropy = 0.01
+c_vmPFC   = 0.5
+
+loss_function = "stablemax_cross_entropy"
+
+
+[model]
+    vocab_size = 6
+
+[model.pfc]
+    seq_length = 900
+
+[model.pfc.reasoning_h]
+    cortex.embedding_dim = 32
+    cortex.num_heads     = 4
+
+[model.pfc.reasoning_l]
+    cortex.embedding_dim = 32
+    cortex.num_heads     = 4
+
+# vmPFC (QValueEstimator): auxiliary Q-predictor trained with a separate TD loss.
+[model.pfc.value_head]
+    hidden_size = 32
+    n_actions   = 2
+    pool_mode   = "first"
+    pool_index  = 0
+    init_bias   = -5.0
+
+# STR-only fields go here
+[model.str]
+    hidden_size          = 32
+    policy_hidden_layers = []
+    value_hidden_layers  = []
+    init_policy_bias     = -2.0
+    init_value_bias      = 0.0
+
+
+# -- Optimizer and scheduler settings -------------------------------------------------------
+[optimizer_supervised]
+    lr           = 1e-4
+    weight_decay = 1e-2
+
+[optimizer_rl]
+    lr           = 1e-4
+    weight_decay = 0.0
+
+[optimizer_qv]
+    lr           = 1e-4
+    weight_decay = 0.0
+
+[scheduler]
+    warmup_steps = 1000
+    min_ratio    = 0.01

@@ -339,3 +339,4 @@ from torch import Tensor
 Device = torch.device
 Dtype = torch.dtype
 Channels = dict[str, np.ndarray]
+Batch = Dict[str, Tensor]  # Generic batch type, can be specialized as needed

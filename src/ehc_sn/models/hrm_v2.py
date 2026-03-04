@@ -25,6 +25,8 @@ from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
+from ehc_sn.training.rl_controller import RLController, RLControllerConfig, RLOutput, RLState
+from ehc_sn.training.rl_head import RLLossConfig, RLLossHead, RLStepOutput
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
 from ehc_sn.training.step_loop import StepContext, StepLoop
 from ehc_sn.types import Device, Dtype
@@ -84,46 +86,18 @@ class ModelSettings_V2(BaseModel, extra="forbid"):
 class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
     """ """
 
+    # ~~ Model architecture ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     model: ModelSettings_V2 = Field(
         ...,
-        description="PFC backbone configuration.",
+        description="",
     )
-
-    # ~~ RL parameters ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    gamma: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "TD discount factor.  Default 1.0 (no discount) is correct for optimal stopping "
-            "with additive ponder costs.  Reduce to 0.99 only if training oscillates."
-        ),
+    rl_controller: RLControllerConfig = Field(
+        ...,
+        description="Configuration for the RL controller, which defines the forward pass and computes RL losses.",
     )
-    rl_warmup_steps: int = Field(
-        default=5000,
-        ge=0,
-        description=(
-            "Number of optimiser steps during which only the supervised optimizer trains. "
-            "STR and vmPFC are frozen; allow_halt=False forces full deliberation. "
-            "Prevents 'halt immediately' collapse before PFC representations are informative."
-        ),
-    )
-    halt_max_steps: int = Field(
-        default=10,
-        ge=1,
-        description="Hard cap on per-slot deliberation steps.",
-    )
-
-    # ~~ RL loss coefficients ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    c_actor: float = Field(default=1.0, ge=0.0, description="Actor loss coefficient.")
-    c_critic: float = Field(default=0.5, ge=0.0, description="Critic loss coefficient.")
-    c_entropy: float = Field(default=0.01, ge=0.0, description="Entropy regularisation coefficient.")
-    c_vmPFC: float = Field(default=0.5, ge=0.0, description="vmPFC auxiliary Q-predictor loss coefficient.")
-
-    # ~~ Supervised loss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    loss_function: LossType = Field(
-        default="stablemax_cross_entropy",
-        description="Token-level supervised loss function name.",
+    loss: RLLossConfig = Field(
+        ...,
+        description="Configuration for the RL loss head, which computes losses based on the controller outputs.",
     )
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -135,15 +109,31 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
         default_factory=AdamATan2Config,
         description="Optimiser for RL parameters (STR actor-critic only).",
     )
-    optimizer_vmPFC: AdamATan2Config = Field(
+    optimizer_qv: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
         description="Optimiser for vmPFC parameters (pfc.estimator only).",
     )
     scheduler: SchedulerConfig = Field(
         default_factory=SchedulerConfig,
-        description="LR scheduler config applied to both optimisers.",
+        description="LR scheduler config applied to both optimizers.",
+    )
+    warmup_steps: int = Field(
+        default=5000,
+        ge=0,
+        description=(
+            "Number of optimizer steps during which only the supervised optimizer trains. "
+            "STR and vmPFC are frozen; allow_halt=False forces full deliberation. "
+            "Prevents 'halt immediately' collapse before PFC representations are informative."
+        ),
     )
 
+    # ~~ RL loss coefficients ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    c_actor: float = Field(default=1.0, ge=0.0, description="Actor loss coefficient.")
+    c_critic: float = Field(default=0.5, ge=0.0, description="Critic loss coefficient.")
+    c_entropy: float = Field(default=0.01, ge=0.0, description="Entropy regularization coefficient.")
+    c_vmPFC: float = Field(default=0.5, ge=0.0, description="vmPFC auxiliary Q-predictor loss coefficient.")
+
+    # ~~ Extra ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     global_batch_size: int = Field(
         ...,
         description=(
@@ -155,43 +145,11 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class TraceFields:
-    """Accessors for v2 trace values from :class:`RLStepOutput` / :class:`RLState`."""
+    """ """
 
     @staticmethod
     def get_model_loss(ctx: StepContext) -> TraceValue:
         return ctx.outputs.loss.detach()
-
-    @staticmethod
-    def get_steps(ctx: StepContext) -> TraceValue:
-        steps: Tensor = ctx.carry.steps
-        return steps.detach()
-
-    @staticmethod
-    def get_halted(ctx: StepContext) -> TraceValue:
-        halted: Tensor = ctx.carry.halted
-        return halted.detach()
-
-    @staticmethod
-    def get_action(ctx: StepContext) -> TraceValue:
-        return ctx.outputs.action.detach()
-
-    @staticmethod
-    def get_value(ctx: StepContext) -> TraceValue:
-        return ctx.outputs.value.detach()
-
-    @staticmethod
-    def get_policy_logits(ctx: StepContext) -> TraceValue:
-        return ctx.outputs.policy_logits.detach()
-
-    @staticmethod
-    def get_pred_is_o(ctx: StepContext) -> TraceValue:
-        logits: Tensor = ctx.outputs.logits
-        pred = torch.argmax(logits.detach(), dim=-1)
-        return (pred == O_ID).to(torch.uint8)
-
-    @staticmethod
-    def get_outcome(ctx: StepContext) -> TraceValue:
-        return ctx.outputs.outcome_mean.detach()
 
 
 # =================================================================================================
@@ -200,13 +158,6 @@ def trace_fields(  # -----------------------------------------------------------
     """ """
     return [
         TraceField(name="loss", get=TraceFields.get_model_loss),
-        TraceField(name="steps", get=TraceFields.get_steps),
-        TraceField(name="act/halted", get=TraceFields.get_halted),  # compat alias
-        TraceField(name="str/action", get=TraceFields.get_action),
-        TraceField(name="str/value", get=TraceFields.get_value),
-        TraceField(name="str/policy_logits", get=TraceFields.get_policy_logits),
-        TraceField(name="pred/is_o", get=TraceFields.get_pred_is_o),
-        TraceField(name="outcome", get=TraceFields.get_outcome),
     ]
 
 
@@ -232,8 +183,8 @@ class HRModelV2(nn.Module):
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, device=device, dtype=dtype)
         self.embed_pos = nn.Embedding(config.seq_length, config.hidden_size, device=device, dtype=dtype)
-        self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)
-        self.str = STRModel(config.str, device=device, dtype=dtype)
+        self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)  # Reasoning module with embedded inputs
+        self.str = STRModel(config.str, device=device, dtype=dtype)  # Actor-critic for adaptive computation
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)  # fmt: skip
         self.reset_parameters()
 
@@ -291,400 +242,6 @@ class HRModelV2(nn.Module):
 
 
 # =================================================================================================
-@dataclass
-class RLState(DetachMixin):
-    """ """
-
-    model_state: HRMState  # Recurrent backbone state
-    steps: Tensor  # (B,) int32 — per-slot deliberation step counter
-    halted: Tensor  # (B,) bool  — per-slot done / reset flag
-    prev_outcome: Tensor  # (B,) float32 — outcome from previous step (improvement baseline)
-    data: Dict[str, Tensor]  # Per-slot buffered "inputs" and "labels"
-
-
-# =================================================================================================
-@dataclass
-class RLOutput(DetachMixin):
-    """ """
-
-    logits: Tensor  # LM logits (B, S, vocab) — for supervised loss
-    policy_logits: Tensor  # STR policy logits (B, 2) — for actor and entropy losses
-    value: Tensor  # V(s_t) (B,) — for critic loss and TD error
-    next_value: Tensor  # V(s_{t+1}) (B,), produced under no_grad — TD bootstrap
-    action: Tensor  # Sampled action (B,): 0=halt, 1=continue
-    theta_cls: Tensor  # Raw (non-detached) z_H[:,0] — tracing only, not used in loss
-    q_values: Tensor  # vmPFC Q-estimates (B, n_actions) — for vmPFC TD-Q loss
-    next_q_max: Tensor  # max Q for next state (B,), under no_grad — vmPFC TD target
-
-
-# =================================================================================================
-class RPEController[RPEState](Protocol):
-    """ """
-
-    def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int, *, device: Optional[Device] = None,
-    ) -> RPEState:  # fmt: skip
-        ...  # fmt: skip
-
-    def reset_state(  # ---------------------------------------------------------------------------
-        self, state: RPEState, reset_flag: Tensor,
-    ) -> RPEState:  # fmt: skip
-        ...  # fmt: skip
-
-    def __call__(  # ------------------------------------------------------------------------------
-        self, features: Tensor, state: RPEState,
-    ) -> Tuple[Tensor, Tensor, RPEState]:  # fmt: skip
-        ...  # fmt: skip
-
-
-# =================================================================================================
-class RLControllerSettings(BaseModel, extra="forbid"):
-    """ """
-
-    halt_max_steps: int = Field(
-        default=10,
-        ge=1,
-        description="Maximum number of deliberation steps before forced halt.",
-    )
-
-    gamma: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Discount factor for TD learning. Default 1.0 (no discount) for optimal stopping "
-            "with additive ponder costs. Reduce if training oscillates."
-        ),
-    )
-
-
-# =================================================================================================
-class RLController:
-    """ """
-
-    def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: HRModelV2, rpe_controller: RPEController, config: RLControllerSettings,
-    ) -> None:  # fmt: skip
-        """ """
-        self._backbone = backbone
-        self._controller = rpe_controller
-        self._config = config
-
-    @property
-    def backbone(self) -> HRModelV2:
-        return self._backbone
-
-    @property
-    def rpe_controller(self) -> STRModel:
-        return self._controller
-
-    @property
-    def config(self) -> RLControllerSettings:
-        return self._config
-
-    def initial_state(  # -------------------------------------------------------------------------
-        self, batch_sample: Batch,
-    ) -> RLState:  # fmt: skip
-        """Create initial per-slot state (all slots marked halted = fresh start)."""
-        B = batch_sample["inputs"].shape[0]
-        device = batch_sample["inputs"].device
-        return RLState(
-            model_state=self._backbone.init_state(B),
-            steps=torch.zeros((B,), dtype=torch.int32, device=device),
-            halted=torch.ones((B,), dtype=torch.bool, device=device),  # force refresh on step 0
-            prev_outcome=torch.zeros((B,), dtype=torch.float32, device=device),
-            data={k: torch.empty_like(v) for k, v in batch_sample.items()},
-        )
-
-    def step(  # ----------------------------------------------------------------------------------
-        self, state: RLState, batch: Batch, *,
-        allow_halt: bool = True, explore: bool = True,
-    ) -> Tuple[RLState, RLOutput]:  # fmt: skip
-        """Run one RLController step.
-
-        Steps performed (in order):
-            1. Refresh per-slot data for halted slots; reset prev_outcome for new episodes.
-            2. Reset backbone recurrent state for halted slots.
-            3. Backbone forward: new state, LM logits, theta_cls, vmPFC q_values.
-            4. STR forward on **detached** theta_cls: policy_logits, value.
-            5. Action selection: Categorical sample (explore=True) or argmax (False).
-            6. Compute done mask (max steps OR halt action when allow_halt=True).
-            7. Bootstrap V(s_{t+1}) and max Q(s_{t+1}) under ``torch.no_grad()``.
-
-        Args:
-            state: Current per-slot state.
-            batch: Current batch of data (inputs and labels).
-            allow_halt: If True, halt actions can terminate slots; otherwise, only max steps.
-            explore: If True, sample stochastically from the policy; otherwise, take argmax.
-
-        Returns:
-            new_state: Updated per-slot state after this step.
-            output: RLOutput containing all relevant tensors for loss computation and tracing.
-        """
-        # 1. Refresh slot data; reset prev_outcome to 0.0 for newly refreshed slots
-        data = self.refresh_slot_data(batch, state)
-        prev_outcome = torch.where(state.halted, torch.zeros_like(state.prev_outcome), state.prev_outcome)
-
-        # 2. Reset backbone recurrent state for halted slots
-        model_state = self._backbone.reset_state(state.halted, state.model_state)
-
-        # 3. Backbone forward (gradients flow for supervised loss via logits; q_values → vmPFC)
-        new_model_state, logits, theta_cls, q_values = self._backbone(data["inputs"], model_state)
-        q_values = q_values.detach()  # detach q_values to prevent vmPFC gradients flowing into PFC
-
-        # 4. STR forward — features MUST be detached (REQ-006: no RL grads into PFC)
-        features = theta_cls.detach()  # (B, D)
-        policy_logits, value, str_state = self._controller(features, new_model_state.str)
-        new_model_state = HRMState(pfc=new_model_state.pfc, str=str_state)
-
-        # 5. Action selection
-        if explore:
-            action = Categorical(logits=policy_logits).sample()  # stochastic (B,)
-        else:
-            action = policy_logits.argmax(dim=-1)  # deterministic (B,)
-
-        # 6. Step counter + done mask
-        steps = torch.where(state.halted, torch.zeros_like(state.steps), state.steps) + 1
-        done = steps >= self.config.halt_max_steps
-        if allow_halt:
-            done = done | (action == HALT_ACTION)
-
-        # 7. Bootstrap V(s_{t+1}) and max Q(s_{t+1}) — no_grad; zero for done slots
-        with torch.no_grad():
-            _, _, next_theta_cls, next_q_values = self._backbone(data["inputs"], new_model_state)
-            _, next_value, _ = self._controller(next_theta_cls.detach())
-            next_value = torch.where(done, torch.zeros_like(next_value), next_value)
-            next_q_max = next_q_values.max(dim=-1).values
-            next_q_max = torch.where(done, torch.zeros_like(next_q_max), next_q_max)
-
-        new_state = RLState(
-            model_state=new_model_state,
-            steps=steps,
-            halted=done,
-            prev_outcome=prev_outcome,
-            data=data,
-        )
-        output = RLOutput(
-            logits=logits,
-            policy_logits=policy_logits,
-            value=value,
-            next_value=next_value,
-            action=action,
-            theta_cls=theta_cls,
-            q_values=q_values,
-            next_q_max=next_q_max,
-        )
-        return new_state, output
-
-    def refresh_slot_data(  # --------------------------------------------------------------------
-        self, batch: Batch, state: RLState,
-    ) -> Dict[str, Tensor]:  # fmt: skip
-        """ """
-        halted, data = state.halted, state.data
-        return {
-            k: torch.where(halted.view((-1,) + (1,) * (batch[k].ndim - 1)), batch[k], data[k])
-            for k in batch
-        }  # fmt: skip
-
-
-# =================================================================================================
-@dataclass(frozen=True)
-class RLStepOutput:
-    """Aggregated outputs of one :class:`RLLossHead` forward step.
-
-    ``loss`` is the *live* (non-detached) combined loss for ``manual_backward``.
-    All other tensor fields are detached for logging/tracing.
-    """
-
-    loss: Tensor  # combined total loss — kept live for backward()
-    loss_supervised: Tensor  # detached — for logging
-    loss_actor: Tensor  # detached — for logging
-    loss_critic: Tensor  # detached — for logging
-    loss_entropy: Tensor  # detached — for logging
-    loss_vmPFC: Tensor  # detached — for logging
-    reward_mean: Tensor  # detached — for logging
-    delta_mean: Tensor  # detached — for logging
-    outcome_mean: Tensor  # detached — for logging
-    action: Tensor  # detached (B,) — for tracing
-    value: Tensor  # detached (B,) — for tracing
-    logits: Tensor  # detached (B, S, V) — for tracing + val accuracy
-    policy_logits: Tensor  # detached (B, 2) — for tracing
-    q_values: Tensor  # detached (B, n_actions) — for tracing
-
-
-# =================================================================================================
-class RLLossHead(nn.Module):
-    """Step module for the HRM v2 STR actor-critic training loop.
-
-    Implements the ``StepModule`` protocol for use with ``StepLoop``.
-
-    Loss composition::
-
-        loss_total = loss_supervised
-                   + c_actor   * loss_actor
-                   + c_critic  * loss_critic
-                   + c_entropy * loss_entropy
-                   + c_vmPFC   * loss_vmPFC
-
-    Reward is improvement-based: ``r_t = O_t - O_{t-1}`` where ``O_t`` is the
-    fraction of correct non-ignored tokens at step ``t`` (REQ-003).  This produces
-    a continuous dopamine-RPE signal fed to the STR TD(0) error.
-
-    During warmup (``is_warmup=True``) only ``loss_supervised`` contributes;
-    RL and vmPFC losses are zeroed out (REQ-011).
-    """
-
-    def __init__(  # ------------------------------------------------------------------------------
-        self, controller: RLController, config: ModelConfig_HRM_V2,
-    ) -> None:  # fmt: skip
-        super().__init__()
-        self._controller = controller
-        self._config = config
-
-    @property
-    def controller(self) -> RLController:
-        return self._controller
-
-    @property
-    def config(self) -> ModelConfig_HRM_V2:
-        return self._config
-
-    @property
-    def loss_fn(self) -> Any:
-        """Resolved token-level supervised loss function."""
-        return getattr(cross_entropy_module, self._config.loss_function)
-
-    def initial_carry(  # -------------------------------------------------------------------------
-        self, batch_sample: Batch,
-    ) -> RLState:  # fmt: skip
-        return self._controller.initial_state(batch_sample)
-
-    def forward(  # -------------------------------------------------------------------------------
-        self, batch: Batch, carry: RLState, **options: Any,
-    ) -> Tuple[RLStepOutput, RLState, bool]:  # fmt: skip
-        """Run one RL step (``StepModule`` protocol).
-
-        Expected options:
-            explore (bool): stochastic action sampling during training.
-            allow_halt (bool): whether halt actions can terminate a slot.
-            is_warmup (bool): when True, zero RL + vmPFC losses (supervised-only phase).
-
-        Returns ``(step_output, new_carry, done)`` where ``done`` signals that all
-        slots have halted (used by ``StepLoop`` to stop iterating).
-        """
-        explore = bool(options.get("explore", True))
-        allow_halt = bool(options.get("allow_halt", True))
-        is_warmup = bool(options.get("is_warmup", False))
-        gamma = self._config.gamma
-
-        carry, outputs = self._controller.step(
-            carry,
-            batch,
-            explore=explore,
-            allow_halt=allow_halt,
-            gamma=gamma,
-        )
-        labels = carry.data["labels"]
-
-        # --- Supervised loss (shapes PFC; STR has no gradient path here) ---------
-        loss_sup = self._compute_supervised_loss(outputs.logits, labels)
-
-        # --- Improvement-based reward (no_grad) ----------------------------------
-        # r_t = O_t - O_{t-1}: continuous RPE signal (dopamine analogue).
-        # carry.prev_outcome = O_{t-1} (or 0.0 at episode start).
-        with torch.no_grad():
-            outcome = self._compute_outcome(outputs.logits, labels)  # (B,) in [0, 1]
-        reward = outcome - carry.prev_outcome  # (B,)
-
-        # Update prev_outcome so the next step uses O_t as its baseline.
-        carry.prev_outcome = outcome.detach()
-
-        # --- TD(0) error: delta = r + gamma * V(s') - V(s) -----------------------
-        delta = reward + gamma * outputs.next_value - outputs.value  # (B,)
-
-        # --- Actor loss: -log pi(a|s) * stop_gradient(delta) ---------------------
-        log_probs = F.log_softmax(outputs.policy_logits, dim=-1)  # (B, 2)
-        log_prob_a = log_probs.gather(1, outputs.action.unsqueeze(-1)).squeeze(-1)  # (B,)
-        loss_actor = -(log_prob_a * delta.detach()).sum()
-
-        # --- Critic loss: 0.5 * delta^2 ------------------------------------------
-        loss_critic = 0.5 * (delta**2).sum()
-
-        # --- Entropy bonus -------------------------------------------------------
-        loss_entropy = -Categorical(logits=outputs.policy_logits).entropy().sum()
-
-        # --- vmPFC auxiliary Q-loss (TD Q-learning, off-policy) ------------------
-        q_a = outputs.q_values.gather(1, outputs.action.unsqueeze(-1)).squeeze(-1)  # (B,)
-        q_target = (reward + gamma * outputs.next_q_max).detach()  # (B,)
-        loss_vmPFC = 0.5 * ((q_a - q_target) ** 2).sum()
-
-        # --- Warmup gating: suppress RL + vmPFC losses during supervised warmup --
-        if is_warmup:
-            loss_actor = torch.zeros_like(loss_actor)
-            loss_critic = torch.zeros_like(loss_critic)
-            loss_entropy = torch.zeros_like(loss_entropy)
-            loss_vmPFC = torch.zeros_like(loss_vmPFC)
-
-        # --- Total ---------------------------------------------------------------
-        loss_total = (
-            loss_sup
-            + self._config.c_actor * loss_actor
-            + self._config.c_critic * loss_critic
-            + self._config.c_entropy * loss_entropy
-            + self._config.c_vmPFC * loss_vmPFC
-        )
-
-        step_output = RLStepOutput(
-            loss=loss_total,
-            loss_supervised=loss_sup.detach(),
-            loss_actor=loss_actor.detach(),
-            loss_critic=loss_critic.detach(),
-            loss_entropy=loss_entropy.detach(),
-            loss_vmPFC=loss_vmPFC.detach(),
-            reward_mean=reward.mean().detach(),
-            delta_mean=delta.mean().detach(),
-            outcome_mean=outcome.mean().detach(),
-            action=outputs.action.detach(),
-            value=outputs.value.detach(),
-            logits=outputs.logits.detach(),
-            policy_logits=outputs.policy_logits.detach(),
-            q_values=outputs.q_values.detach(),
-        )
-        done = bool(carry.halted.all())
-        return step_output, carry, done
-
-    # -- Helpers ----------------------------------------------------------------------------------
-
-    @staticmethod
-    def _compute_outcome(logits: Tensor, labels: Tensor) -> Tensor:
-        """Per-sequence fraction of correct non-ignored tokens (call inside ``torch.no_grad()``).
-
-        Returns float tensor ``(B,)`` in ``[0, 1]``.
-        Sequences where all labels are ignored return 0.0.
-        """
-        mask = labels != IGNORE_LABEL_ID  # (B, S)
-        counts = mask.sum(-1).clamp_min(1).float()  # (B,)
-        correct = mask & (logits.argmax(-1) == labels)  # (B, S)
-        return correct.sum(-1).float() / counts  # (B,)
-
-    # -- Helpers ----------------------------------------------------------------------------------
-
-    @staticmethod
-    def _seq_is_correct(logits: Tensor, labels: Tensor) -> Tensor:
-        """Per-sequence exact correctness (call inside ``torch.no_grad()``)."""
-        mask = labels != IGNORE_LABEL_ID  # (B, S)
-        counts = mask.sum(-1)  # (B,)
-        correct = mask & (logits.argmax(-1) == labels)
-        return (correct.sum(-1) == counts) & (counts > 0)  # (B,) bool
-
-    def _compute_supervised_loss(self, logits: Tensor, labels: Tensor) -> Tensor:
-        """Per-seq-normalised token cross-entropy, summed over the batch."""
-        loss_per_token = self.loss_fn(logits, labels, ignore_index=IGNORE_LABEL_ID)  # (B, S)
-        counts = (labels != IGNORE_LABEL_ID).sum(-1).clamp_min(1).float()  # (B,)
-        return (loss_per_token.sum(-1) / counts).sum()
-
-
-# =================================================================================================
 class TrainingModel(L.LightningModule):
     """ """
 
@@ -739,7 +296,7 @@ class TrainingModel(L.LightningModule):
         opt_rl = AdamATan2(list(self.model.str.parameters()), self._config.optimizer_rl)
 
         # Optimizer C: vmPFC — pfc.estimator only (auxiliary Q-predictor)
-        opt_vmPFC = AdamATan2(list(self.model.pfc.estimator.parameters()), self._config.optimizer_vmPFC)
+        opt_vmPFC = AdamATan2(list(self.model.pfc.estimator.parameters()), self._config.optimizer_qv)
 
         sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, sch_cfg)
         sch_rl = CosineAnnealingLRWithWarmup(opt_rl, total_steps, sch_cfg)
@@ -783,7 +340,7 @@ class TrainingModel(L.LightningModule):
 
         # Horizon=1 step loop: run one step of the controller
         step_batches = repeat(step_batch, 1)
-        is_warmup = self.global_step < self._config.rl_warmup_steps
+        is_warmup = self.global_step < self._config.warmup_steps
         step_opts = {"explore": True, "allow_halt": not is_warmup, "is_warmup": is_warmup}
         carry0 = self._train_carry
 

@@ -135,16 +135,7 @@ class ACTLossHead(nn.Module):
     def __init__(  # ------------------------------------------------------------------------------
         self, controller: ACTController, config: ACTLossConfig,
     ) -> None:  # fmt: skip
-        """Create an ACT loss head.
-
-        Parameters
-        ----------
-        controller:
-            The ACT controller responsible for maintaining rollout state and producing
-            logits/targets.
-        config:
-            Loss configuration (primarily which token-loss function to use).
-        """
+        """ """
         super().__init__()
         self._controller = controller
         self._config = config
@@ -161,15 +152,11 @@ class ACTLossHead(nn.Module):
 
     @property
     def loss_fn(self) -> Any:
-        """Resolved token-level loss function.
-
-        The config stores a string/enum name which is resolved on
-        :mod:`ehc_sn.loss.cross_entropy`.
-        """
+        """Resolved token-level loss function."""
         return getattr(cross_entropy_module, self._config.function)
 
     def initial_carry(  # -------------------------------------------------------------------------
-        self, batch_sample: Batch
+        self, batch_sample: Batch, 
     ) -> ACTState:  # fmt: skip
         """Create the initial :class:`ACTState` for a new rollout."""
         return self.controller.initial_state(batch_sample)

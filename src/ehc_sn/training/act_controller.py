@@ -9,7 +9,8 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-Batch = Dict[str, Tensor]  # Generic batch type, can be specialized as needed
+from ehc_sn.types import Batch
+from ehc_sn.utils.detach import DetachMixin
 
 
 # ==================================================================================================
@@ -36,10 +37,6 @@ class ACTControllerConfig(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
-# NOTE: ACTBackbone and HaltingHead protocols are STR's public contract and
-# will move to modules/str/ (see spec-architecture.md §9 "STR protocol
-# migration"). After the move, act_controller.py will import them from there.
 # =================================================================================================
 class ACTBackbone(Protocol):
     """Minimal interface required by the ACT controller backbone.
@@ -70,7 +67,7 @@ class ACTBackbone(Protocol):
 
 # =================================================================================================
 @dataclass
-class ACTState:
+class ACTState(DetachMixin):
     """Per-slot controller state.
 
     Notes:
@@ -87,23 +84,10 @@ class ACTState:
     halted: Tensor  # Per-slot reset/done flag, shape: (B,)
     data: Dict[str, Tensor]  # Per-slot buffers that persist across steps until reset
 
-    def detach(self) -> "ACTState":
-        """Return a copy with ``model_state`` detached from the computation graph.
-
-        ``steps``, ``halted``, and ``data`` are integer/bool tensors that never
-        carry gradients, so only ``model_state`` needs to be detached.
-        """
-        return ACTState(
-            model_state=self.model_state.detach(),
-            steps=self.steps,
-            halted=self.halted,
-            data=self.data,
-        )
-
 
 # =================================================================================================
 @dataclass
-class ACTOutput:
+class ACTOutput(DetachMixin):
     """Outputs produced by a single controller step.
 
     Notes:
@@ -116,16 +100,6 @@ class ACTOutput:
     continue_logits: Tensor  # Per-slot Q-logits for continuing, shape: (B,)
     action: Tensor  # Selected greedy action: 0=halt, 1=continue
     target_continue: Tensor | None = None  # TD(0) bootstrap target for continue head
-
-    def detach(self) -> ACTOutput:
-        """Return a new ACTOutput with all tensors detached from the computation graph."""
-        return ACTOutput(
-            logits=self.logits.detach(),
-            halt_logits=self.halt_logits.detach(),
-            continue_logits=self.continue_logits.detach(),
-            action=self.action.detach(),
-            target_continue=self.target_continue.detach() if self.target_continue is not None else None,
-        )
 
 
 # =================================================================================================
@@ -150,7 +124,7 @@ class ACTController:
     CONTINUE_ACTION = 1
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: ACTBackbone,  config: ACTControllerConfig
+        self, backbone: ACTBackbone,  config: ACTControllerConfig,
     ) -> None:  # fmt: skip
         """Initialize the ACT controller.
 
