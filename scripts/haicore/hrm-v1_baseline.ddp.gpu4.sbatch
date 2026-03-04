@@ -24,7 +24,7 @@ source "${SLURM_SUBMIT_DIR}/.venv/bin/activate"
 
 # Set environment variables for optimal performance
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
-export NCCL_ASYNC_ERROR_HANDLING=1
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export HRM_V1_CONFIGURATION_PATH="config/haicore_hrm-mazehard.toml"
 
 # Run the training script with srun for proper resource allocation and binding
@@ -35,5 +35,5 @@ srun --cpu-bind=cores \
     --trainer_num_nodes=1 \
     --trainer_accelerator=gpu \
     --max_steps=200000 \
-    --val_check_interval=60 \
+    --val_check_interval=100 \
     --log_every_n_steps=20

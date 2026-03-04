@@ -10,6 +10,7 @@ global_batch_size = 128
 epochs            = 100
 seed              = 42
 augment           = true
+val_check_interval = 100
 
 # -- Model architecture -------------------------------------------------------
 [model]

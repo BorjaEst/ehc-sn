@@ -166,8 +166,15 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         default=10,
         description="Log metrics every N steps.",
     )
+    check_val_every_n_epoch: Optional[int] = Field(
+        default=None,
+        description=(
+            "Validation scheduling mode. Set to None to validate based on total training batches "
+            "across epochs (i.e., use val_check_interval as a global step interval)."
+        ),
+    )
     val_check_interval: int = Field(
-        default=60,
+        default=100,
         description="Validation check interval (in training steps).",
     )
     enable_progress_bar: bool = Field(
@@ -281,6 +288,7 @@ if __name__ == "__main__":
         devices=settings.trainer_devices,
         num_nodes=settings.trainer_num_nodes,
         max_steps=settings.max_steps,
+        check_val_every_n_epoch=settings.check_val_every_n_epoch,
         val_check_interval=settings.val_check_interval,
         limit_val_batches=settings.limit_val_batches,
         log_every_n_steps=settings.log_every_n_steps,
