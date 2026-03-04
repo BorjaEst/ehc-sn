@@ -26,7 +26,7 @@ from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.rl_controller import RLController, RLControllerConfig, RLOutput, RLState
-from ehc_sn.training.rl_head import RLLossConfig, RLLossHead, RLStepOutput
+from ehc_sn.training.rl_head import RLLossConfig, RLLossHead, RLLossStep
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
 from ehc_sn.training.step_loop import StepContext, StepLoop
 from ehc_sn.types import Device, Dtype

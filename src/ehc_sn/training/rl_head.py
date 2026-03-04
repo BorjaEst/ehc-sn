@@ -29,7 +29,7 @@ class RLLossConfig(BaseModel, extra="forbid"):
 
 # =================================================================================================
 @dataclass(frozen=True)
-class RLStepOutput:
+class RLLossStep:
     """ """
 
     loss: Tensor  # combined total loss — kept live for backward()
@@ -73,7 +73,7 @@ class RLLossHead(nn.Module):
     def forward(  # -------------------------------------------------------------------------------
         self, batch: Batch, carry: RLState, *, 
         is_warmup:bool=False, **options: Any,
-    ) -> Tuple[RLStepOutput, RLState, bool]:  # fmt: skip
+    ) -> Tuple[RLLossStep, RLState, bool]:  # fmt: skip
         """ """
         # TODO: The RLHeadLoss should receive targets computed using gamma, but it must not store or define gamma itself.
         gamma = self._config.gamma
@@ -129,7 +129,7 @@ class RLLossHead(nn.Module):
             + self._config.c_vmPFC * loss_vmPFC
         )
 
-        step_output = RLStepOutput(
+        step_output = RLLossStep(
             loss=loss_total,
             loss_supervised=loss_sup.detach(),
             loss_actor=loss_actor.detach(),

@@ -115,7 +115,7 @@ class Losses:
 
 # =================================================================================================
 @dataclass(frozen=True)
-class ACTStepOutput:
+class ACTLossStep:
     """Per-step output contract for loss heads and rollout loops."""
 
     loss: Tensor  # Scalar loss for this step, used for back-propagation
@@ -163,7 +163,7 @@ class ACTLossHead(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, batch: Batch, carry: ACTState, **options: Any,
-    ) -> Tuple[ACTStepOutput, ACTState, bool]:  # fmt: skip
+    ) -> Tuple[ACTLossStep, ACTState, bool]:  # fmt: skip
         """Run one ACT step, returning the step loss, updated state, and metrics.
 
         The controller encapsulates halting and exploration behavior.
@@ -179,7 +179,7 @@ class ACTLossHead(nn.Module):
         losses = self.compute_losses(outputs, labels, stats)
         metrics = self.compute_metrics(carry, outputs, stats, losses)
 
-        outputs = ACTStepOutput(loss=losses.total, metrics=metrics, outputs=outputs)
+        outputs = ACTLossStep(loss=losses.total, metrics=metrics, outputs=outputs)
         return outputs, carry, bool(carry.halted.all())
 
     def compute_correctness(  # ------------------------------------------------------------------
