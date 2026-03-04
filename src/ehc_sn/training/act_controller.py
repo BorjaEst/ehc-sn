@@ -205,6 +205,10 @@ class ACTController:
             allow_halt: Whether a greedy halt action can end the episode early.
             explore: Whether to apply the minimum halting step constraint to a
                 random subset of slots (per-step exploration rule).
+
+        Returns:
+            new_state: Updated controller state after this step.
+            output: ACTOutput containing all relevant tensors for loss computation and tracing.
         """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
@@ -242,10 +246,11 @@ class ACTController:
             slots marked ``halted=True`` are replaced by the new incoming
             ``batch`` values and the rest keep their previous buffered values.
         """
-        data, halted = state.data, state.halted
+        halted, data = state.halted, state.data
         return {
-            k: torch.where(halted.view((-1,) + (1,) * (batch[k].ndim - 1)), batch[k], data[k]) for k in batch
-        }
+            k: torch.where(halted.view((-1,) + (1,) * (batch[k].ndim - 1)), batch[k], data[k])
+            for k in batch
+        }  # fmt: skip
 
     def _select_action_and_done(  # ---------------------------------------------------------------
         self, q_halt: Tensor, q_continue: Tensor, steps: Tensor, allow_halt: bool, explore: bool,
