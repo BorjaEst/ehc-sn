@@ -13,6 +13,9 @@
 # Set strict bash options for better error handling
 set -euo pipefail
 
+# Avoid inheriting conflicting modules from the submission environment.
+module purge
+
 # Load HAICORE modules (NVIDIA tools)
 module load toolkit/nvidia-hpc-sdk/25.3
 
