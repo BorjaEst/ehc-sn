@@ -121,30 +121,9 @@ class RLLossHead(nn.Module):
             loss_vmPFC = torch.zeros_like(loss_vmPFC)
 
         # --- Total ---------------------------------------------------------------
-        loss_total = (
-            loss_sup
-            + self._config.c_actor * loss_actor
-            + self._config.c_critic * loss_critic
-            + self._config.c_entropy * loss_entropy
-            + self._config.c_vmPFC * loss_vmPFC
-        )
+        loss_total = ...
 
-        step_output = RLLossStep(
-            loss=loss_total,
-            loss_supervised=loss_sup.detach(),
-            loss_actor=loss_actor.detach(),
-            loss_critic=loss_critic.detach(),
-            loss_entropy=loss_entropy.detach(),
-            loss_vmPFC=loss_vmPFC.detach(),
-            reward_mean=reward.mean().detach(),
-            delta_mean=delta.mean().detach(),
-            outcome_mean=outcome.mean().detach(),
-            action=outputs.action.detach(),
-            value=outputs.value.detach(),
-            logits=outputs.logits.detach(),
-            policy_logits=outputs.policy_logits.detach(),
-            q_values=outputs.q_values.detach(),
-        )
+        step_output = RLLossStep(...)
         done = bool(carry.halted.all())
         return step_output, carry, done
 

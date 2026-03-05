@@ -251,7 +251,7 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         self.model = HRModelV2(config.model)
         self.controller = RLController(self.model, self.model.str, config.rl_controller)
-        self.step_module = RLLossHead(self.controller, config)
+        self.step_module = RLLossHead(self.controller, config.loss)
         self._config = config
 
         # Manual optimisation: explicit backward + opt step (legacy parity + dual-opt clarity).

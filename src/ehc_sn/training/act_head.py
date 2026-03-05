@@ -151,17 +151,21 @@ class ACTLossHead(nn.Module):
         token_count_per_seq = stats.loss_counts.clamp_min(1).to(torch.float32)  # (B,)
         seq_accuracy = token_correct_per_seq / token_count_per_seq  # (B,)
 
-        pred_halt = outputs.action == ACTController.HALT_ACTION  # (B,)
-        q_halt_correct = pred_halt == stats.seq_is_correct  # (B,)
+        done_action = self.controller.config.done_action
+        pred_done = outputs.action == done_action  # (B,)
+        q_done_correct = pred_done == stats.seq_is_correct  # (B,)
 
         q_continue_correct: Optional[Tensor] = None
-        if outputs.target_continue is not None and outputs.continue_logits is not None:
-            # The continue head uses a dedicated target produced by the controller.
-            pred_continue = outputs.continue_logits >= 0  # (B,)
-            q_continue_correct = pred_continue == stats.seq_is_correct  # (B,)
+        if outputs.target_q is not None:
+            n_actions = outputs.q_values.shape[-1]
+            continue_actions = [a for a in range(n_actions) if a != done_action]
+            if continue_actions:
+                q_cont = outputs.q_values[..., continue_actions].mean(dim=-1)
+                pred_continue = q_cont >= 0
+                q_continue_correct = pred_continue == stats.seq_is_correct
 
         eligible_count = eligible_mask.to(torch.float32).sum()
-        halted = self._build_halted_agg(state, stats, halted_mask, halted_weights, eligible_count, seq_accuracy, q_halt_correct, q_continue_correct)  # fmt: skip
+        halted = self._build_halted_agg(state, stats, halted_mask, halted_weights, eligible_count, seq_accuracy, q_done_correct, q_continue_correct)  # fmt: skip
         tokens = self._build_token_agg(token_correct_per_seq, token_count_per_seq, halted_weights)
         loss = self._build_loss_agg(losses, batch_size=outputs.logits.shape[0])
 
@@ -217,24 +221,29 @@ class ACTLossHead(nn.Module):
         loss_per_token = self.loss_fn(outputs.logits, labels, ignore_index=IGNORE_LABEL_ID)
         loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
         loss_sum = loss_per_seq.sum()
+        done_action = self.controller.config.done_action
 
-        # Halting loss: match "halt" to sequence correctness.
-        # Using seq-level supervision avoids rewarding early halting on partially-correct sequences.
-        q_halt_loss = F.binary_cross_entropy_with_logits(
-            input=outputs.halt_logits,
-            target=stats.seq_is_correct.to(outputs.halt_logits.dtype),
+        # Done-action loss: match Q(done) to sequence correctness.
+        q_done_logits = outputs.q_values[..., done_action]  # (B,)
+        q_done_loss = F.binary_cross_entropy_with_logits(
+            input=q_done_logits,
+            target=stats.seq_is_correct.to(q_done_logits.dtype),
             reduction="sum",
         )
 
-        # Continue loss: optional auxiliary supervision from the controller.
-        if outputs.target_continue is not None and outputs.continue_logits is not None:
-            q_continue_loss = F.binary_cross_entropy_with_logits(
-                input=outputs.continue_logits,
-                target=outputs.target_continue,
-                reduction="sum",
-            )
-        else:
-            q_continue_loss = None
+        # Continue loss: optional auxiliary supervision from the controller's TD target.
+        q_continue_loss: Tensor | None = None
+        if outputs.target_q is not None:
+            # Select the non-done logit(s). For 2-action, pick ~done_action.
+            # Generalization: supervise all non-done actions toward TD target.
+            n_actions = outputs.q_values.shape[-1]
+            continue_actions = [a for a in range(n_actions) if a != done_action]
+            if continue_actions:
+                q_cont = outputs.q_values[..., continue_actions].mean(dim=-1)  # (B,)
+                q_continue_loss = F.binary_cross_entropy_with_logits(
+                    input=q_cont,
+                    target=outputs.target_q,
+                    reduction="sum",
+                )
 
-        # Return all losses in a structured way for consistent logging.
-        return Losses(loss_sum, q_halt_loss, q_continue_loss)
+        return Losses(loss_sum, q_done_loss, q_continue_loss)

@@ -156,14 +156,9 @@ class TraceFields:
         return loss.detach()  # Detach to avoid tracking gradients in the trace
 
     @staticmethod
-    def get_model_halt_logits(ctx: StepContext) -> TraceValue:
-        halt_logits: Tensor = ctx.outputs.outputs.halt_logits  # Tensor shape (B,)
-        return halt_logits.detach()
-
-    @staticmethod
-    def get_model_continue_logits(ctx: StepContext) -> TraceValue:
-        continue_logits: Tensor = ctx.outputs.outputs.continue_logits  # Tensor shape (B,)
-        return continue_logits.detach()
+    def get_q_values(ctx: StepContext) -> TraceValue:
+        q_values: Tensor = ctx.outputs.outputs.q_values  # (B, n_actions)
+        return q_values.detach()
 
     @staticmethod
     def get_model_steps(ctx: StepContext) -> TraceValue:
@@ -193,10 +188,10 @@ class TraceFields:
 
 # =================================================================================================
 def trace_fields() -> List[TraceField[StepContext]]:
+    """ """
     return [
         TraceField(name="loss", get=TraceFields.get_model_loss),
-        TraceField(name="halt_logits", get=TraceFields.get_model_halt_logits),
-        TraceField(name="continue_logits", get=TraceFields.get_model_continue_logits),
+        TraceField(name="q_values", get=TraceFields.get_q_values),
         TraceField(name="steps", get=TraceFields.get_model_steps),
         TraceField(name="act/halted", get=TraceFields.get_act_halted),
         TraceField(name="pred/is_o", get=TraceFields.get_pred_is_o),
