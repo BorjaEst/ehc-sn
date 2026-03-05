@@ -5,11 +5,11 @@
 # Or via env var:              HRM_V1_CONFIGURATION_PATH=config/my_config.toml
 
 # -- Dataset & training -------------------------------------------------------
-dataset_path      = "data/processed/maze-30x30-hard-1k"
-global_batch_size = 128
-epochs            = 100
-seed              = 42
-augment           = true
+dataset_path       = "data/processed/maze-30x30-hard-1k"
+global_batch_size  = 128
+epochs             = 100
+seed               = 42
+augment            = true
 val_check_interval = 100
 
 # -- Model architecture -------------------------------------------------------
@@ -20,15 +20,15 @@ val_check_interval = 100
     seq_length = 900 # 30 × 30 for mazehard puzzle
 
 [model.pfc.reasoning_h] # Transformer block config for both H and L reasoning modules
-    cortex.embedding_dim = 32
+    cortex.embedding_dim = 512
     cortex.num_heads     = 4
 
 [model.pfc.reasoning_l] # Transformer block config for both H and L reasoning modules
-    cortex.embedding_dim = 32
+    cortex.embedding_dim = 512
     cortex.num_heads     = 4
 
 [model.pfc.value_head]
-    hidden_size = 32 # Should match the PFC reasoning module's embedding_dim
+    hidden_size = 512 # Should match the PFC reasoning module's embedding_dim
     n_actions   = 2
     pool_mode   = "first"
     pool_index  = 0 # Reads the CLS summary slot (position 0), not a maze cell

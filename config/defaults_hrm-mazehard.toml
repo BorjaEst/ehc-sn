@@ -6,7 +6,7 @@
 
 # -- Dataset & training -------------------------------------------------------
 dataset_path      = "data/processed/maze-30x30-hard-1k"
-global_batch_size = 8
+global_batch_size = 16
 epochs            = 100
 seed              = 42
 augment           = true
@@ -19,18 +19,18 @@ augment           = true
     seq_length = 900 # 30 × 30 for mazehard puzzle
 
 [model.pfc.reasoning_h] # Transformer block config for both H and L reasoning modules
-    cortex.embedding_dim = 32
+    cortex.embedding_dim = 512
     cortex.num_heads     = 4
 
 [model.pfc.reasoning_l] # Transformer block config for both H and L reasoning modules
-    cortex.embedding_dim = 32
+    cortex.embedding_dim = 512
     cortex.num_heads     = 4
 
 [model.pfc.value_head]
-    hidden_size = 32 # Should match the PFC reasoning module's embedding_dim
+    hidden_size = 512 # Should match the PFC reasoning module's embedding_dim
     n_actions   = 2
     pool_mode   = "first"
-    pool_index  = 0   # Reads the CLS summary slot (position 0), not a maze cell
+    pool_index  = 0 # Reads the CLS summary slot (position 0), not a maze cell
     init_bias   = -5.0
 
 # -- ACT controller -----------------------------------------------------------
