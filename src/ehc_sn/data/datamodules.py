@@ -120,11 +120,12 @@ class Datamodule(L.LightningDataModule):
         return DataLoader(
             dataset,
             batch_size=self._per_gpu_batch_size(),
-            shuffle=shuffle,
+            shuffle=shuffle,  # Shuffle to ensure all data is seen during training (halt buffer)
             num_workers=self.config.num_workers,
             prefetch_factor=self.config.prefetch_factor if self.config.num_workers > 0 else None,
             pin_memory=self.config.pin_memory,
             persistent_workers=self.config.persistent_workers and self.config.num_workers > 0,
+            drop_last=True,  # Drop last batch to ensure consistent batch size
         )
 
     def train_dataloader(  # ----------------------------------------------------------------------
