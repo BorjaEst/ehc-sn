@@ -1,24 +1,4 @@
-"""Adaptive Computation Time (ACT) loss head.
-
-This module defines the loss/metrics head used together with :class:`ehc_sn.training.act_controller.ACTController`.
-
-At each ACT step the controller produces:
-
-- token logits for the main task (language-model-style cross entropy over tokens)
-- halting/continuation logits for a per-sequence decision
-
-The loss head:
-
-1) computes masked token-level modeling loss
-2) derives per-sequence correctness from token predictions
-3) trains the halting decision to match that correctness signal
-4) aggregates step metrics, focusing on sequences that have *actually halted*
-
-Notes
------
-- Labels use ``IGNORE_LABEL_ID`` (default ``-100``) to mark padding / non-loss tokens.
-- Metrics intentionally only count halted sequences to avoid reporting partial-rollout performance.
-"""
+""" """
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
@@ -39,14 +19,7 @@ IGNORE_LABEL_ID = -100
 
 # =================================================================================================
 class ACTLossConfig(BaseModel, extra="forbid"):
-    """Configuration for :class:`ACTLossHead`.
-
-    Attributes
-    ----------
-    function:
-        Name of the token-level modeling loss function to use. This is resolved as an
-        attribute on :mod:`ehc_sn.loss.cross_entropy`.
-    """
+    """ """
 
     function: LossType = Field(
         default="stablemax_cross_entropy",
@@ -57,44 +30,32 @@ class ACTLossConfig(BaseModel, extra="forbid"):
 # =================================================================================================
 @dataclass(frozen=True)
 class CorrectnessStats:
-    """Derived correctness signals used for halting supervision and metrics.
-
-    This structure is computed under ``torch.no_grad()`` because it is used as a
-    training target for the halting/continuation heads and for logging.
-    """
+    """ """
 
     mask: Tensor  # Boolean tensor indicating which tokens contribute to the loss (e.g., non-padding tokens).
 
     @property
     def loss_counts(self) -> Tensor:
-        """Number of tokens contributing to the loss for each sequence (i.e., non-padding tokens)."""
+        """ """
         return self.mask.sum(-1)
 
     @property
     def loss_divisor(self) -> Tensor:
-        """Divisor used for per-sequence normalization.
-
-        Clamps to at least 1 to avoid division-by-zero when a sequence has no
-        supervised tokens.
-        """
+        """ """
         return self.loss_counts.clamp_min(1).unsqueeze(-1)
 
     is_correct: Tensor  # Indicates which tokens were predicted correctly (after masking).
 
     @property
     def seq_is_correct(self) -> Tensor:
-        """Whether the entire sequence is correct (ignoring masked/padding tokens)."""
+        """ """
         return self.is_correct.sum(-1) == self.loss_counts
 
 
 # =================================================================================================
 @dataclass(frozen=True)
 class Losses:
-    """Structured loss components produced by :class:`ACTLossHead`.
-
-    All fields are *sums* over the batch (and for ``loss_sum`` also over tokens via
-    per-sequence normalization).
-    """
+    """ """
 
     loss_sum: Tensor  # Per-step loss sum for the main task
     q_halt_loss_sum: Tensor  # Loss sum for the halting decision
@@ -102,11 +63,7 @@ class Losses:
 
     @property
     def total(self) -> Tensor:
-        """Total scalar loss used for back-propagation.
-
-        The halting and continuation losses are down-weighted (0.5 each) relative
-        to the modeling loss.
-        """
+        """ """
         q_continue_loss_sum = self.q_continue_loss_sum
         if q_continue_loss_sum is None:
             q_continue_loss_sum = torch.tensor(0.0, device=self.loss_sum.device)
@@ -116,7 +73,7 @@ class Losses:
 # =================================================================================================
 @dataclass(frozen=True)
 class ACTLossStep:
-    """Per-step output contract for loss heads and rollout loops."""
+    """ """
 
     loss: Tensor  # Scalar loss for this step, used for back-propagation
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
@@ -125,12 +82,7 @@ class ACTLossStep:
 
 # =================================================================================================
 class ACTLossHead(nn.Module):
-    """Loss head for ACT rollouts.
-
-    The head is called once per rollout step. It delegates state transitions to the
-    :class:`~ehc_sn.training.act_controller.ACTController`, computes losses, and
-    returns both the scalar loss and aggregated metrics.
-    """
+    """ """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, controller: ACTController, config: ACTLossConfig,
@@ -142,32 +94,29 @@ class ACTLossHead(nn.Module):
 
     @property
     def controller(self) -> ACTController:
-        """The underlying :class:`ACTController` used to step the rollout."""
+        """ """
         return self._controller
 
     @property
     def config(self) -> ACTLossConfig:
-        """Configuration object for this loss head."""
+        """ """
         return self._config
 
     @property
     def loss_fn(self) -> Any:
-        """Resolved token-level loss function."""
+        """ """
         return getattr(cross_entropy_module, self._config.function)
 
     def initial_carry(  # -------------------------------------------------------------------------
         self, batch_sample: Batch, 
     ) -> ACTState:  # fmt: skip
-        """Create the initial :class:`ACTState` for a new rollout."""
+        """ """
         return self.controller.initial_state(batch_sample)
 
     def forward(  # -------------------------------------------------------------------------------
         self, batch: Batch, carry: ACTState, **options: Any,
     ) -> Tuple[ACTLossStep, ACTState, bool]:  # fmt: skip
-        """Run one ACT step, returning the step loss, updated state, and metrics.
-
-        The controller encapsulates halting and exploration behavior.
-        """
+        """ """
         carry, outputs = self.controller.step(carry, batch, **options)
         labels = carry.data["labels"]
 
@@ -185,11 +134,7 @@ class ACTLossHead(nn.Module):
     def compute_correctness(  # ------------------------------------------------------------------
         self, outputs: ACTOutput, labels: Tensor
     ) -> CorrectnessStats:  # fmt: skip
-        """Compute token- and sequence-level correctness for the current step.
-
-        Correct tokens are those whose argmax prediction matches the label, restricted
-        to non-ignored label positions.
-        """
+        """ """
         mask = labels != IGNORE_LABEL_ID
         is_correct = mask & (torch.argmax(outputs.logits, dim=-1) == labels)
         return CorrectnessStats(mask=mask, is_correct=is_correct)
@@ -197,12 +142,7 @@ class ACTLossHead(nn.Module):
     def compute_metrics(  # -----------------------------------------------------------------------
         self, state: ACTState, outputs: ACTOutput, stats: CorrectnessStats, losses: Losses,
     ) -> StepMetrics:  # fmt: skip
-        """Aggregate step metrics.
-
-        Metrics focus on sequences that have halted in the *current* carry. This keeps
-        logged accuracy and loss aligned with the ACT decision process (partial sequences
-        still computing are excluded).
-        """
+        """ """
         eligible_mask = stats.loss_counts > 0
         halted_mask = state.halted & eligible_mask  # (B,)
         halted_weights = halted_mask.to(torch.float32)
@@ -232,7 +172,7 @@ class ACTLossHead(nn.Module):
         eligible_count: Tensor, seq_accuracy: Tensor, q_halt_correct: Tensor,
         q_continue_correct: Optional[Tensor]=None,
     ) -> HaltedAgg:  # fmt: skip
-        """Build aggregated metrics for halted sequences."""
+        """ """
         if q_continue_correct is None:
             q_continue_correct = torch.zeros_like(halted_mask)  # (B,) bool
 
@@ -249,7 +189,7 @@ class ACTLossHead(nn.Module):
     def _build_token_agg(  # ---------------------------------------------------------------------
         self, token_correct_per_seq: Tensor, token_count_per_seq: Tensor, halted_weights: Tensor,
     ) -> TokenAgg:  # fmt: skip
-        """Build token-level aggregates for halted sequences."""
+        """ """
         return TokenAgg(
             token_correct_sum=(token_correct_per_seq * halted_weights).sum(),
             token_count_sum=(token_count_per_seq * halted_weights).sum(),
@@ -258,7 +198,7 @@ class ACTLossHead(nn.Module):
     def _build_loss_agg(  # ----------------------------------------------------------------------
         self, losses: Losses, *, batch_size: int,
     ) -> LossAgg:  # fmt: skip
-        """Build loss aggregates with consistent device/dtype handling."""
+        """ """
         q_continue_loss_sum = losses.q_continue_loss_sum
         if q_continue_loss_sum is None:
             q_continue_loss_sum = losses.loss_sum.new_zeros(())
@@ -273,15 +213,7 @@ class ACTLossHead(nn.Module):
     def compute_losses(  # -----------------------------------------------------------------------
         self, outputs: ACTOutput, labels: Tensor, stats: CorrectnessStats
     ) -> Losses:  # fmt: skip
-        """Compute modeling + ACT decision losses.
-
-        - **Modeling loss**: token-level cross entropy over non-ignored labels, normalized
-            per sequence and then summed over the batch.
-        - **Halting loss**: binary cross entropy encouraging the model to halt when the
-            entire sequence is correct, and not halt otherwise.
-        - **Continuation loss**: optional auxiliary BCE loss, only computed when the
-            controller provides ``outputs.target_continue``.
-        """
+        """ """
         loss_per_token = self.loss_fn(outputs.logits, labels, ignore_index=IGNORE_LABEL_ID)
         loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
         loss_sum = loss_per_seq.sum()
