@@ -5,9 +5,9 @@ seed              = 42
 augment           = true
 
 
-gamma          = 1.0
-warmup_steps   = 5000
-halt_max_steps = 10
+gamma        = 1.0
+warmup_steps = 5000
+max_steps    = 10
 
 c_actor   = 1.0
 c_critic  = 0.5

@@ -36,7 +36,7 @@ augment           = true
 # -- ACT controller -----------------------------------------------------------
 [act_controller]
     exploration_prob = 0.1
-    halt_max_steps   = 10
+    max_steps        = 10
 
 # -- Loss, optimizer, scheduler (defaults are fine; override here if needed) ---
 [loss]
