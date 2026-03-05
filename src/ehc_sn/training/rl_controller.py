@@ -1,5 +1,6 @@
 """ """
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, Tuple, TypeAlias
 
@@ -45,18 +46,18 @@ class RLBackbone[BkState](Protocol):
     """ """
 
     def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int, *, device: Optional[Device] = None,
+        self, batch_size: int,
     ) -> BkState:  # fmt: skip
         ...  # fmt: skip
 
     def reset_state(  # ---------------------------------------------------------------------------
-        self, state: BkState, reset_flag: Tensor,
+        self, reset_flag: Tensor, state: BkState,
     ) -> BkState:   # fmt: skip
         ...  # fmt: skip
 
     def __call__(  # ------------------------------------------------------------------------------
         self, inputs: Tensor, state: BkState | None = None,
-    ) -> Tuple[Any, Tensor, Tensor]:  # fmt: skip
+    ) -> Tuple[BkState, Tensor, Tensor, Tensor]:  # fmt: skip
         ...  # fmt: skip
 
 
@@ -188,7 +189,7 @@ class RLController:
         # 4. STR forward — features MUST be detached (REQ-006: no RL grads into PFC)
         features = theta_cls.detach()  # (B, D)
         policy_logits, value, str_state = self._controller(features, new_model_state.str)
-        new_model_state = HRMState(pfc=new_model_state.pfc, str=str_state)
+        new_model_state = dataclasses.replace(new_model_state, str=str_state)
 
         # 5. Action selection
         if explore:
@@ -205,7 +206,7 @@ class RLController:
         # 7. Bootstrap V(s_{t+1}) and max Q(s_{t+1}) — no_grad; zero for done slots
         with torch.no_grad():
             _, _, next_theta_cls, next_q_values = self._backbone(data["inputs"], new_model_state)
-            _, next_value, _ = self._controller(next_theta_cls.detach())
+            _, next_value, _ = self._controller(next_theta_cls.detach(), new_model_state.str)
             next_value = torch.where(done, torch.zeros_like(next_value), next_value)
             next_q_max = next_q_values.max(dim=-1).values
             next_q_max = torch.where(done, torch.zeros_like(next_q_max), next_q_max)

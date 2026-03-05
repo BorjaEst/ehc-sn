@@ -250,7 +250,7 @@ class TrainingModel(L.LightningModule):
     ) -> None:  # fmt: skip
         super().__init__()
         self.model = HRModelV2(config.model)
-        self.controller = RLController(self.model, self.model.str, config.halt_max_steps)
+        self.controller = RLController(self.model, self.model.str, config.rl_controller)
         self.step_module = RLLossHead(self.controller, config)
         self._config = config
 
