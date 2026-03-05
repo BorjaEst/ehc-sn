@@ -57,7 +57,7 @@ class ACTBackbone(Protocol):
 
 # =================================================================================================
 @dataclass
-class ACTState(DetachMixin):
+class ACTState[ModelState](DetachMixin):
     """ """
 
     model_state: Any  # Recurrent state of the model (e.g. LSTM hidden states)
@@ -74,6 +74,7 @@ class ACTOutput(DetachMixin):
     logits: Tensor  # Main task logits (B, S, vocab)
     q_values: Tensor  # Per-slot Q-logits for all actions, shape: (B, n_actions)
     action: Tensor  # Selected action index, shape: (B,)
+    theta_cls: Tensor  # (B, D) — theta CLS features (tracing/diagnostics)
     target_q: Tensor | None = None  # TD(0) bootstrap Q-target, shape: (B,). None outside training.
 
 
@@ -115,18 +116,18 @@ class ACTController:
         """ """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, logits, q = self.backbone(data["inputs"], model_state)
+        model_state, logits, theta, q = self.backbone(data["inputs"], model_state)
 
         steps = torch.where(state.halted, 0, state.steps) + 1
         action, done = self._select_action_and_done(q, steps, allow_halt, explore)
 
         state = ACTState(model_state=model_state, steps=steps, halted=done, data=data)
-        output = ACTOutput(logits=logits, q_values=q, action=action)
+        output = ACTOutput(logits=logits, q_values=q, action=action, theta_cls=theta)
 
         # TD(0) bootstrap target for the Q-head.
         with torch.no_grad():
             _, _, next_q = self.backbone(data["inputs"], model_state)
-        is_last_step = steps >= self._config.halt_max_steps
+        is_last_step = steps >= self.config.max_steps
 
         # At last step: forced done → target is Q(done_action). Otherwise: max over all actions.
         done_action = self._config.done_action
@@ -165,4 +166,5 @@ class ACTController:
         return action, done
 
 
+# =================================================================================================
 __all__ = ["ACTBackbone", "ACTControllerConfig", "ACTController", "ACTState", "ACTOutput"]

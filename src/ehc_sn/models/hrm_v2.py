@@ -42,10 +42,6 @@ O_ID: int = 5
 # Token label ignored by supervised loss (padding / non-supervised positions).
 IGNORE_LABEL_ID: int = -100
 
-# STR action indices (must match STRModel output dim; 0=halt, 1=continue).
-HALT_ACTION: int = 0
-CONTINUE_ACTION: int = 1
-
 
 # =================================================================================================
 class ModelSettings_V2(BaseModel, extra="forbid"):
@@ -126,12 +122,6 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
             "Prevents 'halt immediately' collapse before PFC representations are informative."
         ),
     )
-
-    # ~~ RL loss coefficients ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    c_actor: float = Field(default=1.0, ge=0.0, description="Actor loss coefficient.")
-    c_critic: float = Field(default=0.5, ge=0.0, description="Critic loss coefficient.")
-    c_entropy: float = Field(default=0.01, ge=0.0, description="Entropy regularization coefficient.")
-    c_vmPFC: float = Field(default=0.5, ge=0.0, description="vmPFC auxiliary Q-predictor loss coefficient.")
 
     # ~~ Extra ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     global_batch_size: int = Field(
@@ -224,9 +214,8 @@ class HRModelV2(nn.Module):
         """ """
         state = state or self.init_state(batch_size=inputs.shape[0])
         x = self.embed_inputs(inputs)  # (B, S, D)
-        state_pfc, z_H, q_values = self.pfc(x, state=state.pfc)  # z_H: (B, S+1, D)
-        logits = self.lm_head(z_H[:, 1:])  # strip CLS → (B, S, vocab)
-        theta_cls = z_H[:, 0]  # (B, D) — theta / CLS summary
+        state_pfc, logits, theta_cls, q_values = self.pfc(x, state=state.pfc)  # z_H: (B, S+1, D)
+        logits = self.lm_head(logits)  # strip CLS → (B, S, vocab)
         return HRMState(pfc=state_pfc, str=state.str), logits, theta_cls, q_values
 
     def embed_inputs(  # --------------------------------------------------------------------------

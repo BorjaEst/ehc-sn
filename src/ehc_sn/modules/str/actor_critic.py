@@ -24,7 +24,7 @@ Action indices (canonical; must match caller usage):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 
 import torch
@@ -78,15 +78,9 @@ class STRSettings(BaseModel, extra="forbid"):
 # =================================================================================================
 @dataclass
 class STRState(DetachMixin):
-    """STR recurrent state placeholder.
+    """ """
 
-    Kept in the STR module so we can later add short-timescale recurrence
-    (e.g., GRU hidden, eligibility traces, filtered RPE) without refactoring
-    HRM wiring/signatures.
-    """
-
-    # Empty for now.
-    pass
+    prev_reward: Tensor = torch.tensor(0.0)  # (B,) float32 — reward from previous env.step()
 
 
 # =================================================================================================
@@ -163,15 +157,14 @@ class STRModel(nn.Module):
         device: Optional[Device] = None,
     ) -> STRState:  # fmt: skip
         """Create initial STR state (placeholder; no tensors yet)."""
-        _ = (batch_size, device)
-        return STRState()
+        return STRState(prev_reward=torch.zeros(batch_size, device=device))
 
     def reset_state(  # ---------------------------------------------------------------------------
         self, state: STRState, reset_flag: Tensor,
     ) -> STRState:  # fmt: skip
         """Reset STR state for slots where reset_flag is True (no-op for now)."""
-        _ = (state, reset_flag)
-        return state
+        prev_reward = torch.where(reset_flag, torch.zeros_like(state.prev_reward), state.prev_reward)
+        return replace(state, prev_reward=prev_reward)
 
     def forward(  # -------------------------------------------------------------------------------
         self, features: Tensor, state: STRState,
@@ -188,10 +181,65 @@ class STRModel(nn.Module):
                            index 0 = halt, index 1 = continue.
             value: Scalar state-value estimate ``(B,)``.
         """
-        x = features.to(torch.float32)
-        policy_logits = self.policy_head(x)  # (B, 2)
+        reward_input = state.prev_reward.unsqueeze(-1)  # (B, 1)
+        x = torch.cat([features.to(torch.float32), reward_input], dim=-1)  # (B, D+1)
+        policy_logits = self.policy_head(x)  # (B, A)
         value = self.value_head(x).squeeze(-1)  # (B,)
         return policy_logits, value, state
+
+
+class STRModelGRU(nn.Module):
+    """STR actor-critic with GRU recurrence. Not currently used.
+
+    This is an alternative STR implementation with a GRU layer for temporal integration.
+    It is not currently used in the HRM v2 design, but it may be useful for future experiments
+    with more complex STR dynamics.
+
+    The forward method and state management would need to be adapted to handle the GRU's
+    recurrent state and the temporal dependencies it introduces.
+    """
+
+    def __init__(  # ------------------------------------------------------------------------------
+        self, config: STRSettings, *,
+        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
+    ) -> None:  # fmt: skip
+        raise NotImplementedError("STRModelGRU is not implemented yet. Use STRModel instead.")
+
+
+class STRModelLSTM(nn.Module):
+    """STR actor-critic with LSTM recurrence. Not currently used.
+
+    This is an alternative STR implementation with an LSTM layer for temporal integration.
+    It is not currently used in the HRM v2 design, but it may be useful for future experiments
+    with more complex STR dynamics.
+
+    The forward method and state management would need to be adapted to handle the LSTM's
+    recurrent state and the temporal dependencies it introduces.
+    """
+
+    def __init__(  # ------------------------------------------------------------------------------
+        self, config: STRSettings, *,
+        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
+    ) -> None:  # fmt: skip
+        raise NotImplementedError("STRModelLSTM is not implemented yet. Use STRModel instead.")
+
+
+class STRModelGoNoGo(nn.Module):
+    """STR actor-critic with separate Go/NoGo pathways. Not currently used.
+
+    This is an alternative STR implementation with separate pathways for Go (D1-like) and NoGo (D2-like)
+    action selection. It is not currently used in the HRM v2 design, but it may be useful for future experiments
+    exploring more biologically detailed STR architectures.
+
+    The forward method and state management would need to be adapted to compute separate Go/NoGo activations
+    and combine them into a final policy distribution.
+    """
+
+    def __init__(  # ------------------------------------------------------------------------------
+        self, config: STRSettings, *,
+        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
+    ) -> None:  # fmt: skip
+        raise NotImplementedError("STRModelGoNoGo is not implemented yet. Use STRModel instead.")
 
 
 __all__ = ["STRSettings", "STRState", "STRModel", "HALT_ACTION", "CONTINUE_ACTION"]

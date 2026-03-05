@@ -25,6 +25,20 @@ class RLLossConfig(BaseModel, extra="forbid"):
         default="stablemax_cross_entropy",
         description="The loss function to use for the modeling loss.",
     )
+    gamma: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Discount factor for TD learning. Default 1.0 (no discount) for optimal stopping "
+            "with additive ponder costs. Reduce if training oscillates."
+        ),
+    )
+
+    c_actor: float = Field(default=1.0, ge=0.0, description="Actor loss coefficient.")
+    c_critic: float = Field(default=0.5, ge=0.0, description="Critic loss coefficient.")
+    c_entropy: float = Field(default=0.01, ge=0.0, description="Entropy regularization coefficient.")
+    c_vmPFC: float = Field(default=0.5, ge=0.0, description="vmPFC auxiliary Q-predictor loss coefficient.")
 
 
 # =================================================================================================

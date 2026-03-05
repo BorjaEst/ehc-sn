@@ -25,19 +25,10 @@ class RLControllerConfig(BaseModel, extra="forbid"):
         le=1.0,
         description="Exploration probability for ACT halting.",
     )
-    halt_max_steps: int = Field(
+    max_steps: int = Field(
         default=10,
         ge=1,
         description="Maximum number of deliberation steps before forced halt.",
-    )
-    gamma: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Discount factor for TD learning. Default 1.0 (no discount) for optimal stopping "
-            "with additive ponder costs. Reduce if training oscillates."
-        ),
     )
 
 
@@ -86,11 +77,10 @@ class RPEController[RPEState](Protocol):
 class RLState[ModelState](DetachMixin):
     """ """
 
-    model_state: ModelState  # Recurrent backbone state
-    steps: Tensor  # (B,) int32 — per-slot deliberation step counter
-    halted: Tensor  # (B,) bool  — per-slot done / reset flag
-    prev_outcome: Tensor  # (B,) float32 — outcome from previous step (improvement baseline)
-    data: Dict[str, Tensor]  # Per-slot buffered "inputs" and "labels"
+    model_state: ModelState  # Recurrent state of the model (e.g. LSTM hidden states)
+    steps: Tensor  # Per-slot step counter, shape: (B,)
+    halted: Tensor  # Per-slot reset/done flag, shape: (B,)
+    data: Dict[str, Tensor]  # Per-slot buffers that persist across steps until reset
 
 
 # =================================================================================================
@@ -98,14 +88,12 @@ class RLState[ModelState](DetachMixin):
 class RLOutput(DetachMixin):
     """ """
 
-    logits: Tensor  # LM logits (B, S, vocab) — for supervised loss
-    policy_logits: Tensor  # STR policy logits (B, 2) — for actor and entropy losses
-    value: Tensor  # V(s_t) (B,) — for critic loss and TD error
-    next_value: Tensor  # V(s_{t+1}) (B,), produced under no_grad — TD bootstrap
-    action: Tensor  # Sampled action (B,): 0=halt, 1=continue
-    theta_cls: Tensor  # Raw (non-detached) z_H[:,0] — tracing only, not used in loss
-    q_values: Tensor  # vmPFC Q-estimates (B, n_actions) — for vmPFC TD-Q loss
-    next_q_max: Tensor  # max Q for next state (B,), under no_grad — vmPFC TD target
+    logits: Tensor  # (B, S, V) — LM logits for supervised loss
+    q_values: Tensor  # (B, n_actions) — vmPFC Q-estimates
+    action: Tensor  # (B,) — sampled action index
+    theta_cls: Tensor  # (B, D) — theta CLS features (tracing/diagnostics)
+    policy_logits: Tensor  # (B, A) — STR policy logits
+    value: Tensor  # (B,) — V(s_t) from STR critic
 
 
 # =================================================================================================
@@ -150,84 +138,25 @@ class RLController:
         self, state: RLState, batch: Batch, *,
         allow_halt: bool = True, explore: bool = True,
     ) -> Tuple[RLState, RLOutput]:  # fmt: skip
-        """Run one RLController step.
-
-        Steps performed (in order):
-            1. Refresh per-slot data for halted slots; reset prev_outcome for new episodes.
-            2. Reset backbone recurrent state for halted slots.
-            3. Backbone forward: new state, LM logits, theta_cls, vmPFC q_values.
-            4. STR forward on **detached** theta_cls: policy_logits, value.
-            5. Action selection: Categorical sample (explore=True) or argmax (False).
-            6. Compute done mask (max steps OR halt action when allow_halt=True).
-            7. Bootstrap V(s_{t+1}) and max Q(s_{t+1}) under ``torch.no_grad()``.
-
-        Args:
-            state: Current per-slot state.
-            batch: Current batch of data (inputs and labels).
-            allow_halt: If True, halt actions can terminate slots; otherwise, only max steps.
-            explore: If True, sample stochastically from the policy; otherwise, take argmax.
-
-        Returns:
-            new_state: Updated per-slot state after this step.
-            output: RLOutput containing all relevant tensors for loss computation and tracing.
-        """
-
-        # TODO: integrate and use exploration_prob
-        # TODO:
-
-        # 1. Refresh slot data; reset prev_outcome to 0.0 for newly refreshed slots
+        """ """
         data = self.refresh_slot_data(batch, state)
-        prev_outcome = torch.where(state.halted, torch.zeros_like(state.prev_outcome), state.prev_outcome)
-
-        # 2. Reset backbone recurrent state for halted slots
         model_state = self._backbone.reset_state(state.halted, state.model_state)
+        model_state, logits, theta_cls, q_values = self._backbone(data["inputs"], model_state)
 
-        # 3. Backbone forward (gradients flow for supervised loss via logits; q_values → vmPFC)
-        new_model_state, logits, theta_cls, q_values = self._backbone(data["inputs"], model_state)
-        q_values = q_values.detach()  # detach q_values to prevent vmPFC gradients flowing into PFC
+        # STR: detach theta_cls for gradient isolation (REQ-006)
+        features = theta_cls.detach()
+        policy_logits, value, str_state = self._controller(features, model_state.str)
+        model_state = dataclasses.replace(model_state, str=str_state)
 
-        # 4. STR forward — features MUST be detached (REQ-006: no RL grads into PFC)
-        features = theta_cls.detach()  # (B, D)
-        policy_logits, value, str_state = self._controller(features, new_model_state.str)
-        new_model_state = dataclasses.replace(new_model_state, str=str_state)
+        steps = torch.where(state.halted, 0, state.steps) + 1
+        action, done = self._select_action_and_done(policy_logits, steps, allow_halt, explore)
 
-        # 5. Action selection
-        if explore:
-            action = Categorical(logits=policy_logits).sample()  # stochastic (B,)
-        else:
-            action = policy_logits.argmax(dim=-1)  # deterministic (B,)
-
-        # 6. Step counter + done mask
-        steps = torch.where(state.halted, torch.zeros_like(state.steps), state.steps) + 1
-        done = steps >= self.config.halt_max_steps
-        if allow_halt:
-            done = done | (action == HALT_ACTION)
-
-        # 7. Bootstrap V(s_{t+1}) and max Q(s_{t+1}) — no_grad; zero for done slots
-        with torch.no_grad():
-            _, _, next_theta_cls, next_q_values = self._backbone(data["inputs"], new_model_state)
-            _, next_value, _ = self._controller(next_theta_cls.detach(), new_model_state.str)
-            next_value = torch.where(done, torch.zeros_like(next_value), next_value)
-            next_q_max = next_q_values.max(dim=-1).values
-            next_q_max = torch.where(done, torch.zeros_like(next_q_max), next_q_max)
-
-        new_state = RLState(
-            model_state=new_model_state,
-            steps=steps,
-            halted=done,
-            prev_outcome=prev_outcome,
-            data=data,
-        )
+        new_state = RLState(model_state=model_state, steps=steps, halted=done, data=data)
         output = RLOutput(
-            logits=logits,
-            policy_logits=policy_logits,
-            value=value,
-            next_value=next_value,
-            action=action,
-            theta_cls=theta_cls,
-            q_values=q_values,
-            next_q_max=next_q_max,
-        )
+            logits=logits, policy_logits=policy_logits, value=value, action=action,
+            theta_cls=theta_cls, q_values=q_values,
+        )  # fmt: skip
+
         return new_state, output
 
     def refresh_slot_data(  # --------------------------------------------------------------------
@@ -239,3 +168,24 @@ class RLController:
             k: torch.where(halted.view((-1,) + (1,) * (batch[k].ndim - 1)), batch[k], data[k])
             for k in batch
         }  # fmt: skip
+
+    def _select_action_and_done(  # ---------------------------------------------------------------
+        self, policy_logits: Tensor, steps: Tensor, allow_halt: bool, explore: bool,
+    ) -> Tuple[Tensor, Tensor]:  # fmt: skip
+        dist = Categorical(logits=policy_logits.detach())
+        action = dist.sample()  # (B,)
+        done = steps >= self._config.max_steps  # forced truncation
+
+        if allow_halt:
+            done = done | (action == self._config.done_action)  # agent-chosen termination
+
+        if explore and self._config.max_steps > 1:
+            flag = torch.rand_like(steps.float()) < self._config.exploration_prob
+            min_s = flag * torch.randint_like(steps, low=2, high=self._config.max_steps + 1)
+            done = done & (steps >= min_s)
+
+        return action, done
+
+
+# =================================================================================================
+__all__ = ["RLController", "RLState", "RLOutput", "RLBackbone", "RPEController", "RLControllerConfig"]
