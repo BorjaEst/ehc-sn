@@ -15,39 +15,29 @@ from ehc_sn.utils.detach import DetachMixin
 
 # ==================================================================================================
 class ACTControllerConfig(BaseModel, extra="forbid"):
-    """Configuration for :class:`ACTController`.
-
-    Attributes:
-        exploration_prob: Probability of enabling exploration for a slot on a
-            given step. Exploration delays halting by enforcing a random minimum
-            number of steps before halting is allowed.
-        halt_max_steps: Hard cap on the number of ACT steps per slot.
-    """
+    """ """
 
     exploration_prob: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="Exploration probability for ACT halting.",
+        description="Exploration probability for deliberation.",
     )
-    halt_max_steps: int = Field(
+    max_steps: int = Field(
         ...,
         ge=1,
-        description="Maximum number of ACT steps.",
+        description="Maximum deliberation steps per slot.",
+    )
+    done_action: int = Field(
+        default=0,
+        ge=0,
+        description="Action index that terminates a slot when selected.",
     )
 
 
 # =================================================================================================
 class ACTBackbone(Protocol):
-    """Minimal interface required by the ACT controller backbone.
-
-    The controller treats the backbone as a recurrent function:
-
-    - Input: ``inputs`` for the current slot step and an optional recurrent
-        ``state``.
-    - Output: next recurrent state, main prediction logits, and differentiable
-        features used by the halting head.
-    """
+    """ """
 
     def init_state(  # ----------------------------------------------------------------------------
         self, batch_size: int,
@@ -68,16 +58,7 @@ class ACTBackbone(Protocol):
 # =================================================================================================
 @dataclass
 class ACTState(DetachMixin):
-    """Per-slot controller state.
-
-    Notes:
-        ``halted`` acts as a per-slot "needs reset" flag: when True, that slot
-        will be refreshed with a new sample from the incoming batch and its
-        recurrent state will be reset before the next model step.
-
-        ``model_state`` must implement ``.detach()`` to support
-        :meth:`ACTState.detach`.
-    """
+    """ """
 
     model_state: Any  # Recurrent state of the model (e.g. LSTM hidden states)
     steps: Tensor  # Per-slot step counter, shape: (B,)
@@ -88,51 +69,22 @@ class ACTState(DetachMixin):
 # =================================================================================================
 @dataclass
 class ACTOutput(DetachMixin):
-    """Outputs produced by a single controller step.
+    """ """
 
-    Notes:
-        The ``target_continue`` is only populated during training when TD(0)
-        targets are computed.
-    """
-
-    logits: Tensor  # Main task logits (consumed by the supervised loss/metrics)
-    halt_logits: Tensor  # Per-slot Q-logits for halting, shape: (B,)
-    continue_logits: Tensor  # Per-slot Q-logits for continuing, shape: (B,)
-    action: Tensor  # Selected greedy action: 0=halt, 1=continue
-    target_continue: Tensor | None = None  # TD(0) bootstrap target for continue head
+    logits: Tensor  # Main task logits (B, S, vocab)
+    q_values: Tensor  # Per-slot Q-logits for all actions, shape: (B, n_actions)
+    action: Tensor  # Selected action index, shape: (B,)
+    target_q: Tensor | None = None  # TD(0) bootstrap Q-target, shape: (B,). None outside training.
 
 
 # =================================================================================================
 class ACTController:
-    """Controller that runs multiple ACT steps and manages per-slot resets.
-
-    The controller is responsible for:
-
-    - Resetting recurrent state for slots that finished an episode.
-    - Swapping in fresh batch elements for finished slots (without changing
-      batch size).
-    - Selecting halt/continue actions from halting-head Q-logits.
-    - Optionally computing TD(0) targets for the continue head during training.
-
-    Important:
-        The controller does not read ``nn.Module.training``. Callers must pass
-        explicit flags to select deterministic vs exploratory behavior and
-        whether TD targets are produced.
-    """
-
-    HALT_ACTION = 0
-    CONTINUE_ACTION = 1
+    """ """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, backbone: ACTBackbone,  config: ACTControllerConfig,
     ) -> None:  # fmt: skip
-        """Initialize the ACT controller.
-
-        Args:
-            backbone: The recurrent backbone to control, which must implement the
-                :class:`ACTBackbone` protocol.
-            config: Configuration for the controller behavior.
-        """
+        """ """
         self._backbone = backbone
         self._config = config
 
@@ -147,12 +99,7 @@ class ACTController:
     def initial_state(  # -------------------------------------------------------------------------
         self, batch_sample: Batch
     ) -> ACTState:  # fmt: skip
-        """Create an initial :class:`ACTState` for a new loop.
-
-        The initial ``halted=True`` for all slots forces the first call to
-        :meth:`refresh_slot_data` to populate per-slot buffers from ``batch``
-        (since buffers start empty).
-        """
+        """ """
         batch_size, device = batch_sample["inputs"].shape[0], batch_sample["inputs"].device
         return ACTState(  # FIXME: We need to replace batch_dict by observations and labels
             model_state=self.backbone.init_state(batch_size),
@@ -165,61 +112,33 @@ class ACTController:
         self, state: ACTState, batch: Batch,
         allow_halt: bool = True, explore: bool = True,
     ) -> Tuple[ACTState, ACTOutput]:  # fmt: skip
-        """Run one ACT step, this performs, in order:
-
-        1) Refreshes per-slot data for slots marked done.
-        2) Resets recurrent state for those slots.
-        3) Runs a single model step.
-        4) Updates step counters and selects halt/continue actions.
-        5) Emits outputs for loss and metrics.
-
-        Args:
-            state: Current controller state.
-            batch: Incoming batch of new samples (same shapes as buffers).
-            allow_halt: Whether a greedy halt action can end the episode early.
-            explore: Whether to apply the minimum halting step constraint to a
-                random subset of slots (per-step exploration rule).
-
-        Returns:
-            new_state: Updated controller state after this step.
-            output: ACTOutput containing all relevant tensors for loss computation and tracing.
-        """
+        """ """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
         model_state, logits, q = self.backbone(data["inputs"], model_state)
-        q_halt, q_continue = q[..., self.HALT_ACTION], q[..., self.CONTINUE_ACTION]
 
-        # Reset the step counter when a slot starts a fresh episode.
         steps = torch.where(state.halted, 0, state.steps) + 1
-        action, done = self._select_action_and_done(q_halt, q_continue, steps, allow_halt, explore)
+        action, done = self._select_action_and_done(q, steps, allow_halt, explore)
 
         state = ACTState(model_state=model_state, steps=steps, halted=done, data=data)
-        output = ACTOutput(logits=logits, halt_logits=q_halt, continue_logits=q_continue, action=action)
+        output = ACTOutput(logits=logits, q_values=q, action=action)
 
-        # TD(0) bootstrap target for the continue head.
+        # TD(0) bootstrap target for the Q-head.
         with torch.no_grad():
             _, _, next_q = self.backbone(data["inputs"], model_state)
-            next_q_halt, next_q_continue = next_q[..., self.HALT_ACTION], next_q[..., self.CONTINUE_ACTION]
         is_last_step = steps >= self._config.halt_max_steps
-        next_q = torch.where(is_last_step, next_q_halt, torch.maximum(next_q_halt, next_q_continue))
-        output.target_continue = torch.sigmoid(next_q)  # Sigmoid to convert logits to probabilities
+
+        # At last step: forced done → target is Q(done_action). Otherwise: max over all actions.
+        done_action = self._config.done_action
+        target = torch.where(is_last_step, next_q[..., done_action], next_q.max(dim=-1).values)
+        output.target_q = torch.sigmoid(target)
 
         return state, output
 
     def refresh_slot_data(  # ---------------------------------------------------------------------
         self, batch: Batch, state: ACTState
     ) -> Dict[str, Tensor]:  # fmt: skip
-        """Replace finished slots with new batch data (episode reset).
-
-        Args:
-            batch: New batch data.
-            state: Current ACT state with done/halted flags.
-
-        Returns:
-            A dict of tensors with the same keys/shapes as ``batch`` where
-            slots marked ``halted=True`` are replaced by the new incoming
-            ``batch`` values and the rest keep their previous buffered values.
-        """
+        """ """
         halted, data = state.halted, state.data
         return {
             k: torch.where(halted.view((-1,) + (1,) * (batch[k].ndim - 1)), batch[k], data[k])
@@ -227,37 +146,21 @@ class ACTController:
         }  # fmt: skip
 
     def _select_action_and_done(  # ---------------------------------------------------------------
-        self, q_halt: Tensor, q_continue: Tensor, steps: Tensor, allow_halt: bool, explore: bool,
+        self, q_values: Tensor, steps: Tensor, allow_halt: bool, explore: bool,
     ) -> Tuple[Tensor, Tensor]:  # fmt: skip
-        """Select halt/continue action and compute done mask.
-
-        Action selection is greedy from the two Q-logit heads.
-
-        Done conditions:
-            - Always: ``steps >= halt_max_steps``.
-            - If ``allow_halt``: selecting the halt action may also end the episode,
-                optionally delayed by exploration.
-
-        Exploration:
-            When ``explore=True``, with probability ``exploration_prob`` per slot,
-            enforce a random minimum number of steps (in ``[2, halt_max_steps]``)
-            before halting is allowed. This biases episodes away from trivially
-            halting at step 1 and encourages multi-step rollouts.
-        """
-        config = self.config  # convenience alias
-        q_halt, q_continue = q_halt.detach(), q_continue.detach()  # No gradients flow
-        action = torch.where(q_halt > q_continue, self.HALT_ACTION, self.CONTINUE_ACTION)
-        done = steps >= config.halt_max_steps
+        """ """
+        config = self.config
+        q = q_values.detach()
+        action = q.argmax(dim=-1)  # greedy over all actions (B,)
+        done = steps >= config.max_steps
 
         if allow_halt:
-            done = done | (action == self.HALT_ACTION)
+            done = done | (action == config.done_action)
 
-        if explore and (config.halt_max_steps > 1):
-            exploration_flag = torch.rand_like(q_halt) < config.exploration_prob
-            min_halt_steps = exploration_flag * torch.randint_like(
-                steps, low=2, high=config.halt_max_steps + 1
-            )
-            done = done & (steps >= min_halt_steps)
+        if explore and (config.max_steps > 1):
+            exploration_flag = torch.rand(steps.shape, device=steps.device) < config.exploration_prob
+            min_steps = exploration_flag * torch.randint_like(steps, low=2, high=config.max_steps + 1)
+            done = done & (steps >= min_steps)
 
         return action, done
 
