@@ -1,137 +1,171 @@
-""" """
+"""Mazehard deliberation environment (TorchRL).
 
-import gymnasium as gym
-import numpy as np
-from gymnasium import spaces
+The agent submits predictions as actions. The environment evaluates
+prediction quality and returns improvement-based reward.
+
+TensorDict contract:
+    state_spec / observation_spec:
+        "inputs"        : (S,)   int64   — static token sequence
+        "labels"        : (S,)   int64   — ground truth labels
+        "prev_accuracy" : ()     float32 — accuracy at previous step
+        "step_count"    : ()     int32   — steps taken so far
+    action_spec:
+        "action"  : ()     int64   — halt index (0 = halt, 1 = continue)
+        "logits"  : (S, V) float32 — prediction logits from the policy
+    reward_spec:
+        "reward"    : (1,) float32
+    done_spec (auto):
+        "done"       : (1,) bool
+        "terminated" : (1,) bool
+        "truncated"  : (1,) bool
+"""
+
+import torch
 from pydantic import BaseModel, Field
+from tensordict import TensorDict, TensorDictBase
+from torchrl.data import Categorical, Composite, Unbounded
+from torchrl.envs import EnvBase
 
 IGNORE_LABEL_ID = -100
 
 
 # =================================================================================================
 class EnvConfig(BaseModel, extra="forbid"):
-    """ """
+    """Configuration for :class:`MazeHardEnv`."""
 
-    max_steps: int = Field(
-        default=10,
-        ge=1,
-        description="Maximum steps per episode before truncation.",
-    )
-    seq_length: int = Field(
-        ...,
-        ge=1,
-        description="Length of input and prediction sequences.",
-    )
-    vocab_size: int = Field(
-        ...,
-        ge=1,
-        description="Size of the token vocabulary.",
-    )
+    max_steps: int = Field(default=10, ge=1, description="Maximum steps per episode before truncation.")
+    seq_length: int = Field(..., ge=1, description="Length of input and prediction sequences.")
+    vocab_size: int = Field(..., ge=1, description="Size of the token vocabulary.")
     halt_action: int = Field(
         default=0,
         ge=0,
         description=(
-            "Action index the environment interprets as \u2018halt\u2019 (terminates the episode). "
-            "Must match RLLossConfig.halt_action so the training loop and env agree on semantics."
+            "Action index the environment interprets as 'halt' (terminates the episode). "
+            "Must match RLLossConfig.halt_action."
         ),
     )
 
 
 # =================================================================================================
-class Env(gym.Env):
-    """Deliberation environment for maze-solving.
+class MazeHardEnv(EnvBase):
+    """Deliberation environment for maze-solving (TorchRL, batch-locked).
 
-    The agent submits predictions as actions. The environment evaluates
-    prediction quality and returns improvement-based reward.
+    Wraps a batched token-prediction task as a TorchRL environment.
+    No subprocess, no numpy — all ops are batched torch kernels.
 
-    Observation: raw token sequence (static across steps).
-    Action: {"halt": Discrete(2), "prediction": Box(vocab_size, seq_length)}.
-    Reward: accuracy_t - accuracy_{t-1} (incremental improvement).
-    Terminated: agent chose halt.
-    Truncated: step_count >= max_steps.
+    Usage::
+
+        env = MazeHardEnv(config, batch_size=32, device="cuda")
+        td = env.reset(TensorDict({"inputs": x, "labels": y}, batch_size=[32]))
+        td["action"] = policy(td)
+        td = env.step(td)
+
+    The environment is batch-locked: all B slots step simultaneously.
+    Per-slot auto-reset is handled by the controller, not this class.
     """
 
-    metadata = {"render_modes": []}
+    batch_locked = True
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: EnvConfig,
+        self, config: EnvConfig, batch_size: int, device: torch.device | str | None = None,
     ) -> None:  # fmt: skip
-        super().__init__()
-        """ """
+        super().__init__(batch_size=[batch_size], device=device)
         self._config = config
-        self.observation_space = spaces.Dict(
-            {
-                "inputs": spaces.MultiDiscrete(np.full(*self.shape)),
-            }
-        )
-        self.action_space = spaces.Dict(
-            {
-                "halt": spaces.Discrete(2),
-                "prediction": spaces.Box(low=-np.inf, high=np.inf, shape=self.shape, dtype=np.float32),
-            }
-        )
-        # Episode state (set on reset)
-        self._inputs: np.ndarray | None = None
-        self._labels: np.ndarray | None = None
-        self._prev_accuracy: float = 0.0
-        self._step_count: int = 0
+        self._make_specs()
 
     @property
-    def config(self):
+    def config(self) -> EnvConfig:
         """ """
         return self._config
 
-    @property
-    def shape(self):
-        """ """
-        return (self.config.seq_length, self.config.vocab_size)
+    def _make_specs(self) -> None:  # ------------------------------------------------------------
+        S = self._config.seq_length
+        V = self._config.vocab_size
+        bs = self.batch_size  # torch.Size([B])
 
-    def reset(  # ---------------------------------------------------------------------------------
-        self, *, seed: int | None = None, options: dict | None = None,
-    ) -> tuple[dict[str, np.ndarray], dict]:  # fmt: skip
-        """ """
-        super().reset(seed=seed)
-        # options must carry the sample for this episode
-        sample = options["sample"]  # {"inputs": np.ndarray, "labels": np.ndarray}
-        self._inputs = sample["inputs"]
-        self._labels = sample["labels"]
-        self._prev_accuracy = 0.0
-        self._step_count = 0
-        obs = {"inputs": self._inputs.copy()}
-        return obs, {}
+        # Observations the env produces (and reads back as state next step)
+        self.observation_spec = Composite(
+            inputs=Unbounded(shape=(S,), dtype=torch.int64),
+            labels=Unbounded(shape=(S,), dtype=torch.int64),
+            prev_accuracy=Unbounded(shape=(1,), dtype=torch.float32),
+            step_count=Unbounded(shape=(1,), dtype=torch.int32),
+            shape=bs,
+        )
+        # state_spec = what env reads as inputs (same keys as observation for stateful envs)
+        self.state_spec = self.observation_spec.clone()
+        self.action_spec = Composite(
+            action=Categorical(n=2, shape=(1,), dtype=torch.int64),
+            logits=Unbounded(shape=(S, V), dtype=torch.float32),
+            shape=bs,
+        )
+        self.reward_spec = Unbounded(shape=(1,), dtype=torch.float32)
 
-    def step(  # ----------------------------------------------------------------------------------
-        self, action: dict[str, np.ndarray | int],
-    ) -> tuple[dict[str, np.ndarray], float, bool, bool, dict]:  # fmt: skip
-        """ """
-        self._step_count += 1
-        prediction = action["prediction"]  # (S, V) logits
-        halt = bool(action["halt"] == self._config.halt_action)  # action index → halt semantics
+    def _reset(  # -------------------------------------------------------------------------------
+        self, tensordict: TensorDictBase | None,
+    ) -> TensorDictBase:  # fmt: skip
+        """Initialise episode state from external data.
 
-        # Reward: improvement in prediction accuracy
-        accuracy = self._compute_accuracy(prediction, self._labels)
-        reward = accuracy - self._prev_accuracy
-        self._prev_accuracy = accuracy
+        The controller injects ``inputs`` and ``labels`` from the dataloader.
+        """
+        if tensordict is None or tensordict.is_empty():
+            raise ValueError("MazeHardEnv._reset requires tensordict with 'inputs' and 'labels'.")
 
-        terminated = halt
-        truncated = self._step_count >= self._config.max_steps
+        B = self.batch_size[0]
+        kw = {"device": self.device}
+        return TensorDict(
+            {
+                "inputs": tensordict["inputs"],
+                "labels": tensordict["labels"],
+                "prev_accuracy": torch.zeros(B, 1, **kw),
+                "step_count": torch.zeros(B, 1, dtype=torch.int32, **kw),
+            },
+            batch_size=self.batch_size,
+            device=self.device,
+        )
 
-        obs = {"inputs": self._inputs.copy()}
-        info = {"accuracy": accuracy, "step_count": self._step_count}
-        return obs, reward, terminated, truncated, info
+    @torch.no_grad()
+    def _step(  # --------------------------------------------------------------------------------
+        self, tensordict: TensorDictBase,
+    ) -> TensorDictBase:  # fmt: skip
+        """Compute reward, done-flags, and next state from action + current state.
 
-    @staticmethod
-    def _compute_accuracy(  # ---------------------------------------------------------------------
-        logits: np.ndarray, labels: np.ndarray,
-    ) -> float:  # fmt: skip
-        """ """
-        mask = labels != IGNORE_LABEL_ID
-        if mask.sum() == 0:
-            return 0.0
-        preds = logits.argmax(axis=-1)
-        correct = (preds == labels) & mask
-        return float(correct.sum()) / float(mask.sum())
+        Reward = exp(acc) - exp(prev_acc): smooth, bounded, rewards improvement.
+        Terminated when agent selects halt_action. Truncated at max_steps.
+        """
+        logits = tensordict["logits"]  # (B, S, V)
+        action = tensordict["action"]  # (B, 1)
+        labels = tensordict["labels"]  # (B, S)
+        prev_accuracy = tensordict["prev_accuracy"]  # (B, 1)
+        step_count = tensordict["step_count"]  # (B, 1)
+
+        mask = labels != IGNORE_LABEL_ID  # (B, S) bool
+        counts = mask.sum(-1, keepdim=True).clamp_min(1).float()  # (B, 1)
+        acc = ((logits.argmax(-1) == labels) & mask).sum(-1, keepdim=True).float() / counts
+
+        reward = torch.exp(acc) - torch.exp(prev_accuracy)  # (B, 1)
+        terminated = action == self._config.halt_action  # (B, 1)
+        truncated = (step_count + 1) >= self._config.max_steps  # (B, 1)
+        done = terminated | truncated  # (B, 1)
+
+        return TensorDict(
+            {
+                "inputs": tensordict["inputs"],  # static — carry unchanged
+                "labels": labels,
+                "prev_accuracy": acc,
+                "step_count": step_count + 1,
+                "reward": reward,
+                "terminated": terminated,
+                "truncated": truncated,
+                "done": done,
+            },
+            batch_size=self.batch_size,
+            device=self.device,
+        )
+
+    def _set_seed(self, seed: int | None) -> None:  # --------------------------------------------
+        """No-op: all randomness lives in the dataloader."""
+        pass
 
 
 # =================================================================================================
-__all__ = ["EnvConfig", "Env"]
+__all__ = ["EnvConfig", "MazeHardEnv"]
