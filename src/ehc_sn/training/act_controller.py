@@ -72,9 +72,9 @@ class ACTOutput(DetachMixin):
     """ """
 
     logits: Tuple[Tensor, ...]  # Tuple of (B, S, V) LM logits for supervised loss
-    target_q: Tensor | None = None  # TD(0) bootstrap Q-target, shape: (B,). None outside training.
     theta_cls: Tensor  # (B, D) — theta CLS features
     action: Tensor  # (B,) selected action indices for this step
+    target_q: Tensor | None = None  # TD(0) bootstrap Q-target, shape: (B,). None outside training.
 
 
 # =================================================================================================

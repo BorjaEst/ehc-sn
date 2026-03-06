@@ -94,9 +94,9 @@ class RLOutput(DetachMixin):
     """ """
 
     logits: Tuple[Tensor, ...]  # Tuple of (B, S, V) LM logits for supervised loss
-    reward: Tensor  # (B, 1) reward from the environment for this step
     theta_cls: Tensor  # (B, D) — theta CLS features
     action: Tensor  # (B,) selected action indices for this step
+    reward: Tensor  # (B, 1) reward from the environment for this step
 
 
 # =================================================================================================
