@@ -17,7 +17,7 @@ from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.metrics import build_metrics, update_metrics_from_step
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
-from ehc_sn.modules.str import STRModel, STRSettings, STRState
+from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
 from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
 from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.buffers import FifoBuffer
@@ -176,7 +176,7 @@ class HRModelV2(nn.Module):
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, device=device, dtype=dtype)
         self.embed_pos = nn.Embedding(config.seq_length, config.hidden_size, device=device, dtype=dtype)
         self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)  # Reasoning module with embedded inputs
-        self.str = STRModel(config.str, device=device, dtype=dtype)  # Actor-critic for adaptive computation
+        self.str = STRModelLinear(config.str, device=device, dtype=dtype)  # Reward estimator
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)  # fmt: skip
         self.reset_parameters()
 
