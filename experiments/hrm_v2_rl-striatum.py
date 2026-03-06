@@ -16,7 +16,7 @@ from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSetti
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.environment.mazehard import Env, EnvConfig
+from ehc_sn.envs.mazehard import EnvConfig
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.models import hrm_v2
 from ehc_sn.models.hrm_v2 import ModelConfig_HRM_V2, ModelSettings_V2, TrainingModel

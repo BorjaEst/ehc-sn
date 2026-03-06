@@ -14,7 +14,7 @@ from torch.optim import Optimizer
 
 from ehc_sn.data.schema import CHANNEL_SOLUTION
 from ehc_sn.data.transforms import channels_to_grid
-from ehc_sn.environment.mazehard import Env, EnvConfig
+from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.metrics import build_metrics, update_metrics_from_step
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.str import STRModel, STRSettings, STRState
@@ -246,7 +246,7 @@ class TrainingModel(L.LightningModule):
     ) -> None:  # fmt: skip
         super().__init__()
         self.model = HRModelV2(config.model)
-        self.environment: Env | None = None  # Lazy init in setup() to avoid GPU allocation issues in DDP
+        self.environment: MazeHardEnv | None = None  # Lazy init in setup() to avoid GPU allocation issues
         self.controller = RLController(self.model, config.rl_controller)
         self.step_module = RLLossHead(self.controller, config.loss)
         self._config = config
@@ -282,7 +282,7 @@ class TrainingModel(L.LightningModule):
     ) -> None:  # fmt: skip
         """Lazy initialization of the environment to avoid GPU allocation issues in DDP."""
         if self.environment is None:
-            self.environment = Env(self.config.environment)
+            self.environment = MazeHardEnv(self.config.environment)
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
