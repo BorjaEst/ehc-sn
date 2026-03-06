@@ -74,7 +74,7 @@ class ACTOutput(DetachMixin):
     logits: Tensor  # Main task logits (B, S, vocab)
     q_values: Tensor  # Per-slot Q-logits for all actions, shape: (B, n_actions)
     action: Tensor  # Selected action index, shape: (B,)
-    theta_cls: Tensor  # (B, D) — theta CLS features (tracing/diagnostics)
+    theta_cls: Tensor  # (B, D) — theta CLS features
     target_q: Tensor | None = None  # TD(0) bootstrap Q-target, shape: (B,). None outside training.
 
 
@@ -91,10 +91,12 @@ class ACTController:
 
     @property
     def backbone(self) -> ACTBackbone:
+        """ """
         return self._backbone
 
     @property
     def config(self) -> ACTControllerConfig:
+        """ """
         return self._config
 
     def initial_state(  # -------------------------------------------------------------------------
