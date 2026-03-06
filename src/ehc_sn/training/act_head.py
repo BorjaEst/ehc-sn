@@ -12,6 +12,7 @@ import ehc_sn.loss.cross_entropy as cross_entropy_module
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import HaltedAgg, LossAgg, StepMetrics, TokenAgg
 from ehc_sn.training.act_controller import ACTController, ACTOutput, ACTState
+from ehc_sn.utils.detach import DetachMixin
 
 Batch = Dict[str, Tensor]  # Generic batch type, can be specialized as needed
 IGNORE_LABEL_ID = -100
@@ -29,7 +30,7 @@ class ACTLossConfig(BaseModel, extra="forbid"):
 
 # =================================================================================================
 @dataclass(frozen=True)
-class CorrectnessStats:
+class AccuracyStats:
     """ """
 
     mask: Tensor  # Boolean tensor indicating which tokens contribute to the loss (e.g., non-padding tokens).
@@ -54,7 +55,7 @@ class CorrectnessStats:
 
 # =================================================================================================
 @dataclass(frozen=True)
-class Losses:
+class Losses(DetachMixin):
     """ """
 
     loss_sum: Tensor  # Per-step loss sum for the main task
@@ -75,9 +76,14 @@ class Losses:
 class ACTLossStep:
     """ """
 
-    loss: Tensor  # Scalar loss for this step, used for back-propagation
+    losses: Losses  # Combined losses for this step, kept live for backward()
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
     outputs: Optional[ACTOutput] = None  # Raw controller outputs
+
+    @property
+    def loss(self) -> Tensor:
+        """Scalar loss for this step, used for back-propagation."""
+        return self.losses.total
 
 
 # =================================================================================================
@@ -123,24 +129,24 @@ class ACTLossHead(nn.Module):
         with torch.no_grad():
             # Correctness is used as a supervision signal for halting/continuation.
             # Keeping it out of the graph avoids gradients flowing through argmax.
-            stats = self.compute_correctness(outputs, labels)
+            stats = self.compute_accuracy(outputs, labels)
 
         losses = self.compute_losses(outputs, labels, stats)
         metrics = self.compute_metrics(carry, outputs, stats, losses)
 
-        outputs = ACTLossStep(loss=losses.total, metrics=metrics, outputs=outputs)
+        outputs = ACTLossStep(losses=losses, metrics=metrics, outputs=outputs)
         return outputs, carry, bool(carry.halted.all())
 
-    def compute_correctness(  # ------------------------------------------------------------------
+    def compute_accuracy(  # ------------------------------------------------------------------
         self, outputs: ACTOutput, labels: Tensor
-    ) -> CorrectnessStats:  # fmt: skip
+    ) -> AccuracyStats:  # fmt: skip
         """ """
         mask = labels != IGNORE_LABEL_ID
         is_correct = mask & (torch.argmax(outputs.logits, dim=-1) == labels)
-        return CorrectnessStats(mask=mask, is_correct=is_correct)
+        return AccuracyStats(mask=mask, is_correct=is_correct)
 
     def compute_metrics(  # -----------------------------------------------------------------------
-        self, state: ACTState, outputs: ACTOutput, stats: CorrectnessStats, losses: Losses,
+        self, state: ACTState, outputs: ACTOutput, stats: AccuracyStats, losses: Losses,
     ) -> StepMetrics:  # fmt: skip
         """ """
         eligible_mask = stats.loss_counts > 0
@@ -172,7 +178,7 @@ class ACTLossHead(nn.Module):
         return StepMetrics(halted=halted, tokens=tokens, loss=loss)
 
     def _build_halted_agg(  # --------------------------------------------------------------------
-        self, state: ACTState, stats: CorrectnessStats, halted_mask: Tensor, halted_weights: Tensor,
+        self, state: ACTState, stats: AccuracyStats, halted_mask: Tensor, halted_weights: Tensor,
         eligible_count: Tensor, seq_accuracy: Tensor, q_halt_correct: Tensor,
         q_continue_correct: Optional[Tensor]=None,
     ) -> HaltedAgg:  # fmt: skip
@@ -215,7 +221,7 @@ class ACTLossHead(nn.Module):
         )
 
     def compute_losses(  # -----------------------------------------------------------------------
-        self, outputs: ACTOutput, labels: Tensor, stats: CorrectnessStats
+        self, outputs: ACTOutput, labels: Tensor, stats: AccuracyStats
     ) -> Losses:  # fmt: skip
         """ """
         loss_per_token = self.loss_fn(outputs.logits, labels, ignore_index=IGNORE_LABEL_ID)
