@@ -42,13 +42,13 @@ class QEstimatorSettings(BaseModel, extra="forbid"):
         ge=1,
         description="Number of discrete actions to estimate Q-values for.",
     )
-    pool_mode: Literal["first", "mean", "max"] = Field(
+    pool_mode: Literal["first", "first_detached", "mean"] = Field(
         default="first",
         description=(
             "How to reduce spatial positions (B, S, D) into a summary vector (B, D). "
             "'first': select a single position index (legacy parity). "
+            "'first_detached': same but no gradient through features. "
             "'mean': average over all positions (population-code readout). "
-            "'max': max-pool (winner-take-all readout)."
         ),
     )
     pool_index: int = Field(
