@@ -37,59 +37,73 @@ from ehc_sn.utils.detach import DetachMixin
 class STRSettings(BaseModel, extra="forbid"):
     """ """
 
+    n_features: int = Field(
+        ...,
+        ge=1,
+        description="Dimensionality of STR's internal feature representation (cortical features).",
+    )
+    n_actions: int = Field(
+        ...,
+        ge=1,
+        description="Number of possible actions in the environment (for prediction logits).",
+    )
+    hidden_size: int = Field(
+        default=64,
+        ge=1,
+        description="Hidden layer size for STR's internal MLPs.",
+    )
+
 
 # =================================================================================================
 @dataclass
 class STRState(DetachMixin):
-    """STR recurrent state.
+    """ """
 
-    Carries the reward signal from the previous environment step into the next
-    STR forward pass, modelling dopaminergic tone from the preceding trial epoch.
-
-    Attributes:
-        prev_reward: Reward received at the *previous* step, shape ``(B,)``.
-            Read by ``STRModel.forward()`` (concatenated with cortical features).
-            Written externally by the training loop after ``env.step()``.
-            Zeroed on episode start (``init_state``) and slot reset (``reset_state``).
-    """
-
-    prev_reward: Tensor  # (B,) float32 — reward from the previous env step
+    dummy_placeholder: int = 0  # TODO: STRState currently has no internal state
 
 
 # =================================================================================================
 class STRModelLinear(nn.Module):
-    """STR actor-critic with simple linear layers. This is the default STR implementation in HRM v2.
-
-    The policy head outputs logits for the HALT action and the prediction (action) distribution.
-    The value head outputs a scalar V(s) estimate for TD advantage computation.
-
-    The forward method takes cortical features and the previous reward, concatenates them,
-    and passes them through the actor and critic MLPs to produce the policy distribution and value estimate.
-    """
+    """STR actor-critic with simple linear layers."""
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: STRSettings, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
-        raise NotImplementedError("STRModelLinear is not implemented yet.")
+        """ """
+        super().__init__()
+        self._config = config
+        in_dim = config.n_features + config.n_actions  # cortical features + q_values
+        self.reward_head = nn.Sequential(
+            nn.Linear(in_dim, config.hidden_size, bias=False, device=device, dtype=dtype),
+            nn.SiLU(),
+            nn.Linear(config.hidden_size, 1, bias=True, device=device, dtype=dtype),
+        )
+
+    def init_state(  # ----------------------------------------------------------------------------
+        self, batch_size: int, *, device=None,
+    ) -> STRState:  # fmt: skip
+        """ """
+        return STRState()
+
+    def reset_state(  # ---------------------------------------------------------------------------
+        self, state: STRState, reset_flag: Tensor,
+    ) -> STRState:  # fmt: skip
+        """ """
+        return replace(state)
 
     def forward(  # -------------------------------------------------------------------------------
         self, features: Tensor, q_values: Tensor, state: STRState,
     ) -> Tuple[STRState, Tensor]:  # fmt: skip
         """ """
-        raise NotImplementedError("STRModelLinear.forward() is not implemented yet.")
+        x = torch.cat([features.to(torch.float32), q_values.to(torch.float32)], dim=-1)
+        reward_hat = self.reward_head(x).squeeze(-1)  # (B,)
+        new_state = STRState()  # Placeholder for Linear STR since it has no internal state
+        return new_state, reward_hat
 
 
 class STRModelGRU(nn.Module):
-    """STR actor-critic with GRU recurrence. Not currently used.
-
-    This is an alternative STR implementation with a GRU layer for temporal integration.
-    It is not currently used in the HRM v2 design, but it may be useful for future experiments
-    with more complex STR dynamics.
-
-    The forward method and state management would need to be adapted to handle the GRU's
-    recurrent state and the temporal dependencies it introduces.
-    """
+    """STR actor-critic with GRU recurrence."""
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: STRSettings, *,
@@ -105,15 +119,7 @@ class STRModelGRU(nn.Module):
 
 
 class STRModelLSTM(nn.Module):
-    """STR actor-critic with LSTM recurrence. Not currently used.
-
-    This is an alternative STR implementation with an LSTM layer for temporal integration.
-    It is not currently used in the HRM v2 design, but it may be useful for future experiments
-    with more complex STR dynamics.
-
-    The forward method and state management would need to be adapted to handle the LSTM's
-    recurrent state and the temporal dependencies it introduces.
-    """
+    """STR actor-critic with LSTM recurrence."""
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: STRSettings, *,
@@ -129,15 +135,7 @@ class STRModelLSTM(nn.Module):
 
 
 class STRModelGoNoGo(nn.Module):
-    """STR actor-critic with separate Go/NoGo pathways. Not currently used.
-
-    This is an alternative STR implementation with separate pathways for Go (D1-like) and NoGo (D2-like)
-    action selection. It is not currently used in the HRM v2 design, but it may be useful for future experiments
-    exploring more biologically detailed STR architectures.
-
-    The forward method and state management would need to be adapted to compute separate Go/NoGo activations
-    and combine them into a final policy distribution.
-    """
+    """STR actor-critic with separate Go/NoGo pathways."""
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: STRSettings, *,
