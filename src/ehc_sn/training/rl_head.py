@@ -29,15 +29,6 @@ class RLLossConfig(BaseModel, extra="forbid"):
         default="stablemax_cross_entropy",
         description="The loss function to use for the modeling loss.",
     )
-    gamma: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Discount factor for vmPFC Q-target: target = r + γ · max Q(s’). "
-            "Should match STRSettings.gamma."
-        ),
-    )
     c_actor: float = Field(default=1.0, ge=0.0, description="Actor loss coefficient.")
     c_critic: float = Field(default=0.5, ge=0.0, description="Critic loss coefficient.")
     c_entropy: float = Field(default=0.01, ge=0.0, description="Entropy regularization coefficient.")
@@ -232,7 +223,7 @@ class RLLossHead(nn.Module):
             token_count_sum=(token_count_per_seq * halted_weights).sum(),
         )
 
-        batch_size = int(self._lm_logits(outputs).shape[0])
+        batch_size = int(outputs.logits[0].shape[0])  # logits[0] is features logits (B, S, V)
         loss = LossAgg(
             lm_loss_sum=losses.loss_lm_sum.detach(),
             q_halt_loss_sum=(

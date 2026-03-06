@@ -78,27 +78,27 @@ class MazeHardEnv(EnvBase):
         """ """
         return self._config
 
-    def _make_specs(self) -> None:  # ------------------------------------------------------------
+    def _make_specs(  # ---------------------------------------------------------------------------
+        self,
+    ) -> None:  # fmt: skip
         S = self._config.seq_length
         V = self._config.vocab_size
         bs = self.batch_size  # torch.Size([B])
 
-        # Observations the env produces (and reads back as state next step)
         self.observation_spec = Composite(
-            inputs=Unbounded(shape=(S,), dtype=torch.int64),
-            labels=Unbounded(shape=(S,), dtype=torch.int64),
-            prev_accuracy=Unbounded(shape=(1,), dtype=torch.float32),
-            step_count=Unbounded(shape=(1,), dtype=torch.int32),
+            inputs=Unbounded(shape=(*bs, S), dtype=torch.int64),
+            labels=Unbounded(shape=(*bs, S), dtype=torch.int64),
+            prev_accuracy=Unbounded(shape=(*bs, 1), dtype=torch.float32),
+            step_count=Unbounded(shape=(*bs, 1), dtype=torch.int32),
             shape=bs,
         )
-        # state_spec = what env reads as inputs (same keys as observation for stateful envs)
         self.state_spec = self.observation_spec.clone()
         self.action_spec = Composite(
-            action=Categorical(n=2, shape=(1,), dtype=torch.int64),
-            logits=Unbounded(shape=(S, V), dtype=torch.float32),
+            action=Categorical(n=2, shape=(*bs, 1), dtype=torch.int64),
+            logits=Unbounded(shape=(*bs, S, V), dtype=torch.float32),
             shape=bs,
         )
-        self.reward_spec = Unbounded(shape=(1,), dtype=torch.float32)
+        self.reward_spec = Unbounded(shape=(*bs, 1), dtype=torch.float32)
 
     def _reset(  # -------------------------------------------------------------------------------
         self, tensordict: TensorDictBase | None,

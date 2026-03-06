@@ -159,9 +159,10 @@ class RLController:
 
         steps = torch.where(state.halted, torch.zeros_like(state.steps), state.steps) + 1
         action, done, env_td = self._select_action_and_done(logits, steps, data["labels"], state.env_td, allow_halt, explore)  # fmt: skip
+        reward = env_td["reward"]
 
         state = RLState(model_state=model_state, steps=steps, halted=state.halted, data=data, env_td=env_td)
-        output = RLOutput(logits=logits, theta_cls=theta_cls, action=action)
+        output = RLOutput(logits=logits, theta_cls=theta_cls, action=action, reward=reward)
 
         return state, output
 

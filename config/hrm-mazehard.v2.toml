@@ -63,7 +63,6 @@ warmup_steps = 5000
 # -- Loss settings --------------------------------------------------------------------------------
 [loss]
     function    = "stablemax_cross_entropy"
-    gamma       = 1.0
     c_actor     = 1.0
     c_critic    = 0.5
     c_entropy   = 0.01

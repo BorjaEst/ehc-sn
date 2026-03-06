@@ -247,8 +247,8 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         self.model = HRModelV2(config.model)
         self.environment: MazeHardEnv | None = None  # Lazy init in setup() to avoid GPU allocation issues
-        self.controller = RLController(self.model, config.rl_controller)
-        self.step_module = RLLossHead(self.controller, config.loss)
+        self.controller: RLController | None = None  # Initialized in setup() after environment is ready
+        self.step_module: RLLossHead | None = None  # Initialized in setup() after controller is ready
         self._config = config
 
         # Manual optimization: explicit backward + opt step (legacy parity + dual-opt clarity).
@@ -281,8 +281,13 @@ class TrainingModel(L.LightningModule):
         self, stage: Optional[str] = None,
     ) -> None:  # fmt: skip
         """Lazy initialization of the environment to avoid GPU allocation issues in DDP."""
+        world_size = max(getattr(self.trainer, "world_size", 1), 1)
+        local_bs = self.config.global_batch_size // world_size
+
         if self.environment is None:
-            self.environment = MazeHardEnv(self.config.environment)
+            self.environment = MazeHardEnv(self.config.environment, batch_size=local_bs)
+        self.controller = RLController(self.model, self.environment, self.config.rl_controller)
+        self.step_module = RLLossHead(self.controller, self.config.loss)
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
