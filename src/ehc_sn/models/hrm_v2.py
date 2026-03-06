@@ -212,7 +212,7 @@ class HRModelV2(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, inputs: Tensor, state: Optional[HRMState] = None,
-    ) -> Tuple[HRMState, Tensor, Tensor, Tensor, Tensor]:  # fmt: skip
+    ) -> Tuple[HRMState, Tuple[Tensor, Tensor, Tensor], Tensor]:  # fmt: skip
         """ """
         state = state or self.init_state(batch_size=inputs.shape[0])
         x = self.embed_inputs(inputs)  # (B, S, D)
@@ -220,10 +220,10 @@ class HRModelV2(nn.Module):
         state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H: (B, S+1, D)
         logits = self.lm_head(z_H[:, 1:])  # strip CLS → (B, S, vocab)
         theta_cls = z_H[:, 0]  # (B, D) — theta/CLS summary
-        state_str, r_hat = self.str(theta_cls.detach(), q_logits, state.str)
+        state_str, r_logits = self.str(theta_cls.detach(), q_logits, state.str)
 
         new_state = HRMState(pfc=state_pfc, str=state_str)
-        return new_state, logits, theta_cls, q_logits, r_hat
+        return new_state, (logits, q_logits, r_logits), theta_cls
 
     def embed_inputs(  # --------------------------------------------------------------------------
         self, input: Tensor,
@@ -247,7 +247,7 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         self.model = HRModelV2(config.model)
         self.environment: Env | None = None  # Lazy init in setup() to avoid GPU allocation issues in DDP
-        self.controller = RLController(self.model, self.model.str, config.rl_controller)
+        self.controller = RLController(self.model, config.rl_controller)
         self.step_module = RLLossHead(self.controller, config.loss)
         self._config = config
 

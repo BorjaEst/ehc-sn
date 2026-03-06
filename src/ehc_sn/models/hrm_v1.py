@@ -263,14 +263,17 @@ class HRModelV1(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, inputs: Tensor, state: Optional[HRMState] = None,
-    ) -> Tuple[HRMState, Tensor, Tensor, Tensor]:  # fmt: skip
+    ) -> Tuple[HRMState, Tuple[Tensor, Tensor], Tensor]:  # fmt: skip
         """Forward pass through the HRM (``ACTBackbone`` protocol)."""
         state = state or self.init_state(batch_size=inputs.shape[0])
         x = self.embed_inputs(inputs)  # (B, S, D) — cell tokens only
-        state_pfc, z_H, q_values = self.pfc(x, state=state.pfc)  # z_H is (B, S+1, D)
-        output = self.lm_head(z_H[:, 1:])  # Strip CLS → (B, S, vocab_size)
+
+        state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H is (B, S+1, D)
+        logits = self.lm_head(z_H[:, 1:])  # Strip CLS → (B, S, vocab_size)
         theta_cls = z_H[:, 0]  # (B, D) — CLS features used for ACT control and tracing
-        return HRMState(pfc=state_pfc), output, theta_cls, q_values
+
+        new_state = HRMState(pfc=state_pfc)
+        return new_state, (logits, q_logits), theta_cls
 
     def embed_inputs(  # --------------------------------------------------------------------------
         self, input: Tensor,

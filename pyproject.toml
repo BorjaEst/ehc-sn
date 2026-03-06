@@ -29,6 +29,7 @@
         "setuptools~=80.0",
         "gymnasium~=1.2.0",
         "torch",
+        "torchrl~=0.11.0",
         "adam-atan2-pytorch",
         "lightning",
         "pydantic",

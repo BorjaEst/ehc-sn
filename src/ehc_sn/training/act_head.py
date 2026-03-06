@@ -145,6 +145,40 @@ class ACTLossHead(nn.Module):
         is_correct = mask & (torch.argmax(outputs.logits, dim=-1) == labels)
         return AccuracyStats(mask=mask, is_correct=is_correct)
 
+    def compute_losses(  # -----------------------------------------------------------------------
+        self, outputs: ACTOutput, labels: Tensor, stats: AccuracyStats
+    ) -> Losses:  # fmt: skip
+        """ """
+        loss_per_token = self.loss_fn(outputs.logits, labels, ignore_index=IGNORE_LABEL_ID)
+        loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
+        loss_sum = loss_per_seq.sum()
+        done_action = self.controller.config.done_action
+
+        # Done-action loss: match Q(done) to sequence correctness.
+        q_done_logits = outputs.q_values[..., done_action]  # (B,)
+        q_done_loss = F.binary_cross_entropy_with_logits(
+            input=q_done_logits,
+            target=stats.seq_is_correct.to(q_done_logits.dtype),
+            reduction="sum",
+        )
+
+        # Continue loss: optional auxiliary supervision from the controller's TD target.
+        q_continue_loss: Tensor | None = None
+        if outputs.target_q is not None:
+            # Select the non-done logit(s). For 2-action, pick ~done_action.
+            # Generalization: supervise all non-done actions toward TD target.
+            n_actions = outputs.q_values.shape[-1]
+            continue_actions = [a for a in range(n_actions) if a != done_action]
+            if continue_actions:
+                q_cont = outputs.q_values[..., continue_actions].mean(dim=-1)  # (B,)
+                q_continue_loss = F.binary_cross_entropy_with_logits(
+                    input=q_cont,
+                    target=outputs.target_q,
+                    reduction="sum",
+                )
+
+        return Losses(loss_sum, q_done_loss, q_continue_loss)
+
     def compute_metrics(  # -----------------------------------------------------------------------
         self, state: ACTState, outputs: ACTOutput, stats: AccuracyStats, losses: Losses,
     ) -> StepMetrics:  # fmt: skip
@@ -219,37 +253,3 @@ class ACTLossHead(nn.Module):
             q_continue_loss_sum=q_continue_loss_sum.detach(),
             batch_count=losses.loss_sum.new_tensor(batch_size, dtype=torch.float32),
         )
-
-    def compute_losses(  # -----------------------------------------------------------------------
-        self, outputs: ACTOutput, labels: Tensor, stats: AccuracyStats
-    ) -> Losses:  # fmt: skip
-        """ """
-        loss_per_token = self.loss_fn(outputs.logits, labels, ignore_index=IGNORE_LABEL_ID)
-        loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
-        loss_sum = loss_per_seq.sum()
-        done_action = self.controller.config.done_action
-
-        # Done-action loss: match Q(done) to sequence correctness.
-        q_done_logits = outputs.q_values[..., done_action]  # (B,)
-        q_done_loss = F.binary_cross_entropy_with_logits(
-            input=q_done_logits,
-            target=stats.seq_is_correct.to(q_done_logits.dtype),
-            reduction="sum",
-        )
-
-        # Continue loss: optional auxiliary supervision from the controller's TD target.
-        q_continue_loss: Tensor | None = None
-        if outputs.target_q is not None:
-            # Select the non-done logit(s). For 2-action, pick ~done_action.
-            # Generalization: supervise all non-done actions toward TD target.
-            n_actions = outputs.q_values.shape[-1]
-            continue_actions = [a for a in range(n_actions) if a != done_action]
-            if continue_actions:
-                q_cont = outputs.q_values[..., continue_actions].mean(dim=-1)  # (B,)
-                q_continue_loss = F.binary_cross_entropy_with_logits(
-                    input=q_cont,
-                    target=outputs.target_q,
-                    reduction="sum",
-                )
-
-        return Losses(loss_sum, q_done_loss, q_continue_loss)

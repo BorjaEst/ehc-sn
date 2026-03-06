@@ -36,22 +36,22 @@ class ACTControllerConfig(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class ACTBackbone(Protocol):
+class ACTBackbone[BkState](Protocol):
     """ """
 
     def init_state(  # ----------------------------------------------------------------------------
         self, batch_size: int,
-    ) -> Any:  # fmt: skip
+    ) -> BkState:  # fmt: skip
         ...  # fmt: skip
 
     def reset_state(  # ---------------------------------------------------------------------------
-        self, reset_flag: Tensor, state: Any,
-    ) -> Any:   # fmt: skip
+        self, reset_flag: Tensor, state: BkState,
+    ) -> BkState:   # fmt: skip
         ...  # fmt: skip
 
     def __call__(  # ------------------------------------------------------------------------------
-        self, inputs: Tensor, state: Any | None = None,
-    ) -> Tuple[Any, Tensor, Tensor]:  # fmt: skip
+        self, inputs: Tensor, state: BkState | None = None,
+    ) -> Tuple[BkState, Tuple[Tensor, ...], Tensor]:  # fmt: skip
         ...  # fmt: skip
 
 
@@ -60,7 +60,7 @@ class ACTBackbone(Protocol):
 class ACTState[ModelState](DetachMixin):
     """ """
 
-    model_state: Any  # Recurrent state of the model (e.g. LSTM hidden states)
+    model_state: ModelState  # Recurrent state of the model (e.g. LSTM hidden states)
     steps: Tensor  # Per-slot step counter, shape: (B,)
     halted: Tensor  # Per-slot reset/done flag, shape: (B,)
     data: Dict[str, Tensor]  # Per-slot buffers that persist across steps until reset
@@ -71,11 +71,10 @@ class ACTState[ModelState](DetachMixin):
 class ACTOutput(DetachMixin):
     """ """
 
-    logits: Tensor  # Main task logits (B, S, vocab)
-    q_values: Tensor  # Per-slot Q-logits for all actions, shape: (B, n_actions)
-    action: Tensor  # Selected action index, shape: (B,)
-    theta_cls: Tensor  # (B, D) — theta CLS features
+    logits: Tuple[Tensor, ...]  # Tuple of (B, S, V) LM logits for supervised loss
     target_q: Tensor | None = None  # TD(0) bootstrap Q-target, shape: (B,). None outside training.
+    theta_cls: Tensor  # (B, D) — theta CLS features
+    action: Tensor  # (B,) selected action indices for this step
 
 
 # =================================================================================================
@@ -118,13 +117,13 @@ class ACTController:
         """ """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, logits, theta, q = self.backbone(data["inputs"], model_state)
+        model_state, logits, theta_cls = self.backbone(data["inputs"], model_state)
 
         steps = torch.where(state.halted, 0, state.steps) + 1
         action, done = self._select_action_and_done(q, steps, allow_halt, explore)
 
         state = ACTState(model_state=model_state, steps=steps, halted=done, data=data)
-        output = ACTOutput(logits=logits, q_values=q, action=action, theta_cls=theta)
+        output = ACTOutput(logits=logits, theta_cls=theta_cls, action=action)
 
         # TD(0) bootstrap target for the Q-head.
         with torch.no_grad():

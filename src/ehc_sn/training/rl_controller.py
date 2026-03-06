@@ -25,8 +25,10 @@ from typing import Dict, Optional, Protocol, Tuple
 
 import torch
 from pydantic import BaseModel, Field
+from tensordict import TensorDict, TensorDictBase
 from torch import Tensor
 from torch.distributions import Categorical
+from torchrl.envs import EnvBase
 
 from ehc_sn.types import Batch, Device
 from ehc_sn.utils.detach import DetachMixin
@@ -41,14 +43,14 @@ class RLControllerConfig(BaseModel, extra="forbid"):
     in the env config; temporal discounting (γ) lives in STR config.
     """
 
-    exploration_prob: float = Field(
-        ...,
+    exploration_prob: Optional[float] = Field(
+        default=None,
         ge=0.0,
         le=1.0,
         description="Probability of suppressing an early halt during exploration.",
     )
-    max_steps: int = Field(
-        ...,
+    max_steps: Optional[int] = Field(
+        default=None,
         ge=1,
         description="Maximum deliberation steps per slot before forced termination.",
     )
@@ -70,7 +72,7 @@ class RLBackbone[BkState](Protocol):
 
     def __call__(  # ------------------------------------------------------------------------------
         self, inputs: Tensor, state: BkState | None = None,
-    ) -> Tuple[BkState, Tensor, Tensor, Tensor, Tensor]:  # fmt: skip
+    ) -> Tuple[BkState, Tuple[Tensor, ...], Tensor]:  # fmt: skip
         ...  # fmt: skip
 
 
@@ -83,6 +85,7 @@ class RLState[ModelState](DetachMixin):
     steps: Tensor  # Per-slot step counter, shape: (B,)
     halted: Tensor  # Per-slot reset/done flag, shape: (B,)
     data: Dict[str, Tensor]  # Per-slot buffers that persist across steps until reset
+    env_td: TensorDictBase  # Per-slot TensorDict for interacting with the environment
 
 
 # =================================================================================================
@@ -90,11 +93,10 @@ class RLState[ModelState](DetachMixin):
 class RLOutput(DetachMixin):
     """ """
 
-    logits: Tensor  # (B, S, V) — LM logits for supervised loss
-    q_logits: Tensor  # (B, n_actions) — vmPFC Q-estimate logits for policy and value loss
-    action: Tensor  # (B,) — sampled action index
+    logits: Tuple[Tensor, ...]  # Tuple of (B, S, V) LM logits for supervised loss
+    reward: Tensor  # (B, 1) reward from the environment for this step
     theta_cls: Tensor  # (B, D) — theta CLS features
-    reward_hat: Tensor  # (B, 1) — STR reward prediction
+    action: Tensor  # (B,) selected action indices for this step
 
 
 # =================================================================================================
@@ -102,16 +104,22 @@ class RLController:
     """ """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: RLBackbone, config: RLControllerConfig,
+        self, backbone: RLBackbone, env: EnvBase, config: RLControllerConfig,
     ) -> None:  # fmt: skip
         """ """
         self._backbone = backbone
+        self._env = env
         self._config = config
 
     @property
     def backbone(self) -> RLBackbone:
         """ """
         return self._backbone
+
+    @property
+    def environment(self) -> EnvBase:
+        """ """
+        return self._env
 
     @property
     def config(self) -> RLControllerConfig:
@@ -124,11 +132,20 @@ class RLController:
         """ """
         B = batch_sample["inputs"].shape[0]
         device = batch_sample["inputs"].device
+
+        # Reset env with initial data
+        reset_td = TensorDict(
+            {"inputs": batch_sample["inputs"], "labels": batch_sample["labels"]},
+            batch_size=[B], device=device,
+        )  # fmt: skip
+        env_td = self._env.reset(reset_td)
+
         return RLState(
             model_state=self._backbone.init_state(B),
             steps=torch.zeros((B,), dtype=torch.int32, device=device),
             halted=torch.ones((B,), dtype=torch.bool, device=device),
             data={k: torch.empty_like(v) for k, v in batch_sample.items()},
+            env_td=env_td,
         )
 
     def step(  # ----------------------------------------------------------------------------------
@@ -138,13 +155,13 @@ class RLController:
         """ """
         data = self.refresh_slot_data(batch, state)
         model_state = self._backbone.reset_state(state.halted, state.model_state)
-        model_state, logits, theta_cls, q_logits, r_hat = self._backbone(data["inputs"], model_state)
+        model_state, logits, theta_cls = self._backbone(data["inputs"], model_state)
 
         steps = torch.where(state.halted, torch.zeros_like(state.steps), state.steps) + 1
-        action, done = self._select_action_and_done(q_logits, steps, allow_halt, explore)
+        action, done, env_td = self._select_action_and_done(logits, steps, data["labels"], state.env_td, allow_halt, explore)  # fmt: skip
 
-        state = RLState(model_state=model_state, steps=steps, halted=state.halted, data=data)
-        output = RLOutput( logits=logits, q_logits=q_logits, action=action, theta_cls=theta_cls, reward_hat=r_hat)  # fmt: skip
+        state = RLState(model_state=model_state, steps=steps, halted=state.halted, data=data, env_td=env_td)
+        output = RLOutput(logits=logits, theta_cls=theta_cls, action=action)
 
         return state, output
 
@@ -163,13 +180,37 @@ class RLController:
         }  # fmt: skip
 
     def _select_action_and_done(  # ---------------------------------------------------------------
-        self, q_values: Tensor, steps: Tensor, allow_halt: bool, explore: bool,
-    ) -> Tuple[Tensor, Tensor]:  # fmt: skip
-        """ """
-        action = Categorical(logits=q_values.detach()).sample()  # (B,)
-        done = ...  # FIXME: Probably call the env and use termination signal
+        self, logits: list[Tensor], steps: Tensor, labels: Tensor, env_td: TensorDictBase, 
+        allow_halt: bool, explore: bool,
+    ) -> Tuple[Tensor, Tensor, TensorDictBase]:  # fmt: skip
+        """Sample action, step env, apply exploration gating. Returns (action, done, env_td)."""
+        feature_logits, q_logits, _logits_r = logits  # Unpack list of logits
+        n_actions = self._env.action_spec["action"].shape[-1]
 
-        return action, done
+        # 1. Sample action from Q-logits (controller is action-agnostic)
+        action = Categorical(logits=q_logits.detach()).sample()  # (B,)
+
+        # 2. Auxiliary exploration controlled by exploration_prob
+        if self.config.exploration_prob is not None and explore:
+            explore_flag = torch.rand(steps.shape, device=steps.device) < self.config.exploration_prob
+            action = torch.where(explore_flag, torch.randint_like(action, low=0, high=n_actions), action)
+
+        # 3. Step the environment — env owns reward + termination semantics
+        env_td = env_td.clone()
+        env_td["action"] = action.unsqueeze(-1)  # (B, 1)
+        env_td["logits"] = feature_logits.detach()  # (B, S, V)
+        env_td["labels"] = labels  # (B, S)
+        env_td = self._env.step(env_td)["next"]  # TorchRL convention
+
+        terminated = env_td["terminated"].squeeze(-1)  # (B,)
+        truncated = env_td["truncated"].squeeze(-1)  # (B,)
+        done = terminated | truncated  # (B,)
+
+        # 4. Auxiliary control over termination by controller max_steps
+        if self.config.max_steps is not None and allow_halt:
+            done = done | (steps >= self.config.max_steps)
+
+        return action, done, env_td
 
 
 # =================================================================================================
