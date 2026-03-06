@@ -3,21 +3,19 @@
 import math
 from dataclasses import dataclass
 from itertools import repeat
-from typing import Any, Dict, List, Optional, Protocol, Tuple, TypeAlias
+from typing import Any, Dict, List, Optional, Tuple, TypeAlias
 
 import lightning as L
 import numpy as np
 import torch
-import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
-from torch.distributions import Categorical
 from torch.optim import Optimizer
 
-import ehc_sn.loss.cross_entropy as cross_entropy_module
 from ehc_sn.data.schema import CHANNEL_SOLUTION
 from ehc_sn.data.transforms import channels_to_grid
-from ehc_sn.loss.cross_entropy import LossType
+from ehc_sn.environment.mazehard import Env, EnvConfig
+from ehc_sn.metrics import build_metrics, update_metrics_from_step
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.str import STRModel, STRSettings, STRState
 from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
@@ -87,6 +85,10 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
         ...,
         description="",
     )
+    environment: EnvConfig = Field(
+        ...,
+        description="Environment configuration (max_steps, seq_length, vocab_size, halt_action).",
+    )
     rl_controller: RLControllerConfig = Field(
         ...,
         description="Configuration for the RL controller, which defines the forward pass and computes RL losses.",
@@ -99,15 +101,15 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     optimizer_supervised: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
-        description="Optimiser for supervised parameters (PFC + embeddings + LM head).",
+        description="optimizer for supervised parameters (PFC + embeddings + LM head).",
     )
     optimizer_rl: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
-        description="Optimiser for RL parameters (STR actor-critic only).",
+        description="optimizer for RL parameters (STR actor-critic only).",
     )
     optimizer_qv: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
-        description="Optimiser for vmPFC parameters (pfc.estimator only).",
+        description="optimizer for vmPFC parameters (pfc.estimator only).",
     )
     scheduler: SchedulerConfig = Field(
         default_factory=SchedulerConfig,
@@ -210,13 +212,18 @@ class HRModelV2(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, inputs: Tensor, state: Optional[HRMState] = None,
-    ) -> Tuple[HRMState, Tensor, Tensor, Tensor]:  # fmt: skip
+    ) -> Tuple[HRMState, Tensor, Tensor, Tensor, Tensor]:  # fmt: skip
         """ """
         state = state or self.init_state(batch_size=inputs.shape[0])
         x = self.embed_inputs(inputs)  # (B, S, D)
-        state_pfc, logits, theta_cls, q_values = self.pfc(x, state=state.pfc)  # z_H: (B, S+1, D)
-        logits = self.lm_head(logits)  # strip CLS → (B, S, vocab)
-        return HRMState(pfc=state_pfc, str=state.str), logits, theta_cls, q_values
+
+        state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H: (B, S+1, D)
+        logits = self.lm_head(z_H[:, 1:])  # strip CLS → (B, S, vocab)
+        theta_cls = z_H[:, 0]  # (B, D) — theta/CLS summary
+        state_str, r_hat = self.str(theta_cls.detach(), q_logits, state.str)
+
+        new_state = HRMState(pfc=state_pfc, str=state_str)
+        return new_state, logits, theta_cls, q_logits, r_hat
 
     def embed_inputs(  # --------------------------------------------------------------------------
         self, input: Tensor,
@@ -239,11 +246,12 @@ class TrainingModel(L.LightningModule):
     ) -> None:  # fmt: skip
         super().__init__()
         self.model = HRModelV2(config.model)
+        self.environment: Env | None = None  # Lazy init in setup() to avoid GPU allocation issues in DDP
         self.controller = RLController(self.model, self.model.str, config.rl_controller)
         self.step_module = RLLossHead(self.controller, config.loss)
         self._config = config
 
-        # Manual optimisation: explicit backward + opt step (legacy parity + dual-opt clarity).
+        # Manual optimization: explicit backward + opt step (legacy parity + dual-opt clarity).
         self.automatic_optimization = False
         self._train_carry = None
 
@@ -268,6 +276,13 @@ class TrainingModel(L.LightningModule):
     def config(self) -> ModelConfig_HRM_V2:
         """ """
         return self._config
+
+    def setup(  # --------------------------------------------------------------------------------
+        self, stage: Optional[str] = None,
+    ) -> None:  # fmt: skip
+        """Lazy initialization of the environment to avoid GPU allocation issues in DDP."""
+        if self.environment is None:
+            self.environment = Env(self.config.environment)
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
@@ -353,10 +368,6 @@ class TrainingModel(L.LightningModule):
         opt_sup.step(); opt_sup.zero_grad(set_to_none=True); sch_sup.step()  # fmt: skip
         opt_rl.step(); opt_rl.zero_grad(set_to_none=True); sch_rl.step()  # fmt: skip
         opt_vmPFC.step(); opt_vmPFC.zero_grad(set_to_none=True); sch_vmPFC.step()  # fmt: skip
-
-        scheduler = self.lr_schedulers()
-        for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
-            sch.step()  # type: ignore
 
         update_metrics_from_step(self.train_metrics, step.outputs.metrics)
         loss_gm = step.outputs.loss / float(local_bs)
