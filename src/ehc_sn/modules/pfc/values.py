@@ -117,15 +117,15 @@ class QValueEstimator(nn.Module):
     def config(self) -> QEstimatorSettings:
         return self._config
 
-    def _pool(self, z: Tensor) -> Tensor:
+    def _pool(self, z_H: Tensor, z_L) -> Tensor:
         """Reduce (B, S, D) → (B, D) using the configured strategy."""
         mode = self._config.pool_mode
         if mode == "first":
-            return z[:, self._config.pool_index]
+            return z_H[:, self._config.pool_index]
+        if mode == "first_detached":
+            return z_H[:, self._config.pool_index].detach()
         if mode == "mean":
-            return z.mean(dim=1)
-        if mode == "max":
-            return z.max(dim=1).values
+            return z_H.mean(dim=1)
         raise ValueError(f"Unknown pool_mode: {mode!r}")
 
     def forward(self, z_H: Tensor, z_L: Tensor) -> Tensor:
@@ -138,7 +138,7 @@ class QValueEstimator(nn.Module):
         Returns:
             Q-value logits ``(B, n_actions)``.
         """
-        features = self._pool(z_H) if z_H.ndim == 3 else z_H
+        features = self._pool(z_H, z_L)
         x = self.trunk(features.to(torch.float32))
         return self.head(x)
 

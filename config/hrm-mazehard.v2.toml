@@ -4,19 +4,17 @@ epochs            = 100
 seed              = 42
 augment           = true
 
-
-gamma        = 1.0
 warmup_steps = 5000
-max_steps    = 10
-
-c_actor   = 1.0
-c_critic  = 0.5
-c_entropy = 0.01
-c_vmPFC   = 0.5
-
-loss_function = "stablemax_cross_entropy"
 
 
+# -- Environment settings ----------------------------------------------------------------------
+[environment]
+    max_steps   = 16
+    seq_length  = 900
+    vocab_size  = 6
+    halt_action = 0
+
+# -- Model settings -------------------------------------------------------------------------------
 [model]
     vocab_size = 6
 
@@ -33,19 +31,16 @@ loss_function = "stablemax_cross_entropy"
 
 # vmPFC (QValueEstimator): auxiliary Q-predictor trained with a separate TD loss.
 [model.pfc.value_head]
+    pool_mode   = "first_detached"  # detach reward error propagation to reasoning
     hidden_size = 512
     n_actions   = 2
-    pool_mode   = "first"
     pool_index  = 0
     init_bias   = -5.0
 
-# STR-only fields go here
+# STR actor-critic: gamma is basal-ganglia temporal credit assignment
 [model.str]
-    hidden_size          = 32
-    policy_hidden_layers = []
-    value_hidden_layers  = []
-    init_policy_bias     = -2.0
-    init_value_bias      = 0.0
+    n_features = 512  # cortical features, same as pfc.reasoning_i.cortex.embedding_dim
+    n_actions  = 2    # Halt and continue
 
 
 # -- Optimizer and scheduler settings -------------------------------------------------------
@@ -64,3 +59,17 @@ loss_function = "stablemax_cross_entropy"
 [scheduler]
     warmup_steps = 1000
     min_ratio    = 0.01
+
+# -- Loss settings --------------------------------------------------------------------------------
+[loss]
+    function    = "stablemax_cross_entropy"
+    gamma       = 1.0
+    halt_action = 0
+    max_steps   = 10
+    c_actor     = 1.0
+    c_critic    = 0.5
+    c_entropy   = 0.01
+    c_vmPFC     = 0.5
+
+[rl_controller]
+    exploration_prob = 0.1

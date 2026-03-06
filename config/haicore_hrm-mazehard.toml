@@ -28,9 +28,9 @@ val_check_interval = 100
     cortex.num_heads     = 4
 
 [model.pfc.value_head]
+    pool_mode   = "first" # Use only cls_token to estimate Q-values
     hidden_size = 512 # Should match the PFC reasoning module's embedding_dim
     n_actions   = 2
-    pool_mode   = "first"
     pool_index  = 0 # Reads the CLS summary slot (position 0), not a maze cell
     init_bias   = -5.0
 
