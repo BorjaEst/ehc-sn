@@ -10,8 +10,9 @@ primitive used throughout the model.
 """
 
 import math
-from typing import Optional
+from typing import Literal, Optional
 
+import torch
 import torch.nn.functional as F
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from torch import Tensor, nn
@@ -87,6 +88,19 @@ class AttentionConfig(BaseModel, extra="forbid"):
 
     is_causal: bool = Field(default=False, description="Apply causal masking in attention.")
 
+    pos_encodings: Literal["learned", "rope"] = Field(
+        default="learned",
+        description=(
+            "Positional encoding strategy. 'rope' applies rotary embeddings to Q/K inside every "
+            "attention call, enabling persistent positional awareness across recurrent reasoning "
+            "cycles. 'learned' relies on additive position embeddings added once at the input."
+        ),
+    )
+    rope_theta: float = Field(
+        default=10000.0,
+        description="Base period for RoPE frequency bands. Ignored when pos_encodings='learned'.",
+    )
+
     @property
     def head_dim(self) -> int:
         """Dimension of each attention head."""
@@ -96,6 +110,42 @@ class AttentionConfig(BaseModel, extra="forbid"):
     def output_size(self) -> int:
         """Output dimension of the attention module."""
         return self.head_dim * self.num_heads
+
+
+def _rope_rotate(x: Tensor, theta: float) -> Tensor:
+    """Apply Rotary Position Embeddings (RoPE) to a query or key tensor.
+
+    Rotates consecutive dimension pairs (first-half / second-half split) by
+    position-dependent angles. Computation is done in float32 and cast back to
+    the input dtype, preserving bf16/fp16 training stability.
+
+    Args:
+        x: Tensor of shape ``[batch, heads, seq, head_dim]``.
+        theta: Base frequency (``rope_theta``) controlling the wavelength
+            spectrum. Legacy default: ``10000.0``.
+
+    Returns:
+        Rotated tensor of identical shape and dtype as ``x``.
+    """
+    _batch, _heads, seq_len, head_dim = x.shape
+    device, orig_dtype = x.device, x.dtype
+    half = head_dim // 2  # pairs of dimensions to rotate
+
+    # Frequency for each dimension pair: 1 / (theta^(2i / head_dim)), i in [0, half).
+    freqs = 1.0 / (
+        theta ** (torch.arange(0, head_dim, 2, device=device, dtype=torch.float32) / head_dim)
+    )  # [half]
+
+    # Outer product → angle per position per frequency: [seq, half]
+    angles = torch.outer(torch.arange(seq_len, device=device, dtype=torch.float32), freqs)
+    cos = angles.cos().view(1, 1, seq_len, half)  # [1, 1, S, half]
+    sin = angles.sin().view(1, 1, seq_len, half)
+
+    # Rotate: [x1 * cos - x2 * sin,  x1 * sin + x2 * cos] (Euler rotation)
+    x_f = x.float()
+    x1, x2 = x_f[..., :half], x_f[..., half:]  # each [B, H, S, half]
+    rotated = torch.cat([x1 * cos - x2 * sin, x1 * sin + x2 * cos], dim=-1)
+    return rotated.to(orig_dtype)
 
 
 # =================================================================================================
@@ -202,6 +252,12 @@ class Attention(nn.Module):
         q = q.transpose(1, 2)  # [bs, heads, seq, head_dim]
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
+
+        # Apply RoPE to Q and K before KV-head expansion (position info is per token, not per head copy).
+        if config.pos_encodings == "rope":
+            q = _rope_rotate(q, config.rope_theta)
+            k = _rope_rotate(k, config.rope_theta)
+
         k, v = self._expand_kv_heads(k, v)
 
         # `is_causal` is handled by SDPA; `attn_mask` is optional and may embed_inputs

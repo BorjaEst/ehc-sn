@@ -125,6 +125,7 @@ class Datamodule(L.LightningDataModule):
             prefetch_factor=self.config.prefetch_factor if self.config.num_workers > 0 else None,
             pin_memory=self.config.pin_memory,
             persistent_workers=self.config.persistent_workers and self.config.num_workers > 0,
+            drop_last=True,  # drop_last is often recommended for training
         )
 
     def train_dataloader(  # ----------------------------------------------------------------------

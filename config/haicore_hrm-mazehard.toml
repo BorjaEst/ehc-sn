@@ -10,7 +10,6 @@ global_batch_size = 128
 epochs            = 100
 seed              = 42
 augment           = true
-val_check_interval = 100
 
 # -- Model architecture -------------------------------------------------------
 [model]
@@ -19,16 +18,24 @@ val_check_interval = 100
 [model.pfc]
     seq_length = 900 # 30 × 30 for mazehard puzzle
 
-[model.pfc.reasoning_h] # Transformer block config for both H and L reasoning modules
-    cortex.embedding_dim = 32
-    cortex.num_heads     = 4
+[model.pfc.reasoning_h] # High-level reasoning (anterior dlPFC) — legacy parity: 4 layers × 2 cycles, 512-d, 8 heads, RoPE
+    cortex.embedding_dim = 512
+    cortex.num_heads     = 8
+    cortex.pos_encodings = "rope"
+    cortex.rope_theta    = 10000.0
+    n_layers             = 4
+    n_cycles             = 2
 
-[model.pfc.reasoning_l] # Transformer block config for both H and L reasoning modules
-    cortex.embedding_dim = 32
-    cortex.num_heads     = 4
+[model.pfc.reasoning_l] # Low-level reasoning (posterior dlPFC) — must match reasoning_h embedding_dim
+    cortex.embedding_dim = 512
+    cortex.num_heads     = 8
+    cortex.pos_encodings = "rope"
+    cortex.rope_theta    = 10000.0
+    n_layers             = 4
+    n_cycles             = 2
 
 [model.pfc.value_head]
-    hidden_size = 32 # Should match the PFC reasoning module's embedding_dim
+    hidden_size = 512 # Should match the PFC reasoning module's embedding_dim
     n_actions   = 2
     pool_mode   = "first"
     pool_index  = 0 # Reads the CLS summary slot (position 0), not a maze cell
@@ -37,7 +44,7 @@ val_check_interval = 100
 # -- ACT controller -----------------------------------------------------------
 [act_controller]
     exploration_prob = 0.1
-    halt_max_steps   = 10
+    halt_max_steps   = 16
 
 # -- Loss, optimizer, scheduler (defaults are fine; override here if needed) ---
 [loss]
@@ -45,8 +52,9 @@ val_check_interval = 100
 
 [optimizer]
     lr           = 1e-4
-    weight_decay = 1e-2
+    weight_decay = 0.1
+    betas        = [0.9, 0.95]
 
 [scheduler]
-    warmup_steps = 1000
-    min_ratio    = 0.01
+    warmup_steps = 2000
+    min_ratio    = 1.00

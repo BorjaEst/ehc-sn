@@ -215,7 +215,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         description="Whether to checkpoint the model after every evaluation.",
     )
     limit_val_batches: int = Field(
-        default=10,
+        default=1,
         description="Cap validation to N batches per validation run.",
     )
     eval_save_outputs: List[str] = Field(

@@ -190,6 +190,7 @@ class ACTController:
     def step(  # ----------------------------------------------------------------------------------
         self, state: ACTState, batch: Batch,
         allow_halt: bool = True, explore: bool = True,
+        compute_td_target: bool = True,
     ) -> Tuple[ACTState, ACTOutput]:  # fmt: skip
         """Run one ACT step, this performs, in order:
 
@@ -219,12 +220,18 @@ class ACTController:
         output = ACTOutput(logits=logits, halt_logits=q_halt, continue_logits=q_continue, action=action)
 
         # TD(0) bootstrap target for the continue head.
-        with torch.no_grad():
-            _, _, next_q = self.backbone(data["inputs"], model_state)
-            next_q_halt, next_q_continue = next_q[..., self.HALT_ACTION], next_q[..., self.CONTINUE_ACTION]
-        is_last_step = steps >= self._config.halt_max_steps
-        next_q = torch.where(is_last_step, next_q_halt, torch.maximum(next_q_halt, next_q_continue))
-        output.target_continue = torch.sigmoid(next_q)  # Sigmoid to convert logits to probabilities
+        # Skipped during validation (compute_td_target=False) to avoid a redundant forward pass.
+        # Also skipped when halt_max_steps==1 (every step is terminal; target collapses to q_halt).
+        if compute_td_target and self._config.halt_max_steps > 1:
+            with torch.no_grad():
+                _, _, next_q = self.backbone(data["inputs"], model_state)
+                next_q_halt, next_q_continue = (
+                    next_q[..., self.HALT_ACTION],
+                    next_q[..., self.CONTINUE_ACTION],
+                )
+            is_last_step = steps >= self._config.halt_max_steps
+            next_q = torch.where(is_last_step, next_q_halt, torch.maximum(next_q_halt, next_q_continue))
+            output.target_continue = torch.sigmoid(next_q)  # Sigmoid to convert logits to probabilities
 
         return state, output
 

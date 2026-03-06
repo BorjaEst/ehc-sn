@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
@@ -36,6 +36,19 @@ class TransformerBlockConfig(BaseModel, extra="forbid"):
     is_causal: bool = Field(
         default=False,
         description="Whether to apply causal masking in attention.",
+    )
+
+    pos_encodings: Literal["learned", "rope"] = Field(
+        default="learned",
+        description=(
+            "Positional encoding strategy. 'learned': add learned position embeddings once at the "
+            "input (current default). 'rope': apply rotary embeddings inside every attention "
+            "operation — required for multi-step recurrent reasoning (legacy parity)."
+        ),
+    )
+    rope_theta: float = Field(
+        default=10000.0,
+        description="Base period for RoPE frequency bands. Ignored when pos_encodings='learned'.",
     )
 
     @property

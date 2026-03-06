@@ -85,6 +85,11 @@ class ModelSettings_V1(BaseModel, extra="forbid"):
         """Convenience property for standard deviation of truncated normal initialization."""
         return 1.0 / math.sqrt(self.hidden_size)
 
+    @property
+    def pos_encodings(self) -> str:
+        """Positional encoding mode shared by both H and L reasoning modules."""
+        return self.pfc.reasoning_h.cortex.pos_encodings
+
 
 # =================================================================================================
 class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
@@ -221,7 +226,11 @@ class HRModelV1(nn.Module):
         self._config = config
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, device=device, dtype=dtype)
-        self.embed_pos = nn.Embedding(config.seq_length, config.hidden_size, device=device, dtype=dtype)
+        self.embed_pos = (
+            nn.Embedding(config.seq_length, config.hidden_size, device=device, dtype=dtype)
+            if config.pos_encodings == "learned"
+            else None
+        )
         self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)  # fmt: skip
         self.reset_parameters()
@@ -247,7 +256,8 @@ class HRModelV1(nn.Module):
         """
         init_std = self.config.init_std  # 1 / sqrt(hidden_size)
         trunc_normal_init_(self.embed_tokens.weight, std=init_std)
-        trunc_normal_init_(self.embed_pos.weight, std=init_std)
+        if self.embed_pos is not None:
+            trunc_normal_init_(self.embed_pos.weight, std=init_std)
         trunc_normal_init_(self.lm_head.weight, std=init_std)
         # self.pfc.reset_parameters()  # Already done when pfc is initialized
 
@@ -276,13 +286,28 @@ class HRModelV1(nn.Module):
     def embed_inputs(  # --------------------------------------------------------------------------
         self, input: Tensor,
     ) -> Tensor:  # fmt: skip
-        """ """
-        token_embeddings = self.embed_tokens(input.to(torch.int32))
-        positions = torch.arange(self.config.seq_length, device=input.device)
-        pos_embeddings = self.embed_pos(positions).unsqueeze(0)
+        """Embed token ids into a scaled representation ready for recurrent reasoning.
 
-        # Scale embeddings to keep activations in a reasonable range.
-        return self.config.embedding_scale * (token_embeddings + pos_embeddings)
+        Two modes (controlled by ``config.pos_encodings``):
+
+        **rope** (legacy parity): token embeddings only, scaled by ``sqrt(d)``.
+            Positional information is injected inside every attention operation via
+            Rotary Position Embeddings; no additive position table is needed or used.
+
+        **learned**: token + additive learned position embeddings, scaled by
+            ``(1/\u221a2) * sqrt(d)`` to preserve unit variance at the residual stream
+            (the factor compensates for summing two independently-initialized
+            embeddings, each with per-dim variance \u2248 1/d).
+        """
+        token_embeddings = self.embed_tokens(input.to(torch.int32))
+        if self.config.pos_encodings == "rope":
+            # RoPE mode: positions are encoded in QK rotation — scale by sqrt(d) only.
+            return math.sqrt(self.config.hidden_size) * token_embeddings
+        else:
+            # Learned mode: add positional table, then scale to maintain variance.
+            positions = torch.arange(self.config.seq_length, device=input.device)
+            pos_embeddings = self.embed_pos(positions).unsqueeze(0)
+            return self.config.embedding_scale * (token_embeddings + pos_embeddings)
 
 
 # =================================================================================================
@@ -473,7 +498,11 @@ class TrainingModel(L.LightningModule):
 
         # Run a full ACT rollout so halted-only metrics are meaningful.
         step_batches = repeat(batch_dict)  # Run until all examples halt
-        act_options = {"allow_halt": False, "explore": False}  # No halt or exploration in validation
+        act_options = {
+            "allow_halt": False,
+            "explore": False,
+            "compute_td_target": False,
+        }  # No halt, exploration, or TD target in validation
         carry0 = self.step_module.initial_carry(batch_dict)
 
         # Initialize carry/state on the first batch
