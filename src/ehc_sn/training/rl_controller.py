@@ -185,11 +185,11 @@ class RLController:
         allow_halt: bool, explore: bool,
     ) -> Tuple[Tensor, Tensor, TensorDictBase]:  # fmt: skip
         """Sample action, step env, apply exploration gating. Returns (action, done, env_td)."""
-        feature_logits, q_logits, _logits_r = logits  # Unpack list of logits
+        logits_lm, logits_q, logits_r, *_ = logits  # Unpack list of logits multiple heads
         n_actions = self._env.action_spec["action"].shape[-1]
 
         # 1. Sample action from Q-logits (controller is action-agnostic)
-        action = Categorical(logits=q_logits.detach()).sample()  # (B,)
+        action = Categorical(logits=logits_q.detach()).sample()  # (B,)
 
         # 2. Auxiliary exploration controlled by exploration_prob
         if self.config.exploration_prob is not None and explore:
@@ -199,7 +199,7 @@ class RLController:
         # 3. Step the environment — env owns reward + termination semantics
         env_td = env_td.clone()
         env_td["action"] = action.unsqueeze(-1)  # (B, 1)
-        env_td["logits"] = feature_logits.detach()  # (B, S, V)
+        env_td["logits"] = logits_lm.detach()  # (B, S, V)
         env_td["labels"] = labels  # (B, S)
         env_td = self._env.step(env_td)["next"]  # TorchRL convention
 

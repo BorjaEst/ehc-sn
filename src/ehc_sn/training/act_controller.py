@@ -151,9 +151,9 @@ class ACTController:
         self, logits: list[Tensor], steps: Tensor, allow_halt: bool, explore: bool,
     ) -> Tuple[Tensor, Tensor]:  # fmt: skip
         """ """
-        _feature_logits, q_logits = logits  # Unpack list of logits
+        _logits_lm, logits_q, *_ = logits  # Unpack list of logits multiple heads
         config = self.config
-        action = q_logits.detach().argmax(dim=-1)  # greedy over all actions (B,)
+        action = logits_q.detach().argmax(dim=-1)  # greedy over all actions (B,)
         done = steps >= config.max_steps
 
         if allow_halt:
