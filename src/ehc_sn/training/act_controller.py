@@ -120,7 +120,7 @@ class ACTController:
         model_state, logits, theta_cls = self.backbone(data["inputs"], model_state)
 
         steps = torch.where(state.halted, 0, state.steps) + 1
-        action, done = self._select_action_and_done(q, steps, allow_halt, explore)
+        action, done = self._select_action_and_done(logits, steps, allow_halt, explore)
 
         state = ACTState(model_state=model_state, steps=steps, halted=done, data=data)
         output = ACTOutput(logits=logits, theta_cls=theta_cls, action=action)
@@ -148,12 +148,12 @@ class ACTController:
         }  # fmt: skip
 
     def _select_action_and_done(  # ---------------------------------------------------------------
-        self, q_values: Tensor, steps: Tensor, allow_halt: bool, explore: bool,
+        self, logits: list[Tensor], steps: Tensor, allow_halt: bool, explore: bool,
     ) -> Tuple[Tensor, Tensor]:  # fmt: skip
         """ """
+        _feature_logits, q_logits = logits  # Unpack list of logits
         config = self.config
-        q = q_values.detach()
-        action = q.argmax(dim=-1)  # greedy over all actions (B,)
+        action = q_logits.detach().argmax(dim=-1)  # greedy over all actions (B,)
         done = steps >= config.max_steps
 
         if allow_halt:

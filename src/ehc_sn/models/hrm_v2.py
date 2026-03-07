@@ -380,7 +380,7 @@ class TrainingModel(L.LightningModule):
         signals = {**step.outputs.signals, "is_warmup": torch.tensor(float(is_warmup))}
         return {"loss": loss.detach(), "signals": signals}
 
-    # -- Validation --------------------------------------------------------------------------------
+    # -- Validation -------------------------------------------------------------------------------
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
