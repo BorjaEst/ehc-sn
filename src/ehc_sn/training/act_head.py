@@ -147,8 +147,9 @@ class ACTLossHead(nn.Module):
         self, outputs: ACTOutput, labels: Tensor
     ) -> AccuracyStats:  # fmt: skip
         """ """
+        logits_lm, *_ = outputs.logits  # Unpack list of logits if backbone returns multiple heads
         mask = labels != IGNORE_LABEL_ID
-        is_correct = mask & (torch.argmax(outputs.logits, dim=-1) == labels)
+        is_correct = mask & (torch.argmax(logits_lm, dim=-1) == labels)
         return AccuracyStats(mask=mask, is_correct=is_correct)
 
     def compute_losses(  # -----------------------------------------------------------------------
