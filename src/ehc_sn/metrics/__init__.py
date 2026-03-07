@@ -39,8 +39,8 @@ def _groups_to_keys(  # --------------------------------------------------------
 ) -> set[str]:  # fmt: skip
     """Convert a set of key groups to the corresponding set of metric keys."""
     keys = set(_COMMON_KEYS)
-    keys = keys | _ACT_KEYS if "act" in groups else keys
-    keys = keys | _RL_KEYS if "rl" in groups else keys
+    keys = keys | set(_ACT_KEYS) if "act" in groups else keys
+    keys = keys | set(_RL_KEYS) if "rl" in groups else keys
     return keys
 
 
