@@ -41,6 +41,13 @@ CHANNEL_MASK_VALID: str = "mask_valid"
 """Explicit reachability mask. Optional."""
 
 # =================================================================================================
+# Vocabulary token IDs
+# =================================================================================================
+
+O_ID: int = 5
+"""Solution-path overlay token ID used in MazeHard supervised training."""
+
+# =================================================================================================
 MANDATORY_CHANNELS: frozenset[str] = frozenset({CHANNEL_TOPOLOGY})
 
 CHANNEL_DTYPES: dict[str, np.dtype] = {
@@ -99,6 +106,7 @@ __all__ = [
     "CHANNEL_LANDMARKS",
     "CHANNEL_REGIONS",
     "CHANNEL_MASK_VALID",
+    "O_ID",
     "MANDATORY_CHANNELS",
     "CHANNEL_DTYPES",
     "validate_npz",

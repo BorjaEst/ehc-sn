@@ -29,12 +29,13 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
-from ehc_sn.data.schema import CHANNEL_SOLUTION
+from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.metrics.routes import ACT_ROUTES
+from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
-from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
+from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.act_controller import ACTController, ACTControllerConfig
 from ehc_sn.training.act_head import ACTLossConfig, ACTLossHead
@@ -48,9 +49,6 @@ from ehc_sn.utils import trunc_normal_init_
 
 # Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
 Batch: TypeAlias = Dict[str, Tensor]
-
-# HRM-private: solution-path token, not part of the canonical SEM vocabulary.
-O_ID: int = 5
 
 
 # =================================================================================================
@@ -145,58 +143,6 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
             "The per-device batch size is computed as `global_batch_size // world_size`."
         ),
     )  # TODO: consider moving to BufferSettings or similar
-
-
-# =================================================================================================
-class TraceFields:
-    """ """
-
-    @staticmethod
-    def get_model_loss(ctx: StepContext) -> TraceValue:
-        loss: Tensor = ctx.outputs.loss  # Scalar tensor
-        return loss.detach()  # Detach to avoid tracking gradients in the trace
-
-    @staticmethod
-    def get_logits_lm(ctx: StepContext) -> TraceValue:
-        logits: Tensor = ctx.outputs.outputs.logits[0]  # (B, S, vocab_size)
-        return logits.detach()
-
-    @staticmethod
-    def get_logits_q(ctx: StepContext) -> TraceValue:
-        logits_q: Tensor = ctx.outputs.outputs.logits[1]  # (B, n_actions)
-        return logits_q.detach()
-
-    @staticmethod
-    def get_model_steps(ctx: StepContext) -> TraceValue:
-        steps: Tensor = ctx.carry.steps  # Tensor shape (B,)
-        return steps.detach()
-
-    @staticmethod
-    def get_act_halted(ctx: StepContext) -> TraceValue:
-        halted: Tensor = ctx.carry.halted
-        return halted.detach()
-
-    @staticmethod
-    def get_outputs(ctx: StepContext) -> TraceValue:
-        outputs: Any = ctx.outputs.outputs
-        return outputs.detach()
-
-    @staticmethod
-    def get_pred_is_o(ctx: StepContext) -> TraceValue:
-        pred: Tensor = torch.argmax(TraceFields.get_logits_lm(ctx), dim=-1)  # type: ignore
-        return (pred == O_ID).to(torch.uint8).detach()
-
-
-# =================================================================================================
-def trace_fields() -> List[TraceField[StepContext]]:
-    """ """
-    return [
-        TraceField(name="loss", get=TraceFields.get_model_loss),
-        TraceField(name="logits_q", get=TraceFields.get_logits_q),
-        TraceField(name="steps", get=TraceFields.get_model_steps),
-        TraceField(name="act/halted", get=TraceFields.get_act_halted),
-        TraceField(name="pred/is_o", get=TraceFields.get_pred_is_o),
-    ]
 
 
 # =================================================================================================
@@ -327,7 +273,7 @@ class TrainingModel(L.LightningModule):
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(ACT_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(ACT_ROUTES).clone(prefix="val/")
-        self.trace_specs = TraceSpec(fields=trace_fields())
+        self.trace_specs = build_trace_spec("act")
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer = FifoBuffer(

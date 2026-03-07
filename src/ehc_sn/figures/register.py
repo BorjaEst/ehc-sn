@@ -32,7 +32,7 @@ def register_builtin_figures() -> None:
                 plot=overlay.plot,
                 default_filename="overlay",
                 tags={"paper", "mazehard"},
-                trace_keys={"act/halted", "pred/is_o"},
+                trace_keys={"act/halted", "pred/solution_overlay"},
                 extras_keys={"inputs", "labels"},
             )
         )
@@ -45,7 +45,7 @@ def register_builtin_figures() -> None:
                 plot=evolution.plot,
                 default_filename="evolution",
                 tags={"mazehard"},
-                trace_keys={"act/halted", "pred/is_o"},
+                trace_keys={"act/halted", "pred/solution_overlay"},
                 extras_keys={"inputs", "labels"},
             )
         )

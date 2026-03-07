@@ -1,7 +1,7 @@
 """MazeHard figure: prediction evolution over rollout steps.
 
 This figure renders a single MazeHard puzzle and shows how the model's binary
-argmax overlay prediction (`pred/is_o`) evolves over time. The first column
+argmax overlay prediction (`pred/solution_overlay`) evolves over time. The first column
 shows ground-truth overlay (`labels == O_ID`), followed by per-step predictions
 up to the halt step.
 """
@@ -19,10 +19,8 @@ from ehc_sn.figures.figures.panels import panel
 from ehc_sn.figures.plots.mazehard import plot_maze_with_overlay
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.axes import subdivide_axes
+from ehc_sn.data.schema import O_ID
 from ehc_sn.figures.utils.grids import first_halt_index, reshape_grid
-from ehc_sn.models.hrm_v1 import (  # FIXME figures should not depend on specific model constants, this might be a bad design smell
-    O_ID,
-)
 from ehc_sn.rollouts.trace_tree import TraceTree
 
 
@@ -95,7 +93,7 @@ def _get_required_trace(  # ----------------------------------------------------
     trace: TraceTree,
 ) -> tuple[np.ndarray, np.ndarray]:  # fmt: skip
     halted = np.asarray(trace.get("act/halted"))
-    pred_is_o = np.asarray(trace.get("pred/is_o"))
+    pred_is_o = np.asarray(trace.get("pred/solution_overlay"))
     return pred_is_o, halted
 
 
