@@ -156,13 +156,16 @@ class ACTLossHead(nn.Module):
         self, outputs: ACTOutput, labels: Tensor, stats: AccuracyStats
     ) -> Losses:  # fmt: skip
         """ """
-        loss_per_token = self.loss_fn(outputs.logits, labels, ignore_index=IGNORE_LABEL_ID)
+        logits_lm, logits_q, *_ = outputs.logits  # Unpack list of logits multiple heads
+
+        # Compute main modeling loss (e.g., cross-entropy) over all tokens, summed over batch.
+        loss_per_token = self.loss_fn(logits_lm, labels, ignore_index=IGNORE_LABEL_ID)
         loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
         loss_sum = loss_per_seq.sum()
-        done_action = self.controller.config.done_action
 
         # Done-action loss: match Q(done) to sequence correctness.
-        q_done_logits = outputs.q_values[..., done_action]  # (B,)
+        done_action = self.controller.config.done_action
+        q_done_logits = logits_q[..., done_action]  # (B,)
         q_done_loss = F.binary_cross_entropy_with_logits(
             input=q_done_logits,
             target=stats.seq_is_correct.to(q_done_logits.dtype),
@@ -174,10 +177,10 @@ class ACTLossHead(nn.Module):
         if outputs.target_q is not None:
             # Select the non-done logit(s). For 2-action, pick ~done_action.
             # Generalization: supervise all non-done actions toward TD target.
-            n_actions = outputs.q_values.shape[-1]
+            n_actions = logits_q.shape[-1]
             continue_actions = [a for a in range(n_actions) if a != done_action]
             if continue_actions:
-                q_cont = outputs.q_values[..., continue_actions].mean(dim=-1)  # (B,)
+                q_cont = logits_q[..., continue_actions].mean(dim=-1)  # (B,)
                 q_continue_loss = F.binary_cross_entropy_with_logits(
                     input=q_cont,
                     target=outputs.target_q,
@@ -190,6 +193,7 @@ class ACTLossHead(nn.Module):
         self, state: ACTState, outputs: ACTOutput, stats: AccuracyStats, losses: Losses,
     ) -> StepMetrics:  # fmt: skip
         """ """
+        _, logits_q, *_ = outputs.logits  # Unpack list of logits multiple heads
         eligible_mask = stats.loss_counts > 0
         halted_mask = state.halted & eligible_mask  # (B,)
         halted_weights = halted_mask.to(torch.float32)
@@ -204,17 +208,17 @@ class ACTLossHead(nn.Module):
 
         q_continue_correct: Optional[Tensor] = None
         if outputs.target_q is not None:
-            n_actions = outputs.q_values.shape[-1]
+            n_actions = logits_q.shape[-1]
             continue_actions = [a for a in range(n_actions) if a != done_action]
             if continue_actions:
-                q_cont = outputs.q_values[..., continue_actions].mean(dim=-1)
+                q_cont = logits_q[..., continue_actions].mean(dim=-1)
                 pred_continue = q_cont >= 0
                 q_continue_correct = pred_continue == stats.seq_is_correct
 
         eligible_count = eligible_mask.to(torch.float32).sum()
         halted = self._build_halted_agg(state, stats, halted_mask, halted_weights, eligible_count, seq_accuracy, q_done_correct, q_continue_correct)  # fmt: skip
         tokens = self._build_token_agg(token_correct_per_seq, token_count_per_seq, halted_weights)
-        loss = self._build_loss_agg(losses, batch_size=outputs.logits.shape[0])
+        loss = self._build_loss_agg(losses, batch_size=logits_q.shape[0])
 
         return StepMetrics(halted=halted, tokens=tokens, loss=loss)
 
