@@ -453,14 +453,11 @@ class TrainingModel(L.LightningModule):
         for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
             sch.step()  # type: ignore
 
+        # Update metrics with unnormalized loss and log to TensorBoard.
         update_metrics_from_step(self.train_metrics, step.outputs.metrics)
-        loss_gm = step.outputs.loss / float(local_bs)
-        if (self.global_step + 1) % self.trainer.log_every_n_steps == 0:  # type: ignore
-            self.log_dict(self.train_metrics.compute(), on_step=True, on_epoch=False, logger=True)
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
-        self.log("train/loss_gm", loss_gm.detach(), on_step=True, on_epoch=False, logger=True)
 
-        return {"loss": loss.detach()}
+        return {"loss": loss.detach(), "signals": step.outputs.signals}
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
@@ -484,10 +481,8 @@ class TrainingModel(L.LightningModule):
         if step is None:
             raise ValueError("Evaluation loop did not yield any steps, cannot log metrics.")
 
+        # Update metrics with the final step's metrics and log to TensorBoard.
         update_metrics_from_step(self.val_metrics, step.outputs.metrics)
-        vals = self.val_metrics.compute()  # Compute metrics based on accumulated state
-        self.log_dict(vals, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
-        self.log("val/accuracy", vals["val/all/accuracy"], prog_bar=True, logger=True, sync_dist=True)
 
         return {"trace": collector.tree}
 

@@ -79,6 +79,11 @@ class ACTLossStep:
     losses: Losses  # Combined losses for this step, kept live for backward()
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
     outputs: Optional[ACTOutput] = None  # Raw controller outputs
+    signals: Dict[str, Any] = None  # Diagnostic signals (T2/T3); plain dict, no schema commitment
+
+    def __post_init__(self) -> None:
+        if self.signals is None:
+            object.__setattr__(self, "signals", {})
 
     @property
     def loss(self) -> Tensor:
@@ -133,8 +138,9 @@ class ACTLossHead(nn.Module):
 
         losses = self.compute_losses(outputs, labels, stats)
         metrics = self.compute_metrics(carry, outputs, stats, losses)
+        signals = self.compute_signals(carry, outputs, losses)
 
-        outputs = ACTLossStep(losses=losses, metrics=metrics, outputs=outputs)
+        outputs = ACTLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
         return outputs, carry, bool(carry.halted.all())
 
     def compute_accuracy(  # ------------------------------------------------------------------
@@ -257,3 +263,17 @@ class ACTLossHead(nn.Module):
             entropy_loss_sum=torch.tensor(0.0, device=losses.loss_sum.device),
             q_value_loss_sum=torch.tensor(0.0, device=losses.loss_sum.device),
         )
+
+    def compute_signals(  # -----------------------------------------------------------------------
+        self, state: ACTState, outputs: ACTOutput, losses: Losses,
+    ) -> Dict[str, Tensor]:  # fmt: skip
+        """ """
+        signals: Dict[str, Tensor] = {
+            "steps_mean": state.steps.float().mean().detach(),
+            "theta_cls_norm": outputs.theta_cls.detach().norm(dim=-1).mean(),
+            "loss_q_halt": losses.q_halt_loss_sum.detach(),
+        }
+        if outputs.target_q is not None:
+            signals["target_q_mean"] = outputs.target_q.mean().detach()
+            signals["target_q_std"] = outputs.target_q.std().detach()
+        return signals

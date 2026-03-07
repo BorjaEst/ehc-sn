@@ -88,6 +88,11 @@ class RLLossStep:
     losses: Losses  # Combined losses for this step, kept live for backward()
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
     outputs: Optional[RLOutput] = None  # Raw controller outputs
+    signals: Dict[str, Tensor] = None  # Diagnostic signals (T2/T3); plain dict, no schema commitment
+
+    def __post_init__(self) -> None:
+        if self.signals is None:
+            object.__setattr__(self, "signals", {})
 
     @property
     def loss(self) -> Tensor:
@@ -142,8 +147,9 @@ class RLLossHead(nn.Module):
 
         losses = self.compute_losses(outputs, labels, stats)
         metrics = self.compute_metrics(carry, outputs, stats, losses)
+        signals = self.compute_signals(carry, outputs, losses)
 
-        outputs = RLLossStep(losses=losses, metrics=metrics, outputs=outputs)
+        outputs = RLLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
         return outputs, carry, bool(carry.halted.all())
 
     def compute_accuracy(  # ------------------------------------------------------------------
@@ -237,6 +243,27 @@ class RLLossHead(nn.Module):
         )
 
         return StepMetrics(halted=halted, tokens=tokens, loss=loss)
+
+    def compute_signals(  # -----------------------------------------------------------------------
+        self, state: RLState, outputs: RLOutput, losses: Losses,
+    ) -> Dict[str, Tensor]:  # fmt: skip
+        """ """
+        _feature, q_logits, logits_r = outputs.logits  # (B,S,V), (B,A), (B,1)
+        reward = outputs.reward.squeeze(-1)  # (B,)
+        rpe = (reward - logits_r.squeeze(-1)).detach()  # (B,) reward prediction error
+        dist = Categorical(logits=q_logits.detach())
+        return {
+            "reward_mean": reward.mean().detach(),
+            "reward_std": reward.std().detach(),
+            "q_mean": q_logits.detach().mean(),
+            "q_std": q_logits.detach().std(),
+            "rpe_magnitude": rpe.abs().mean(),
+            "action_entropy": dist.entropy().mean(),
+            "steps_mean": state.steps.float().mean().detach(),
+            "loss_actor": losses.loss_actor_sum.detach(),
+            "loss_critic": losses.loss_critic_sum.detach(),
+            "loss_entropy": losses.loss_entropy_sum.detach(),
+        }
 
 
 # =================================================================================================

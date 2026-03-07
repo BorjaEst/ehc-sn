@@ -14,7 +14,9 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
+from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
+from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.envs.mazehard import EnvConfig
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
@@ -170,6 +172,14 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         default_factory=FigureCallbackSettings,
         description="Figure generation callback settings.",
     )
+    diagnostic_level: Literal["minimal", "standard", "research"] = Field(
+        default="standard",
+        description=(
+            "Instrumentation tier. 'minimal': only training metrics. "
+            "'standard': training metrics + model health diagnostics. "
+            "'research': all available diagnostic signals."
+        ),
+    )
 
     # ---------------------------------------------------------------------------------------------
     # Training control settings (passed as kwargs to Lightning Trainer)
@@ -250,6 +260,11 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         """Compose DatamoduleConfig from leaf settings."""
         return DatamoduleConfig.model_validate(self, from_attributes=True)
 
+    @property
+    def diagnostics(self) -> DiagnosticsSettings:
+        """Compose DiagnosticsSettings from leaf settings."""
+        return DiagnosticsSettings.model_validate(self, from_attributes=True)
+
 
 # =================================================================================================
 def _validate_global_batch_size(settings: RunArguments) -> None:
@@ -285,11 +300,13 @@ if __name__ == "__main__":
     seed_everything(settings.seed)
 
     # Prepare callbacks: checkpointing + optional figure generation.
-    callbacks_list = []
+    callbacks_list = [TrainingMetricsCallback()]
     if settings.checkpoint is not None:
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
     if settings.figures is not None and settings.figures.enabled:
         callbacks_list.append(FiguresCallback(settings.figures))
+    if settings.diagnostic_level != "minimal":
+        callbacks_list.append(DiagnosticsCallback(settings.diagnostics))
 
     # Build the PyTorch Lightning Trainer.
     # This wires together logging, callbacks, and training control.
