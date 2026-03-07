@@ -1,16 +1,16 @@
+""" """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
 from typing import Any, Dict
 
-from torch import Tensor
-
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
+from ehc_sn.types import Batch
 
-BatchDict = Dict[str, Tensor]
 
-
-class PartialResetCollector(Iterator[BatchDict]):
+# =================================================================================================
+class PartialResetCollector(Iterator[Batch]):
     """
     Iterator that yields per-step batches and stops when refill is impossible.
 
@@ -18,17 +18,24 @@ class PartialResetCollector(Iterator[BatchDict]):
     a refill cannot be satisfied, iteration stops.
     """
 
-    def __init__(self, *, incoming: BatchDict, assembler: PartialResetBatchAssembler, carry0: Any) -> None:
+    def __init__(  # ------------------------------------------------------------------------------
+        self, *, incoming: Batch, assembler: PartialResetBatchAssembler, carry0: Any,
+    ) -> None:  # fmt: skip
+        """ """
         self._incoming = incoming
         self._template = incoming
         self._assembler = assembler
         self._reset_mask = carry0.halted
         self._started = False
 
-    def __iter__(self) -> "PartialResetCollector":
+    def __iter__(  # ------------------------------------------------------------------------------
+        self,
+    ) -> "PartialResetCollector":  # fmt: skip
         return self
 
-    def __next__(self) -> BatchDict:
+    def __next__(  # ------------------------------------------------------------------------------
+        self,
+    ) -> Batch:  # fmt: skip
         if not self._started:
             self._started = True
             return self._assembler.ingest_and_make_step_batch(
@@ -43,5 +50,11 @@ class PartialResetCollector(Iterator[BatchDict]):
             raise StopIteration
         return step_batch
 
-    def update(self, *, carry: Any) -> None:
+    def update(  # --------------------------------------------------------------------------------
+        self, *, carry: Any,
+    ) -> None:  # fmt: skip
         self._reset_mask = carry.halted
+
+
+# =================================================================================================
+__all__ = ["PartialResetCollector"]
