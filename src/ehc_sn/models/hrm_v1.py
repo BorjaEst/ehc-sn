@@ -31,7 +31,7 @@ from torch.optim import Optimizer
 
 from ehc_sn.data.schema import CHANNEL_SOLUTION
 from ehc_sn.data.transforms import channels_to_grid
-from ehc_sn.metrics import build_metrics, update_metrics_from_step
+from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
 from ehc_sn.rollouts.trace_tree import TraceTree
@@ -324,9 +324,8 @@ class TrainingModel(L.LightningModule):
         self._train_carry = None
 
         # Metrics are cloned for train/val to allow separate logging and state management.
-        base_metrics = build_metrics()
-        self.train_metrics = base_metrics.clone(prefix="train/")
-        self.val_metrics = base_metrics.clone(prefix="val/")
+        self.train_metrics = build_train_metrics(groups=["act"]).clone(prefix="train/")
+        self.val_metrics = build_val_metrics(groups=["act"]).clone(prefix="val/")
         self.trace_specs = TraceSpec(fields=trace_fields())
 
         # Buffer + assembler implement partial-reset batching for ACT runs.

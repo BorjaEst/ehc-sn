@@ -32,7 +32,7 @@ class RLLossConfig(BaseModel, extra="forbid"):
     c_actor: float = Field(default=1.0, ge=0.0, description="Actor loss coefficient.")
     c_critic: float = Field(default=0.5, ge=0.0, description="Critic loss coefficient.")
     c_entropy: float = Field(default=0.01, ge=0.0, description="Entropy regularization coefficient.")
-    c_vmPFC: float = Field(default=0.5, ge=0.0, description="vmPFC auxiliary Q-predictor loss coefficient.")
+    c_q_value: float = Field(default=0.5, ge=0.0, description="vmPFC auxiliary Q-predictor loss coefficient.")
 
 
 # =================================================================================================
@@ -66,7 +66,7 @@ class Losses(DetachMixin):
     """ """
 
     loss_lm_sum: Tensor
-    loss_vmPFC_sum: Tensor
+    loss_q_value_sum: Tensor
 
     loss_actor_sum: Tensor
     loss_critic_sum: Tensor
@@ -76,7 +76,7 @@ class Losses(DetachMixin):
     def total(self) -> Tensor:
         """ """
         loss_rl = self.loss_actor_sum + self.loss_critic_sum + self.loss_entropy_sum
-        loss_m = self.loss_lm_sum + self.loss_vmPFC_sum
+        loss_m = self.loss_lm_sum + self.loss_q_value_sum
         return loss_rl + loss_m
 
 
@@ -178,12 +178,12 @@ class RLLossHead(nn.Module):
             loss_actor = -(logp * advantage).sum()
             loss_critic = F.mse_loss(logits_r, outputs.reward, reduction="sum")
             loss_entropy = -entropy.sum()  # negative so minimizing loss maximizes entropy
-            loss_vmPFC = F.mse_loss(q_a, outputs.reward.squeeze(-1).detach(), reduction="sum")
+            loss_q_value = F.mse_loss(q_a, outputs.reward.squeeze(-1).detach(), reduction="sum")
         else:
             loss_actor = torch.tensor(0.0, device=logits_lm.device)
             loss_critic = torch.tensor(0.0, device=logits_lm.device)
             loss_entropy = torch.tensor(0.0, device=logits_lm.device)
-            loss_vmPFC = torch.tensor(0.0, device=logits_lm.device)
+            loss_q_value = torch.tensor(0.0, device=logits_lm.device)
 
         # --- Combine losses with coefficients from config ---
         return Losses(
@@ -191,7 +191,7 @@ class RLLossHead(nn.Module):
             loss_actor_sum=self.config.c_actor * loss_actor,
             loss_critic_sum=self.config.c_critic * loss_critic,
             loss_entropy_sum=self.config.c_entropy * loss_entropy,
-            loss_vmPFC_sum=self.config.c_vmPFC * loss_vmPFC,
+            loss_q_value_sum=self.config.c_q_value * loss_q_value,
         )
 
     def compute_metrics(  # -----------------------------------------------------------------------
@@ -224,16 +224,16 @@ class RLLossHead(nn.Module):
         )
 
         batch_size = int(outputs.logits[0].shape[0])  # logits[0] is features logits (B, S, V)
+        q_halt_loss_sum=losses.loss_actor_sum + losses.loss_critic_sum + losses.loss_entropy_sum + losses.loss_q_value_sum  # fmt: skip
         loss = LossAgg(
             lm_loss_sum=losses.loss_lm_sum.detach(),
-            q_halt_loss_sum=(
-                losses.loss_actor_sum
-                + losses.loss_critic_sum
-                + losses.loss_entropy_sum
-                + losses.loss_vmPFC_sum
-            ).detach(),
+            q_halt_loss_sum=q_halt_loss_sum.detach(),
             q_continue_loss_sum=losses.loss_lm_sum.new_zeros(()),
             batch_count=losses.loss_lm_sum.new_tensor(batch_size, dtype=torch.float32),
+            actor_loss_sum=losses.loss_actor_sum.detach(),
+            critic_loss_sum=losses.loss_critic_sum.detach(),
+            entropy_loss_sum=losses.loss_entropy_sum.detach(),
+            q_value_loss_sum=losses.loss_q_value_sum.detach(),
         )
 
         return StepMetrics(halted=halted, tokens=tokens, loss=loss)

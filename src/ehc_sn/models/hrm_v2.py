@@ -15,7 +15,7 @@ from torch.optim import Optimizer
 from ehc_sn.data.schema import CHANNEL_SOLUTION
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
-from ehc_sn.metrics import build_metrics, update_metrics_from_step
+from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
 from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
@@ -256,9 +256,8 @@ class TrainingModel(L.LightningModule):
         self._train_carry = None
 
         # Metrics are cloned for train/val to allow separate logging and state management.
-        base_metrics = build_metrics()
-        self.train_metrics = base_metrics.clone(prefix="train/")
-        self.val_metrics = base_metrics.clone(prefix="val/")
+        self.train_metrics = build_train_metrics(groups=["rl"]).clone(prefix="train/")
+        self.val_metrics = build_val_metrics(groups=["rl"]).clone(prefix="val/")
         self.trace_specs = TraceSpec(fields=trace_fields())
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
@@ -305,13 +304,13 @@ class TrainingModel(L.LightningModule):
         opt_rl = AdamATan2(list(self.model.str.parameters()), self._config.optimizer_rl)
 
         # Optimizer C: vmPFC — pfc.estimator only (auxiliary Q-predictor)
-        opt_vmPFC = AdamATan2(list(self.model.pfc.estimator.parameters()), self._config.optimizer_qv)
+        opt_qv = AdamATan2(list(self.model.pfc.estimator.parameters()), self._config.optimizer_qv)
 
         sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, sch_cfg)
         sch_rl = CosineAnnealingLRWithWarmup(opt_rl, total_steps, sch_cfg)
-        sch_vmPFC = CosineAnnealingLRWithWarmup(opt_vmPFC, total_steps, sch_cfg)
+        sch_qv = CosineAnnealingLRWithWarmup(opt_qv, total_steps, sch_cfg)
 
-        return [opt_sup, opt_rl, opt_vmPFC], [sch_sup, sch_rl, sch_vmPFC]
+        return [opt_sup, opt_rl, opt_qv], [sch_sup, sch_rl, sch_qv]
 
     # -- Lifecycle --------------------------------------------------------------------------------
 
@@ -367,12 +366,12 @@ class TrainingModel(L.LightningModule):
         self.manual_backward(loss)
 
         # Optimizer step and reset gradient for all optimizers
-        opt_sup, opt_rl, opt_vmPFC = self.optimizers()  # type: ignore[misc]
-        sch_sup, sch_rl, sch_vmPFC = self.lr_schedulers()  # type: ignore[misc]
+        opt_sup, opt_rl, opt_qv = self.optimizers()  # type: ignore[misc]
+        sch_sup, sch_rl, sch_qv = self.lr_schedulers()  # type: ignore[misc]
 
         opt_sup.step(); opt_sup.zero_grad(set_to_none=True); sch_sup.step()  # fmt: skip
         opt_rl.step(); opt_rl.zero_grad(set_to_none=True); sch_rl.step()  # fmt: skip
-        opt_vmPFC.step(); opt_vmPFC.zero_grad(set_to_none=True); sch_vmPFC.step()  # fmt: skip
+        opt_qv.step(); opt_qv.zero_grad(set_to_none=True); sch_qv.step()  # fmt: skip
 
         update_metrics_from_step(self.train_metrics, step.outputs.metrics)
         loss_gm = step.outputs.loss / float(local_bs)

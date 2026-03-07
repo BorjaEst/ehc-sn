@@ -252,4 +252,8 @@ class ACTLossHead(nn.Module):
             q_halt_loss_sum=losses.q_halt_loss_sum.detach(),
             q_continue_loss_sum=q_continue_loss_sum.detach(),
             batch_count=losses.loss_sum.new_tensor(batch_size, dtype=torch.float32),
+            actor_loss_sum=torch.tensor(0.0, device=losses.loss_sum.device),
+            critic_loss_sum=torch.tensor(0.0, device=losses.loss_sum.device),
+            entropy_loss_sum=torch.tensor(0.0, device=losses.loss_sum.device),
+            q_value_loss_sum=torch.tensor(0.0, device=losses.loss_sum.device),
         )

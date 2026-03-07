@@ -21,6 +21,10 @@ _ROUTES: tuple[tuple[str, str, str], ...] = (
     ("loss/lm",            "loss.lm_loss_sum",              "loss.batch_count"),  # fmt: skip
     ("loss/q_halt",        "loss.q_halt_loss_sum",          "loss.batch_count"),  # fmt: skip
     ("loss/q_continue",    "loss.q_continue_loss_sum",      "loss.batch_count"),  # fmt: skip
+    ("loss/actor",         "loss.actor_loss_sum",           "loss.batch_count"),  # fmt: skip
+    ("loss/critic",        "loss.critic_loss_sum",          "loss.batch_count"),  # fmt: skip
+    ("loss/entropy",       "loss.entropy_loss_sum",         "loss.batch_count"),  # fmt: skip
+    ("loss/q_value",         "loss.q_value_loss_sum",           "loss.batch_count"),  # fmt: skip
 )
 
 
