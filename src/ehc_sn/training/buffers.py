@@ -1,3 +1,5 @@
+""" """
+
 from collections import deque
 from dataclasses import dataclass
 from typing import Deque, Dict, Optional, Sequence
@@ -6,28 +8,44 @@ import torch
 from torch import Tensor
 
 
+# =================================================================================================
 @dataclass
 class _Chunk:
+    """ """
+
     rows: Dict[str, Tensor]  # CPU tensors, leading dim = n_rows
     start: int = 0  # how many rows already consumed
 
 
+# =================================================================================================
 class FifoBuffer:
-    def __init__(self, *, capacity_rows: int, keys: Sequence[str], pin_memory: bool = True):
+    """ """
+
+    def __init__(  # ------------------------------------------------------------------------------
+        self, *, capacity_rows: int, keys: Sequence[str], pin_memory: bool = True,
+    ) -> None:  # fmt: skip
+        """ """
         self.capacity_rows = capacity_rows
         self.keys = list(keys)
         self.pin_memory = pin_memory
         self._chunks: Deque[_Chunk] = deque()
         self._size_rows = 0
 
-    def __len__(self) -> int:
+    def __len__(  # -------------------------------------------------------------------------------
+        self,
+    ) -> int:  # fmt: skip
+        """Number of rows currently stored in the buffer."""
         return self._size_rows
 
-    def clear(self) -> None:
+    def clear(  # ---------------------------------------------------------------------------------
+        self,
+    ) -> None:  # fmt: skip
         self._chunks.clear()
         self._size_rows = 0
 
-    def push_rows(self, batch: Dict[str, Tensor], row_indices: Tensor) -> None:
+    def push_rows(  # -----------------------------------------------------------------------------
+        self, batch: Dict[str, Tensor], row_indices: Tensor,
+    ) -> None:  # fmt: skip
         """Takes rows from (likely GPU) batch, stores them on CPU as one chunk."""
         if row_indices.numel() == 0:
             return
@@ -46,7 +64,9 @@ class FifoBuffer:
         self._size_rows += n
         self._trim_to_capacity()
 
-    def pop(self, n: int) -> Dict[str, Tensor]:
+    def pop(  # -----------------------------------------------------------------------------------
+        self, n: int,
+    ) -> Dict[str, Tensor]:  # fmt: skip
         """Pop up to n rows (CPU tensors)."""
         n = min(n, self._size_rows)
         out: Dict[str, list[Tensor]] = {k: [] for k in self.keys}
@@ -73,9 +93,15 @@ class FifoBuffer:
             return {k: torch.empty((0,), dtype=torch.int32) for k in self.keys}
         return {k: torch.cat(v, dim=0) for k, v in out.items()}
 
-    def _trim_to_capacity(self) -> None:
+    def _trim_to_capacity(  # ---------------------------------------------------------------------
+        self,
+    ) -> None:  # fmt: skip
         """Simple policy: drop oldest chunks until within capacity."""
         while self._size_rows > self.capacity_rows and self._chunks:
             ch = self._chunks.popleft()
             n = ch.rows[self.keys[0]].shape[0] - ch.start
             self._size_rows -= n
+
+
+# =================================================================================================
+__all__ = ["FifoBuffer"]
