@@ -12,8 +12,9 @@ from torch.distributions import Categorical
 
 import ehc_sn.loss.cross_entropy as cross_entropy_module
 from ehc_sn.loss.cross_entropy import LossType
-from ehc_sn.metrics import HaltedAgg, LossAgg, StepMetrics, TokenAgg
+from ehc_sn.metrics import signals as S
 from ehc_sn.training.rl_controller import RLController, RLOutput, RLState
+from ehc_sn.training.types import HaltedAgg, LossAgg, StepMetrics, TokenAgg
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
@@ -253,17 +254,17 @@ class RLLossHead(nn.Module):
         rpe = (reward - logits_r.squeeze(-1)).detach()  # (B,) reward prediction error
         dist = Categorical(logits=q_logits.detach())
         return {
-            "reward_mean": reward.mean().detach(),
-            "reward_std": reward.std().detach(),
-            "q_mean": q_logits.detach().mean(),
-            "q_std": q_logits.detach().std(),
-            "rpe_magnitude": rpe.abs().mean(),
-            "action_entropy": dist.entropy().mean(),
-            "steps_mean": state.steps.float().mean().detach(),
-            "loss_actor": losses.loss_actor_sum.detach(),
-            "loss_critic": losses.loss_critic_sum.detach(),
-            "loss_entropy": losses.loss_entropy_sum.detach(),
-        }
+            S.REWARD_MEAN:    reward.mean().detach(),
+            S.REWARD_STD:     reward.std().detach(),
+            S.Q_MEAN:         q_logits.detach().mean(),
+            S.Q_STD:          q_logits.detach().std(),
+            S.RPE_MAGNITUDE:  rpe.abs().mean(),
+            S.ACTION_ENTROPY: dist.entropy().mean(),
+            S.STEPS_MEAN:     state.steps.float().mean().detach(),
+            S.LOSS_ACTOR:     losses.loss_actor_sum.detach(),
+            S.LOSS_CRITIC:    losses.loss_critic_sum.detach(),
+            S.LOSS_ENTROPY:   losses.loss_entropy_sum.detach(),
+        }  # fmt: skip
 
 
 # =================================================================================================

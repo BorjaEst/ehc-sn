@@ -1,6 +1,18 @@
-""" """  # TODO: We need a better name for this module and probably split it into multiple files.
+"""TEM-specific sensory accuracy metrics.
 
-# TODO: Migrate to torchmetrics
+These classes are specific to the TEM (Tolman-Eichenbaum Machine) architecture
+and are **not** part of the generic metrics public API exported by
+:mod:`ehc_sn.metrics`.  TEM code should import directly from this module:
+
+    from ehc_sn.metrics.metrics import AccuracyO, SensoryAccuracy
+
+Migration note: when TEM is refactored to use the standard paradigm-specific
+metrics pipeline (``RatioMetric`` + routing table), these classes should be
+replaced by route entries in a ``metrics/routes/tem.py`` module.
+"""
+
+# TODO: When TEM gains a loss head (tem_v2 or later), replace AccuracyO with
+#       RatioMetric route entries in metrics/routes/tem.py and delete this file.
 
 from __future__ import annotations
 

@@ -1,7 +1,16 @@
-""" """
+"""Step-metrics types for HRM training paradigms.
+
+These dataclasses carry the sufficient statistics — numerator/denominator pairs —
+that :func:`~ehc_sn.metrics.update_metrics_from_step` routes into TorchMetrics
+:class:`~ehc_sn.metrics.torchmetrics.RatioMetric` instances for correct
+weighted epoch-level aggregation.
+
+Each field is a scalar tensor produced by the loss head and accumulated over
+batches via :class:`~ehc_sn.metrics.torchmetrics.RatioMetric`.
+"""
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -56,3 +65,7 @@ class StepMetrics:
     halted: HaltedAgg
     tokens: TokenAgg
     loss: LossAgg
+
+
+# =================================================================================================
+__all__ = ["HaltedAgg", "LossAgg", "StepMetrics", "TokenAgg"]

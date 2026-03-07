@@ -10,8 +10,9 @@ from torch import Tensor, nn
 
 import ehc_sn.loss.cross_entropy as cross_entropy_module
 from ehc_sn.loss.cross_entropy import LossType
-from ehc_sn.metrics import HaltedAgg, LossAgg, StepMetrics, TokenAgg
+from ehc_sn.metrics import signals as S
 from ehc_sn.training.act_controller import ACTController, ACTOutput, ACTState
+from ehc_sn.training.types import HaltedAgg, LossAgg, StepMetrics, TokenAgg
 from ehc_sn.utils.detach import DetachMixin
 
 Batch = Dict[str, Tensor]  # Generic batch type, can be specialized as needed
@@ -273,12 +274,12 @@ class ACTLossHead(nn.Module):
         self, state: ACTState, outputs: ACTOutput, losses: Losses,
     ) -> Dict[str, Tensor]:  # fmt: skip
         """ """
-        signals: Dict[str, Tensor] = {
-            "steps_mean": state.steps.float().mean().detach(),
-            "theta_cls_norm": outputs.theta_cls.detach().norm(dim=-1).mean(),
-            "loss_q_halt": losses.q_halt_loss_sum.detach(),
-        }
+        sig: Dict[str, Tensor] = {
+            S.STEPS_MEAN:      state.steps.float().mean().detach(),
+            S.THETA_CLS_NORM:  outputs.theta_cls.detach().norm(dim=-1).mean(),
+            S.LOSS_Q_HALT:     losses.q_halt_loss_sum.detach(),
+        }  # fmt: skip
         if outputs.target_q is not None:
-            signals["target_q_mean"] = outputs.target_q.mean().detach()
-            signals["target_q_std"] = outputs.target_q.std().detach()
-        return signals
+            sig[S.TARGET_Q_MEAN] = outputs.target_q.mean().detach()
+            sig[S.TARGET_Q_STD] = outputs.target_q.std().detach()
+        return sig

@@ -16,6 +16,7 @@ from ehc_sn.data.schema import CHANNEL_SOLUTION
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
+from ehc_sn.metrics.routes import RL_ROUTES
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
 from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
@@ -256,8 +257,8 @@ class TrainingModel(L.LightningModule):
         self._train_carry = None
 
         # Metrics are cloned for train/val to allow separate logging and state management.
-        self.train_metrics = build_train_metrics(groups=["rl"]).clone(prefix="train/")
-        self.val_metrics = build_val_metrics(groups=["rl"]).clone(prefix="val/")
+        self.train_metrics = build_train_metrics(RL_ROUTES).clone(prefix="train/")
+        self.val_metrics = build_val_metrics(RL_ROUTES).clone(prefix="val/")
         self.trace_specs = TraceSpec(fields=trace_fields())
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
@@ -374,7 +375,7 @@ class TrainingModel(L.LightningModule):
         opt_qv.step(); opt_qv.zero_grad(set_to_none=True); sch_qv.step()  # fmt: skip
 
         # Update metrics with unnormalized loss and log to TensorBoard.
-        update_metrics_from_step(self.train_metrics, step.outputs.metrics)
+        update_metrics_from_step(self.train_metrics, step.outputs.metrics, RL_ROUTES)
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
         signals = {**step.outputs.signals, "is_warmup": torch.tensor(float(is_warmup))}
@@ -401,7 +402,7 @@ class TrainingModel(L.LightningModule):
             raise ValueError("Evaluation loop did not yield any steps.")
 
         # Update metrics with the final step's metrics and log to TensorBoard.
-        update_metrics_from_step(self.val_metrics, step.outputs.metrics)
+        update_metrics_from_step(self.val_metrics, step.outputs.metrics, RL_ROUTES)
 
         return {"trace": collector.tree}
 

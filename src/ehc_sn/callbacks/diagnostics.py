@@ -8,6 +8,8 @@ import lightning.pytorch as pl
 from lightning.pytorch import LightningModule, Trainer
 from pydantic import BaseModel, Field
 
+from ehc_sn.metrics.signals import STANDARD_SIGNALS
+
 
 # =================================================================================================
 class DiagnosticsSettings(BaseModel, extra="forbid"):
@@ -21,15 +23,14 @@ class DiagnosticsSettings(BaseModel, extra="forbid"):
             "'research' logs all keys present in the signals dict."
         ),
     )
-
-
-# =================================================================================================
-_STANDARD_KEYS: frozenset[str] = frozenset(
-    # Keys that represent stable T2 diagnostics — always logged at 'standard' level.
-    { "reward_mean", "reward_std", "q_mean", "q_std", "rpe_magnitude", "action_entropy", "steps_mean",
-      "theta_cls_norm", "target_q_mean", "loss_actor", "loss_critic",
-    }
-)  # fmt: skip
+    signal_prefix: str = Field(
+        default="model/",
+        description=(
+            "Namespace prefix applied to all signal keys when logging. "
+            "Use paradigm-specific prefixes (e.g. 'rl/', 'act/') to keep "
+            "TensorBoard dashboards organised."
+        ),
+    )
 
 
 # =================================================================================================
@@ -52,9 +53,10 @@ class DiagnosticsCallback(pl.Callback):
             return
 
         level = self.settings.diagnostic_level
-        keys = signals.keys() if level == "research" else (k for k in signals if k in _STANDARD_KEYS)
+        prefix = self.settings.signal_prefix
+        keys = signals.keys() if level == "research" else (k for k in signals if k in STANDARD_SIGNALS)
         for key in keys:
-            pl_module.log(f"model/{key}", signals[key], on_step=True, on_epoch=False, logger=True)
+            pl_module.log(f"{prefix}{key}", signals[key], on_step=True, on_epoch=False, logger=True)
 
 
 # =================================================================================================

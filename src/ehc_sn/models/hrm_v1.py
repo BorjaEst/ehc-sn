@@ -32,6 +32,7 @@ from torch.optim import Optimizer
 from ehc_sn.data.schema import CHANNEL_SOLUTION
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
+from ehc_sn.metrics.routes import ACT_ROUTES
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.rollouts.collect import TraceCollector, TraceField, TraceSpec, TraceValue
 from ehc_sn.rollouts.trace_tree import TraceTree
@@ -324,8 +325,8 @@ class TrainingModel(L.LightningModule):
         self._train_carry = None
 
         # Metrics are cloned for train/val to allow separate logging and state management.
-        self.train_metrics = build_train_metrics(groups=["act"]).clone(prefix="train/")
-        self.val_metrics = build_val_metrics(groups=["act"]).clone(prefix="val/")
+        self.train_metrics = build_train_metrics(ACT_ROUTES).clone(prefix="train/")
+        self.val_metrics = build_val_metrics(ACT_ROUTES).clone(prefix="val/")
         self.trace_specs = TraceSpec(fields=trace_fields())
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
@@ -454,7 +455,7 @@ class TrainingModel(L.LightningModule):
             sch.step()  # type: ignore
 
         # Update metrics with unnormalized loss and log to TensorBoard.
-        update_metrics_from_step(self.train_metrics, step.outputs.metrics)
+        update_metrics_from_step(self.train_metrics, step.outputs.metrics, ACT_ROUTES)
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
         return {"loss": loss.detach(), "signals": step.outputs.signals}
@@ -482,7 +483,7 @@ class TrainingModel(L.LightningModule):
             raise ValueError("Evaluation loop did not yield any steps, cannot log metrics.")
 
         # Update metrics with the final step's metrics and log to TensorBoard.
-        update_metrics_from_step(self.val_metrics, step.outputs.metrics)
+        update_metrics_from_step(self.val_metrics, step.outputs.metrics, ACT_ROUTES)
 
         return {"trace": collector.tree}
 
