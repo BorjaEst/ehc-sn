@@ -156,9 +156,14 @@ class TraceFields:
         return loss.detach()  # Detach to avoid tracking gradients in the trace
 
     @staticmethod
-    def get_q_values(ctx: StepContext) -> TraceValue:
-        q_values: Tensor = ctx.outputs.outputs.q_values  # (B, n_actions)
-        return q_values.detach()
+    def get_logits_lm(ctx: StepContext) -> TraceValue:
+        logits: Tensor = ctx.outputs.outputs.logits[0]  # (B, S, vocab_size)
+        return logits.detach()
+
+    @staticmethod
+    def get_logits_q(ctx: StepContext) -> TraceValue:
+        logits_q: Tensor = ctx.outputs.outputs.logits[1]  # (B, n_actions)
+        return logits_q.detach()
 
     @staticmethod
     def get_model_steps(ctx: StepContext) -> TraceValue:
@@ -176,13 +181,8 @@ class TraceFields:
         return outputs.detach()
 
     @staticmethod
-    def get_logits(ctx: StepContext) -> TraceValue:
-        logits: Tensor = ctx.outputs.outputs.logits
-        return logits.detach()
-
-    @staticmethod
     def get_pred_is_o(ctx: StepContext) -> TraceValue:
-        pred: Tensor = torch.argmax(TraceFields.get_logits(ctx), dim=-1)  # type: ignore
+        pred: Tensor = torch.argmax(TraceFields.get_logits_lm(ctx), dim=-1)  # type: ignore
         return (pred == O_ID).to(torch.uint8).detach()
 
 
@@ -191,7 +191,7 @@ def trace_fields() -> List[TraceField[StepContext]]:
     """ """
     return [
         TraceField(name="loss", get=TraceFields.get_model_loss),
-        TraceField(name="q_values", get=TraceFields.get_q_values),
+        TraceField(name="logits_q", get=TraceFields.get_logits_q),
         TraceField(name="steps", get=TraceFields.get_model_steps),
         TraceField(name="act/halted", get=TraceFields.get_act_halted),
         TraceField(name="pred/is_o", get=TraceFields.get_pred_is_o),
