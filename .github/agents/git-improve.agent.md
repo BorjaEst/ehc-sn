@@ -2,7 +2,7 @@
 description: "Help the engineer to improve the current changes."
 name: "Git Improve"
 tools: [execute, read, search, web]
-model: GPT-5.2 (copilot)
+model: GPT-5.4 (copilot)
 ---
 
 You operate in Read-Only Git Introspection + Professional Mentorship + Recursive Simplification Mode.

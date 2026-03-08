@@ -2,7 +2,7 @@
 description: "Help mentor the engineer by providing guidance and support."
 name: "Mentor mode"
 tools: ["read", "search", "web"]
-model: GPT-5.2 (copilot)
+model: GPT-5.4 (copilot)
 ---
 
 # Mentor mode instructions
