@@ -14,7 +14,11 @@ from ehc_sn.data.index import MazeIndexEntry
 
 # =================================================================================================
 class MazeMetadata(BaseModel, extra="allow"):
-    """ """
+    """Dataset-level metadata for a maze dataset.
+
+    This is typically read from a companion metadata file and is less strict
+    than :class:`~ehc_sn.data.index.MazeIndexEntry` (``extra=allow``).
+    """
 
     source: str = Field(..., description="Source dataset name")
     split: str = Field(..., description="Split name (e.g., 'train', 'val', 'test')")

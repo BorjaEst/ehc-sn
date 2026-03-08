@@ -75,7 +75,7 @@ class MazeHardEnv(EnvBase):
 
     @property
     def config(self) -> EnvConfig:
-        """ """
+        """Return the environment configuration."""
         return self._config
 
     def _make_specs(  # ---------------------------------------------------------------------------

@@ -1,4 +1,27 @@
-""" """
+"""HRM v2 Lightning module (RL + warmup).
+
+This module defines a PyTorch Lightning :class:`~lightning.LightningModule` wrapper
+around the HRM v2 architecture (:class:`HRModelV2`) and its training loop.
+
+Compared to HRM v1 (ACT-supervised), HRM v2 couples a PFC-style recurrent reasoning
+core with an STR actor-critic head and trains with reinforcement-learning losses
+computed by :class:`~ehc_sn.training.rl_head.RLLossHead` via a
+:class:`~ehc_sn.training.rl_controller.RLController`.
+
+Key behaviors:
+    - **Manual optimization**: sets ``automatic_optimization = False`` and performs
+        explicit backward/optimizer/scheduler steps.
+    - **Three-optimizer training**: supervised params, RL (STR) params, and vmPFC
+        (``pfc.estimator``) params are optimized with separate optimizers.
+    - **Warmup**: for the first ``warmup_steps`` global steps, halting is disabled
+        (``allow_halt=False``) to avoid the degenerate "halt immediately" solution.
+    - **Partial reset batching**: halted examples are replaced with fresh rows using
+        :class:`~ehc_sn.training.buffers.FifoBuffer` and
+        :class:`~ehc_sn.training.partial_reset.PartialResetBatchAssembler`.
+
+The batch structure used throughout this file is a plain ``dict[str, Tensor]``
+with keys ``"inputs"`` and ``"labels"``.
+"""
 
 import math
 from dataclasses import dataclass
@@ -42,7 +65,17 @@ IGNORE_LABEL_ID: int = -100
 
 # =================================================================================================
 class ModelSettings_V2(BaseModel, extra="forbid"):
-    """ """
+    """Model-level settings for HRM v2.
+
+    This settings object composes:
+        - PFC settings (recurrent reasoning core)
+        - STR settings (actor-critic / reward head)
+        - token vocabulary size
+
+    Notes:
+        HRM v2 currently requires RoPE positional encodings inside the PFC modules
+        for legacy parity and to match the environment tokenization.
+    """
 
     pfc: PFCSettings = Field(
         ...,
@@ -89,7 +122,18 @@ class ModelSettings_V2(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
-    """ """
+    """Configuration for the HRM v2 Lightning module.
+
+    This config wires together:
+        - model settings (:class:`ModelSettings_V2`)
+        - environment settings (:class:`~ehc_sn.envs.mazehard.EnvConfig`)
+        - RL controller and loss head configs
+        - optimizer and scheduler settings
+
+    Notes:
+        - ``extra=\"forbid\"`` ensures unknown keys fail fast.
+        - ``global_batch_size`` is used to derive per-rank batch size under DDP.
+    """
 
     # ~~ Model architecture ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     model: ModelSettings_V2 = Field(
@@ -127,7 +171,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
         description="LR scheduler config applied to both optimizers.",
     )
     warmup_steps: int = Field(
-        default=5000,
+        default=100,
         ge=0,
         description=(
             "Number of optimizer steps during which only the supervised optimizer trains. "
@@ -149,7 +193,12 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
 # =================================================================================================
 @dataclass
 class HRMState(DetachMixin):
-    """ """
+    """Recurrent state carried across steps for HRM v2.
+
+    Attributes:
+        pfc: PFC recurrent state.
+        str: STR recurrent state.
+    """
 
     pfc: PFCState  # Prefrontal Cortex state, containing working memory and reasoning module states.
     str: STRState  # STR actor-critic state, containing any recurrent state for the STR module (if needed).
@@ -157,7 +206,19 @@ class HRMState(DetachMixin):
 
 # =================================================================================================
 class HRModelV2(nn.Module):
-    """ """
+    """Core HRM v2 model.
+
+    The model consists of:
+        - token embedding table
+        - PFC recurrent reasoning module producing per-token logits and a CLS summary
+        - STR actor-critic module consuming the CLS summary and PFC Q logits
+        - language-model head predicting per-token labels
+
+    The forward pass returns:
+        - updated recurrent state
+        - tuple of logits ``(token_logits, q_logits, r_logits)``
+        - CLS feature vector (used by the controller / tracing)
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: ModelSettings_V2, *,
@@ -174,11 +235,15 @@ class HRModelV2(nn.Module):
 
     @property
     def config(self) -> ModelSettings_V2:
-        """ """
+        """Return the parsed model settings used to build this module."""
         return self._config
 
     def reset_parameters(self) -> None:  # -------------------------------------------------------
-        """ """
+        """Initialize parameters.
+
+        Uses truncated normal initialization with ``std = 1/sqrt(hidden_size)`` for
+        token embeddings and the LM head to keep initial activation scales stable.
+        """
         init_std = self.config.init_std
         trunc_normal_init_(self.embed_tokens.weight, std=init_std)
         trunc_normal_init_(self.lm_head.weight, std=init_std)
@@ -186,7 +251,14 @@ class HRModelV2(nn.Module):
     def init_state(  # ---------------------------------------------------------------------------
         self, batch_size: int,
     ) -> HRMState:  # fmt: skip
-        """ """
+        """Create a fresh recurrent state.
+
+        Args:
+            batch_size: Number of parallel environments / sequences.
+
+        Returns:
+            A new :class:`HRMState` with initialized PFC and STR states.
+        """
         return HRMState(
             pfc=self.pfc.init_state(batch_size),
             str=self.str.init_state(batch_size),
@@ -195,7 +267,16 @@ class HRModelV2(nn.Module):
     def reset_state(  # --------------------------------------------------------------------------
         self, reset_flag: Tensor, state: HRMState,
     ) -> HRMState:  # fmt: skip
-        """ """
+        """Selectively reset rows of the recurrent state.
+
+        Args:
+            reset_flag: Boolean / 0-1 tensor of shape ``(B,)`` indicating which
+                batch rows should be reset.
+            state: Current recurrent state.
+
+        Returns:
+            New state with flagged rows reset for both PFC and STR.
+        """
         return HRMState(
             pfc=self.pfc.reset_state(state.pfc, reset_flag),
             str=self.str.reset_state(state.str, reset_flag),
@@ -204,7 +285,20 @@ class HRModelV2(nn.Module):
     def forward(  # -------------------------------------------------------------------------------
         self, inputs: Tensor, state: Optional[HRMState] = None,
     ) -> Tuple[HRMState, Tuple[Tensor, Tensor, Tensor], Tensor]:  # fmt: skip
-        """ """
+        """Run one model step.
+
+        Args:
+            inputs: Token ids of shape ``(B, S)``.
+            state: Optional recurrent state to carry across steps. If ``None``, a
+                fresh state is created.
+
+        Returns:
+            ``(new_state, (logits, q_logits, r_logits), theta_cls)`` where:
+                - ``logits`` is ``(B, S, vocab_size)``
+                - ``q_logits`` is controller-specific (produced by PFC)
+                - ``r_logits`` is reward / policy output from STR
+                - ``theta_cls`` is ``(B, D)`` CLS summary vector.
+        """
         state = state or self.init_state(batch_size=inputs.shape[0])
         x = self.embed_inputs(inputs)  # (B, S, D)
 
@@ -219,7 +313,14 @@ class HRModelV2(nn.Module):
     def embed_inputs(  # --------------------------------------------------------------------------
         self, input: Tensor,
     ) -> Tensor:  # fmt: skip
-        """ """
+        """Embed token ids into a scaled representation.
+
+        Args:
+            input: Token ids of shape ``(B, S)``.
+
+        Returns:
+            Embedded inputs of shape ``(B, S, D)`` scaled by ``sqrt(D)``.
+        """
         token_embeddings = self.embed_tokens(input.to(torch.int32))
         # Scale embeddings to keep activations in a reasonable range.
         return self.config.embedding_scale * token_embeddings
@@ -227,7 +328,15 @@ class HRModelV2(nn.Module):
 
 # =================================================================================================
 class TrainingModel(L.LightningModule):
-    """ """
+    """LightningModule wrapper for HRM v2 RL training.
+
+    This wrapper manages:
+        - lazy initialization of :class:`~ehc_sn.envs.mazehard.MazeHardEnv`
+        - wiring :class:`~ehc_sn.training.rl_controller.RLController` and
+          :class:`~ehc_sn.training.rl_head.RLLossHead`
+        - partial-reset batching via FIFO buffering
+        - manual optimization with three optimizers
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: ModelConfig_HRM_V2,
@@ -261,7 +370,7 @@ class TrainingModel(L.LightningModule):
 
     @property
     def config(self) -> ModelConfig_HRM_V2:
-        """ """
+        """Return the parsed configuration used by this LightningModule."""
         return self._config
 
     def setup(  # --------------------------------------------------------------------------------
@@ -279,7 +388,15 @@ class TrainingModel(L.LightningModule):
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
     ) -> Tuple[List[Optimizer], List[SequentialLR]]:  # fmt: skip
-        """ """
+        """Build optimizers and schedulers.
+
+        Returns:
+            ``(optimizers, schedulers)`` where both lists have length 3 and share
+            the same order:
+                1) supervised params (everything except ``pfc.estimator``)
+                2) RL params (STR actor-critic only)
+                3) vmPFC params (``pfc.estimator`` only)
+        """
         total_steps = int(self.trainer.estimated_stepping_batches)
         sch_cfg = self._config.scheduler
 
@@ -321,7 +438,16 @@ class TrainingModel(L.LightningModule):
     def training_step(  # -------------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
     ) -> Dict[str, Any]:  # fmt: skip
-        """ """
+        """Run one training step (horizon = 1) with manual optimization.
+
+        Training uses a carry object produced by :class:`~ehc_sn.training.rl_head.RLLossHead`
+        to support partial resets: rows that halted in the previous step are
+        replaced with fresh examples from the current incoming batch.
+
+        Notes:
+            - ``setup()`` must have run so that ``self.step_module`` is available.
+            - During warmup (``global_step < warmup_steps``), halting is disabled.
+        """
         batch_dict = batch
 
         # Initialize carry/state on the first batch
@@ -373,7 +499,11 @@ class TrainingModel(L.LightningModule):
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
     ) -> Dict[str, Any]:  # fmt: skip
-        """ """
+        """Run a full evaluation rollout and return traces.
+
+        Validation runs the controller until all slots halt (no exploration) and
+        collects a trace tree for downstream logging/analysis.
+        """
         batch_dict = batch
 
         # Run a full rollout until all slots halt, collecting traces for logging/analysis.

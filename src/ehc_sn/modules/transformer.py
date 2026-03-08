@@ -105,13 +105,13 @@ class TransformerBlock(nn.Module):
 
     @property
     def config(self) -> TransformerBlockConfig:
-        """ """
+        """Return the parsed block configuration."""
         return self._config
 
     def forward(  # -------------------------------------------------------------------------------
         self, x: Tensor,
     ) -> Tensor:  # fmt: skip
-        """ """
+        """Apply self-attention and MLP sublayers with post-norm residuals."""
         attention = self.self_attn(x)
         x = rms_norm(x + attention, variance_epsilon=self.config.rms_norm_eps)
         x = rms_norm(x + self.mlp(x), variance_epsilon=self.config.rms_norm_eps)

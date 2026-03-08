@@ -1,4 +1,8 @@
-""" """
+"""Lightning callbacks for metric logging.
+
+The primary callback here logs aggregated metric collections exposed by the
+Lightning module as ``train_metrics`` / ``val_metrics``.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +14,12 @@ from lightning.pytorch import LightningModule, Trainer
 
 # =================================================================================================
 class TrainingMetricsCallback(pl.Callback):
-    """ """
+    """Logs train/val metric collections from a LightningModule.
+
+    Expects the module to expose:
+        - ``train_metrics`` with a ``compute()`` method
+        - ``val_metrics`` with a ``compute()`` method
+    """
 
     def on_train_batch_end(  # --------------------------------------------------------------------
         self, trainer: Trainer, pl_module: LightningModule, outputs: Any, batch: Any, batch_idx: int,

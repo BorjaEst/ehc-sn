@@ -1,4 +1,14 @@
-""" """
+"""ACT loss head for HRM v1.
+
+This module defines :class:`ACTLossHead`, which wraps an
+:class:`~ehc_sn.training.act_controller.ACTController` and computes:
+    - token-level supervised modeling loss (cross-entropy)
+    - Q(done) binary supervision from sequence correctness
+    - optional auxiliary Q(continue) supervision from TD bootstrap targets
+
+The head returns an :class:`ACTLossStep` with live loss tensors, aggregated
+metrics, and diagnostic signals.
+"""
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
@@ -21,7 +31,11 @@ IGNORE_LABEL_ID = -100
 
 # =================================================================================================
 class ACTLossConfig(BaseModel, extra="forbid"):
-    """ """
+    """Configuration for :class:`ACTLossHead`.
+
+    Attributes:
+        function: Name of the token-level supervised loss function.
+    """
 
     function: LossType = Field(
         default="stablemax_cross_entropy",
@@ -32,32 +46,32 @@ class ACTLossConfig(BaseModel, extra="forbid"):
 # =================================================================================================
 @dataclass(frozen=True)
 class AccuracyStats:
-    """ """
+    """Token-level correctness statistics used for metrics/logging."""
 
     mask: Tensor  # Boolean tensor indicating which tokens contribute to the loss (e.g., non-padding tokens).
 
     @property
     def loss_counts(self) -> Tensor:
-        """ """
+        """Number of eligible tokens per sequence (shape ``(B,)``)."""
         return self.mask.sum(-1)
 
     @property
     def loss_divisor(self) -> Tensor:
-        """ """
+        """Safe divisor for per-sequence averages (shape ``(B, 1)``)."""
         return self.loss_counts.clamp_min(1).unsqueeze(-1)
 
     is_correct: Tensor  # Indicates which tokens were predicted correctly (after masking).
 
     @property
     def seq_is_correct(self) -> Tensor:
-        """ """
+        """Whether all eligible tokens were predicted correctly (shape ``(B,)``)."""
         return self.is_correct.sum(-1) == self.loss_counts
 
 
 # =================================================================================================
 @dataclass(frozen=True)
 class Losses(DetachMixin):
-    """ """
+    """Bundle of ACT loss terms (summed over batch)."""
 
     loss_sum: Tensor  # Per-step loss sum for the main task
     q_halt_loss_sum: Tensor  # Loss sum for the halting decision
@@ -65,7 +79,7 @@ class Losses(DetachMixin):
 
     @property
     def total(self) -> Tensor:
-        """ """
+        """Total scalar loss for the step."""
         q_continue_loss_sum = self.q_continue_loss_sum
         if q_continue_loss_sum is None:
             q_continue_loss_sum = torch.tensor(0.0, device=self.loss_sum.device)
@@ -75,7 +89,7 @@ class Losses(DetachMixin):
 # =================================================================================================
 @dataclass(frozen=True)
 class ACTLossStep:
-    """ """
+    """A single rollout/loss step produced by :class:`ACTLossHead`."""
 
     losses: Losses  # Combined losses for this step, kept live for backward()
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
@@ -94,41 +108,61 @@ class ACTLossStep:
 
 # =================================================================================================
 class ACTLossHead(nn.Module):
-    """ """
+    """Loss head wrapping :class:`~ehc_sn.training.act_controller.ACTController`.
+
+    Responsibilities:
+        - run one controller step
+        - compute supervised + halting losses
+        - produce aggregated metrics and diagnostic signals
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, controller: ACTController, config: ACTLossConfig,
     ) -> None:  # fmt: skip
-        """ """
+        """Create a loss head.
+
+        Args:
+            controller: ACT controller managing halting and state.
+            config: Loss configuration.
+        """
         super().__init__()
         self._controller = controller
         self._config = config
 
     @property
     def controller(self) -> ACTController:
-        """ """
+        """Return the wrapped controller."""
         return self._controller
 
     @property
     def config(self) -> ACTLossConfig:
-        """ """
+        """Return the loss configuration."""
         return self._config
 
     @property
     def loss_fn(self) -> Any:
-        """ """
+        """Return the configured token-level loss function implementation."""
         return getattr(cross_entropy_module, self._config.function)
 
     def initial_carry(  # -------------------------------------------------------------------------
         self, batch_sample: Batch, 
     ) -> ACTState:  # fmt: skip
-        """ """
+        """Initialize the rollout carry/state from an example batch."""
         return self.controller.initial_state(batch_sample)
 
     def forward(  # -------------------------------------------------------------------------------
         self, batch: Batch, carry: ACTState, **options: Any,
     ) -> Tuple[ACTLossStep, ACTState, bool]:  # fmt: skip
-        """ """
+        """Run one controller step and compute losses/metrics.
+
+        Args:
+            batch: Incoming batch used for step inputs and partial resets.
+            carry: Current ACT state.
+            **options: Forwarded to :meth:`ACTController.step`.
+
+        Returns:
+            ``(step, new_carry, all_halted)``.
+        """
         carry, outputs = self.controller.step(carry, batch, **options)
         labels = carry.data["labels"]
 
@@ -147,7 +181,7 @@ class ACTLossHead(nn.Module):
     def compute_accuracy(  # ------------------------------------------------------------------
         self, outputs: ACTOutput, labels: Tensor
     ) -> AccuracyStats:  # fmt: skip
-        """ """
+        """Compute masked token correctness statistics (out-of-graph)."""
         logits_lm, *_ = outputs.logits  # Unpack list of logits if backbone returns multiple heads
         mask = labels != IGNORE_LABEL_ID
         is_correct = mask & (torch.argmax(logits_lm, dim=-1) == labels)
@@ -156,7 +190,7 @@ class ACTLossHead(nn.Module):
     def compute_losses(  # -----------------------------------------------------------------------
         self, outputs: ACTOutput, labels: Tensor, stats: AccuracyStats
     ) -> Losses:  # fmt: skip
-        """ """
+        """Compute supervised and halting-related losses for a step."""
         logits_lm, logits_q, *_ = outputs.logits  # Unpack list of logits multiple heads
 
         # Compute main modeling loss (e.g., cross-entropy) over all tokens, summed over batch.
@@ -193,7 +227,7 @@ class ACTLossHead(nn.Module):
     def compute_metrics(  # -----------------------------------------------------------------------
         self, state: ACTState, outputs: ACTOutput, stats: AccuracyStats, losses: Losses,
     ) -> StepMetrics:  # fmt: skip
-        """ """
+        """Aggregate per-step metrics for logging."""
         _, logits_q, *_ = outputs.logits  # Unpack list of logits multiple heads
         eligible_mask = stats.loss_counts > 0
         halted_mask = state.halted & eligible_mask  # (B,)
@@ -228,7 +262,7 @@ class ACTLossHead(nn.Module):
         eligible_count: Tensor, seq_accuracy: Tensor, q_halt_correct: Tensor,
         q_continue_correct: Optional[Tensor]=None,
     ) -> HaltedAgg:  # fmt: skip
-        """ """
+        """Build halted-only metric aggregation for the current step."""
         if q_continue_correct is None:
             q_continue_correct = torch.zeros_like(halted_mask)  # (B,) bool
 
@@ -245,7 +279,7 @@ class ACTLossHead(nn.Module):
     def _build_token_agg(  # ---------------------------------------------------------------------
         self, token_correct_per_seq: Tensor, token_count_per_seq: Tensor, halted_weights: Tensor,
     ) -> TokenAgg:  # fmt: skip
-        """ """
+        """Build token-level metric aggregation for the current step."""
         return TokenAgg(
             token_correct_sum=(token_correct_per_seq * halted_weights).sum(),
             token_count_sum=(token_count_per_seq * halted_weights).sum(),
@@ -254,7 +288,7 @@ class ACTLossHead(nn.Module):
     def _build_loss_agg(  # ----------------------------------------------------------------------
         self, losses: Losses, *, batch_size: int,
     ) -> LossAgg:  # fmt: skip
-        """ """
+        """Build detached loss aggregation payload for logging."""
         q_continue_loss_sum = losses.q_continue_loss_sum
         if q_continue_loss_sum is None:
             q_continue_loss_sum = losses.loss_sum.new_zeros(())
@@ -273,7 +307,7 @@ class ACTLossHead(nn.Module):
     def compute_signals(  # -----------------------------------------------------------------------
         self, state: ACTState, outputs: ACTOutput, losses: Losses,
     ) -> Dict[str, Tensor]:  # fmt: skip
-        """ """
+        """Compute lightweight diagnostic signals for logging."""
         sig: Dict[str, Tensor] = {
             S.STEPS_MEAN:      state.steps.float().mean().detach(),
             S.THETA_CLS_NORM:  outputs.theta_cls.detach().norm(dim=-1).mean(),

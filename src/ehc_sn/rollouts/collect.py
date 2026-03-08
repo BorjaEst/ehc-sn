@@ -17,7 +17,7 @@ TraceGetter: TypeAlias = Callable[[Context], TraceValue]
 
 @dataclass(frozen=True)
 class TraceField(Generic[Context]):
-    """ """
+    """One named field in a trace specification."""
 
     name: str
     get: TraceGetter[Context]
@@ -25,25 +25,25 @@ class TraceField(Generic[Context]):
 
 @dataclass(frozen=True)
 class TraceSpec(Generic[Context]):
-    """ """
+    """Specification describing which values to collect into a :class:`TraceTree`."""
 
     fields: Sequence[TraceField[Context]]
 
     def keys(self) -> set[str]:
-        """ """
+        """Return the set of field names in this spec."""
         return {f.name for f in self.fields}
 
 
 class TraceCollector(Generic[Context]):
-    """ """
+    """Collect per-step values into a :class:`~ehc_sn.rollouts.trace_tree.TraceTree`."""
 
     def __init__(self, tree: TraceTree, spec: TraceSpec[Context]):
-        """ """
+        """Create a collector bound to a tree and a spec."""
         self.tree = tree
         self.spec = spec
 
     def append(self, t: int, ctx: Context) -> None:
-        """ """
+        """Append one timestep payload extracted from the given context."""
         payload: dict[str, TraceValue] = {"t": t}
         payload.update({f.name: f.get(ctx) for f in self.spec.fields})
         self.tree.append(payload)

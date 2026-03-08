@@ -1,4 +1,9 @@
-""" """
+"""Small FIFO buffer utilities for partial-reset training.
+
+The main consumer is :class:`~ehc_sn.training.partial_reset.PartialResetBatchAssembler`.
+Rows are pushed from (typically GPU) batches and stored as CPU tensors (optionally
+pinned) so they can be used to refill halted slots later.
+"""
 
 from collections import deque
 from dataclasses import dataclass
@@ -11,7 +16,11 @@ from torch import Tensor
 # =================================================================================================
 @dataclass
 class _Chunk:
-    """ """
+    """Internal storage unit for :class:`FifoBuffer`.
+
+    A chunk is a dict of CPU tensors (same number of rows per key) plus a cursor
+    tracking how many rows have already been consumed.
+    """
 
     rows: Dict[str, Tensor]  # CPU tensors, leading dim = n_rows
     start: int = 0  # how many rows already consumed
@@ -19,12 +28,22 @@ class _Chunk:
 
 # =================================================================================================
 class FifoBuffer:
-    """ """
+    """FIFO buffer storing complete batch rows on CPU.
+
+    Designed for partial-reset batching: when some slots halt, their rows can be
+    pushed into the buffer and later popped to refill a step batch.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, *, capacity_rows: int, keys: Sequence[str], pin_memory: bool = True,
     ) -> None:  # fmt: skip
-        """ """
+        """Create a FIFO buffer.
+
+        Args:
+            capacity_rows: Maximum number of rows stored across all chunks.
+            keys: Keys to store from incoming batches.
+            pin_memory: If True, pin CPU tensors for faster H2D transfers.
+        """
         self.capacity_rows = capacity_rows
         self.keys = list(keys)
         self.pin_memory = pin_memory

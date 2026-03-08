@@ -1,4 +1,18 @@
-""" """
+"""ACT controller: halting decisions and recurrent state management.
+
+This module implements the controller used by HRM v1 training.
+
+The controller is responsible for:
+    - refreshing per-slot buffers for halted slots (partial reset semantics)
+    - resetting backbone recurrent state for halted slots
+    - running the backbone forward pass
+    - selecting a halt/continue action based on Q logits
+    - optionally computing a TD(0) bootstrap target to supervise non-halt actions
+
+The semantics of the actions are minimal:
+    - ``done_action`` indicates the action index that terminates deliberation.
+    - all other actions are treated as "continue" (potentially multiple).
+"""
 
 from __future__ import annotations
 
@@ -15,7 +29,13 @@ from ehc_sn.utils.detach import DetachMixin
 
 # ==================================================================================================
 class ACTControllerConfig(BaseModel, extra="forbid"):
-    """ """
+    """Configuration for :class:`ACTController`.
+
+    Attributes:
+        exploration_prob: Probability of suppressing early halting during training.
+        max_steps: Hard cap on steps before forced termination.
+        done_action: Action index that signals termination when selected.
+    """
 
     exploration_prob: float = Field(
         ...,
@@ -37,7 +57,7 @@ class ACTControllerConfig(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class ACTBackbone[BkState](Protocol):
-    """ """
+    """Backbone protocol expected by :class:`ACTController`."""
 
     def init_state(  # ----------------------------------------------------------------------------
         self, batch_size: int,
@@ -58,7 +78,7 @@ class ACTBackbone[BkState](Protocol):
 # =================================================================================================
 @dataclass
 class ACTState[ModelState](DetachMixin):
-    """ """
+    """Controller carry/state for ACT rollouts."""
 
     model_state: ModelState  # Recurrent state of the model (e.g. LSTM hidden states)
     steps: Tensor  # Per-slot step counter, shape: (B,)
@@ -69,7 +89,14 @@ class ACTState[ModelState](DetachMixin):
 # =================================================================================================
 @dataclass
 class ACTOutput(DetachMixin):
-    """ """
+    """Outputs produced by a controller step.
+
+    Attributes:
+        logits: Backbone logits tuple (head-dependent).
+        theta_cls: CLS feature vector of shape ``(B, D)``.
+        action: Selected action indices of shape ``(B,)``.
+        target_q: Optional TD(0) bootstrap target used to supervise continue actions.
+    """
 
     logits: Tuple[Tensor, ...]  # Tuple of (B, S, V) LM logits for supervised loss
     theta_cls: Tensor  # (B, D) — theta CLS features
@@ -79,29 +106,39 @@ class ACTOutput(DetachMixin):
 
 # =================================================================================================
 class ACTController:
-    """ """
+    """ACT controller used for supervised HRM v1 training.
+
+    The controller is agnostic to the meaning of non-done actions; it treats them
+    as generic "continue" actions and uses either greedy argmax or exploration
+    gating to avoid immediate halting.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, backbone: ACTBackbone,  config: ACTControllerConfig,
     ) -> None:  # fmt: skip
-        """ """
+        """Create a controller.
+
+        Args:
+            backbone: Model implementing :class:`ACTBackbone`.
+            config: Controller configuration.
+        """
         self._backbone = backbone
         self._config = config
 
     @property
     def backbone(self) -> ACTBackbone:
-        """ """
+        """Return the wrapped backbone."""
         return self._backbone
 
     @property
     def config(self) -> ACTControllerConfig:
-        """ """
+        """Return the controller configuration."""
         return self._config
 
     def initial_state(  # -------------------------------------------------------------------------
         self, batch_sample: Batch
     ) -> ACTState:  # fmt: skip
-        """ """
+        """Build an initial ACT state from a batch sample."""
         batch_size, device = batch_sample["inputs"].shape[0], batch_sample["inputs"].device
         return ACTState(  # FIXME: We need to replace batch_dict by observations and labels
             model_state=self.backbone.init_state(batch_size),
@@ -114,7 +151,18 @@ class ACTController:
         self, state: ACTState, batch: Batch,
         allow_halt: bool = True, explore: bool = True, td_target: bool = True,
     ) -> Tuple[ACTState, ACTOutput]:  # fmt: skip
-        """ """
+        """Advance the controller by one step.
+
+        Args:
+            state: Current rollout state.
+            batch: Incoming batch used to refresh halted slots.
+            allow_halt: If False, disables done-action halting.
+            explore: If True, probabilistically suppresses early halting.
+            td_target: If True, computes TD bootstrap targets (when applicable).
+
+        Returns:
+            ``(new_state, output)``.
+        """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
         model_state, logits, theta_cls = self.backbone(data["inputs"], model_state)
@@ -134,7 +182,11 @@ class ACTController:
     def compute_td_target(  # ---------------------------------------------------------------------
         self, data: Dict[str, Tensor], model_state: Any, steps: Tensor,
     ) -> Tensor:  # fmt: skip
-        """ """
+        """Compute TD(0) bootstrap targets for the Q head.
+
+        At the last allowed step, the target becomes the predicted Q for the done
+        action; otherwise it is the max Q over actions.
+        """
         with torch.no_grad():
             _, _, next_q = self.backbone(data["inputs"], model_state)
         is_last_step = steps >= self.config.max_steps
@@ -148,7 +200,7 @@ class ACTController:
     def refresh_slot_data(  # ---------------------------------------------------------------------
         self, batch: Batch, state: ACTState
     ) -> Dict[str, Tensor]:  # fmt: skip
-        """ """
+        """Replace data for halted slots with incoming batch data."""
         halted, data = state.halted, state.data
         return {
             k: torch.where(halted.view((-1,) + (1,) * (batch[k].ndim - 1)), batch[k], data[k])
@@ -158,7 +210,7 @@ class ACTController:
     def _select_action_and_done(  # ---------------------------------------------------------------
         self, logits: list[Tensor], steps: Tensor, allow_halt: bool, explore: bool,
     ) -> Tuple[Tensor, Tensor]:  # fmt: skip
-        """ """
+        """Select action and determine done flags for this step."""
         _logits_lm, logits_q, *_ = logits  # Unpack list of logits multiple heads
         config = self.config
         action = logits_q.detach().argmax(dim=-1)  # greedy over all actions (B,)

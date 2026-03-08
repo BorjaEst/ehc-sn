@@ -1,4 +1,14 @@
-""" """
+"""RL loss head for HRM v2.
+
+This module defines a loss head that wraps :class:`~ehc_sn.training.rl_controller.RLController`
+to produce a training/evaluation step with:
+    - supervised token modeling loss (cross-entropy over maze tokens)
+    - actor-critic losses computed from environment rewards
+    - auxiliary vmPFC (Q-value) regression loss
+
+The head returns an :class:`RLLossStep` containing the live loss tensors (for
+backprop), aggregated metrics, and diagnostic signals.
+"""
 
 import dataclasses
 from dataclasses import dataclass
@@ -24,7 +34,15 @@ IGNORE_LABEL_ID: int = -100
 
 # =================================================================================================
 class RLLossConfig(BaseModel, extra="forbid"):
-    """ """
+    """Configuration for :class:`RLLossHead`.
+
+    Attributes:
+        function: Name of the token-level supervised loss function.
+        c_actor: Coefficient for the policy gradient (actor) loss.
+        c_critic: Coefficient for the value regression (critic) loss.
+        c_entropy: Coefficient for entropy regularization.
+        c_q_value: Coefficient for the auxiliary Q-value regression loss.
+    """
 
     function: LossType = Field(
         default="stablemax_cross_entropy",
@@ -39,32 +57,40 @@ class RLLossConfig(BaseModel, extra="forbid"):
 # =================================================================================================
 @dataclass(frozen=True)
 class AccuracyStats:
-    """ """
+    """Token-level correctness statistics used for metrics.
+
+    This is computed out-of-graph (no gradients through argmax) and used for
+    logging and some halted-only aggregations.
+    """
 
     mask: Tensor  # Boolean tensor indicating which tokens contribute to the loss (e.g., non-padding tokens).
 
     @property
     def loss_counts(self) -> Tensor:
-        """ """
+        """Number of eligible tokens per sequence (shape ``(B,)``)."""
         return self.mask.sum(-1)
 
     @property
     def loss_divisor(self) -> Tensor:
-        """ """
+        """Safe divisor for per-sequence averages (shape ``(B, 1)``)."""
         return self.loss_counts.clamp_min(1).unsqueeze(-1)
 
     is_correct: Tensor  # Indicates which tokens were predicted correctly (after masking).
 
     @property
     def seq_is_correct(self) -> Tensor:
-        """ """
+        """Whether all eligible tokens were predicted correctly (shape ``(B,)``)."""
         return self.is_correct.sum(-1) == self.loss_counts
 
 
 # =================================================================================================
 @dataclass(frozen=True)
 class Losses(DetachMixin):
-    """ """
+    """Bundle of per-step loss terms (summed over batch).
+
+    All fields are *sums* (not means). Normalization (e.g. by local batch size)
+    is performed by the Lightning module before backward.
+    """
 
     loss_lm_sum: Tensor
     loss_q_value_sum: Tensor
@@ -75,7 +101,7 @@ class Losses(DetachMixin):
 
     @property
     def total(self) -> Tensor:
-        """ """
+        """Total scalar loss for the step."""
         loss_rl = self.loss_actor_sum + self.loss_critic_sum + self.loss_entropy_sum
         loss_m = self.loss_lm_sum + self.loss_q_value_sum
         return loss_rl + loss_m
@@ -84,7 +110,14 @@ class Losses(DetachMixin):
 # =================================================================================================
 @dataclass(frozen=True)
 class RLLossStep:
-    """ """
+    """A single rollout/loss step produced by :class:`RLLossHead`.
+
+    Attributes:
+        losses: Live loss tensors (used for backward).
+        metrics: Aggregated metrics detached for logging.
+        outputs: Optional raw controller outputs for tracing.
+        signals: Lightweight diagnostic signals.
+    """
 
     losses: Losses  # Combined losses for this step, kept live for backward()
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
@@ -103,41 +136,64 @@ class RLLossStep:
 
 # =================================================================================================
 class RLLossHead(nn.Module):
-    """ """
+    """Loss head wrapping :class:`~ehc_sn.training.rl_controller.RLController`.
+
+    The loss head is responsible for:
+        - running one controller step
+        - computing supervised + RL losses
+        - producing step metrics and diagnostic signals
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, controller: RLController, config: RLLossConfig,
     ) -> None:  # fmt: skip
-        """ """
+        """Create a loss head.
+
+        Args:
+            controller: Controller responsible for forward pass + env stepping.
+            config: Loss configuration.
+        """
         super().__init__()
         self._controller = controller
         self._config = config
 
     @property
     def controller(self) -> RLController:
-        """ """
+        """Return the wrapped controller."""
         return self._controller
 
     @property
     def config(self) -> RLLossConfig:
-        """ """
+        """Return the loss configuration."""
         return self._config
 
     @property
     def loss_fn(self) -> Any:
-        """ """
+        """Return the configured token-level loss function implementation."""
         return getattr(cross_entropy_module, self._config.function)
 
     def initial_carry(  # -------------------------------------------------------------------------
         self, batch_sample: Batch,
     ) -> RLState:  # fmt: skip
-        """ """
+        """Initialize the rollout carry/state from an example batch."""
         return self._controller.initial_state(batch_sample)
 
     def forward(  # -------------------------------------------------------------------------------
         self, batch: Batch, carry: RLState, *, is_warmup: bool = False, **options: Any,
     ) -> Tuple[RLLossStep, RLState, bool]:  # fmt: skip
-        """ """
+        """Run one controller step and compute losses/metrics.
+
+        Args:
+            batch: Incoming batch used both for the step inputs and as a source
+                of fresh samples for partial resets.
+            carry: Current rollout state.
+            is_warmup: If True, RL losses are suppressed (supervised loss only).
+            **options: Forwarded to :meth:`RLController.step` (e.g. exploration).
+
+        Returns:
+            ``(step, new_carry, all_halted)`` where ``all_halted`` indicates that
+            all slots are done for the current carry.
+        """
         carry, outputs = self._controller.step(carry, batch, **options)
         labels = carry.data["labels"]
 
@@ -156,7 +212,7 @@ class RLLossHead(nn.Module):
     def compute_accuracy(  # ------------------------------------------------------------------
         self, outputs: RLOutput, labels: Tensor,
     ) -> AccuracyStats:  # fmt: skip
-        """ """
+        """Compute masked token correctness statistics (out-of-graph)."""
         logits_lm, *_ = outputs.logits  # Unpack list of logits if backbone returns multiple heads
         mask = labels != IGNORE_LABEL_ID
         is_correct = mask & (torch.argmax(logits_lm, dim=-1) == labels)
@@ -166,7 +222,10 @@ class RLLossHead(nn.Module):
         self, outputs: RLOutput, labels: Tensor, stats: AccuracyStats, *,
         is_warmup: bool = False,
     ) -> Losses:  # fmt: skip
-        """ """
+        """Compute supervised and RL loss terms for a step.
+
+        All returned losses are summed over the batch.
+        """
         logits_lm, logits_q, logits_r, *_ = outputs.logits  # Unpack list of logits multiple heads
 
         # --- Supervised LM loss (every step, as in ACT) ---
@@ -204,7 +263,11 @@ class RLLossHead(nn.Module):
     def compute_metrics(  # -----------------------------------------------------------------------
         self, state: RLState, outputs: RLOutput, stats: AccuracyStats, losses: Losses,
     ) -> StepMetrics:  # fmt: skip
-        """ """
+        """Aggregate per-step metrics for logging.
+
+        Metrics are mostly reported over the subset of sequences that halted on
+        this step (to match the "halted-only" reporting style used elsewhere).
+        """
         eligible_mask = stats.loss_counts > 0
         halted_mask = state.halted & eligible_mask
         halted_weights = halted_mask.to(torch.float32)
@@ -248,7 +311,10 @@ class RLLossHead(nn.Module):
     def compute_signals(  # -----------------------------------------------------------------------
         self, state: RLState, outputs: RLOutput, losses: Losses,
     ) -> Dict[str, Tensor]:  # fmt: skip
-        """ """
+        """Compute lightweight diagnostic signals.
+
+        Signals are intended for TensorBoard-style scalar logging.
+        """
         _feature, q_logits, logits_r = outputs.logits  # (B,S,V), (B,A), (B,1)
         reward = outputs.reward.squeeze(-1)  # (B,)
         rpe = (reward - logits_r.squeeze(-1)).detach()  # (B,) reward prediction error

@@ -26,7 +26,11 @@ class AutoencoderSettings(BaseModel, extra="forbid", arbitrary_types_allowed=Tru
 
 # =================================================================================================
 class AutoencoderModule(nn.Module):
-    """ """  # TODO: Add docstrings to this class and its methods.
+    """Encode observations into features and decode them back.
+
+    This module is a thin wrapper around a selected encoder/decoder pair based
+    on :class:`AutoencoderSettings`.
+    """
 
     def __init__(self, n_o: int, n_c: int, settings: AutoencoderSettings):
         super().__init__()
@@ -54,7 +58,11 @@ class AutoencoderModule(nn.Module):
 
 # =================================================================================================
 class TwoHotEncoder(nn.Module):
-    """ """  # TODO: Add docstrings to this class and its methods.
+    """Two-hot encoder.
+
+    Converts a one-hot observation vector into a fixed two-hot representation
+    using a precomputed lookup table.
+    """
 
     def __init__(self, n_o: int, n_c: int):
         super(TwoHotEncoder, self).__init__()
@@ -72,7 +80,7 @@ class TwoHotEncoder(nn.Module):
 
 # =================================================================================================
 class MLPDecoder(nn.Module):
-    """ """  # TODO: Add docstrings to this class and its methods.
+    """MLP-based decoder from features to observation logits."""
 
     def __init__(self, n_c: int, n_o: int):
         super(MLPDecoder, self).__init__()

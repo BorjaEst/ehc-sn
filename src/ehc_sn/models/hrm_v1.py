@@ -1,16 +1,17 @@
-"""HRM v1 Lightning module.
+"""HRM v1 Lightning module (ACT-supervised).
 
-This module defines a PyTorch Lightning `LightningModule` wrapper around the core HRM
-architecture (`HRModel`) with Adaptive Computation Time (ACT) control and loss
-computation.
+This module defines a PyTorch Lightning :class:`~lightning.LightningModule` wrapper
+around the HRM v1 architecture (:class:`HRModelV1`) with Adaptive Computation Time
+(ACT) control and loss computation.
 
 Key behaviors:
-        - **Manual optimization**: uses `automatic_optimization = False` and explicitly performs
-            backward/optimizer/scheduler steps for legacy parity.
-        - **Stateful training carry**: forwards a `carry` object across mini-batches to support
-            continuation/halting semantics.
-        - **Partial reset batching**: halted examples are replaced with fresh rows using a FIFO buffer
-            and `PartialResetBatchAssembler`.
+    - **Manual optimization**: sets ``automatic_optimization = False`` and performs
+        explicit backward/optimizer/scheduler steps for legacy parity.
+    - **Stateful training carry**: forwards a carry object across mini-batches to
+        support continuation / halting semantics.
+    - **Partial reset batching**: halted examples are replaced with fresh rows
+        using a FIFO buffer and
+        :class:`~ehc_sn.training.partial_reset.PartialResetBatchAssembler`.
 
 The batch structure used throughout this file is a plain ``dict[str, Tensor]``
 with keys ``"inputs"`` and ``"labels"``.

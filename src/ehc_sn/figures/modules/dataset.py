@@ -19,9 +19,16 @@ from matplotlib.axes import Axes
 from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
 
-from ehc_sn.data.schema import CHANNEL_GOALS, CHANNEL_LANDMARKS, CHANNEL_MASK_VALID  # fmt: skip
-from ehc_sn.data.schema import CHANNEL_REGIONS, CHANNEL_OBSERVATIONS, CHANNEL_SOLUTION  # fmt: skip
-from ehc_sn.data.schema import CHANNEL_START, CHANNEL_TOPOLOGY  # fmt: skip
+from ehc_sn.data.schema import (  # fmt: skip
+    CHANNEL_GOALS,
+    CHANNEL_LANDMARKS,
+    CHANNEL_MASK_VALID,
+    CHANNEL_OBSERVATIONS,
+    CHANNEL_REGIONS,
+    CHANNEL_SOLUTION,
+    CHANNEL_START,
+    CHANNEL_TOPOLOGY,
+)
 from ehc_sn.figures.figures.base import BaseFigureTemplate
 from ehc_sn.figures.figures.panels import panel
 from ehc_sn.figures.registry import FigureContext
@@ -76,7 +83,12 @@ class ProcessedSampleFigure(BaseFigureTemplate):
     def __init__(  # ------------------------------------------------------------------------------
         self, channels: dict[str, np.ndarray], ctx: FigureContext,
     ) -> None:  # fmt: skip
-        """ """
+        """Create the figure template for a single processed sample.
+
+        Args:
+            channels: Channel name → numpy array, typically produced by a dataset transform.
+            ctx: Figure context for styling and output controls.
+        """
         self.channels = channels
         super().__init__(None, ctx)  # trace=None — not used
 
@@ -171,6 +183,13 @@ def _overlay_categorical(  # ---------------------------------------------------
 def _overlay_sequential(  # -----------------------------------------------------------------------
     ax: Axes, arr: np.ndarray, *, cmap: str = "viridis", alpha: float = 0.6,
 ) -> None:  # fmt: skip
+    """Overlay an int32 ordinal channel with a sequential colormap."""
+    masked = np.ma.masked_where(arr <= 0, arr)
+    ax.imshow(masked, cmap=cmap, origin="upper", interpolation="nearest", alpha=alpha)
+
+
+# =================================================================================================
+__all__ = ["plot"]
     """Overlay an int32 ordinal channel with a sequential colormap."""
     masked = np.ma.masked_where(arr <= 0, arr)
     ax.imshow(masked, cmap=cmap, origin="upper", interpolation="nearest", alpha=alpha)

@@ -1,4 +1,9 @@
-""" """
+"""Iterator utilities for partial-reset rollouts.
+
+This module provides :class:`PartialResetCollector`, an iterator that yields
+per-step batches where halted slots are refilled from a FIFO buffer via
+:class:`~ehc_sn.training.partial_reset.PartialResetBatchAssembler`.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +26,13 @@ class PartialResetCollector(Iterator[Batch]):
     def __init__(  # ------------------------------------------------------------------------------
         self, *, incoming: Batch, assembler: PartialResetBatchAssembler, carry0: Any,
     ) -> None:  # fmt: skip
-        """ """
+        """Create a collector.
+
+        Args:
+            incoming: Current incoming batch used as the primary data source.
+            assembler: Batch assembler that manages buffer ingestion/refills.
+            carry0: Initial carry/state; must expose a ``halted`` mask.
+        """
         self._incoming = incoming
         self._template = incoming
         self._assembler = assembler
@@ -53,6 +64,7 @@ class PartialResetCollector(Iterator[Batch]):
     def update(  # --------------------------------------------------------------------------------
         self, *, carry: Any,
     ) -> None:  # fmt: skip
+        """Update the internal reset mask from the latest carry."""
         self._reset_mask = carry.halted
 
 

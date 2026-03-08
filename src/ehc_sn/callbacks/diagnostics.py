@@ -1,4 +1,8 @@
-""" """
+"""Lightning callback for logging diagnostic signals.
+
+Models typically return a dict from ``training_step`` containing a ``signals``
+payload. This callback logs a configurable subset of those signals.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ from ehc_sn.metrics.signals import STANDARD_SIGNALS
 
 # =================================================================================================
 class DiagnosticsSettings(BaseModel, extra="forbid"):
-    """ """
+    """Settings controlling which diagnostic signals are logged."""
 
     diagnostic_level: Literal["standard", "research"] = Field(
         default="standard",
@@ -35,7 +39,7 @@ class DiagnosticsSettings(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class DiagnosticsCallback(pl.Callback):
-    """ """
+    """Logs step-level diagnostic signals emitted by the training step."""
 
     def __init__(  # ------------------------------------------------------------------------------
         self, settings: DiagnosticsSettings,

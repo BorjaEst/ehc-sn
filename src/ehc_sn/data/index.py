@@ -8,7 +8,11 @@ from pydantic import BaseModel, Field
 
 # =================================================================================================
 class MazeIndexEntry(BaseModel, extra="forbid"):
-    """ """
+    """One entry in a maze dataset index.
+
+    Index entries are stored as JSONL and describe where and how to interpret a
+    sample dataset (shape, channels, split/source metadata).
+    """
 
     id: str = Field(..., description="Unique identifier for the maze (e.g., 'maze_00001')")
     source: str = Field(..., description="Source dataset name (e.g., 'huggingface')")
@@ -18,12 +22,12 @@ class MazeIndexEntry(BaseModel, extra="forbid"):
 
     @property
     def height(self) -> int:
-        """ """
+        """Maze grid height (rows)."""
         return self.shape[0]
 
     @property
     def width(self) -> int:
-        """ """
+        """Maze grid width (columns)."""
         return self.shape[1]
 
     channels: list[str] = Field(..., description="List of channel names (e.g., ['observation', 'goal'])")

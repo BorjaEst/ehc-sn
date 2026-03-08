@@ -1,4 +1,11 @@
-""" """
+"""Two-level recurrent reasoning primitives for the PFC module.
+
+This file contains:
+    - configuration objects for reasoning modules
+    - working-memory state containers
+    - high-level and low-level reasoning module implementations
+    - helper functions to initialize/reset memory and to generate recurrent updates
+"""
 
 from __future__ import annotations
 
@@ -16,7 +23,7 @@ from ehc_sn.types import Activation, Device, Dtype, Matrix, MemoryState, MultiSc
 
 # =================================================================================================
 class ReasoningSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
-    """ """
+    """Settings for a single reasoning module (high or low level)."""
 
     cortex: TransformerBlockConfig = Field(
         ...,
@@ -43,7 +50,12 @@ class ReasoningSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True)
 # =================================================================================================
 @dataclass
 class WorkingMemory:
-    """ """
+    """Working memory state for the PFC reasoning stack.
+
+    Attributes:
+        z_H: High-level activation tensor of shape ``(B, S, D)``.
+        z_L: Low-level activation tensor of shape ``(B, S, D)``.
+    """
 
     z_H: Tensor  # Higher-level state tensor of shape [batch, seq_length, hidden_size].
     z_L: Tensor  # Lower-level state tensor of shape [batch, seq_length, hidden_size].
@@ -55,7 +67,11 @@ class WorkingMemory:
 
 # =================================================================================================
 class ReasoningModule(nn.Module):
-    """"""
+    """Base class for reasoning modules.
+
+    Wraps a :class:`~ehc_sn.modules.transformer.TransformerStack` and exposes a
+    persistent reset vector used to initialize and reset memory.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: ReasoningSettings, device: Optional[Device] = None, dtype: Optional[Dtype] = None,
@@ -69,7 +85,7 @@ class ReasoningModule(nn.Module):
 
     @property
     def config(self) -> ReasoningSettings:
-        """ """
+        """Return the parsed settings for this reasoning module."""
         return self._config
 
 
@@ -80,7 +96,7 @@ class HighLvRModule(ReasoningModule):
     def forward(  # ----------------------------------------------------------------------------------
         self, x: Tensor, memory: WorkingMemory,
     ) -> WorkingMemory:  # fmt: skip
-        """ """
+        """Update the high-level state given current low-level state."""
         z_H = self.cortex(memory.z_H, memory.z_L)
         return WorkingMemory(z_H, memory.z_L)
 
@@ -92,7 +108,7 @@ class LowLvRModule(ReasoningModule):
     def forward(  # ----------------------------------------------------------------------------------
         self, x: Tensor, memory: WorkingMemory,
     ) -> WorkingMemory:  # fmt: skip
-        """ """
+        """Update the low-level state given high-level state and inputs."""
         z_L = self.cortex(memory.z_L, memory.z_H + x)
         return WorkingMemory(memory.z_H, z_L)
 
@@ -101,7 +117,11 @@ class LowLvRModule(ReasoningModule):
 def reasoning_gen(  # ----------------------------------------------------------------------------------
     x: Tensor, memory: WorkingMemory, high_module: HighLvRModule, low_module: LowLvRModule,
 ) -> Generator[WorkingMemory]:  # fmt: skip
-    """ """
+    """Yield successive working-memory updates for one full reasoning episode.
+
+    The schedule is nested: for each high-level cycle, run ``n_cycles`` low-level
+    updates, then one high-level update.
+    """
     for _ in range(high_module.config.n_cycles):
         for _ in range(low_module.config.n_cycles):
             memory = low_module(x, memory)
@@ -114,7 +134,7 @@ def reasoning_gen(  # ----------------------------------------------------------
 def init_memory(  # ----------------------------------------------------------------------------------
     batch_size: int, seq_length: int,  high_module: HighLvRModule, low_module: LowLvRModule,
 ) -> WorkingMemory:  # fmt: skip
-    """ """
+    """Initialize working memory using the modules' reset vectors."""
     return WorkingMemory(
         z_H=high_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1).clone(),
         z_L=low_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1).clone(),
@@ -125,7 +145,17 @@ def init_memory(  # ------------------------------------------------------------
 def reset_memory(  # ----------------------------------------------------------------------------------
     memory: WorkingMemory, reset_flag: Tensor, high_module: HighLvRModule, low_module: LowLvRModule,
 ) -> WorkingMemory:  # fmt: skip
-    """ """
+    """Reset selected rows of working memory.
+
+    Args:
+        memory: Current working memory.
+        reset_flag: Boolean tensor of shape ``(B,)``. True indicates the row is reset.
+        high_module: High-level module providing its reset vector.
+        low_module: Low-level module providing its reset vector.
+
+    Returns:
+        New working memory with reset rows replaced by reset vectors.
+    """
     batch_size, seq_length, _ = memory.z_H.shape
     init_H = high_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1)
     init_L = low_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1)

@@ -15,6 +15,7 @@ from ehc_sn.data.transforms import Compose, RandomDihedral
 
 # =================================================================================================
 class DatamoduleConfig(BaseModel, extra="forbid"):
+    """Configuration for :class:`Datamodule` (LightningDataModule)."""
 
     dataset_path: Path = Field(
         ...,
@@ -52,11 +53,21 @@ class DatamoduleConfig(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class Datamodule(L.LightningDataModule):
+    """Lightning DataModule for maze datasets.
+
+    Loads a processed dataset directory containing an ``index.jsonl`` and
+    per-split channel arrays. Optionally applies training-time augmentation.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: DatamoduleConfig, transform: Callable | None = None,
     ) -> None:  # fmt: skip
-        """ """
+        """Create the data module.
+
+        Args:
+            config: Datamodule configuration.
+            transform: Optional adapter transform applied after built-in transforms.
+        """
         super().__init__()
         self._config = config
         self._adapter = transform
@@ -66,12 +77,12 @@ class Datamodule(L.LightningDataModule):
 
     @property
     def config(self) -> DatamoduleConfig:
-        """"""
+        """Return the parsed datamodule configuration."""
         return self._config
 
     @property
     def train_transform(self) -> list[Callable]:
-        """ """
+        """Transforms applied to training samples."""
         return [
             RandomDihedral(rng=np.random.default_rng(self.config.seed)) if self.config.augment else None,
             self._adapter,
@@ -79,7 +90,7 @@ class Datamodule(L.LightningDataModule):
 
     @property
     def eval_transform(self) -> list[Callable]:
-        """ """
+        """Transforms applied to validation/test samples."""
         return [
             self._adapter,
         ]
@@ -131,7 +142,7 @@ class Datamodule(L.LightningDataModule):
     def train_dataloader(  # ----------------------------------------------------------------------
         self,
     ) -> DataLoader:  # fmt: skip
-        """ """
+        """Return the training DataLoader."""
         if self._train is None:
             raise RuntimeError("Call setup('fit') before train_dataloader()")
         return self._make_loader(self._train, shuffle=True)
@@ -139,7 +150,7 @@ class Datamodule(L.LightningDataModule):
     def val_dataloader(  # ------------------------------------------------------------------------
         self,
     ) -> DataLoader:  # fmt: skip
-        """ """
+        """Return the validation DataLoader."""
         if self._val is None:
             raise RuntimeError("Call setup('fit') or setup('validate') before val_dataloader()")
         return self._make_loader(self._val, shuffle=False)
@@ -147,7 +158,7 @@ class Datamodule(L.LightningDataModule):
     def test_dataloader(  # -----------------------------------------------------------------------
         self,
     ) -> DataLoader:  # fmt: skip
-        """ """
+        """Return the test DataLoader."""
         if self._test is None:
             raise RuntimeError("Call setup('test') before test_dataloader()")
         return self._make_loader(self._test, shuffle=False)

@@ -1,4 +1,7 @@
-""" """
+"""A minimal example/dummy figure module.
+
+Used as a placeholder template for figure wiring and rendering.
+"""
 
 from __future__ import annotations
 
@@ -13,12 +16,12 @@ from ehc_sn.rollouts.trace_tree import TraceTree
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
-    """ """
+    """Render the dummy figure."""
     return DummyFigure(trace, ctx).plot()
 
 
 class DummyFigure(BaseFigureTemplate):
-    """ """
+    """Single-panel dummy figure."""
 
     HEIGHT_FRAC: float = 0.25
     MOSAIC = [["fake_panel"]]
@@ -30,7 +33,7 @@ class DummyFigure(BaseFigureTemplate):
     # def plot_panel(self, ax: Axes) -> None:
     @panel()
     def fake_panel(self, ax: Axes) -> None:
-        """ """
+        """Render a single placeholder panel."""
         ax.text(0.5, 0.5, "Dummy figure", ha="center", va="center", fontsize=16)
         ax.set_xticks([])
         ax.set_yticks([])

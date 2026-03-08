@@ -99,11 +99,29 @@ class SwiGLU(nn.Module):
 
 # =================================================================================================
 class MLP(torch.nn.Module):
-    """ """  # TODO: Add docstrings to this class and its methods.
+    """Simple 2-layer MLP (legacy utility).
+
+    This class supports either:
+        - a single module (scalar ``in_dim``/``out_dim``), or
+        - a list of independent modules (list ``in_dim``/``out_dim``)
+
+    Notes:
+        This is a legacy helper used by older components (e.g. autoencoder). New
+        code should generally prefer :class:`SwiGLU` or a purpose-built module.
+    """
 
     def __init__(
         self, in_dim, out_dim, activation=(torch.nn.functional.elu, None), hidden_dim=None, bias=(True, True)
     ):
+        """Create the MLP.
+
+        Args:
+            in_dim: Input dimension or list of input dimensions.
+            out_dim: Output dimension or list of output dimensions.
+            activation: Tuple ``(hidden_activation, output_activation)``.
+            hidden_dim: Hidden dimension(s). If None, uses mean of in/out.
+            bias: Tuple indicating whether each layer uses bias.
+        """
         # First call super class init function to set up torch.nn.Module style model and inherit it's functionality
         super(MLP, self).__init__()
         # Check if this network consists of module: are input and output dimensions lists? If not, make them (but remember it wasn't)
@@ -145,6 +163,12 @@ class MLP(torch.nn.Module):
                         self.w[n][from_layer].bias.fill_(0.0)
 
     def set_weights(self, from_layer, value):
+        """Set the weights of one layer for all modules.
+
+        Args:
+            from_layer: Layer index (0=input->hidden, 1=hidden->output).
+            value: Tensor or scalar, or list thereof when using modular mode.
+        """
         # If single value is provided: copy it for each module
         if type(value) is not list:
             input_value = [value for n in range(self.N)]
@@ -162,6 +186,7 @@ class MLP(torch.nn.Module):
                     self.w[n][from_layer].weight.fill_(input_value[n])
 
     def forward(self, data):
+        """Apply the MLP to the provided input(s)."""
         # Make input data into list, if this network doesn't consist of modules
         if self.is_list:
             input_data = data
