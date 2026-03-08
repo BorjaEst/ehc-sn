@@ -202,7 +202,7 @@ class RLLossHead(nn.Module):
             # Keeping it out of the graph avoids gradients flowing through argmax.
             stats = self.compute_accuracy(outputs, labels)
 
-        losses = self.compute_losses(outputs, labels, stats)
+        losses = self.compute_losses(outputs, labels, stats, is_warmup=is_warmup)
         metrics = self.compute_metrics(carry, outputs, stats, losses)
         signals = self.compute_signals(carry, outputs, losses)
 

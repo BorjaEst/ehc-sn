@@ -26,7 +26,13 @@ from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
 
 # Configure PyTorch for better performance on modern GPUs
-torch.set_float32_matmul_precision("medium")
+torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.backends.cudnn.benchmark = True
+torch.backends.cuda.enable_flash_sdp(True)
+torch.backends.cuda.enable_mem_efficient_sdp(True)
+torch.backends.cuda.enable_math_sdp(True)
 CONFIGURATION_PATH = os.environ.get("HRM_V1_CONFIGURATION_PATH", "config/defaults_hrm-mazehard.toml")
 
 
@@ -210,6 +216,13 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         default=1,
         description="Number of nodes for distributed training.",
     )
+    trainer_precision: str = Field(
+        default="16-mixed",
+        description=(
+            "Lightning Trainer precision. '32-true' = full fp32 (paper-parity default). "
+            "Use 'bf16-mixed' for throughput on Ampere+."
+        ),
+    )
 
     # ---------------------------------------------------------------------------------------------
     # Checkpointing and evaluation settings (passed as kwargs to Trainer and Checkpoint callback)
@@ -304,6 +317,7 @@ if __name__ == "__main__":
         strategy=settings.trainer_strategy,
         devices=settings.trainer_devices,
         num_nodes=settings.trainer_num_nodes,
+        precision=settings.trainer_precision,
         max_steps=settings.max_steps,
         check_val_every_n_epoch=settings.check_val_every_n_epoch,
         val_check_interval=settings.val_check_interval,

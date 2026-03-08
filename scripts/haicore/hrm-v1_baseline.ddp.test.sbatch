@@ -30,6 +30,10 @@ export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export HRM_V1_CONFIGURATION_PATH="config/defaults_hrm-mazehard.toml"
 
+# Precision reproducibility: must be set before CUDA kernels initialise.
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
+export PYTHONHASHSEED=0
+
 # Run the training script with srun for proper resource allocation and binding
 srun --cpu-bind=cores \
     python experiments/hrm_v1_baseline.py \

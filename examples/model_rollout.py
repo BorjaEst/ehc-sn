@@ -47,8 +47,13 @@ from ehc_sn.training.schedules import SchedulerConfig
 from ehc_sn.training.step_loop import StepLoop
 
 # Configure PyTorch for better performance on modern GPUs.
-torch.set_float32_matmul_precision("medium")
-
+torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.backends.cudnn.benchmark = True
+torch.backends.cuda.enable_flash_sdp(True)
+torch.backends.cuda.enable_mem_efficient_sdp(True)
+torch.backends.cuda.enable_math_sdp(True)
 # Optional override for the experiment configuration path.
 CONFIGURATION_PATH = os.environ.get("EXP01_CONFIGURATION_PATH", "config/defaults_ehc.toml")
 

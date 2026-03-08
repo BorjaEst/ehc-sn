@@ -266,7 +266,7 @@ class RLController:
         # 3. Step the environment — env owns reward + termination semantics
         env_td = env_td.clone()
         env_td["action"] = action.unsqueeze(-1)  # (B, 1)
-        env_td["logits"] = logits_lm.detach()  # (B, S, V)
+        env_td["logits"] = logits_lm.detach().to(torch.float32)  # (B, S, V)
         env_td["labels"] = labels  # (B, S)
         env_td = self._env.step(env_td)["next"]  # TorchRL convention
 

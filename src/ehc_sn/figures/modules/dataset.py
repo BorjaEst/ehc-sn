@@ -190,10 +190,3 @@ def _overlay_sequential(  # ----------------------------------------------------
 
 # =================================================================================================
 __all__ = ["plot"]
-    """Overlay an int32 ordinal channel with a sequential colormap."""
-    masked = np.ma.masked_where(arr <= 0, arr)
-    ax.imshow(masked, cmap=cmap, origin="upper", interpolation="nearest", alpha=alpha)
-
-
-# =================================================================================================
-__all__ = ["plot"]

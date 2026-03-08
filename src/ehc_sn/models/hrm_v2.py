@@ -484,8 +484,13 @@ class TrainingModel(L.LightningModule):
         sch_sup, sch_rl, sch_qv = self.lr_schedulers()  # type: ignore[misc]
 
         opt_sup.step(); opt_sup.zero_grad(set_to_none=True); sch_sup.step()  # fmt: skip
-        opt_rl.step(); opt_rl.zero_grad(set_to_none=True); sch_rl.step()  # fmt: skip
-        opt_qv.step(); opt_qv.zero_grad(set_to_none=True); sch_qv.step()  # fmt: skip
+        if not is_warmup:
+            opt_rl.step(); opt_rl.zero_grad(set_to_none=True); sch_rl.step()  # fmt: skip
+            opt_qv.step(); opt_qv.zero_grad(set_to_none=True); sch_qv.step()  # fmt: skip
+        else:
+            # Keep gradients clean even when optimizers are intentionally frozen.
+            opt_rl.zero_grad(set_to_none=True)
+            opt_qv.zero_grad(set_to_none=True)
 
         # Update metrics with unnormalized loss and log to TensorBoard.
         update_metrics_from_step(self.train_metrics, step.outputs.metrics, RL_ROUTES)
@@ -501,14 +506,14 @@ class TrainingModel(L.LightningModule):
     ) -> Dict[str, Any]:  # fmt: skip
         """Run a full evaluation rollout and return traces.
 
-        Validation runs the controller until all slots halt (no exploration) and
+        Validation runs the controller to the max horizon (no exploration) and
         collects a trace tree for downstream logging/analysis.
         """
         batch_dict = batch
 
         # Run a full rollout until all slots halt, collecting traces for logging/analysis.
         step_batches = repeat(batch_dict)  # Run until all examples halt
-        step_opts = {"explore": False, "allow_halt": True, "is_warmup": False}
+        step_opts = {"explore": False, "allow_halt": False, "is_warmup": False}
         carry0 = self.step_module.initial_carry(batch_dict)
         collector = TraceCollector(TraceTree(), self.trace_specs)
 

@@ -116,7 +116,7 @@ class MazeHardEnv(EnvBase):
             {
                 "inputs": tensordict["inputs"],
                 "labels": tensordict["labels"],
-                "prev_accuracy": torch.zeros(B, 1, **kw),
+                "prev_accuracy": torch.zeros(B, 1, dtype=torch.float32, **kw),
                 "step_count": torch.zeros(B, 1, dtype=torch.int32, **kw),
             },
             batch_size=self.batch_size,
