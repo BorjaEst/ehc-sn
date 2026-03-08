@@ -12,7 +12,8 @@ from ehc_sn import utils
 from ehc_sn.modules.pfc import reasoning as r
 from ehc_sn.modules.pfc.reasoning import HighLvRModule, LowLvRModule, ReasoningSettings, WorkingMemory
 from ehc_sn.modules.pfc.values import QEstimatorSettings, QValueEstimator
-from ehc_sn.types import Device, Dtype
+from ehc_sn.modules.transformer import TransformerBlockConfig, TransformerStack
+from ehc_sn.types import Activation, Device, Dtype, Matrix, MemoryState, MultiScaleCode
 from ehc_sn.utils import trunc_normal_init_
 
 
@@ -26,27 +27,53 @@ class PFCSettings(BaseModel, extra="forbid"):
         ge=1,
         description="Sequence length for the model (number of tokens per example).",
     )
-
-    # Reasoning module configs
-    reasoning_h: ReasoningSettings = Field(
-        default_factory=ReasoningSettings,
-        description="Configuration for the high-level reasoning module (anterior dlPFC).",
-    )
-    reasoning_l: ReasoningSettings = Field(
-        default_factory=ReasoningSettings,
-        description="Configuration for the low-level reasoning module (posterior dlPFC).",
-    )
-
-    @property
-    def hidden_size(self) -> int:
-        """Convenience property to get the hidden size from the reasoning module config."""
-        return self.reasoning_h.cortex.hidden_size
-
-    # Value estimator config (vmPFC analogue)
     value_head: QEstimatorSettings = Field(
         ...,
         description="Configuration for the Q-value estimator (vmPFC analogue).",
     )
+    cortex: TransformerBlockConfig = Field(
+        ...,
+        description="Base transformer block config for reasoning modules.",
+    )
+
+    @property
+    def hidden_size(self) -> int:
+        """Convenience property to access the hidden size from the cortex config."""
+        return self.cortex.embedding_dim
+
+    # High-level reasoning module parameters (anterior dlPFC analogue)
+    layers_h: int = Field(
+        default=4,
+        ge=1,
+        description="Number of layers in the high-level reasoning module.",
+    )
+    cycles_h: int = Field(
+        default=2,
+        ge=1,
+        description="Number of cycles to reason in the high-level reasoning module.",
+    )
+
+    @property
+    def reasoning_h(self) -> ReasoningSettings:
+        """Convenience property to access the high-level reasoning config."""
+        return ReasoningSettings(cortex=self.cortex, n_layers=self.layers_h, n_cycles=self.cycles_h)
+
+    # Low-level reasoning module parameters (posterior dlPFC analogue)
+    layers_l: int = Field(
+        default=4,
+        ge=1,
+        description="Number of layers in the low-level reasoning module.",
+    )
+    cycles_l: int = Field(
+        default=2,
+        ge=1,
+        description="Number of cycles to reason in the low-level reasoning module.",
+    )
+
+    @property
+    def reasoning_l(self) -> ReasoningSettings:
+        """Convenience property to access the low-level reasoning config."""
+        return ReasoningSettings(cortex=self.cortex, n_layers=self.layers_l, n_cycles=self.cycles_l)
 
 
 # =================================================================================================

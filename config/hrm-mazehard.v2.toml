@@ -16,26 +16,23 @@ warmup_steps = 5000
 
 # -- Model settings -------------------------------------------------------------------------------
 [model]
-    vocab_size = 6
+    vocab_size = 6 # 5 canonical SEM IDs + O_ID (solution-path token)
 
 [model.pfc]
-    seq_length = 900
-
-[model.pfc.reasoning_h]
-    cortex.embedding_dim = 512
-    cortex.num_heads     = 4
-
-[model.pfc.reasoning_l]
-    cortex.embedding_dim = 512
-    cortex.num_heads     = 4
-
-# vmPFC (QValueEstimator): auxiliary Q-predictor trained with a separate TD loss.
-[model.pfc.value_head]
-    pool_mode   = "first_detached"  # detach reward error propagation to reasoning
-    hidden_size = 512
-    n_actions   = 2
-    pool_index  = 0
-    init_bias   = -5.0
+    seq_length             = 900 # 30 × 30 for mazehard puzzle
+    value_head.hidden_size = 512 # Should match the PFC reasoning module's embedding_dim
+    value_head.n_actions   = 2
+    value_head.pool_mode   = "first"
+    value_head.pool_index  = 0 # Reads the CLS summary slot (position 0), not a maze cell
+    value_head.init_bias   = -5.0
+    cortex.embedding_dim   = 512
+    cortex.num_heads       = 8
+    cortex.pos_encodings   = "rope"
+    cortex.rope_theta      = 10000.0
+    layers_h               = 4
+    cycles_h               = 2
+    layers_l               = 4
+    cycles_l               = 2
 
 # STR actor-critic: gamma is basal-ganglia temporal credit assignment
 [model.str]

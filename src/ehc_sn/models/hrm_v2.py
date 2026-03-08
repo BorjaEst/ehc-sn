@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, TypeAlias
 import lightning as L
 import numpy as np
 import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
@@ -44,8 +44,21 @@ IGNORE_LABEL_ID: int = -100
 class ModelSettings_V2(BaseModel, extra="forbid"):
     """ """
 
-    pfc: PFCSettings = Field(..., description="Settings for the core PFC model architecture.")
-    str: STRSettings = Field(..., description="Settings for the STR actor-critic architecture.")
+    pfc: PFCSettings = Field(
+        ...,
+        description="Settings for the core PFC model architecture.",
+    )
+    str: STRSettings = Field(
+        ...,
+        description="Settings for the STR actor-critic architecture.",
+    )
+
+    @field_validator("pfc", mode="after")
+    def validate_pfc(cls, v: PFCSettings) -> PFCSettings:
+        """Ensure that the PFC settings have a valid reasoning module configuration."""
+        if v.cortex.pos_encodings != "rope":
+            raise ValueError("PFC reasoning modules must use RoPE positional encodings")
+        return v
 
     vocab_size: int = Field(
         ...,
@@ -155,7 +168,6 @@ class HRModelV2(nn.Module):
         self._config = config
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, device=device, dtype=dtype)
-        self.embed_pos = nn.Embedding(config.seq_length, config.hidden_size, device=device, dtype=dtype)
         self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)  # Reasoning module with embedded inputs
         self.str = STRModelLinear(config.str, device=device, dtype=dtype)  # Reward estimator
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)  # fmt: skip
@@ -170,7 +182,6 @@ class HRModelV2(nn.Module):
         """ """
         init_std = self.config.init_std
         trunc_normal_init_(self.embed_tokens.weight, std=init_std)
-        trunc_normal_init_(self.embed_pos.weight, std=init_std)
         trunc_normal_init_(self.lm_head.weight, std=init_std)
 
     def init_state(  # ---------------------------------------------------------------------------
@@ -211,11 +222,8 @@ class HRModelV2(nn.Module):
     ) -> Tensor:  # fmt: skip
         """ """
         token_embeddings = self.embed_tokens(input.to(torch.int32))
-        positions = torch.arange(self.config.seq_length, device=input.device)
-        pos_embeddings = self.embed_pos(positions).unsqueeze(0)
-
         # Scale embeddings to keep activations in a reasonable range.
-        return self.config.embedding_scale * (token_embeddings + pos_embeddings)
+        return self.config.embedding_scale * token_embeddings
 
 
 # =================================================================================================
