@@ -112,7 +112,7 @@ class ACTController:
 
     def step(  # ----------------------------------------------------------------------------------
         self, state: ACTState, batch: Batch,
-        allow_halt: bool = True, explore: bool = True,
+        allow_halt: bool = True, explore: bool = True, td_target: bool = True,
     ) -> Tuple[ACTState, ACTOutput]:  # fmt: skip
         """ """
         data = self.refresh_slot_data(batch, state)
@@ -126,6 +126,15 @@ class ACTController:
         output = ACTOutput(logits=logits, theta_cls=theta_cls, action=action)
 
         # TD(0) bootstrap target for the Q-head.
+        if td_target and self._config.max_steps > 1:
+            output.target_q = self.compute_td_target(data, model_state, steps)
+
+        return state, output
+
+    def compute_td_target(  # ---------------------------------------------------------------------
+        self, data: Dict[str, Tensor], model_state: Any, steps: Tensor,
+    ) -> Tensor:  # fmt: skip
+        """ """
         with torch.no_grad():
             _, _, next_q = self.backbone(data["inputs"], model_state)
         is_last_step = steps >= self.config.max_steps
@@ -133,9 +142,8 @@ class ACTController:
         # At last step: forced done → target is Q(done_action). Otherwise: max over all actions.
         done_action = self._config.done_action
         target = torch.where(is_last_step, next_q[..., done_action], next_q.max(dim=-1).values)
-        output.target_q = torch.sigmoid(target)
 
-        return state, output
+        return torch.sigmoid(target)
 
     def refresh_slot_data(  # ---------------------------------------------------------------------
         self, batch: Batch, state: ACTState
