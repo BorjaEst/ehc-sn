@@ -171,7 +171,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
         description="LR scheduler config applied to both optimizers.",
     )
     warmup_steps: int = Field(
-        default=100,
+        default=5000,
         ge=0,
         description=(
             "Number of optimizer steps during which only the supervised optimizer trains. "
