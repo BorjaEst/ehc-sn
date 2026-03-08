@@ -78,9 +78,8 @@ class ModelSettings_V2(BaseModel, extra="forbid"):
 
     @property
     def embedding_scale(self) -> float:
-        """Convenience property for scaling embeddings to maintain variance."""
-        # scale by 1/sqrt(2) to maintain forward variance
-        return 0.707106781 * math.sqrt(self.hidden_size)
+        """Base embedding scale applied to token embeddings."""
+        return math.sqrt(self.hidden_size)
 
     @property
     def init_std(self) -> float:

@@ -78,9 +78,8 @@ class ModelSettings_V1(BaseModel, extra="forbid"):
 
     @property
     def embedding_scale(self) -> float:
-        """Convenience property for scaling embeddings to maintain variance."""
-        # scale by 1/sqrt(2) to maintain forward variance
-        return 0.707106781 * math.sqrt(self.hidden_size)
+        """Base embedding scale applied to token embeddings."""
+        return math.sqrt(self.hidden_size)
 
     @property
     def init_std(self) -> float:
@@ -253,11 +252,11 @@ class HRModelV1(nn.Module):
             # Learned mode: add positional table, then scale to maintain variance.
             positions = torch.arange(self.config.seq_length, device=input.device)
             pos_embeddings = self.embed_pos(positions).unsqueeze(0)
-            return self.config.embedding_scale * (token_embeddings + pos_embeddings)
+            return 0.707106781 * self.config.embedding_scale * (token_embeddings + pos_embeddings)
 
         if self.config.pos_encodings == "rope":
             # RoPE mode: positions are encoded in QK rotation — scale by sqrt(d) only.
-            return math.sqrt(self.config.hidden_size) * token_embeddings
+            return self.config.embedding_scale * token_embeddings
 
         raise ValueError(f"Unsupported pos_encodings mode: {self.config.pos_encodings}")
 
