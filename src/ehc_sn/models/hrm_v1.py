@@ -171,7 +171,11 @@ class HRModelV1(nn.Module):
         self._config = config
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, device=device, dtype=dtype)
-        self.embed_pos = nn.Embedding(config.seq_length, config.hidden_size, device=device, dtype=dtype)
+        if config.pos_encodings == "learned":
+            self.embed_pos = nn.Embedding(config.seq_length, config.hidden_size, device=device, dtype=dtype)
+        else:
+            self.embed_pos = None  # Not used in RoPE mode
+
         self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)  # fmt: skip
         self.reset_parameters()
@@ -197,7 +201,8 @@ class HRModelV1(nn.Module):
         """
         init_std = self.config.init_std  # 1 / sqrt(hidden_size)
         trunc_normal_init_(self.embed_tokens.weight, std=init_std)
-        trunc_normal_init_(self.embed_pos.weight, std=init_std)
+        if self.embed_pos is not None:
+            trunc_normal_init_(self.embed_pos.weight, std=init_std)
         trunc_normal_init_(self.lm_head.weight, std=init_std)
         # self.pfc.reset_parameters()  # Already done when pfc is initialized
 
