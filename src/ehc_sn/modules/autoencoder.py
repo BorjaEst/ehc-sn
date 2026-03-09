@@ -25,7 +25,7 @@ class AutoencoderSettings(BaseModel, extra="forbid", arbitrary_types_allowed=Tru
 
 
 # =================================================================================================
-class AutoencoderModule(nn.Module):
+class Autoencoder(nn.Module):
     """Encode observations into features and decode them back.
 
     This module is a thin wrapper around a selected encoder/decoder pair based
