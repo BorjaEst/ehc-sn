@@ -35,7 +35,7 @@ from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
-from ehc_sn.metrics.routes import ACT_ROUTES
+from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.rollouts.collect import TraceCollector
@@ -299,7 +299,7 @@ class TrainingModel(L.LightningModule):
 
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(ACT_ROUTES).clone(prefix="train/")
-        self.val_metrics = build_val_metrics(ACT_ROUTES).clone(prefix="val/")
+        self.val_metrics = build_val_metrics(ACT_EPISODE_ROUTES).clone(prefix="val/")
         self.trace_specs = build_trace_spec("act")
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
@@ -424,11 +424,9 @@ class TrainingModel(L.LightningModule):
         step, collector = None, TraceCollector(TraceTree(), self.trace_specs)
         for t, step in StepLoop(self.step_module, step_batches, carry0, options=act_options):
             collector.append(t, step)
+            update_metrics_from_step(self.val_metrics, step.outputs.metrics, ACT_EPISODE_ROUTES)
         if step is None:
             raise ValueError("Evaluation loop did not yield any steps, cannot log metrics.")
-
-        # Update metrics with the final step's metrics and log to TensorBoard.
-        update_metrics_from_step(self.val_metrics, step.outputs.metrics, ACT_ROUTES)
 
         return {"trace": collector.tree}
 

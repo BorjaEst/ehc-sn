@@ -1,4 +1,4 @@
-"""Routing table for HRM v2 RL (Reinforcement Learning) training paradigm.
+"""Routing tables for HRM v2 RL (Reinforcement Learning).
 
 These routes map metric keys to dotted attribute paths on
 :class:`~ehc_sn.training.types.StepMetrics`, which is the step-metrics object
@@ -7,6 +7,12 @@ produced by :class:`~ehc_sn.heads.rl.RLLossHead`.
 
 from ehc_sn.metrics.adapter import Route
 from ehc_sn.metrics.keys import LOSS_LM, RL_LOSS_ACTOR, RL_LOSS_CRITIC, RL_LOSS_ENTROPY, RL_LOSS_Q_VALUE, extra_ratio_paths  # fmt: skip
+
+
+def _with_namespace(namespace: str, routes: tuple[Route, ...]) -> tuple[Route, ...]:
+    """Prefix route keys with a metric namespace."""
+    return tuple(Route(f"{namespace}/{route.key}", route.num_path, route.den_path) for route in routes)
+
 
 RL_ROUTES: tuple[Route, ...] = (
     # key                              numerator path                          denominator path
@@ -21,4 +27,6 @@ RL_ROUTES: tuple[Route, ...] = (
     Route("loss/q_value",            *extra_ratio_paths(RL_LOSS_Q_VALUE)),                                # fmt: skip
 )
 
-__all__ = ["RL_ROUTES"]
+RL_EPISODE_ROUTES: tuple[Route, ...] = _with_namespace("episode", RL_ROUTES)
+
+__all__ = ["RL_EPISODE_ROUTES", "RL_ROUTES"]

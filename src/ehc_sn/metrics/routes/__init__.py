@@ -7,7 +7,7 @@ Import the appropriate table and pass it to :func:`~ehc_sn.metrics.update_metric
 and :func:`~ehc_sn.metrics.build_train_metrics` / :func:`~ehc_sn.metrics.build_val_metrics`.
 """
 
-from ehc_sn.metrics.routes.act import ACT_ROUTES
-from ehc_sn.metrics.routes.rl import RL_ROUTES
+from ehc_sn.metrics.routes.act import ACT_EPISODE_ROUTES, ACT_ROUTES
+from ehc_sn.metrics.routes.rl import RL_EPISODE_ROUTES, RL_ROUTES
 
-__all__ = ["ACT_ROUTES", "RL_ROUTES"]
+__all__ = ["ACT_EPISODE_ROUTES", "ACT_ROUTES", "RL_EPISODE_ROUTES", "RL_ROUTES"]

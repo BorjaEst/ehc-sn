@@ -44,8 +44,8 @@ CROSS_PARADIGM_SIGNALS: frozenset[str] = frozenset({STEPS_MEAN, THETA_CLS_NORM})
 # ACT-specific — produced by ACTLossHead.compute_signals()
 # =================================================================================================
 
-LOSS_Q_HALT: str = "loss_q_halt"
-"""Q-halt binary cross-entropy loss (ACT)."""
+LOSS_Q_DONE: str = "loss_q_done"
+"""Q-done binary cross-entropy loss (ACT)."""
 
 TARGET_Q_MEAN: str = "target_q_mean"
 """TD(0) bootstrap Q-target mean (ACT)."""
@@ -53,7 +53,7 @@ TARGET_Q_MEAN: str = "target_q_mean"
 TARGET_Q_STD: str = "target_q_std"
 """TD(0) bootstrap Q-target standard deviation (ACT)."""
 
-ACT_SIGNALS: frozenset[str] = frozenset({LOSS_Q_HALT, TARGET_Q_MEAN, TARGET_Q_STD})
+ACT_SIGNALS: frozenset[str] = frozenset({LOSS_Q_DONE, TARGET_Q_MEAN, TARGET_Q_STD})
 
 
 # =================================================================================================
@@ -110,7 +110,7 @@ __all__ = [
     # Cross-paradigm
     "STEPS_MEAN", "THETA_CLS_NORM", "CROSS_PARADIGM_SIGNALS",
     # ACT
-    "LOSS_Q_HALT", "TARGET_Q_MEAN", "TARGET_Q_STD", "ACT_SIGNALS",
+    "LOSS_Q_DONE", "TARGET_Q_MEAN", "TARGET_Q_STD", "ACT_SIGNALS",
     # RL
     "REWARD_MEAN", "REWARD_STD", "Q_MEAN", "Q_STD", "RPE_MAGNITUDE", "ACTION_ENTROPY",
     "LOSS_ACTOR", "LOSS_CRITIC", "LOSS_ENTROPY", "RL_SIGNALS",

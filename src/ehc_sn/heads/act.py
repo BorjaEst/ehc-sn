@@ -164,7 +164,7 @@ class ACTLossHead(TokenLossHeadBase[ACTController, ACTLossConfig]):
         sig: Dict[str, Tensor] = {
             S.STEPS_MEAN:     state.steps.float().mean().detach(),
             S.THETA_CLS_NORM: outputs.theta_cls.detach().norm(dim=-1).mean(),
-            S.LOSS_Q_HALT:    losses.loss_q_done_sum.detach(),
+            S.LOSS_Q_DONE:    losses.loss_q_done_sum.detach(),
         }  # fmt: skip
         if outputs.target_q is not None:
             sig[S.TARGET_Q_MEAN] = outputs.target_q.mean().detach()

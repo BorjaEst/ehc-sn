@@ -41,7 +41,7 @@ from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.heads.rl import RLLossConfig, RLLossHead, RLLossStep
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
-from ehc_sn.metrics.routes import RL_ROUTES
+from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
@@ -354,7 +354,7 @@ class TrainingModel(L.LightningModule):
 
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(RL_ROUTES).clone(prefix="train/")
-        self.val_metrics = build_val_metrics(RL_ROUTES).clone(prefix="val/")
+        self.val_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(prefix="val/")
         self.trace_specs = build_trace_spec("rl")
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
@@ -512,11 +512,9 @@ class TrainingModel(L.LightningModule):
         step = None
         for t, step in StepLoop(self.step_module, step_batches, carry0, options=rl_options):
             collector.append(t, step)
+            update_metrics_from_step(self.val_metrics, step.outputs.metrics, RL_EPISODE_ROUTES)
         if step is None:
             raise ValueError("Evaluation loop did not yield any steps.")
-
-        # Update metrics with the final step's metrics and log to TensorBoard.
-        update_metrics_from_step(self.val_metrics, step.outputs.metrics, RL_ROUTES)
 
         return {"trace": collector.tree}
 

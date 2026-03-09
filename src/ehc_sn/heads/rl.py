@@ -15,7 +15,7 @@ backprop), aggregated metrics, and diagnostic signals.
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
