@@ -41,7 +41,7 @@ from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.heads.rl import RLLossConfig, RLLossHead, RLLossStep
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
-from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_ROUTES
+from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
@@ -353,7 +353,7 @@ class TrainingModel(L.LightningModule):
         self._train_carry = None
 
         # Metrics are cloned for train/val to allow separate logging and state management.
-        self.train_metrics = build_train_metrics(RL_ROUTES).clone(prefix="train/")
+        self.train_metrics = build_train_metrics(RL_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(prefix="val/")
         self.trace_specs = build_trace_spec("rl")
 
@@ -488,7 +488,7 @@ class TrainingModel(L.LightningModule):
             opt_qv.zero_grad(set_to_none=True)
 
         # Update metrics with unnormalized loss and log to TensorBoard.
-        update_metrics_from_step(self.train_metrics, step.outputs.metrics, RL_ROUTES)
+        update_metrics_from_step(self.train_metrics, step.outputs.metrics, RL_STEP_ROUTES)
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
         signals = {**step.outputs.signals, "is_warmup": torch.tensor(float(is_warmup))}

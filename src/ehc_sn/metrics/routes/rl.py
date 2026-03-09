@@ -6,7 +6,14 @@ produced by :class:`~ehc_sn.heads.rl.RLLossHead`.
 """
 
 from ehc_sn.metrics.adapter import Route
-from ehc_sn.metrics.keys import LOSS_LM, RL_LOSS_ACTOR, RL_LOSS_CRITIC, RL_LOSS_ENTROPY, RL_LOSS_Q_VALUE, extra_ratio_paths  # fmt: skip
+from ehc_sn.metrics.keys import (
+    LOSS_LM,
+    RL_LOSS_ACTOR,
+    RL_LOSS_CRITIC,
+    RL_LOSS_ENTROPY,
+    RL_LOSS_Q_VALUE,
+    extra_ratio_paths,
+)
 
 
 def _with_namespace(namespace: str, routes: tuple[Route, ...]) -> tuple[Route, ...]:
@@ -14,19 +21,27 @@ def _with_namespace(namespace: str, routes: tuple[Route, ...]) -> tuple[Route, .
     return tuple(Route(f"{namespace}/{route.key}", route.num_path, route.den_path) for route in routes)
 
 
-RL_ROUTES: tuple[Route, ...] = (
-    # key                              numerator path                          denominator path
-    Route("all/accuracy",            "rollout.accuracy_sum",                 "rollout.completed_count"),  # fmt: skip
-    Route("rollout/completed_rate",  "rollout.completed_count",              "rollout.eligible_count"),   # fmt: skip
-    Route("rollout/avg_steps",       "rollout.steps_sum",                    "rollout.completed_count"),  # fmt: skip
-    Route("tokens/accuracy",         "tokens.token_correct_sum",             "tokens.token_count_sum"),   # fmt: skip
-    Route("loss/lm",                 *extra_ratio_paths(LOSS_LM)),                                        # fmt: skip
-    Route("loss/actor",              *extra_ratio_paths(RL_LOSS_ACTOR)),                                  # fmt: skip
-    Route("loss/critic",             *extra_ratio_paths(RL_LOSS_CRITIC)),                                 # fmt: skip
-    Route("loss/entropy",            *extra_ratio_paths(RL_LOSS_ENTROPY)),                                # fmt: skip
-    Route("loss/q_value",            *extra_ratio_paths(RL_LOSS_Q_VALUE)),                                # fmt: skip
+RL_STEP_ROUTES: tuple[Route, ...] = (
+    # key                                  numerator path                           denominator path
+    Route("all/accuracy",                "step.accuracy_sum",                    "step.evaluated_count"),         # fmt: skip
+    Route("rollout/completed_rate",      "episode.completed_count",              "step.evaluated_count"),         # fmt: skip
+    Route("rollout/avg_steps",           "step.steps_sum",                       "step.evaluated_count"),         # fmt: skip
+    Route("tokens/accuracy",             "step_tokens.token_correct_sum",        "step_tokens.token_count_sum"),  # fmt: skip
+    Route("loss/lm",                     *extra_ratio_paths(LOSS_LM)),                                            # fmt: skip
+    Route("loss/actor",                  *extra_ratio_paths(RL_LOSS_ACTOR)),                                      # fmt: skip
+    Route("loss/critic",                 *extra_ratio_paths(RL_LOSS_CRITIC)),                                     # fmt: skip
+    Route("loss/entropy",                *extra_ratio_paths(RL_LOSS_ENTROPY)),                                    # fmt: skip
+    Route("loss/q_value",                *extra_ratio_paths(RL_LOSS_Q_VALUE)),                                    # fmt: skip
 )
 
-RL_EPISODE_ROUTES: tuple[Route, ...] = _with_namespace("episode", RL_ROUTES)
+RL_EPISODE_ROUTES: tuple[Route, ...] = _with_namespace(
+    "episode",
+    (
+        Route("all/accuracy", "episode.accuracy_sum", "episode.completed_count"),
+        Route("rollout/completed_rate", "episode.completed_count", "episode.eligible_count"),
+        Route("rollout/avg_steps", "episode.steps_sum", "episode.completed_count"),
+        Route("tokens/accuracy", "episode_tokens.token_correct_sum", "episode_tokens.token_count_sum"),
+    ),
+)
 
-__all__ = ["RL_EPISODE_ROUTES", "RL_ROUTES"]
+__all__ = ["RL_EPISODE_ROUTES", "RL_STEP_ROUTES"]

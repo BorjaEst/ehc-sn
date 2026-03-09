@@ -14,17 +14,25 @@ def _with_namespace(namespace: str, routes: tuple[Route, ...]) -> tuple[Route, .
     return tuple(Route(f"{namespace}/{route.key}", route.num_path, route.den_path) for route in routes)
 
 
-ACT_ROUTES: tuple[Route, ...] = (
-    # key                             numerator path                           denominator path
-    Route("all/accuracy",           "rollout.accuracy_sum",                  "rollout.completed_count"),                # fmt: skip
-    Route("rollout/completed_rate", "rollout.completed_count",               "rollout.eligible_count"),                 # fmt: skip
-    Route("rollout/avg_steps",      "rollout.steps_sum",                     "rollout.completed_count"),                # fmt: skip
-    Route("tokens/accuracy",        "tokens.token_correct_sum",              "tokens.token_count_sum"),                 # fmt: skip
-    Route("loss/lm",                *extra_ratio_paths(LOSS_LM)),                                                          # fmt: skip
-    Route("loss/q_done",            *extra_ratio_paths(ACT_LOSS_Q_DONE)),                                                 # fmt: skip
-    Route("loss/q_continue",        *extra_ratio_paths(ACT_LOSS_Q_CONTINUE)),                                             # fmt: skip
+ACT_STEP_ROUTES: tuple[Route, ...] = (
+    # key                                  numerator path                           denominator path
+    Route("all/accuracy",                "step.accuracy_sum",                    "step.evaluated_count"),         # fmt: skip
+    Route("rollout/completed_rate",      "episode.completed_count",              "step.evaluated_count"),         # fmt: skip
+    Route("rollout/avg_steps",           "step.steps_sum",                       "step.evaluated_count"),         # fmt: skip
+    Route("tokens/accuracy",             "step_tokens.token_correct_sum",        "step_tokens.token_count_sum"),  # fmt: skip
+    Route("loss/lm",                     *extra_ratio_paths(LOSS_LM)),                                            # fmt: skip
+    Route("loss/q_done",                 *extra_ratio_paths(ACT_LOSS_Q_DONE)),                                    # fmt: skip
+    Route("loss/q_continue",             *extra_ratio_paths(ACT_LOSS_Q_CONTINUE)),                                # fmt: skip
 )
 
-ACT_EPISODE_ROUTES: tuple[Route, ...] = _with_namespace("episode", ACT_ROUTES)
+ACT_EPISODE_ROUTES: tuple[Route, ...] = _with_namespace(
+    "episode",
+    (
+        Route("all/accuracy", "episode.accuracy_sum", "episode.completed_count"),
+        Route("rollout/completed_rate", "episode.completed_count", "episode.eligible_count"),
+        Route("rollout/avg_steps", "episode.steps_sum", "episode.completed_count"),
+        Route("tokens/accuracy", "episode_tokens.token_correct_sum", "episode_tokens.token_count_sum"),
+    ),
+)
 
-__all__ = ["ACT_EPISODE_ROUTES", "ACT_ROUTES"]
+__all__ = ["ACT_EPISODE_ROUTES", "ACT_STEP_ROUTES"]

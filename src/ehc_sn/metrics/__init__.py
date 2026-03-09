@@ -13,8 +13,10 @@ def build_train_metrics(  # ----------------------------------------------------
     """Build a MetricCollection for training metrics (non-accumulated, direct step ratios).
 
     Args:
-        routes: Paradigm-specific routing table (e.g. :data:`~ehc_sn.metrics.routes.ACT_ROUTES`
-            or :data:`~ehc_sn.metrics.routes.RL_ROUTES`).  The metric keys are derived from
+        routes: Paradigm-specific routing table (e.g. :data:`~ehc_sn.metrics.routes.ACT_STEP_ROUTES`,
+            :data:`~ehc_sn.metrics.routes.ACT_EPISODE_ROUTES`,
+            :data:`~ehc_sn.metrics.routes.RL_STEP_ROUTES`, or
+            :data:`~ehc_sn.metrics.routes.RL_EPISODE_ROUTES`). The metric keys are derived from
             ``route.key`` for each entry.
 
     Returns:
@@ -33,8 +35,10 @@ def build_val_metrics(  # ------------------------------------------------------
     """Build a MetricCollection for validation metrics (accumulated over the epoch).
 
     Args:
-        routes: Paradigm-specific routing table (e.g. :data:`~ehc_sn.metrics.routes.ACT_ROUTES`
-            or :data:`~ehc_sn.metrics.routes.RL_ROUTES`).  The metric keys are derived from
+        routes: Paradigm-specific routing table (e.g. :data:`~ehc_sn.metrics.routes.ACT_STEP_ROUTES`,
+            :data:`~ehc_sn.metrics.routes.ACT_EPISODE_ROUTES`,
+            :data:`~ehc_sn.metrics.routes.RL_STEP_ROUTES`, or
+            :data:`~ehc_sn.metrics.routes.RL_EPISODE_ROUTES`). The metric keys are derived from
             ``route.key`` for each entry.
 
     Returns:

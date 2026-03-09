@@ -35,7 +35,7 @@ from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
-from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_ROUTES
+from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.rollouts.collect import TraceCollector
@@ -298,7 +298,7 @@ class TrainingModel(L.LightningModule):
         self._train_carry = None
 
         # Metrics are cloned for train/val to allow separate logging and state management.
-        self.train_metrics = build_train_metrics(ACT_ROUTES).clone(prefix="train/")
+        self.train_metrics = build_train_metrics(ACT_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(ACT_EPISODE_ROUTES).clone(prefix="val/")
         self.trace_specs = build_trace_spec("act")
 
@@ -403,7 +403,7 @@ class TrainingModel(L.LightningModule):
             sch.step()  # type: ignore
 
         # Update metrics with unnormalized loss and log to TensorBoard.
-        update_metrics_from_step(self.train_metrics, step.outputs.metrics, ACT_ROUTES)
+        update_metrics_from_step(self.train_metrics, step.outputs.metrics, ACT_STEP_ROUTES)
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
         return {"loss": loss.detach(), "signals": step.outputs.signals}

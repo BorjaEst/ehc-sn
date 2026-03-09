@@ -1,8 +1,9 @@
 """Generic step-metrics types for rollout-based loss heads.
 
-The shared layer exposes only two pieces of structure:
+The shared layer exposes three pieces of structure:
 
-* **Core rollout/token aggregates** shared across token-supervised rollout heads.
+* **Episode aggregates** for completed sequences on the current step.
+* **Step aggregates** for all currently evaluated sequences on the current step.
 * **Keyed ratio extras** for algorithm-specific losses and diagnostics.
 
 This keeps the generic layer free of ACT- or RL-specific field names while
@@ -42,10 +43,22 @@ class RolloutAgg:
 # =================================================================================================
 @dataclass(frozen=True)
 class TokenAgg:
-    """Token-level aggregates for completed sequences."""
+    """Token-level aggregates over a selected subset of sequences."""
 
     token_correct_sum: Tensor
     token_count_sum: Tensor
+
+
+# =================================================================================================
+@dataclass(frozen=True)
+class TransitionAgg:
+    """Aggregates over all evaluated sequences on the current step."""
+
+    evaluated_count: Tensor
+    eligible_count: Tensor
+    accuracy_sum: Tensor
+    exact_sum: Tensor
+    steps_sum: Tensor
 
 
 # =================================================================================================
@@ -57,10 +70,12 @@ class StepMetrics:
     name such as ``"loss_lm"`` or ``"loss_actor"``.
     """
 
-    rollout: RolloutAgg
-    tokens: TokenAgg
+    episode: RolloutAgg
+    episode_tokens: TokenAgg
+    step: TransitionAgg
+    step_tokens: TokenAgg
     extras: Mapping[str, RatioStat]
 
 
 # =================================================================================================
-__all__ = ["RatioStat", "RolloutAgg", "StepMetrics", "TokenAgg"]
+__all__ = ["RatioStat", "RolloutAgg", "StepMetrics", "TokenAgg", "TransitionAgg"]
