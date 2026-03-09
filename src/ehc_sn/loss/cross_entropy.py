@@ -1,15 +1,21 @@
+""" """
+
 from typing import Any, Dict, Literal, Optional, Sequence, Tuple
 
 import torch
 import torch.nn.functional as F
-from torch import nn
+from torch import Tensor
 
 from ehc_sn.activations.stablemax import log_stablemax
 
 LossType = Literal["stablemax_cross_entropy", "softmax_cross_entropy"]
 
 
-def stablemax_cross_entropy(logits, labels, ignore_index: int = -100):
+# =================================================================================================
+def stablemax_cross_entropy(  # -------------------------------------------------------------------
+    logits, labels, ignore_index: int = -100,
+) -> Tensor:  # fmt: skip
+    """ """
     valid_mask = labels != ignore_index
     transformed_labels = torch.where(valid_mask, labels, 0)
     logprobs = log_stablemax(logits.to(torch.float64), dim=-1)
@@ -19,12 +25,17 @@ def stablemax_cross_entropy(logits, labels, ignore_index: int = -100):
     return -torch.where(valid_mask, prediction, 0)
 
 
-def softmax_cross_entropy(logits, labels, ignore_index: int = -100):
-    # Cast logits to f32
-    # Flatten logits
+# =================================================================================================
+def softmax_cross_entropy(  # ---------------------------------------------------------------------
+    logits, labels, ignore_index: int = -100,
+) -> Tensor:  # fmt: skip
+    """ """
     return F.cross_entropy(
         logits.to(torch.float32).view(-1, logits.shape[-1]),
         labels.to(torch.long).view(-1),
         ignore_index=ignore_index,
         reduction="none",
     ).view(labels.shape)
+
+# =================================================================================================
+__all__ = ["LossType", "stablemax_cross_entropy", "softmax_cross_entropy"]  # fmt: skip
