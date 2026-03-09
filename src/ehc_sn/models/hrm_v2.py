@@ -398,22 +398,19 @@ class TrainingModel(L.LightningModule):
                 3) vmPFC params (``pfc.estimator`` only)
         """
         total_steps = int(self.trainer.estimated_stepping_batches)
-        sch_cfg = self._config.scheduler
 
         # Optimizer A: supervised — all model params EXCEPT pfc.estimator (vmPFC)
         vmPFC_ids = {id(p) for p in self.model.pfc.estimator.parameters()}
         sup_params = [p for p in self.model.parameters() if id(p) not in vmPFC_ids]
-        opt_sup = AdamATan2(sup_params, self._config.optimizer_supervised)
-
+        opt_sup = AdamATan2(sup_params, self.config.optimizer_supervised)
         # Optimizer B: RL — STR actor-critic only (strictly isolated)
-        opt_rl = AdamATan2(list(self.model.str.parameters()), self._config.optimizer_rl)
-
+        opt_rl = AdamATan2(list(self.model.str.parameters()), self.config.optimizer_rl)
         # Optimizer C: vmPFC — pfc.estimator only (auxiliary Q-predictor)
-        opt_qv = AdamATan2(list(self.model.pfc.estimator.parameters()), self._config.optimizer_qv)
+        opt_qv = AdamATan2(list(self.model.pfc.estimator.parameters()), self.config.optimizer_qv)
 
-        sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, sch_cfg)
-        sch_rl = CosineAnnealingLRWithWarmup(opt_rl, total_steps, sch_cfg)
-        sch_qv = CosineAnnealingLRWithWarmup(opt_qv, total_steps, sch_cfg)
+        sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, self.config.scheduler)
+        sch_rl = CosineAnnealingLRWithWarmup(opt_rl, total_steps, self.config.scheduler)
+        sch_qv = CosineAnnealingLRWithWarmup(opt_qv, total_steps, self.config.scheduler)
 
         return [opt_sup, opt_rl, opt_qv], [sch_sup, sch_rl, sch_qv]
 
@@ -448,33 +445,31 @@ class TrainingModel(L.LightningModule):
             - ``setup()`` must have run so that ``self.step_module`` is available.
             - During warmup (``global_step < warmup_steps``), halting is disabled.
         """
-        batch_dict = batch
-
         # Initialize carry/state on the first batch
         if self._train_carry is None:
-            self._train_carry = self.step_module.initial_carry(batch_dict)
+            self._train_carry = self.step_module.initial_carry(batch)
 
         # Assemble partial-reset step batch
         step_batch = self._train_batch_assembler.make_step_batch(
-            incoming=batch_dict,
+            incoming=batch,
             reset_mask=self._train_carry.halted,
         )
 
         # Horizon=1 step loop: run one step of the controller
         step_batches = repeat(step_batch, 1)
         is_warmup = self.global_step < self._config.warmup_steps
-        step_opts = {"explore": True, "allow_halt": not is_warmup, "is_warmup": is_warmup}
+        rl_options = {"explore": True, "allow_halt": not is_warmup, "is_warmup": is_warmup}
         carry0 = self._train_carry
 
         step = None
-        for _t, step in StepLoop(self.step_module, step_batches, carry0, options=step_opts):
+        for _t, step in StepLoop(self.step_module, step_batches, carry0, options=rl_options):
             pass  # horizon = 1; loop runs exactly once
         if step is None:
             raise ValueError("StepLoop did not yield any steps.")
         self._train_carry = step.carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
-        local_bs = int(batch_dict["inputs"].shape[0])
+        local_bs = int(batch["inputs"].shape[0])
         out = step.outputs
         loss = _normalize_loss_for_backward(out.loss, local_bs)
         self.manual_backward(loss)
@@ -504,21 +499,18 @@ class TrainingModel(L.LightningModule):
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
     ) -> Dict[str, Any]:  # fmt: skip
-        """Run a full evaluation rollout and return traces.
+        """Run a full rollout until all slots halt, collecting traces for logging/analysis.
 
         Validation runs the controller to the max horizon (no exploration) and
         collects a trace tree for downstream logging/analysis.
         """
-        batch_dict = batch
-
-        # Run a full rollout until all slots halt, collecting traces for logging/analysis.
-        step_batches = repeat(batch_dict)  # Run until all examples halt
-        step_opts = {"explore": False, "allow_halt": False, "is_warmup": False}
-        carry0 = self.step_module.initial_carry(batch_dict)
+        step_batches = repeat(batch)  # Run until all examples halt
+        rl_options = {"explore": False, "allow_halt": False, "is_warmup": False}
+        carry0 = self.step_module.initial_carry(batch)
         collector = TraceCollector(TraceTree(), self.trace_specs)
 
         step = None
-        for t, step in StepLoop(self.step_module, step_batches, carry0, options=step_opts):
+        for t, step in StepLoop(self.step_module, step_batches, carry0, options=rl_options):
             collector.append(t, step)
         if step is None:
             raise ValueError("Evaluation loop did not yield any steps.")

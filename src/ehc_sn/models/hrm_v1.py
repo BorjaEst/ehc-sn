@@ -47,6 +47,7 @@ from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConf
 from ehc_sn.training.step_loop import StepContext, StepLoop
 from ehc_sn.types import Device, Dtype
 from ehc_sn.utils import trunc_normal_init_
+from ehc_sn.utils.detach import DetachMixin
 
 # Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
 Batch: TypeAlias = Dict[str, Tensor]
@@ -152,12 +153,10 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
 
 # =================================================================================================
 @dataclass
-class HRMState:
-    pfc: PFCState
+class HRMState(DetachMixin):
+    """Container for the full recurrent HRM state."""
 
-    def detach(self) -> "HRMState":
-        """Return a copy with the PFC state detached from the computation graph."""
-        return HRMState(pfc=self.pfc.detach())
+    pfc: PFCState
 
 
 # =================================================================================================
@@ -327,37 +326,14 @@ class TrainingModel(L.LightningModule):
         Returns:
             A tuple `(optimizers, schedulers)` in the format Lightning expects.
         """
-        optimizers = self.build_optimizers()
-        schedulers = self.schedulers(optimizers)
-
-        return optimizers, schedulers
-
-    def build_optimizers(  # ----------------------------------------------------------------------
-        self,
-    ) -> List[Optimizer]:  # fmt: skip
-        """Construct the optimizer(s) for trainable parameters.
-
-        Returns:
-            List containing a single `AdamATan2` optimizer for the HRM parameters.
-        """
-        params = [p for p in self.model.parameters() if p.requires_grad]
-        optimizer = AdamATan2(params, self.config.optimizer)
-        return [optimizer]
-
-    def schedulers(  # ----------------------------------------------------------------------------
-        self, optimizers: List[Optimizer],
-    ) -> List[SequentialLR]:  # fmt: skip
-        """Construct LR schedulers for the provided optimizers.
-
-        Args:
-            optimizers: Optimizers returned by `build_optimizers()`.
-
-        Returns:
-            A list of schedulers (one per optimizer). Currently uses cosine annealing with warmup.
-        """
         total_steps = int(self.trainer.estimated_stepping_batches)
-        config = self.config.scheduler
-        return [CosineAnnealingLRWithWarmup(opt, total_steps, config) for opt in optimizers]
+
+        # Optimizer for the main model parameters
+        sup_params = [p for p in self.model.parameters() if p.requires_grad]
+        opt_sup = AdamATan2(sup_params, self._config.optimizer)
+        sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, self.config.scheduler)
+
+        return [opt_sup], [sch_sup]
 
     def on_train_epoch_start(  # ------------------------------------------------------------------
         self,
@@ -388,17 +364,15 @@ class TrainingModel(L.LightningModule):
             - Horizon is effectively 1: we run exactly one rollout step per mini-batch.
             - Loss is normalized by the *global* effective batch size for parity with legacy code.
         """
-        batch_dict = batch
-
         # Initialize carry/state on the first batch
         if self._train_carry is None:
-            self._train_carry = self.step_module.initial_carry(batch_dict)
+            self._train_carry = self.step_module.initial_carry(batch)
 
         # Assemble a step batch using the previous carry's halted mask.
         # `reset_mask=True` means "this row is done, replace it with a fresh example".
         assembler = self._train_batch_assembler
         step_batch = assembler.make_step_batch(
-            incoming=batch_dict,
+            incoming=batch,
             reset_mask=self._train_carry.halted,  # vectorized done flags
         )
 
@@ -415,7 +389,7 @@ class TrainingModel(L.LightningModule):
         self._train_carry = step.carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
-        local_bs = int(batch_dict["inputs"].shape[0])
+        local_bs = int(batch["inputs"].shape[0])
         loss = _normalize_loss_for_backward(step.outputs.loss, local_bs=local_bs)
         self.manual_backward(loss)
 
@@ -437,17 +411,14 @@ class TrainingModel(L.LightningModule):
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
     ) -> Dict[str, object]:  # fmt: skip
-        """Run one validation step.
+        """Run a full ACT rollout so halted-only metrics are meaningful.
 
         Validation uses `EvaluationLoop` (no carry is persisted across batches here) and logs
         normalized metrics.
         """
-        batch_dict = batch
-
-        # Run a full ACT rollout so halted-only metrics are meaningful.
-        step_batches = repeat(batch_dict)  # Run until all examples halt
+        step_batches = repeat(batch)  # Run until all examples halt
         act_options = {"allow_halt": False, "explore": False, "td_target": False}
-        carry0 = self.step_module.initial_carry(batch_dict)
+        carry0 = self.step_module.initial_carry(batch)
 
         # Initialize carry/state on the first batch
         step, collector = None, TraceCollector(TraceTree(), self.trace_specs)
