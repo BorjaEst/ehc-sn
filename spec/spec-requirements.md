@@ -120,6 +120,12 @@ All code in `training/` is **model-agnostic**: it must not import from
 `LightningModule` trainer in `models/*.py`. Single-model primitives
 must be generalized or relocated before next release.
 
+All code in `controllers/` and `heads/` is also **model-agnostic**: it must not
+import from `models/`. Controllers own rollout carry/state and step orchestration;
+heads own step-local loss composition and metric aggregation. Heads may depend on
+`controllers/`, `loss/`, `metrics/`, and `training/` primitives, but `training/`
+must remain usable without importing from `controllers/` or `heads/`.
+
 ---
 
 ## 8 Cross-Component Change Policy

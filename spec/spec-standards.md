@@ -36,7 +36,7 @@
 ### 1.4 Naming
 
 - **Modules**: lowercase with underscores (`path_integration.py`).
-- **Classes**: PascalCase (`AttractorNetwork`, `TEMConfig`).
+- **Classes**: PascalCase (`AttractorNetwork`, `ModelSettings_V1`).
 - **Functions/methods**: lowercase with underscores (`sample_diag_gaussian`).
 - **Constants**: UPPER_SNAKE_CASE.
 - **Type aliases**: PascalCase (following existing pattern: `MultiScaleCode`,

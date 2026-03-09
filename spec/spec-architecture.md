@@ -41,23 +41,27 @@ Any component may import external dependencies declared in `pyproject.toml`.
 Internal imports follow a top-down DAG: import from your own layer or below,
 **never** upward.
 
-| Layer | Components                                                                                               |
-| ----- | -------------------------------------------------------------------------------------------------------- |
-| **4** | `experiments/`                                                                                           |
-| **3** | `models/`                                                                                                |
-| **2** | `modules/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/` |
-| **1** | `activations/`, `utils/`, `types.py`                                                                     |
+Layer 4: `experiments/`
+
+Layer 3: `models/`
+
+Layer 2: `modules/`, `controllers/`, `heads/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/`
+
+Layer 1: `activations/`, `utils/`, `types.py`
 
 **Additional constraints:**
 
-| Rule | Constraint                                                              |
-| ---- | ----------------------------------------------------------------------- |
-| R1   | `training/` must not import from `modules/`                             |
-| R2   | `modules/` must not import from `training/`                             |
-| R3   | `data/` must not import from `modules/` or `training/`                  |
-| R4   | `utils/` must not import from any `ehc_sn` subpackage                   |
-| R5   | Peer imports within a component (e.g., `modules/hpc/` → `modules/mec/`) |
-|      | are allowed                                                             |
+R1: `training/` must not import from `modules/`
+
+R2: `modules/` must not import from `training/`, `controllers/`, or `heads/`
+
+R3: `controllers/` and `heads/` must not import from `models/`
+
+R4: `data/` must not import from `modules/`, `training/`, `controllers/`, or `heads/`
+
+R5: `utils/` must not import from any `ehc_sn` subpackage
+
+R6: Peer imports within a component (for example, `modules/hpc/` → `modules/mec/`) are allowed
 
 ---
 
@@ -97,11 +101,11 @@ file per model version). A model file co-locates:
 - **Pydantic configs** — architecture config and training config.
 - **State dataclasses** — explicit recurrent state.
 
-| Model      | `nn.Module`  | `LightningModule` | Config        | State      | Composes                                       | Status         |
-| ---------- | ------------ | ----------------- | ------------- | ---------- | ---------------------------------------------- | -------------- |
-| **TEM v1** | `TEMModelV1` | `TEMTrainerV1`    | `TEMConfig`   | `TEMState` | LEC + MEC + HPC + Autoencoder + Projections    | Needs refactor |
-| **HRM v1** | `HRMModelV1` | `HRMTrainerV1`    | `PFCSettings` | `HRMState` | PFC + STR                                      | Needs refactor |
-| **EHC v1** | `EHCModelV1` | `EHCTrainerV1`    | `EHCConfig`   | `EHCState` | LEC + MEC + HPC + PFC + STR + shared NN blocks | `NOT_STARTED`  |
+| Model      | `nn.Module`  | `LightningModule` | Config             | State      | Composes                                       | Status         |
+| ---------- | ------------ | ----------------- | ------------------ | ---------- | ---------------------------------------------- | -------------- |
+| **TEM v1** | `TEMModelV1` | `TEMTrainerV1`    | `ModelSettings_V1` | `TEMState` | LEC + MEC + HPC + Autoencoder + Projections    | Needs refactor |
+| **HRM v1** | `HRMModelV1` | `HRMTrainerV1`    | `PFCSettings`      | `HRMState` | PFC + STR                                      | Needs refactor |
+| **EHC v1** | `EHCModelV1` | `EHCTrainerV1`    | `EHCConfig`        | `EHCState` | LEC + MEC + HPC + PFC + STR + shared NN blocks | `NOT_STARTED`  |
 
 **Multiple trainers per model.** E.g., `EHCModelV1` might have both
 `EHCTrainerV1` (RL) and `EHCPretrainV1` (supervised). All live in the
@@ -121,15 +125,49 @@ names, no multi-scale iteration, no orchestration logic.
 | `regularization.py` | Activation penalties: L1 sparsity, L2 norm on flat `(B, D)` codes.                                                                   |
 | `decision.py`       | Gating losses: BCE for halt/continue. Extensible to N-action selection.                                                              |
 
-### 4.5 Training
+### 4.5 Runtime Orchestration
+
+Runtime orchestration is split into controllers and heads so action/halting
+mechanics and per-step loss composition can evolve independently while staying
+outside `models/`.
+
+#### 4.5.1 Controllers
+
+Controllers own recurrent rollout carry, slot refresh/reset behavior, and the
+algorithm-specific step policy for a model backbone. They are model-agnostic:
+no imports from `models/`, no Lightning code, and no dataset ownership.
+
+`ACT`: `controllers/act.py`.
+Adaptive Computation Time rollout control: halting policy, recurrent carry, TD bootstrap targets.
+
+`RL`: `controllers/rl.py`.
+Environment-coupled rollout control: action sampling, env stepping, recurrent carry, done propagation.
+
+Shared rollout-state helpers and thin controller bases live in the same
+component when they exist only to support these controllers.
+
+#### 4.5.2 Heads
+
+Heads adapt a controller to the `StepModule` contract and assemble per-step
+losses, metrics, and diagnostic signals. They may import from `controllers/`,
+`loss/`, `metrics/`, and `training/`, but not from `models/`.
+
+`ACT`: `heads/act.py`.
+Supervised ACT losses, halted/token aggregation, and ACT-specific diagnostics.
+
+`RL`: `heads/rl.py`.
+Actor-critic losses, supervised token loss, halted/token aggregation, diagnostics.
+
+Shared head utilities and thin base heads live in the same component when they
+serve multiple head variants without introducing model semantics.
+
+#### 4.5.3 Training
 
 Generic algorithmic building blocks — no model-specific code, no model imports.
 
 | Component         | Path(s)             | Paradigm   | Responsibility                                                                                                |
 | ----------------- | ------------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
 | **Step-Loop**     | `step_loop.py`      | Generic    | Generic step iteration: `StepLoop`, `StepModule` protocol, `StepContext`.                                     |
-| **Loss Heads**    | `act_head.py`       | Generic    | `StepModule` implementations that wire a controller + `loss/` primitives into a step-level contract.          |
-| **ACT**           | `act_controller.py` | Generic    | Adaptive Computation Time (Graves 2016): `ACTController`, `ACTState`, `ACTOutput`, protocol interfaces.       |
 | **Partial-Reset** | `partial_reset.py`  | Generic    | Stateful batch assembly: replace completed rows with fresh examples from a buffer.                            |
 | **Collector**     | `collector.py`      | Generic    | Per-step state collection for partial-reset pipelines.                                                        |
 | **Buffers**       | `buffers.py`        | Generic    | Bounded FIFO storage for batch examples.                                                                      |
@@ -140,7 +178,7 @@ Generic algorithmic building blocks — no model-specific code, no model imports
 | **ELBO**          | `elbo.py`           | VAE / ELBO | KL divergence utilities, ELBO loss aggregation, reconstruction + KL balancing, annealing schedules.           |
 
 **Named by function.** Root-level files are named by algorithmic function
-(`act_controller.py`, `buffers.py`). Regime files are named by paradigm
+(`buffers.py`). Regime files are named by paradigm
 (`supervised.py`, `rl.py`, `elbo.py`).
 
 ### 4.6 Data
@@ -447,13 +485,13 @@ those modules.
 
 ### 6.1 Config Types
 
-| Type                    | Base class                                            | Scope                                         | Lives in                     | Example                    |
-| ----------------------- | ----------------------------------------------------- | --------------------------------------------- | ---------------------------- | -------------------------- |
-| **Component config**    | `pydantic.BaseModel(extra="forbid")`                  | Single-component settings                     | Same file as the `nn.Module` | `AttractorSettings`        |
-| **Model config**        | `pydantic.BaseModel(extra="forbid")`                  | Architecture: dimensions, layers, activations | `models/*.py`                | `TEMConfig`, `PFCSettings` |
-| **Training config**     | `pydantic.BaseModel(extra="forbid")`                  | Optimizer, LR schedule, loss weights, buffers | `models/*.py` (with trainer) | `HRMTrainingConfig`        |
-| **Data config**         | `pydantic.BaseModel(extra="forbid")`                  | Dataset paths, batch size, workers            | `data/*.py`                  | `DatamoduleConfig`         |
-| **Experiment settings** | `pydantic_settings.BaseSettings(cli_parse_args=True)` | Composes all above + Trainer knobs            | `experiments/*.py`           | `RunArguments`             |
+| Type                    | Base class                                            | Scope                                         | Lives in                     | Example                           |
+| ----------------------- | ----------------------------------------------------- | --------------------------------------------- | ---------------------------- | --------------------------------- |
+| **Component config**    | `pydantic.BaseModel(extra="forbid")`                  | Single-component settings                     | Same file as the `nn.Module` | `AttractorSettings`               |
+| **Model config**        | `pydantic.BaseModel(extra="forbid")`                  | Architecture: dimensions, layers, activations | `models/*.py`                | `ModelSettings_V1`, `PFCSettings` |
+| **Training config**     | `pydantic.BaseModel(extra="forbid")`                  | Optimizer, LR schedule, loss weights, buffers | `models/*.py` (with trainer) | `HRMTrainingConfig`               |
+| **Data config**         | `pydantic.BaseModel(extra="forbid")`                  | Dataset paths, batch size, workers            | `data/*.py`                  | `DatamoduleConfig`                |
+| **Experiment settings** | `pydantic_settings.BaseSettings(cli_parse_args=True)` | Composes all above + Trainer knobs            | `experiments/*.py`           | `RunArguments`                    |
 
 Architectural dimensions use `frozen=True`. Training configs are separate
 from model configs; the trainer passes only the architecture config to
