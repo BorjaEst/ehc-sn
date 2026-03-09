@@ -70,12 +70,27 @@ class ACTState[ModelState](RolloutState[ModelState]):
 # =================================================================================================
 @dataclass
 class ACTOutput(DetachMixin):
-    """Outputs produced by a controller step."""
+    """Outputs produced by a controller step.
 
-    logits: Tuple[Tensor, ...]  # Tuple of (B, S, V) LM logits for supervised loss
+    Named property accessors (``lm_logits``, ``q_logits``) are the preferred
+    read path for heads.  Direct positional reads via ``logits[N]`` are
+    deprecated in head code and will be removed once all heads are migrated.
+    """
+
+    logits: Tuple[Tensor, ...]  # (lm_logits, q_logits, ...); prefer named properties in heads
     theta_cls: Tensor  # (B, D) — theta CLS features
     action: Tensor  # (B,) selected action indices for this step
     target_q: Tensor | None = None  # TD(0) bootstrap Q-target, shape: (B,). None outside training.
+
+    @property
+    def lm_logits(self) -> Tensor:
+        """LM head logits, shape ``(B, S, V)``."""
+        return self.logits[0]
+
+    @property
+    def q_logits(self) -> Tensor:
+        """Q-value logits (halt/continue policy), shape ``(B, A)``."""
+        return self.logits[1]
 
 
 # =================================================================================================

@@ -76,12 +76,32 @@ class RLState[ModelState](RolloutState[ModelState]):
 # =================================================================================================
 @dataclass
 class RLOutput(DetachMixin):
-    """Outputs produced by one controller step."""
+    """Outputs produced by one controller step.
 
-    logits: Tuple[Tensor, ...]  # Tuple of (B, S, V) LM logits for supervised loss
+    Named property accessors (``lm_logits``, ``q_logits``, ``value_logits``) are
+    the preferred read path for heads.  Direct positional reads via ``logits[N]``
+    are deprecated in head code and will be removed once all heads are migrated.
+    """
+
+    logits: Tuple[Tensor, ...]  # (lm_logits, q_logits, value_logits, ...); prefer named properties in heads
     theta_cls: Tensor  # (B, D) — theta CLS features
     action: Tensor  # (B,) selected action indices for this step
     reward: Tensor  # (B, 1) reward from the environment for this step
+
+    @property
+    def lm_logits(self) -> Tensor:
+        """LM head logits, shape ``(B, S, V)``."""
+        return self.logits[0]
+
+    @property
+    def q_logits(self) -> Tensor:
+        """Action policy logits (STR), shape ``(B, A)``."""
+        return self.logits[1]
+
+    @property
+    def value_logits(self) -> Tensor:
+        """Value / reward-prediction logits, shape ``(B, 1)``."""
+        return self.logits[2]
 
 
 # =================================================================================================
