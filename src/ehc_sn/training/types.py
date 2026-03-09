@@ -1,39 +1,47 @@
-"""Step-metrics types for HRM training paradigms.
+"""Generic step-metrics types for rollout-based loss heads.
 
-These dataclasses carry the sufficient statistics — numerator/denominator pairs —
-that :func:`~ehc_sn.metrics.update_metrics_from_step` routes into TorchMetrics
-:class:`~ehc_sn.metrics.torchmetrics.RatioMetric` instances for correct
-weighted epoch-level aggregation.
+The shared layer exposes only two pieces of structure:
 
-Each field is a scalar tensor produced by the loss head and accumulated over
-batches via :class:`~ehc_sn.metrics.torchmetrics.RatioMetric`.
+* **Core rollout/token aggregates** shared across token-supervised rollout heads.
+* **Keyed ratio extras** for algorithm-specific losses and diagnostics.
+
+This keeps the generic layer free of ACT- or RL-specific field names while
+preserving the routing model used by :func:`~ehc_sn.metrics.update_metrics_from_step`.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
-import torch
 from torch import Tensor
 
 
 # =================================================================================================
 @dataclass(frozen=True)
-class HaltedAgg:
-    """Aggregates over sequences that halted on the current step."""
+class RatioStat:
+    """A single aggregated ratio statistic.
 
-    halted_count: Tensor
+    Both fields are sums over the current step / batch.
+    """
+
+    numerator_sum: Tensor
+    denominator_sum: Tensor
+
+
+# =================================================================================================
+@dataclass(frozen=True)
+class RolloutAgg:
+    """Lifecycle aggregates over completed sequences on the current step."""
+
+    completed_count: Tensor
     eligible_count: Tensor
     accuracy_sum: Tensor
     exact_sum: Tensor
     steps_sum: Tensor
-    q_halt_correct_sum: Tensor
-    q_continue_correct_sum: Tensor
 
 
 # =================================================================================================
 @dataclass(frozen=True)
 class TokenAgg:
-    """Token-level aggregates for halted sequences."""
+    """Token-level aggregates for completed sequences."""
 
     token_correct_sum: Tensor
     token_count_sum: Tensor
@@ -41,31 +49,18 @@ class TokenAgg:
 
 # =================================================================================================
 @dataclass(frozen=True)
-class LossAgg:
-    """Per-step loss aggregates (batch-level sums)."""
-
-    # ~~ General losses applicable to both ACT and RL heads ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    lm_loss_sum: Tensor
-    q_halt_loss_sum: Tensor
-    q_continue_loss_sum: Tensor
-    batch_count: Tensor
-
-    # ~~ RL-specific (zero for non-RL) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    actor_loss_sum: Tensor  # e.g. policy gradient
-    critic_loss_sum: Tensor  # e.g. value function MSE
-    entropy_loss_sum: Tensor  # e.g. action distribution entropy regularization
-    q_value_loss_sum: Tensor  # e.g. auxiliary loss on vmPFC features
-
-
-# =================================================================================================
-@dataclass(frozen=True)
 class StepMetrics:
-    """Aggregated per-step metrics used for logging and control flow."""
+    """Aggregated per-step metrics used for logging and control flow.
 
-    halted: HaltedAgg
+    ``extras`` stores algorithm-specific ratio metrics keyed by a stable internal
+    name such as ``"loss_lm"`` or ``"loss_actor"``.
+    """
+
+    rollout: RolloutAgg
     tokens: TokenAgg
-    loss: LossAgg
+    extras: dict[str, RatioStat]
 
 
 # =================================================================================================
-__all__ = ["HaltedAgg", "LossAgg", "StepMetrics", "TokenAgg"]
+__all__ = ["RatioStat", "RolloutAgg", "StepMetrics", "TokenAgg"]
+__all__ = ["RatioStat", "RolloutAgg", "StepMetrics", "TokenAgg"]

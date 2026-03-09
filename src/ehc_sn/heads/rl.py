@@ -1,35 +1,35 @@
 """RL loss head for HRM v2.
 
-This module defines a loss head that wraps :class:`~ehc_sn.training.rl_controller.RLController`
+This module defines a loss head that wraps :class:`~ehc_sn.controllers.rl.RLController`
 to produce a training/evaluation step with:
     - supervised token modeling loss (cross-entropy over maze tokens)
     - actor-critic losses computed from environment rewards
     - auxiliary vmPFC (Q-value) regression loss
 
+The head reads controller outputs via *named properties* (``outputs.lm_logits``,
+``outputs.q_logits``, ``outputs.value_logits``) — never via positional
+``outputs.logits[N]`` index.
+
 The head returns an :class:`RLLossStep` containing the live loss tensors (for
 backprop), aggregated metrics, and diagnostic signals.
 """
 
-import dataclasses
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 import torch
 import torch.nn.functional as F
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
 from torch.distributions import Categorical
 
-import ehc_sn.loss.cross_entropy as cross_entropy_module
 from ehc_sn.controllers.rl import RLController, RLOutput, RLState
+from ehc_sn.heads._base import AccuracyStats, TokenLossHeadBase
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
-from ehc_sn.training.types import HaltedAgg, LossAgg, StepMetrics, TokenAgg
+from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
-
-# Token label ignored by supervised loss (padding / non-supervised positions).
-IGNORE_LABEL_ID: int = -100
 
 
 # =================================================================================================
@@ -52,35 +52,6 @@ class RLLossConfig(BaseModel, extra="forbid"):
     c_critic: float = Field(default=0.5, ge=0.0, description="Critic loss coefficient.")
     c_entropy: float = Field(default=0.01, ge=0.0, description="Entropy regularization coefficient.")
     c_q_value: float = Field(default=0.5, ge=0.0, description="vmPFC auxiliary Q-predictor loss coefficient.")
-
-
-# =================================================================================================
-@dataclass(frozen=True)
-class AccuracyStats:
-    """Token-level correctness statistics used for metrics.
-
-    This is computed out-of-graph (no gradients through argmax) and used for
-    logging and some halted-only aggregations.
-    """
-
-    mask: Tensor  # Boolean tensor indicating which tokens contribute to the loss (e.g., non-padding tokens).
-
-    @property
-    def loss_counts(self) -> Tensor:
-        """Number of eligible tokens per sequence (shape ``(B,)``)."""
-        return self.mask.sum(-1)
-
-    @property
-    def loss_divisor(self) -> Tensor:
-        """Safe divisor for per-sequence averages (shape ``(B, 1)``)."""
-        return self.loss_counts.clamp_min(1).unsqueeze(-1)
-
-    is_correct: Tensor  # Indicates which tokens were predicted correctly (after masking).
-
-    @property
-    def seq_is_correct(self) -> Tensor:
-        """Whether all eligible tokens were predicted correctly (shape ``(B,)``)."""
-        return self.is_correct.sum(-1) == self.loss_counts
 
 
 # =================================================================================================
@@ -135,8 +106,8 @@ class RLLossStep:
 
 
 # =================================================================================================
-class RLLossHead(nn.Module):
-    """Loss head wrapping :class:`~ehc_sn.training.rl_controller.RLController`.
+class RLLossHead(TokenLossHeadBase[RLController, RLLossConfig]):
+    """Loss head wrapping :class:`~ehc_sn.controllers.rl.RLController`.
 
     The loss head is responsible for:
         - running one controller step
@@ -153,30 +124,7 @@ class RLLossHead(nn.Module):
             controller: Controller responsible for forward pass + env stepping.
             config: Loss configuration.
         """
-        super().__init__()
-        self._controller = controller
-        self._config = config
-
-    @property
-    def controller(self) -> RLController:
-        """Return the wrapped controller."""
-        return self._controller
-
-    @property
-    def config(self) -> RLLossConfig:
-        """Return the loss configuration."""
-        return self._config
-
-    @property
-    def loss_fn(self) -> Any:
-        """Return the configured token-level loss function implementation."""
-        return getattr(cross_entropy_module, self._config.function)
-
-    def initial_carry(  # -------------------------------------------------------------------------
-        self, batch_sample: Batch,
-    ) -> RLState:  # fmt: skip
-        """Initialize the rollout carry/state from an example batch."""
-        return self._controller.initial_state(batch_sample)
+        super().__init__(controller=controller, config=config)
 
     def forward(  # -------------------------------------------------------------------------------
         self, batch: Batch, carry: RLState, *, is_warmup: bool = False, **options: Any,
@@ -194,62 +142,38 @@ class RLLossHead(nn.Module):
             ``(step, new_carry, all_halted)`` where ``all_halted`` indicates that
             all slots are done for the current carry.
         """
-        carry, outputs = self._controller.step(carry, batch, **options)
-        labels = carry.data["labels"]
-
-        with torch.no_grad():
-            # Correctness is used as a supervision signal for halting/continuation.
-            # Keeping it out of the graph avoids gradients flowing through argmax.
-            stats = self.compute_accuracy(outputs, labels)
-
-        losses = self.compute_losses(outputs, labels, stats, is_warmup=is_warmup)
-        metrics = self.compute_metrics(carry, outputs, stats, losses)
-        signals = self.compute_signals(carry, outputs, losses)
-
-        outputs = RLLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
-        return outputs, carry, bool(carry.halted.all())
-
-    def compute_accuracy(  # ------------------------------------------------------------------
-        self, outputs: RLOutput, labels: Tensor,
-    ) -> AccuracyStats:  # fmt: skip
-        """Compute masked token correctness statistics (out-of-graph)."""
-        logits_lm, *_ = outputs.logits  # Unpack list of logits if backbone returns multiple heads
-        mask = labels != IGNORE_LABEL_ID
-        is_correct = mask & (torch.argmax(logits_lm, dim=-1) == labels)
-        return AccuracyStats(mask=mask, is_correct=is_correct)
+        carry, outputs = self.controller.step(carry, batch, **options)
+        step_output = self._run_token_step(batch, carry, outputs, is_warmup=is_warmup)
+        return step_output, carry, bool(carry.halted.all())
 
     def compute_losses(  # ------------------------------------------------------------------------
         self, outputs: RLOutput, labels: Tensor, stats: AccuracyStats, *,
-        is_warmup: bool = False,
+        is_warmup: bool = False, **_: Any,
     ) -> Losses:  # fmt: skip
         """Compute supervised and RL loss terms for a step.
 
         All returned losses are summed over the batch.
         """
-        logits_lm, logits_q, logits_r, *_ = outputs.logits  # Unpack list of logits multiple heads
-
         # --- Supervised LM loss (every step, as in ACT) ---
-        loss_per_token = self.loss_fn(logits_lm, labels, ignore_index=IGNORE_LABEL_ID)  # (B,S)
-        loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)  # (B,)
-        loss_lm_sum = loss_per_seq.sum()
+        loss_lm_sum = self.compute_lm_loss(outputs.lm_logits, labels, stats)
 
         # --- Reinforcement learning losses (vmPFC critic + actor) ---
-        dist = Categorical(logits=logits_q)
+        dist = Categorical(logits=outputs.q_logits)
         logp = dist.log_prob(outputs.action)  # (B,)
         entropy = dist.entropy()  # (B,)
-        advantage = (outputs.reward.squeeze(-1) - logits_r.squeeze(-1)).detach()  # (B,)
-        q_a = logits_q.gather(1, outputs.action.unsqueeze(-1)).squeeze(-1)  # (B,)
+        advantage = (outputs.reward.squeeze(-1) - outputs.value_logits.squeeze(-1)).detach()  # (B,)
+        q_a = outputs.q_logits.gather(1, outputs.action.unsqueeze(-1)).squeeze(-1)  # (B,)
 
         if not is_warmup:  # Compute RL losses only after warmup phase
             loss_actor = -(logp * advantage).sum()
-            loss_critic = F.mse_loss(logits_r, outputs.reward, reduction="sum")
+            loss_critic = F.mse_loss(outputs.value_logits, outputs.reward, reduction="sum")
             loss_entropy = -entropy.sum()  # negative so minimizing loss maximizes entropy
             loss_q_value = F.mse_loss(q_a, outputs.reward.squeeze(-1).detach(), reduction="sum")
         else:
-            loss_actor = torch.tensor(0.0, device=logits_lm.device)
-            loss_critic = torch.tensor(0.0, device=logits_lm.device)
-            loss_entropy = torch.tensor(0.0, device=logits_lm.device)
-            loss_q_value = torch.tensor(0.0, device=logits_lm.device)
+            loss_actor = torch.tensor(0.0, device=outputs.lm_logits.device)
+            loss_critic = torch.tensor(0.0, device=outputs.lm_logits.device)
+            loss_entropy = torch.tensor(0.0, device=outputs.lm_logits.device)
+            loss_q_value = torch.tensor(0.0, device=outputs.lm_logits.device)
 
         # --- Combine losses with coefficients from config ---
         return Losses(
@@ -260,53 +184,24 @@ class RLLossHead(nn.Module):
             loss_q_value_sum=self.config.c_q_value * loss_q_value,
         )
 
-    def compute_metrics(  # -----------------------------------------------------------------------
-        self, state: RLState, outputs: RLOutput, stats: AccuracyStats, losses: Losses,
-    ) -> StepMetrics:  # fmt: skip
-        """Aggregate per-step metrics for logging.
+    def _build_metric_ratios(  # -----------------------------------------------------------------
+        self, losses: Losses, *, batch_size: int,
+    ) -> dict[str, RatioStat]:  # fmt: skip
+        """Pack RL loss terms into detached generic ratio metrics."""
+        batch_count = losses.loss_lm_sum.new_tensor(batch_size, dtype=torch.float32)
+        return {
+            "loss_lm": RatioStat(losses.loss_lm_sum.detach(), batch_count),
+            "loss_actor": RatioStat(losses.loss_actor_sum.detach(), batch_count),
+            "loss_critic": RatioStat(losses.loss_critic_sum.detach(), batch_count),
+            "loss_entropy": RatioStat(losses.loss_entropy_sum.detach(), batch_count),
+            "loss_q_value": RatioStat(losses.loss_q_value_sum.detach(), batch_count),
+        }
 
-        Metrics are mostly reported over the subset of sequences that halted on
-        this step (to match the "halted-only" reporting style used elsewhere).
-        """
-        eligible_mask = stats.loss_counts > 0
-        halted_mask = state.halted & eligible_mask
-        halted_weights = halted_mask.to(torch.float32)
-
-        token_correct_per_seq = stats.is_correct.to(torch.float32).sum(-1)
-        token_count_per_seq = stats.loss_counts.clamp_min(1).to(torch.float32)
-        seq_accuracy = token_correct_per_seq / token_count_per_seq
-
-        eligible_count = eligible_mask.to(torch.float32).sum()
-
-        halted = HaltedAgg(
-            halted_count=halted_weights.sum(),
-            eligible_count=eligible_count,
-            accuracy_sum=(seq_accuracy * halted_weights).sum(),
-            exact_sum=(stats.seq_is_correct & halted_mask).to(torch.float32).sum(),
-            steps_sum=(state.steps * halted_weights.to(state.steps.dtype)).sum(),
-            q_halt_correct_sum=halted_weights.new_zeros(()),
-            q_continue_correct_sum=halted_weights.new_zeros(()),
-        )
-
-        tokens = TokenAgg(
-            token_correct_sum=(token_correct_per_seq * halted_weights).sum(),
-            token_count_sum=(token_count_per_seq * halted_weights).sum(),
-        )
-
-        batch_size = int(outputs.logits[0].shape[0])  # logits[0] is features logits (B, S, V)
-        q_halt_loss_sum=losses.loss_actor_sum + losses.loss_critic_sum + losses.loss_entropy_sum + losses.loss_q_value_sum  # fmt: skip
-        loss = LossAgg(
-            lm_loss_sum=losses.loss_lm_sum.detach(),
-            q_halt_loss_sum=q_halt_loss_sum.detach(),
-            q_continue_loss_sum=losses.loss_lm_sum.new_zeros(()),
-            batch_count=losses.loss_lm_sum.new_tensor(batch_size, dtype=torch.float32),
-            actor_loss_sum=losses.loss_actor_sum.detach(),
-            critic_loss_sum=losses.loss_critic_sum.detach(),
-            entropy_loss_sum=losses.loss_entropy_sum.detach(),
-            q_value_loss_sum=losses.loss_q_value_sum.detach(),
-        )
-
-        return StepMetrics(halted=halted, tokens=tokens, loss=loss)
+    def _build_step_output(  # -------------------------------------------------------------------
+        self, losses: Losses, metrics: Any, signals: Dict[str, Tensor], outputs: RLOutput,
+    ) -> RLLossStep:  # fmt: skip
+        """Wrap losses, metrics, and signals into an :class:`RLLossStep`."""
+        return RLLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
     def compute_signals(  # -----------------------------------------------------------------------
         self, state: RLState, outputs: RLOutput, losses: Losses,
@@ -315,15 +210,14 @@ class RLLossHead(nn.Module):
 
         Signals are intended for TensorBoard-style scalar logging.
         """
-        _feature, q_logits, logits_r = outputs.logits  # (B,S,V), (B,A), (B,1)
         reward = outputs.reward.squeeze(-1)  # (B,)
-        rpe = (reward - logits_r.squeeze(-1)).detach()  # (B,) reward prediction error
-        dist = Categorical(logits=q_logits.detach())
+        rpe = (reward - outputs.value_logits.squeeze(-1)).detach()  # (B,) reward prediction error
+        dist = Categorical(logits=outputs.q_logits.detach())
         return {
             S.REWARD_MEAN:    reward.mean().detach(),
             S.REWARD_STD:     reward.std().detach(),
-            S.Q_MEAN:         q_logits.detach().mean(),
-            S.Q_STD:          q_logits.detach().std(),
+            S.Q_MEAN:         outputs.q_logits.detach().mean(),
+            S.Q_STD:          outputs.q_logits.detach().std(),
             S.RPE_MAGNITUDE:  rpe.abs().mean(),
             S.ACTION_ENTROPY: dist.entropy().mean(),
             S.STEPS_MEAN:     state.steps.float().mean().detach(),
