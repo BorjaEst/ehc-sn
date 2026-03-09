@@ -19,9 +19,10 @@ What this module does NOT do:
     - Own γ (STR does this).
 """
 
-import dataclasses
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Dict, Optional, Protocol, Tuple
+from typing import Optional, Protocol, Tuple
 
 import torch
 from pydantic import BaseModel, Field
@@ -30,6 +31,7 @@ from torch import Tensor
 from torch.distributions import Categorical
 from torchrl.envs import EnvBase
 
+from ehc_sn.controllers._base import BaseController, RolloutBackbone, RolloutState
 from ehc_sn.types import Batch, Device
 from ehc_sn.utils.detach import DetachMixin
 
@@ -38,9 +40,11 @@ from ehc_sn.utils.detach import DetachMixin
 class RLControllerConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`RLController`.
 
-    Intentionally minimal: the controller is responsible only for exploration
-    probability.  Environment semantics (``max_steps``, ``halt_action``) live
-    in the env config; temporal discounting (γ) lives in STR config.
+    Attributes:
+        exploration_prob: Probability of suppressing an early halt during
+            exploration.  ``None`` disables random action substitution.
+        max_steps: Hard cap on deliberation steps before forced termination.
+            ``None`` delegates all termination to the environment.
     """
 
     exploration_prob: Optional[float] = Field(
@@ -57,66 +61,22 @@ class RLControllerConfig(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class RLBackbone[BkState](Protocol):
-    """Backbone protocol expected by :class:`RLController`.
-
-    The backbone is responsible for the actual neural forward pass and recurrent
-    state management. The controller treats the backbone as a black box: it feeds
-    token inputs, receives logits and a CLS summary, and resets state for halted
-    slots.
-    """
-
-    def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int,
-    ) -> BkState:  # fmt: skip
-        ...  # fmt: skip
-
-    def reset_state(  # ---------------------------------------------------------------------------
-        self, reset_flag: Tensor, state: BkState,
-    ) -> BkState:   # fmt: skip
-        ...  # fmt: skip
-
-    def __call__(  # ------------------------------------------------------------------------------
-        self, inputs: Tensor, state: BkState | None = None,
-    ) -> Tuple[BkState, Tuple[Tensor, ...], Tensor]:  # fmt: skip
-        ...  # fmt: skip
+class RLBackbone[BkState](RolloutBackbone[BkState], Protocol):
+    """Backbone protocol expected by :class:`RLController`."""
 
 
 # =================================================================================================
 @dataclass
-class RLState[ModelState](DetachMixin):
-    """Controller carry/state for RL rollouts.
+class RLState[ModelState](RolloutState[ModelState]):
+    """Controller carry/state for RL rollouts."""
 
-    This state is carried across controller steps and supports partial resets.
-
-    Attributes:
-        model_state: Recurrent model state (backbone-specific).
-        steps: Per-slot step counter of shape ``(B,)``.
-        halted: Per-slot reset/done flag of shape ``(B,)``.
-        data: Per-slot buffers (e.g. inputs/labels) that persist until reset.
-        env_td: TorchRL TensorDict representing the current environment state.
-    """
-
-    model_state: ModelState  # Recurrent state of the model (e.g. LSTM hidden states)
-    steps: Tensor  # Per-slot step counter, shape: (B,)
-    halted: Tensor  # Per-slot reset/done flag, shape: (B,)
-    data: Dict[str, Tensor]  # Per-slot buffers that persist across steps until reset
     env_td: TensorDictBase  # Per-slot TensorDict for interacting with the environment
 
 
 # =================================================================================================
 @dataclass
 class RLOutput(DetachMixin):
-    """Outputs produced by one controller step.
-
-    Attributes:
-        logits: Backbone outputs (a tuple of tensors; interpretation depends on
-            the model/controller contract).
-        theta_cls: CLS feature vector of shape ``(B, D)`` used for tracing and
-            downstream heads.
-        action: Sampled action indices of shape ``(B,)``.
-        reward: Reward returned by the environment of shape ``(B, 1)``.
-    """
+    """Outputs produced by one controller step."""
 
     logits: Tuple[Tensor, ...]  # Tuple of (B, S, V) LM logits for supervised loss
     theta_cls: Tensor  # (B, D) — theta CLS features
@@ -125,7 +85,7 @@ class RLOutput(DetachMixin):
 
 
 # =================================================================================================
-class RLController:
+class RLController[BkState](BaseController[BkState, RLControllerConfig]):
     """Action sampler + rollout state manager for HRM v2.
 
     The controller:
@@ -148,28 +108,17 @@ class RLController:
             env: TorchRL environment used to compute rewards/termination.
             config: Controller-specific configuration.
         """
-        self._backbone = backbone
+        super().__init__(backbone=backbone, config=config)
         self._env = env
-        self._config = config
-
-    @property
-    def backbone(self) -> RLBackbone:
-        """Return the wrapped backbone."""
-        return self._backbone
 
     @property
     def environment(self) -> EnvBase:
         """Return the TorchRL environment used for stepping."""
         return self._env
 
-    @property
-    def config(self) -> RLControllerConfig:
-        """Return the controller configuration."""
-        return self._config
-
     def initial_state(  # -------------------------------------------------------------------------
         self, batch_sample: Batch,
-    ) -> RLState:  # fmt: skip
+    ) -> RLState[BkState]:  # fmt: skip
         """Build an initial rollout state from a batch sample.
 
         This performs an environment reset using the provided batch contents.
@@ -191,18 +140,16 @@ class RLController:
         )  # fmt: skip
         env_td = self._env.reset(reset_td)
 
+        slots = self.initial_slots(batch_sample)
         return RLState(
-            model_state=self._backbone.init_state(B),
-            steps=torch.zeros((B,), dtype=torch.int32, device=device),
-            halted=torch.ones((B,), dtype=torch.bool, device=device),
-            data={k: torch.empty_like(v) for k, v in batch_sample.items()},
-            env_td=env_td,
-        )
+            model_state=slots.model_state, steps=slots.steps, halted=slots.halted,
+            data=slots.data, env_td=env_td,
+        )  # fmt: skip
 
     def step(  # ----------------------------------------------------------------------------------
-        self, state: RLState, batch: Batch, *,
+        self, state: RLState[BkState], batch: Batch, *,
         allow_halt: bool = True, explore: bool = True,
-    ) -> Tuple[RLState, RLOutput]:  # fmt: skip
+    ) -> Tuple[RLState[BkState], RLOutput]:  # fmt: skip
         """Advance the controller by one step.
 
         The step:
@@ -221,37 +168,29 @@ class RLController:
             ``(new_state, output)``.
         """
         data = self.refresh_slot_data(batch, state)
-        model_state = self._backbone.reset_state(state.halted, state.model_state)
-        model_state, logits, theta_cls = self._backbone(data["inputs"], model_state)
+        model_state = self.backbone.reset_state(state.halted, state.model_state)
+        model_state, logits, theta_cls = self.backbone(data["inputs"], model_state)
 
-        steps = torch.where(state.halted, torch.zeros_like(state.steps), state.steps) + 1
+        steps = self.advance_steps(state)
         action, done, env_td = self._select_action_and_done(logits, steps, data["labels"], state.env_td, allow_halt, explore)  # fmt: skip
         reward = env_td["reward"]
 
-        state = RLState(model_state=model_state, steps=steps, halted=state.halted, data=data, env_td=env_td)
+        state = RLState(model_state=model_state, steps=steps, halted=done, data=data, env_td=env_td)
         output = RLOutput(logits=logits, theta_cls=theta_cls, action=action, reward=reward)
 
         return state, output
 
     def refresh_slot_data(  # --------------------------------------------------------------------
-        self, batch: Batch, state: RLState,
-    ) -> Dict[str, Tensor]:  # fmt: skip
-        """Replace data for halted slots with incoming batch data.
-
-        For slots where ``state.halted`` is True, the new batch row is used.
-        For still-active slots, the existing slot buffer is preserved.
-        """
-        halted, data = state.halted, state.data
-        return {
-            k: torch.where(halted.view((-1,) + (1,) * (batch[k].ndim - 1)), batch[k], data[k])
-            for k in batch
-        }  # fmt: skip
+        self, batch: Batch, state: RLState[BkState],
+    ) -> dict[str, Tensor]:  # fmt: skip
+        """Replace data for halted slots with incoming batch data."""
+        return super().refresh_slot_data(batch, state)
 
     def _select_action_and_done(  # ---------------------------------------------------------------
         self, logits: list[Tensor], steps: Tensor, labels: Tensor, env_td: TensorDictBase, 
         allow_halt: bool, explore: bool,
     ) -> Tuple[Tensor, Tensor, TensorDictBase]:  # fmt: skip
-        """Sample action, step env, apply exploration gating. Returns (action, done, env_td)."""
+        """Sample action, step env, and apply exploration gating."""
         logits_lm, logits_q, logits_r, *_ = logits  # Unpack list of logits multiple heads
         n_actions = self._env.action_spec["action"].shape[-1]
 

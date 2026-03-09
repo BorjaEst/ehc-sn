@@ -17,12 +17,13 @@ The semantics of the actions are minimal:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Protocol, Tuple
+from typing import Any, Protocol, Tuple
 
 import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
+from ehc_sn.controllers._base import BaseController, RolloutBackbone, RolloutState
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
@@ -56,47 +57,20 @@ class ACTControllerConfig(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class ACTBackbone[BkState](Protocol):
+class ACTBackbone[BkState](RolloutBackbone[BkState], Protocol):
     """Backbone protocol expected by :class:`ACTController`."""
-
-    def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int,
-    ) -> BkState:  # fmt: skip
-        ...  # fmt: skip
-
-    def reset_state(  # ---------------------------------------------------------------------------
-        self, reset_flag: Tensor, state: BkState,
-    ) -> BkState:   # fmt: skip
-        ...  # fmt: skip
-
-    def __call__(  # ------------------------------------------------------------------------------
-        self, inputs: Tensor, state: BkState | None = None,
-    ) -> Tuple[BkState, Tuple[Tensor, ...], Tensor]:  # fmt: skip
-        ...  # fmt: skip
 
 
 # =================================================================================================
 @dataclass
-class ACTState[ModelState](DetachMixin):
+class ACTState[ModelState](RolloutState[ModelState]):
     """Controller carry/state for ACT rollouts."""
-
-    model_state: ModelState  # Recurrent state of the model (e.g. LSTM hidden states)
-    steps: Tensor  # Per-slot step counter, shape: (B,)
-    halted: Tensor  # Per-slot reset/done flag, shape: (B,)
-    data: Dict[str, Tensor]  # Per-slot buffers that persist across steps until reset
 
 
 # =================================================================================================
 @dataclass
 class ACTOutput(DetachMixin):
-    """Outputs produced by a controller step.
-
-    Attributes:
-        logits: Backbone logits tuple (head-dependent).
-        theta_cls: CLS feature vector of shape ``(B, D)``.
-        action: Selected action indices of shape ``(B,)``.
-        target_q: Optional TD(0) bootstrap target used to supervise continue actions.
-    """
+    """Outputs produced by a controller step."""
 
     logits: Tuple[Tensor, ...]  # Tuple of (B, S, V) LM logits for supervised loss
     theta_cls: Tensor  # (B, D) — theta CLS features
@@ -105,12 +79,17 @@ class ACTOutput(DetachMixin):
 
 
 # =================================================================================================
-class ACTController:
-    """ACT controller used for supervised HRM v1 training.
+class ACTController[BkState](BaseController[BkState, ACTControllerConfig]):
+    """ACT controller for supervised HRM v1 deliberation.
 
-    The controller is agnostic to the meaning of non-done actions; it treats them
-    as generic "continue" actions and uses either greedy argmax or exploration
-    gating to avoid immediate halting.
+    The controller:
+        - runs the backbone forward pass each step
+        - selects a halt/continue action via greedy argmax over Q-logits
+        - applies probabilistic exploration gating to suppress premature halting
+        - optionally computes a TD(0) bootstrap target to supervise continue actions
+
+    Action semantics are minimal: ``done_action`` terminates deliberation; all
+    other actions are treated as generic continue steps.
     """
 
     def __init__(  # ------------------------------------------------------------------------------
@@ -122,35 +101,30 @@ class ACTController:
             backbone: Model implementing :class:`ACTBackbone`.
             config: Controller configuration.
         """
-        self._backbone = backbone
-        self._config = config
-
-    @property
-    def backbone(self) -> ACTBackbone:
-        """Return the wrapped backbone."""
-        return self._backbone
-
-    @property
-    def config(self) -> ACTControllerConfig:
-        """Return the controller configuration."""
-        return self._config
+        super().__init__(backbone=backbone, config=config)
 
     def initial_state(  # -------------------------------------------------------------------------
         self, batch_sample: Batch
-    ) -> ACTState:  # fmt: skip
-        """Build an initial ACT state from a batch sample."""
-        batch_size, device = batch_sample["inputs"].shape[0], batch_sample["inputs"].device
-        return ACTState(  # FIXME: We need to replace batch_dict by observations and labels
-            model_state=self.backbone.init_state(batch_size),
-            steps=torch.zeros((batch_size,), dtype=torch.int32, device=device),
-            halted=torch.ones((batch_size,), dtype=torch.bool, device=device),
-            data={k: torch.empty_like(v) for k, v in batch_sample.items()},
-        )
+    ) -> ACTState[BkState]:  # fmt: skip
+        """Build an initial ACT state from a batch sample.
+
+        Args:
+            batch_sample: Batch dict containing at least ``"inputs"`` of shape
+                ``(B, ...)``.
+
+        Returns:
+            Initialized :class:`ACTState`.
+        """
+        slots = self.initial_slots(batch_sample)
+        return ACTState(
+            model_state=slots.model_state, steps=slots.steps, halted=slots.halted,
+            data=slots.data,
+        )  # fmt: skip
 
     def step(  # ----------------------------------------------------------------------------------
-        self, state: ACTState, batch: Batch,
+        self, state: ACTState[BkState], batch: Batch,
         allow_halt: bool = True, explore: bool = True, td_target: bool = True,
-    ) -> Tuple[ACTState, ACTOutput]:  # fmt: skip
+    ) -> Tuple[ACTState[BkState], ACTOutput]:  # fmt: skip
         """Advance the controller by one step.
 
         Args:
@@ -167,7 +141,7 @@ class ACTController:
         model_state = self.backbone.reset_state(state.halted, state.model_state)
         model_state, logits, theta_cls = self.backbone(data["inputs"], model_state)
 
-        steps = torch.where(state.halted, 0, state.steps) + 1
+        steps = self.advance_steps(state)
         action, done = self._select_action_and_done(logits, steps, allow_halt, explore)
 
         state = ACTState(model_state=model_state, steps=steps, halted=done, data=data)
@@ -180,12 +154,20 @@ class ACTController:
         return state, output
 
     def compute_td_target(  # ---------------------------------------------------------------------
-        self, data: Dict[str, Tensor], model_state: Any, steps: Tensor,
+        self, data: dict[str, Tensor], model_state: Any, steps: Tensor,
     ) -> Tensor:  # fmt: skip
         """Compute TD(0) bootstrap targets for the Q head.
 
         At the last allowed step, the target becomes the predicted Q for the done
         action; otherwise it is the max Q over actions.
+
+        Args:
+            data: Per-slot input buffers; ``data["inputs"]`` is fed to the backbone.
+            model_state: Current backbone recurrent state (used for next-step preview).
+            steps: Per-slot step counters of shape ``(B,)``.
+
+        Returns:
+            Sigmoid-normalised TD target of shape ``(B,)``.
         """
         with torch.no_grad():
             _, _, next_q = self.backbone(data["inputs"], model_state)
@@ -198,14 +180,10 @@ class ACTController:
         return torch.sigmoid(target)
 
     def refresh_slot_data(  # ---------------------------------------------------------------------
-        self, batch: Batch, state: ACTState
-    ) -> Dict[str, Tensor]:  # fmt: skip
+        self, batch: Batch, state: ACTState[BkState]
+    ) -> dict[str, Tensor]:  # fmt: skip
         """Replace data for halted slots with incoming batch data."""
-        halted, data = state.halted, state.data
-        return {
-            k: torch.where(halted.view((-1,) + (1,) * (batch[k].ndim - 1)), batch[k], data[k])
-            for k in batch
-        }  # fmt: skip
+        return super().refresh_slot_data(batch, state)
 
     def _select_action_and_done(  # ---------------------------------------------------------------
         self, logits: list[Tensor], steps: Tensor, allow_halt: bool, explore: bool,
