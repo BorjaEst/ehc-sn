@@ -50,7 +50,7 @@ from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.rl_controller import RLController, RLControllerConfig, RLOutput, RLState
 from ehc_sn.training.rl_head import RLLossConfig, RLLossHead, RLLossStep
-from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
+from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig
 from ehc_sn.training.step_loop import StepContext, StepLoop
 from ehc_sn.types import Device, Dtype
 from ehc_sn.utils import trunc_normal_init_
@@ -305,7 +305,10 @@ class HRModelV2(nn.Module):
         state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H: (B, S+1, D)
         logits = self.lm_head(z_H[:, 1:])  # strip CLS → (B, S, vocab)
         theta_cls = z_H[:, 0]  # (B, D) — theta/CLS summary
-        state_str, r_logits = self.str(theta_cls.detach(), q_logits, state.str)
+        # Detach both inputs to STR so critic backward (Phase 3) has an independent graph.
+        # theta_cls.detach(): backbone grad stops here.
+        # q_logits.detach(): pfc.estimator grad stops here (Phase 2 may have freed it).
+        state_str, r_logits = self.str(theta_cls.detach(), q_logits.detach(), state.str)
 
         new_state = HRMState(pfc=state_pfc, str=state_str)
         return new_state, (logits, q_logits, r_logits), theta_cls
@@ -387,35 +390,41 @@ class TrainingModel(L.LightningModule):
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
-    ) -> Tuple[List[Optimizer], List[SequentialLR]]:  # fmt: skip
-        """Build optimizers and schedulers.
+    ) -> List[Optimizer]:  # fmt: skip
+        """Build optimizers and store schedulers as instance attributes.
+
+        Schedulers are NOT returned to Lightning: with ``automatic_optimization=False``
+        Lightning would auto-step them before the manual ``opt.step()`` calls, causing
+        out-of-order warnings and double-stepping.  Instead they are stored as
+        ``self._sch_sup``, ``self._sch_rl``, ``self._sch_qv`` and stepped manually
+        in :meth:`training_step`.
 
         Returns:
-            ``(optimizers, schedulers)`` where both lists have length 3 and share
-            the same order:
-                1) supervised params (everything except ``pfc.estimator``)
-                2) RL params (STR actor-critic only)
-                3) vmPFC params (``pfc.estimator`` only)
+            List of 3 optimizers in order: [opt_sup, opt_rl, opt_qv].
         """
         total_steps = int(self.trainer.estimated_stepping_batches)
         sch_cfg = self._config.scheduler
 
-        # Optimizer A: supervised — all model params EXCEPT pfc.estimator (vmPFC)
-        vmPFC_ids = {id(p) for p in self.model.pfc.estimator.parameters()}
-        sup_params = [p for p in self.model.parameters() if id(p) not in vmPFC_ids]
+        # Optimizer A: supervised backbone — all params EXCEPT STR and pfc.estimator.
+        # STR and pfc.estimator are owned exclusively by opt_rl and opt_qv respectively;
+        # param sets are disjoint so each backward phase updates only its owner.
+        _excluded_ids = {id(p) for p in self.model.str.parameters()} | {
+            id(p) for p in self.model.pfc.estimator.parameters()
+        }
+        sup_params = [p for p in self.model.parameters() if id(p) not in _excluded_ids]
         opt_sup = AdamATan2(sup_params, self._config.optimizer_supervised)
 
-        # Optimizer B: RL — STR actor-critic only (strictly isolated)
+        # Optimizer B: STR critic only (reward prediction / value head).
         opt_rl = AdamATan2(list(self.model.str.parameters()), self._config.optimizer_rl)
 
-        # Optimizer C: vmPFC — pfc.estimator only (auxiliary Q-predictor)
+        # Optimizer C: vmPFC estimator only (actor / Q-value / entropy heads).
         opt_qv = AdamATan2(list(self.model.pfc.estimator.parameters()), self._config.optimizer_qv)
 
-        sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, sch_cfg)
-        sch_rl = CosineAnnealingLRWithWarmup(opt_rl, total_steps, sch_cfg)
-        sch_qv = CosineAnnealingLRWithWarmup(opt_qv, total_steps, sch_cfg)
+        self._sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, sch_cfg)
+        self._sch_rl = CosineAnnealingLRWithWarmup(opt_rl, total_steps, sch_cfg)
+        self._sch_qv = CosineAnnealingLRWithWarmup(opt_qv, total_steps, sch_cfg)
 
-        return [opt_sup, opt_rl, opt_qv], [sch_sup, sch_rl, sch_qv]
+        return [opt_sup, opt_rl, opt_qv]
 
     # -- Lifecycle --------------------------------------------------------------------------------
 
@@ -473,31 +482,41 @@ class TrainingModel(L.LightningModule):
             raise ValueError("StepLoop did not yield any steps.")
         self._train_carry = step.carry.detach()
 
-        # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = int(batch_dict["inputs"].shape[0])
         out = step.outputs
-        loss = _normalize_loss_for_backward(out.loss, local_bs)
-        self.manual_backward(loss)
-
-        # Optimizer step and reset gradient for all optimizers
         opt_sup, opt_rl, opt_qv = self.optimizers()  # type: ignore[misc]
-        sch_sup, sch_rl, sch_qv = self.lr_schedulers()  # type: ignore[misc]
 
-        opt_sup.step(); opt_sup.zero_grad(set_to_none=True); sch_sup.step()  # fmt: skip
+        # Phase 1: supervised backbone (LM loss only).
+        # RL grads are stopped at detach boundaries in pfc.estimator and theta_cls.
+        loss_sup = _normalize_loss_for_backward(out.losses.loss_lm_sum, local_bs)
+        self.manual_backward(loss_sup)
+        opt_sup.step(); opt_sup.zero_grad(set_to_none=True); self._sch_sup.step()  # fmt: skip
+
         if not is_warmup:
-            opt_rl.step(); opt_rl.zero_grad(set_to_none=True); sch_rl.step()  # fmt: skip
-            opt_qv.step(); opt_qv.zero_grad(set_to_none=True); sch_qv.step()  # fmt: skip
+            # Phase 2: vmPFC actor/Q head (pfc.estimator only; backbone detached).
+            # Graph is independent because pfc.estimator receives detached backbone features.
+            loss_qv = _normalize_loss_for_backward(
+                out.losses.loss_actor_sum + out.losses.loss_entropy_sum + out.losses.loss_q_value_sum,
+                local_bs,
+            )
+            self.manual_backward(loss_qv)
+            opt_qv.step(); opt_qv.zero_grad(set_to_none=True); self._sch_qv.step()  # fmt: skip
+
+            # Phase 3: STR critic (STR only; inputs are fully detached in HRModelV2.forward).
+            loss_rl = _normalize_loss_for_backward(out.losses.loss_critic_sum, local_bs)
+            self.manual_backward(loss_rl)
+            opt_rl.step(); opt_rl.zero_grad(set_to_none=True); self._sch_rl.step()  # fmt: skip
         else:
-            # Keep gradients clean even when optimizers are intentionally frozen.
             opt_rl.zero_grad(set_to_none=True)
             opt_qv.zero_grad(set_to_none=True)
 
         # Update metrics with unnormalized loss and log to TensorBoard.
+        total_loss = _normalize_loss_for_backward(out.losses.total, local_bs)
         update_metrics_from_step(self.train_metrics, step.outputs.metrics, RL_ROUTES)
-        self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
+        self.log("train/loss", total_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
         signals = {**step.outputs.signals, "is_warmup": torch.tensor(float(is_warmup))}
-        return {"loss": loss.detach(), "signals": signals}
+        return {"loss": total_loss.detach(), "signals": signals}
 
     # -- Validation -------------------------------------------------------------------------------
 

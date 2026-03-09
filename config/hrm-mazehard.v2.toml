@@ -1,13 +1,12 @@
+# -- Training settings ----------------------------------------------------------------------------
 dataset_path      = "data/processed/maze-30x30-hard-1k"
 global_batch_size = 16
 epochs            = 100
 seed              = 42
 augment           = true
+warmup_steps      = 100  # 2000
 
-warmup_steps = 5000
-
-
-# -- Environment settings ----------------------------------------------------------------------
+# -- Environment settings -------------------------------------------------------------------------
 [environment]
     max_steps   = 16
     seq_length  = 900

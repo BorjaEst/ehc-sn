@@ -242,7 +242,7 @@ class RLLossHead(nn.Module):
 
         if not is_warmup:  # Compute RL losses only after warmup phase
             loss_actor = -(logp * advantage).sum()
-            loss_critic = F.mse_loss(logits_r, outputs.reward, reduction="sum")
+            loss_critic = F.mse_loss(logits_r, outputs.reward.squeeze(-1), reduction="sum")
             loss_entropy = -entropy.sum()  # negative so minimizing loss maximizes entropy
             loss_q_value = F.mse_loss(q_a, outputs.reward.squeeze(-1).detach(), reduction="sum")
         else:

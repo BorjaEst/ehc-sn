@@ -227,7 +227,9 @@ class PFCModel(nn.Module):
         memory = next(memory_gen)  # N-1 step to update high-level state with gradients
 
         # Estimate Q-values from the updated state.
-        q_estimation = self.estimator(memory.z_H, memory.z_L)
+        # Detach backbone features so actor/q losses (opt_qv) do not propagate
+        # into the shared PFC backbone; only opt_sup shapes the backbone.
+        q_estimation = self.estimator(memory.z_H.detach(), memory.z_L.detach())
 
         # Important: detach only the carry, not the outputs used for supervised learning.
         # Downstream heads (LM head, value head) must see tensors that keep gradients.
