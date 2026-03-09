@@ -21,9 +21,9 @@ from torch import Tensor, nn
 from torch.distributions import Categorical
 
 import ehc_sn.loss.cross_entropy as cross_entropy_module
+from ehc_sn.controllers.rl import RLController, RLOutput, RLState
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
-from ehc_sn.training.rl_controller import RLController, RLOutput, RLState
 from ehc_sn.training.types import HaltedAgg, LossAgg, StepMetrics, TokenAgg
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin

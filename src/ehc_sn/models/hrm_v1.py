@@ -30,16 +30,16 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
+from ehc_sn.controllers.act import ACTController, ACTControllerConfig
 from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
 from ehc_sn.data.transforms import channels_to_grid
+from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.metrics.routes import ACT_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
-from ehc_sn.training.act_controller import ACTController, ACTControllerConfig
-from ehc_sn.training.act_head import ACTLossConfig, ACTLossHead
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler

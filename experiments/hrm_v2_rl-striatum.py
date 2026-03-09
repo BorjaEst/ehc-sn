@@ -17,14 +17,14 @@ from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
+from ehc_sn.controllers.rl import RLControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.envs.mazehard import EnvConfig
+from ehc_sn.heads.rl import RLLossConfig
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.models import hrm_v2
 from ehc_sn.models.hrm_v2 import ModelConfig_HRM_V2, ModelSettings_V2, TrainingModel
 from ehc_sn.training.optim import AdamATan2Config
-from ehc_sn.training.rl_controller import RLControllerConfig
-from ehc_sn.training.rl_head import RLLossConfig
 from ehc_sn.training.schedules import SchedulerConfig
 
 # Configure PyTorch for better performance on modern GPUs

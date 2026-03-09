@@ -33,15 +33,15 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn import figures
+from ehc_sn.controllers.act import ACTControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.sinks import save_pdf
+from ehc_sn.heads.act import ACTLossConfig
 from ehc_sn.models.hrm_v1 import Model, ModelConfig_HRM_V1, supervised_maze_tokenize
 from ehc_sn.modules.pfc import PFCSettings
 from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
-from ehc_sn.training.act_controller import ACTControllerConfig
-from ehc_sn.training.act_head import ACTLossConfig
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
 from ehc_sn.training.step_loop import StepLoop

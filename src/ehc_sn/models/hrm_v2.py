@@ -35,9 +35,11 @@ from pydantic import BaseModel, Field, field_validator
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
+from ehc_sn.controllers.rl import RLController, RLControllerConfig, RLOutput, RLState
 from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
+from ehc_sn.heads.rl import RLLossConfig, RLLossHead, RLLossStep
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.metrics.routes import RL_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
@@ -48,8 +50,6 @@ from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
-from ehc_sn.training.rl_controller import RLController, RLControllerConfig, RLOutput, RLState
-from ehc_sn.training.rl_head import RLLossConfig, RLLossHead, RLLossStep
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
 from ehc_sn.training.step_loop import StepContext, StepLoop
 from ehc_sn.types import Device, Dtype
