@@ -9,6 +9,7 @@ This keeps the generic layer free of ACT- or RL-specific field names while
 preserving the routing model used by :func:`~ehc_sn.metrics.update_metrics_from_step`.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from torch import Tensor
@@ -58,9 +59,8 @@ class StepMetrics:
 
     rollout: RolloutAgg
     tokens: TokenAgg
-    extras: dict[str, RatioStat]
+    extras: Mapping[str, RatioStat]
 
 
 # =================================================================================================
-__all__ = ["RatioStat", "RolloutAgg", "StepMetrics", "TokenAgg"]
 __all__ = ["RatioStat", "RolloutAgg", "StepMetrics", "TokenAgg"]

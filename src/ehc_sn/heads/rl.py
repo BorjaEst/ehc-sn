@@ -27,6 +27,7 @@ from ehc_sn.controllers.rl import RLController, RLOutput, RLState
 from ehc_sn.heads._base import AccuracyStats, TokenLossHeadBase
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
+from ehc_sn.metrics.keys import LOSS_LM, RL_LOSS_ACTOR, RL_LOSS_CRITIC, RL_LOSS_ENTROPY, RL_LOSS_Q_VALUE
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
@@ -190,11 +191,11 @@ class RLLossHead(TokenLossHeadBase[RLController, RLLossConfig]):
         """Pack RL loss terms into detached generic ratio metrics."""
         batch_count = losses.loss_lm_sum.new_tensor(batch_size, dtype=torch.float32)
         return {
-            "loss_lm": RatioStat(losses.loss_lm_sum.detach(), batch_count),
-            "loss_actor": RatioStat(losses.loss_actor_sum.detach(), batch_count),
-            "loss_critic": RatioStat(losses.loss_critic_sum.detach(), batch_count),
-            "loss_entropy": RatioStat(losses.loss_entropy_sum.detach(), batch_count),
-            "loss_q_value": RatioStat(losses.loss_q_value_sum.detach(), batch_count),
+            LOSS_LM: RatioStat(losses.loss_lm_sum.detach(), batch_count),
+            RL_LOSS_ACTOR: RatioStat(losses.loss_actor_sum.detach(), batch_count),
+            RL_LOSS_CRITIC: RatioStat(losses.loss_critic_sum.detach(), batch_count),
+            RL_LOSS_ENTROPY: RatioStat(losses.loss_entropy_sum.detach(), batch_count),
+            RL_LOSS_Q_VALUE: RatioStat(losses.loss_q_value_sum.detach(), batch_count),
         }
 
     def _build_step_output(  # -------------------------------------------------------------------

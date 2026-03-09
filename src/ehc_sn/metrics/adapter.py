@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple, Sequence
+from collections.abc import Mapping, Sequence
+from typing import NamedTuple
 
 from torchmetrics import MetricCollection
 
@@ -23,9 +24,12 @@ class Route(NamedTuple):
 
 
 def _get(obj: object, path: str) -> object:
-    """Resolve a dotted attribute path against obj."""
+    """Resolve a dotted attribute or mapping path against ``obj``."""
     for attr in path.split("."):
-        obj = getattr(obj, attr)
+        if isinstance(obj, Mapping):
+            obj = obj[attr]
+        else:
+            obj = getattr(obj, attr)
     return obj
 
 

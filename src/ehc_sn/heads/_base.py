@@ -177,10 +177,10 @@ class TokenLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT: BaseMo
       ``outputs.lm_logits`` and returns :class:`AccuracyStats` detached from the
       compute graph.
     * **LM loss helper** — ``compute_lm_loss`` computes the summed supervised
-      token loss using the function named by ``config.function``.
+        token loss using the function named by ``config.function``.
     * **Shared step pipeline** — ``_run_token_step`` covers labels lookup,
-    accuracy stats, loss computation, rollout/token aggregation, and
-      :class:`~ehc_sn.training.types.StepMetrics` assembly.
+        accuracy stats, loss computation, rollout/token aggregation, and
+        :class:`~ehc_sn.training.types.StepMetrics` assembly.
     * **Generic forward** — runs ``controller.step`` then ``_run_token_step``;
       override to add algorithm-specific options (e.g. ``is_warmup``).
 
@@ -195,8 +195,8 @@ class TokenLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT: BaseMo
     Subclasses **must** implement:
 
     * ``compute_losses`` — algorithm-specific loss terms.
-        * ``_build_metric_ratios`` — pack algorithm-specific ratios into
-            ``dict[str, RatioStat]``.
+    * ``_build_metric_ratios`` — pack algorithm-specific ratios into
+        ``dict[str, RatioStat]``.
     * ``_build_step_output`` — wrap everything into the concrete step-output type.
 
         Subclasses **may** override ``compute_signals`` to add scalar diagnostic tensors.
@@ -232,10 +232,10 @@ class TokenLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT: BaseMo
         1. Extract ``labels = carry.data["labels"]``.
         2. Compute :class:`AccuracyStats` *out of graph* via ``compute_accuracy``.
         3. Call ``compute_losses(**loss_options)`` for algorithm losses.
-          4. Assemble :class:`~ehc_sn.training.types.StepMetrics` via
-              ``build_rollout_token_aggs`` + ``_build_metric_ratios``.
-          5. Call ``compute_signals`` for diagnostic scalar dict.
-          6. Return ``_build_step_output(losses, metrics, signals, outputs)``.
+        4. Assemble :class:`~ehc_sn.training.types.StepMetrics` via
+           ``build_rollout_token_aggs`` + ``_build_metric_ratios``.
+        5. Call ``compute_signals`` for diagnostic scalar dict.
+        6. Return ``_build_step_output(losses, metrics, signals, outputs)``.
 
         Args:
             batch: The step batch (available to subclass overrides).

@@ -25,6 +25,7 @@ from ehc_sn.controllers.act import ACTController, ACTOutput, ACTState
 from ehc_sn.heads._base import AccuracyStats, TokenLossHeadBase
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
+from ehc_sn.metrics.keys import ACT_LOSS_Q_CONTINUE, ACT_LOSS_Q_DONE, LOSS_LM
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.utils.detach import DetachMixin
 
@@ -151,9 +152,9 @@ class ACTLossHead(TokenLossHeadBase[ACTController, ACTLossConfig]):
             q_continue_loss_sum = losses.loss_sum.new_zeros(())
 
         return {
-            "loss_lm": RatioStat(losses.loss_sum.detach(), batch_count),
-            "loss_q_done": RatioStat(losses.loss_q_done_sum.detach(), batch_count),
-            "loss_q_continue": RatioStat(q_continue_loss_sum.detach(), batch_count),
+            LOSS_LM: RatioStat(losses.loss_sum.detach(), batch_count),
+            ACT_LOSS_Q_DONE: RatioStat(losses.loss_q_done_sum.detach(), batch_count),
+            ACT_LOSS_Q_CONTINUE: RatioStat(q_continue_loss_sum.detach(), batch_count),
         }
 
     def compute_signals(  # -----------------------------------------------------------------------
