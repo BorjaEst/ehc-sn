@@ -20,7 +20,7 @@ with keys ``"inputs"`` and ``"labels"``.
 import math
 from dataclasses import dataclass
 from itertools import repeat
-from typing import Any, Dict, List, Optional, Tuple, TypeAlias
+from typing import Any, Dict, List, Mapping, Optional, Tuple, TypeAlias
 
 import lightning as L
 import numpy as np

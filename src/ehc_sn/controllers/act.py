@@ -177,7 +177,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         action; otherwise it is the max Q over actions.
 
         Args:
-            data: Per-slot input buffers; ``data["inputs"]`` is fed to the backbone.
+            data: Per-slot batch buffers; the full batch mapping is fed to the backbone.
             model_state: Current backbone recurrent state (used for next-step preview).
             steps: Per-slot step counters of shape ``(B,)``.
 
@@ -185,7 +185,8 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
             Sigmoid-normalized TD target of shape ``(B,)``.
         """
         with torch.no_grad():
-            _, _, next_q = self.backbone(data["inputs"], model_state)
+            _, logits, _ = self.backbone(data, model_state)
+            next_q = logits[1]
         is_last_step = steps >= self.config.max_steps
 
         # At last step: forced done → target is Q(done_action). Otherwise: max over all actions.
