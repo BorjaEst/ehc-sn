@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.distributions import Categorical
 
+import ehc_sn.loss.cross_entropy as cross_entropy_module
 from ehc_sn.controllers.rl import RLController, RLOutput, RLState
 from ehc_sn.heads._base import AccuracyStats, TokenLossHeadBase
 from ehc_sn.loss.cross_entropy import LossType
@@ -126,6 +127,11 @@ class RLLossHead(TokenLossHeadBase[RLController, RLLossConfig]):
             config: Loss configuration.
         """
         super().__init__(controller=controller, config=config)
+
+    @property
+    def loss_fn(self) -> Any:
+        """Return the configured token-level loss function."""
+        return getattr(cross_entropy_module, self._config.function)
 
     def forward(  # -------------------------------------------------------------------------------
         self, batch: Batch, carry: RLState, *, is_warmup: bool = False, **options: Any,

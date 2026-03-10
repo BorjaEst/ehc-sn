@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from torch import Tensor
 
+import ehc_sn.loss.cross_entropy as cross_entropy_module
 from ehc_sn.controllers.act import ACTController, ACTOutput, ACTState
 from ehc_sn.heads._base import AccuracyStats, TokenLossHeadBase
 from ehc_sn.loss.cross_entropy import LossType
@@ -70,7 +71,7 @@ class ACTLossStep:
     losses: Losses  # Combined losses for this step, kept live for backward()
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
     outputs: Optional[ACTOutput] = None  # Raw controller outputs
-    signals: Dict[str, Any] = None  # Diagnostic signals (T2/T3); plain dict, no schema commitment
+    signals: Dict[str, Any] | None = None  # Diagnostic signals (T2/T3); plain dict
 
     def __post_init__(self) -> None:
         if self.signals is None:
@@ -103,6 +104,11 @@ class ACTLossHead(TokenLossHeadBase[ACTController, ACTLossConfig]):
         """
         super().__init__(controller=controller, config=config)
 
+    @property
+    def loss_fn(self) -> Any:
+        """Return the configured token-level loss function."""
+        return getattr(cross_entropy_module, self._config.function)
+
     def compute_losses(  # -----------------------------------------------------------------------
         self, outputs: ACTOutput, labels: Tensor, stats: AccuracyStats, **_: Any,
     ) -> Losses:  # fmt: skip
@@ -113,11 +119,8 @@ class ACTLossHead(TokenLossHeadBase[ACTController, ACTLossConfig]):
         # Done-action loss: match Q(done) to sequence correctness.
         done_action = self.controller.config.done_action
         q_done_logits = outputs.q_logits[..., done_action]  # (B,)
-        q_done_loss = F.binary_cross_entropy_with_logits(
-            input=q_done_logits,
-            target=stats.seq_is_correct.to(q_done_logits.dtype),
-            reduction="sum",
-        )
+        target = stats.seq_is_correct.to(q_done_logits.dtype)
+        q_done_loss = F.binary_cross_entropy_with_logits(q_done_logits, target, reduction="sum")
 
         # Continue loss: optional auxiliary supervision from the controller's TD target.
         q_continue_loss: Tensor | None = None
@@ -128,11 +131,8 @@ class ACTLossHead(TokenLossHeadBase[ACTController, ACTLossConfig]):
             continue_actions = [a for a in range(n_actions) if a != done_action]
             if continue_actions:
                 q_cont = outputs.q_logits[..., continue_actions].mean(dim=-1)  # (B,)
-                q_continue_loss = F.binary_cross_entropy_with_logits(
-                    input=q_cont,
-                    target=outputs.target_q,
-                    reduction="sum",
-                )
+                target = outputs.target_q
+                q_continue_loss = F.binary_cross_entropy_with_logits(q_cont, target, reduction="sum")
 
         return Losses(loss_sum, q_done_loss, q_continue_loss)
 

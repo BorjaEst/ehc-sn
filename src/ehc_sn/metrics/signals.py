@@ -1,9 +1,10 @@
 """Canonical signal vocabulary for diagnostic and research logging.
 
-All signal producers (:meth:`~ehc_sn.training.act_head.ACTLossHead.compute_signals`,
-:meth:`~ehc_sn.training.rl_head.RLLossHead.compute_signals`) and consumers
+All signal producers (:meth:`~ehc_sn.heads.act.ACTLossHead.compute_signals`,
+:meth:`~ehc_sn.heads.rl.RLLossHead.compute_signals`,
+:meth:`~ehc_sn.heads.var.VARLossHead.compute_signals`) and consumers
 (:class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback`) import from this
-module rather than using string literals.  This ensures that renaming a signal
+module rather than using string literals. This ensures that renaming a signal
 requires a single edit, and mismatches between producers and consumers fail
 loudly via ``NameError`` rather than silently emitting nothing to the dashboard.
 
@@ -19,6 +20,9 @@ Structure
 ``RL_SIGNALS``
     Signals specific to RL (Reinforcement Learning) training heads.
 
+``VAR_SIGNALS``
+    Signals specific to VAR (variational latent-consistency) training heads.
+
 ``STANDARD_SIGNALS``
     The union of cross-paradigm + paradigm-specific signals that are stable
     enough to log at the ``"standard"`` diagnostic tier (T2).  All other signals
@@ -32,7 +36,7 @@ from __future__ import annotations
 # =================================================================================================
 
 STEPS_MEAN: str = "steps_mean"
-"""Mean deliberation steps per slot (ACT and RL)."""
+"""Mean deliberation steps per slot."""
 
 THETA_CLS_NORM: str = "theta_cls_norm"
 """L2 norm of the theta/CLS feature vector from the PFC backbone."""
@@ -94,10 +98,37 @@ RL_SIGNALS: frozenset[str] = frozenset(
 
 
 # =================================================================================================
+# VAR-specific — produced by VARLossHead.compute_signals()
+# =================================================================================================
+
+LOSS_TOTAL: str = "loss_total"
+"""Total VAR loss sum for this step."""
+
+LOSS_OBS_NLL: str = "loss_obs_nll"
+"""Observation negative log-likelihood loss sum (VAR)."""
+
+LOSS_LATENT: str = "loss_latent"
+"""Latent consistency loss sum (VAR)."""
+
+LOSS_REG: str = "loss_reg"
+"""Latent regularization loss sum (VAR)."""
+
+LATENT_POST_NORM: str = "latent_post_norm"
+"""Mean activation norm of posterior latent block(s)."""
+
+LATENT_PRIOR_NORM: str = "latent_prior_norm"
+"""Mean activation norm of prior latent block(s)."""
+
+VAR_SIGNALS: frozenset[str] = frozenset(
+    {LOSS_TOTAL, LOSS_OBS_NLL, LOSS_LATENT, LOSS_REG, LATENT_POST_NORM, LATENT_PRIOR_NORM}
+)
+
+
+# =================================================================================================
 # T2 standard set — re-used by DiagnosticsCallback
 # =================================================================================================
 
-STANDARD_SIGNALS: frozenset[str] = CROSS_PARADIGM_SIGNALS | ACT_SIGNALS | RL_SIGNALS
+STANDARD_SIGNALS: frozenset[str] = CROSS_PARADIGM_SIGNALS | ACT_SIGNALS | RL_SIGNALS | VAR_SIGNALS
 """All signals that are logged at the ``"standard"`` diagnostic tier.
 
 A :class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback` configured with
@@ -114,6 +145,9 @@ __all__ = [
     # RL
     "REWARD_MEAN", "REWARD_STD", "Q_MEAN", "Q_STD", "RPE_MAGNITUDE", "ACTION_ENTROPY",
     "LOSS_ACTOR", "LOSS_CRITIC", "LOSS_ENTROPY", "RL_SIGNALS",
+    # VAR
+    "LOSS_TOTAL", "LOSS_OBS_NLL", "LOSS_LATENT", "LOSS_REG", "LATENT_POST_NORM",
+    "LATENT_PRIOR_NORM", "VAR_SIGNALS",
     # Aggregate
     "STANDARD_SIGNALS",
 ]  # fmt: skip

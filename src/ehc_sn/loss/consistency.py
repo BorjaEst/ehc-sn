@@ -1,15 +1,68 @@
 """Representation-consistency loss primitives.
 
-This module provides flat-tensor consistency penalties for variational and
-energy-based losses. Inputs are model-agnostic tensors of shape ``(B, D)`` and
+This module provides flat-tensor consistency penalties and latent-code helpers
+for rollout heads. Inputs are model-agnostic tensors of shape ``(B, D)`` and
 outputs are per-example loss values of shape ``(B,)``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Any
+
 import torch
 from torch import Tensor
 from torch.distributions import Normal
+
+LatentCode = Tensor | Sequence[Tensor]
+
+
+# =================================================================================================
+def iter_latent_codes(  # ------------------------------------------------------------------------
+    code: LatentCode,
+) -> tuple[Tensor, ...]:  # fmt: skip
+    """Return a tuple view over one or more latent-code blocks."""
+    if isinstance(code, Tensor):
+        return (code,)
+    return tuple(code)
+
+
+# =================================================================================================
+def sum_latent_terms(  # -------------------------------------------------------------------------
+    loss_fn: Any, pred: LatentCode, target: LatentCode,
+) -> Tensor:  # fmt: skip
+    """Apply a flat-tensor loss over one or more latent-code blocks.
+
+    Args:
+        loss_fn: Callable returning a per-example tensor of shape ``(B,)``.
+        pred: Predicted code tensor or sequence of tensors.
+        target: Target code tensor or sequence of tensors.
+
+    Returns:
+        Per-example loss values of shape ``(B,)``.
+    """
+    pred_codes = iter_latent_codes(pred)
+    target_codes = iter_latent_codes(target)
+    if len(pred_codes) != len(target_codes):
+        raise ValueError("Latent code groups must have the same number of blocks.")
+
+    total: Tensor | None = None
+    for pred_code, target_code in zip(pred_codes, target_codes, strict=True):
+        term = loss_fn(pred_code, target_code)
+        total = term if total is None else total + term
+
+    if total is None:
+        raise ValueError("Latent code groups must not be empty.")
+    return total
+
+
+# =================================================================================================
+def mean_latent_norm(  # -------------------------------------------------------------------------
+    code: LatentCode,
+) -> Tensor:  # fmt: skip
+    """Return the mean block-wise activation norm for diagnostics."""
+    block_means = [block.detach().norm(dim=-1).mean() for block in iter_latent_codes(code)]
+    return torch.stack(block_means).mean()
 
 
 # =================================================================================================
@@ -49,4 +102,7 @@ def nll_consistency(  # --------------------------------------------------------
 
 
 # =================================================================================================
-__all__ = ["mse_consistency", "nll_consistency"]
+__all__ = [
+    "LatentCode", "iter_latent_codes", "mean_latent_norm", "mse_consistency", "nll_consistency",
+    "sum_latent_terms",
+]  # fmt: skip
