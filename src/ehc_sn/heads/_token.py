@@ -71,17 +71,10 @@ class TokenLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT: BaseMo
         labels = carry.data["labels"]
         with torch.no_grad():
             stats = self.compute_accuracy(outputs, labels)
+
         losses = self.compute_losses(outputs, labels, stats, **loss_options)
-        episode_agg, episode_token_agg, step_agg, step_token_agg = build_rollout_token_aggs(
-            steps=carry.steps,
-            completed=carry.halted,
-            stats=stats,
-        )
-        metric_ratios = self._build_metric_ratios(losses, batch_size=int(carry.halted.shape[0]))
-        metrics = StepMetrics(
-            episode=episode_agg, episode_tokens=episode_token_agg, step=step_agg, 
-            step_tokens=step_token_agg, extras=metric_ratios,
-        )  # fmt: skip
+        extras = self._build_metric_ratios(losses, batch_size=int(carry.halted.shape[0]))
+        metrics = build_token_step_metrics(carry.steps, carry.halted, stats, extras)
         signals = self.compute_signals(carry, outputs, losses)
         return self._build_step_output(losses, metrics, signals, outputs)
 
@@ -145,46 +138,50 @@ def compute_lm_loss_sum(  # ----------------------------------------------------
 
 
 # =================================================================================================
-def build_rollout_token_aggs(  # -------------------------------------------------------------------
-    *, steps: Tensor, completed: Tensor, stats: AccuracyStats,
-) -> tuple[RolloutAgg, TokenAgg, TransitionAgg, TokenAgg]:  # fmt: skip
-    """Build episode-level and step-level aggregate metrics for a token step."""
+def build_token_step_metrics(  # ------------------------------------------------------------------
+    *, steps: Tensor, completed: Tensor, stats: AccuracyStats, extras: dict[str, RatioStat],
+) -> StepMetrics:  # fmt: skip
+    """Build generic per-step token-supervision metrics."""
     eligible_mask = stats.loss_counts > 0
     completed_mask = completed & eligible_mask
-    completed_weights = completed_mask.to(torch.float32)
+
     eligible_weights = eligible_mask.to(torch.float32)
+    completed_weights = completed_mask.to(torch.float32)
 
     token_correct_per_seq = stats.is_correct.to(torch.float32).sum(-1)
     token_count_per_seq = stats.loss_counts.clamp_min(1).to(torch.float32)
     seq_accuracy = token_correct_per_seq / token_count_per_seq
+    seq_exact = stats.seq_is_correct.to(torch.float32)
 
-    rollout_agg = RolloutAgg(
-        completed_count=completed_weights.sum(),
-        eligible_count=eligible_mask.to(torch.float32).sum(),
-        accuracy_sum=(seq_accuracy * completed_weights).sum(),
-        exact_sum=(stats.seq_is_correct & completed_mask).to(torch.float32).sum(),
-        steps_sum=(steps * completed_weights.to(steps.dtype)).sum(),
+    return StepMetrics(
+        episode=RolloutAgg(
+            completed_count=completed_weights.sum(),
+            eligible_count=eligible_weights.sum(),
+            accuracy_sum=(seq_accuracy * completed_weights).sum(),
+            exact_sum=(seq_exact * completed_weights).sum(),
+            steps_sum=(steps * completed_weights.to(steps.dtype)).sum(),
+        ),
+        episode_tokens=TokenAgg(
+            token_correct_sum=(token_correct_per_seq * completed_weights).sum(),
+            token_count_sum=(token_count_per_seq * completed_weights).sum(),
+        ),
+        step=TransitionAgg(
+            evaluated_count=eligible_weights.sum(),
+            eligible_count=eligible_weights.sum(),
+            accuracy_sum=(seq_accuracy * eligible_weights).sum(),
+            exact_sum=(seq_exact * eligible_weights).sum(),
+            steps_sum=(steps * eligible_weights.to(steps.dtype)).sum(),
+        ),
+        step_tokens=TokenAgg(
+            token_correct_sum=(token_correct_per_seq * eligible_weights).sum(),
+            token_count_sum=(token_count_per_seq * eligible_weights).sum(),
+        ),
+        extras=extras,
     )
-    episode_token_agg = TokenAgg(
-        token_correct_sum=(token_correct_per_seq * completed_weights).sum(),
-        token_count_sum=(token_count_per_seq * completed_weights).sum(),
-    )
-    step_agg = TransitionAgg(
-        evaluated_count=eligible_weights.sum(),
-        eligible_count=eligible_weights.sum(),
-        accuracy_sum=(seq_accuracy * eligible_weights).sum(),
-        exact_sum=(stats.seq_is_correct & eligible_mask).to(torch.float32).sum(),
-        steps_sum=(steps * eligible_weights.to(steps.dtype)).sum(),
-    )
-    step_token_agg = TokenAgg(
-        token_correct_sum=(token_correct_per_seq * eligible_weights).sum(),
-        token_count_sum=(token_count_per_seq * eligible_weights).sum(),
-    )
-    return rollout_agg, episode_token_agg, step_agg, step_token_agg
 
 
 # =================================================================================================
 __all__ = [
-    "IGNORE_LABEL_ID", "AccuracyStats", "TokenLossHeadBase", "build_rollout_token_aggs",
+    "IGNORE_LABEL_ID", "AccuracyStats", "TokenLossHeadBase", "build_token_step_metrics",
     "compute_accuracy_stats", "compute_lm_loss_sum",
 ]  # fmt: skip
