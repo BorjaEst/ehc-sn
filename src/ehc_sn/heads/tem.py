@@ -27,6 +27,7 @@ from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_terms
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import TEM_LOSS_GRID_KL, TEM_LOSS_OBS_NLL, TEM_LOSS_PLACE_CONSISTENCY, TEM_LOSS_REG
+from ehc_sn.types import Batch
 from ehc_sn.training.types import RatioStat, StepMetrics
 
 
@@ -176,14 +177,14 @@ class TEMLossHead(VariationalLossHeadBase[TEMController, TEMLossConfig]):
         return TEMLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, carry: Any, outputs: TEMOutput, losses: TEMLosses,
+        self, batch: Batch, carry: Any, outputs: TEMOutput, losses: TEMLosses,
     ) -> Dict[str, Tensor]:  # fmt: skip
         """Compute detached TEM diagnostics and ELBO-style scalar signals."""
         labels = self._observation_target(carry)
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
         place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
-        signals = super().compute_signals(carry, outputs, losses)
+        signals = super().compute_signals(batch, carry, outputs, losses)
 
         loss_obs_inference = self.loss_fn(outputs.logits_inference, labels).sum().detach()
         loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels).sum().detach()

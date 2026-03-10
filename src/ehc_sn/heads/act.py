@@ -27,6 +27,7 @@ from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import ACT_LOSS_Q_CONTINUE, ACT_LOSS_Q_DONE, LOSS_LM
 from ehc_sn.training.types import RatioStat, StepMetrics
+from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -152,7 +153,7 @@ class ACTLossHead(TokenLossHeadBase[ACTController, ACTLossConfig]):
         }
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, state: ACTRolloutState, outputs: ACTOutput, losses: Losses,
+        self, batch: Batch, state: ACTRolloutState, outputs: ACTOutput, losses: Losses,
     ) -> Dict[str, Tensor]:  # fmt: skip
         """Compute lightweight diagnostic signals for logging."""
         sig: Dict[str, Tensor] = {

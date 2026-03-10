@@ -189,7 +189,7 @@ class RLLossHead(TokenLossHeadBase[RLController, RLLossConfig]):
         return RLLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, state: RLRolloutState, outputs: RLOutput, losses: Losses,
+        self, batch: Batch, state: RLRolloutState, outputs: RLOutput, losses: Losses,
     ) -> Dict[str, Tensor]:  # fmt: skip
         """Compute lightweight diagnostic signals.
 

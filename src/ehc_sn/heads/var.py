@@ -11,11 +11,8 @@ from torch import Tensor
 
 from ehc_sn.controllers.var import MAIN_LATENT_RELATION, VARController, VAROutput, VARRolloutState
 from ehc_sn.heads._variational import (
-    VariationalLosses,
-    VariationalLossHeadBase,
-    VariationalLossStep,
-    get_reg_term,
-    require_latent_relation,
+    VariationalLosses, VariationalLossHeadBase, VariationalLossStep,
+    get_reg_term, require_latent_relation,
 )
 from ehc_sn.loss.consistency import LatentCode, mean_latent_norm, mse_consistency, sum_latent_terms
 from ehc_sn.loss.cross_entropy import LossType
@@ -23,6 +20,7 @@ from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_te
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import VAR_LOSS_LATENT, VAR_LOSS_OBS_NLL, VAR_LOSS_REG
 from ehc_sn.training.types import RatioStat, StepMetrics
+from ehc_sn.types import Batch
 
 
 # =================================================================================================
@@ -135,11 +133,11 @@ class VARLossHead(VariationalLossHeadBase[VARController, VARLossConfig]):
         }
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, state: VARRolloutState, outputs: VAROutput, losses: VARLosses,
+        self, batch: Batch, state: VARRolloutState, outputs: VAROutput, losses: VARLosses,
     ) -> Dict[str, Tensor]:  # fmt: skip
         """Compute lightweight diagnostic signals for logging."""
         main_relation = require_latent_relation(outputs.latent_relations, MAIN_LATENT_RELATION)
-        signals = super().compute_signals(state, outputs, losses)
+        signals = super().compute_signals(batch, state, outputs, losses)
         signals.update(
             {
                 S.LATENT_POST_NORM: mean_latent_norm(main_relation.lhs),

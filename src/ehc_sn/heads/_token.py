@@ -17,6 +17,8 @@ from torch import Tensor
 import ehc_sn.loss.cross_entropy as cross_entropy_module
 from ehc_sn.heads._base import BaseLossHead, ControllerWithInitialState
 from ehc_sn.training.types import RatioStat, RolloutAgg, StepMetrics, TokenAgg, TransitionAgg
+from ehc_sn.types import Batch
+from ehc_sn.utils.detach import DetachMixin
 
 IGNORE_LABEL_ID: int = -100
 
@@ -46,6 +48,12 @@ class AccuracyStats:
 
 
 # =================================================================================================
+@dataclass(frozen=True)
+class TokenLosses(DetachMixin):
+    """Shared parent loss structure for token-family heads."""
+
+
+# =================================================================================================
 class TokenLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT: BaseModel](
     BaseLossHead[ControllerT, ConfigT]
 ):  # fmt: skip
@@ -65,7 +73,7 @@ class TokenLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT: BaseMo
         return step_output, carry, bool(carry.halted.all())
 
     def _run_token_step(  # -----------------------------------------------------------------------
-        self, batch: Any, carry: Any, outputs: Any, **loss_options: Any,
+        self, batch: Batch, carry: Any, outputs: Any, **loss_options: Any,
     ) -> Any:  # fmt: skip
         """Execute the shared token-supervision pipeline once outputs exist."""
         labels = carry.data["labels"]
@@ -75,7 +83,7 @@ class TokenLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT: BaseMo
         losses = self.compute_losses(outputs, labels, stats, **loss_options)
         extras = self._build_metric_ratios(losses, batch_size=int(carry.halted.shape[0]))
         metrics = build_token_step_metrics(carry.steps, carry.halted, stats, extras)
-        signals = self.compute_signals(carry, outputs, losses)
+        signals = self.compute_signals(batch, carry, outputs, losses)
         return self._build_step_output(losses, metrics, signals, outputs)
 
     def compute_accuracy(  # ----------------------------------------------------------------------
@@ -109,7 +117,7 @@ class TokenLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT: BaseMo
         raise NotImplementedError
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, carry: Any, outputs: Any, losses: Any,
+        self, batch: Batch, carry: Any, outputs: Any, losses: Any,
     ) -> dict:  # fmt: skip
         """Return a dict of scalar diagnostic tensors for logging."""
         return {}
@@ -182,6 +190,6 @@ def build_token_step_metrics(  # -----------------------------------------------
 
 # =================================================================================================
 __all__ = [
-    "IGNORE_LABEL_ID", "AccuracyStats", "TokenLossHeadBase", "build_token_step_metrics",
-    "compute_accuracy_stats", "compute_lm_loss_sum",
+    "IGNORE_LABEL_ID", "AccuracyStats", "TokenLosses", "TokenLossHeadBase",
+     "build_token_step_metrics", "compute_accuracy_stats", "compute_lm_loss_sum",
 ]  # fmt: skip

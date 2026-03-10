@@ -88,7 +88,7 @@ class VariationalLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT](
             batch_size=int(carry.halted.shape[0]),
             like=losses.total.detach(),
         )
-        signals = self.compute_signals(carry, outputs, losses)
+        signals = self.compute_signals(batch, carry, outputs, losses)
         return self._build_step_output(losses, metrics, signals, outputs), carry, bool(carry.halted.all())
 
     def compute_losses(  # ------------------------------------------------------------------------
@@ -110,7 +110,7 @@ class VariationalLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT](
         raise NotImplementedError
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, carry: Any, outputs: Any, losses: VariationalLosses,
+        self, batch: Batch, carry: Any, outputs: Any, losses: VariationalLosses,
     ) -> Dict[str, Tensor]:  # fmt: skip
         """Return detached generic variational-family diagnostic signals."""
         return {
