@@ -76,7 +76,7 @@
 
 [tool.isort]
     profile           = "black"
-    line_length       = 110
+    line_length       = 140
     known_first_party = ["ehc_sn"]
 
 [tool.mypy]
