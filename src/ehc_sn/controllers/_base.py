@@ -14,7 +14,7 @@ from ehc_sn.utils.detach import DetachMixin
 
 
 # =================================================================================================
-class RolloutBackbone[BkState](Protocol):
+class RolloutBackbone[ModelState, ModelOutput](Protocol):
     """Protocol for backbone models driven by rollout controllers.
 
     The backbone owns the recurrent state and the neural forward pass.
@@ -31,17 +31,17 @@ class RolloutBackbone[BkState](Protocol):
 
     def init_state(  # ----------------------------------------------------------------------------
         self, batch_size: int,
-    ) -> BkState:  # fmt: skip
+    ) -> ModelState:  # fmt: skip
         ...  # fmt: skip
 
     def reset_state(  # ---------------------------------------------------------------------------
-        self, reset_flag: Tensor, state: BkState,
-    ) -> BkState:  # fmt: skip
+        self, reset_flag: Tensor, state: ModelState,
+    ) -> ModelState:  # fmt: skip
         ...  # fmt: skip
 
     def __call__(  # ------------------------------------------------------------------------------
-        self, inputs: Tensor, state: BkState | None = None,
-    ) -> tuple[BkState, tuple[Tensor, ...], Tensor]:  # fmt: skip
+        self, inputs: Batch, state: ModelState | None = None,
+    ) -> tuple[ModelState, ModelOutput]:  # fmt: skip
         ...  # fmt: skip
 
 
@@ -68,32 +68,7 @@ class RolloutState[ModelState](DetachMixin):
 
 
 # =================================================================================================
-def make_empty_slot_data(  # ----------------------------------------------------------------------
-    batch_sample: Batch,
-) -> Dict[str, Tensor]:  # fmt: skip
-    """Allocate per-slot buffers matching an example batch."""
-    return {key: torch.empty_like(value) for key, value in batch_sample.items()}
-
-
-def refresh_slot_data(  # -------------------------------------------------------------------------
-    batch: Batch, halted: Tensor, data: Dict[str, Tensor],
-) -> Dict[str, Tensor]:  # fmt: skip
-    """Replace halted slots with fresh batch rows while keeping active slots."""
-    return {
-        key: torch.where(halted.view((-1,) + (1,) * (value.ndim - 1)), value, data[key])
-        for key, value in batch.items()
-    }
-
-
-def advance_rollout_steps(  # ---------------------------------------------------------------------
-    steps: Tensor, halted: Tensor,
-) -> Tensor:  # fmt: skip
-    """Reset halted slot counters and advance all slots by one step."""
-    return torch.where(halted, torch.zeros_like(steps), steps) + 1
-
-
-# =================================================================================================
-class BaseController[BkState, ConfigT: BaseModel]:
+class BaseController[ModelState, ConfigT: BaseModel]:
     """Shared infrastructure for slot-based rollout controllers.
 
     A rollout controller drives a backbone across a variable number of steps,
@@ -133,13 +108,13 @@ class BaseController[BkState, ConfigT: BaseModel]:
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: RolloutBackbone[BkState], config: ConfigT,
+        self, backbone: RolloutBackbone[ModelState], config: ConfigT,
     ) -> None:  # fmt: skip
         self._backbone = backbone
         self._config = config
 
     @property
-    def backbone(self) -> RolloutBackbone[BkState]:
+    def backbone(self) -> RolloutBackbone[ModelState]:
         """Return the wrapped backbone."""
         return self._backbone
 
@@ -150,7 +125,7 @@ class BaseController[BkState, ConfigT: BaseModel]:
 
     def initial_slots(  # -------------------------------------------------------------------------
         self, batch_sample: Batch,
-    ) -> RolloutState[BkState]:  # fmt: skip
+    ) -> RolloutState[ModelState]:  # fmt: skip
         """Allocate the initial per-slot rollout buffers from a batch sample.
 
         All slots start as halted (``halted=True``, ``steps=0``), so the first
@@ -166,24 +141,33 @@ class BaseController[BkState, ConfigT: BaseModel]:
             model_state=self.backbone.init_state(batch_size),
             steps=torch.zeros((batch_size,), dtype=torch.int32, device=device),
             halted=torch.ones((batch_size,), dtype=torch.bool, device=device),
-            data=make_empty_slot_data(batch_sample),
+            data=self.make_empty_slot_data(batch_sample),
         )
 
+    @staticmethod
+    def make_empty_slot_data(  # ----------------------------------------------------------------------
+        batch_sample: Batch,
+    ) -> Dict[str, Tensor]:  # fmt: skip
+        """Allocate per-slot buffers matching an example batch."""
+        return {key: torch.empty_like(value) for key, value in batch_sample.items()}
+
     def refresh_slot_data(  # ---------------------------------------------------------------------
-        self, batch: Batch, state: RolloutState[BkState],
+        self, batch: Batch, state: RolloutState[ModelState],
     ) -> Dict[str, Tensor]:  # fmt: skip
         """Refresh slot buffers for halted rows."""
-        return refresh_slot_data(batch, state.halted, state.data)
+        batch, halted, data = batch, state.halted, state.data
+        return {
+            key: torch.where(halted.view((-1,) + (1,) * (value.ndim - 1)), value, data[key])
+            for key, value in batch.items()
+        }
 
     def advance_steps(  # -------------------------------------------------------------------------
-        self, state: RolloutState[BkState],
+        self, state: RolloutState[ModelState],
     ) -> Tensor:  # fmt: skip
         """Advance per-slot step counters using halted rows as reset points."""
-        return advance_rollout_steps(state.steps, state.halted)
+        steps, halted = state.steps, state.halted
+        return torch.where(halted, torch.zeros_like(steps), steps) + 1
 
 
 # =================================================================================================
-__all__ = [
-    "BaseController", "RolloutBackbone", "RolloutState", "advance_rollout_steps",
-    "make_empty_slot_data", "refresh_slot_data",
-]  # fmt: skip
+__all__ = ["BaseController", "RolloutBackbone", "RolloutState"]

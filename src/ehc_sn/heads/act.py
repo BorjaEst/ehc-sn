@@ -21,9 +21,8 @@ import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-import ehc_sn.loss.cross_entropy as cross_entropy_module
-from ehc_sn.controllers.act import ACTController, ACTOutput, ACTState
-from ehc_sn.heads._base import AccuracyStats, TokenLossHeadBase
+from ehc_sn.controllers.act import ACTController, ACTOutput, ACTRolloutState
+from ehc_sn.heads._token import AccuracyStats, TokenLossHeadBase
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import ACT_LOSS_Q_CONTINUE, ACT_LOSS_Q_DONE, LOSS_LM
@@ -104,11 +103,6 @@ class ACTLossHead(TokenLossHeadBase[ACTController, ACTLossConfig]):
         """
         super().__init__(controller=controller, config=config)
 
-    @property
-    def loss_fn(self) -> Any:
-        """Return the configured token-level loss function."""
-        return getattr(cross_entropy_module, self._config.function)
-
     def compute_losses(  # -----------------------------------------------------------------------
         self, outputs: ACTOutput, labels: Tensor, stats: AccuracyStats, **_: Any,
     ) -> Losses:  # fmt: skip
@@ -158,7 +152,7 @@ class ACTLossHead(TokenLossHeadBase[ACTController, ACTLossConfig]):
         }
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, state: ACTState, outputs: ACTOutput, losses: Losses,
+        self, state: ACTRolloutState, outputs: ACTOutput, losses: Losses,
     ) -> Dict[str, Tensor]:  # fmt: skip
         """Compute lightweight diagnostic signals for logging."""
         sig: Dict[str, Tensor] = {

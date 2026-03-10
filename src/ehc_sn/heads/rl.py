@@ -23,9 +23,8 @@ from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.distributions import Categorical
 
-import ehc_sn.loss.cross_entropy as cross_entropy_module
-from ehc_sn.controllers.rl import RLController, RLOutput, RLState
-from ehc_sn.heads._base import AccuracyStats, TokenLossHeadBase
+from ehc_sn.controllers.rl import RLController, RLOutput, RLRolloutState
+from ehc_sn.heads._token import AccuracyStats, TokenLossHeadBase
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import LOSS_LM, RL_LOSS_ACTOR, RL_LOSS_CRITIC, RL_LOSS_ENTROPY, RL_LOSS_Q_VALUE
@@ -50,27 +49,38 @@ class RLLossConfig(BaseModel, extra="forbid"):
         default="stablemax_cross_entropy",
         description="The loss function to use for the modeling loss.",
     )
-    c_actor: float = Field(default=1.0, ge=0.0, description="Actor loss coefficient.")
-    c_critic: float = Field(default=0.5, ge=0.0, description="Critic loss coefficient.")
-    c_entropy: float = Field(default=0.01, ge=0.0, description="Entropy regularization coefficient.")
-    c_q_value: float = Field(default=0.5, ge=0.0, description="vmPFC auxiliary Q-predictor loss coefficient.")
+    c_actor: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Actor loss coefficient.",
+    )
+    c_critic: float = Field(
+        default=0.5,
+        ge=0.0,
+        description="Critic loss coefficient.",
+    )
+    c_entropy: float = Field(
+        default=0.01,
+        ge=0.0,
+        description="Entropy regularization coefficient.",
+    )
+    c_q_value: float = Field(
+        default=0.5,
+        ge=0.0,
+        description="vmPFC auxiliary Q-predictor loss coefficient.",
+    )
 
 
 # =================================================================================================
 @dataclass(frozen=True)
 class Losses(DetachMixin):
-    """Bundle of per-step loss terms (summed over batch).
+    """Bundle of per-step loss terms (summed over batch)."""
 
-    All fields are *sums* (not means). Normalization (e.g. by local batch size)
-    is performed by the Lightning module before backward.
-    """
-
-    loss_lm_sum: Tensor
-    loss_q_value_sum: Tensor
-
-    loss_actor_sum: Tensor
-    loss_critic_sum: Tensor
-    loss_entropy_sum: Tensor
+    loss_lm_sum: Tensor  # Supervised LM loss sum over the batch for the current step
+    loss_q_value_sum: Tensor  # Auxiliary Q-value regression loss sum over the batch for the current step
+    loss_actor_sum: Tensor  # Policy gradient (actor) loss sum over the batch for the current step
+    loss_critic_sum: Tensor  # Value regression (critic) loss sum over the batch for the current step
+    loss_entropy_sum: Tensor  # Entropy regularization loss sum over the batch for the current step
 
     @property
     def total(self) -> Tensor:
@@ -83,14 +93,7 @@ class Losses(DetachMixin):
 # =================================================================================================
 @dataclass(frozen=True)
 class RLLossStep:
-    """A single rollout/loss step produced by :class:`RLLossHead`.
-
-    Attributes:
-        losses: Live loss tensors (used for backward).
-        metrics: Aggregated metrics detached for logging.
-        outputs: Optional raw controller outputs for tracing.
-        signals: Lightweight diagnostic signals.
-    """
+    """A single rollout/loss step produced by :class:`RLLossHead`."""
 
     losses: Losses  # Combined losses for this step, kept live for backward()
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
@@ -128,14 +131,9 @@ class RLLossHead(TokenLossHeadBase[RLController, RLLossConfig]):
         """
         super().__init__(controller=controller, config=config)
 
-    @property
-    def loss_fn(self) -> Any:
-        """Return the configured token-level loss function."""
-        return getattr(cross_entropy_module, self._config.function)
-
     def forward(  # -------------------------------------------------------------------------------
-        self, batch: Batch, carry: RLState, *, is_warmup: bool = False, **options: Any,
-    ) -> Tuple[RLLossStep, RLState, bool]:  # fmt: skip
+        self, batch: Batch, carry: RLRolloutState, *, is_warmup: bool = False, **options: Any,
+    ) -> Tuple[RLLossStep, RLRolloutState, bool]:  # fmt: skip
         """Run one controller step and compute losses/metrics.
 
         Args:
@@ -211,7 +209,7 @@ class RLLossHead(TokenLossHeadBase[RLController, RLLossConfig]):
         return RLLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, state: RLState, outputs: RLOutput, losses: Losses,
+        self, state: RLRolloutState, outputs: RLOutput, losses: Losses,
     ) -> Dict[str, Tensor]:  # fmt: skip
         """Compute lightweight diagnostic signals.
 

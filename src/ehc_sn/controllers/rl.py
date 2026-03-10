@@ -61,13 +61,13 @@ class RLControllerConfig(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class RLBackbone[BkState](RolloutBackbone[BkState], Protocol):
+class RLRolloutBackbone[ModelState, ModelOutput](RolloutBackbone[ModelState, ModelOutput], Protocol):
     """Backbone protocol expected by :class:`RLController`."""
 
 
 # =================================================================================================
 @dataclass
-class RLState[ModelState](RolloutState[ModelState]):
+class RLRolloutState[ModelState](RolloutState[ModelState]):
     """Controller carry/state for RL rollouts."""
 
     env_td: TensorDictBase  # Per-slot TensorDict for interacting with the environment
@@ -105,7 +105,7 @@ class RLOutput(DetachMixin):
 
 
 # =================================================================================================
-class RLController[BkState](BaseController[BkState, RLControllerConfig]):
+class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
     """Action sampler + rollout state manager for HRM v2.
 
     The controller:
@@ -119,12 +119,12 @@ class RLController[BkState](BaseController[BkState, RLControllerConfig]):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: RLBackbone, env: EnvBase, config: RLControllerConfig,
+        self, backbone: RLRolloutBackbone, env: EnvBase, config: RLControllerConfig,
     ) -> None:  # fmt: skip
         """Create a controller.
 
         Args:
-            backbone: Model implementing :class:`RLBackbone`.
+            backbone: Model implementing :class:`RLRolloutBackbone`.
             env: TorchRL environment used to compute rewards/termination.
             config: Controller-specific configuration.
         """
@@ -138,7 +138,7 @@ class RLController[BkState](BaseController[BkState, RLControllerConfig]):
 
     def initial_state(  # -------------------------------------------------------------------------
         self, batch_sample: Batch,
-    ) -> RLState[BkState]:  # fmt: skip
+    ) -> RLRolloutState[ModelState]:  # fmt: skip
         """Build an initial rollout state from a batch sample.
 
         This performs an environment reset using the provided batch contents.
@@ -148,7 +148,7 @@ class RLController[BkState](BaseController[BkState, RLControllerConfig]):
                 ``"labels"`` of shape ``(B, S)``.
 
         Returns:
-            Initialized :class:`RLState` with fresh backbone state and env state.
+            Initialized :class:`RLRolloutState` with fresh backbone state and env state.
         """
         B = batch_sample["inputs"].shape[0]
         device = batch_sample["inputs"].device
@@ -161,15 +161,15 @@ class RLController[BkState](BaseController[BkState, RLControllerConfig]):
         env_td = self._env.reset(reset_td)
 
         slots = self.initial_slots(batch_sample)
-        return RLState(
+        return RLRolloutState(
             model_state=slots.model_state, steps=slots.steps, halted=slots.halted,
             data=slots.data, env_td=env_td,
         )  # fmt: skip
 
     def step(  # ----------------------------------------------------------------------------------
-        self, state: RLState[BkState], batch: Batch, *,
+        self, state: RLRolloutState[ModelState], batch: Batch, *,
         allow_halt: bool = True, explore: bool = True,
-    ) -> Tuple[RLState[BkState], RLOutput]:  # fmt: skip
+    ) -> Tuple[RLRolloutState[ModelState], RLOutput]:  # fmt: skip
         """Advance the controller by one step.
 
         The step:
@@ -189,25 +189,19 @@ class RLController[BkState](BaseController[BkState, RLControllerConfig]):
         """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, logits, theta_cls = self.backbone(data["inputs"], model_state)
+        model_state, logits, theta_cls = self.backbone(data, model_state)
 
         steps = self.advance_steps(state)
-        action, done, env_td = self._select_action_and_done(logits, steps, data["labels"], state.env_td, allow_halt, explore)  # fmt: skip
+        action, done, env_td = self._select_action_and_done(logits, steps, data, state.env_td, allow_halt, explore)  # fmt: skip
         reward = env_td["reward"]
 
-        state = RLState(model_state=model_state, steps=steps, halted=done, data=data, env_td=env_td)
+        state = RLRolloutState(model_state=model_state, steps=steps, halted=done, data=data, env_td=env_td)
         output = RLOutput(logits=logits, theta_cls=theta_cls, action=action, reward=reward)
 
         return state, output
 
-    def refresh_slot_data(  # --------------------------------------------------------------------
-        self, batch: Batch, state: RLState[BkState],
-    ) -> dict[str, Tensor]:  # fmt: skip
-        """Replace data for halted slots with incoming batch data."""
-        return super().refresh_slot_data(batch, state)
-
     def _select_action_and_done(  # ---------------------------------------------------------------
-        self, logits: list[Tensor], steps: Tensor, labels: Tensor, env_td: TensorDictBase, 
+        self, logits: list[Tensor], steps: Tensor, data: Batch, env_td: TensorDictBase, 
         allow_halt: bool, explore: bool,
     ) -> Tuple[Tensor, Tensor, TensorDictBase]:  # fmt: skip
         """Sample action, step env, and apply exploration gating."""
@@ -226,7 +220,7 @@ class RLController[BkState](BaseController[BkState, RLControllerConfig]):
         env_td = env_td.clone()
         env_td["action"] = action.unsqueeze(-1)  # (B, 1)
         env_td["logits"] = logits_lm.detach().to(torch.float32)  # (B, S, V)
-        env_td["labels"] = labels  # (B, S)
+        env_td["labels"] = data["labels"]  # (B, S)
         env_td = self._env.step(env_td)["next"]  # TorchRL convention
 
         terminated = env_td["terminated"].squeeze(-1)  # (B,)
@@ -241,4 +235,4 @@ class RLController[BkState](BaseController[BkState, RLControllerConfig]):
 
 
 # =================================================================================================
-__all__ = ["RLController", "RLState", "RLOutput", "RLBackbone", "RLControllerConfig"]
+__all__ = ["RLController", "RLRolloutState", "RLOutput", "RLRolloutBackbone", "RLControllerConfig"]

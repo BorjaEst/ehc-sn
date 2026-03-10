@@ -117,7 +117,7 @@ class DetachMixin:
         """Return a copy of this dataclass with all tensor-like fields detached.
 
         The returned instance is of the same concrete type (``Self``), which is
-        convenient for state objects such as ``RLState`` and ``RLOutput``.
+        convenient for state objects such as ``RLRolloutState`` and ``RLOutput``.
 
         Raises:
             TypeError: If the mixin is used on a non-dataclass type.

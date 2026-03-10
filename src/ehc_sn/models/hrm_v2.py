@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field, field_validator
 from torch import Tensor, nn
 from torch.optim import Optimizer
 
-from ehc_sn.controllers.rl import RLController, RLControllerConfig, RLOutput, RLState
+from ehc_sn.controllers.rl import RLController, RLControllerConfig
 from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
@@ -283,12 +283,12 @@ class HRModelV2(nn.Module):
         )
 
     def forward(  # -------------------------------------------------------------------------------
-        self, inputs: Tensor, state: Optional[HRMState] = None,
+        self, batch: Batch, state: Optional[HRMState] = None,
     ) -> Tuple[HRMState, Tuple[Tensor, Tensor, Tensor], Tensor]:  # fmt: skip
         """Run one model step.
 
         Args:
-            inputs: Token ids of shape ``(B, S)``.
+            batch: Input batch containing at least ``"inputs"`` of shape ``(B, S)``.
             state: Optional recurrent state to carry across steps. If ``None``, a
                 fresh state is created.
 
@@ -299,8 +299,8 @@ class HRModelV2(nn.Module):
                 - ``r_logits`` is reward / policy output from STR
                 - ``theta_cls`` is ``(B, D)`` CLS summary vector.
         """
-        state = state or self.init_state(batch_size=inputs.shape[0])
-        x = self.embed_inputs(inputs)  # (B, S, D)
+        state = state or self.init_state(batch_size=batch["inputs"].shape[0])
+        x = self.embed_inputs(batch["inputs"])  # (B, S, D)
 
         state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H: (B, S+1, D)
         logits = self.lm_head(z_H[:, 1:])  # strip CLS → (B, S, vocab)

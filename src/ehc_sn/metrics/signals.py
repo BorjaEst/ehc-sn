@@ -23,6 +23,9 @@ Structure
 ``VAR_SIGNALS``
     Signals specific to VAR (variational latent-consistency) training heads.
 
+``TEM_SIGNALS``
+    Signals specific to TEM variational training heads.
+
 ``STANDARD_SIGNALS``
     The union of cross-paradigm + paradigm-specific signals that are stable
     enough to log at the ``"standard"`` diagnostic tier (T2).  All other signals
@@ -89,7 +92,7 @@ LOSS_CRITIC: str = "loss_critic"
 """Critic (value MSE) loss sum for this step."""
 
 LOSS_ENTROPY: str = "loss_entropy"
-"""Entropy regularisation loss sum for this step."""
+"""Entropy regularization loss sum for this step."""
 
 RL_SIGNALS: frozenset[str] = frozenset(
     {REWARD_MEAN, REWARD_STD, Q_MEAN, Q_STD, RPE_MAGNITUDE, ACTION_ENTROPY,
@@ -125,10 +128,58 @@ VAR_SIGNALS: frozenset[str] = frozenset(
 
 
 # =================================================================================================
+# TEM-specific — produced by TEMLossHead.compute_signals()
+# =================================================================================================
+
+LOSS_GRID_KL: str = "loss_grid_kl"
+"""Grid latent consistency loss sum (TEM)."""
+
+LOSS_PLACE_CONSISTENCY: str = "loss_place_consistency"
+"""Place consistency loss sum (TEM)."""
+
+LOSS_OBS_INFER: str = "loss_obs_infer"
+"""Observation NLL from the inference pathway (TEM)."""
+
+LOSS_OBS_RETRIEVED: str = "loss_obs_retrieved"
+"""Observation NLL from the retrieved pathway (TEM)."""
+
+LOSS_OBS_ANCESTRAL: str = "loss_obs_ancestral"
+"""Observation NLL from the ancestral pathway (TEM)."""
+
+LOSS_PLACE_TRANSITION: str = "loss_place_transition"
+"""Place consistency contribution from the transition path (TEM)."""
+
+LOSS_PLACE_SENSORY: str = "loss_place_sensory"
+"""Place consistency contribution from sensory-cued recall (TEM)."""
+
+GRID_POST_NORM: str = "grid_post_norm"
+"""Mean activation norm of inferred grid-code blocks (TEM)."""
+
+GRID_PRIOR_NORM: str = "grid_prior_norm"
+"""Mean activation norm of generated grid-code blocks (TEM)."""
+
+PLACE_POST_NORM: str = "place_post_norm"
+"""Mean activation norm of inferred place-code blocks (TEM)."""
+
+PLACE_PRIOR_NORM: str = "place_prior_norm"
+"""Mean activation norm of generated place-code blocks (TEM)."""
+
+TEM_SIGNALS: frozenset[str] = VAR_SIGNALS | frozenset(
+    {
+        LOSS_GRID_KL, LOSS_PLACE_CONSISTENCY, LOSS_OBS_INFER, LOSS_OBS_RETRIEVED, LOSS_OBS_ANCESTRAL,
+        LOSS_PLACE_TRANSITION, LOSS_PLACE_SENSORY, GRID_POST_NORM, GRID_PRIOR_NORM, PLACE_POST_NORM,
+        PLACE_PRIOR_NORM,
+    }
+)  # fmt: skip
+
+
+# =================================================================================================
 # T2 standard set — re-used by DiagnosticsCallback
 # =================================================================================================
 
-STANDARD_SIGNALS: frozenset[str] = CROSS_PARADIGM_SIGNALS | ACT_SIGNALS | RL_SIGNALS | VAR_SIGNALS
+STANDARD_SIGNALS: frozenset[str] = (
+    CROSS_PARADIGM_SIGNALS | ACT_SIGNALS | RL_SIGNALS | VAR_SIGNALS | TEM_SIGNALS
+)
 """All signals that are logged at the ``"standard"`` diagnostic tier.
 
 A :class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback` configured with
@@ -148,6 +199,10 @@ __all__ = [
     # VAR
     "LOSS_TOTAL", "LOSS_OBS_NLL", "LOSS_LATENT", "LOSS_REG", "LATENT_POST_NORM",
     "LATENT_PRIOR_NORM", "VAR_SIGNALS",
+    # TEM
+    "LOSS_GRID_KL", "LOSS_PLACE_CONSISTENCY", "LOSS_OBS_INFER", "LOSS_OBS_RETRIEVED",
+    "LOSS_OBS_ANCESTRAL", "LOSS_PLACE_TRANSITION", "LOSS_PLACE_SENSORY", "GRID_POST_NORM",
+    "GRID_PRIOR_NORM", "PLACE_POST_NORM", "PLACE_PRIOR_NORM", "TEM_SIGNALS",
     # Aggregate
     "STANDARD_SIGNALS",
 ]  # fmt: skip

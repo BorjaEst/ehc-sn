@@ -57,13 +57,13 @@ class ACTControllerConfig(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class ACTBackbone[BkState](RolloutBackbone[BkState], Protocol):
+class ACTRolloutBackbone[ModelState, ModelOutput](RolloutBackbone[ModelState, ModelOutput], Protocol):
     """Backbone protocol expected by :class:`ACTController`."""
 
 
 # =================================================================================================
 @dataclass
-class ACTState[ModelState](RolloutState[ModelState]):
+class ACTRolloutState[ModelState](RolloutState[ModelState]):
     """Controller carry/state for ACT rollouts."""
 
 
@@ -94,7 +94,7 @@ class ACTOutput(DetachMixin):
 
 
 # =================================================================================================
-class ACTController[BkState](BaseController[BkState, ACTControllerConfig]):
+class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig]):
     """ACT controller for supervised HRM v1 deliberation.
 
     The controller:
@@ -108,19 +108,19 @@ class ACTController[BkState](BaseController[BkState, ACTControllerConfig]):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: ACTBackbone,  config: ACTControllerConfig,
+        self, backbone: ACTRolloutBackbone,  config: ACTControllerConfig,
     ) -> None:  # fmt: skip
         """Create a controller.
 
         Args:
-            backbone: Model implementing :class:`ACTBackbone`.
+            backbone: Model implementing :class:`ACTRolloutBackbone`.
             config: Controller configuration.
         """
         super().__init__(backbone=backbone, config=config)
 
     def initial_state(  # -------------------------------------------------------------------------
         self, batch_sample: Batch
-    ) -> ACTState[BkState]:  # fmt: skip
+    ) -> ACTRolloutState[ModelState]:  # fmt: skip
         """Build an initial ACT state from a batch sample.
 
         Args:
@@ -128,18 +128,18 @@ class ACTController[BkState](BaseController[BkState, ACTControllerConfig]):
                 ``(B, ...)``.
 
         Returns:
-            Initialized :class:`ACTState`.
+            Initialized :class:`ACTRolloutState`.
         """
         slots = self.initial_slots(batch_sample)
-        return ACTState(
+        return ACTRolloutState(
             model_state=slots.model_state, steps=slots.steps, halted=slots.halted,
             data=slots.data,
         )  # fmt: skip
 
     def step(  # ----------------------------------------------------------------------------------
-        self, state: ACTState[BkState], batch: Batch,
+        self, state: ACTRolloutState[ModelState], batch: Batch,
         allow_halt: bool = True, explore: bool = True, td_target: bool = True,
-    ) -> Tuple[ACTState[BkState], ACTOutput]:  # fmt: skip
+    ) -> Tuple[ACTRolloutState[ModelState], ACTOutput]:  # fmt: skip
         """Advance the controller by one step.
 
         Args:
@@ -154,12 +154,12 @@ class ACTController[BkState](BaseController[BkState, ACTControllerConfig]):
         """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, logits, theta_cls = self.backbone(data["inputs"], model_state)
+        model_state, logits, theta_cls = self.backbone(data, model_state)
 
         steps = self.advance_steps(state)
         action, done = self._select_action_and_done(logits, steps, allow_halt, explore)
 
-        state = ACTState(model_state=model_state, steps=steps, halted=done, data=data)
+        state = ACTRolloutState(model_state=model_state, steps=steps, halted=done, data=data)
         output = ACTOutput(logits=logits, theta_cls=theta_cls, action=action)
 
         # TD(0) bootstrap target for the Q-head.
@@ -182,7 +182,7 @@ class ACTController[BkState](BaseController[BkState, ACTControllerConfig]):
             steps: Per-slot step counters of shape ``(B,)``.
 
         Returns:
-            Sigmoid-normalised TD target of shape ``(B,)``.
+            Sigmoid-normalized TD target of shape ``(B,)``.
         """
         with torch.no_grad():
             _, _, next_q = self.backbone(data["inputs"], model_state)
@@ -193,12 +193,6 @@ class ACTController[BkState](BaseController[BkState, ACTControllerConfig]):
         target = torch.where(is_last_step, next_q[..., done_action], next_q.max(dim=-1).values)
 
         return torch.sigmoid(target)
-
-    def refresh_slot_data(  # ---------------------------------------------------------------------
-        self, batch: Batch, state: ACTState[BkState]
-    ) -> dict[str, Tensor]:  # fmt: skip
-        """Replace data for halted slots with incoming batch data."""
-        return super().refresh_slot_data(batch, state)
 
     def _select_action_and_done(  # ---------------------------------------------------------------
         self, logits: list[Tensor], steps: Tensor, allow_halt: bool, explore: bool,
@@ -221,4 +215,4 @@ class ACTController[BkState](BaseController[BkState, ACTControllerConfig]):
 
 
 # =================================================================================================
-__all__ = ["ACTBackbone", "ACTControllerConfig", "ACTController", "ACTState", "ACTOutput"]
+__all__ = ["ACTRolloutBackbone", "ACTControllerConfig", "ACTController", "ACTRolloutState", "ACTOutput"]

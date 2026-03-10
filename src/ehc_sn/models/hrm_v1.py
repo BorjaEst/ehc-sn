@@ -161,11 +161,13 @@ class HRMState(DetachMixin):
 
 # =================================================================================================
 class HRModelV1(nn.Module):
+    """ """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: ModelSettings_V1, *,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
+        """ """
         super().__init__()
         self._config = config
 
@@ -181,6 +183,7 @@ class HRModelV1(nn.Module):
 
     @property
     def config(self) -> ModelSettings_V1:
+        """ """
         return self._config
 
     def reset_parameters(  # ----------------------------------------------------------------------
@@ -208,21 +211,21 @@ class HRModelV1(nn.Module):
     def init_state(  # ---------------------------------------------------------------------------
         self, batch_size: int,
     ) -> HRMState:  # fmt: skip
-        """Create a fresh recurrent state (``ACTBackbone`` protocol)."""
+        """Create a fresh recurrent state (``ACTRolloutBackbone`` protocol)."""
         return HRMState(pfc=self.pfc.init_state(batch_size))
 
     def reset_state(  # --------------------------------------------------------------------------
         self, reset_flag: Tensor, state: HRMState,
     ) -> HRMState:  # fmt: skip
-        """Selectively reset rows of the recurrent state (``ACTBackbone`` protocol)."""
+        """Selectively reset rows of the recurrent state (``ACTRolloutBackbone`` protocol)."""
         return HRMState(pfc=self.pfc.reset_state(state.pfc, reset_flag))
 
     def forward(  # -------------------------------------------------------------------------------
-        self, inputs: Tensor, state: Optional[HRMState] = None,
+        self, batch: Batch, state: Optional[HRMState] = None,
     ) -> Tuple[HRMState, Tuple[Tensor, Tensor], Tensor]:  # fmt: skip
-        """Forward pass through the HRM (``ACTBackbone`` protocol)."""
-        state = state or self.init_state(batch_size=inputs.shape[0])
-        x = self.embed_inputs(inputs)  # (B, S, D) — cell tokens only
+        """Forward pass through the HRM (``ACTRolloutBackbone`` protocol)."""
+        state = state or self.init_state(batch_size=batch["inputs"].shape[0])
+        x = self.embed_inputs(batch["inputs"])  # (B, S, D) — cell tokens only
 
         state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H is (B, S+1, D)
         logits = self.lm_head(z_H[:, 1:])  # Strip CLS → (B, S, vocab_size)

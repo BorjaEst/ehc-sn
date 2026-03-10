@@ -8,6 +8,7 @@ outputs are per-example loss values of shape ``(B,)``.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import torch
@@ -15,6 +16,21 @@ from torch import Tensor
 from torch.distributions import Normal
 
 LatentCode = Tensor | Sequence[Tensor]
+
+
+# =================================================================================================
+@dataclass(frozen=True)
+class LatentRelation:
+    """Named binary relation between two semantic latent-code sides.
+
+    Each side may itself be a single tensor or a multi-block latent code. The
+    relation object stays agnostic to whether the two sides represent a
+    posterior/prior pair, two transition states, or another semantic
+    comparison.
+    """
+
+    lhs: LatentCode
+    rhs: LatentCode
 
 
 # =================================================================================================
@@ -103,6 +119,6 @@ def nll_consistency(  # --------------------------------------------------------
 
 # =================================================================================================
 __all__ = [
-    "LatentCode", "iter_latent_codes", "mean_latent_norm", "mse_consistency", "nll_consistency",
-    "sum_latent_terms",
+    "LatentCode", "LatentRelation", "iter_latent_codes", "mean_latent_norm", "mse_consistency",
+    "nll_consistency", "sum_latent_terms",
 ]  # fmt: skip

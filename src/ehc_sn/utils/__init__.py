@@ -96,7 +96,7 @@ def inv_var_weight(mus, sigmas):
     inv_var_var = 1.0 / torch.sum(1.0 / (sigmas**2), dim=0)
     # Calculate inverse variance weighted average
     inv_var_avg = torch.sum(mus / (sigmas**2), dim=0) * inv_var_var
-    # Convert weigthed variance to sigma
+    # Convert weighted variance to sigma
     inv_var_sigma = torch.sqrt(inv_var_var)
     # And return results
     return inv_var_avg, inv_var_sigma
@@ -104,25 +104,25 @@ def inv_var_weight(mus, sigmas):
 
 def softmax(o):
     """
-    Applies softmax to tensors of inputs, using torch softmax funcion
+    Applies softmax to tensors of inputs, using torch softmax function
     Assumes o is a 1D vector, or batches of row vectors with the batches along dim 0
     """
     # Return torch softmax
     return torch.nn.Softmax(dim=-1)(o)
 
 
-def normalise(o):
+def normalize(o):
     """
-    Normalises vector of input to unit norm, using torch normalise funcion
+    normalizes vector of input to unit norm, using torch normalize function
     Assumes o is a 1D vector, or batches of row vectors with the batches along dim 0
     """
-    # Return torch normalise with p=2 for L2 norm
+    # Return torch normalize with p=2 for L2 norm
     return torch.nn.functional.normalize(o, p=2, dim=-1)
 
 
 def relu(o):
     """
-    Applies rectified linear activation unit to tensors of inputs, using torch relu funcion
+    Applies rectified linear activation unit to tensors of inputs, using torch relu function
     """
     # Return torch relu
     return torch.nn.functional.relu(o)
@@ -130,7 +130,7 @@ def relu(o):
 
 def leaky_relu(o):
     """
-    Applies leaky (meaning small negative slope instead of zeros) rectified linear activation unit to tensors of inputs, using torch leaky relu funcion
+    Applies leaky (meaning small negative slope instead of zeros) rectified linear activation unit to tensors of inputs, using torch leaky relu function
     """
     # Return torch leaky relu [torch.nn.functional.leaky_relu(val) for val in o] if type(o) is list else
     return torch.nn.functional.leaky_relu(o)
@@ -180,7 +180,7 @@ def cross_entropy(value, target):
     """
     # Return torch BCE loss
     if type(value) is list:
-        loss = [torch.nn.CrossEntropyLoss(reduction="none")(val, targ) for val, targ in zip(value, target)]
+        loss = [torch.nn.CrossEntropyLoss(reduction="none")(v, t) for v, t in zip(value, target)]
     else:
         loss = torch.nn.CrossEntropyLoss(reduction="none")(value, target)
     return loss
@@ -215,7 +215,7 @@ def make_directories():
     # Initialise the run and dir_check to create a new run folder within the current date
     run = 0
     dir_check = True
-    # Initialise all pahts
+    # Initialise all paths
     train_path, model_path, save_path, script_path, run_path = None, None, None, None, None
     # Find the current run: the first run that doesn't exist yet
     while dir_check:
@@ -247,7 +247,7 @@ def set_directories(date, run):
     """
     Returns directories for storing data during a model training run from a given previous training run
     """
-    # Initialise all pahts
+    # Initialise all paths
     train_path, model_path, save_path, script_path, run_path = None, None, None, None, None
     # Find the current run: the first run that doesn't exist yet
     run_path = "../Summaries/" + date + "/run" + str(run) + "/"
@@ -267,7 +267,7 @@ def make_logger(run_path):
     # Create new logger
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
-    # Remove anly existing handlers so you don't output to old files, or to new files twice
+    # Remove any existing handlers so you don't output to old files, or to new files twice
     logger.handlers = []
     # Create a file handler, but only if the handler does
     handler = logging.FileHandler(run_path + "report.log")
@@ -362,7 +362,7 @@ def create_downsample_matrix(n: List[int], n_subsampled: List[int]) -> List[Matr
 def create_repeat_matrices(n_subsampled: List[int], n: List[int]) -> List[Matrix]:
     """Create repeat matrices.
 
-    Matrix for repeating cells information using elementwise product
+    Matrix for repeating cells information using element wise product
     after matrix multiplication.
 
     Args:
@@ -684,7 +684,7 @@ def make_hebbian_write_mask(n_stages: int, shape: List[int], f_init: List[float]
 
     - Within *stages* modules (``f < n_stages``): allow only low→high frequency
       connections based on ``f_init[from] <= f_init[to]``.
-    - Within *reast* modules (``f >= n_stages``): same low→high rule.
+    - Within *attractor* modules (``f >= n_stages``): allow all connections (fully recurrent).
     - Between modules: allow all connections (bidirectional).
 
     Args:
