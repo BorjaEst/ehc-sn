@@ -138,7 +138,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
 
     def step(  # ----------------------------------------------------------------------------------
         self, state: ACTRolloutState[ModelState], batch: Batch,
-        allow_halt: bool = True, explore: bool = True, td_target: bool = True,
+        allow_halt: bool = True, explore: bool = True, td_target: bool = True, **_: Any,
     ) -> Tuple[ACTRolloutState[ModelState], ACTOutput]:  # fmt: skip
         """Advance the controller by one step.
 

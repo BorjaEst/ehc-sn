@@ -9,7 +9,7 @@ targets. Termination is controlled only by ``max_steps``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
 from torch import Tensor
@@ -104,7 +104,8 @@ class VARController[ModelState](BaseController[ModelState, VARControllerConfig])
         )  # fmt: skip
 
     def step(  # ----------------------------------------------------------------------------------
-        self, state: VARRolloutState[ModelState], batch: Batch,
+        self, state: VARRolloutState[ModelState], batch: Batch, *,
+        allow_halt: bool = True, explore: bool = True, **_: Any,
     ) -> tuple[VARRolloutState[ModelState], VAROutput]:  # fmt: skip
         """Advance the controller by one variational step."""
         data = self.refresh_slot_data(batch, state)

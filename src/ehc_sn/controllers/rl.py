@@ -22,7 +22,7 @@ What this module does NOT do:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Protocol, Tuple
+from typing import Any, Optional, Protocol, Tuple
 
 import torch
 from pydantic import BaseModel, Field
@@ -168,7 +168,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
 
     def step(  # ----------------------------------------------------------------------------------
         self, state: RLRolloutState[ModelState], batch: Batch, *,
-        allow_halt: bool = True, explore: bool = True,
+        allow_halt: bool = True, explore: bool = True, **_: Any,
     ) -> Tuple[RLRolloutState[ModelState], RLOutput]:  # fmt: skip
         """Advance the controller by one step.
 

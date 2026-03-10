@@ -156,7 +156,8 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         )  # fmt: skip
 
     def step(  # ----------------------------------------------------------------------------------
-        self, state: TEMRolloutState[ModelState], batch: Batch,
+        self, state: TEMRolloutState[ModelState], batch: Batch, *,
+        allow_halt: bool = True, explore: bool = True, **_: Any,
     ) -> tuple[TEMRolloutState[ModelState], TEMOutput]:  # fmt: skip
         """Advance the controller by one variational step."""
         data = self.refresh_slot_data(batch, state)
