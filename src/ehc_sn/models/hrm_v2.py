@@ -399,9 +399,11 @@ class TrainingModel(L.LightningModule):
         """
         total_steps = int(self.trainer.estimated_stepping_batches)
 
-        # Optimizer A: supervised — all model params EXCEPT pfc.estimator (vmPFC)
+        # Optimizer A: supervised — backbone + LM params only.
         vmPFC_ids = {id(p) for p in self.model.pfc.estimator.parameters()}
-        sup_params = [p for p in self.model.parameters() if id(p) not in vmPFC_ids]
+        str_ids = {id(p) for p in self.model.str.parameters()}
+        excluded_ids = vmPFC_ids | str_ids
+        sup_params = [p for p in self.model.parameters() if id(p) not in excluded_ids]
         opt_sup = AdamATan2(sup_params, self.config.optimizer_supervised)
         # Optimizer B: RL — STR actor-critic only (strictly isolated)
         opt_rl = AdamATan2(list(self.model.str.parameters()), self.config.optimizer_rl)

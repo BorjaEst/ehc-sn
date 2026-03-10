@@ -146,14 +146,15 @@ class RLLossHead(TokenLossHeadBase[RLController, RLLossConfig]):
         dist = Categorical(logits=outputs.q_logits)
         logp = dist.log_prob(outputs.action)  # (B,)
         entropy = dist.entropy()  # (B,)
-        advantage = (outputs.reward.squeeze(-1) - outputs.value_logits.squeeze(-1)).detach()  # (B,)
+        reward, value = outputs.reward.squeeze(-1), outputs.value_logits.squeeze(-1)  # (B,)
+        advantage = (reward - value).detach()  # (B,)
         q_a = outputs.q_logits.gather(1, outputs.action.unsqueeze(-1)).squeeze(-1)  # (B,)
 
         if not is_warmup:  # Compute RL losses only after warmup phase
             loss_actor = -(logp * advantage).sum()
-            loss_critic = F.mse_loss(outputs.value_logits, outputs.reward, reduction="sum")
+            loss_critic = F.mse_loss(value, reward, reduction="sum")
             loss_entropy = -entropy.sum()  # negative so minimizing loss maximizes entropy
-            loss_q_value = F.mse_loss(q_a, outputs.reward.squeeze(-1).detach(), reduction="sum")
+            loss_q_value = F.mse_loss(q_a, reward.detach(), reduction="sum")
         else:
             loss_actor = torch.tensor(0.0, device=outputs.lm_logits.device)
             loss_critic = torch.tensor(0.0, device=outputs.lm_logits.device)
