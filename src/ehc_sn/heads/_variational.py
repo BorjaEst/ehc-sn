@@ -62,26 +62,6 @@ class VariationalLossStep:
 
 
 # =================================================================================================
-def build_variational_step_metrics(  # -----------------------------------------------------------
-    extras: Dict[str, RatioStat], *, batch_size: int, like: Tensor,
-) -> StepMetrics:  # fmt: skip
-    """Build generic metrics for a variational step.
-
-    Variational heads do not currently report token or rollout accuracy, so
-    those aggregates are zero-filled while loss ratios live in ``extras``.
-    """
-    zero = like.new_zeros(())
-    batch_count = like.new_tensor(batch_size, dtype=torch.float32)
-    return StepMetrics(
-        episode=RolloutAgg(completed_count=zero, eligible_count=zero, accuracy_sum=zero, exact_sum=zero, steps_sum=zero),
-        episode_tokens=TokenAgg(token_correct_sum=zero, token_count_sum=zero),
-        step=TransitionAgg(evaluated_count=batch_count, eligible_count=batch_count, accuracy_sum=zero, exact_sum=zero, steps_sum=zero),
-        step_tokens=TokenAgg(token_correct_sum=zero, token_count_sum=zero),
-        extras=extras,
-    )  # fmt: skip
-
-
-# =================================================================================================
 class VariationalLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT](
     BaseLossHead[ControllerT, ConfigT]
 ):  # fmt: skip
@@ -140,6 +120,26 @@ class VariationalLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT](
             S.LOSS_LATENT: losses.loss_latent_sum.detach(),
             S.LOSS_REG: losses.loss_reg_sum.detach(),
         }
+
+# =================================================================================================
+def build_variational_step_metrics(  # -----------------------------------------------------------
+    extras: Dict[str, RatioStat], *, batch_size: int, like: Tensor,
+) -> StepMetrics:  # fmt: skip
+    """Build generic metrics for a variational step.
+
+    Variational heads do not currently report token or rollout accuracy, so
+    those aggregates are zero-filled while loss ratios live in ``extras``.
+    """
+    zero = like.new_zeros(())
+    batch_count = like.new_tensor(batch_size, dtype=torch.float32)
+    return StepMetrics(
+        episode=RolloutAgg(completed_count=zero, eligible_count=zero, accuracy_sum=zero, exact_sum=zero, steps_sum=zero),
+        episode_tokens=TokenAgg(token_correct_sum=zero, token_count_sum=zero),
+        step=TransitionAgg(evaluated_count=batch_count, eligible_count=batch_count, accuracy_sum=zero, exact_sum=zero, steps_sum=zero),
+        step_tokens=TokenAgg(token_correct_sum=zero, token_count_sum=zero),
+        extras=extras,
+    )  # fmt: skip
+
 
 # =================================================================================================
 def require_latent_relation(  # ------------------------------------------------------------------

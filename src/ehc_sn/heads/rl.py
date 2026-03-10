@@ -131,26 +131,6 @@ class RLLossHead(TokenLossHeadBase[RLController, RLLossConfig]):
         """
         super().__init__(controller=controller, config=config)
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, batch: Batch, carry: RLRolloutState, *, is_warmup: bool = False, **options: Any,
-    ) -> Tuple[RLLossStep, RLRolloutState, bool]:  # fmt: skip
-        """Run one controller step and compute losses/metrics.
-
-        Args:
-            batch: Incoming batch used both for the step inputs and as a source
-                of fresh samples for partial resets.
-            carry: Current rollout state.
-            is_warmup: If True, RL losses are suppressed (supervised loss only).
-            **options: Forwarded to :meth:`RLController.step` (e.g. exploration).
-
-        Returns:
-            ``(step, new_carry, all_halted)`` where ``all_halted`` indicates that
-            all slots are done for the current carry.
-        """
-        carry, outputs = self.controller.step(carry, batch, **options)
-        step_output = self._run_token_step(batch, carry, outputs, is_warmup=is_warmup)
-        return step_output, carry, bool(carry.halted.all())
-
     def compute_losses(  # ------------------------------------------------------------------------
         self, outputs: RLOutput, labels: Tensor, stats: AccuracyStats, *,
         is_warmup: bool = False, **_: Any,

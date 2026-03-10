@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import islice, tee
-from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Protocol, Tuple
+from itertools import islice
+from typing import Any, Dict, Iterator, Mapping, Optional, Protocol, Tuple
 
 from torch import Tensor
 
