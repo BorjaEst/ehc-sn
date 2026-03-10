@@ -139,7 +139,7 @@ def compute_lm_loss_sum(  # ----------------------------------------------------
 
 # =================================================================================================
 def build_token_step_metrics(  # ------------------------------------------------------------------
-    *, steps: Tensor, completed: Tensor, stats: AccuracyStats, extras: dict[str, RatioStat],
+    steps: Tensor, completed: Tensor, stats: AccuracyStats, extras: dict[str, RatioStat],
 ) -> StepMetrics:  # fmt: skip
     """Build generic per-step token-supervision metrics."""
     eligible_mask = stats.loss_counts > 0
