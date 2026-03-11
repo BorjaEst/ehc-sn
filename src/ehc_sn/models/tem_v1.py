@@ -79,12 +79,10 @@ class ModelSettings_V1(BaseModel):
         ge=1,
         description="Number of discrete observation dimensions (input to autoencoder).",
     )
-
     autoencoder: AutoencoderSettings = Field(
         ...,
         description="Settings for the autoencoder module used for observation compression.",
     )
-
     lec_projection: ProjectionSettings = Field(
         ...,
         description=(
@@ -92,7 +90,6 @@ class ModelSettings_V1(BaseModel):
             "This module projects LEC features into the format expected by HPC memory."
         ),
     )
-
     mec_projection: ProjectionSettings = Field(
         ...,
         description=(
@@ -332,7 +329,7 @@ class TrainingModel(L.LightningModule):
 
     def configure_optimizers(  # -------------------------------------------------------------------
         self,
-    ) -> Tuple[List[Optimizer], List[SequentialLR]]:  # fmt: skip
+    ) -> tuple[list[Optimizer], list[SequentialLR]]:  # fmt: skip
         """ """
         total_steps = int(self.trainer.estimated_stepping_batches)
 
