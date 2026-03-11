@@ -284,7 +284,7 @@ class HRModelV2(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, batch: Batch, state: Optional[HRMState] = None,
-    ) -> Tuple[HRMState, Tuple[Tensor, Tensor, Tensor], Tensor]:  # fmt: skip
+    ) -> tuple[HRMState, tuple[Tensor, Tensor, Tensor], Tensor]:  # fmt: skip
         """Run one model step.
 
         Args:
@@ -387,7 +387,7 @@ class TrainingModel(L.LightningModule):
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
-    ) -> Tuple[List[Optimizer], List[SequentialLR]]:  # fmt: skip
+    ) -> tuple[list[Optimizer], list[SequentialLR]]:  # fmt: skip
         """Build optimizers and schedulers.
 
         Returns:

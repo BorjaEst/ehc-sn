@@ -222,7 +222,7 @@ class HRModelV1(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, batch: Batch, state: Optional[HRMState] = None,
-    ) -> Tuple[HRMState, Tuple[Tensor, Tensor], Tensor]:  # fmt: skip
+    ) -> tuple[HRMState, tuple[Tensor, Tensor], Tensor]:  # fmt: skip
         """Forward pass through the HRM (``ACTRolloutBackbone`` protocol)."""
         state = state or self.init_state(batch_size=batch["inputs"].shape[0])
         x = self.embed_inputs(batch["inputs"])  # (B, S, D) — cell tokens only
@@ -323,7 +323,7 @@ class TrainingModel(L.LightningModule):
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
-    ) -> Tuple[List[Optimizer], List[SequentialLR]]:  # fmt: skip
+    ) -> tuple[list[Optimizer], list[SequentialLR]]:  # fmt: skip
         """Build optimizers and LR schedulers.
 
         Returns:
