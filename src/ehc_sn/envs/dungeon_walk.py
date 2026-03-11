@@ -79,7 +79,7 @@ class DungeonWalk(EnvBase):
     batch_locked = True
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: EnvConfig, batch_size: int, device: torch.device | str | None = None,
+        self, config: EnvConfig, batch_size: int, device: Device | str | None = None,
     ) -> None:  # fmt: skip
         super().__init__(batch_size=[batch_size], device=device)
         self._config = config
