@@ -8,7 +8,7 @@ from typing import Iterable, Optional, Tuple
 import numpy as np
 
 
-def reshape_grid(seq: np.ndarray, *, grid_shape: Optional[Tuple[int, int]] = None) -> np.ndarray:
+def reshape_grid(seq: np.ndarray, *, grid_shape: Optional[tuple[int, int]] = None) -> np.ndarray:
     """Reshape a flat sequence into a 2D grid.
 
     If ``grid_shape`` is not provided, infer a square grid and validate it.
@@ -20,9 +20,7 @@ def reshape_grid(seq: np.ndarray, *, grid_shape: Optional[Tuple[int, int]] = Non
             raise ValueError(f"Expected square sequence length, got {arr.size}")
         grid_shape = (n, n)
     if grid_shape[0] * grid_shape[1] != arr.size:
-        raise ValueError(
-            f"Expected sequence length {grid_shape[0] * grid_shape[1]}, got {arr.size}"
-        )
+        raise ValueError(f"Expected sequence length {grid_shape[0] * grid_shape[1]}, got {arr.size}")
     return arr.reshape(grid_shape)
 
 

@@ -229,7 +229,7 @@ def subdivide_axes(  # ---------------------------------------------------------
 class _MosaicChoice:
     nrows: int
     ncols: int
-    key: Tuple[float, float, int]
+    key: tuple[float, float, int]
 
 
 # =================================================================================================
@@ -317,7 +317,7 @@ def mosaic_axes(  # ------------------------------------------------------------
 # =================================================================================================
 def _get_figure_size_inches(  # -------------------------------------------------------------------
     fig: Any,
-) -> Tuple[float, float]:  # fmt: skip
+) -> tuple[float, float]:  # fmt: skip
     """Return `(width_in, height_in)` for a matplotlib Figure-like object."""
     size = getattr(fig, "get_size_inches", None)
     if callable(size):
