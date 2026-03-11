@@ -11,15 +11,15 @@ Notes:
 
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 import torch
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from ehc_sn import utils
-from ehc_sn.modules import MLP
-from ehc_sn.types import Activation, LocationBelief
+from ehc_sn.modules.mlp import MLP
+from ehc_sn.types import Activation, Device, Dtype, LocationBelief
 
 
 # =================================================================================================
@@ -43,37 +43,35 @@ class GroundLocSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True)
 
 # =================================================================================================
 class GroundLocation(nn.Module):
-    def __init__(self, shape: List[int], settings: GroundLocSettings):
+    """ """  # TODO: docstring
+
+    def __init__(  # ------------------------------------------------------------------------------
+        self, shape: List[int], config: Optional[GroundLocSettings],
+        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
+    ) -> None:  # fmt: skip
         """Initialize grounded-location inference.
 
         Args:
             shape: Grounded-location feature sizes per frequency module.
-            settings: Grounded-location inference settings.
+            config: Grounded-location inference config.
         """
         super().__init__()
+        self._config = config
+
         self._shape, self._n_freq = list(shape), len(shape)
-        self._activation_fn = utils.activation_from_str(settings.activation)
-        self._settings = settings
+        self._activation_fn = utils.activation_from_str(config.activation)
 
         # Uncertainty from predicted grounded location
         self.uncertainty_mlp = MLP(shape, shape, [torch.tanh, torch.exp], [2 * n for n in shape])
 
     @property
-    def settings(self) -> GroundLocSettings:
-        """Return grounded-location inference settings."""
-        return self._settings
+    def config(self) -> GroundLocSettings:
+        """Return grounded-location inference config."""
+        return self._config
 
-    @property
-    def shape(self) -> List[int]:
-        """Return per-frequency feature sizes."""
-        return self._shape
-
-    @property
-    def n_freq(self) -> int:
-        """Return number of frequency modules."""
-        return self._n_freq
-
-    def forward(self, x_: List[Tensor], g_: List[Tensor]) -> LocationBelief:
+    def forward(  # -------------------------------------------------------------------------------
+        self, x_: List[Tensor], g_: List[Tensor],
+    ) -> LocationBelief:  # fmt: skip
         """Infer grounded-location mean and uncertainty.
 
         Args:
@@ -90,7 +88,13 @@ class GroundLocation(nn.Module):
         sigma_p = self.uncertainty_mlp(mu_p)
         return LocationBelief(mean=mu_p, uncertainty=sigma_p)
 
-    def activation(self, p: Tensor) -> Tensor:
+    def activation(  # ----------------------------------------------------------------------------
+        self, p: Tensor,
+    ) -> Tensor:  # fmt: skip
         """Apply the configured activation with clamping."""
-        p = torch.clamp(p, min=self.settings.clamp_min, max=self.settings.clamp_max)
+        p = torch.clamp(p, min=self.config.clamp_min, max=self.config.clamp_max)
         return self._activation_fn(p)
+
+
+# =================================================================================================
+__all__ = ["GroundLocSettings", "GroundLocation"]
