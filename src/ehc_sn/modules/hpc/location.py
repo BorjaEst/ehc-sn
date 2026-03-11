@@ -23,7 +23,7 @@ from ehc_sn.types import Activation, Device, Dtype, LocationBelief
 
 
 # =================================================================================================
-class GroundLocSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class GroundLocSettings(BaseModel, extra="forbid"):
     """Settings for location distribution modules."""
 
     activation: Activation = Field(
@@ -46,7 +46,7 @@ class GroundLocation(nn.Module):
     """ """  # TODO: docstring
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, shape: List[int], config: Optional[GroundLocSettings],
+        self, shape: list[int], config: Optional[GroundLocSettings],
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """Initialize grounded-location inference.
@@ -70,7 +70,7 @@ class GroundLocation(nn.Module):
         return self._config
 
     def forward(  # -------------------------------------------------------------------------------
-        self, x_: List[Tensor], g_: List[Tensor],
+        self, x_: list[Tensor], g_: list[Tensor],
     ) -> LocationBelief:  # fmt: skip
         """Infer grounded-location mean and uncertainty.
 

@@ -23,7 +23,7 @@ from ehc_sn.types import Activation, Device, Dtype
 
 
 # =================================================================================================
-class AttractorSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class AttractorSettings(BaseModel, extra="forbid"):
     """Settings for attractor dynamics modules."""
 
     kappa: float = Field(
@@ -58,7 +58,7 @@ class AttractorNetwork(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, shape: List[int], config: Optional[AttractorSettings] = None,
+        self, shape: list[int], config: Optional[AttractorSettings] = None,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """Initialize the attractor.
@@ -79,8 +79,8 @@ class AttractorNetwork(nn.Module):
         return self._config
 
     def forward(  # -------------------------------------------------------------------------------
-        self, p_query: List[Tensor], M: Tensor, *, masks: Optional[List[Tensor]] = None,
-    ) -> List[Tensor]:  # fmt: skip
+        self, p_query: list[Tensor], M: Tensor, *, masks: Optional[list[Tensor]] = None,
+    ) -> list[Tensor]:  # fmt: skip
         """Run attractor retrieval.
 
         Args:

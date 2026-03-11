@@ -15,7 +15,7 @@ Naming conventions:
 - Variables suffixed with an underscore (e.g. `x_`, `g_`) refer to values that
     have been projected into the *memory* feature space.
 - Grounded location codes `p` and abstract location codes `g` are represented
-    as multi-scale codes: `List[Tensor]` (one tensor per frequency module).
+    as multi-scale codes: `list[Tensor]` (one tensor per frequency module).
 
 Shape conventions:
 
@@ -40,11 +40,9 @@ from ehc_sn.modules.hpc.memory import HebbianUpdate, HebbianUpdateSettings
 from ehc_sn.types import Device, Dtype, LocationBelief, Matrix, MemoryState
 from ehc_sn.utils.detach import DetachMixin
 
-__all__ = ["HPCModel", "HPCState"]
-
 
 # =================================================================================================
-class HPCSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class HPCSettings(BaseModel, extra="forbid"):
     """Settings for HPC modules."""
 
     n_stages: int = Field(
@@ -52,11 +50,11 @@ class HPCSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
         ge=1,
         description="Number of stages for hierarchical attractor retrieval.",
     )
-    shape: List[int] = Field(
+    shape: list[int] = Field(
         ...,
         description="Feature dimensionality per frequency module.",
     )
-    f_init: List[float] = Field(
+    f_init: list[float] = Field(
         ...,
         description="Initial feature scales per frequency module for Hebbian write mask.",
     )
@@ -104,20 +102,20 @@ class HPCState(DetachMixin):
     """
 
     location: LocationBelief  # State and uncertainty over grounded locations
-    _memory: List[Matrix]  # Memory matrices
+    _memory: list[Matrix]  # Memory matrices
 
     @property
-    def cells(self) -> List[Tensor]:
+    def cells(self) -> list[Tensor]:
         """Return grounded location features."""
         return self.location.mean
 
     @property
-    def uncertainty(self) -> Optional[List[Tensor]]:
+    def uncertainty(self) -> Optional[list[Tensor]]:
         """Return grounded location uncertainty."""
         return self.location.uncertainty
 
     @property
-    def memory(self) -> Optional[List[Matrix]]:
+    def memory(self) -> Optional[list[Matrix]]:
         """Return Hebbian memory matrices."""
         return self._memory
 
@@ -145,6 +143,7 @@ class HPCModel(nn.Module):
         self, config: HPCSettings, 
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
+        """ """
         super().__init__()
         self._config = config
         shape, n_stages, f_init = config.shape, config.n_stages, config.f_init
@@ -180,7 +179,7 @@ class HPCModel(nn.Module):
         pass
 
     def init_state(  # ----------------------------------------------------------------------------
-        self, *, batch_size: int, 
+        self, batch_size: int, *, 
         device: Optional[Device] = None, memory: Optional[MemoryState] = None,
     ) -> HPCState:  # fmt: skip
         """Create an initial `HPCState`.
@@ -201,10 +200,18 @@ class HPCModel(nn.Module):
         memory = memory or self.init_memory(batch_size=batch_size, device=device)
         return HPCState(location=self.location, _memory=memory)
 
+    def reset_state(  # ---------------------------------------------------------------------------
+        self, state: HPCState,  # TODO: define based in other modules reset_state
+    ) -> HPCState:  # fmt: skip
+        """ """
+        raise NotImplementedError(
+            "HPC reset_state not implemented. Use init_state or implement reset logic here."
+        )
+
     def init_memory(  # ---------------------------------------------------------------------------
-        self, *, batch_size: int, 
+        self, batch_size: int, *, 
         device: Optional[Device] = None,
-    ) -> List[Tensor]:  # fmt: skip
+    ) -> list[Tensor]:  # fmt: skip
         """Initialize Hebbian memory matrices.
 
         Args:
@@ -239,12 +246,13 @@ class HPCModel(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, *, state: HPCState,
-    ) -> Tuple[List[Tensor], HPCState]:  # fmt: skip
+    ) -> tuple[list[Tensor], HPCState]:  # fmt: skip
+        """ """
         raise NotImplementedError("HPC forward not implemented. Use generative() or inference().")
 
     def generative(  # ----------------------------------------------------------------------------
-        self, p_g: List[Tensor], state: HPCState,
-    ) -> Tuple[List[Tensor], HPCState]:  # fmt: skip
+        self, p_g: list[Tensor], state: HPCState,
+    ) -> tuple[list[Tensor], HPCState]:  # fmt: skip
         """Return a grounded location sample/mean from a provided distribution.
 
         This is used by TEM when generating grounded location `p` from retrieved
@@ -264,8 +272,8 @@ class HPCModel(nn.Module):
         return p_gen, state.new(p_gen, state.uncertainty)
 
     def inference(  # -----------------------------------------------------------------------------
-        self, x_: List[Tensor], g_: List[Tensor], state: HPCState,
-    ) -> Tuple[List[Tensor], HPCState]:  # fmt: skip
+        self, x_: list[Tensor], g_: list[Tensor], state: HPCState,
+    ) -> tuple[list[Tensor], HPCState]:  # fmt: skip
         """Infer grounded location from projected sensory and abstract features.
 
         Args:
@@ -283,8 +291,8 @@ class HPCModel(nn.Module):
         return p_inf, state.new(p_inf, transition.uncertainty)
 
     def recall(  # --------------------------------------------------------------------------------
-        self, p_query: List[Tensor], state: HPCState, *, mode: Literal["full", "hierarchical"],
-    ) -> List[Tensor]:  # fmt: skip
+        self, p_query: list[Tensor], state: HPCState, *, mode: Literal["full", "hierarchical"],
+    ) -> list[Tensor]:  # fmt: skip
         """Retrieve grounded location via attractor dynamics.
 
         Args:
@@ -308,7 +316,7 @@ class HPCModel(nn.Module):
         raise ValueError(f"Invalid mode '{mode}'. Expected 'full' or 'hierarchical'.")
 
     def update(  # --------------------------------------------------------------------------------
-        self, p_inf: List[Tensor], p_gen_gi: List[Tensor], p_xi: Optional[List[Tensor]], state: HPCState
+        self, p_inf: list[Tensor], p_gen_gi: list[Tensor], p_xi: Optional[list[Tensor]], state: HPCState
     ) -> HPCState:  # fmt: skip
         """Apply a Hebbian write to the memory matrices.
 

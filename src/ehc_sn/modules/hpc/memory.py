@@ -20,7 +20,7 @@ from ehc_sn.types import Device, Dtype
 
 
 # =================================================================================================
-class HebbianUpdateSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class HebbianUpdateSettings(BaseModel, extra="forbid"):
     """Settings for Hebbian update modules."""
 
     clamp_min: float = Field(
@@ -79,7 +79,7 @@ class HebbianUpdate(nn.Module):
         return self._runtime
 
     def forward(  # -------------------------------------------------------------------------------
-        self, memory: Tensor, p_inf: List[Tensor], p_gen: List[Tensor], *,
+        self, memory: Tensor, p_inf: list[Tensor], p_gen: list[Tensor], *,
         mask: Optional[Tensor] = None,
     ) -> Tensor:  # fmt: skip
         """Apply a Hebbian write update.
