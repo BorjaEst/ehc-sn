@@ -41,6 +41,8 @@ from torch import Tensor
 from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
+from ehc_sn.types import Device
+
 ACTION_STAY: Final[int] = 0
 ACTION_UP: Final[int] = 1
 ACTION_RIGHT: Final[int] = 2

@@ -26,6 +26,8 @@ from tensordict import TensorDict, TensorDictBase
 from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
+from ehc_sn.types import Device
+
 IGNORE_LABEL_ID = -100
 
 
@@ -168,4 +170,5 @@ class MazeHardEnv(EnvBase):
 
 
 # =================================================================================================
+__all__ = ["EnvConfig", "MazeHardEnv"]
 __all__ = ["EnvConfig", "MazeHardEnv"]

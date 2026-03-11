@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from scipy.special import comb
 from torch import Tensor, nn
 
-from ehc_sn.types import LocationBelief, Matrix, Reduction, Vector
+from ehc_sn.types import Device, LocationBelief, Matrix, Reduction, Vector
 
 
 def _find_multiple(n: int, k: int) -> int:
