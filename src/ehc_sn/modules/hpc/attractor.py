@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from ehc_sn import utils
-from ehc_sn.types import Activation
+from ehc_sn.types import Activation, Device, Dtype
 
 
 # =================================================================================================
@@ -57,34 +57,30 @@ class AttractorNetwork(nn.Module):
     and uses stage masks to control which dimensions update at each stage.
     """
 
-    def __init__(self, shape: List[int], settings: Optional[AttractorSettings] = None):
+    def __init__(  # ------------------------------------------------------------------------------
+        self, shape: List[int], config: Optional[AttractorSettings] = None,
+        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
+    ) -> None:  # fmt: skip
         """Initialize the attractor.
 
         Args:
             shape: Feature sizes per frequency module.
-            settings: Attractor settings. If `None`, defaults are used.
+            config: Attractor config. If `None`, defaults are used.
         """
         super().__init__()
+        self._config = config or AttractorSettings()
+
         self._shape, self._n_freq = list(shape), len(shape)
-        self._settings = settings = settings or AttractorSettings()
-        self._activation_fn = utils.activation_from_str(settings.activation)
+        self._activation_fn = utils.activation_from_str(config.activation)
 
     @property
-    def settings(self) -> AttractorSettings:
-        """Return attractor settings."""
-        return self._settings
+    def config(self) -> AttractorSettings:
+        """Return attractor config."""
+        return self._config
 
-    @property
-    def shape(self) -> List[int]:
-        """Return per-frequency feature sizes."""
-        return self._shape
-
-    @property
-    def n_freq(self) -> int:
-        """Return number of frequency modules."""
-        return self._n_freq
-
-    def forward(self, p_query: List[Tensor], M: Tensor, masks: Optional[List[Tensor]] = None) -> List[Tensor]:
+    def forward(  # -------------------------------------------------------------------------------
+        self, p_query: List[Tensor], M: Tensor, *, masks: Optional[List[Tensor]] = None,
+    ) -> List[Tensor]:  # fmt: skip
         """Run attractor retrieval.
 
         Args:
@@ -100,7 +96,7 @@ class AttractorNetwork(nn.Module):
             tensor has shape `(B, shape[f])`.
         """
         # Flatten query grounded locations across frequency modules.
-        p, kappa = torch.cat(p_query, dim=1), self.settings.kappa
+        p, kappa = torch.cat(p_query, dim=1), self.config.kappa
         h = self.activation(p)
 
         # Ensure dtype consistency for numerical stability.
@@ -114,7 +110,13 @@ class AttractorNetwork(nn.Module):
         # Re-split the grounded location into frequency modules.
         return torch.split(h, split_size_or_sections=self.shape, dim=1)
 
-    def activation(self, p: Tensor) -> Tensor:
+    def activation( # -----------------------------------------------------------------------------
+        self, p: Tensor,
+    ) -> Tensor:  # fmt: skip
         """Apply the configured activation with clamping."""
-        p = torch.clamp(p, min=self.settings.clamp_min, max=self.settings.clamp_max)
+        p = torch.clamp(p, min=self.config.clamp_min, max=self.config.clamp_max)
         return self._activation_fn(p)
+
+
+# =================================================================================================
+__all__ = ["AttractorSettings", "AttractorNetwork"]
