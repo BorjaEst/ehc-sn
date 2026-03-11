@@ -10,11 +10,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+import torch
 from pydantic import BaseModel, Field
+from tensordict import TensorDict, TensorDictBase
 from torch import Tensor
 
 from ehc_sn.controllers._base import BaseController, RolloutBackbone, RolloutState
+from ehc_sn.envs.dungeon_walk import EnvBase
 from ehc_sn.loss.consistency import LatentCode, LatentRelation
+from ehc_sn.policies._base import ActionPolicy, PolicyInput, ScriptedPolicyConfig
+from ehc_sn.policies.random_walk import RandomWalkPolicy
+from ehc_sn.policies.stay import StayPolicy
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
@@ -29,6 +35,10 @@ PLACE_REG_TERM: str = "place"
 class TEMControllerConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`TEMController`."""
 
+    policy: ScriptedPolicyConfig = Field(
+        default_factory=ScriptedPolicyConfig,
+        description="Configuration for the scripted TEM walk policy.",
+    )
     max_steps: int = Field(
         default=1,
         ge=1,
@@ -45,6 +55,9 @@ class TEMRolloutBackbone[ModelState, ModelOutput](RolloutBackbone[ModelState, Mo
 @dataclass
 class TEMRolloutState[ModelState](RolloutState[ModelState]):
     """Controller carry/state for TEM rollouts."""
+
+    env_td: TensorDictBase
+    static_data: dict[str, Tensor]
 
 
 # =================================================================================================
@@ -132,47 +145,149 @@ class TEMOutput(DetachMixin):
 
 
 class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig]):
-    """ """
+    """TEM rollout controller with controller-owned environment stepping."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: TEMRolloutBackbone[ModelState], config: TEMControllerConfig,
+        self, backbone: TEMRolloutBackbone[ModelState], env: EnvBase, config: TEMControllerConfig,
     ) -> None:  # fmt: skip
         """Create a controller.
 
         Args:
             backbone: Model implementing :class:`TEMRolloutBackbone`.
+            env: TorchRL environment used to generate online walk steps.
             config: Controller configuration.
         """
         super().__init__(backbone=backbone, config=config)
+        self._env = env
+        if config.policy.kind == "stay":
+            self._policy: ActionPolicy = StayPolicy(stay_action=config.policy.stay_action)
+        elif config.policy.kind == "random_walk":
+            self._policy = RandomWalkPolicy(stay_action=config.policy.stay_action, seed=config.policy.seed)
+        else:
+            raise ValueError(f"Unsupported TEM policy kind: {config.policy.kind}.")
+
+    @property
+    def environment(self) -> EnvBase:
+        """Return the TorchRL environment used for stepping."""
+        return self._env
 
     def initial_state(  # -------------------------------------------------------------------------
         self, batch_sample: Batch
     ) -> TEMRolloutState[ModelState]:  # fmt: skip
-        """Build an initial rollout state from a batch sample."""
-        slots = self.initial_slots(batch_sample)
+        """Build an initial rollout state from a static maze batch."""
+        reset_td = self._build_reset_td(batch_sample)
+        env_td = self.environment.reset(reset_td)
+        batch_size = int(reset_td.batch_size[0])
         return TEMRolloutState(
-            model_state=slots.model_state, steps=slots.steps, halted=slots.halted,
-            data=slots.data,
-        )  # fmt: skip
+            model_state=self.backbone.init_state(batch_size),
+            steps=self._zeros(batch_size, dtype="int32", device=env_td.device),
+            halted=self._zeros(batch_size, dtype="bool", device=env_td.device),
+            data=self._extract_step_data(env_td),
+            env_td=env_td,
+            static_data={key: value.clone() for key, value in reset_td.items()},
+        )
 
     def step(  # ----------------------------------------------------------------------------------
         self, state: TEMRolloutState[ModelState], batch: Batch, *,
         allow_halt: bool = True, explore: bool = True, **_: Any,
     ) -> tuple[TEMRolloutState[ModelState], TEMOutput]:  # fmt: skip
         """Advance the controller by one variational step."""
-        data = self.refresh_slot_data(batch, state)
+        static_data, env_td = self._refresh_halted_slots(batch, state)
+        data = self._extract_step_data(env_td)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
         model_state, obs_logits, _, grid, place = self.backbone(data, model_state)
+
         latent_relations = self._coerce_latent(grid, place)
         reg_terms = self._coerce_regularization(grid, place)
+        action = self._policy_action(env_td, explore=explore)
+
+        env_td = env_td.clone()  # Next env_td
+        env_td["action"] = action
+        env_td = self.environment.step(env_td)["next"]
+        data = self._extract_step_data(env_td)  # Next data
 
         steps = self.advance_steps(state)
-        done = steps >= self.config.max_steps
+        done = env_td["done"].squeeze(-1)
+        if allow_halt:
+            done = done | (steps >= self.config.max_steps)
 
-        state = TEMRolloutState(model_state=model_state, steps=steps, halted=done, data=data)
+        state = TEMRolloutState( model_state=model_state, steps=steps, halted=done, data=data, env_td=env_td, static_data=static_data)  # fmt: skip
         output = TEMOutput(obs_logits=obs_logits, latent_relations=latent_relations, reg_terms=reg_terms)
 
         return state, output
+
+    def _build_reset_td(  # ----------------------------------------------------------------------
+        self, batch: Batch,
+    ) -> TensorDict:  # fmt: skip
+        """Return the static maze tensors required by ``EnvBase.reset``."""
+        required = ("topology", "observations", "mask_valid")
+        optional = ("regions", "start", "goals", "landmarks")
+        missing = [key for key in required if key not in batch]
+        if missing:
+            raise KeyError(f"TEMController reset batch is missing required maze keys: {', '.join(missing)}.")
+
+        reset_data = {key: batch[key] for key in required}
+        for key in optional:
+            if key in batch:
+                reset_data[key] = batch[key]
+
+        batch_size = int(next(iter(reset_data.values())).shape[0])
+        device = next(iter(reset_data.values())).device
+        return TensorDict(reset_data, batch_size=[batch_size], device=device)
+
+    def _extract_step_data(  # -------------------------------------------------------------------
+        self, env_td: TensorDictBase,
+    ) -> dict[str, Tensor]:  # fmt: skip
+        """Extract the current-step model payload from an environment state."""
+        keys = (
+            "inputs", "observation_target", "previous_action", "location_id", "region_id",
+            "valid_action_mask", "step_count",
+        )  # fmt: skip
+        return {key: env_td[key] for key in keys if key in env_td.keys()}
+
+    def _refresh_halted_slots(  # ---------------------------------------------------------------
+        self, batch: Batch, state: TEMRolloutState[ModelState],
+    ) -> tuple[dict[str, Tensor], TensorDictBase]:  # fmt: skip
+        """Reset halted slots from the incoming maze batch and keep active slots unchanged."""
+        if not torch.any(state.halted):
+            return state.static_data, state.env_td
+
+        new_static = self._build_reset_td(batch)
+        static_data = {
+            key: torch.where(state.halted.view((-1,) + (1,) * (value.ndim - 1)), value, state.static_data[key])
+            for key, value in new_static.items()
+        }  # fmt: skip
+        reset_td = TensorDict(static_data, batch_size=state.env_td.batch_size, device=state.env_td.device)
+        env_td = self.environment.reset_slots(state.halted, reset_td, state.env_td)
+        return static_data, env_td
+
+    def _policy_action(  # -----------------------------------------------------------------------
+        self, env_td: TensorDictBase, *, explore: bool,
+    ) -> Tensor:  # fmt: skip
+        """Return an action tensor sampled by the configured scripted policy."""
+        policy_input = self._make_policy_input(env_td)
+        action = self._policy(policy_input, explore=explore).action
+        if action.ndim == 1:
+            action = action.unsqueeze(-1)
+        return action.to(device=env_td.device, dtype=torch.int64)
+
+    def _make_policy_input(self, env_td: TensorDictBase) -> PolicyInput:
+        """Adapt environment state to the reusable policy input contract."""
+        return PolicyInput(
+            valid_action_mask=env_td["valid_action_mask"],
+            location_id=env_td["location_id"] if "location_id" in env_td.keys() else None,
+            region_id=env_td["region_id"] if "region_id" in env_td.keys() else None,
+            step_count=env_td["step_count"] if "step_count" in env_td.keys() else None,
+        )
+
+    @staticmethod
+    def _zeros(batch_size: int, *, dtype: str, device: Any) -> Tensor:
+        """Allocate a per-slot zero tensor with the requested dtype."""
+        if dtype == "int32":
+            return torch.zeros((batch_size,), dtype=torch.int32, device=device)
+        if dtype == "bool":
+            return torch.zeros((batch_size,), dtype=torch.bool, device=device)
+        raise ValueError(f"Unsupported zero dtype request: {dtype}.")
 
     def _coerce_latent(  # --------------------------------------------------------------
         self, grid: tuple[Tensor, Tensor], place: tuple[Tensor, Tensor, Tensor],
@@ -201,13 +316,14 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
     def refresh_slot_data(  # ---------------------------------------------------------------------
         self, batch: Batch, state: TEMRolloutState[ModelState]
     ) -> dict[str, Tensor]:  # fmt: skip
-        """Replace data for halted slots with incoming batch data."""
-        return super().refresh_slot_data(batch, state)
+        """Return the current-step payload cached in the controller carry."""
+        return state.data
 
 
 # =================================================================================================
 __all__ = [
     "GRID_REG_TERM", "GRID_TRANSITION_RELATION", "PLACE_REG_TERM", "PLACE_SENSORY_RELATION",
     "PLACE_TRANSITION_RELATION",
-    "TEMRolloutBackbone", "TEMController", "TEMControllerConfig", "TEMOutput", "TEMRolloutState",
+    "TEMController", "TEMControllerConfig", "TEMOutput", "TEMRolloutBackbone",
+    "TEMRolloutState",
 ]  # fmt: skip

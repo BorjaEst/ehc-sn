@@ -90,4 +90,4 @@ class CategoricalPolicy:
 
 
 # =================================================================================================
-__all__ = ["CategoricalPolicy", "CategoricalPolicyConfig"]
+__all__ = ["CategoricalPolicy", "CategoricalPolicyConfig", "PolicyInput", "PolicyDecision"]

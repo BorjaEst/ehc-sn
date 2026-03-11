@@ -28,10 +28,10 @@ import torch
 from pydantic import BaseModel, Field
 from tensordict import TensorDict, TensorDictBase
 from torch import Tensor
-from torch.distributions import Categorical
 from torchrl.envs import EnvBase
 
 from ehc_sn.controllers._base import BaseController, RolloutBackbone, RolloutState
+from ehc_sn.policies.categorical import CategoricalPolicy, CategoricalPolicyConfig, PolicyInput
 from ehc_sn.types import Batch, Device
 from ehc_sn.utils.detach import DetachMixin
 
@@ -41,17 +41,14 @@ class RLControllerConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`RLController`.
 
     Attributes:
-        exploration_prob: Probability of suppressing an early halt during
-            exploration.  ``None`` disables random action substitution.
+        policy: Configuration for the categorical action policy used to sample rollout actions.
         max_steps: Hard cap on deliberation steps before forced termination.
             ``None`` delegates all termination to the environment.
     """
 
-    exploration_prob: Optional[float] = Field(
-        default=None,
-        ge=0.0,
-        le=1.0,
-        description="Probability of suppressing an early halt during exploration.",
+    policy: CategoricalPolicyConfig = Field(
+        default_factory=CategoricalPolicyConfig,
+        description="Configuration for the categorical action policy used to sample rollout actions.",
     )
     max_steps: Optional[int] = Field(
         default=None,
@@ -83,7 +80,7 @@ class RLOutput(DetachMixin):
     are deprecated in head code and will be removed once all heads are migrated.
     """
 
-    logits: Tuple[Tensor, ...]  # (lm_logits, q_logits, value_logits, ...); prefer named properties in heads
+    logits: tuple[Tensor, ...]  # (lm_logits, q_logits, value_logits, ...); prefer named properties in heads
     theta_cls: Tensor  # (B, D) — theta CLS features
     action: Tensor  # (B,) selected action indices for this step
     reward: Tensor  # (B, 1) reward from the environment for this step
@@ -130,6 +127,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         """
         super().__init__(backbone=backbone, config=config)
         self._env = env
+        self._policy = CategoricalPolicy(config.policy)
 
     @property
     def environment(self) -> EnvBase:
@@ -169,7 +167,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
     def step(  # ----------------------------------------------------------------------------------
         self, state: RLRolloutState[ModelState], batch: Batch, *,
         allow_halt: bool = True, explore: bool = True, **_: Any,
-    ) -> Tuple[RLRolloutState[ModelState], RLOutput]:  # fmt: skip
+    ) -> tuple[RLRolloutState[ModelState], RLOutput]:  # fmt: skip
         """Advance the controller by one step.
 
         The step:
@@ -203,20 +201,19 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
     def _select_action_and_done(  # ---------------------------------------------------------------
         self, logits: list[Tensor], steps: Tensor, data: Batch, env_td: TensorDictBase, 
         allow_halt: bool, explore: bool,
-    ) -> Tuple[Tensor, Tensor, TensorDictBase]:  # fmt: skip
+    ) -> tuple[Tensor, Tensor, TensorDictBase]:  # fmt: skip
         """Sample action, step env, and apply exploration gating."""
         logits_lm, logits_q, logits_r, *_ = logits  # Unpack list of logits multiple heads
-        n_actions = self._env.action_spec["action"].shape[-1]
 
-        # 1. Sample action from Q-logits (controller is action-agnostic)
-        action = Categorical(logits=logits_q.detach()).sample()  # (B,)
+        # 1. Sample action from STR policy logits
+        policy_input = PolicyInput(
+            valid_action_mask=torch.ones_like(logits_q, dtype=torch.bool),
+            step_count=env_td.get("step_count"),
+            logits=logits_q,
+        )
+        action = self._policy(policy_input, explore=explore).action.to(dtype=torch.int64)  # (B,)
 
-        # 2. Auxiliary exploration controlled by exploration_prob
-        if self.config.exploration_prob is not None and explore:
-            explore_flag = torch.rand(steps.shape, device=steps.device) < self.config.exploration_prob
-            action = torch.where(explore_flag, torch.randint_like(action, low=0, high=n_actions), action)
-
-        # 3. Step the environment — env owns reward + termination semantics
+        # 2. Step the environment — env owns reward + termination semantics
         env_td = env_td.clone()
         env_td["action"] = action.unsqueeze(-1)  # (B, 1)
         env_td["logits"] = logits_lm.detach().to(torch.float32)  # (B, S, V)
@@ -227,7 +224,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         truncated = env_td["truncated"].squeeze(-1)  # (B,)
         done = terminated | truncated  # (B,)
 
-        # 4. Auxiliary control over termination by controller max_steps
+        # 3. Auxiliary control over termination by controller max_steps
         if self.config.max_steps is not None and allow_halt:
             done = done | (steps >= self.config.max_steps)
 
