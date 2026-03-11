@@ -11,7 +11,7 @@ from ehc_sn.modules.mlp import MLP
 
 
 # =================================================================================================
-class AutoencoderSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class AutoencoderSettings(BaseModel, extra="forbid"):
     """Settings for autoencoder modules."""
 
     encode_mode: Literal["two_hot"] = Field(

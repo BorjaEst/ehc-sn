@@ -14,7 +14,7 @@ from ehc_sn.types import InitStrategy, ProjectionMode
 
 
 # =================================================================================================
-class ProjectionSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class ProjectionSettings(BaseModel, extra="forbid"):
     """Settings for projection modules."""
 
     mode: ProjectionMode = Field(
@@ -55,7 +55,7 @@ class ProjectionModule(nn.Module):
         self.set_learning()
 
     @staticmethod
-    def create_module(settings: ProjectionSettings, shape_from: List[int], shape_to: List[int]) -> nn.Module:
+    def create_module(settings: ProjectionSettings, shape_from: list[int], shape_to: list[int]) -> nn.Module:
         if settings.mode == "tiling":
             module = TileModule(shape_from, shape_to, settings)
         elif settings.mode == "low_rank":
@@ -69,28 +69,28 @@ class ProjectionModule(nn.Module):
         for param in self._module.parameters():
             param.requires_grad = self._settings.learnable
 
-    def forward(self, z: List[Tensor]) -> List[Tensor]:
+    def forward(self, z: list[Tensor]) -> list[Tensor]:
         return self._module.forward(z)
 
-    def inverse(self, p: List[Tensor]) -> List[Tensor]:
+    def inverse(self, p: list[Tensor]) -> list[Tensor]:
         return self._module.inverse(p)
 
 
 # =================================================================================================
 class AbstractModule(nn.Module, ABC):
     @abstractmethod
-    def forward(self, z: List[Tensor]) -> List[Tensor]:
+    def forward(self, z: list[Tensor]) -> list[Tensor]:
         pass
 
     @abstractmethod
-    def inverse(self, p: List[Tensor]) -> List[Tensor]:
+    def inverse(self, p: list[Tensor]) -> list[Tensor]:
         pass
 
 
 # =================================================================================================
 class TileModule(AbstractModule):
 
-    def __init__(self, shape_from: List[int], shape_to: List[int], settings: ProjectionSettings):
+    def __init__(self, shape_from: list[int], shape_to: list[int], settings: ProjectionSettings):
         super(TileModule, self).__init__()
         self._settings = settings
         w_list = self.create_matrices(shape_from, shape_to, settings)
@@ -98,8 +98,8 @@ class TileModule(AbstractModule):
 
     @staticmethod
     def create_matrices(
-        shape_from: List[int], shape_to: List[int], settings: ProjectionSettings
-    ) -> List[Tensor]:
+        shape_from: list[int], shape_to: list[int], settings: ProjectionSettings
+    ) -> list[Tensor]:
         if settings.init == "identity":
             w_list = utils.create_tiling_matrices(shape_from, shape_to)
         elif settings.init == "random":
@@ -108,11 +108,11 @@ class TileModule(AbstractModule):
             raise ValueError(f"Unknown init strategy: {settings.init}")
         return w_list
 
-    def forward(self, z_from: List[Tensor]) -> List[Tensor]:
+    def forward(self, z_from: list[Tensor]) -> list[Tensor]:
         # z[f]: [B, n_in] -> [B, n_out]
         return [torch.matmul(z_from[f], self.w[f]) for f in range(len(z_from))]
 
-    def inverse(self, z_to: List[Tensor]) -> List[Tensor]:
+    def inverse(self, z_to: list[Tensor]) -> list[Tensor]:
         # z[f]: [B, n_out] -> [B, n_in]
         return [torch.matmul(z_to[f], self.w[f].T) for f in range(len(z_to))]
 
@@ -120,7 +120,7 @@ class TileModule(AbstractModule):
 # =================================================================================================
 class LowRankModule(AbstractModule):
 
-    def __init__(self, shape_from: List[int], shape_to: List[int], settings: ProjectionSettings):
+    def __init__(self, shape_from: list[int], shape_to: list[int], settings: ProjectionSettings):
         super(LowRankModule, self).__init__()
         self._settings = settings
         w_down, w_repeat = self.create_matrices(shape_from, shape_to, settings)
@@ -131,8 +131,8 @@ class LowRankModule(AbstractModule):
 
     @staticmethod
     def create_matrices(
-        shape_from: List[int], shape_to: List[int], settings: ProjectionSettings
-    ) -> Tuple[List[Tensor], List[Tensor]]:
+        shape_from: list[int], shape_to: list[int], settings: ProjectionSettings
+    ) -> tuple[list[Tensor], list[Tensor]]:
         rank_list = _coerce_rank_list(settings.rank, shape_from, shape_to)
         if settings.init == "identity":  # Legacy-equivalent: downsample to r dims, then repeat to n_out
             w_down = utils.create_downsample_matrix(shape_from, rank_list)
@@ -144,19 +144,19 @@ class LowRankModule(AbstractModule):
             raise ValueError(f"Unknown init strategy: {settings.init}")
         return w_down, w_repeat
 
-    def forward(self, z_from: List[Tensor]) -> List[Tensor]:
+    def forward(self, z_from: list[Tensor]) -> list[Tensor]:
         # z[f]: [B, n_in] -> [B, r] -> [B, n_out]
         z_down = [torch.matmul(z_from[f], self.w_down[f]) for f in range(len(z_from))]
         return [torch.matmul(z_down[f], self.w_repeat[f]) for f in range(len(z_down))]
 
-    def inverse(self, z_to: List[Tensor]) -> List[Tensor]:
+    def inverse(self, z_to: list[Tensor]) -> list[Tensor]:
         # z[f]: [B, n_out] -> [B, r] -> [B, n_in]
         z_down = [torch.matmul(z_to[f], self.w_repeat[f].T) for f in range(len(z_to))]
         return [torch.matmul(z_down[f], self.w_down[f].T) for f in range(len(z_down))]
 
 
 # =================================================================================================
-def _coerce_rank_list(rank, shape_from: Sequence[int], shape_to: Sequence[int]) -> List[int]:
+def _coerce_rank_list(rank, shape_from: Sequence[int], shape_to: Sequence[int]) -> list[int]:
     """Normalize rank config into per-frequency list and validate."""
     n_freq = len(shape_from)
     if rank is None:
