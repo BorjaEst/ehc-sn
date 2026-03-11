@@ -108,7 +108,7 @@ class STRModelLinear(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, features: Tensor, q_values: Tensor, state: STRState,
-    ) -> Tuple[STRState, Tensor]:  # fmt: skip
+    ) -> tuple[STRState, Tensor]:  # fmt: skip
         """Predict reward/value from features and Q-values.
 
         Args:
@@ -136,7 +136,7 @@ class STRModelGRU(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, features: Tensor, q_values: Tensor, state: STRState,
-    ) -> Tuple[STRState, Tensor]:  # fmt: skip
+    ) -> tuple[STRState, Tensor]:  # fmt: skip
         """Forward pass (not implemented)."""
         raise NotImplementedError("STRModelGRU.forward() is not implemented yet.")
 
@@ -152,7 +152,7 @@ class STRModelLSTM(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, features: Tensor, q_values: Tensor, state: STRState,
-    ) -> Tuple[STRState, Tensor]:  # fmt: skip
+    ) -> tuple[STRState, Tensor]:  # fmt: skip
         """Forward pass (not implemented)."""
         raise NotImplementedError("STRModelLSTM.forward() is not implemented yet.")
 
@@ -168,7 +168,7 @@ class STRModelGoNoGo(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, features: Tensor, q_values: Tensor, state: STRState,
-    ) -> Tuple[STRState, Tensor]:  # fmt: skip
+    ) -> tuple[STRState, Tensor]:  # fmt: skip
         """Forward pass (not implemented)."""
         raise NotImplementedError("STRModelGoNoGo.forward() is not implemented yet.")
 
