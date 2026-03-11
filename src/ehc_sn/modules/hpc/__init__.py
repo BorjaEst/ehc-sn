@@ -142,16 +142,19 @@ class HPCModel(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: HPCSettings, device: Optional[Device]=None, dtype: Optional[Dtype]=None,
+        self, config: HPCSettings, 
+        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         super().__init__()
         self._config = config
+        shape, n_stages, f_init = config.shape, config.n_stages, config.f_init
+        n_freq = len(shape)
 
         # Stage masks are buffers so `.to(device)` moves them automatically.
         # Each is shaped (n_stages, S) where S = sum(shape).
-        masks = utils.update_to_masks(shape, update=utils.make_update_hierarchical(n_stages, self.n_freq))
+        masks = utils.update_to_masks(shape, update=utils.make_update_hierarchical(n_stages, n_freq))
         self.register_buffer("masks_hierarchical", masks, persistent=False)
-        masks = utils.update_to_masks(shape, update=utils.make_update_full(n_stages, self.n_freq))
+        masks = utils.update_to_masks(shape, update=utils.make_update_full(n_stages, n_freq))
         self.register_buffer("masks_full", masks, persistent=False)
 
         # Hebbian write mask gates synapses in the flattened (S, S) matrix.
@@ -177,7 +180,7 @@ class HPCModel(nn.Module):
         pass
 
     def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int, *,
+        self, *, batch_size: int, 
         device: Optional[Device] = None, memory: Optional[MemoryState] = None,
     ) -> HPCState:  # fmt: skip
         """Create an initial `HPCState`.
@@ -199,7 +202,7 @@ class HPCModel(nn.Module):
         return HPCState(location=self.location, _memory=memory)
 
     def init_memory(  # ---------------------------------------------------------------------------
-        self, *, batch_size: int, *,
+        self, *, batch_size: int, 
         device: Optional[Device] = None,
     ) -> List[Tensor]:  # fmt: skip
         """Initialize Hebbian memory matrices.
@@ -328,3 +331,7 @@ class HPCModel(nn.Module):
         m_hier = self.memory_system(m_hier, p_inf, p_gen_gi, mask=self.update_mask)
         m_full = self.memory_system(m_full, p_inf, p_xi) if not self.config.common_memory and p_xi else m_hier
         return HPCState(state.location, _memory=[m_hier, m_full])
+
+
+# =================================================================================================
+__all__ = ["HPCModel", "HPCState", "HPCSettings"]
