@@ -37,7 +37,8 @@ from ehc_sn import utils
 from ehc_sn.modules.hpc.attractor import AttractorNetwork, AttractorSettings
 from ehc_sn.modules.hpc.location import GroundLocation, GroundLocSettings
 from ehc_sn.modules.hpc.memory import HebbianUpdate, HebbianUpdateSettings
-from ehc_sn.types import GroundedLocation, LocationBelief, Matrix, MemoryState, MultiScaleCode
+from ehc_sn.types import Device, Dtype, LocationBelief, Matrix, MemoryState
+from ehc_sn.utils.detach import DetachMixin
 
 __all__ = ["HPCModel", "HPCState"]
 
@@ -45,6 +46,20 @@ __all__ = ["HPCModel", "HPCState"]
 # =================================================================================================
 class HPCSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
     """Settings for HPC modules."""
+
+    n_stages: int = Field(
+        ...,
+        ge=1,
+        description="Number of stages for hierarchical attractor retrieval.",
+    )
+    shape: List[int] = Field(
+        ...,
+        description="Feature dimensionality per frequency module.",
+    )
+    f_init: List[float] = Field(
+        ...,
+        description="Initial feature scales per frequency module for Hebbian write mask.",
+    )
 
     common_memory: bool = Field(  # Probably to move to hebbian which will rename memory
         default=False,
@@ -56,21 +71,21 @@ class HPCSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
     )
     attractor: AttractorSettings = Field(
         default_factory=AttractorSettings,
-        description="Attractor dynamics module settings.",
+        description="Attractor dynamics module config.",
     )
     location: GroundLocSettings = Field(
         default_factory=GroundLocSettings,
-        description="Location distribution module settings.",
+        description="Location distribution module config.",
     )
     memory: HebbianUpdateSettings = Field(
         default_factory=HebbianUpdateSettings,
-        description="Hebbian update module settings.",
+        description="Hebbian update module config.",
     )
 
 
 # =================================================================================================
 @dataclass
-class HPCState:
+class HPCState(DetachMixin):
     """Container for HPC state.
 
     Attributes:
@@ -90,51 +105,6 @@ class HPCState:
 
     location: LocationBelief  # State and uncertainty over grounded locations
     _memory: List[Matrix]  # Memory matrices
-
-    def new(
-        self, cells: Optional[GroundedLocation] = None, uncertainty: Optional[MultiScaleCode] = None
-    ) -> "HPCState":
-        """Return a new state with an updated transition.
-
-        This is a convenience helper used throughout TEM to keep state updates
-        explicit (no in-place mutation).
-
-        Args:
-            cells: New grounded location mean (multi-scale code).
-            uncertainty: New grounded location uncertainty (multi-scale code).
-                Note: the parameter name preserves a legacy spelling.
-
-        Returns:
-            A new `HPCState` with updated `transition` and preserved `memory`.
-
-        Notes:
-            This method performs a shallow copy of the state fields. Use
-            `detach()` when you need to carry state across iterations without
-            keeping autograd history.
-        """
-        batch_size, device = self.cells[0].shape[0], self.cells[0].device
-        copy, shape = self.__dict__.copy(), [v.shape[1] for v in self.cells]
-        location = LocationBelief(
-            mean=cells or [torch.zeros((batch_size, n), device=device) for n in shape],
-            uncertainty=uncertainty,
-        )
-        copy.update(location=location)  # Memory is preserved
-        return HPCState(**copy)
-
-    def detach(self) -> "HPCState":
-        """Return a detached copy.
-
-        Use this when carrying state across iterations without backpropagating
-        through history.
-
-        Returns:
-            A detached `HPCState` where all tensors in `transition` and `memory`
-            have been detached.
-        """
-        mean = [v.detach() for v in self.cells]
-        uncertainty = [v.detach() for v in self.uncertainty] if self.uncertainty else None
-        memory = [m.detach() for m in self.memory] if self.memory is not None else None
-        return HPCState(LocationBelief(mean, uncertainty), memory)
 
     @property
     def cells(self) -> List[Tensor]:
@@ -171,18 +141,11 @@ class HPCModel(nn.Module):
     - `HebbianUpdate` (write): M, p_inf, p_gen -> M'
     """
 
-    def __init__(
-        self,
-        n_stages: int,  # Number of attractor update stages
-        shape: List[int],  # Grounded-location feature sizes per frequency module
-        f_init: List[float],  # Frequency values per module
-        *,
-        settings: Optional[HPCSettings] = None,  # HPC settings
-    ):
+    def __init__(  # ------------------------------------------------------------------------------
+        self, config: HPCSettings, device: Optional[Device]=None, dtype: Optional[Dtype]=None,
+    ) -> None:  # fmt: skip
         super().__init__()
-        self._shape, self._n_freq = list(shape), len(shape)
-        self._n_stages = n_stages
-        self._settings = settings
+        self._config = config
 
         # Stage masks are buffers so `.to(device)` moves them automatically.
         # Each is shaped (n_stages, S) where S = sum(shape).
@@ -196,16 +159,27 @@ class HPCModel(nn.Module):
         self.register_buffer("update_mask", mask, persistent=False)
 
         # Instantiate submodules
-        self.attractor = AttractorNetwork(shape, settings.attractor)
-        self.location = GroundLocation(shape, settings.location)
-        self.memory_system = HebbianUpdate(settings.memory)
+        self.attractor = AttractorNetwork(shape, config.attractor)
+        self.location = GroundLocation(shape, config.location)
+        self.memory_system = HebbianUpdate(config.memory)
 
-    def init_state(
+        self.reset_parameters()  # Initialize parameters and buffers
+
+    @property
+    def config(self) -> HPCSettings:
+        """HPC module config."""
+        return self._config
+
+    def reset_parameters(  # ----------------------------------------------------------------------
         self,
-        batch_size: int,
-        device: Optional[torch.device] = None,
-        memory: Optional[MemoryState] = None,
-    ) -> HPCState:
+    ) -> None:  # fmt: skip
+        """Initialize parameters and buffers."""
+        pass
+
+    def init_state(  # ----------------------------------------------------------------------------
+        self, batch_size: int, *,
+        device: Optional[Device] = None, memory: Optional[MemoryState] = None,
+    ) -> HPCState:  # fmt: skip
         """Create an initial `HPCState`.
 
         Args:
@@ -220,11 +194,14 @@ class HPCModel(nn.Module):
             - `memory`: output of `init_memory` (two matrices, shape `(B, S, S)`)
         """
         p_init = [torch.zeros((batch_size, n), device=device) for n in self.shape]
-        transition = LocationBelief(mean=p_init, uncertainty=None)
+        self.location = LocationBelief(mean=p_init, uncertainty=None)
         memory = memory or self.init_memory(batch_size=batch_size, device=device)
-        return HPCState(transition, memory)
+        return HPCState(location=self.location, _memory=memory)
 
-    def init_memory(self, *, batch_size: int, device: torch.device) -> List[Tensor]:
+    def init_memory(  # ---------------------------------------------------------------------------
+        self, *, batch_size: int, *,
+        device: Optional[Device] = None,
+    ) -> List[Tensor]:  # fmt: skip
         """Initialize Hebbian memory matrices.
 
         Args:
@@ -234,19 +211,21 @@ class HPCModel(nn.Module):
         Returns:
             A list `[M_hier, M_full]` where each matrix is shaped `(B, S, S)`.
 
-            If `settings.common_memory=True`, `M_full` is the same tensor object
+            If `config.common_memory=True`, `M_full` is the same tensor object
             as `M_hier` (shared memory).
         """
         m0 = torch.zeros((batch_size, sum(self.shape), sum(self.shape)), dtype=torch.float, device=device)
         memory = [m0]
-        memory.append(m0 if self.settings.common_memory else m0.clone())
+        memory.append(m0 if self.config.common_memory else m0.clone())
         return memory
 
-    def set_runtime(self, *, eta: float, hebbian_decay: float) -> None:
+    def set_runtime(  # ---------------------------------------------------------------------------
+        self, *, eta: float, hebbian_decay: float,
+    ) -> None:  # fmt: skip
         """Set runtime hyperparameters.
 
         These values are commonly controlled by the training loop and are not
-        part of the static settings tree.
+        part of the static config tree.
 
         Args:
             eta: Hebbian learning rate.
@@ -255,30 +234,14 @@ class HPCModel(nn.Module):
         self.memory_system.runtime.eta = float(eta)
         self.memory_system.runtime.hebbian_decay = float(hebbian_decay)
 
-    @property
-    def settings(self) -> HPCSettings:
-        """HPC module settings."""
-        return self._settings
-
-    @property
-    def shape(self) -> List[int]:
-        """Dimensionality of features per frequency module."""
-        return self._shape
-
-    @property
-    def n_freq(self) -> int:
-        """Number of frequency modules."""
-        return self._n_freq
-
-    @property
-    def n_stages(self) -> int:
-        """Number of attractor stages."""
-        return self._n_stages
-
-    def forward(self, *, state: HPCState) -> Tuple[List[Tensor], HPCState]:
+    def forward(  # -------------------------------------------------------------------------------
+        self, *, state: HPCState,
+    ) -> Tuple[List[Tensor], HPCState]:  # fmt: skip
         raise NotImplementedError("HPC forward not implemented. Use generative() or inference().")
 
-    def generative(self, p_g: List[Tensor], state: HPCState) -> Tuple[List[Tensor], HPCState]:
+    def generative(  # ----------------------------------------------------------------------------
+        self, p_g: List[Tensor], state: HPCState,
+    ) -> Tuple[List[Tensor], HPCState]:  # fmt: skip
         """Return a grounded location sample/mean from a provided distribution.
 
         This is used by TEM when generating grounded location `p` from retrieved
@@ -290,14 +253,16 @@ class HPCModel(nn.Module):
 
         Returns:
             `(p_gen, new_state)` where `p_gen` is either a sample from the
-            diagonal Gaussian (if `settings.do_sample=True`) or the provided
+            diagonal Gaussian (if `config.do_sample=True`) or the provided
             mean, and `new_state` updates `transition` accordingly.
         """
         transition = LocationBelief(mean=p_g, uncertainty=state.uncertainty)
-        p_gen = utils.sample_diag_gaussian(transition) if self.settings.do_sample else transition.mean
+        p_gen = utils.sample_diag_gaussian(transition) if self.config.do_sample else transition.mean
         return p_gen, state.new(p_gen, state.uncertainty)
 
-    def inference(self, x_: List[Tensor], g_: List[Tensor], state: HPCState) -> Tuple[List[Tensor], HPCState]:
+    def inference(  # -----------------------------------------------------------------------------
+        self, x_: List[Tensor], g_: List[Tensor], state: HPCState,
+    ) -> Tuple[List[Tensor], HPCState]:  # fmt: skip
         """Infer grounded location from projected sensory and abstract features.
 
         Args:
@@ -307,16 +272,16 @@ class HPCModel(nn.Module):
 
         Returns:
             `(p_inf, new_state)` where `p_inf` is either a sample from the
-            inferred diagonal Gaussian (if `settings.do_sample=True`) or the
+            inferred diagonal Gaussian (if `config.do_sample=True`) or the
             mean, and `new_state` updates both mean and uncertainty.
         """
         transition = self.location(x_, g_)
-        p_inf = utils.sample_diag_gaussian(transition) if self.settings.do_sample else transition.mean
+        p_inf = utils.sample_diag_gaussian(transition) if self.config.do_sample else transition.mean
         return p_inf, state.new(p_inf, transition.uncertainty)
 
-    def recall(
-        self, p_query: List[Tensor], state: HPCState, *, mode: Literal["full", "hierarchical"]
-    ) -> List[Tensor]:
+    def recall(  # --------------------------------------------------------------------------------
+        self, p_query: List[Tensor], state: HPCState, *, mode: Literal["full", "hierarchical"],
+    ) -> List[Tensor]:  # fmt: skip
         """Retrieve grounded location via attractor dynamics.
 
         Args:
@@ -339,13 +304,13 @@ class HPCModel(nn.Module):
             return self.attractor(p_query, state.memory[1], masks=self.masks_full)
         raise ValueError(f"Invalid mode '{mode}'. Expected 'full' or 'hierarchical'.")
 
-    def update(
+    def update(  # --------------------------------------------------------------------------------
         self, p_inf: List[Tensor], p_gen_gi: List[Tensor], p_xi: Optional[List[Tensor]], state: HPCState
-    ) -> HPCState:
+    ) -> HPCState:  # fmt: skip
         """Apply a Hebbian write to the memory matrices.
 
         The update is applied to the hierarchical memory, and optionally to the
-        full memory depending on `settings.common_memory`.
+        full memory depending on `config.common_memory`.
 
         Args:
             p_inf: Inferred grounded location per frequency module.
@@ -361,7 +326,5 @@ class HPCModel(nn.Module):
         """
         m_hier, m_full = state.memory
         m_hier = self.memory_system(m_hier, p_inf, p_gen_gi, mask=self.update_mask)
-        m_full = (
-            self.memory_system(m_full, p_inf, p_xi) if not self.settings.common_memory and p_xi else m_hier
-        )
+        m_full = self.memory_system(m_full, p_inf, p_xi) if not self.config.common_memory and p_xi else m_hier
         return HPCState(state.location, _memory=[m_hier, m_full])
