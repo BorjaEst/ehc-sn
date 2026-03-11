@@ -5,7 +5,7 @@ This module is intentionally dependency-light (no imports from other
 throughout the codebase.
 
 Conventions:
-    - Multi-scale codes are `List[Tensor]` (one tensor per frequency module).
+    - Multi-scale codes are `list[Tensor]` (one tensor per frequency module).
     - Many modules use `B` for batch size and `S = sum(shape)` for flattened
       multi-scale size.
 
@@ -43,7 +43,7 @@ Shape conventions:
 # Multi-Scale Representations
 # =============================================================================
 
-MultiScaleCode = List[Vector]
+MultiScaleCode = list[Vector]
 """Hierarchical representation across multiple frequency modules.
 
 In TEM, both abstract locations (g) and grounded locations (p) are
@@ -156,7 +156,7 @@ Notes:
 # Memory Structures
 # =============================================================================
 
-HebbianMemory = List[Matrix]
+HebbianMemory = list[Matrix]
 """Attractor network connection weights for memory storage.
 
 Structure:
@@ -272,7 +272,7 @@ class Trajectory:
 # Batch Processing
 # =============================================================================
 
-WalkSample: TypeAlias = Tuple[Observation, Action, Location]
+WalkSample: TypeAlias = tuple[Observation, Action, Location]
 """Single unbatched walk sample.
 
 This is the item-level return type used by the map-style walk dataset.
@@ -287,7 +287,7 @@ Notes:
     - The time dimension is always first (time-major), which simplifies truncated BPTT.
 """
 
-WalkBatch: TypeAlias = Tuple[Observation, Action, Location]
+WalkBatch: TypeAlias = tuple[Observation, Action, Location]
 """Single time-major batch of walks.
 
 Tuple elements:
