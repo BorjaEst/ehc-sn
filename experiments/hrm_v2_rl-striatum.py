@@ -47,7 +47,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     @classmethod
     def settings_customise_sources(  # ------------------------------------------------------------
         cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,
-    ) -> Tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip
+    ) -> tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip
         """Customize settings source order.
 
         Pydantic Settings supports multiple value sources; we explicitly place
@@ -256,7 +256,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         default=10,
         description="Cap validation to N batches per validation run.",
     )
-    eval_save_outputs: List[str] = Field(
+    eval_save_outputs: list[str] = Field(
         default_factory=list,
         description="Evaluation output keys saved as tensors in the checkpoint directory.",
     )
