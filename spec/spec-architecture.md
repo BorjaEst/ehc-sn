@@ -45,7 +45,7 @@ Layer 4: `experiments/`
 
 Layer 3: `models/`
 
-Layer 2: `modules/`, `controllers/`, `heads/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/`
+Layer 2: `modules/`, `controllers/`, `policies/`, `heads/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/`
 
 Layer 1: `activations/`, `utils/`, `types.py`
 
@@ -62,6 +62,8 @@ R4: `data/` must not import from `modules/`, `training/`, `controllers/`, or `he
 R5: `utils/` must not import from any `ehc_sn` subpackage
 
 R6: Peer imports within a component (for example, `modules/hpc/` → `modules/mec/`) are allowed
+
+R7: `policies/` must not import from `models/`, `controllers/`, `heads/`, `training/`, or `modules/`
 
 ---
 
@@ -161,7 +163,37 @@ Actor-critic losses, supervised token loss, halted/token aggregation, diagnostic
 Shared head utilities and thin base heads live in the same component when they
 serve multiple head variants without introducing model semantics.
 
-#### 4.5.3 Training
+#### 4.5.3 Policies
+
+Policies own reusable action-selection logic over rollout-state views. They are
+not environments and not controllers: they do not advance environment state,
+manage rollout carry, or compute losses. Their job is limited to selecting an
+action from an explicit policy input and owning policy-local randomness.
+
+`policies/`
+Reusable scripted or learned action-selection strategies.
+
+Responsibilities:
+
+- Define a narrow public policy protocol for action selection.
+- Define typed policy-input/config contracts when reuse across controllers is intended.
+- Own policy-local RNG and exploration semantics.
+- Remain reusable across TEM, RL, scripted evaluation, and data-generation workflows.
+
+Constraints:
+
+- Policies consume typed rollout-state views or documented tensor mappings.
+- Policies must not depend on controller internals or model classes.
+- Controllers invoke policies and pass resulting actions to environments.
+- Environments validate and apply actions but do not silently define policy behavior.
+
+Examples:
+
+- Random walk over a valid-action mask.
+- Deterministic stay / no-op policy.
+- Region-biased or novelty-biased scripted walk policies.
+
+#### 4.5.4 Training
 
 Generic algorithmic building blocks — no model-specific code, no model imports.
 

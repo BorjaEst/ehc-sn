@@ -38,6 +38,18 @@ under `temp/` (not on the Python path).
 - New Pydantic configs must use `extra="forbid"` unless there is an explicit,
   documented reason for leniency.
 
+### 3.1 Policy Contracts
+
+- Reusable policy interfaces and policy configuration contracts belong in
+  `ehc_sn/policies/` once they are intended for cross-controller reuse.
+- Policy APIs must consume typed rollout-state views or documented tensor
+  mappings, not arbitrary controller internals.
+- Policy objects own policy-local randomness and sampling semantics; controllers
+  may pass mode flags (for example train/eval) but must not duplicate policy
+  sampling logic.
+- Policy configs must use `extra="forbid"` unless there is an explicit,
+  documented compatibility reason.
+
 ---
 
 ## 4 Dependency Constraints
@@ -126,6 +138,16 @@ heads own step-local loss composition and metric aggregation. Heads may depend o
 `controllers/`, `loss/`, `metrics/`, and `training/` primitives, but `training/`
 must remain usable without importing from `controllers/` or `heads/`.
 
+All code in `policies/` is **model-agnostic** and **controller-agnostic**:
+it must not import from `models/`, `controllers/`, `heads/`, `training/`, or
+`modules/`. Policies may depend on external tensor/runtime libraries and on
+lightweight shared contracts such as `ehc_sn.types` and `ehc_sn.utils`.
+
+Policies own reusable action-selection behavior over explicit rollout-state
+views. Controllers remain responsible for rollout lifecycle and environment
+stepping; environments remain responsible for transition dynamics and action
+validation.
+
 ---
 
 ## 8 Cross-Component Change Policy
@@ -137,6 +159,9 @@ Code changes that cross component boundaries require a tracked plan in
 - Moving code between components.
 - Changing the public API of a component that other components depend on.
 - Adding or removing a runtime dependency.
+
+For new top-level packages, the plan must also update `spec/spec-architecture.md`
+so the component taxonomy remains complete and dependency boundaries are explicit.
 
 Single-component changes (bug fixes, internal refactors, new private helpers)
 do not require a plan unless they alter the component's public contract.
