@@ -20,7 +20,7 @@ class AdamATan2Config(BaseModel, extra="forbid"):
         default=1e-2,
         description="Weight decay for the main optimizer (e.g. Adam). The weight decay for the puzzle embedding optimizer is set by `emb_weight_decay`.",
     )
-    betas: Tuple[float, float] = Field(
+    betas: tuple[float, float] = Field(
         default=(0.9, 0.98),
         description="Betas for Adam optimizer. The betas for the puzzle embedding optimizer are not set by default since Adam is not used for the puzzle embedding optimizer.",
     )
@@ -41,7 +41,7 @@ class AdamConfig(BaseModel, extra="forbid"):
         default=1e-2,
         description="Weight decay for the Adam optimizer.",
     )
-    betas: Tuple[float, float] = Field(
+    betas: tuple[float, float] = Field(
         default=(0.9, 0.98),
         description="Betas for the Adam optimizer.",
     )

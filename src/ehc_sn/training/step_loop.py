@@ -32,12 +32,12 @@ class StepModule(Protocol):
 
     def __call__(  # -----------------------------------------------------------------------------
         self, batch: Batch, carry: Any, **options
-    ) -> Tuple[Any, Any, bool]:  # fmt: skip
+    ) -> tuple[Any, Any, bool]:  # fmt: skip
         ...  # fmt: skip
 
 
 # =================================================================================================
-class StepLoop(Iterator[Tuple[int, StepContext]]):
+class StepLoop(Iterator[tuple[int, StepContext]]):
     """Iterate a step module over a batch source for diagnostic or training traces."""
 
     def __init__(  # -----------------------------------------------------------------------------
@@ -57,7 +57,7 @@ class StepLoop(Iterator[Tuple[int, StepContext]]):
 
     def __next__(  # -----------------------------------------------------------------------------
         self,
-    ) -> Tuple[int, StepContext]:  # fmt: skip
+    ) -> tuple[int, StepContext]:  # fmt: skip
         t_trace, batch = next(self.batch_iter)
         outputs, carry, done = self.step_module(batch, self.carry, **self.options)
         self.carry = carry
