@@ -16,7 +16,7 @@ from scipy.stats import truncnorm
 from torch import Tensor, nn
 
 from ehc_sn import utils
-from ehc_sn.modules import MLP
+from ehc_sn.modules.mlp import MLP
 from ehc_sn.types import LocationBelief
 
 
@@ -34,6 +34,8 @@ class P2GMemSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
 # =================================================================================================
 @dataclass
 class Runtime:
+    """ """
+
     uncertainty_offset: float = 0.0
 
 
@@ -46,57 +48,36 @@ class P2GMemory(nn.Module):
     `LocationBelief` (typically from path integration).
     """
 
-    def __init__(self, n_p: List[int], mec_shape: List[int], settings: P2GMemSettings):
+    def __init__(  # ------------------------------------------------------------------------------
+        self, n_p: list[int], mec_shape: list[int], config: P2GMemSettings,
+    ) -> None:  # fmt: skip
+        """ """
         super().__init__()
-        self._mec_shape, self._n_freq = mec_shape, len(mec_shape)
-        self._n_p = n_p
-        self._settings = settings
+        self._config = config
         self._runtime = Runtime()
 
         # Mean prediction from place cells
         self.MLP_mu_g_mem = MLP(n_p, mec_shape, hidden_dim=[2 * g for g in mec_shape])
 
         # Initialize last layer with truncated normal (legacy parity)
-        init_w = lambda f: truncnorm.rvs(
-            -2, 2, size=list(self.MLP_mu_g_mem.w[f][-1].weight.shape), loc=0, scale=settings.sigma_init
-        )
-        self.MLP_mu_g_mem.set_weights(
-            -1, [torch.tensor(init_w(f), dtype=torch.float32) for f in range(self._n_freq)]
-        )
+        init_w = lambda f: truncnorm.rvs(-2, 2, size=list(self.MLP_mu_g_mem.w[f][-1].weight.shape), loc=0, scale=config.sigma_init)  # fmt: skip
+        self.MLP_mu_g_mem.set_weights(-1, [torch.tensor(init_w(f), dtype=torch.float32) for f in range(self._n_freq)])  # fmt: skip
 
         # Uncertainty from memory quality indicators
-        self.MLP_sigma_g_mem = MLP(
-            [2 for _ in n_p],
-            mec_shape,
-            activation=[torch.tanh, torch.exp],
-            hidden_dim=[2 * g for g in mec_shape],
-        )
+        self.MLP_sigma_g_mem = MLP([2 for _ in n_p], mec_shape, activation=[torch.tanh, torch.exp], hidden_dim=[2 * g for g in mec_shape])  # fmt: skip
+
+    @property
+    def config(self) -> P2GMemSettings:
+        """Return the P2G memory config."""
+        return self._config
 
     @property
     def runtime(self) -> Runtime:
         return self._runtime
 
-    @property
-    def settings(self) -> P2GMemSettings:
-        """Return the P2G memory settings."""
-        return self._settings
-
-    @property
-    def in_dims(self) -> List[int]:
-        """Return input dimensions (place-cell counts) per frequency."""
-        return self._n_p
-
-    @property
-    def shape(self) -> List[int]:
-        """Return grid-cell module sizes per frequency."""
-        return self._mec_shape
-
-    @property
-    def n_freq(self) -> int:
-        """Return the number of frequency modules."""
-        return self._n_freq
-
-    def forward(self, p_x: List[Tensor], transition: LocationBelief) -> LocationBelief:
+    def forward(  # -------------------------------------------------------------------------------
+        self, p_x: list[Tensor], transition: LocationBelief,
+    ) -> LocationBelief:  # fmt: skip
         """Infer a corrected grid-code transition from place cells.
 
         Args:
@@ -114,7 +95,9 @@ class P2GMemory(nn.Module):
         correction = LocationBelief(mean=mu, uncertainty=sigma)
         return utils.inv_var_trans(transition, correction)
 
-    def _inference_mean(self, p_x: List[Tensor]) -> List[Tensor]:
+    def _inference_mean(  # -----------------------------------------------------------------------
+        self, p_x: list[Tensor],
+    ) -> list[Tensor]:  # fmt: skip
         """Predict grid-code means from place cells.
 
         Args:
@@ -125,7 +108,9 @@ class P2GMemory(nn.Module):
         """
         return self.MLP_mu_g_mem(p_x)
 
-    def _inference_uncertainty(self, g: List[Tensor], err: List[Tensor]) -> List[Tensor]:
+    def _inference_uncertainty(  # ----------------------------------------------------------------
+        self, g: list[Tensor], err: list[Tensor],
+    ) -> list[Tensor]:  # fmt: skip
         """Estimate uncertainty from grid-code magnitude and reconstruction error.
 
         Args:
@@ -141,3 +126,7 @@ class P2GMemory(nn.Module):
         ]
         sigma = self.MLP_sigma_g_mem(sigma_g_input)
         return [sigma[f] + self.runtime.uncertainty_offset for f in range(self._n_freq)]
+
+
+# =================================================================================================
+__all__ = ["P2GMemory", "P2GMemSettings"]

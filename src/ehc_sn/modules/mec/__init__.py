@@ -21,13 +21,18 @@ from ehc_sn import utils
 from ehc_sn.modules.mec.ovc import OVCCorrection, OVCSettings
 from ehc_sn.modules.mec.p2g import P2GMemory, P2GMemSettings
 from ehc_sn.modules.mec.path import PathIntegrator, PathSettings
-
-__all__ = ["MECModel", "MECState"]
+from ehc_sn.types import Device, Dtype, LocationBelief, Matrix, MemoryState
+from ehc_sn.utils.detach import DetachMixin
 
 
 # =================================================================================================
-class MECSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class MECSettings(BaseModel, extra="forbid"):
     """Settings for MEC modules."""
+
+    shape: list[int] = Field(
+        ...,
+        description="",
+    )
 
     do_sample: bool = Field(
         default=False,
@@ -38,6 +43,7 @@ class MECSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
         frozen=True,
         description="Standard deviation for initializing grid cell activations.",
     )
+
     clamp_min: float = Field(
         default=-1.0,
         description="Minimum activation clamp for OVC cells.",
@@ -46,23 +52,24 @@ class MECSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
         default=1.0,
         description="Maximum activation clamp for OVC cells.",
     )
+
     path: PathSettings = Field(
         default_factory=PathSettings,
-        description="Path integration module settings.",
+        description="Path integration module config.",
     )
     p2g: P2GMemSettings = Field(
         default_factory=P2GMemSettings,
-        description="Place-to-grid memory inference module settings.",
+        description="Place-to-grid memory inference module config.",
     )
-    ovc: OVCSettings = Field(
+    ovc: Optional[OVCSettings] = Field(
         default_factory=OVCSettings,
-        description="OVC module settings.",
+        description="OVC module config.",
     )
 
 
 # =================================================================================================
 @dataclass()
-class MECState:
+class MECState(DetachMixin):
     """Container for MEC state.
 
     The state represents a belief over abstract location encoded as grid (and
@@ -76,71 +83,31 @@ class MECState:
     """
 
     location: LocationBelief  # State and uncertainty over abstract locations
-    _n_ovc_modules: Optional[int] = None  # Cached number of OVC modules
-
-    def new(
-        self, cells: Optional[AbstractLocation] = None, uncertainty: Optional[MultiScaleCode] = None
-    ) -> "MECState":
-        """Return a new state with an updated transition.
-
-        Args:
-            cells: New abstract location mean (multi-scale code).
-            uncertainty: New abstract location uncertainty (multi-scale code).
-                Note: the parameter name preserves a legacy spelling.
-
-        Returns:
-            A new `MECState` with updated `transition`.
-
-        Notes:
-            This method performs a shallow copy of the state fields. Use
-            `detach()` when you need to cache state across iterations without
-            keeping autograd history.
-        """
-        batch_size, device = self.cells[0].shape[0], self.cells[0].device
-        copy, shape = self.__dict__.copy(), [v.shape[1] for v in self.cells]
-        location = LocationBelief(
-            mean=cells or [torch.zeros((batch_size, n), device=device) for n in shape],
-            uncertainty=uncertainty,
-        )
-        copy.update(location=location)  # n_ovc_modules is preserved
-        return MECState(**copy)
-
-    def detach(self) -> "MECState":
-        """Return a detached copy.
-
-        This is typically used when caching a previous iteration state without
-        keeping autograd history.
-
-        Returns:
-            A detached copy of the current state.
-        """
-        cells = [v.detach() for v in self.cells]
-        uncertainty = [v.detach() for v in self.uncertainty] if self.uncertainty else None
-        return self.new(cells, uncertainty)
+    _shape_ovc_modules: Optional[int] = None  # Cached number of OVC modules
 
     @property
-    def cells(self) -> List[Tensor]:
+    def cells(self) -> list[Tensor]:
         """Return grid + OVC activations."""
         return self.location.mean
 
     @property
-    def uncertainty(self) -> Optional[List[Tensor]]:
+    def uncertainty(self) -> Optional[list[Tensor]]:
         """Return grid + OVC uncertainties."""
         return self.location.uncertainty
 
     @property
-    def grid_cells(self) -> List[Tensor]:
+    def grid_cells(self) -> list[Tensor]:
         """Return only the grid-cell activations."""
-        if self._n_ovc_modules is None:
+        if self._shape_ovc_modules is None:
             return self.cells
-        return self.cells[: len(self.cells) - self._n_ovc_modules]
+        return self.cells[: len(self.cells) - self._shape_ovc_modules]
 
     @property
-    def ovc_cells(self) -> Optional[List[Tensor]]:
+    def ovc_cells(self) -> Optional[list[Tensor]]:
         """Return only the OVC activations, or `None` if not present."""
-        if self._n_ovc_modules is None:
+        if self._shape_ovc_modules is None:
             return None
-        return self.cells[len(self.cells) - self._n_ovc_modules :]
+        return self.cells[len(self.cells) - self._shape_ovc_modules :]
 
 
 # =================================================================================================
@@ -155,39 +122,30 @@ class MECModel(nn.Module):
     - `OVCCorrection` for shiny landmark cue fusion
     """
 
-    def __init__(
-        self,
-        n_actions: int,  # Number of possible discrete actions
-        n_hippocampal: List[int],  # Number of hippocampal place cells per frequency
-        n_grids: List[int],  # Number of grid cells per frequency
-        n_ovc: Optional[List[int]],  # Number of OVC cells per frequency (or None)
-        f_init: List[float],  # Initial firing rate for all cells per frequency
-        *,
-        settings: Optional[MECSettings] = None,  # MEC settings
-    ):
+    def __init__(  # ------------------------------------------------------------------------------
+        self, n_actions: int, n_hippocampal: list[int], f_init: list[float], config: MECSettings,
+        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
+    ) -> None:  # fmt: skip
+        """ """
         super().__init__()
-        self._settings = settings or MECSettings()
-        self._n_actions = n_actions
-        self._shape = n_grids + (n_ovc if n_ovc is not None else [])
-        self._n_grids, self._n_ovc = n_grids, n_ovc
-        self._n_ovc_modules = None if n_ovc is None else len(n_ovc)
-        self._n_freq = len(self.shape)  # Total number of frequency modules
+        self._config = config
 
         # Prior: learned "default phase" of the grid code at reset
-        init_fn = lambda size: truncnorm.rvs(-2, 2, size=size, loc=0, scale=settings.sigma_init)
-        self.cells_init = nn.ParameterList(
-            [nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in self.shape]
-        )
-        self.uncertainty_init = nn.ParameterList(
-            [nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in self.shape]
-        )
+        init_fn = lambda size: truncnorm.rvs(-2, 2, size=size, loc=0, scale=config.sigma_init)
+        self.cells_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in self.shape])  # fmt: skip
+        self.uncertainty_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in self.shape])  # fmt: skip
 
         # Instantiate submodules
-        self.path_integration = PathIntegrator(n_actions, self.shape, f_init, settings=settings.path)
-        self.p2g_correction = P2GMemory(n_hippocampal, self.shape, settings=settings.p2g)
-        self.ovc_correction = OVCCorrection(n_ovc, self.shape, settings=settings.ovc)
+        self.path_integration = PathIntegrator(n_actions, self.shape, f_init, config=config.path)
+        self.p2g_correction = P2GMemory(n_hippocampal, self.shape, config=config.p2g)
+        self.ovc_correction = OVCCorrection(config.ovc.shape, self.shape, config=config.ovc)
 
-    def init_state(self, batch_size: int, device: Optional[torch.device] = None) -> MECState:
+    @property
+    def config(self) -> MECSettings:
+        """Return the MEC config."""
+        return self._config
+
+    def init_state(self, batch_size: int, device: Optional[Device] = None) -> MECState:
         """Create an initial MEC state from learned priors.
 
         Args:
@@ -200,7 +158,7 @@ class MECModel(nn.Module):
         g0 = [g.unsqueeze(0).expand(batch_size, -1).to(device) for g in self.cells_init]
         sigma_0 = [std.unsqueeze(0).expand(batch_size, -1).to(device) for std in self.uncertainty_init]
         transition = LocationBelief(mean=g0, uncertainty=sigma_0)
-        return MECState(transition, _n_ovc_modules=self._n_ovc_modules)
+        return MECState(transition, _shape_ovc_modules=self._shape_ovc_modules)
 
     def set_runtime(self, *, p2g_uncertainty_offset: float) -> None:
         """Set runtime hyperparameters.
@@ -210,42 +168,7 @@ class MECModel(nn.Module):
         """
         self.p2g_correction.runtime.uncertainty_offset = p2g_uncertainty_offset
 
-    @property
-    def settings(self) -> MECSettings:
-        """Return the MEC settings."""
-        return self._settings
-
-    @property
-    def n_actions(self) -> int:
-        """Return the number of actions."""
-        return self._n_actions
-
-    @property
-    def n_hippocampal(self) -> List[int]:
-        """Return hippocampal place-cell counts per frequency."""
-        return self.p2g_correction.n_hippocampal
-
-    @property
-    def n_grids(self) -> List[int]:
-        """Return grid module sizes per frequency."""
-        return self._n_grids
-
-    @property
-    def n_ovc(self) -> Optional[List[int]]:
-        """Return OVC module sizes per frequency, or `None` if OVC is disabled."""
-        return self._n_ovc
-
-    @property
-    def shape(self) -> List[int]:
-        """Return grid-cell counts per frequency module."""
-        return self._shape
-
-    @property
-    def n_freq(self) -> int:
-        """Return the number of frequency modules."""
-        return self._n_freq
-
-    def forward(self, *, _) -> Tuple[List[Tensor], MECState]:
+    def forward(self, *, _) -> tuple[list[Tensor], MECState]:
         """Not implemented.
 
         Raises:
@@ -255,7 +178,7 @@ class MECModel(nn.Module):
 
     def generative(
         self, action: Tensor, locations: list[LocationLabel], state: MECState
-    ) -> Tuple[AbstractLocation, MECState]:
+    ) -> tuple[AbstractLocation, MECState]:
         """Run the generative (path integration) update.
 
         Args:
@@ -277,7 +200,7 @@ class MECModel(nn.Module):
 
         # 1) Action-driven transition for the state (legacy g_path)
         transition = self.path_integration(action, state.cells, no_direc_mask=None)
-        if self.settings.do_sample:
+        if self.config.do_sample:
             cells_next = utils.sample_diag_gaussian(transition)
         else:
             cells_next = transition.mean
@@ -285,7 +208,7 @@ class MECModel(nn.Module):
         # 2) g_gen: reuse mu when possible, only compute no_direc when needed
         if any_shiny:
             g_gen = self._clamp(self.path_integration.mean(action, state.cells, no_direc_mask))
-        elif self.settings.do_sample:
+        elif self.config.do_sample:
             g_gen = cells_next  # legacy: g_gen == sampled g when no shiny
         else:
             g_gen = self._clamp(transition.mean)
@@ -294,7 +217,7 @@ class MECModel(nn.Module):
 
     def inference(
         self, p_x: Optional[GroundedLocation], locations: list[LocationLabel], state: MECState
-    ) -> Tuple[AbstractLocation, MECState]:
+    ) -> tuple[AbstractLocation, MECState]:
         """Run inference by fusing memory and OVC cues into the state.
 
         Args:
@@ -311,11 +234,11 @@ class MECModel(nn.Module):
         transition = self.p2g_correction(p_x, transition) if p_x is not None else transition
         # Step 2: Apply OVC correction from shiny landmarks.
         transition = (
-            self.ovc_correction(locations, transition) if self._n_ovc_modules is not 0 else transition
+            self.ovc_correction(locations, transition) if self._shape_ovc_modules is not 0 else transition
         )
 
         # Apply central sampling policy (legacy parity: g_inf is sampled when do_sample=True)
-        if self.settings.do_sample:
+        if self.config.do_sample:
             cells_next = utils.sample_diag_gaussian(transition)
         else:
             cells_next = transition.mean
@@ -332,4 +255,8 @@ class MECModel(nn.Module):
         Returns:
             Clamped activations.
         """
-        return [torch.clamp(g_f, min=self._settings.clamp_min, max=self._settings.clamp_max) for g_f in g]
+        return [torch.clamp(g_f, min=self._config.clamp_min, max=self._config.clamp_max) for g_f in g]
+
+
+# =================================================================================================
+__all__ = ["MECModel", "MECState"]

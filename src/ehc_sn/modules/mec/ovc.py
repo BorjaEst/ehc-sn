@@ -13,14 +13,19 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from ehc_sn import utils
-from ehc_sn.modules import MLP
-from ehc_sn.types import LocationBelief
+from ehc_sn.modules.mlp import MLP
+from ehc_sn.types import Device, Dtype, LocationBelief
+from ehc_sn.utils.detach import DetachMixin
 
 
 # =================================================================================================
-class OVCSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class OVCSettings(BaseModel, extra="forbid"):
     """Settings for OVC modules."""
 
+    shape: list[int] = Field(
+        ...,
+        description="Sizes of OVC frequency modules (must be contiguous and at the end of MEC frequencies).",
+    )
     hidden_dim: int = Field(
         default=20,
         frozen=True,
@@ -36,44 +41,30 @@ class OVCCorrection(nn.Module):
     combined using inverse-variance weighting.
     """
 
-    def __init__(
-        self, n_ovc: Optional[List[int]], mec_shape: List[int], *, settings: Optional[OVCSettings] = None
-    ):
+    def __init__(  # ------------------------------------------------------------------------------
+        self, mec_shape: List[int], config: OVCSettings,
+    ) -> None:  # fmt: skip
+        """ """
         super().__init__()
-        self._settings = settings or OVCSettings()
-        n_freq_ovc = None if n_ovc is None else len(n_ovc)
+        self._config = config or OVCSettings()
+        n_freq_ovc = None if shape is None else len(shape)
         self._ovc_start, self._ovc_count = utils.resolve_ovc_slice(len(mec_shape), n_freq_ovc)
         self._shape = mec_shape[self._ovc_start : self._ovc_start + self._ovc_count]
         self._n_freq = len(self._shape)
 
         # Shiny cue → mean and uncertainty.
-        hidden_dim = [settings.hidden_dim] * self.n_freq
+        hidden_dim = [config.hidden_dim] * self.n_freq
         self.g_shiny_mlp = MLP([1] * self.n_freq, self.shape, hidden_dim=hidden_dim)
-        self.uncertainty_mlp = MLP(
-            [1] * self.n_freq, self.shape, [torch.tanh, torch.exp], hidden_dim=hidden_dim
-        )
+        self.uncertainty_mlp = MLP( [1] * self.n_freq, self.shape, [torch.tanh, torch.exp], hidden_dim=hidden_dim)  # fmt: skip
 
     @property
-    def settings(self) -> OVCSettings:
-        """Return the OVC settings."""
-        return self._settings
+    def config(self) -> OVCSettings:
+        """Return the OVC config."""
+        return self._config
 
-    @property
-    def shape(self) -> List[int]:
-        """Return OVC module sizes per frequency."""
-        return self._shape
-
-    @property
-    def n_freq(self) -> int:
-        """Return the number of OVC frequency modules."""
-        return self._n_freq
-
-    @property
-    def ovc_start(self) -> int:
-        """Return the starting index (into MEC frequencies) for OVC correction."""
-        return self._ovc_start
-
-    def forward(self, locations: list[dict], transition: LocationBelief) -> LocationBelief:
+    def forward(  # -------------------------------------------------------------------------------
+        self, locations: list[dict], transition: LocationBelief,
+    ) -> LocationBelief:  # fmt: skip
         """Apply OVC correction to environments with shiny cues.
 
         Args:
@@ -96,7 +87,9 @@ class OVCCorrection(nn.Module):
         correction = self._predict_correction(shiny_input)
         return utils.inv_var_trans(transition, correction, shiny_mask, freqs)
 
-    def _identify_shiny_envs(self, locations: list[dict], device: torch.device) -> Tensor | None:
+    def _identify_shiny_envs(  # ------------------------------------------------------------------
+        self, locations: list[dict], device: Device,
+    ) -> Tensor | None:  # fmt: skip
         """Return a mask selecting environments with shiny cues.
 
         Args:
@@ -112,9 +105,9 @@ class OVCCorrection(nn.Module):
             return None
         return torch.tensor(shiny_envs, dtype=torch.bool, device=device)
 
-    def _extract_shiny_cues(
-        self, locations: list[dict], shiny_mask: Tensor, device: torch.device
-    ) -> List[Tensor]:
+    def _extract_shiny_cues(  # -------------------------------------------------------------------
+        self, locations: list[dict], shiny_mask: Tensor, device: Device
+    ) -> list[Tensor]:  # fmt: skip
         """Extract shiny cue values as inputs for the OVC MLPs.
 
         Args:
@@ -130,7 +123,9 @@ class OVCCorrection(nn.Module):
         shiny_tensor = torch.as_tensor(shiny_vals, dtype=torch.float32, device=device).unsqueeze(-1)
         return [shiny_tensor] * self.n_freq
 
-    def _predict_correction(self, shiny_input: List[Tensor]) -> LocationBelief:
+    def _predict_correction(  # -------------------------------------------------------------------
+        self, shiny_input: list[Tensor],
+    ) -> LocationBelief:  # fmt: skip
         """Predict mean and uncertainty for the OVC correction.
 
         Args:
@@ -147,3 +142,7 @@ class OVCCorrection(nn.Module):
         sigma_g_shiny = self.uncertainty_mlp(shiny_input)
 
         return LocationBelief(mean=mu_g_shiny, uncertainty=sigma_g_shiny)
+
+
+# =================================================================================================
+__all__ = ["OVCCorrection", "OVCSettings"]

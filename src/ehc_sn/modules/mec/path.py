@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from ehc_sn import utils
-from ehc_sn.modules import MLP
+from ehc_sn.modules.mlp import MLP
 from ehc_sn.types import LocationBelief
 
 
@@ -37,53 +37,35 @@ class PathIntegrator(nn.Module):
     transition (`D_no_a`) via `no_direc_mask`.
     """
 
-    def __init__(self, n_a: int, mec_shape: List[int], f_init: List[float], settings: PathSettings):
+    def __init__(  # ------------------------------------------------------------------------------
+        self, n_a: int, mec_shape: list[int], f_init: list[float], config: PathSettings,
+    ) -> None:  # fmt: skip
+        """ """
         super().__init__()
         self._n_a, self._mec_shape, self._n_freq = n_a, mec_shape, len(mec_shape)
         self._connections = conn = utils.connections(f_init)
-        self._conn_indices = [
-            [f_from for f_from in range(self.n_freq) if conn[f_to][f_from]] for f_to in range(self.n_freq)
-        ]
-        self._in_dims = [
-            sum(mec_shape[f_from] for f_from in self._conn_indices[f_to]) for f_to in range(self.n_freq)
-        ]
+        self._conn_indices = [[f_from for f_from in range(self.n_freq) if conn[f_to][f_from]] for f_to in range(self.n_freq)]  # fmt: skip
+        self._in_dims = [sum(mec_shape[f_from] for f_from in self._conn_indices[f_to]) for f_to in range(self.n_freq)]  # fmt: skip
         self._mat_shape = [(self._in_dims[f_to], mec_shape[f_to]) for f_to in range(self.n_freq)]
-        self._settings = settings
+        self._config = config
 
         # LocationBelief weights (action-conditioned)
-        hidden_dim = [settings.hidden_dim] * self.n_freq
-        self.MLP_D_a = MLP(
-            [n_a] * self.n_freq, self.shape, [torch.tanh, None], hidden_dim, bias=[True, False]
-        )
+        hidden_dim = [config.hidden_dim] * self.n_freq
+        self.MLP_D_a = MLP([n_a] * self.n_freq, self.shape, [torch.tanh, None], hidden_dim, bias=[True, False])  # fmt: skip
         self.MLP_D_a.set_weights(1, 0.0)
-        self.D_no_a = nn.ParameterList(
-            [nn.Parameter(torch.zeros(m)) for m in self._mat_shape]
-        )  # Non-directional, per-frequency matrix
+        self.D_no_a = nn.ParameterList([nn.Parameter(torch.zeros(m)) for m in self._mat_shape])  # fmt: skip
 
         # LocationBelief uncertainty
         self.uncertainty_mlp = MLP(mec_shape, mec_shape, [torch.tanh, torch.exp], [2 * g for g in mec_shape])
 
     @property
-    def settings(self) -> PathSettings:
-        """Return the path integration settings."""
-        return self._settings
+    def config(self) -> PathSettings:
+        """Return the path integration config."""
+        return self._config
 
-    @property
-    def n_actions(self) -> int:
-        """Return the number of actions."""
-        return self._n_a
-
-    @property
-    def shape(self) -> List[int]:
-        """Return flattened transition sizes per frequency module."""
-        return [in_dim * out_dim for in_dim, out_dim in self._mat_shape]
-
-    @property
-    def n_freq(self) -> int:
-        """Return the number of frequency modules."""
-        return self._n_freq
-
-    def forward(self, a: Tensor, g_prev: List[Tensor], no_direc_mask: Tensor | None = None) -> LocationBelief:
+    def forward(  # -------------------------------------------------------------------------------
+        self, a: Tensor, g_prev: list[Tensor], no_direc_mask: Tensor | None = None,
+    ) -> LocationBelief:  # fmt: skip
         """Compute the transition distribution for a single step.
 
         Args:
@@ -99,7 +81,9 @@ class PathIntegrator(nn.Module):
         sigma = self.uncertainty_mlp(g_prev)
         return LocationBelief(mean=mu, uncertainty=sigma)
 
-    def mean(self, a: Tensor, g: List[Tensor], no_direc_mask: Tensor | None) -> List[Tensor]:
+    def mean(  # ----------------------------------------------------------------------------------
+        self, a: Tensor, g: list[Tensor], no_direc_mask: Tensor | None,
+    ) -> list[Tensor]:  # fmt: skip
         """Compute the mean transition update.
 
         Args:
@@ -123,7 +107,9 @@ class PathIntegrator(nn.Module):
         delta = [torch.bmm(g_in_f, mat_f).squeeze(1) for g_in_f, mat_f in zip(g_in, mats)]
         return [g_f + delta_f for g_f, delta_f in zip(g, delta)]
 
-    def _transition_matrices(self, a: Tensor, no_direc_mask: Tensor | None) -> List[Tensor]:
+    def _transition_matrices(  # ------------------------------------------------------------------
+        self, a: Tensor, no_direc_mask: Tensor | None,
+    ) -> list[Tensor]:  # fmt: skip
         """Build per-frequency transition matrices.
 
         Args:
@@ -145,3 +131,7 @@ class PathIntegrator(nn.Module):
                 mats[f_to] = torch.where(mask, d_no_a, mats[f_to])
 
         return mats
+
+
+# =================================================================================================
+__all__ = ["PathSettings", "PathIntegrator"]
