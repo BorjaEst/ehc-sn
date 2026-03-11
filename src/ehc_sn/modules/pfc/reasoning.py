@@ -22,7 +22,7 @@ from ehc_sn.types import Activation, Device, Dtype, Matrix, MemoryState, MultiSc
 
 
 # =================================================================================================
-class ReasoningSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class ReasoningSettings(BaseModel, extra="forbid"):
     """Settings for a single reasoning module (high or low level)."""
 
     cortex: TransformerBlockConfig = Field(
@@ -36,7 +36,7 @@ class ReasoningSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True)
     )
 
     @property
-    def layers(self) -> List[TransformerBlockConfig]:
+    def layers(self) -> list[TransformerBlockConfig]:
         """Convenience property to construct the list of transformer block."""
         return [self.cortex for _ in range(self.n_layers)]
 

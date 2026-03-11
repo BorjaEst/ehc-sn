@@ -195,7 +195,7 @@ class PFCModel(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, x: Tensor, state: Optional[PFCState] = None,
-    ) -> Tuple[PFCState, Tensor, Tensor]:  # fmt: skip
+    ) -> tuple[PFCState, Tensor, Tensor]:  # fmt: skip
         """Run recurrent reasoning and compute auxiliary value estimates.
 
         Args:
