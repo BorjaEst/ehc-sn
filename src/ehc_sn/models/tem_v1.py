@@ -14,25 +14,27 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from adam_atan2_pytorch import AdamAtan2 as AdamATan2
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch import Tensor, nn
 from torch.distributions import Normal
 from torch.optim import Adam, Optimizer
 from torch.optim.lr_scheduler import ExponentialLR
 
 from ehc_sn import utils
-from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
+from ehc_sn.controllers.tem import TEMController, TEMControllerConfig, TEMOutput
 from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
 from ehc_sn.data.transforms import channels_to_grid
+from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
+from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
 from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
-from ehc_sn.metrics.routes import ACT_STEP_ROUTES
+from ehc_sn.metrics.routes import TEM_STEP_ROUTES as TEM_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
-from ehc_sn.modules.autoencoder import Autoencoder
+from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
 from ehc_sn.modules.hpc import HPCModel, HPCSettings, HPCState, MemoryState
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
-from ehc_sn.modules.projection import ProjectionModule
+from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
 from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.buffers import FifoBuffer
@@ -40,7 +42,7 @@ from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
 from ehc_sn.training.step_loop import StepContext, StepLoop
-from ehc_sn.types import AbstractLocation, Device, Dtype, GroundedLocation, Prediction, Reduction, Scalar
+from ehc_sn.types import Device, Dtype
 from ehc_sn.utils import trunc_normal_init_
 from ehc_sn.utils.detach import DetachMixin
 
@@ -222,13 +224,10 @@ class TEMModelV1(nn.Module):
         self.hpc.set_runtime(eta=eta, hebbian_decay=hebbian_decay)
 
     def forward(  # -------------------------------------------------------------------------------
-        self, inputs: tuple[Tensor, ...], state: Optional[TEMState],
-    ) -> tuple[TEMState, tuple[Tensor, ...], Optional[Tensor], LatentCode, LatentCode]:  # fmt: skip
+        self, inputs: Batch, state: Optional[TEMState] = None,
+    ) -> tuple[TEMState, TEMOutput]:  # fmt: skip
         """ """
-        state = self.reset_state(state, a_prev, observation.device)  # FIXME: this is controller logic
-        device = observation.device  # Get device from observation tensor
-        actions = utils.one_hot_with_zero(a_prev, self.config.n_actions, device=device)
-        observation, locations, a_prev = inputs
+        # state = self.reset_state(state, a_prev, observation.device)  # FIXME: this is controller logic
         features = self.autoencoder.encode(observation)  # Encode observation to compressed format
 
         # Observe / infer: LEC filtering + HPC retrieval + MEC correction
@@ -237,7 +236,7 @@ class TEMModelV1(nn.Module):
         p_xi = self.hpc.recall(x_, state.hpc, mode="full") if self.config.use_x_cued_recall else None
 
         # LocationBelief: MEC path integration (action-driven)
-        g_gen, state.mec = self.mec.generative(actions, locations, state.mec)  # Updates mec state with g_path
+        g_gen, state.mec = self.mec.generative(action, locations, state.mec)
         g_ = self.mec_projection(g_gen)
         p_gg = self.hpc.recall(g_, state.hpc, mode="hierarchical")
 
@@ -259,7 +258,7 @@ class TEMModelV1(nn.Module):
         # Generate observation prediction from inferred grounded location
         x = self.lec_projection.inverse(p_inf)
         c_p_inf = self.lec.generative(x)
-        logits_inf = self.autoencoder.decode(c_p_inf)
+        logits_inference = self.autoencoder.decode(c_p_inf)
 
         # Generate observation from inferred grounded location
         x = self.lec_projection.inverse(p_gen_gi)
@@ -273,7 +272,7 @@ class TEMModelV1(nn.Module):
 
         # Build full output, state and return
         new_state = state
-        obs_logits = (logits_ing, logits_retr, logits_ances)
+        obs_logits = (logits_inference, logits_retrieved, logits_ancestral)
         grid = (grid_post, grid_prior)
         place = (place_post, place_prior, place_sensory)
         return new_state, obs_logits, None, grid, place
