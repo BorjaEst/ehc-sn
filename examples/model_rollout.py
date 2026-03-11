@@ -77,7 +77,7 @@ class ExampleArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     @classmethod
     def settings_customise_sources(  # ------------------------------------------------------------
         cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,
-    ) -> Tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip
+    ) -> tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip
         """Define settings precedence.
 
         Order:
