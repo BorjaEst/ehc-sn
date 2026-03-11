@@ -77,7 +77,7 @@ class ACTOutput(DetachMixin):
     deprecated in head code and will be removed once all heads are migrated.
     """
 
-    logits: Tuple[Tensor, ...]  # (lm_logits, q_logits, ...); prefer named properties in heads
+    logits: tuple[Tensor, ...]  # (lm_logits, q_logits, ...); prefer named properties in heads
     theta_cls: Tensor  # (B, D) — theta CLS features
     action: Tensor  # (B,) selected action indices for this step
     target_q: Tensor | None = None  # TD(0) bootstrap Q-target, shape: (B,). None outside training.
@@ -139,7 +139,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
     def step(  # ----------------------------------------------------------------------------------
         self, state: ACTRolloutState[ModelState], batch: Batch,
         allow_halt: bool = True, explore: bool = True, td_target: bool = True, **_: Any,
-    ) -> Tuple[ACTRolloutState[ModelState], ACTOutput]:  # fmt: skip
+    ) -> tuple[ACTRolloutState[ModelState], ACTOutput]:  # fmt: skip
         """Advance the controller by one step.
 
         Args:
@@ -197,7 +197,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
 
     def _select_action_and_done(  # ---------------------------------------------------------------
         self, logits: list[Tensor], steps: Tensor, allow_halt: bool, explore: bool,
-    ) -> Tuple[Tensor, Tensor]:  # fmt: skip
+    ) -> tuple[Tensor, Tensor]:  # fmt: skip
         """Select action and determine done flags for this step."""
         _logits_lm, logits_q, *_ = logits  # Unpack list of logits multiple heads
         config = self.config
