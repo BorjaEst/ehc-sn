@@ -44,7 +44,7 @@ class AccuracyO:
     _total: Tensor | None = None  # weight for averaging (internal)
 
     @classmethod
-    def zero(cls, *, device: torch.device | str, dtype: torch.dtype = torch.float32) -> "AccuracyO":
+    def zero(cls, *, device: Device | str, dtype: torch.dtype = torch.float32) -> "AccuracyO":
         """Create a zero-initialized accuracy.
 
         Args:
