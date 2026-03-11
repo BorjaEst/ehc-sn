@@ -13,9 +13,11 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
+from ehc_sn.types import Device, Dtype
+
 
 # =================================================================================================
-class FreqFilterSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class FreqFilterSettings(BaseModel, extra="forbid"):
     """Settings for LEC frequency filtering modules."""
 
 
@@ -27,16 +29,18 @@ class FrequencyFilter(nn.Module):
     used to mix the previous filtered value with the current sensory input.
     """
 
-    def __init__(self, f_init: List[float], settings: FreqFilterSettings):
+    def __init__(  # ------------------------------------------------------------------------------
+        self, f_init: list[float], config: Optional[FreqFilterSettings] = None,
+        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
+    ) -> None:  # fmt: skip
         """Initialize the filter.
 
         Args:
             f_init: Initial filter coefficients per frequency module.
-            settings: Configuration for the filter.
+            config: Configuration for the filter.
         """
         super().__init__()
-        self._n_freq = len(f_init)
-        self._settings = settings
+        self._config = config or FreqFilterSettings()
 
         # Initialize temporal filtering factors
         # Store as logit(f) so that sigmoid(alpha) recovers the desired frequency
@@ -44,16 +48,13 @@ class FrequencyFilter(nn.Module):
         self.alpha = nn.ParameterList([nn.Parameter(torch.tensor(a, dtype=torch.float)) for a in alpha_logit])
 
     @property
-    def settings(self) -> FreqFilterSettings:
-        """Return the filter settings."""
-        return self._settings
+    def config(self) -> FreqFilterSettings:
+        """Return the filter config."""
+        return self._config
 
-    @property
-    def n_freq(self) -> int:
-        """Return the number of frequency modules."""
-        return len(self.alpha)
-
-    def forward(self, c: Tensor, x_prev: List[Tensor]) -> List[Tensor]:
+    def forward(  # -------------------------------------------------------------------------------
+        self, c: Tensor, x_prev: list[Tensor],
+    ) -> list[Tensor]:  # fmt: skip
         """Apply temporal filtering.
 
         Args:
@@ -65,3 +66,9 @@ class FrequencyFilter(nn.Module):
         """
         alpha = [torch.sigmoid(self.alpha[f]) for f in range(self.n_freq)]
         return [(1 - alpha[f]) * x_prev[f] + alpha[f] * c for f in range(self.n_freq)]
+
+
+# =================================================================================================
+__all__ = ["FreqFilterSettings", "FrequencyFilter"]
+# =================================================================================================
+__all__ = ["FreqFilterSettings", "FrequencyFilter"]

@@ -13,7 +13,7 @@ The public entry point is `LECModel`, which exposes TEM-compatible `init_state`,
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
@@ -22,32 +22,40 @@ from torch import Tensor, nn
 from ehc_sn.modules.lec.filter import FreqFilterSettings, FrequencyFilter
 from ehc_sn.modules.lec.norm import FeatureNorm, FeatureNormSettings
 from ehc_sn.modules.lec.reconstruction import Reconstruction, ReconstructionSettings
-from ehc_sn.types import MultiScaleCode
-
-__all__ = ["LECModel", "LECState"]
+from ehc_sn.types import Device, Dtype, MultiScaleCode
+from ehc_sn.utils.detach import DetachMixin
 
 
 # =================================================================================================
-class LECSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class LECSettings(BaseModel, extra="forbid"):
     """Settings for LEC modules."""
+
+    n_features: int = Field(
+        ...,
+        description="",
+    )
+    f_init: list[float] = Field(
+        ...,
+        description="",
+    )
 
     filter: FreqFilterSettings = Field(
         default_factory=FreqFilterSettings,
-        description="Feature Frequency filtering module settings.",
+        description="Feature Frequency filtering module config.",
     )
     norm: FeatureNormSettings = Field(
         default_factory=FeatureNormSettings,
-        description="Feature normalization module settings.",
+        description="Feature normalization module config.",
     )
     reconstruction: ReconstructionSettings = Field(
         default_factory=ReconstructionSettings,
-        description="Feature reconstruction module settings.",
+        description="Feature reconstruction module config.",
     )
 
 
 # =================================================================================================
 @dataclass
-class LECState:
+class LECState(DetachMixin):
     """Container for LEC state.
 
     Attributes:
@@ -58,42 +66,6 @@ class LECState:
     cells: MultiScaleCode  # LEC cell activations per frequency
     filtered: MultiScaleCode  # Unweighted filtered features
 
-    def new(
-        self, cells: Optional[MultiScaleCode] = None, filtered: Optional[MultiScaleCode] = None
-    ) -> "LECState":
-        """Return a new state with updated fields.
-        If a field is not provided, the value is reset to the initial value (zeros).
-
-        Args:
-            cells: Optional new LEC cell activations.
-            filtered: Optional new filtered features.
-
-        Returns:
-            A new `LECState` instance.
-
-        Notes:
-            This method performs a shallow copy of the state fields. Use
-            `detach()` when you need to carry state across iterations without
-            keeping autograd history.
-        """
-        batch_size, device = self.cells[0].shape[0], self.cells[0].device
-        copy, shape = self.__dict__.copy(), [v.shape[1] for v in self.cells]
-        cells = cells or [torch.zeros((batch_size, n), device=device) for n in shape]
-        filtered = filtered or [torch.zeros((batch_size, n), device=device) for n in shape]
-        copy.update(cells=cells, filtered=filtered)
-        return LECState(**copy)
-
-    def detach(self) -> "LECState":
-        """Return a detached copy.
-
-        Returns:
-            A detached copy of the current state.
-        """
-        return LECState(
-            cells=[v.detach() for v in self.cells],
-            filtered=[v.detach() for v in self.filtered],
-        )
-
 
 # =================================================================================================
 class LECModel(nn.Module):
@@ -103,27 +75,39 @@ class LECModel(nn.Module):
     generative and inference interfaces.
     """
 
-    def __init__(
-        self,
-        n_features: int,  # Number of LEC features (compressed observation)
-        f_init: List[float],  # Initial firing rates per frequency
-        *,
-        settings: Optional[LECSettings] = None,  # LEC settings
-    ):
+    def __init__(  # ------------------------------------------------------------------------------
+        self, config: LECSettings,
+        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
+    ) -> None:  # fmt: skip
+        """ """
         super().__init__()
-        self._settings = settings or LECSettings()
-        self._n_c, self._n_freq = n_features, len(f_init)
-        self._shape = [n_features] * self.n_freq
+        self._config = config
+        n_features, f_init = config.n_features, config.f_init
+        n_freq = len(f_init)
 
         # Composable submodules (single responsibility each)
-        self.filter = FrequencyFilter(f_init, settings.filter)
-        self.norm = FeatureNorm(settings.norm)
-        self.reconstructor = Reconstruction(n_features, settings.reconstruction)
+        self.filter = FrequencyFilter(f_init, config.filter)
+        self.norm = FeatureNorm(config.norm)
+        self.reconstruct = Reconstruction(n_features, config.reconstruction)
+        self.w_f = nn.ParameterList([nn.Parameter(torch.tensor(1.0)) for _ in range(n_freq)])
 
-        # Frequency module specific scaling of filtered sensory experience
-        self.w_f = nn.ParameterList([nn.Parameter(torch.tensor(1.0)) for _ in range(self.n_freq)])
+        self.reset_parameters()
 
-    def init_state(self, batch_size: int, device: Optional[torch.device] = None) -> LECState:
+    @property
+    def config(self) -> LECSettings:
+        """Return the LEC config."""
+        return self._config
+
+    def reset_parameters(  # ----------------------------------------------------------------------
+        self,
+    ) -> None:  # fmt: skip
+        """Initialize parameters and buffers."""
+        pass
+
+    def init_state(  # ----------------------------------------------------------------------------
+        self, batch_size: int, *,
+        device: Optional[Device] = None,
+    ) -> LECState:  # fmt: skip
         """Create an initial LEC state.
 
         Args:
@@ -136,37 +120,32 @@ class LECModel(nn.Module):
         x0 = [torch.zeros((batch_size, n), device=device) for n in self.shape]
         return LECState(cells=x0, filtered=x0)
 
-    def set_runtime(self, *, _):
+    def reset_state(  # ---------------------------------------------------------------------------
+        self, state: LECState,  # TODO: define based in other modules reset_state
+    ) -> LECState:  # fmt: skip
+        """ """
+        raise NotImplementedError(
+            "LEC reset_state not implemented. Use init_state or implement reset logic here."
+        )
+
+    def set_runtime(  # ---------------------------------------------------------------------------
+        self, **_,
+    ) -> None:  # fmt: skip
         """Set runtime hyperparameters.
 
         This module currently does not use runtime parameters.
         """
         pass
 
-    @property
-    def settings(self) -> LECSettings:
-        """Return the LEC settings."""
-        return self._settings
-
-    @property
-    def shape(self) -> List[int]:
-        """Return per-frequency LEC activation sizes."""
-        return self._shape
-
-    @property
-    def n_freq(self) -> int:
-        """Return the number of frequency modules."""
-        return self._n_freq
-
-    def forward(self, *, _) -> Tuple[List[Tensor], LECState]:
-        """Not implemented.
-
-        Raises:
-            NotImplementedError: Always. Use `generative` or `inference`.
-        """
+    def forward(  # -------------------------------------------------------------------------------
+        self, *, state: LECState,
+    ) -> tuple[list[Tensor], LECState]:  # fmt: skip
+        """ """
         raise NotImplementedError("LEC forward not implemented. Use generative() or inference().")
 
-    def generative(self, x: List[Tensor]) -> Tensor:
+    def generative(  # ----------------------------------------------------------------------------
+        self, x: list[Tensor],
+    ) -> Tensor:  # fmt: skip
         """Reconstruct sensory input from LEC features.
 
         Args:
@@ -175,9 +154,11 @@ class LECModel(nn.Module):
         Returns:
             A reconstruction of the sensory input.
         """
-        return self.reconstructor(x)
+        return self.reconstruct(x)
 
-    def inference(self, c: Tensor, state: LECState) -> Tuple[List[Tensor], LECState]:
+    def inference(  # -----------------------------------------------------------------------------
+        self, c: Tensor, state: LECState,
+    ) -> tuple[list[Tensor], LECState]:  # fmt: skip
         """Run the LEC inference update.
 
         Args:
@@ -192,3 +173,7 @@ class LECModel(nn.Module):
         normalized = self.norm(filtered)
         x_inf = next_cells = [torch.sigmoid(self.w_f[f]) * normalized[f] for f in range(self.n_freq)]
         return x_inf, state.new(cells=next_cells, filtered=filtered)
+
+
+# =================================================================================================
+__all__ = ["LECModel", "LECState"]
