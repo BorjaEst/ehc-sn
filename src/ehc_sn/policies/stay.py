@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import torch
+from pydantic import BaseModel, Field
 
 from ehc_sn.policies._base import PolicyDecision, PolicyInput
+
+
+# =================================================================================================
+class StayPolicyConfig(BaseModel, extra="forbid"):
+    """Configuration for deterministic stay / no-op policies."""
+
+    kind: Literal["stay"] = Field(default="stay", description="Select the environment no-op action.")
 
 
 # =================================================================================================
@@ -12,9 +22,9 @@ class StayPolicy:
     """Always emit the configured stay action."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, *, stay_action: int = 0,
+        self, *, action: int,
     ) -> None:  # fmt: skip
-        self._stay_action = int(stay_action)
+        self._action = int(action)
 
     def __call__(  # ------------------------------------------------------------------------------
         self, policy_input: PolicyInput, *, explore: bool = True,
@@ -24,7 +34,7 @@ class StayPolicy:
         batch_shape = policy_input.valid_action_mask.shape[:-1]
         action = torch.full(
             (*batch_shape, 1),
-            self._stay_action,
+            self._action,
             dtype=torch.int64,
             device=policy_input.valid_action_mask.device,
         )
@@ -32,4 +42,4 @@ class StayPolicy:
 
 
 # =================================================================================================
-__all__ = ["StayPolicy"]
+__all__ = ["StayPolicyConfig", "StayPolicy"]

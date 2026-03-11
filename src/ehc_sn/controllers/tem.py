@@ -16,11 +16,11 @@ from tensordict import TensorDict, TensorDictBase
 from torch import Tensor
 
 from ehc_sn.controllers._base import BaseController, RolloutBackbone, RolloutState
-from ehc_sn.envs.dungeon_walk import EnvBase
+from ehc_sn.envs.dungeon_walk import ACTION_STAY, DungeonWalk
 from ehc_sn.loss.consistency import LatentCode, LatentRelation
-from ehc_sn.policies._base import ActionPolicy, PolicyInput, ScriptedPolicyConfig
-from ehc_sn.policies.random_walk import RandomWalkPolicy
-from ehc_sn.policies.stay import StayPolicy
+from ehc_sn.policies import ActionPolicy, PolicyInput, ScriptedPolicyConfig
+from ehc_sn.policies.random_walk import RandomWalkPolicy, RandomWalkPolicyConfig
+from ehc_sn.policies.stay import StayPolicy, StayPolicyConfig
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
@@ -148,7 +148,7 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
     """TEM rollout controller with controller-owned environment stepping."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: TEMRolloutBackbone[ModelState], env: EnvBase, config: TEMControllerConfig,
+        self, backbone: TEMRolloutBackbone[ModelState], env: DungeonWalk, config: TEMControllerConfig,
     ) -> None:  # fmt: skip
         """Create a controller.
 
@@ -159,15 +159,15 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         """
         super().__init__(backbone=backbone, config=config)
         self._env = env
-        if config.policy.kind == "stay":
-            self._policy: ActionPolicy = StayPolicy(stay_action=config.policy.stay_action)
-        elif config.policy.kind == "random_walk":
-            self._policy = RandomWalkPolicy(stay_action=config.policy.stay_action, seed=config.policy.seed)
+        if isinstance(config.policy, StayPolicyConfig):
+            self._policy: ActionPolicy = StayPolicy(action=ACTION_STAY)
+        elif isinstance(config.policy, RandomWalkPolicyConfig):
+            self._policy = RandomWalkPolicy(seed=config.policy.seed)
         else:
-            raise ValueError(f"Unsupported TEM policy kind: {config.policy.kind}.")
+            raise TypeError(f"Unsupported TEM policy config: {type(config.policy).__name__}.")
 
     @property
-    def environment(self) -> EnvBase:
+    def environment(self) -> DungeonWalk:
         """Return the TorchRL environment used for stepping."""
         return self._env
 

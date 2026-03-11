@@ -8,32 +8,9 @@ but the contract leaves room for richer learned or scripted policies later.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
-from pydantic import BaseModel, Field
 from torch import Tensor
-
-
-# =================================================================================================
-class ScriptedPolicyConfig(BaseModel, extra="forbid"):
-    """Configuration for reusable scripted action policies."""
-
-    kind: Literal["stay", "random_walk"] = Field(
-        default="random_walk",
-        description="Scripted policy used to select rollout actions.",
-    )
-    seed: int | None = Field(
-        default=None,
-        description=(
-            "Optional RNG seed for deterministic policy sampling. The seed is applied when "
-            "the policy instance is created; RNG state is not checkpointed."
-        ),
-    )
-    stay_action: int = Field(
-        default=0,
-        ge=0,
-        description="Action index treated as the environment no-op / stay action.",
-    )
 
 
 # =================================================================================================
@@ -97,4 +74,4 @@ class ActionPolicy(Protocol):
 
 
 # =================================================================================================
-__all__ = ["ActionPolicy", "PolicyDecision", "PolicyInput", "ScriptedPolicyConfig"]
+__all__ = ["ActionPolicy", "PolicyDecision", "PolicyInput"]

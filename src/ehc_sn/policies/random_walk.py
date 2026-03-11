@@ -2,9 +2,29 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import torch
+from pydantic import BaseModel, Field
 
 from ehc_sn.policies._base import PolicyDecision, PolicyInput
+
+
+# =================================================================================================
+class RandomWalkPolicyConfig(BaseModel, extra="forbid"):
+    """Configuration for uniform random walk policies."""
+
+    kind: Literal["random_walk"] = Field(
+        default="random_walk",
+        description="Uniformly sample from currently legal actions.",
+    )
+    seed: int | None = Field(
+        default=None,
+        description=(
+            "Optional RNG seed for deterministic policy sampling. The seed is applied when "
+            "the policy instance is created; RNG state is not checkpointed."
+        ),
+    )
 
 
 # =================================================================================================
@@ -12,9 +32,8 @@ class RandomWalkPolicy:
     """Uniformly sample one valid action per slot."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, *, stay_action: int = 0, seed: int | None = None,
+        self, *, seed: int | None = None,
     ) -> None:  # fmt: skip
-        self._stay_action = int(stay_action)
         self._generator = torch.Generator(device="cpu")
         if seed is not None:
             self._generator.manual_seed(seed)
@@ -22,7 +41,7 @@ class RandomWalkPolicy:
     def __call__(  # ------------------------------------------------------------------------------
         self, policy_input: PolicyInput, *, explore: bool = True,
     ) -> PolicyDecision:  # fmt: skip
-        """Sample one valid action per row, falling back to stay when none are valid."""
+        """Sample one valid action per row from the legal-action mask."""
         _ = explore
         valid_action_mask = policy_input.valid_action_mask.to(torch.bool)
         if valid_action_mask.ndim != 2:
@@ -32,14 +51,13 @@ class RandomWalkPolicy:
         for row in valid_action_mask:
             valid = row.nonzero(as_tuple=False).flatten()
             if valid.numel() == 0:
-                action = torch.tensor(self._stay_action, dtype=torch.int64, device=row.device)
-            else:
-                index = torch.randint(0, int(valid.numel()), (1,), generator=self._generator, device="cpu")
-                action = valid[index.to(valid.device)].to(torch.int64)
+                raise ValueError("RandomWalkPolicy requires at least one legal action per row.")
+            index = torch.randint(0, int(valid.numel()), (1,), generator=self._generator, device="cpu")
+            action = valid[index.to(valid.device)].to(torch.int64)
             actions.append(action)
 
         return PolicyDecision(action=torch.stack(actions, dim=0).view(-1, 1))
 
 
 # =================================================================================================
-__all__ = ["RandomWalkPolicy"]
+__all__ = ["RandomWalkPolicyConfig", "RandomWalkPolicy"]
