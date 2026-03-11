@@ -45,18 +45,9 @@ from ehc_sn.utils.detach import DetachMixin
 class HPCSettings(BaseModel, extra="forbid"):
     """Settings for HPC modules."""
 
-    n_stages: int = Field(
-        ...,
-        ge=1,
-        description="Number of stages for hierarchical attractor retrieval.",
-    )
     shape: list[int] = Field(
         ...,
         description="Feature dimensionality per frequency module.",
-    )
-    f_init: list[float] = Field(
-        ...,
-        description="Initial feature scales per frequency module for Hebbian write mask.",
     )
 
     common_memory: bool = Field(  # Probably to move to hebbian which will rename memory
@@ -67,6 +58,16 @@ class HPCSettings(BaseModel, extra="forbid"):
         default=False,
         description="Whether to sample from location distributions or use means.",
     )
+
+    clamp_min: float = Field(
+        default=-1.0,
+        description="Minimum activation clamp for OVC cells.",
+    )
+    clamp_max: float = Field(
+        default=1.0,
+        description="Maximum activation clamp for OVC cells.",
+    )
+
     attractor: AttractorSettings = Field(
         default_factory=AttractorSettings,
         description="Attractor dynamics module config.",
@@ -140,7 +141,7 @@ class HPCModel(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: HPCSettings, 
+        self, n_stages: int, f_init: list[float], config: HPCSettings, 
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """ """

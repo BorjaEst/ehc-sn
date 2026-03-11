@@ -30,13 +30,18 @@ from ehc_sn.utils.detach import DetachMixin
 class LECSettings(BaseModel, extra="forbid"):
     """Settings for LEC modules."""
 
-    n_features: int = Field(
+    shape: list[int] = Field(
         ...,
-        description="",
+        description="Feature dimensionality per frequency module.",
     )
-    f_init: list[float] = Field(
-        ...,
-        description="",
+
+    clamp_min: float = Field(
+        default=-1.0,
+        description="Minimum activation clamp for OVC cells.",
+    )
+    clamp_max: float = Field(
+        default=1.0,
+        description="Maximum activation clamp for OVC cells.",
     )
 
     filter: FreqFilterSettings = Field(
@@ -76,7 +81,7 @@ class LECModel(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: LECSettings,
+        self, f_init: list[float], config: LECSettings,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """ """
