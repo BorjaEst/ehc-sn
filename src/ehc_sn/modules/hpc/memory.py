@@ -16,6 +16,8 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
+from ehc_sn.types import Device, Dtype
+
 
 # =================================================================================================
 class HebbianUpdateSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
@@ -37,7 +39,7 @@ class Runtime:
     """Runtime hyperparameters for Hebbian memory.
 
     These are set by the training loop (see `Model.set_runtime`) and are not
-    part of the static settings tree.
+    part of the static config tree.
 
     Attributes:
         eta: Hebbian learning rate.
@@ -53,29 +55,33 @@ class Runtime:
 class HebbianUpdate(nn.Module):
     """Hebbian write/update logic for the grounded-location memory matrix."""
 
-    def __init__(self, settings: HebbianUpdateSettings):
+    def __init__(  # ------------------------------------------------------------------------------
+        self, config: Optional[HebbianUpdateSettings] = None,
+        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
+    ) -> None:  # fmt: skip
         """Initialize Hebbian update.
 
         Args:
-            settings: Hebbian update settings (e.g., clamp range).
+            config: Hebbian update config (e.g., clamp range).
         """
         super().__init__()
-        self._settings = settings
+        self._config = config or HebbianUpdateSettings()
         self._runtime = Runtime()
+
+    @property
+    def config(self) -> HebbianUpdateSettings:
+        """Return Hebbian update config."""
+        return self._config
 
     @property
     def runtime(self) -> Runtime:
         """Return runtime hyperparameters."""
         return self._runtime
 
-    @property
-    def settings(self) -> HebbianUpdateSettings:
-        """Return Hebbian update settings."""
-        return self._settings
-
-    def forward(
-        self, memory: Tensor, p_inf: List[Tensor], p_gen: List[Tensor], *, mask: Optional[Tensor] = None
-    ) -> Tensor:
+    def forward(  # -------------------------------------------------------------------------------
+        self, memory: Tensor, p_inf: List[Tensor], p_gen: List[Tensor], *,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:  # fmt: skip
         """Apply a Hebbian write update.
 
         Args:
@@ -97,4 +103,8 @@ class HebbianUpdate(nn.Module):
 
     def clamp_memory(self, m: Tensor) -> Tensor:
         """Clamp memory values for numerical stability and legacy parity."""
-        return torch.clamp(m, min=self._settings.clamp_min, max=self._settings.clamp_max)
+        return torch.clamp(m, min=self._config.clamp_min, max=self._config.clamp_max)
+
+
+# =================================================================================================
+__all__ = ["HebbianUpdateSettings", "Runtime", "HebbianUpdate"]
