@@ -48,7 +48,7 @@ def trunc_normal_init_(tensor: Tensor, std: float = 1.0, lower: float = -2.0, up
     return tensor
 
 
-def sample_diag_gaussian(transition: LocationBelief, *, scale: float = 1.0) -> List[Tensor]:
+def sample_diag_gaussian(transition: LocationBelief, *, scale: float = 1.0) -> list[Tensor]:
     """Sample a diagonal Gaussian distribution.
 
     Args:
@@ -333,7 +333,7 @@ def reduce_per_env(loss_per_env: Tensor, reduction: Reduction) -> Tensor:
     raise ValueError(f"Unknown reduction: {reduction}")
 
 
-def create_downsample_matrix(n: List[int], n_subsampled: List[int]) -> List[Matrix]:
+def create_downsample_matrix(n: list[int], n_subsampled: list[int]) -> list[Matrix]:
     """Create downsampling matrices.
 
     Downsampling matrix to go from cells to compressed cells for
@@ -359,7 +359,7 @@ def create_downsample_matrix(n: List[int], n_subsampled: List[int]) -> List[Matr
     ]
 
 
-def create_repeat_matrices(n_subsampled: List[int], n: List[int]) -> List[Matrix]:
+def create_repeat_matrices(n_subsampled: list[int], n: list[int]) -> list[Matrix]:
     """Create repeat matrices.
 
     Matrix for repeating cells information using element wise product
@@ -381,7 +381,7 @@ def create_repeat_matrices(n_subsampled: List[int], n: List[int]) -> List[Matrix
     ]
 
 
-def create_tiling_matrices(n_in: List[int], n_out: List[int]) -> List[Matrix]:
+def create_tiling_matrices(n_in: list[int], n_out: list[int]) -> list[Matrix]:
     """Create tile matrices.
 
     Tiling matrix to project from one cortical region to another by repeating
@@ -410,8 +410,8 @@ def create_tiling_matrices(n_in: List[int], n_out: List[int]) -> List[Matrix]:
 
 
 def create_random_projection(
-    n_in: List[int], n_out: List[int], sparsity: float = 1.0, seed: Optional[int] = None
-) -> List[Matrix]:
+    n_in: list[int], n_out: list[int], sparsity: float = 1.0, seed: Optional[int] = None
+) -> list[Matrix]:
     """Create random fixed projection matrices.
 
     Biologically-inspired alternative to downsampling + W_repeat expansion.
@@ -467,7 +467,7 @@ def create_random_projection(
     return matrices
 
 
-def create_encoding_table(n_in: int, n_out: int, n_hot: int = 2) -> List[Vector]:
+def create_encoding_table(n_in: int, n_out: int, n_hot: int = 2) -> list[Vector]:
     """Create n-hot encoding lookup table.
 
     Generates a lookup table for converting one-hot observations to n-hot
@@ -531,7 +531,7 @@ def create_encoding_table(n_in: int, n_out: int, n_hot: int = 2) -> List[Vector]
     return torch.stack(encoding_table, dim=0)
 
 
-def uncat_to_list(x: Tensor, dims: List[int]) -> List[Tensor]:
+def uncat_to_list(x: Tensor, dims: list[int]) -> list[Tensor]:
     """Split a concatenated tensor into a list of tensors with given last-dim sizes.
 
     Args:
@@ -545,7 +545,7 @@ def uncat_to_list(x: Tensor, dims: List[int]) -> List[Tensor]:
 
 
 def one_hot_with_zero(
-    action: list[int | None], num_actions: int, device: torch.device | None = None
+    action: list[int | None], num_actions: int, device: Device | None = None
 ) -> torch.Tensor:
     """
     Convert actions to one-hot encoding where action 0/None = all-zeros (static action).
@@ -579,7 +579,7 @@ def connections(f_grid: list[float]) -> list[list[bool]]:
     return [[f_grid[f1] <= f_grid[f2] for f1 in range(n)] for f2 in range(n)]
 
 
-def resolve_ovc_slice(n_freq_total: int, n_freq_ovc: Optional[int]) -> Tuple[int, int]:
+def resolve_ovc_slice(n_freq_total: int, n_freq_ovc: Optional[int]) -> tuple[int, int]:
     """Determine which MEC modules are OVC (receive shiny landmark correction).
 
     Args:
@@ -616,7 +616,7 @@ def resolve_ovc_slice(n_freq_total: int, n_freq_ovc: Optional[int]) -> Tuple[int
     return n_freq_total - n_freq_ovc, n_freq_ovc
 
 
-def update_to_masks(shape: List[int], *, update: torch.Tensor) -> torch.Tensor:
+def update_to_masks(shape: list[int], *, update: torch.Tensor) -> torch.Tensor:
     """Expand a stage×freq update matrix to a stage×sum(shape) mask tensor.
 
     Args:
@@ -673,7 +673,7 @@ def make_update_hierarchical(
     return update_ramp
 
 
-def make_hebbian_write_mask(n_stages: int, shape: List[int], f_init: List[float]) -> torch.Tensor:
+def make_hebbian_write_mask(n_stages: int, shape: list[int], f_init: list[float]) -> torch.Tensor:
     """Create a Hebbian write-connectivity mask for a block-structured memory matrix.
 
     This mask gates which synapses in the hippocampal memory matrix are allowed
