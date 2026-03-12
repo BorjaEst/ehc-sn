@@ -144,6 +144,7 @@ class TEMOutput(DetachMixin):
     theta_cls: Tensor | None = None
 
 
+# =================================================================================================
 class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig]):
     """TEM rollout controller with controller-owned environment stepping."""
 
