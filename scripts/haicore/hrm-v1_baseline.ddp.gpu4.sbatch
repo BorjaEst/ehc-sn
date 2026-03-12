@@ -28,7 +28,7 @@ source "${SLURM_SUBMIT_DIR}/.venv/bin/activate"
 # Set environment variables for optimal performance
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
-export HRM_V1_CONFIGURATION_PATH="config/haicore_hrm-mazehard.toml"
+export HRM_V1_CONFIGURATION_PATH="config/hrm-mazehard.v1.haicore.toml"
 
 # Precision reproducibility: must be set before CUDA kernels initialise.
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
