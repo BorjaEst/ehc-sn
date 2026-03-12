@@ -65,6 +65,7 @@ class OVCCorrection(nn.Module):
         """ """
         super().__init__()
         self._config = config or OVCSettings()
+        shape = self._config.shape
         n_freq_ovc = None if shape is None else len(shape)
         self._ovc_start, self._ovc_count = utils.resolve_ovc_slice(len(mec_shape), n_freq_ovc)
         self._shape = mec_shape[self._ovc_start : self._ovc_start + self._ovc_count]
@@ -81,55 +82,55 @@ class OVCCorrection(nn.Module):
         return self._config
 
     def forward(  # -------------------------------------------------------------------------------
-        self, locations: list[dict], transition: LocationBelief,
+        self, landmark_id: Tensor | None, transition: LocationBelief,
     ) -> LocationBelief:  # fmt: skip
         """Apply OVC correction to environments with shiny cues.
 
         Args:
-            locations: Per-environment metadata. If `loc.get("shiny")` is not
-                `None`, the value is treated as a scalar cue for that batch
-                element.
+            landmark_id: Optional current-cell landmark ids of shape `(batch, 1)`.
             transition: Reference transition to correct.
 
         Returns:
             A corrected `LocationBelief`. If no shiny cues are present, returns the
             input transition unchanged.
         """
-        shiny_mask = self._identify_shiny_envs(locations, transition.mean[0].device)
+        shiny_mask = self._identify_shiny_envs(landmark_id, transition.mean[0].device)
         if shiny_mask is None:  # No shiny envs present
             return transition
 
-        shiny_input = self._extract_shiny_cues(locations, shiny_mask, transition.mean[0].device)
+        shiny_input = self._extract_shiny_cues(landmark_id, shiny_mask, transition.mean[0].device)
         freqs = range(self.ovc_start, self.ovc_start + self.n_freq)
 
         correction = self._predict_correction(shiny_input)
         return utils.inv_var_trans(transition, correction, shiny_mask, freqs)
 
     def _identify_shiny_envs(  # ------------------------------------------------------------------
-        self, locations: list[dict], device: Device,
+        self, landmark_id: Tensor | None, device: Device,
     ) -> Tensor | None:  # fmt: skip
         """Return a mask selecting environments with shiny cues.
 
         Args:
-            locations: Per-environment metadata.
+            landmark_id: Optional current-cell landmark ids.
             device: Device for the returned tensor.
 
         Returns:
             A boolean mask of shape `(batch,)`, or `None` if no shiny cues are
             present.
         """
-        shiny_envs = [loc.get("shiny") is not None for loc in locations]
-        if not any(shiny_envs):
+        if landmark_id is None:
             return None
-        return torch.tensor(shiny_envs, dtype=torch.bool, device=device)
+        shiny_mask = landmark_id.squeeze(-1).to(torch.int64) != 0
+        if not torch.any(shiny_mask):
+            return None
+        return shiny_mask.to(device=device)
 
     def _extract_shiny_cues(  # -------------------------------------------------------------------
-        self, locations: list[dict], shiny_mask: Tensor, device: Device
+        self, landmark_id: Tensor | None, shiny_mask: Tensor, device: Device
     ) -> list[Tensor]:  # fmt: skip
         """Extract shiny cue values as inputs for the OVC MLPs.
 
         Args:
-            locations: Per-environment metadata.
+            landmark_id: Optional current-cell landmark ids.
             shiny_mask: Boolean mask indicating which batch items have cues.
             device: Device for returned tensors.
 
@@ -137,8 +138,11 @@ class OVCCorrection(nn.Module):
             A list of cue tensors (one per OVC module). Each tensor has shape
             `(n_shiny, 1)`.
         """
-        shiny_vals = [loc["shiny"] for loc in locations if loc.get("shiny") is not None]
-        shiny_tensor = torch.as_tensor(shiny_vals, dtype=torch.float32, device=device).unsqueeze(-1)
+        if landmark_id is None:
+            raise ValueError("landmark_id is required when shiny_mask selects OVC-corrected rows.")
+        shiny_tensor = (
+            landmark_id.squeeze(-1)[shiny_mask].to(device=device, dtype=torch.float32).unsqueeze(-1)
+        )
         return [shiny_tensor] * self.n_freq
 
     def _predict_correction(  # -------------------------------------------------------------------

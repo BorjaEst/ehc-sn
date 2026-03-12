@@ -6,7 +6,7 @@ and estimates transition uncertainty.
 
 from __future__ import annotations
 
-from typing import List
+from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
@@ -38,20 +38,21 @@ class PathIntegrator(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, n_a: int, mec_shape: list[int], f_initial: list[float], config: PathSettings,
+        self, n_actions: int, mec_shape: list[int], f_initial: list[float], config: PathSettings,
     ) -> None:  # fmt: skip
         """ """
         super().__init__()
-        self._n_a, self._mec_shape, self._n_freq = n_a, mec_shape, len(mec_shape)
-        self._connections = conn = utils.connections(f_initial)
-        self._conn_indices = [[f_from for f_from in range(self.n_freq) if conn[f_to][f_from]] for f_to in range(self.n_freq)]  # fmt: skip
-        self._in_dims = [sum(mec_shape[f_from] for f_from in self._conn_indices[f_to]) for f_to in range(self.n_freq)]  # fmt: skip
-        self._mat_shape = [(self._in_dims[f_to], mec_shape[f_to]) for f_to in range(self.n_freq)]
         self._config = config
+        n_freq = len(mec_shape)
+
+        self._connections = conn = utils.connections(f_initial)
+        self._conn_indices = [[f_from for f_from in range(n_freq) if conn[f_to][f_from]] for f_to in range(n_freq)]  # fmt: skip
+        self._in_dims = [sum(mec_shape[f_from] for f_from in self._conn_indices[f_to]) for f_to in range(n_freq)]  # fmt: skip
+        self._mat_shape = [(self._in_dims[f_to], mec_shape[f_to]) for f_to in range(n_freq)]
 
         # LocationBelief weights (action-conditioned)
-        hidden_dim = [config.hidden_dim] * self.n_freq
-        self.MLP_D_a = MLP([n_a] * self.n_freq, self.shape, [torch.tanh, None], hidden_dim, bias=[True, False])  # fmt: skip
+        hidden_dim = [config.hidden_dim] * n_freq
+        self.MLP_D_a = MLP([n_actions] * n_freq, mec_shape, [torch.tanh, None], hidden_dim, bias=[True, False])  # fmt: skip
         self.MLP_D_a.set_weights(1, 0.0)
         self.D_no_a = nn.ParameterList([nn.Parameter(torch.zeros(m)) for m in self._mat_shape])  # fmt: skip
 
