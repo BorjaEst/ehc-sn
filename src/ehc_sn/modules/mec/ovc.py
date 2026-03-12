@@ -13,9 +13,9 @@ from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn import utils
+from ehc_sn.modules.mec.layout import MECLayout, validate_ovc_shape_policy
 from ehc_sn.modules.mlp import MLP
-from ehc_sn.types import Device, Dtype, LocationBelief
-from ehc_sn.utils.detach import DetachMixin
+from ehc_sn.types import Device, LocationBelief
 
 
 # =================================================================================================
@@ -43,10 +43,7 @@ class OVCSettings(BaseModel, extra="forbid"):
 
     @model_validator(mode="after")
     def validate_shape_policy(self) -> "OVCSettings":
-        if self.mode == "separate" and not self.shape:
-            raise ValueError("mec.ovc.shape is required when mec.ovc.mode='separate'.")
-        if self.mode != "separate" and self.shape is not None:
-            raise ValueError("mec.ovc.shape is only allowed when mec.ovc.mode='separate'.")
+        validate_ovc_shape_policy(self.mode, self.shape)
         return self
 
 
@@ -59,15 +56,14 @@ class OVCCorrection(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, mec_shape: list[int], config: OVCSettings,
+        self, layout: MECLayout, config: OVCSettings,
     ) -> None:  # fmt: skip
         """ """
         super().__init__()
         self._config = config or OVCSettings()
-        shape = self._config.shape
-        n_freq_ovc = None if shape is None else len(shape)
-        self._ovc_start, self._ovc_count = utils.resolve_ovc_slice(len(mec_shape), n_freq_ovc)
-        self._shape = mec_shape[self._ovc_start : self._ovc_start + self._ovc_count]
+        self._ovc_start = layout.ovc_correction_start
+        self._ovc_count = layout.ovc_correction_count
+        self._shape = layout.ovc_correction_shape
         self._n_freq = len(self._shape)
 
         # Shiny cue → mean and uncertainty.

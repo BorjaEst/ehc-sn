@@ -10,7 +10,7 @@ The public entry point is `MECModel`, which exposes a TEM-compatible API via
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Final, List, Optional, Tuple
+from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
@@ -19,6 +19,7 @@ from torch import Tensor, nn
 
 from ehc_sn import utils
 from ehc_sn.controllers.tem import NO_PREVIOUS_ACTION
+from ehc_sn.modules.mec.layout import MECLayout, resolve_mec_layout
 from ehc_sn.modules.mec.ovc import OVCCorrection, OVCSettings
 from ehc_sn.modules.mec.p2g import P2GMemory, P2GMemSettings
 from ehc_sn.modules.mec.path import PathIntegrator, PathSettings
@@ -72,11 +73,24 @@ class MECSettings(BaseModel, extra="forbid"):
     )
 
     @property
+    def mec_layout(self) -> MECLayout:
+        """Return canonical MEC and OVC layout facts for this config."""
+        return resolve_mec_layout(self.grid_shape, ovc_mode=self.ovc.mode, ovc_shape=self.ovc.shape)
+
+    @property
     def mec_shape(self) -> list[int]:
         """Resolve the full MEC shape from the configured OVC mode."""
-        if self.ovc.mode == "separate":
-            return list(self.grid_shape) + list(self.ovc.shape or [])
-        return list(self.grid_shape)
+        return self.mec_layout.full_shape
+
+    @property
+    def mec_ovc_shape(self) -> list[int]:
+        """Return the appended OVC shape implied by the configured OVC mode."""
+        return self.mec_layout.appended_ovc_shape
+
+    @property
+    def n_total_freq(self) -> int:
+        """Return the total number of MEC frequencies after OVC expansion."""
+        return self.mec_layout.n_total_freq
 
 
 # =================================================================================================
@@ -159,11 +173,11 @@ class MECModel(nn.Module):
     ) -> None:  # fmt: skip
         """ """
         super().__init__()
-        self._config = config
+        self._config, layout = config, config.mec_layout
         self._action_count = action_count
-        self._shape = config.mec_shape
-        self._n_freq = len(self._shape)
-        self._n_ovc_modules = len(config.ovc.shape or []) if config.ovc.mode == "separate" else None
+        self._shape = layout.full_shape
+        self._n_freq = layout.n_total_freq
+        self._n_ovc_modules = layout.appended_ovc_count or None
 
         # Prior: learned "default phase" of the grid code at reset
         init_fn = lambda size: truncnorm.rvs(-2, 2, size=size, loc=0, scale=config.sigma_init)
@@ -173,7 +187,7 @@ class MECModel(nn.Module):
         # Instantiate submodules
         self.path_integration = PathIntegrator(action_count, self._shape, f_initial, config=config.path)
         self.p2g_correction = P2GMemory(n_hippocampal, self._shape, config=config.p2g)
-        self.ovc_correction = OVCCorrection(self._shape, config=config.ovc)
+        self.ovc_correction = OVCCorrection(layout, config=config.ovc)
 
     @property
     def config(self) -> MECSettings:

@@ -163,13 +163,13 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
     @property
     def mec_ovc_shape(self) -> list[int]:
         """Return the appended OVC shape implied by the configured OVC mode."""
-        return list(self.mec.ovc.shape or []) if self.mec.ovc.mode == "separate" else []
+        return self.mec.mec_ovc_shape
 
     @computed_field
     @property
     def n_total_freq(self) -> int:
         """Return the total number of MEC/HPC frequencies after OVC expansion."""
-        return len(self.mec_shape)
+        return self.mec.n_total_freq
 
 
 # =================================================================================================
