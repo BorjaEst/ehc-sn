@@ -24,7 +24,7 @@ from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
 from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
-from ehc_sn.metrics.routes import TEM_STEP_ROUTES as TEM_ROUTES
+from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
 from ehc_sn.modules.hpc import HPCModel, HPCSettings, HPCState, MemoryState
@@ -373,8 +373,8 @@ class TrainingModel(L.LightningModule):
         self._train_carry = None
 
         # Metrics are cloned for train/val to allow separate logging and state management.
-        self.train_metrics = build_train_metrics(TEM_ROUTES).clone(prefix="train/")
-        self.val_metrics = build_val_metrics(TEM_ROUTES).clone(prefix="val/")
+        self.train_metrics = build_train_metrics(TEM_STEP_ROUTES).clone(prefix="train/")
+        self.val_metrics = build_val_metrics(TEM_EPISODE_ROUTES).clone(prefix="val/")
         self.trace_specs = build_trace_spec("tem")
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
@@ -508,7 +508,7 @@ class TrainingModel(L.LightningModule):
             sch.step()  # type: ignore
 
         # Update metrics with unnormalized loss and log to TensorBoard.
-        update_metrics_from_step(self.train_metrics, step.outputs.metrics, TEM_ROUTES)
+        update_metrics_from_step(self.train_metrics, step.outputs.metrics, TEM_STEP_ROUTES)
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
         return {"loss": loss.detach(), "signals": step.outputs.signals}
@@ -516,10 +516,10 @@ class TrainingModel(L.LightningModule):
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
     ) -> Dict[str, object]:  # fmt: skip
-        """Run a full ACT rollout so halted-only metrics are meaningful.
+        """Run a full TEM rollout until all slots reach the configured horizon.
 
-        Validation uses `EvaluationLoop` (no carry is persisted across batches here) and logs
-        normalized metrics.
+        Validation does not persist carry across batches and accumulates episode
+        metrics across the rollout, matching the ACT/RL validation pattern.
         """
         step_batches = repeat(batch)  # Run until all examples halt
         step_options = {}  # FIXME after the HeadLoss and TEMController support options
@@ -533,7 +533,7 @@ class TrainingModel(L.LightningModule):
             raise ValueError("Evaluation loop did not yield any steps, cannot log metrics.")
 
         # Update metrics with the final step's metrics and log to TensorBoard.
-        update_metrics_from_step(self.val_metrics, step.outputs.metrics, TEM_ROUTES)
+        update_metrics_from_step(self.val_metrics, step.outputs.metrics, TEM_EPISODE_ROUTES)
 
         return {"trace": collector.tree}
 

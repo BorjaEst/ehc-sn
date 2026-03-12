@@ -8,7 +8,7 @@ here so model files contain *no* trace wiring.
 Usage
 -----
     from ehc_sn.metrics.traces import build_trace_spec
-    self.trace_specs = build_trace_spec("act")   # or "rl"
+    self.trace_specs = build_trace_spec("act")   # or "rl" / "tem"
 
 Naming convention
 -----------------
@@ -137,7 +137,19 @@ RL_TRACE_FIELDS: tuple[TraceField, ...] = (
 
 
 # =================================================================================================
-def build_trace_spec(paradigm: Literal["act", "rl"]) -> TraceSpec:  # ---------------------------
+# TEM-specific — TEM uses only the rollout-safe baseline fields for now.
+# =================================================================================================
+
+
+TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
+    TRACE_LOSS,
+    TRACE_HALTED,
+    TRACE_STEPS,
+)
+
+
+# =================================================================================================
+def build_trace_spec(paradigm: Literal["act", "rl", "tem"]) -> TraceSpec:  # --------------------
     """Build a :class:`~ehc_sn.rollouts.collect.TraceSpec` for a training paradigm.
 
     Returns common fields plus paradigm-specific fields.  Pass the returned
@@ -146,22 +158,28 @@ def build_trace_spec(paradigm: Literal["act", "rl"]) -> TraceSpec:  # ----------
 
     Args:
         paradigm: ``"act"`` for ACT-based models (hrm_v1) or
-            ``"rl"`` for RL-based models (hrm_v2).
+            ``"rl"`` for RL-based models (hrm_v2), or
+            ``"tem"`` for TEM-based models (tem_v1).
 
     Returns:
         A :class:`~ehc_sn.rollouts.collect.TraceSpec` instance.
 
     Raises:
-        ValueError: If *paradigm* is not ``"act"`` or ``"rl"``.
+        ValueError: If *paradigm* is not ``"act"``, ``"rl"``, or ``"tem"``.
     """
     if paradigm == "act":
         fields = COMMON_TRACE_FIELDS + ACT_TRACE_FIELDS
     elif paradigm == "rl":
         fields = COMMON_TRACE_FIELDS + RL_TRACE_FIELDS
+    elif paradigm == "tem":
+        fields = TEM_TRACE_FIELDS
     else:
-        raise ValueError(f"Unknown paradigm: {paradigm!r}. Expected 'act' or 'rl'.")
+        raise ValueError(f"Unknown paradigm: {paradigm!r}. Expected 'act', 'rl', or 'tem'.")
     return TraceSpec(fields=list(fields))
 
 
 # =================================================================================================
-__all__ = ["COMMON_TRACE_FIELDS", "ACT_TRACE_FIELDS", "RL_TRACE_FIELDS", "build_trace_spec"]
+__all__ = [
+    "COMMON_TRACE_FIELDS", "ACT_TRACE_FIELDS", "RL_TRACE_FIELDS", TEM_TRACE_FIELDS,
+    "build_trace_spec"
+]  # fmt: skip
