@@ -131,6 +131,24 @@ class HPCState(DetachMixin):
             _memory=self._memory if memory is None else memory,
         )
 
+    def replace_rows(self, flag: Tensor, fresh: "HPCState") -> "HPCState":
+        """Return a state where flagged rows are replaced from ``fresh``."""
+        uncertainty = None
+        if self.uncertainty is not None and fresh.uncertainty is not None:
+            uncertainty = utils.merge_multiscale_rows(flag, self.uncertainty, fresh.uncertainty)
+
+        merged_memory_0 = utils.merge_rows(flag, self.memory[0], fresh.memory[0])
+        if self.memory[0] is self.memory[1]:
+            merged_memory = [merged_memory_0, merged_memory_0]
+        else:
+            merged_memory = [merged_memory_0, utils.merge_rows(flag, self.memory[1], fresh.memory[1])]
+
+        return self.new(
+            cells=utils.merge_multiscale_rows(flag, self.cells, fresh.cells),
+            uncertainty=uncertainty,
+            memory=merged_memory,
+        )
+
 
 # =================================================================================================
 class HPCModel(nn.Module):
