@@ -26,7 +26,7 @@ Shape conventions:
 - A memory matrix is shaped `(B, S, S)`.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Literal, Optional, Tuple
 
 import torch
@@ -102,23 +102,34 @@ class HPCState(DetachMixin):
             the same underlying tensor.
     """
 
-    location: LocationBelief  # State and uncertainty over grounded locations
+    grounded_belief: LocationBelief  # State and uncertainty over grounded locations
     _memory: list[Matrix]  # Memory matrices
 
     @property
     def cells(self) -> list[Tensor]:
         """Return grounded location features."""
-        return self.location.mean
+        return self.grounded_belief.mean
 
     @property
     def uncertainty(self) -> Optional[list[Tensor]]:
         """Return grounded location uncertainty."""
-        return self.location.uncertainty
+        return self.grounded_belief.uncertainty
 
     @property
     def memory(self) -> Optional[list[Matrix]]:
         """Return Hebbian memory matrices."""
         return self._memory
+
+    def new(  # -----------------------------------------------------------------------------------
+        self, cells: list[Tensor], uncertainty: Optional[list[Tensor]], *,
+        memory: Optional[list[Matrix]] = None,
+    ) -> HPCState:  # fmt: skip
+        """Return a copy with updated grounded belief and optional memory."""
+        return replace(
+            self,
+            grounded_belief=LocationBelief(mean=cells, uncertainty=uncertainty),
+            _memory=self._memory if memory is None else memory,
+        )
 
 
 # =================================================================================================
@@ -163,7 +174,7 @@ class HPCModel(nn.Module):
 
         # Instantiate submodules
         self.attractor = AttractorNetwork(shape, config.attractor)
-        self.location = GroundLocation(shape, config.location)
+        self.grounded_location = GroundLocation(shape, config.location)
         self.memory_system = HebbianUpdate(config.memory)
 
         self.reset_parameters()  # Initialize parameters and buffers
@@ -197,9 +208,9 @@ class HPCModel(nn.Module):
             - `memory`: output of `init_memory` (two matrices, shape `(B, S, S)`)
         """
         p_init = [torch.zeros((batch_size, n), device=device) for n in self.shape]
-        self.location = LocationBelief(mean=p_init, uncertainty=None)
+        grounded_belief = LocationBelief(mean=p_init, uncertainty=None)
         memory = memory or self.init_memory(batch_size=batch_size, device=device)
-        return HPCState(location=self.location, _memory=memory)
+        return HPCState(grounded_belief=grounded_belief, _memory=memory)
 
     def reset_state(  # ---------------------------------------------------------------------------
         self, state: HPCState,  # TODO: define based in other modules reset_state
@@ -287,7 +298,7 @@ class HPCModel(nn.Module):
             inferred diagonal Gaussian (if `config.do_sample=True`) or the
             mean, and `new_state` updates both mean and uncertainty.
         """
-        transition = self.location(x_, g_)
+        transition = self.grounded_location(x_, g_)
         p_inf = utils.sample_diag_gaussian(transition) if self.config.do_sample else transition.mean
         return p_inf, state.new(p_inf, transition.uncertainty)
 
@@ -339,7 +350,7 @@ class HPCModel(nn.Module):
         m_hier, m_full = state.memory
         m_hier = self.memory_system(m_hier, p_inf, p_gen_gi, mask=self.update_mask)
         m_full = self.memory_system(m_full, p_inf, p_xi) if not self.config.common_memory and p_xi else m_hier
-        return HPCState(state.location, _memory=[m_hier, m_full])
+        return HPCState(state.grounded_belief, _memory=[m_hier, m_full])
 
 
 # =================================================================================================

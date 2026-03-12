@@ -12,7 +12,7 @@ The public entry point is `LECModel`, which exposes TEM-compatible `init_state`,
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 import torch
@@ -64,12 +64,28 @@ class LECState(DetachMixin):
     """Container for LEC state.
 
     Attributes:
-        cells: Per-frequency LEC activations.
-        filtered: Per-frequency unweighted filtered features.
+        features: Per-frequency LEC activations.
+        filtered_features: Per-frequency unweighted filtered features.
     """
 
-    cells: MultiScaleCode  # LEC cell activations per frequency
-    filtered: MultiScaleCode  # Unweighted filtered features
+    features: MultiScaleCode  # LEC activations per frequency
+    filtered_features: MultiScaleCode  # Unweighted filtered features
+
+    @property
+    def cells(self) -> MultiScaleCode:
+        """Backward-compatible alias for LEC activations."""
+        return self.features
+
+    @property
+    def filtered(self) -> MultiScaleCode:
+        """Backward-compatible alias for unweighted filtered features."""
+        return self.filtered_features
+
+    def new(  # -----------------------------------------------------------------------------------
+        self, *, features: MultiScaleCode, filtered_features: MultiScaleCode,
+    ) -> LECState:  # fmt: skip
+        """Return a copy with updated feature tensors."""
+        return replace(self, features=features, filtered_features=filtered_features)
 
 
 # =================================================================================================
@@ -123,7 +139,7 @@ class LECModel(nn.Module):
             An initialized `LECState`.
         """
         x0 = [torch.zeros((batch_size, n), device=device) for n in self.shape]
-        return LECState(cells=x0, filtered=x0)
+        return LECState(features=x0, filtered_features=x0)
 
     def reset_state(  # ---------------------------------------------------------------------------
         self, state: LECState,  # TODO: define based in other modules reset_state
@@ -174,10 +190,10 @@ class LECModel(nn.Module):
             A tuple `(x_inf, new_state)` where `x_inf` are the inferred
             per-frequency features and `new_state` is the updated LEC state.
         """
-        filtered = self.filter(c, state.filtered)
+        filtered = self.filter(c, state.filtered_features)
         normalized = self.norm(filtered)
         x_inf = next_cells = [torch.sigmoid(self.w_f[f]) * normalized[f] for f in range(self.n_freq)]
-        return x_inf, state.new(cells=next_cells, filtered=filtered)
+        return x_inf, state.new(features=next_cells, filtered_features=filtered)
 
 
 # =================================================================================================

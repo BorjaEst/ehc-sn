@@ -9,7 +9,7 @@ The public entry point is `MECModel`, which exposes a TEM-compatible API via
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Optional, Tuple
 
 import torch
@@ -21,7 +21,7 @@ from ehc_sn import utils
 from ehc_sn.modules.mec.ovc import OVCCorrection, OVCSettings
 from ehc_sn.modules.mec.p2g import P2GMemory, P2GMemSettings
 from ehc_sn.modules.mec.path import PathIntegrator, PathSettings
-from ehc_sn.types import AbstractLocation, Device, Dtype, LocationBelief, LocationLabel
+from ehc_sn.types import AbstractLocation, Device, Dtype, GroundedLocation, LocationBelief, LocationLabel
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -76,24 +76,29 @@ class MECState(DetachMixin):
     optionally OVC) activations with per-frequency uncertainty.
 
     Attributes:
+        abstract_belief: Belief over the abstract/grid code.
         cells: List of per-frequency activations. If OVC modules are enabled,
             their activations are appended after the grid modules.
         uncertainty: Optional list of per-frequency uncertainties aligned with
             `cells`.
     """
 
-    location: LocationBelief  # State and uncertainty over abstract locations
+    abstract_belief: LocationBelief  # State and uncertainty over abstract locations
     _shape_ovc_modules: Optional[int] = None  # Cached number of OVC modules
 
     @property
     def cells(self) -> list[Tensor]:
         """Return grid + OVC activations."""
-        return self.location.mean
+        return self.abstract_belief.mean
 
     @property
     def uncertainty(self) -> Optional[list[Tensor]]:
         """Return grid + OVC uncertainties."""
-        return self.location.uncertainty
+        return self.abstract_belief.uncertainty
+
+    def new(self, cells: list[Tensor], uncertainty: Optional[list[Tensor]]) -> MECState:
+        """Return a copy with an updated abstract-location belief."""
+        return replace(self, abstract_belief=LocationBelief(mean=cells, uncertainty=uncertainty))
 
     @property
     def grid_cells(self) -> list[Tensor]:
@@ -229,7 +234,7 @@ class MECModel(nn.Module):
             A tuple `(g_inf, new_state)` where `g_inf` is the inferred grid code
             and `new_state` is the updated MEC state.
         """
-        transition: LocationBelief = state.location
+        transition: LocationBelief = state.abstract_belief
         # Step 1: Correct path integration with memory-based inference
         transition = self.p2g_correction(p_x, transition) if p_x is not None else transition
         # Step 2: Apply OVC correction from shiny landmarks.
