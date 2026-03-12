@@ -1,0 +1,27 @@
+dataset_path      = "data/processed/dungeons"
+global_batch_size = 16
+epochs            = 100
+seed              = 42
+augment           = true
+
+
+# -- Environment settings ----------------------------------------------------------------------
+[environment]
+
+# -- Model settings -------------------------------------------------------------------------------
+[model]
+
+# -- Optimizer and scheduler settings -------------------------------------------------------
+[optimizer]
+    lr           = 1e-4
+    weight_decay = 1e-2
+
+[scheduler]
+    warmup_steps = 1000
+    min_ratio    = 0.01
+
+# -- Loss settings --------------------------------------------------------------------------------
+[loss]
+
+# -- Controller settings --------------------------------------------------------------------------
+[tem_controller]

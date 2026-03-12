@@ -33,7 +33,7 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
-CONFIGURATION_PATH = os.environ.get("HRM_V1_CONFIGURATION_PATH", "config/defaults_hrm-mazehard.toml")
+CONFIGURATION_PATH = os.environ.get("HRM_V1_CONFIGURATION_PATH", "config/hrm-mazehard.v1.toml")
 
 
 # =================================================================================================
@@ -160,7 +160,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         description="Model checkpoint settings.",
     )
     figures: Optional[FigureCallbackSettings] = Field(
-        default_factory=FigureCallbackSettings(figures=["overlay", "evolution"]),
+        default_factory=FigureCallbackSettings,
         description="Figure generation callback settings.",
     )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(

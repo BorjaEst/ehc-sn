@@ -5,12 +5,11 @@
 # Or via env var:              HRM_V1_CONFIGURATION_PATH=config/my_config.toml
 
 # -- Dataset & training -------------------------------------------------------
-dataset_path       = "data/processed/maze-30x30-hard-1k"
-global_batch_size  = 128
-epochs             = 100
-seed               = 42
-augment            = true
-val_check_interval = 100
+dataset_path      = "data/processed/maze-30x30-hard-1k"
+global_batch_size = 16
+epochs            = 100
+seed              = 42
+augment           = true
 
 # -- Model architecture -------------------------------------------------------
 [model]
@@ -49,3 +48,8 @@ val_check_interval = 100
 [scheduler]
     warmup_steps = 2000
     min_ratio    = 1.00
+
+# -- Figures & diagnostics ----------------------------------------------------
+[figures]
+    enabled = true
+    figures = ["overlay", "evolution"]

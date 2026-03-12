@@ -175,7 +175,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         description="Model checkpoint settings.",
     )
     figures: Optional[FigureCallbackSettings] = Field(
-        default_factory=FigureCallbackSettings(figures=["overlay", "evolution"]),
+        default_factory=FigureCallbackSettings,
         description="Figure generation callback settings.",
     )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(
