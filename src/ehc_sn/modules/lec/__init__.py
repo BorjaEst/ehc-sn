@@ -19,6 +19,7 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
+from ehc_sn import utils
 from ehc_sn.modules.lec.filter import FreqFilterSettings, FrequencyFilter
 from ehc_sn.modules.lec.norm import FeatureNorm, FeatureNormSettings
 from ehc_sn.modules.lec.reconstruction import Reconstruction, ReconstructionSettings
@@ -87,6 +88,15 @@ class LECState(DetachMixin):
     ) -> LECState:  # fmt: skip
         """Return a copy with updated feature tensors."""
         return replace(self, features=features, filtered_features=filtered_features)
+
+    def replace_rows(self, flag: Tensor, fresh: "LECState") -> "LECState":
+        """Return a state where flagged rows are replaced from ``fresh``."""
+        return self.new(
+            features=utils.merge_multiscale_rows(flag, self.features, fresh.features),
+            filtered_features=utils.merge_multiscale_rows(
+                flag, self.filtered_features, fresh.filtered_features
+            ),
+        )
 
 
 # =================================================================================================
