@@ -6,7 +6,7 @@ import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import repeat, tee
-from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, TypeAlias, Union
+from typing import Any, Dict, Literal, Optional, TypeAlias
 
 import lightning as L
 import numpy as np
@@ -39,7 +39,7 @@ from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import SchedulerConfig, SequentialLR
 from ehc_sn.training.step_loop import StepContext, StepLoop
 from ehc_sn.types import Device, Dtype
-from ehc_sn.utils import trunc_normal_init_
+from ehc_sn.utils import merge_multiscale_rows, trunc_normal_init_
 from ehc_sn.utils.detach import DetachMixin
 
 # Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
@@ -255,7 +255,7 @@ class TEMModelV1(nn.Module):
         """Construct the TEM backbone from the resolved TEM v1 model settings."""
         super().__init__()
         self._config = config
-        n_stages, n_actions = config.n_stages, config.n_actions
+        n_stages = config.n_stages
         f_initial = config.f_initial
 
         # Autoencoder module for observation compression/decoding
@@ -263,7 +263,7 @@ class TEMModelV1(nn.Module):
 
         # Entorhinal Hippocampal Circuit components
         self.hpc = HPCModel(n_stages, f_initial, config.hpc, device=device, dtype=dtype)
-        self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
+        self.mec = MECModel(config.action_count, config.hpc.shape, f_initial, config.mec, action0_is_noop=config.action0_is_noop, device=device, dtype=dtype)  # fmt: skip
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
         # Projection modules
@@ -276,7 +276,7 @@ class TEMModelV1(nn.Module):
         return self._config
 
     def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int, *, memory: Optional[MemoryState],
+        self, batch_size: int, *, memory: Optional[MemoryState] = None,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> TEMState:  # fmt: skip
         """Create an initial recurrent TEM state."""
@@ -289,12 +289,17 @@ class TEMModelV1(nn.Module):
     def reset_state(  # ---------------------------------------------------------------------------
         self, reset_flag: Tensor, state: TEMState,
     ) -> TEMState:  # fmt: skip
-        """Reset halted rows to fresh recurrent state while preserving HPC memory."""
+        """Reset flagged rows to a fresh episode state while preserving active rows."""
+        reset_flag = reset_flag.to(torch.bool).view(-1)
         if not torch.any(reset_flag):
             return state
 
-        # TODO: implement row-wise partial reset while preserving active slots.
-        return self.init_state(int(reset_flag.shape[0]), memory=state.hpc.memory, device=reset_flag.device)
+        fresh = self.init_state(int(reset_flag.shape[0]), memory=None, device=reset_flag.device)
+        return TEMState(
+            lec=state.lec.replace_rows(reset_flag, fresh.lec),
+            mec=state.mec.replace_rows(reset_flag, fresh.mec),
+            hpc=state.hpc.replace_rows(reset_flag, fresh.hpc),
+        )
 
     def set_runtime(  # ---------------------------------------------------------------------------
         self, eta: float, hebbian_decay: float, p2g_uncertainty_offset: float,
@@ -306,9 +311,11 @@ class TEMModelV1(nn.Module):
     def forward(  # -------------------------------------------------------------------------------
         self, inputs: Batch, state: Optional[TEMState] = None,
     ) -> tuple[TEMState, TEMOutput]:  # fmt: skip
-        """ """
-        obs_inputs, previous_action = inputs["observations"], inputs["prev_actions"]
-        location_labels = inputs.get("locations", None)
+        """Run one TEM step under the controller/backbone rollout contract."""
+        obs_inputs = inputs["inputs"]
+        previous_action = inputs["previous_action"]
+        step_count = inputs["step_count"].squeeze(-1).to(torch.int32)
+        landmark_id = inputs.get("landmark_id")
         obs_embedding = self.autoencoder.encode(obs_inputs)
 
         # Initialize state if not provided (e.g. first step of rollout); otherwise use the provided state.
@@ -326,7 +333,7 @@ class TEMModelV1(nn.Module):
         place_recall_from_grid_prior = self.hpc.recall(place_query_from_grid_prior, state.hpc, mode="hierarchical")  # fmt: skip
 
         # Grid posterior after correcting the prior with recalled place evidence.
-        grid_post, state.mec = self.mec.inference(place_sensory, locations=location_labels, state=state.mec)  # fmt: skip
+        grid_post, state.mec = self.mec.inference(place_sensory, landmark_id=landmark_id, state=state.mec)  # fmt: skip
         place_query_from_grid_post = self.projection_mec(grid_post)
         place_recall_from_grid_post = self.hpc.recall(place_query_from_grid_post, state.hpc, mode="hierarchical")  # fmt: skip
 
@@ -351,7 +358,7 @@ class TEMModelV1(nn.Module):
         obs_features_ancestral = self.lec.generative(lec_features_from_place_prior)
         logits_ancestral = self.autoencoder.decode(obs_features_ancestral)
 
-        # Package outputs into a TEMOutput dataclass for use by the loss head and metrics.
+        # Return controller-compatible rollout outputs for the TEM loss head.
         obs_logits = (logits_inference, logits_retrieved, logits_ancestral)
         grid = (grid_post, grid_prior)
         place = (place_post, place_prior, place_sensory)
