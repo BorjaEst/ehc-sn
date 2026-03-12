@@ -5,6 +5,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.optim.optimizer import Optimizer
 
 
+# =================================================================================================
 class SchedulerConfig(BaseModel, extra="forbid"):
     warmup_steps: int = Field(
         default=0,
@@ -16,8 +17,30 @@ class SchedulerConfig(BaseModel, extra="forbid"):
     )
 
 
+# =================================================================================================
+# class SequentialLR(SequentialLR):
+#     """ """
+
+#     def __init__(  # ------------------------------------------------------------------------------
+#         self, optimizer: Optimizer, total_steps: int, config: Optional[SchedulerConfig] = None,
+#     ) -> None:  # fmt: skip
+#         """ """
+#         config = config or SchedulerConfig()
+#         super().__init__(
+#             optimizer,
+#             schedulers=[LinearLR(optimizer, start_factor=1.0, end_factor=0.0, total_iters=total_steps)],
+#             milestones=[total_steps],
+#         )
+
+
+# =================================================================================================
 class CosineAnnealingLRWithWarmup(SequentialLR):
-    def __init__(self, optimizer: Optimizer, total_steps: int, config: Optional[SchedulerConfig] = None):
+    """ """
+
+    def __init__(  # ------------------------------------------------------------------------------
+        self, optimizer: Optimizer, total_steps: int, config: Optional[SchedulerConfig] = None,
+    ) -> None:  # fmt: skip
+        """ """
         config = config or SchedulerConfig()
         warmup_steps = config.warmup_steps
         cosine_steps = total_steps - warmup_steps
@@ -29,4 +52,7 @@ class CosineAnnealingLRWithWarmup(SequentialLR):
         super().__init__(optimizer, schedulers=[warmup, cosine], milestones=[warmup_steps])
 
 
-__all__ = ["SchedulerConfig", "SequentialLR", "CosineAnnealingLR", "LinearLR", "CosineAnnealingLRWithWarmup"]
+# =================================================================================================
+__all__ = [
+    "SchedulerConfig", "SequentialLR", "CosineAnnealingLR", "LinearLR", "CosineAnnealingLRWithWarmup",
+]  # fmt: skip

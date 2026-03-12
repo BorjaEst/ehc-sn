@@ -3,23 +3,18 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
 from dataclasses import dataclass
-from itertools import repeat, tee
-from typing import Any, Dict, Literal, Optional, TypeAlias
+from itertools import repeat
+from typing import Any, Dict, Optional, TypeAlias
 
 import lightning as L
-import numpy as np
 import torch
 import torch.nn as nn
 from pydantic import BaseModel, Field, computed_field, model_validator
 from torch import Tensor
-from torch.distributions import Normal
 from torch.optim import Adam, Optimizer
-from torch.optim.lr_scheduler import ExponentialLR
 
-from ehc_sn import utils
-from ehc_sn.controllers.tem import TEMController, TEMControllerConfig, TEMOutput
+from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
 from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
@@ -36,8 +31,8 @@ from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
-from ehc_sn.training.schedules import SchedulerConfig, SequentialLR
-from ehc_sn.training.step_loop import StepContext, StepLoop
+from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
+from ehc_sn.training.step_loop import StepLoop
 from ehc_sn.types import Device, Dtype
 from ehc_sn.utils.detach import DetachMixin
 
@@ -173,6 +168,74 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
 
 
 # =================================================================================================
+class MemoryRuntimeConfig(BaseModel, extra="forbid"):
+    """Step-based runtime schedule for Hebbian memory dynamics."""
+
+    eta: float = Field(
+        default=0.5,
+        description="Target Hebbian write rate reached after the eta ramp completes.",
+    )
+    eta_it: int = Field(
+        default=16000,
+        ge=1,
+        description="Number of optimizer steps used to ramp eta to its target value.",
+    )
+    hebbian_decay: float = Field(
+        default=0.9999,
+        description="Target Hebbian decay reached after the decay ramp completes.",
+    )
+    lambda_it: int = Field(
+        default=200,
+        ge=1,
+        description="Number of optimizer steps used to ramp Hebbian decay to its target value.",
+    )
+
+
+# =================================================================================================
+class UncertaintyRuntimeConfig(BaseModel, extra="forbid"):
+    """Step-based runtime schedule for MEC uncertainty correction."""
+
+    p2g_sig_half_it: int = Field(
+        default=400,
+        ge=0,
+        description="Sigmoid midpoint for the p->g uncertainty offset schedule.",
+    )
+    p2g_sig_scale_it: int = Field(
+        default=200,
+        ge=1,
+        description="Sigmoid scale for the p->g uncertainty offset schedule.",
+    )
+    offset_min: float = Field(
+        default=0.0,
+        description="Minimum additive uncertainty offset applied at convergence.",
+    )
+    offset_max: float = Field(
+        default=10000.0,
+        description="Maximum additive uncertainty offset applied at the start of training.",
+    )
+
+    @model_validator(mode="after")
+    def validate_offset_range(self) -> "UncertaintyRuntimeConfig":
+        if self.offset_max < self.offset_min:
+            raise ValueError("offset_max must be greater than or equal to offset_min.")
+        return self
+
+
+# =================================================================================================
+class RuntimeConfig(BaseModel, extra="forbid"):
+    """Step-based runtime schedules for TEM model dynamics."""
+
+    memory: MemoryRuntimeConfig = Field(
+        default_factory=MemoryRuntimeConfig,
+        description="Runtime schedule for Hebbian plasticity parameters.",
+    )
+    uncertainty: UncertaintyRuntimeConfig = Field(
+        default_factory=UncertaintyRuntimeConfig,
+        description="Runtime schedule for MEC uncertainty parameters.",
+    )
+
+
+# =================================================================================================
 class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
     """Top-level TEM v1 training config."""
 
@@ -203,6 +266,10 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
         default_factory=SchedulerConfig,
         description="",
     )
+    runtime: RuntimeConfig = Field(
+        default_factory=RuntimeConfig,
+        description="",
+    )
 
     # ~~ Extra ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     global_batch_size: int = Field(
@@ -227,6 +294,16 @@ class TEMState(DetachMixin):
     lec: LECState
     mec: MECState
     hpc: HPCState
+
+
+# =================================================================================================
+@dataclass(frozen=True)
+class TEMRuntimeState:
+    """Resolved TEM runtime values for the current optimizer step."""
+
+    eta: float
+    hebbian_decay: float
+    p2g_uncertainty_offset: float
 
 
 # =================================================================================================
@@ -408,46 +485,30 @@ class TrainingModel(L.LightningModule):
     def configure_optimizers(  # -------------------------------------------------------------------
         self,
     ) -> tuple[list[Optimizer], list[SequentialLR]]:  # fmt: skip
-        """ """
+        """Build the optimizer and learning-rate scheduler."""
         total_steps = int(self.trainer.estimated_stepping_batches)
 
         # Optimizer for the main model parameters
         sup_params = [p for p in self.model.parameters() if p.requires_grad]
         opt_sup = Adam(sup_params, self.config.optimizer)
-        sch_sup = ExponentialLR(opt_sup, total_steps, self.config.scheduler)
+        sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, self.config.scheduler)
+        # sch_sup = ExponentialLR(opt_sup, total_steps, self.config.scheduler)
 
         return [opt_sup], [sch_sup]
 
-    def _compute_schedule(  # ---------------------------------------------------------------------
-        self, iteration: int,
-    ) -> tuple[float, float, float, float]:  # fmt: skip
-        # FIXME: this needs to be integrated with the LR scheduler and ideally moved to a separate ScheduleManager
-        # class; it's currently a mess of hardcoded heuristics and hyperparameters scattered across the
-        # codebase, but it needs to be computed at each step to update the model runtime parameters
-        # (eta, hebbian decay, p2g offset, walk length center).
+    def _apply_runtime(  # ------------------------------------------------------------------------
+        self, step: int, *, log_values: bool,
+    ) -> TEMRuntimeState:  # fmt: skip
+        """Resolve and apply TEM runtime dynamics for the current global step."""
+        runtime = resolve_tem_runtime(step, self.config.runtime)
+        self.model.set_runtime(runtime.eta, runtime.hebbian_decay, runtime.p2g_uncertainty_offset)
 
-        walk = self.trainer_settings.walk
-        hebbian = self.trainer_settings.scheduler.memory
-        p2g = self.trainer_settings.scheduler.uncertainty
+        if log_values:
+            self.log("train/runtime/eta", runtime.eta, on_step=True, on_epoch=False, logger=True)
+            self.log("train/runtime/hebbian_decay", runtime.hebbian_decay, on_step=True, on_epoch=False, logger=True)  # fmt: skip
+            self.log("train/runtime/p2g_uncertainty_offset", runtime.p2g_uncertainty_offset, on_step=True, on_epoch=False, logger=True)  # fmt: skip
 
-        # Hebbian memory parameters
-        eta = min((iteration + 1) / hebbian.eta_it, 1) * hebbian.eta
-        lamb = min((iteration + 1) / hebbian.lambda_it, 1) * hebbian.hebbian_decay
-
-        # p->g uncertainty offset schedule (eta-style: schedule outputs the final runtime value)
-        p2g_scale = 1 / (1 + np.exp((iteration - p2g.p2g_sig_half_it) / p2g.p2g_sig_scale_it))
-        p2g_uncertainty_offset = p2g.offset_min + (p2g.offset_max - p2g.offset_min) * p2g_scale
-
-        # Walk length center (annealing from max to min over training)
-        max_steps = max(int(self.trainer_settings.max_steps), 1)
-        walk_length_center = (
-            walk.walk_it_max
-            - walk.walk_it_window * 0.5
-            - min((iteration + 1) / max_steps, 1)
-            * (walk.walk_it_max - walk.walk_it_min - walk.walk_it_window)
-        )
-
-        return eta, lamb, p2g_uncertainty_offset, walk_length_center
+        return runtime
 
     # -- Lifecycle --------------------------------------------------------------------------------
 
@@ -471,6 +532,8 @@ class TrainingModel(L.LightningModule):
         self, batch: Batch, batch_idx: int,
     ) -> Tensor:  # fmt: skip
         """ """
+        self._apply_runtime(self.global_step, log_values=True)
+
         # Initialize carry/state on the first batch
         if self._train_carry is None:
             self._train_carry = self.step_module.initial_carry(batch)
@@ -521,6 +584,7 @@ class TrainingModel(L.LightningModule):
         Validation does not persist carry across batches and accumulates episode
         metrics across the rollout, matching the ACT/RL validation pattern.
         """
+        self._apply_runtime(self.global_step, log_values=False)
         step_batches = repeat(batch)  # Run until all examples halt
         step_options = {}  # FIXME after the HeadLoss and TEMController support options
         carry0 = self.step_module.initial_carry(batch)
@@ -536,6 +600,28 @@ class TrainingModel(L.LightningModule):
         update_metrics_from_step(self.val_metrics, step.outputs.metrics, TEM_EPISODE_ROUTES)
 
         return {"trace": collector.tree}
+
+
+# =================================================================================================
+def resolve_tem_runtime(  # -----------------------------------------------------------------------
+    step: int, config: RuntimeConfig,
+) -> TEMRuntimeState:  # fmt: skip
+    """Resolve TEM runtime values from the current global training step."""
+    if step < 0:
+        raise ValueError(f"step must be non-negative, got {step}.")
+
+    memory = config.memory
+    uncertainty = config.uncertainty
+    progress_eta = min((step + 1) / float(memory.eta_it), 1.0)
+    progress_decay = min((step + 1) / float(memory.lambda_it), 1.0)
+    p2g_scale = 1.0 / (1.0 + math.exp((step - uncertainty.p2g_sig_half_it) / uncertainty.p2g_sig_scale_it))
+    p2g_uncertainty_offset = uncertainty.offset_min + (uncertainty.offset_max - uncertainty.offset_min) * p2g_scale  # fmt: skip
+
+    return TEMRuntimeState(
+        eta=progress_eta * memory.eta,
+        hebbian_decay=progress_decay * memory.hebbian_decay,
+        p2g_uncertainty_offset=p2g_uncertainty_offset,
+    )
 
 
 # =================================================================================================

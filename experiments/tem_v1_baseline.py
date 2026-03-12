@@ -23,7 +23,7 @@ from ehc_sn.envs.dungeon_walk import EnvConfig
 from ehc_sn.heads.tem import TEMLossConfig
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.models import tem_v1
-from ehc_sn.models.tem_v1 import ModelConfig_TEM_V1, ModelSettings_V1, TrainingModel
+from ehc_sn.models.tem_v1 import ModelConfig_TEM_V1, ModelSettings_V1, RuntimeConfig, TrainingModel
 from ehc_sn.training.optim import AdamConfig
 from ehc_sn.training.schedules import SchedulerConfig
 
@@ -100,6 +100,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     scheduler: SchedulerConfig = Field(
         default_factory=SchedulerConfig,
         description="Learning rate scheduler settings (scheduler_type, warmup_steps, total_steps).",
+    )
+    runtime: RuntimeConfig = Field(
+        default_factory=RuntimeConfig,
+        description="TEM runtime dynamics schedule settings applied inside the training loop.",
     )
 
     # ---------------------------------------------------------------------------------------------
