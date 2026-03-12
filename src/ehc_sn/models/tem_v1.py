@@ -39,11 +39,13 @@ from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import SchedulerConfig, SequentialLR
 from ehc_sn.training.step_loop import StepContext, StepLoop
 from ehc_sn.types import Device, Dtype
-from ehc_sn.utils import merge_multiscale_rows, trunc_normal_init_
 from ehc_sn.utils.detach import DetachMixin
 
 # Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
 Batch: TypeAlias = Dict[str, Tensor]
+ObsLogits = tuple[Tensor, Tensor, Tensor]  # (inference, retrieved, ancestral)
+GridCodes = tuple[Tensor, Tensor]  # (posterior, prior)
+PlaceCodes = tuple[Tensor, Tensor, Optional[Tensor]]  # (posterior, prior, sensory-cued retrieval)
 
 
 # =================================================================================================
@@ -300,21 +302,21 @@ class TEMModelV1(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, inputs: Batch, state: Optional[TEMState] = None,
-    ) -> tuple[TEMState, TEMOutput]:  # fmt: skip
-        """Run one TEM step under the controller/backbone rollout contract."""
+    ) -> tuple[TEMState, ObsLogits, Any, GridCodes, PlaceCodes]:  # fmt: skip
+        """Run one TEM step from the current payload and recurrent state.
+
+        ``state`` is assumed to have already been reset for any fresh episode
+        rows by the caller. When ``state`` is ``None``, a fresh full-batch state
+        is allocated and the normal single-step TEM transition is executed.
+        """
         obs_inputs = inputs["inputs"]
         previous_action = inputs["previous_action"]
-        step_count = inputs["step_count"].squeeze(-1).to(torch.int32)
         landmark_id = inputs.get("landmark_id")
         obs_embedding = self.autoencoder.encode(obs_inputs)
-        is_episode_start = step_count == 0
 
-        # Initialize state if not provided (e.g. first step of rollout); otherwise use the provided state.
+        # If no state is provided, initialize a fresh state and run the step as usual. This allows us to avoid
         if state is None:
             state = self.init_state(int(obs_inputs.shape[0]), memory=None, device=obs_inputs.device)
-        if torch.any(is_episode_start):
-            grid_prior = merge_multiscale_rows(is_episode_start, grid_prior, state.mec.cells)
-            state.mec = state.mec.replace_rows(is_episode_start, ...)  # TODO: replace here the start
 
         # Sensory inference: encode observations into LEC features and query place memory from them.
         lec_features_post, state.lec = self.lec.inference(obs_embedding, state.lec)
@@ -356,7 +358,7 @@ class TEMModelV1(nn.Module):
         obs_logits = (logits_inference, logits_retrieved, logits_ancestral)
         grid = (grid_post, grid_prior)
         place = (place_post, place_prior, place_sensory)
-        return state, TEMOutput(obs_logits=obs_logits, grid=grid, place=place)
+        return state, obs_logits, None, grid, place  # Action=None as TEM provides no direct action outputs
 
 
 # =================================================================================================
