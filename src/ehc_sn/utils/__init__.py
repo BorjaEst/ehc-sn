@@ -4,7 +4,7 @@ import math
 import os
 from itertools import combinations
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -60,6 +60,21 @@ def sample_diag_gaussian(transition: LocationBelief, *, scale: float = 1.0) -> l
     """
     mu, sigma = transition.mean, transition.uncertainty
     return [mu_f + float(scale) * sigma_f * torch.randn_like(mu_f) for mu_f, sigma_f in zip(mu, sigma)]
+
+
+def expand_row_mask(flag: Tensor, ref: Tensor) -> Tensor:
+    """Expand a boolean row mask to match a batched tensor."""
+    return flag.view((-1,) + (1,) * (ref.ndim - 1))
+
+
+def merge_rows(flag: Tensor, current: Tensor, fresh: Tensor) -> Tensor:
+    """Select fresh rows where ``flag`` is true and keep current rows otherwise."""
+    return torch.where(expand_row_mask(flag, current), fresh, current)
+
+
+def merge_multiscale_rows(flag: Tensor, current: Sequence[Tensor], fresh: Sequence[Tensor]) -> list[Tensor]:
+    """Apply row-wise replacement over a multiscale latent code."""
+    return [merge_rows(flag, current_f, fresh_f) for current_f, fresh_f in zip(current, fresh, strict=True)]
 
 
 def inv_var_trans(
