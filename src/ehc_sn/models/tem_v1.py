@@ -240,55 +240,55 @@ class TEMModelV1(nn.Module):
         self, inputs: Batch, state: Optional[TEMState] = None,
     ) -> tuple[TEMState, TEMOutput]:  # fmt: skip
         """ """
-        # state = self.reset_state(state, a_prev, observation.device)  # FIXME: this is controller logic
-        features = self.autoencoder.encode(observation)  # Encode observation to compressed format
+        obs_inputs, previous_action = inputs["observations"], inputs["prev_actions"]
+        location_labels = inputs.get("locations", None)
+        obs_embedding = self.autoencoder.encode(obs_inputs)
 
-        # Observe / infer: LEC filtering + HPC retrieval + MEC correction
-        x_inf, state.lec = self.lec.inference(features, state.lec)
-        x_ = self.projection_lec(x_inf)  # Project to memory format
-        p_xi = self.hpc.recall(x_, state.hpc, mode="full") if self.config.use_x_cued_recall else None
+        # Initialize state if not provided (e.g. first step of rollout); otherwise use the provided state.
+        if state is None:
+            state = self.init_state(int(obs_inputs.shape[0]), memory=None, device=obs_inputs.device)
 
-        # LocationBelief: MEC path integration (action-driven)
-        g_gen, state.mec = self.mec.generative(action, locations, state.mec)
-        g_ = self.projection_mec(g_gen)
-        p_gg = self.hpc.recall(g_, state.hpc, mode="hierarchical")
+        # Sensory inference: encode observations into LEC features and query place memory from them.
+        lec_features_post, state.lec = self.lec.inference(obs_embedding, state.lec)
+        place_query_from_obs = self.projection_lec(lec_features_post)
+        place_sensory = self.hpc.recall(place_query_from_obs, state.hpc, mode="full") if self.config.use_x_cued_recall else None  # fmt: skip
 
-        # Infer abstract location by using state and sensory experience
-        g_inf, state.mec = self.mec.inference(p_xi, locations=locations, state=state.mec)
-        g_ = self.projection_mec(g_inf)
-        p_gi = self.hpc.recall(g_, state.hpc, mode="hierarchical")
+        # Grid transition prior from action-driven path integration.
+        grid_prior, state.mec = self.mec.generative(previous_action, location_labels, state.mec)
+        place_query_from_grid_prior = self.projection_mec(grid_prior)
+        place_recall_from_grid_prior = self.hpc.recall(place_query_from_grid_prior, state.hpc, mode="hierarchical")  # fmt: skip
 
-        # Generate grounded location from inferred abstract location
-        p_gen_gi, state.hpc = self.hpc.generative(p_gi, state.hpc)
-        p_gen_gg, state.hpc = self.hpc.generative(p_gg, state.hpc)
+        # Grid posterior after correcting the prior with recalled place evidence.
+        grid_post, state.mec = self.mec.inference(place_sensory, locations=location_labels, state=state.mec)  # fmt: skip
+        place_query_from_grid_post = self.projection_mec(grid_post)
+        place_recall_from_grid_post = self.hpc.recall(place_query_from_grid_post, state.hpc, mode="hierarchical")  # fmt: skip
 
-        # Infer grounded location from abstract location and sensory experience
-        p_inf, state.hpc = self.hpc.inference(x_, g_, state.hpc)
+        # Place prior and posterior terms used by the TEM variational losses.
+        place_retrieved, state.hpc = self.hpc.generative(place_recall_from_grid_post, state.hpc)
+        place_prior, state.hpc = self.hpc.generative(place_recall_from_grid_prior, state.hpc)
+        place_post, state.hpc = self.hpc.inference(place_query_from_obs, place_query_from_grid_post, state.hpc)  # fmt: skip
 
-        # Update memory and return new state
-        state.hpc = self.hpc.update(p_inf, p_gen_gi, p_xi, state.hpc)
+        # Hebbian update uses the posterior place code and the sensory-cued retrieval when available.
+        state.hpc = self.hpc.update(place_post, place_retrieved, place_sensory, state.hpc)
 
-        # Generate observation prediction from inferred grounded location
-        x = self.projection_lec.inverse(p_inf)
-        c_p_inf = self.lec.generative(x)
-        logits_inference = self.autoencoder.decode(c_p_inf)
+        # Decode observation logits for the three TEM pathways.
+        lec_features_from_place_post = self.projection_lec.inverse(place_post)
+        obs_features_inference = self.lec.generative(lec_features_from_place_post)
+        logits_inference = self.autoencoder.decode(obs_features_inference)
 
-        # Generate observation from inferred grounded location
-        x = self.projection_lec.inverse(p_gen_gi)
-        c_p_gen_gi = self.lec.generative(x)
-        logits_retrieved = self.autoencoder.decode(c_p_gen_gi)
+        lec_features_from_place_retrieved = self.projection_lec.inverse(place_retrieved)
+        obs_features_retrieved = self.lec.generative(lec_features_from_place_retrieved)
+        logits_retrieved = self.autoencoder.decode(obs_features_retrieved)
 
-        # Generate observation from generated grounded location
-        x = self.projection_lec.inverse(p_gen_gg)
-        c_p_gen_gg = self.lec.generative(x)
-        logits_ancestral = self.autoencoder.decode(c_p_gen_gg)
+        lec_features_from_place_prior = self.projection_lec.inverse(place_prior)
+        obs_features_ancestral = self.lec.generative(lec_features_from_place_prior)
+        logits_ancestral = self.autoencoder.decode(obs_features_ancestral)
 
-        # Build full output, state and return
-        new_state = state
+        # Package outputs into a TEMOutput dataclass for use by the loss head and metrics.
         obs_logits = (logits_inference, logits_retrieved, logits_ancestral)
         grid = (grid_post, grid_prior)
         place = (place_post, place_prior, place_sensory)
-        return new_state, obs_logits, None, grid, place
+        return state, TEMOutput(obs_logits=obs_logits, grid=grid, place=place)
 
 
 # =================================================================================================
@@ -477,4 +477,10 @@ class TrainingModel(L.LightningModule):
 
 
 # =================================================================================================
-# TODO: Helpers here
+def _normalize_loss_for_backward(  # --------------------------------------------------------------
+    total_loss: Tensor, local_bs: int,
+) -> Tensor:  # fmt: skip
+    """Normalize the total loss by the local batch size for distributed training."""
+    if local_bs <= 0:
+        raise ValueError(f"local_bs must be positive, got {local_bs}.")
+    return total_loss / float(local_bs)
