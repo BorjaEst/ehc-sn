@@ -65,16 +65,6 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
         ge=1,
         description="Number of discrete actions in the environment.",
     )
-    action0_is_noop: bool = Field(
-        default=True,
-        description="Whether the first action (index 0) is a no-op, which affects the count of move actions.",
-    )
-
-    @computed_field
-    @property
-    def n_actions(self) -> int:
-        """Return the action dimension consumed by TEM transitions."""
-        return self.action_count - 1 if self.action0_is_noop else self.action_count
 
     f_initial: list[float] = Field(
         default_factory=lambda: [0.99, 0.3, 0.09, 0.5, 0.4],
@@ -255,7 +245,7 @@ class TEMModelV1(nn.Module):
         """Construct the TEM backbone from the resolved TEM v1 model settings."""
         super().__init__()
         self._config = config
-        n_stages = config.n_stages
+        n_stages, n_actions = config.n_stages, config.action_count
         f_initial = config.f_initial
 
         # Autoencoder module for observation compression/decoding
@@ -263,7 +253,7 @@ class TEMModelV1(nn.Module):
 
         # Entorhinal Hippocampal Circuit components
         self.hpc = HPCModel(n_stages, f_initial, config.hpc, device=device, dtype=dtype)
-        self.mec = MECModel(config.action_count, config.hpc.shape, f_initial, config.mec, action0_is_noop=config.action0_is_noop, device=device, dtype=dtype)  # fmt: skip
+        self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
         # Projection modules

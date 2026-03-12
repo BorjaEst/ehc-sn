@@ -143,16 +143,14 @@ class MECModel(nn.Module):
 
     def __init__(  # ------------------------------------------------------------------------------
         self, action_count: int, n_hippocampal: list[int], f_initial: list[float], config: MECSettings,
-        *, action0_is_noop: bool = True,
-        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
+        *, device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """ """
         super().__init__()
         self._config = config
         self._action_count = action_count
-        self._action0_is_noop = action0_is_noop
+        self._shape_ovc_modules = len(config.ovc.shape or []) if config.ovc.mode == "separate" else None
         shape = config.grid_shape
-        transition_action_dim = action_count - 1 if action0_is_noop else action_count
 
         # Prior: learned "default phase" of the grid code at reset
         init_fn = lambda size: truncnorm.rvs(-2, 2, size=size, loc=0, scale=config.sigma_init)
@@ -160,9 +158,9 @@ class MECModel(nn.Module):
         self.uncertainty_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in shape])  # fmt: skip
 
         # Instantiate submodules
-        self.path_integration = PathIntegrator(transition_action_dim, shape, f_initial, config=config.path)
+        self.path_integration = PathIntegrator(action_count, shape, f_initial, config=config.path)
         self.p2g_correction = P2GMemory(n_hippocampal, shape, config=config.p2g)
-        self.ovc_correction = OVCCorrection(config.ovc.shape, shape, config=config.ovc)
+        self.ovc_correction = OVCCorrection(shape, config=config.ovc)
 
     @property
     def config(self) -> MECSettings:
@@ -256,7 +254,7 @@ class MECModel(nn.Module):
         # Step 1: Correct path integration with memory-based inference
         transition = self.p2g_correction(p_x, transition) if p_x is not None else transition
         # Step 2: Apply OVC correction from shiny landmarks.
-        transition = self.ovc_correction(landmark_id, transition) if self._shape_ovc_modules != 0 else transition # fmt: skip
+        transition = self.ovc_correction(landmark_id, transition) if self.config.ovc.mode != "off" else transition # fmt: skip
 
         # Apply central sampling policy (legacy parity: g_inf is sampled when do_sample=True)
         if self.config.do_sample:
@@ -281,17 +279,9 @@ class MECModel(nn.Module):
     def _encode_action_ids(self, action: Tensor) -> Tensor:
         """Encode environment action ids for path integration."""
         action_ids = action.squeeze(-1).to(torch.int64)
-        if self._action0_is_noop:
-            encoded = torch.zeros(
-                (action_ids.shape[0], self._action_count - 1),
-                device=action_ids.device,
-                dtype=torch.float32,
-            )
-            move_ids = torch.clamp(action_ids - 1, min=0)
-            move_mask = (action_ids > 0).to(torch.float32).unsqueeze(-1)
-            encoded.scatter_(1, move_ids.unsqueeze(-1), move_mask)
-            return encoded
-
+        if torch.any(action_ids < 0) or torch.any(action_ids >= self._action_count):
+            bad_ids = action_ids[(action_ids < 0) | (action_ids >= self._action_count)].unique(sorted=True)
+            raise ValueError(f"Action ids must be in [0, {self._action_count}), got {bad_ids.tolist()}.")
         return torch.nn.functional.one_hot(action_ids, num_classes=self._action_count).to(torch.float32)
 
 
