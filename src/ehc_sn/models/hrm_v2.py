@@ -6,7 +6,7 @@ around the HRM v2 architecture (:class:`HRModelV2`) and its training loop.
 Compared to HRM v1 (ACT-supervised), HRM v2 couples a PFC-style recurrent reasoning
 core with an STR actor-critic head and trains with reinforcement-learning losses
 computed by :class:`~ehc_sn.training.rl_head.RLLossHead` via a
-:class:`~ehc_sn.training.rl_controller.RLController`.
+:class:`~ehc_sn.training.controller.RLController`.
 
 Key behaviors:
     - **Manual optimization**: sets ``automatic_optimization = False`` and performs
@@ -144,7 +144,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
         ...,
         description="Environment configuration (max_steps, seq_length, vocab_size, halt_action).",
     )
-    rl_controller: RLControllerConfig = Field(
+    controller: RLControllerConfig = Field(
         ...,
         description="Configuration for the RL controller, which defines the forward pass and computes RL losses.",
     )
@@ -332,7 +332,7 @@ class TrainingModel(L.LightningModule):
 
     This wrapper manages:
         - lazy initialization of :class:`~ehc_sn.envs.mazehard.MazeHardEnv`
-        - wiring :class:`~ehc_sn.training.rl_controller.RLController` and
+        - wiring :class:`~ehc_sn.training.controller.RLController` and
           :class:`~ehc_sn.training.rl_head.RLLossHead`
         - partial-reset batching via FIFO buffering
         - manual optimization with three optimizers
@@ -382,7 +382,7 @@ class TrainingModel(L.LightningModule):
 
         if self.environment is None:
             self.environment = MazeHardEnv(self.config.environment, batch_size=local_bs)
-        self.controller = RLController(self.model, self.environment, self.config.rl_controller)
+        self.controller = RLController(self.model, self.environment, self.config.controller)
         self.step_module = RLLossHead(self.controller, self.config.loss)
 
     def configure_optimizers(  # ------------------------------------------------------------------

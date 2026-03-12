@@ -65,5 +65,5 @@ warmup_steps = 5000
     c_entropy   = 0.01
     c_q_value   = 0.5
 
-[rl_controller]
+[controller]
     policy.exploration_prob = 0.1

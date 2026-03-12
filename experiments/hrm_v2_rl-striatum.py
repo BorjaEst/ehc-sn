@@ -83,7 +83,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Environment configuration (max_steps, seq_length, vocab_size, halt_action).",
     )
-    rl_controller: RLControllerConfig = Field(
+    controller: RLControllerConfig = Field(
         ...,
         description="RL controller configuration (exploration probability).",
     )
