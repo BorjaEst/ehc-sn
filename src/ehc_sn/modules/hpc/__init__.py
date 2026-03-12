@@ -176,22 +176,25 @@ class HPCModel(nn.Module):
         """ """
         super().__init__()
         self._config = config
-        shape, n_freq = config.shape, len(config.shape)
+        self._shape = list(config.shape)
+        self._n_freq = len(config.shape)
 
         # Stage masks are buffers so `.to(device)` moves them automatically.
         # Each is shaped (n_stages, S) where S = sum(shape).
-        masks = utils.update_to_masks(shape, update=utils.make_update_hierarchical(n_stages, n_freq))
+        masks = utils.update_to_masks(
+            self._shape, update=utils.make_update_hierarchical(n_stages, self._n_freq)
+        )
         self.register_buffer("masks_hierarchical", masks, persistent=False)
-        masks = utils.update_to_masks(shape, update=utils.make_update_full(n_stages, n_freq))
+        masks = utils.update_to_masks(self._shape, update=utils.make_update_full(n_stages, self._n_freq))
         self.register_buffer("masks_full", masks, persistent=False)
 
         # Hebbian write mask gates synapses in the flattened (S, S) matrix.
-        mask = utils.make_hebbian_write_mask(n_stages, shape, f_initial)
+        mask = utils.make_hebbian_write_mask(n_stages, self._shape, f_initial)
         self.register_buffer("update_mask", mask, persistent=False)
 
         # Instantiate submodules
-        self.attractor = AttractorNetwork(shape, config.attractor)
-        self.grounded_location = GroundLocation(shape, config.location)
+        self.attractor = AttractorNetwork(self._shape, config.attractor)
+        self.grounded_location = GroundLocation(self._shape, config.location)
         self.memory_system = HebbianUpdate(config.memory)
 
         self.reset_parameters()  # Initialize parameters and buffers
@@ -200,6 +203,16 @@ class HPCModel(nn.Module):
     def config(self) -> HPCSettings:
         """HPC module config."""
         return self._config
+
+    @property
+    def shape(self) -> list[int]:
+        """Return the grounded-location shape exposed to projections."""
+        return self._shape
+
+    @property
+    def n_freq(self) -> int:
+        """Return the number of HPC frequency modules."""
+        return self._n_freq
 
     def reset_parameters(  # ----------------------------------------------------------------------
         self,

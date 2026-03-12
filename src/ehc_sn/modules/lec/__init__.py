@@ -114,14 +114,15 @@ class LECModel(nn.Module):
         """ """
         super().__init__()
         self._config = config
-        n_features, f_initial = config.n_features, config.f_initial
-        n_freq = len(f_initial)
+        n_features = config.feature_dim
+        self._n_freq = len(f_initial)
+        self._shape = [n_features] * self._n_freq
 
         # Composable submodules (single responsibility each)
         self.filter = FrequencyFilter(f_initial, config.filter)
         self.norm = FeatureNorm(config.norm)
         self.reconstruct = Reconstruction(n_features, config.reconstruction)
-        self.w_f = nn.ParameterList([nn.Parameter(torch.tensor(1.0)) for _ in range(n_freq)])
+        self.w_f = nn.ParameterList([nn.Parameter(torch.tensor(1.0)) for _ in range(self._n_freq)])
 
         self.reset_parameters()
 
@@ -129,6 +130,16 @@ class LECModel(nn.Module):
     def config(self) -> LECSettings:
         """Return the LEC config."""
         return self._config
+
+    @property
+    def shape(self) -> list[int]:
+        """Return the resolved LEC multiscale shape."""
+        return self._shape
+
+    @property
+    def n_freq(self) -> int:
+        """Return the number of LEC frequency modules."""
+        return self._n_freq
 
     def reset_parameters(  # ----------------------------------------------------------------------
         self,

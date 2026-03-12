@@ -26,9 +26,8 @@ class OVCSettings(BaseModel, extra="forbid"):
         default="merged",
         description=(
             "OVC mode. If 'off', no OVC correction is applied. "
-            "If 'merged', all OVC frequencies are merged into a single module "
-            "(with size equal to the sum of the specified sizes). "
-            "If 'separate', OVC frequencies are kept separate with sizes specified by `shape`."
+            "If 'merged', shiny correction is fused into the existing MEC frequencies in place. "
+            "If 'separate', OVC frequencies are appended as explicit modules with sizes specified by `shape`."
         ),
     )
     shape: Optional[list[int]] = Field(
@@ -72,14 +71,29 @@ class OVCCorrection(nn.Module):
         self._n_freq = len(self._shape)
 
         # Shiny cue → mean and uncertainty.
-        hidden_dim = [config.hidden_dim] * self.n_freq
-        self.g_shiny_mlp = MLP([1] * self.n_freq, self.shape, hidden_dim=hidden_dim)
-        self.uncertainty_mlp = MLP( [1] * self.n_freq, self.shape, [torch.tanh, torch.exp], hidden_dim=hidden_dim)  # fmt: skip
+        hidden_dim = [self._config.hidden_dim] * self._n_freq
+        self.g_shiny_mlp = MLP([1] * self._n_freq, self.shape, hidden_dim=hidden_dim)
+        self.uncertainty_mlp = MLP( [1] * self._n_freq, self.shape, [torch.tanh, torch.exp], hidden_dim=hidden_dim)  # fmt: skip
 
     @property
     def config(self) -> OVCSettings:
         """Return the OVC config."""
         return self._config
+
+    @property
+    def shape(self) -> list[int]:
+        """Return the per-frequency OVC correction shape."""
+        return self._shape
+
+    @property
+    def n_freq(self) -> int:
+        """Return the number of frequencies corrected by OVC."""
+        return self._n_freq
+
+    @property
+    def ovc_start(self) -> int:
+        """Return the starting frequency index of the OVC correction slice."""
+        return self._ovc_start
 
     def forward(  # -------------------------------------------------------------------------------
         self, landmark_id: Tensor | None, transition: LocationBelief,

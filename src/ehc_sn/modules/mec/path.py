@@ -43,16 +43,18 @@ class PathIntegrator(nn.Module):
         """ """
         super().__init__()
         self._config = config
-        n_freq = len(mec_shape)
+        self._n_actions = n_actions
+        self._shape = list(mec_shape)
+        self._n_freq = len(mec_shape)
 
         self._connections = conn = utils.connections(f_initial)
-        self._conn_indices = [[f_from for f_from in range(n_freq) if conn[f_to][f_from]] for f_to in range(n_freq)]  # fmt: skip
-        self._in_dims = [sum(mec_shape[f_from] for f_from in self._conn_indices[f_to]) for f_to in range(n_freq)]  # fmt: skip
-        self._mat_shape = [(self._in_dims[f_to], mec_shape[f_to]) for f_to in range(n_freq)]
+        self._conn_indices = [[f_from for f_from in range(self._n_freq) if conn[f_to][f_from]] for f_to in range(self._n_freq)]  # fmt: skip
+        self._in_dims = [sum(mec_shape[f_from] for f_from in self._conn_indices[f_to]) for f_to in range(self._n_freq)]  # fmt: skip
+        self._mat_shape = [(self._in_dims[f_to], mec_shape[f_to]) for f_to in range(self._n_freq)]
 
         # LocationBelief weights (action-conditioned)
-        hidden_dim = [config.hidden_dim] * n_freq
-        self.MLP_D_a = MLP([n_actions] * n_freq, mec_shape, [torch.tanh, None], hidden_dim, bias=[True, False])  # fmt: skip
+        hidden_dim = [config.hidden_dim] * self._n_freq
+        self.MLP_D_a = MLP([n_actions] * self._n_freq, mec_shape, [torch.tanh, None], hidden_dim, bias=[True, False])  # fmt: skip
         self.MLP_D_a.set_weights(1, 0.0)
         self.D_no_a = nn.ParameterList([nn.Parameter(torch.zeros(m)) for m in self._mat_shape])  # fmt: skip
 
@@ -63,6 +65,16 @@ class PathIntegrator(nn.Module):
     def config(self) -> PathSettings:
         """Return the path integration config."""
         return self._config
+
+    @property
+    def shape(self) -> list[int]:
+        """Return the MEC feature shape consumed by the transition."""
+        return self._shape
+
+    @property
+    def n_freq(self) -> int:
+        """Return the number of MEC frequency modules."""
+        return self._n_freq
 
     def forward(  # -------------------------------------------------------------------------------
         self, a: Tensor, g_prev: list[Tensor], no_direc_mask: Tensor | None = None,

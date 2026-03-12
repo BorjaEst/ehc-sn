@@ -55,6 +55,8 @@ class P2GMemory(nn.Module):
         super().__init__()
         self._config = config
         self._runtime = Runtime()
+        self._shape = list(mec_shape)
+        self._n_freq = len(mec_shape)
 
         # Mean prediction from place cells
         self.MLP_mu_g_mem = MLP(n_p, mec_shape, hidden_dim=[2 * g for g in mec_shape])
@@ -74,6 +76,16 @@ class P2GMemory(nn.Module):
     @property
     def runtime(self) -> Runtime:
         return self._runtime
+
+    @property
+    def shape(self) -> list[int]:
+        """Return the corrected MEC feature shape."""
+        return self._shape
+
+    @property
+    def n_freq(self) -> int:
+        """Return the number of MEC frequency modules."""
+        return self._n_freq
 
     def forward(  # -------------------------------------------------------------------------------
         self, p_x: list[Tensor], transition: LocationBelief,

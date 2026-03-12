@@ -41,6 +41,7 @@ class FrequencyFilter(nn.Module):
         """
         super().__init__()
         self._config = config or FreqFilterSettings()
+        self._n_freq = len(f_initial)
 
         # Initialize temporal filtering factors
         # Store as logit(f) so that sigmoid(alpha) recovers the desired frequency
@@ -51,6 +52,11 @@ class FrequencyFilter(nn.Module):
     def config(self) -> FreqFilterSettings:
         """Return the filter config."""
         return self._config
+
+    @property
+    def n_freq(self) -> int:
+        """Return the number of LEC frequency modules."""
+        return self._n_freq
 
     def forward(  # -------------------------------------------------------------------------------
         self, c: Tensor, x_prev: list[Tensor],
@@ -68,7 +74,5 @@ class FrequencyFilter(nn.Module):
         return [(1 - alpha[f]) * x_prev[f] + alpha[f] * c for f in range(self.n_freq)]
 
 
-# =================================================================================================
-__all__ = ["FreqFilterSettings", "FrequencyFilter"]
 # =================================================================================================
 __all__ = ["FreqFilterSettings", "FrequencyFilter"]

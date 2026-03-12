@@ -10,7 +10,7 @@ The public entry point is `MECModel`, which exposes a TEM-compatible API via
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import List, Optional, Tuple
+from typing import Final, List, Optional, Tuple
 
 import torch
 from pydantic import BaseModel, Field
@@ -23,6 +23,8 @@ from ehc_sn.modules.mec.p2g import P2GMemory, P2GMemSettings
 from ehc_sn.modules.mec.path import PathIntegrator, PathSettings
 from ehc_sn.types import AbstractLocation, Device, Dtype, GroundedLocation, LocationBelief
 from ehc_sn.utils.detach import DetachMixin
+
+NO_PREVIOUS_ACTION: Final[int] = -1
 
 
 # =================================================================================================
@@ -72,6 +74,14 @@ class MECSettings(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
+def resolve_mec_shape(config: MECSettings) -> list[int]:
+    """Resolve the full MEC shape from the configured OVC mode."""
+    if config.ovc.mode == "separate":
+        return list(config.grid_shape) + list(config.ovc.shape or [])
+    return list(config.grid_shape)
+
+
+# =================================================================================================
 @dataclass()
 class MECState(DetachMixin):
     """Container for MEC state.
@@ -88,7 +98,7 @@ class MECState(DetachMixin):
     """
 
     abstract_belief: LocationBelief  # State and uncertainty over abstract locations
-    _shape_ovc_modules: Optional[int] = None  # Cached number of OVC modules
+    _n_ovc_modules: Optional[int] = None  # Cached number of appended OVC modules
 
     @property
     def cells(self) -> list[Tensor]:
@@ -117,16 +127,16 @@ class MECState(DetachMixin):
     @property
     def grid_cells(self) -> list[Tensor]:
         """Return only the grid-cell activations."""
-        if self._shape_ovc_modules is None:
+        if self._n_ovc_modules is None:
             return self.cells
-        return self.cells[: len(self.cells) - self._shape_ovc_modules]
+        return self.cells[: len(self.cells) - self._n_ovc_modules]
 
     @property
     def ovc_cells(self) -> Optional[list[Tensor]]:
         """Return only the OVC activations, or `None` if not present."""
-        if self._shape_ovc_modules is None:
+        if self._n_ovc_modules is None:
             return None
-        return self.cells[len(self.cells) - self._shape_ovc_modules :]
+        return self.cells[len(self.cells) - self._n_ovc_modules :]
 
 
 # =================================================================================================
@@ -149,23 +159,44 @@ class MECModel(nn.Module):
         super().__init__()
         self._config = config
         self._action_count = action_count
-        self._shape_ovc_modules = len(config.ovc.shape or []) if config.ovc.mode == "separate" else None
-        shape = config.grid_shape
+        self._shape = self._resolve_shape(config)
+        self._n_freq = len(self._shape)
+        self._n_ovc_modules = len(config.ovc.shape or []) if config.ovc.mode == "separate" else None
 
         # Prior: learned "default phase" of the grid code at reset
         init_fn = lambda size: truncnorm.rvs(-2, 2, size=size, loc=0, scale=config.sigma_init)
-        self.cells_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in shape])  # fmt: skip
-        self.uncertainty_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in shape])  # fmt: skip
+        self.cells_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in self._shape])  # fmt: skip
+        self.uncertainty_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in self._shape])  # fmt: skip
 
         # Instantiate submodules
-        self.path_integration = PathIntegrator(action_count, shape, f_initial, config=config.path)
-        self.p2g_correction = P2GMemory(n_hippocampal, shape, config=config.p2g)
-        self.ovc_correction = OVCCorrection(shape, config=config.ovc)
+        self.path_integration = PathIntegrator(action_count, self._shape, f_initial, config=config.path)
+        self.p2g_correction = P2GMemory(n_hippocampal, self._shape, config=config.p2g)
+        self.ovc_correction = OVCCorrection(self._shape, config=config.ovc)
 
     @property
     def config(self) -> MECSettings:
         """Return the MEC config."""
         return self._config
+
+    @property
+    def shape(self) -> list[int]:
+        """Return the resolved full MEC shape."""
+        return self._shape
+
+    @property
+    def n_freq(self) -> int:
+        """Return the total number of MEC frequency modules."""
+        return self._n_freq
+
+    @property
+    def n_ovc_modules(self) -> int:
+        """Return the number of appended OVC modules."""
+        return 0 if self._n_ovc_modules is None else self._n_ovc_modules
+
+    @staticmethod
+    def _resolve_shape(config: MECSettings) -> list[int]:
+        """Resolve the full MEC shape from the configured OVC mode."""
+        return resolve_mec_shape(config)
 
     def init_state(self, batch_size: int, device: Optional[Device] = None) -> MECState:
         """Create an initial MEC state from learned priors.
@@ -180,7 +211,7 @@ class MECModel(nn.Module):
         g0 = [g.unsqueeze(0).expand(batch_size, -1).to(device) for g in self.cells_init]
         sigma_0 = [std.unsqueeze(0).expand(batch_size, -1).to(device) for std in self.uncertainty_init]
         transition = LocationBelief(mean=g0, uncertainty=sigma_0)
-        return MECState(transition, _shape_ovc_modules=self._shape_ovc_modules)
+        return MECState(transition, _n_ovc_modules=self._n_ovc_modules)
 
     def set_runtime(self, *, p2g_uncertainty_offset: float) -> None:
         """Set runtime hyperparameters.
@@ -212,7 +243,7 @@ class MECModel(nn.Module):
             A tuple `(g_gen, new_state)` where `g_gen` is the generative grid
             code and `new_state` is the updated MEC state.
         """
-        action_encoded = self._encode_action_ids(action)
+        action_encoded, no_previous_action = self._encode_action_ids(action)
         no_direc_mask = None
         if landmark_id is not None:
             no_direc_mask = landmark_id.squeeze(-1).to(torch.int64) != 0
@@ -233,6 +264,12 @@ class MECModel(nn.Module):
             g_gen = cells_next  # legacy: g_gen == sampled g when no shiny
         else:
             g_gen = self._clamp(transition.mean)
+
+        if torch.any(no_previous_action):
+            g_gen, next_state = self._preserve_reset_rows(
+                no_previous_action, g_gen, state, state.new(cells_next, transition.uncertainty)
+            )
+            return g_gen, next_state
 
         return g_gen, state.new(cells_next, transition.uncertainty)
 
@@ -276,14 +313,37 @@ class MECModel(nn.Module):
         """
         return [torch.clamp(g_f, min=self._config.clamp_min, max=self._config.clamp_max) for g_f in g]
 
-    def _encode_action_ids(self, action: Tensor) -> Tensor:
-        """Encode environment action ids for path integration."""
+    @staticmethod
+    def _preserve_reset_rows(
+        reset_mask: Tensor,
+        g_gen: AbstractLocation,
+        state_before: MECState,
+        state_after: MECState,
+    ) -> tuple[AbstractLocation, MECState]:
+        """Restore pre-step MEC priors for rows with no previous action."""
+        if not torch.any(reset_mask):
+            return g_gen, state_after
+        return (
+            utils.merge_multiscale_rows(reset_mask, g_gen, state_before.cells),
+            state_after.replace_rows(reset_mask, state_before),
+        )
+
+    def _encode_action_ids(self, action: Tensor) -> tuple[Tensor, Tensor]:
+        """Encode environment action ids for path integration.
+
+        Returns the one-hot action basis plus a boolean mask selecting rows that
+        represent the controller-internal "no previous action" boundary.
+        """
         action_ids = action.squeeze(-1).to(torch.int64)
-        if torch.any(action_ids < 0) or torch.any(action_ids >= self._action_count):
-            bad_ids = action_ids[(action_ids < 0) | (action_ids >= self._action_count)].unique(sorted=True)
+        no_previous_action = action_ids == NO_PREVIOUS_ACTION
+        invalid = ((action_ids < 0) & ~no_previous_action) | (action_ids >= self._action_count)
+        if torch.any(invalid):
+            bad_ids = action_ids[invalid].unique(sorted=True)
             raise ValueError(f"Action ids must be in [0, {self._action_count}), got {bad_ids.tolist()}.")
-        return torch.nn.functional.one_hot(action_ids, num_classes=self._action_count).to(torch.float32)
+        encoded_ids = action_ids.masked_fill(no_previous_action, 0)
+        encoded = torch.nn.functional.one_hot(encoded_ids, num_classes=self._action_count).to(torch.float32)
+        return encoded, no_previous_action
 
 
 # =================================================================================================
-__all__ = ["MECModel", "MECState"]
+__all__ = ["MECModel", "MECState", "MECSettings", "NO_PREVIOUS_ACTION", "resolve_mec_shape"]

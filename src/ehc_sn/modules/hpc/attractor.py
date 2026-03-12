@@ -71,12 +71,22 @@ class AttractorNetwork(nn.Module):
         self._config = config or AttractorSettings()
 
         self._shape, self._n_freq = list(shape), len(shape)
-        self._activation_fn = utils.activation_from_str(config.activation)
+        self._activation_fn = utils.activation_from_str(self._config.activation)
 
     @property
     def config(self) -> AttractorSettings:
         """Return attractor config."""
         return self._config
+
+    @property
+    def shape(self) -> list[int]:
+        """Return the per-frequency grounded-location shape."""
+        return self._shape
+
+    @property
+    def n_freq(self) -> int:
+        """Return the number of attractor frequency modules."""
+        return self._n_freq
 
     def forward(  # -------------------------------------------------------------------------------
         self, p_query: list[Tensor], M: Tensor, *, masks: Optional[list[Tensor]] = None,

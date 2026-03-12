@@ -43,7 +43,7 @@ class GroundLocSettings(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class GroundLocation(nn.Module):
-    """ """  # TODO: docstring
+    """Infer grounded-location beliefs from sensory and abstract codes."""
 
     def __init__(  # ------------------------------------------------------------------------------
         self, shape: list[int], config: Optional[GroundLocSettings],
@@ -56,10 +56,10 @@ class GroundLocation(nn.Module):
             config: Grounded-location inference config.
         """
         super().__init__()
-        self._config = config
+        self._config = config or GroundLocSettings()
 
         self._shape, self._n_freq = list(shape), len(shape)
-        self._activation_fn = utils.activation_from_str(config.activation)
+        self._activation_fn = utils.activation_from_str(self._config.activation)
 
         # Uncertainty from predicted grounded location
         self.uncertainty_mlp = MLP(shape, shape, [torch.tanh, torch.exp], [2 * n for n in shape])
@@ -68,6 +68,16 @@ class GroundLocation(nn.Module):
     def config(self) -> GroundLocSettings:
         """Return grounded-location inference config."""
         return self._config
+
+    @property
+    def shape(self) -> list[int]:
+        """Return the grounded-location shape."""
+        return self._shape
+
+    @property
+    def n_freq(self) -> int:
+        """Return the number of grounded-location frequency modules."""
+        return self._n_freq
 
     def forward(  # -------------------------------------------------------------------------------
         self, x_: list[Tensor], g_: list[Tensor],
