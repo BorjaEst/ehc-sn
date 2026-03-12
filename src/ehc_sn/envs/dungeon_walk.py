@@ -19,6 +19,7 @@ TensorDict contract:
         "previous_action"   : (1,)   int64   — action that produced current state
         "location_id"       : (1,)   int64   — flattened current cell index
         "region_id"         : (1,)   int64   — current region id (0 if absent)
+        "landmark_id"       : (1,)   int64   — current landmark id / shiny cue (0 if absent)
         "valid_action_mask" : (A,)   bool    — legal movement actions
         "step_count"        : (1,)   int32   — transitions taken in episode
 
@@ -89,6 +90,7 @@ class DungeonWalk(EnvBase):
         self._observations: Tensor | None = None
         self._mask_valid: Tensor | None = None
         self._regions: Tensor | None = None
+        self._landmarks: Tensor | None = None
         self._height = 0
         self._width = 0
         self._action_deltas = torch.tensor(
@@ -113,6 +115,7 @@ class DungeonWalk(EnvBase):
             previous_action=Unbounded(shape=(*bs, 1), dtype=torch.int64),
             location_id=Unbounded(shape=(*bs, 1), dtype=torch.int64),
             region_id=Unbounded(shape=(*bs, 1), dtype=torch.int64),
+            landmark_id=Unbounded(shape=(*bs, 1), dtype=torch.int64),
             valid_action_mask=Unbounded(shape=(*bs, action_count), dtype=torch.bool),
             step_count=Unbounded(shape=(*bs, 1), dtype=torch.int32),
             shape=bs,
@@ -241,6 +244,9 @@ class DungeonWalk(EnvBase):
         regions = tensordict.get("regions")
         if regions is not None:
             regions = regions.to(device=self.device, dtype=torch.int64)
+        landmarks = tensordict.get("landmarks")
+        if landmarks is not None:
+            landmarks = landmarks.to(device=self.device, dtype=torch.int64)
 
         if topology.shape != observations.shape or topology.shape != mask_valid.shape:
             raise ValueError(
@@ -256,8 +262,9 @@ class DungeonWalk(EnvBase):
             self._topology = topology
             self._observations = observations
             self._mask_valid = mask_valid
-            self._regions = (
-                regions if regions is not None else torch.zeros_like(observations, dtype=torch.int64)
+            self._regions = regions if regions is not None else torch.zeros_like(observations, dtype=torch.int64)  # fmt: skip
+            self._landmarks = (
+                landmarks if landmarks is not None else torch.zeros_like(observations, dtype=torch.int64)
             )
             return
 
@@ -270,6 +277,12 @@ class DungeonWalk(EnvBase):
             self._regions[reset_mask] = regions[reset_mask]
         else:
             self._regions[reset_mask] = 0
+        if self._landmarks is None:
+            self._landmarks = torch.zeros_like(observations, dtype=torch.int64)
+        if landmarks is not None:
+            self._landmarks[reset_mask] = landmarks[reset_mask]
+        else:
+            self._landmarks[reset_mask] = 0
 
     def _sample_start_locations(  # -------------------------------------------------------------
         self, tensordict: TensorDictBase, reset_mask: Tensor | None = None,
@@ -328,6 +341,11 @@ class DungeonWalk(EnvBase):
             if self._regions is not None
             else torch.zeros_like(observation_target)
         )
+        landmark_id = (
+            self._landmarks[batch_index, rows, cols].view(-1, 1)
+            if self._landmarks is not None
+            else torch.zeros_like(observation_target)
+        )
         valid_action_mask = self._compute_valid_action_mask(rows, cols)
 
         return TensorDict(
@@ -337,6 +355,7 @@ class DungeonWalk(EnvBase):
                 "previous_action": previous_action.to(torch.int64),
                 "location_id": location_id.to(torch.int64),
                 "region_id": region_id.to(torch.int64),
+                "landmark_id": landmark_id.to(torch.int64),
                 "valid_action_mask": valid_action_mask,
                 "step_count": step_count.to(torch.int32),
             },

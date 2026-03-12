@@ -242,7 +242,7 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         """Extract the current-step model payload from an environment state."""
         keys = (
             "inputs", "observation_target", "previous_action", "location_id", "region_id",
-            "valid_action_mask", "step_count",
+            "landmark_id", "valid_action_mask", "step_count",
         )  # fmt: skip
         return {key: env_td[key] for key in keys if key in env_td.keys()}
 
