@@ -21,7 +21,7 @@ from ehc_sn import utils
 from ehc_sn.modules.mec.ovc import OVCCorrection, OVCSettings
 from ehc_sn.modules.mec.p2g import P2GMemory, P2GMemSettings
 from ehc_sn.modules.mec.path import PathIntegrator, PathSettings
-from ehc_sn.types import AbstractLocation, Device, Dtype, GroundedLocation, LocationBelief, LocationLabel
+from ehc_sn.types import AbstractLocation, Device, Dtype, GroundedLocation, LocationBelief
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -104,6 +104,16 @@ class MECState(DetachMixin):
         """Return a copy with an updated abstract-location belief."""
         return replace(self, abstract_belief=LocationBelief(mean=cells, uncertainty=uncertainty))
 
+    def replace_rows(self, flag: Tensor, fresh: "MECState") -> "MECState":
+        """Return a state where flagged rows are replaced from ``fresh``."""
+        uncertainty = None
+        if self.uncertainty is not None and fresh.uncertainty is not None:
+            uncertainty = utils.merge_multiscale_rows(flag, self.uncertainty, fresh.uncertainty)
+        return self.new(
+            cells=utils.merge_multiscale_rows(flag, self.cells, fresh.cells),
+            uncertainty=uncertainty,
+        )
+
     @property
     def grid_cells(self) -> list[Tensor]:
         """Return only the grid-cell activations."""
@@ -132,22 +142,27 @@ class MECModel(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, n_actions: int, n_hippocampal: list[int], f_initial: list[float], config: MECSettings,
+        self, action_count: int, n_hippocampal: list[int], f_initial: list[float], config: MECSettings,
+        *, action0_is_noop: bool = True,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """ """
         super().__init__()
         self._config = config
+        self._action_count = action_count
+        self._action0_is_noop = action0_is_noop
+        shape = config.grid_shape
+        transition_action_dim = action_count - 1 if action0_is_noop else action_count
 
         # Prior: learned "default phase" of the grid code at reset
         init_fn = lambda size: truncnorm.rvs(-2, 2, size=size, loc=0, scale=config.sigma_init)
-        self.cells_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in self.shape])  # fmt: skip
-        self.uncertainty_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in self.shape])  # fmt: skip
+        self.cells_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in shape])  # fmt: skip
+        self.uncertainty_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in shape])  # fmt: skip
 
         # Instantiate submodules
-        self.path_integration = PathIntegrator(n_actions, self.shape, f_initial, config=config.path)
-        self.p2g_correction = P2GMemory(n_hippocampal, self.shape, config=config.p2g)
-        self.ovc_correction = OVCCorrection(config.ovc.shape, self.shape, config=config.ovc)
+        self.path_integration = PathIntegrator(transition_action_dim, shape, f_initial, config=config.path)
+        self.p2g_correction = P2GMemory(n_hippocampal, shape, config=config.p2g)
+        self.ovc_correction = OVCCorrection(config.ovc.shape, shape, config=config.ovc)
 
     @property
     def config(self) -> MECSettings:
@@ -186,37 +201,36 @@ class MECModel(nn.Module):
         raise NotImplementedError("MEC forward not implemented. Use generative() or inference().")
 
     def generative(
-        self, action: Tensor, locations: list[LocationLabel], state: MECState
+        self, action: Tensor, landmark_id: Tensor | None, state: MECState
     ) -> tuple[AbstractLocation, MECState]:
         """Run the generative (path integration) update.
 
         Args:
-            a: One-hot action tensor of shape `(batch, n_actions)`.
-            locations: Per-environment metadata. A non-`None` `"shiny"` value
-                indicates a landmark cue is present.
+            action: Action ids of shape `(batch, 1)` from the environment.
+            landmark_id: Optional current-cell landmark ids of shape `(batch, 1)`.
             state: Current MEC state.
 
         Returns:
             A tuple `(g_gen, new_state)` where `g_gen` is the generative grid
             code and `new_state` is the updated MEC state.
         """
-        # Build no-direction mask for shiny environments
-        shiny_envs = [loc.get("shiny") is not None for loc in locations]
-        any_shiny = any(shiny_envs)
-        no_direc_mask = (
-            torch.tensor(shiny_envs, device=action.device, dtype=torch.bool) if any_shiny else None
-        )
+        action_encoded = self._encode_action_ids(action)
+        no_direc_mask = None
+        if landmark_id is not None:
+            no_direc_mask = landmark_id.squeeze(-1).to(torch.int64) != 0
+            if not torch.any(no_direc_mask):
+                no_direc_mask = None
 
         # 1) Action-driven transition for the state (legacy g_path)
-        transition = self.path_integration(action, state.cells, no_direc_mask=None)
+        transition = self.path_integration(action_encoded, state.cells, no_direc_mask=None)
         if self.config.do_sample:
             cells_next = utils.sample_diag_gaussian(transition)
         else:
             cells_next = transition.mean
 
         # 2) g_gen: reuse mu when possible, only compute no_direc when needed
-        if any_shiny:
-            g_gen = self._clamp(self.path_integration.mean(action, state.cells, no_direc_mask))
+        if no_direc_mask is not None:
+            g_gen = self._clamp(self.path_integration.mean(action_encoded, state.cells, no_direc_mask))
         elif self.config.do_sample:
             g_gen = cells_next  # legacy: g_gen == sampled g when no shiny
         else:
@@ -225,13 +239,13 @@ class MECModel(nn.Module):
         return g_gen, state.new(cells_next, transition.uncertainty)
 
     def inference(
-        self, p_x: Optional[GroundedLocation], locations: list[LocationLabel], state: MECState
+        self, p_x: Optional[GroundedLocation], landmark_id: Tensor | None, state: MECState
     ) -> tuple[AbstractLocation, MECState]:
         """Run inference by fusing memory and OVC cues into the state.
 
         Args:
             p_x: Retrieved place-cell activations per frequency (from HPC).
-            locations: Per-environment metadata used for OVC correction.
+            landmark_id: Optional current-cell landmark ids of shape `(batch, 1)`.
             state: Current MEC state (typically after path integration).
 
         Returns:
@@ -242,9 +256,7 @@ class MECModel(nn.Module):
         # Step 1: Correct path integration with memory-based inference
         transition = self.p2g_correction(p_x, transition) if p_x is not None else transition
         # Step 2: Apply OVC correction from shiny landmarks.
-        transition = (
-            self.ovc_correction(locations, transition) if self._shape_ovc_modules is not 0 else transition
-        )
+        transition = self.ovc_correction(landmark_id, transition) if self._shape_ovc_modules != 0 else transition # fmt: skip
 
         # Apply central sampling policy (legacy parity: g_inf is sampled when do_sample=True)
         if self.config.do_sample:
@@ -265,6 +277,22 @@ class MECModel(nn.Module):
             Clamped activations.
         """
         return [torch.clamp(g_f, min=self._config.clamp_min, max=self._config.clamp_max) for g_f in g]
+
+    def _encode_action_ids(self, action: Tensor) -> Tensor:
+        """Encode environment action ids for path integration."""
+        action_ids = action.squeeze(-1).to(torch.int64)
+        if self._action0_is_noop:
+            encoded = torch.zeros(
+                (action_ids.shape[0], self._action_count - 1),
+                device=action_ids.device,
+                dtype=torch.float32,
+            )
+            move_ids = torch.clamp(action_ids - 1, min=0)
+            move_mask = (action_ids > 0).to(torch.float32).unsqueeze(-1)
+            encoded.scatter_(1, move_ids.unsqueeze(-1), move_mask)
+            return encoded
+
+        return torch.nn.functional.one_hot(action_ids, num_classes=self._action_count).to(torch.float32)
 
 
 # =================================================================================================
