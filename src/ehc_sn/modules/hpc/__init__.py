@@ -176,8 +176,7 @@ class HPCModel(nn.Module):
         """ """
         super().__init__()
         self._config = config
-        shape, n_stages, f_initial = config.shape, config.n_stages, config.f_initial
-        n_freq = len(shape)
+        shape, n_freq = config.shape, len(config.shape)
 
         # Stage masks are buffers so `.to(device)` moves them automatically.
         # Each is shaped (n_stages, S) where S = sum(shape).
