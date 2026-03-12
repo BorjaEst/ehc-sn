@@ -1,20 +1,115 @@
+# -- General settings -----------------------------------------------------------------------------
 dataset_path      = "data/processed/dungeons"
 global_batch_size = 16
 epochs            = 100
 seed              = 42
 augment           = true
 
+num_workers        = 4
+prefetch_factor    = 2
+pin_memory         = true
+persistent_workers = true
+
+max_steps           = 200000
+log_every_n_steps   = 10
+val_check_interval  = 100
+limit_val_batches   = 10
+enable_progress_bar = true
+
+trainer_accelerator = "gpu"
+trainer_strategy    = "ddp"
+trainer_devices     = 1
+trainer_num_nodes   = 1
+trainer_precision   = "16-mixed"
+
+diagnostic_level = "standard"
 
 # -- Environment settings ----------------------------------------------------------------------
 [environment]
-
+    max_steps         = 300
+    observation_dim   = 45
+    action_count      = 5
+    use_start_channel = true
 # -- Model settings -------------------------------------------------------------------------------
 [model]
+    vocab_size = 45
+    n_actions  = 5
+
+    # Current schema says int, but legacy TEM semantics strongly suggest this should
+    # be a list of frequencies. This value only makes the TOML match the current
+    # field name, not the intended legacy behavior.
+    f_init = 10
+
+[model.autoencoder]
+    encode_mode = "two_hot"
+    decode_mode = "mlp"
+
+[model.hpc]
+    shape         = [100, 100, 80, 60, 60]
+    common_memory = false
+    do_sample     = false
+    clamp_min     = -1.0
+    clamp_max     = 1.0
+
+[model.hpc.attractor]
+    kappa      = 0.8
+    activation = "leaky_relu"
+    clamp_min  = -1.0
+    clamp_max  = 1.0
+
+[model.hpc.location]
+    activation = "leaky_relu"
+    clamp_min  = -1.0
+    clamp_max  = 1.0
+
+[model.hpc.memory]
+    clamp_min = -1.0
+    clamp_max = 1.0
+
+[model.lec]
+    shape     = [10, 10, 10, 10, 10]
+    clamp_min = -1.0
+    clamp_max = 1.0
+
+[model.lec.filter]
+
+[model.lec.norm]
+
+[model.lec.reconstruction]
+
+[model.mec]
+    shape      = [30, 24, 18, 24, 18]
+    do_sample  = false
+    sigma_init = 0.5
+    clamp_min  = -1.0
+    clamp_max  = 1.0
+
+[model.mec.path]
+    hidden_dim = 20
+
+[model.mec.p2g]
+    sigma_init = 0.1
+
+[model.mec.ovc]
+    shape      = [24, 18]
+    hidden_dim = 20
+
+[model.projection_lec]
+    mode      = "tiling"
+    init      = "identity"
+    learnable = false
+
+[model.projection_mec]
+    mode      = "low_rank"
+    init      = "identity"
+    learnable = false
 
 # -- Optimizer and scheduler settings -------------------------------------------------------
 [optimizer]
     lr           = 1e-4
     weight_decay = 1e-2
+    betas        = [0.9, 0.98]
+
 
 [scheduler]
     warmup_steps = 1000
@@ -22,6 +117,42 @@ augment           = true
 
 # -- Loss settings --------------------------------------------------------------------------------
 [loss]
+    observation_loss  = "softmax_cross_entropy"
+    c_obs             = 1.0
+    c_grid            = 1.0
+    c_place           = 1.0
+    c_grid_reg        = 0.01
+    c_place_reg       = 0.02
+    grid_reg_norm     = "l2"
+    place_reg_norm    = "l1"
+    use_x_cued_recall = true
 
 # -- Controller settings --------------------------------------------------------------------------
-[tem_controller]
+[controller]
+    max_steps = 20
+[controller.policy]
+    kind = "random_walk"
+    seed = 42
+
+
+# -- Logging settings --------------------------------------------------------------------------------
+[logger]
+    save_dir  = "logs"
+    name      = "tem-dungeons"
+    log_graph = false
+    prefix    = ""
+
+[checkpoint]
+    every_n_train_steps = 1000
+    save_last           = true
+
+
+# -- Figures & diagnostics ------------------------------------------------------------------------
+[figures]
+    enabled         = true
+    split           = "validate"
+    figures         = ["dummy"]
+    save_pdf        = true
+    log_tensorboard = true
+    env_idx         = 0
+    freq_idx        = 0
