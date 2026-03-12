@@ -12,8 +12,8 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn as nn
-from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
-from torch import Tensor, nn
+from pydantic import BaseModel, Field, computed_field, model_validator
+from torch import Tensor
 from torch.distributions import Normal
 from torch.optim import Adam, Optimizer
 from torch.optim.lr_scheduler import ExponentialLR
@@ -48,7 +48,12 @@ Batch: TypeAlias = Dict[str, Tensor]
 
 # =================================================================================================
 class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
-    """ """
+    """Canonical TEM v1 model settings.
+
+    This compact schema keeps the environment-facing observation/action
+    contract, shared multiscale frequencies, and component-local settings in a
+    single model config without reintroducing legacy aliases.
+    """
 
     observation_dim: int = Field(
         ...,
@@ -67,8 +72,8 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
 
     @computed_field
     @property
-    def n_move_actions(self) -> int:
-        """ """
+    def n_actions(self) -> int:
+        """Return the action dimension consumed by TEM transitions."""
         return self.action_count - 1 if self.action0_is_noop else self.action_count
 
     f_initial: list[float] = Field(
@@ -87,30 +92,34 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
     @model_validator(mode="after")
     def validate_model(self) -> "ModelSettings_V1":
         self._validate_f_initial()
-        self._validate_grid_shape()
-        self._validate_hpc_shape()
+        self._validate_stage_alignment()
+        self._validate_frequency_alignment()
         return self
 
     def _validate_f_initial(self) -> None:
         if any(not (0.0 < value < 1.0) for value in self.f_initial):
             raise ValueError("f_initial values must be strictly between 0 and 1.")
 
-    def _validate_grid_shape(self) -> None:
+    def _validate_stage_alignment(self) -> None:
         if len(self.mec.grid_shape) != self.n_stages:
             raise ValueError("len(mec.grid_shape) must equal len(f_initial).")
 
-    def _validate_hpc_shape(self) -> None:
+    def _validate_frequency_alignment(self) -> None:
+        if len(self.f_initial) != len(self.hpc.shape):
+            raise ValueError("len(f_initial) must equal len(hpc.shape).")
         if len(self.hpc.shape) != self.n_total_freq:
             raise ValueError("len(hpc.shape) must equal the derived total MEC frequency count.")
 
     @computed_field
     @property
     def n_stages(self) -> int:
+        """Return the number of frequency modules (stages) in the model, inferred from f_initial."""
         return len(self.f_initial)
 
     @computed_field
     @property
     def n_freq(self) -> int:
+        """Return the total number of frequency modules."""
         return len(self.f_initial)
 
     hpc: HPCSettings = Field(
@@ -126,15 +135,6 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
         description="Settings for the MEC module, including path integration and correction parameters.",
     )
 
-    @computed_field
-    @property
-    def mec_ovc_shape(self) -> list[int]:
-        if self.mec.ovc.mode == "off":
-            return []
-        if self.mec.ovc.mode == "merged":
-            return list(self.mec.grid_shape)
-        return list(self.mec.ovc.shape or [])
-
     autoencoder: AutoencoderSettings = Field(
         ...,
         description="Settings for the autoencoder module used for observation compression.",
@@ -148,8 +148,8 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
         ),
     )
     projection_mec: ProjectionSettings = Field(
-        # default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False, rank=[10, 10, 8, 6, 6]),
-        default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False),
+        default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False, rank=[10, 10, 8, 6, 6]),
+        # default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False),
         description=(
             "Settings for the projection module between MEC and HPC. "
             "This module projects MEC abstract location codes into the format expected by HPC memory."
@@ -159,11 +159,13 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
     @computed_field
     @property
     def lec_shape(self) -> list[int]:
+        """Return the resolved LEC feature shape across all frequencies."""
         return [self.lec.feature_dim] * self.n_stages
 
     @computed_field
     @property
     def mec_ovc_shape(self) -> list[int]:
+        """Return the resolved OVC shape implied by the configured OVC mode."""
         if self.mec.ovc.mode == "off":
             return []
         if self.mec.ovc.mode == "merged":
@@ -173,6 +175,7 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
     @computed_field
     @property
     def mec_shape(self) -> list[int]:
+        """Return the full MEC shape including optional OVC modules."""
         if self.mec.ovc.mode == "separate":
             return list(self.mec.grid_shape) + self.mec_ovc_shape
         return list(self.mec.grid_shape)
@@ -180,12 +183,13 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
     @computed_field
     @property
     def n_total_freq(self) -> int:
+        """Return the total number of MEC/HPC frequencies after OVC expansion."""
         return len(self.mec_shape)
 
 
 # =================================================================================================
 class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
-    """ """
+    """Top-level TEM v1 training config."""
 
     # ~~ Model architecture ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     model: ModelSettings_V1 = Field(
@@ -221,6 +225,14 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
         description="",
     )  # TODO: consider moving to BufferSettings or similar
 
+    @model_validator(mode="after")
+    def validate_environment_contract(self) -> "ModelConfig_TEM_V1":
+        if self.environment.observation_dim != self.model.observation_dim:
+            raise ValueError("environment.observation_dim must match model.observation_dim.")
+        if self.environment.action_count != self.model.action_count:
+            raise ValueError("environment.action_count must match model.action_count.")
+        return self
+
 
 # =================================================================================================
 @dataclass
@@ -240,14 +252,14 @@ class TEMModelV1(nn.Module):
         self, config: ModelSettings_V1, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
-        """ """
+        """Construct the TEM backbone from the resolved TEM v1 model settings."""
         super().__init__()
         self._config = config
         n_stages, n_actions = config.n_stages, config.n_actions
         f_initial = config.f_initial
 
         # Autoencoder module for observation compression/decoding
-        self.autoencoder = Autoencoder(config.autoencoder, device=device, dtype=dtype)
+        self.autoencoder = Autoencoder(config.observation_dim, config.lec.feature_dim, config.autoencoder)
 
         # Entorhinal Hippocampal Circuit components
         self.hpc = HPCModel(n_stages, f_initial, config.hpc, device=device, dtype=dtype)
@@ -255,8 +267,8 @@ class TEMModelV1(nn.Module):
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
         # Projection modules
-        self.projection_mec = ProjectionModule(config.projection_mec)
-        self.projection_lec = ProjectionModule(config.projection_lec)
+        self.projection_mec = ProjectionModule(self.mec, self.hpc, config.projection_mec)
+        self.projection_lec = ProjectionModule(self.lec, self.hpc, config.projection_lec)
 
     @property
     def config(self) -> ModelSettings_V1:
@@ -267,11 +279,11 @@ class TEMModelV1(nn.Module):
         self, batch_size: int, *, memory: Optional[MemoryState],
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> TEMState:  # fmt: skip
-        """ """
-        memory = memory if memory is not None else self.hpc.init_memory(batch_size, device, dtype)
-        lec_state = self.lec.init_state(batch_size, device)
-        state_mec = self.mec.init_state(batch_size, device)
-        hpc_state = self.hpc.init_state(batch_size, device, memory=memory)
+        """Create an initial recurrent TEM state."""
+        memory = memory if memory is not None else self.hpc.init_memory(batch_size=batch_size, device=device)
+        lec_state = self.lec.init_state(batch_size, device=device)
+        state_mec = self.mec.init_state(batch_size, device=device)
+        hpc_state = self.hpc.init_state(batch_size, device=device, memory=memory)
         return TEMState(lec_state, state_mec, hpc_state)
 
     def reset_state(  # ---------------------------------------------------------------------------
@@ -281,9 +293,8 @@ class TEMModelV1(nn.Module):
         if not torch.any(reset_flag):
             return state
 
-        init_state = self.init_state(int(reset_flag.shape[0]), device=reset_flag.device)
-        # TODO: Complete correctly the state reset logic
-        return TEMState(lec_state, mec_state, hpc_state)
+        # TODO: implement row-wise partial reset while preserving active slots.
+        return self.init_state(int(reset_flag.shape[0]), memory=state.hpc.memory, device=reset_flag.device)
 
     def set_runtime(  # ---------------------------------------------------------------------------
         self, eta: float, hebbian_decay: float, p2g_uncertainty_offset: float,
