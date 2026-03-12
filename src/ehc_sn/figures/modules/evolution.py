@@ -14,12 +14,12 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+from ehc_sn.data.schema import O_ID
 from ehc_sn.figures.figures.base import BaseFigureTemplate
 from ehc_sn.figures.figures.panels import panel
 from ehc_sn.figures.plots.mazehard import plot_maze_with_overlay
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.axes import subdivide_axes
-from ehc_sn.data.schema import O_ID
 from ehc_sn.figures.utils.grids import first_halt_index, reshape_grid
 from ehc_sn.rollouts.trace_tree import TraceTree
 

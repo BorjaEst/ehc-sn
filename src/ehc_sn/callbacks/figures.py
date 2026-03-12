@@ -48,7 +48,7 @@ class FigureCallbackSettings(BaseModel, extra="forbid"):
         default="validate",
         description="Split to sample for figure generation.",
     )
-    figures: List[str] = Field(
+    figures: list[str] = Field(
         default_factory=lambda: ["overlay", "evolution"],
         description="Figure names to generate (from registry).",
     )

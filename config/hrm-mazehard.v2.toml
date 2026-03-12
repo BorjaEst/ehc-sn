@@ -66,4 +66,4 @@ warmup_steps = 5000
     c_q_value   = 0.5
 
 [rl_controller]
-    exploration_prob = 0.1
+    policy.exploration_prob = 0.1

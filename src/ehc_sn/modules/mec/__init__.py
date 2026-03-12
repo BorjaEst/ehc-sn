@@ -21,7 +21,7 @@ from ehc_sn import utils
 from ehc_sn.modules.mec.ovc import OVCCorrection, OVCSettings
 from ehc_sn.modules.mec.p2g import P2GMemory, P2GMemSettings
 from ehc_sn.modules.mec.path import PathIntegrator, PathSettings
-from ehc_sn.types import Device, Dtype, LocationBelief, Matrix, MemoryState
+from ehc_sn.types import AbstractLocation, Device, Dtype, LocationBelief, LocationLabel
 from ehc_sn.utils.detach import DetachMixin
 
 
