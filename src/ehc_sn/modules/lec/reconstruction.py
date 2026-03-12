@@ -24,8 +24,8 @@ class ReconstructionSettings(BaseModel, extra="forbid"):
 class Reconstruction(nn.Module):
     """Linear reconstruction of sensory input from LEC features."""
 
-    def __init__(
-        self, n_c: int, config: Optional[ReconstructionSettings],
+    def __init__(  # ------------------------------------------------------------------------------
+        self, n_c: int, config: ReconstructionSettings,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """Initialize reconstruction parameters.
@@ -35,7 +35,7 @@ class Reconstruction(nn.Module):
             config: Reconstruction configuration.
         """
         super().__init__()
-        self._config = config or ReconstructionSettings()
+        self._config = config
 
         # Reconstruction parameters
         self.w_x = torch.nn.Parameter(torch.tensor(1.0))  # For reconstructing c from x
@@ -46,7 +46,9 @@ class Reconstruction(nn.Module):
         """Return the reconstruction config."""
         return self._config
 
-    def forward(self, x: list[Tensor]) -> Tensor:
+    def forward(  # -------------------------------------------------------------------------------
+        self, x: list[Tensor],
+    ) -> Tensor:  # fmt: skip
         """Reconstruct sensory input.
 
         Args:

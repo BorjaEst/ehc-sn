@@ -26,7 +26,7 @@ class FeatureNorm(nn.Module):
     """Normalize per-frequency feature vectors."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: Optional[FeatureNormSettings] = None,
+        self, config: FeatureNormSettings,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """Initialize the normalization module.
@@ -35,7 +35,7 @@ class FeatureNorm(nn.Module):
             config: Configuration for normalization.
         """
         super().__init__()
-        self._config = config or FeatureNormSettings()
+        self._config = config
 
     @property
     def config(self) -> FeatureNormSettings:

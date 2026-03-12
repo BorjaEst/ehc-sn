@@ -139,7 +139,7 @@ class OVCCorrection(nn.Module):
         return shiny_mask.to(device=device)
 
     def _extract_shiny_cues(  # -------------------------------------------------------------------
-        self, landmark_id: Tensor | None, shiny_mask: Tensor, device: Device
+        self, landmark_id: Tensor | None, shiny_mask: Tensor, device: Device,
     ) -> list[Tensor]:  # fmt: skip
         """Extract shiny cue values as inputs for the OVC MLPs.
 

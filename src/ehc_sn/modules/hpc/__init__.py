@@ -131,7 +131,9 @@ class HPCState(DetachMixin):
             _memory=self._memory if memory is None else memory,
         )
 
-    def replace_rows(self, flag: Tensor, fresh: "HPCState") -> "HPCState":
+    def replace_rows(  # --------------------------------------------------------------------------
+        self, flag: Tensor, fresh: "HPCState",
+    ) -> "HPCState":  # fmt: skip
         """Return a state where flagged rows are replaced from ``fresh``."""
         uncertainty = None
         if self.uncertainty is not None and fresh.uncertainty is not None:

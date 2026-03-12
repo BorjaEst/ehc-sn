@@ -18,7 +18,7 @@ from ehc_sn.types import LocationBelief
 
 
 # =================================================================================================
-class PathSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class PathSettings(BaseModel, extra="forbid"):
     """Settings for path integration modules."""
 
     hidden_dim: int = Field(

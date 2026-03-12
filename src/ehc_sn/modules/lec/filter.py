@@ -30,7 +30,7 @@ class FrequencyFilter(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, f_initial: list[float], config: Optional[FreqFilterSettings] = None,
+        self, f_initial: list[float], config: FreqFilterSettings,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """Initialize the filter.
@@ -40,7 +40,7 @@ class FrequencyFilter(nn.Module):
             config: Configuration for the filter.
         """
         super().__init__()
-        self._config = config or FreqFilterSettings()
+        self._config = config
         self._n_freq = len(f_initial)
 
         # Initialize temporal filtering factors

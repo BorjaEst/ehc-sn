@@ -21,7 +21,7 @@ from ehc_sn.types import LocationBelief
 
 
 # =================================================================================================
-class P2GMemSettings(BaseModel, extra="forbid", arbitrary_types_allowed=True):
+class P2GMemSettings(BaseModel, extra="forbid"):
     """Settings for MEC memory inference modules."""
 
     sigma_init: float = Field(

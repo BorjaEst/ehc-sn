@@ -56,7 +56,7 @@ class HebbianUpdate(nn.Module):
     """Hebbian write/update logic for the grounded-location memory matrix."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: Optional[HebbianUpdateSettings] = None,
+        self, config: HebbianUpdateSettings,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """Initialize Hebbian update.
@@ -65,7 +65,7 @@ class HebbianUpdate(nn.Module):
             config: Hebbian update config (e.g., clamp range).
         """
         super().__init__()
-        self._config = config or HebbianUpdateSettings()
+        self._config = config
         self._runtime = Runtime()
 
     @property

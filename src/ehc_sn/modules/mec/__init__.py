@@ -18,13 +18,12 @@ from scipy.stats import truncnorm
 from torch import Tensor, nn
 
 from ehc_sn import utils
+from ehc_sn.controllers.tem import NO_PREVIOUS_ACTION
 from ehc_sn.modules.mec.ovc import OVCCorrection, OVCSettings
 from ehc_sn.modules.mec.p2g import P2GMemory, P2GMemSettings
 from ehc_sn.modules.mec.path import PathIntegrator, PathSettings
 from ehc_sn.types import AbstractLocation, Device, Dtype, GroundedLocation, LocationBelief
 from ehc_sn.utils.detach import DetachMixin
-
-NO_PREVIOUS_ACTION: Final[int] = -1
 
 
 # =================================================================================================
@@ -74,14 +73,6 @@ class MECSettings(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-def resolve_mec_shape(config: MECSettings) -> list[int]:
-    """Resolve the full MEC shape from the configured OVC mode."""
-    if config.ovc.mode == "separate":
-        return list(config.grid_shape) + list(config.ovc.shape or [])
-    return list(config.grid_shape)
-
-
-# =================================================================================================
 @dataclass()
 class MECState(DetachMixin):
     """Container for MEC state.
@@ -110,11 +101,15 @@ class MECState(DetachMixin):
         """Return grid + OVC uncertainties."""
         return self.abstract_belief.uncertainty
 
-    def new(self, cells: list[Tensor], uncertainty: Optional[list[Tensor]]) -> MECState:
+    def new(  # -----------------------------------------------------------------------------------
+        self, cells: list[Tensor], uncertainty: Optional[list[Tensor]],
+    ) -> MECState:  # fmt: skip
         """Return a copy with an updated abstract-location belief."""
         return replace(self, abstract_belief=LocationBelief(mean=cells, uncertainty=uncertainty))
 
-    def replace_rows(self, flag: Tensor, fresh: "MECState") -> "MECState":
+    def replace_rows(  # --------------------------------------------------------------------------
+        self, flag: Tensor, fresh: "MECState",
+    ) -> "MECState":  # fmt: skip
         """Return a state where flagged rows are replaced from ``fresh``."""
         uncertainty = None
         if self.uncertainty is not None and fresh.uncertainty is not None:
@@ -194,11 +189,17 @@ class MECModel(nn.Module):
         return 0 if self._n_ovc_modules is None else self._n_ovc_modules
 
     @staticmethod
-    def _resolve_shape(config: MECSettings) -> list[int]:
+    def _resolve_shape(  # ------------------------------------------------------------------------
+        config: MECSettings,
+    ) -> list[int]:  # fmt: skip
         """Resolve the full MEC shape from the configured OVC mode."""
-        return resolve_mec_shape(config)
+        if config.ovc.mode == "separate":
+            return list(config.grid_shape) + list(config.ovc.shape or [])
+        return list(config.grid_shape)
 
-    def init_state(self, batch_size: int, device: Optional[Device] = None) -> MECState:
+    def init_state(  # ----------------------------------------------------------------------------
+        self, batch_size: int, device: Optional[Device] = None,
+    ) -> MECState:  # fmt: skip
         """Create an initial MEC state from learned priors.
 
         Args:
@@ -213,7 +214,9 @@ class MECModel(nn.Module):
         transition = LocationBelief(mean=g0, uncertainty=sigma_0)
         return MECState(transition, _n_ovc_modules=self._n_ovc_modules)
 
-    def set_runtime(self, *, p2g_uncertainty_offset: float) -> None:
+    def set_runtime(  # ---------------------------------------------------------------------------
+        self, *, p2g_uncertainty_offset: float,
+    ) -> None:  # fmt: skip
         """Set runtime hyperparameters.
 
         Args:
@@ -221,7 +224,9 @@ class MECModel(nn.Module):
         """
         self.p2g_correction.runtime.uncertainty_offset = p2g_uncertainty_offset
 
-    def forward(self, *, _) -> tuple[list[Tensor], MECState]:
+    def forward(  # -------------------------------------------------------------------------------
+        self, *, _,
+    ) -> tuple[list[Tensor], MECState]:  # fmt: skip
         """Not implemented.
 
         Raises:
@@ -229,9 +234,9 @@ class MECModel(nn.Module):
         """
         raise NotImplementedError("MEC forward not implemented. Use generative() or inference().")
 
-    def generative(
-        self, action: Tensor, landmark_id: Tensor | None, state: MECState
-    ) -> tuple[AbstractLocation, MECState]:
+    def generative(  # ----------------------------------------------------------------------------
+        self, action: Tensor, landmark_id: Tensor | None, state: MECState,
+    ) -> tuple[AbstractLocation, MECState]:  # fmt: skip
         """Run the generative (path integration) update.
 
         Args:
@@ -273,9 +278,9 @@ class MECModel(nn.Module):
 
         return g_gen, state.new(cells_next, transition.uncertainty)
 
-    def inference(
-        self, p_x: Optional[GroundedLocation], landmark_id: Tensor | None, state: MECState
-    ) -> tuple[AbstractLocation, MECState]:
+    def inference(  # -----------------------------------------------------------------------------
+        self, p_x: Optional[GroundedLocation], landmark_id: Tensor | None, state: MECState,
+    ) -> tuple[AbstractLocation, MECState]:  # fmt: skip
         """Run inference by fusing memory and OVC cues into the state.
 
         Args:
@@ -302,7 +307,9 @@ class MECModel(nn.Module):
 
         return g_inf, state.new(cells_next, transition.uncertainty)
 
-    def _clamp(self, g: AbstractLocation) -> AbstractLocation:
+    def _clamp(  # --------------------------------------------------------------------------------
+        self, g: AbstractLocation,
+    ) -> AbstractLocation:  # fmt: skip
         """Clamp activations for numerical stability.
 
         Args:
@@ -314,12 +321,9 @@ class MECModel(nn.Module):
         return [torch.clamp(g_f, min=self._config.clamp_min, max=self._config.clamp_max) for g_f in g]
 
     @staticmethod
-    def _preserve_reset_rows(
-        reset_mask: Tensor,
-        g_gen: AbstractLocation,
-        state_before: MECState,
-        state_after: MECState,
-    ) -> tuple[AbstractLocation, MECState]:
+    def _preserve_reset_rows(  # ------------------------------------------------------------------
+        reset_mask: Tensor, g_gen: AbstractLocation, state_before: MECState, state_after: MECState,
+    ) -> tuple[AbstractLocation, MECState]:  # fmt: skip
         """Restore pre-step MEC priors for rows with no previous action."""
         if not torch.any(reset_mask):
             return g_gen, state_after
@@ -328,7 +332,9 @@ class MECModel(nn.Module):
             state_after.replace_rows(reset_mask, state_before),
         )
 
-    def _encode_action_ids(self, action: Tensor) -> tuple[Tensor, Tensor]:
+    def _encode_action_ids(  # --------------------------------------------------------------------
+        self, action: Tensor,
+    ) -> tuple[Tensor, Tensor]:  # fmt: skip
         """Encode environment action ids for path integration.
 
         Returns the one-hot action basis plus a boolean mask selecting rows that
@@ -346,4 +352,4 @@ class MECModel(nn.Module):
 
 
 # =================================================================================================
-__all__ = ["MECModel", "MECState", "MECSettings", "NO_PREVIOUS_ACTION", "resolve_mec_shape"]
+__all__ = ["MECModel", "MECState", "MECSettings"]

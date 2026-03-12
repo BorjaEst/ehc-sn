@@ -46,7 +46,7 @@ class GroundLocation(nn.Module):
     """Infer grounded-location beliefs from sensory and abstract codes."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, shape: list[int], config: Optional[GroundLocSettings],
+        self, shape: list[int], config: GroundLocSettings,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """Initialize grounded-location inference.
@@ -56,7 +56,7 @@ class GroundLocation(nn.Module):
             config: Grounded-location inference config.
         """
         super().__init__()
-        self._config = config or GroundLocSettings()
+        self._config = config
 
         self._shape, self._n_freq = list(shape), len(shape)
         self._activation_fn = utils.activation_from_str(self._config.activation)

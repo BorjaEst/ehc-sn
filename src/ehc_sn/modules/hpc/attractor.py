@@ -58,7 +58,7 @@ class AttractorNetwork(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, shape: list[int], config: Optional[AttractorSettings] = None,
+        self, shape: list[int], config: AttractorSettings,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """Initialize the attractor.
@@ -68,7 +68,7 @@ class AttractorNetwork(nn.Module):
             config: Attractor config. If `None`, defaults are used.
         """
         super().__init__()
-        self._config = config or AttractorSettings()
+        self._config = config
 
         self._shape, self._n_freq = list(shape), len(shape)
         self._activation_fn = utils.activation_from_str(self._config.activation)
@@ -89,7 +89,8 @@ class AttractorNetwork(nn.Module):
         return self._n_freq
 
     def forward(  # -------------------------------------------------------------------------------
-        self, p_query: list[Tensor], M: Tensor, *, masks: Optional[list[Tensor]] = None,
+        self, p_query: list[Tensor], M: Tensor, *, 
+        masks: Optional[list[Tensor]] = None,
     ) -> list[Tensor]:  # fmt: skip
         """Run attractor retrieval.
 
