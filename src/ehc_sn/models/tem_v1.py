@@ -317,10 +317,14 @@ class TEMModelV1(nn.Module):
         step_count = inputs["step_count"].squeeze(-1).to(torch.int32)
         landmark_id = inputs.get("landmark_id")
         obs_embedding = self.autoencoder.encode(obs_inputs)
+        is_episode_start = step_count == 0
 
         # Initialize state if not provided (e.g. first step of rollout); otherwise use the provided state.
         if state is None:
             state = self.init_state(int(obs_inputs.shape[0]), memory=None, device=obs_inputs.device)
+        if torch.any(is_episode_start):
+            grid_prior = merge_multiscale_rows(is_episode_start, grid_prior, state.mec.cells)
+            state.mec = state.mec.replace_rows(is_episode_start, ...)  # TODO: replace here the start
 
         # Sensory inference: encode observations into LEC features and query place memory from them.
         lec_features_post, state.lec = self.lec.inference(obs_embedding, state.lec)
@@ -328,7 +332,7 @@ class TEMModelV1(nn.Module):
         place_sensory = self.hpc.recall(place_query_from_obs, state.hpc, mode="full") if self.config.use_x_cued_recall else None  # fmt: skip
 
         # Grid transition prior from action-driven path integration.
-        grid_prior, state.mec = self.mec.generative(previous_action, location_labels, state.mec)
+        grid_prior, state.mec = self.mec.generative(previous_action, landmark_id, state.mec)
         place_query_from_grid_prior = self.projection_mec(grid_prior)
         place_recall_from_grid_prior = self.hpc.recall(place_query_from_grid_prior, state.hpc, mode="hierarchical")  # fmt: skip
 
