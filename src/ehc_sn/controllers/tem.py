@@ -8,7 +8,7 @@ properties rather than tuple positions or legacy model-internal structures.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 import torch
 from pydantic import BaseModel, Field
@@ -18,7 +18,6 @@ from torch import Tensor
 from ehc_sn.controllers._base import BaseController, RolloutBackbone, RolloutState
 from ehc_sn.envs.dungeon_walk import ACTION_STAY, DungeonWalk
 from ehc_sn.loss.consistency import LatentCode, LatentRelation
-from ehc_sn.modules.mec import NO_PREVIOUS_ACTION
 from ehc_sn.policies import ActionPolicy, PolicyInput, ScriptedPolicyConfig
 from ehc_sn.policies.random_walk import RandomWalkPolicy, RandomWalkPolicyConfig
 from ehc_sn.policies.stay import StayPolicy, StayPolicyConfig
@@ -30,6 +29,7 @@ PLACE_TRANSITION_RELATION: str = "place_transition"
 PLACE_SENSORY_RELATION: str = "place_sensory"
 GRID_REG_TERM: str = "grid"
 PLACE_REG_TERM: str = "place"
+NO_PREVIOUS_ACTION: Final[int] = -1
 
 
 # ==================================================================================================
@@ -341,7 +341,7 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
 # =================================================================================================
 __all__ = [
     "GRID_REG_TERM", "GRID_TRANSITION_RELATION", "PLACE_REG_TERM", "PLACE_SENSORY_RELATION",
-    "PLACE_TRANSITION_RELATION",
+    "PLACE_TRANSITION_RELATION", "NO_PREVIOUS_ACTION",
     "TEMController", "TEMControllerConfig", "TEMOutput", "TEMRolloutBackbone",
     "TEMRolloutState",
 ]  # fmt: skip
