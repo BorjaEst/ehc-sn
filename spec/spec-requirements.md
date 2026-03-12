@@ -50,6 +50,13 @@ under `temp/` (not on the Python path).
 - Policy configs must use `extra="forbid"` unless there is an explicit,
   documented compatibility reason.
 
+### 3.2 Figure Contracts
+
+- The canonical public API of `ehc_sn.figures` is limited to registry/context contracts, built-in registration, sinks, and `ehc_sn`-native figure modules.
+- A public figure module must define one primary figure class derived from `BaseFigureTemplate` and may expose a thin `plot(...)` convenience wrapper.
+- A figure module is public only if it uses the `ehc_sn` namespace exclusively and is exported from the component or registered as a built-in figure.
+- Modules under `src/ehc_sn/figures/` that still import `torch_tem` are migration inventory, not public API.
+
 ---
 
 ## 4 Dependency Constraints

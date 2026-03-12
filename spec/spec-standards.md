@@ -149,5 +149,10 @@ is the single source of truth. Do not duplicate the precedence order elsewhere.
 - Figure sinks: `save_pdf` for file output; interactive `plt.show()` for
   development.
 - Axis utilities in `figures/utils/` for consistent subplot layout.
+- Public figure modules should keep low-level drawing in `figures/plots/` and
+  reserve figure classes for data selection, layout, and panel orchestration.
+- Panel methods on `BaseFigureTemplate` subclasses accept an `Axes` and mutate
+  it in place; shared colorbars must use the component's declared panel/colorbar
+  conventions rather than ad hoc figure-level state.
 
 ---

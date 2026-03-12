@@ -402,11 +402,22 @@ adapt it to each model's expected input.
 
 Metrics, trace/rollout collection, and publication-ready visualization.
 
-| Component    | Path        | Responsibility                                                                                                                                                    |
-| ------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Metrics**  | `metrics/`  | TorchMetrics-based evaluation (accuracy, loss ratios, halting stats). Adapter pattern for model-output → metric update.                                           |
-| **Rollouts** | `rollouts/` | Trace collection (`TraceCollector`, `TraceSpec`) and tree-structured rollout data (`TraceTree`). Feeds both training diagnostics and figures.                     |
-| **Figures**  | `figures/`  | Publication-ready plotting. Registry pattern (`FigureSpec`, `REGISTRY`), plot modules, sinks (PDF/show), and axis utilities. Uses SciencePlots + pub-ready-plots. |
+| Component    | Path        | Responsibility                                                                                                                                                                                                        |
+| ------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Metrics**  | `metrics/`  | TorchMetrics-based evaluation (accuracy, loss ratios, halting stats). Adapter pattern for model-output → metric update.                                                                                               |
+| **Rollouts** | `rollouts/` | Trace collection (`TraceCollector`, `TraceSpec`) and tree-structured rollout data (`TraceTree`). Feeds both training diagnostics and figures.                                                                         |
+| **Figures**  | `figures/`  | Publication-ready plotting. Public API centers on `FigureContext`, `FigureSpec`, `REGISTRY`, built-in registration, figure modules, sinks, and reusable plotting/layout helpers. Uses SciencePlots + pub-ready-plots. |
+
+#### 4.7.1 Figures Internal Layers
+
+The `figures/` component is internally split into four layers:
+
+- `figures/figures/`: figure authoring framework (`BaseFigureTemplate`, panel decorators, grouped colorbars).
+- `figures/modules/`: public figure definitions. Each public module owns one primary figure class and may expose a thin `plot(...)` wrapper.
+- `figures/plots/`: Axes-first plotting primitives reused across figure modules.
+- `figures/utils/`, `registry.py`, `register.py`, `sinks.py`: layout/data helpers, discovery, and output persistence.
+
+Dependency direction inside the component is one-way: `modules/` may depend on the authoring framework, `plots/`, `utils/`, and registry contracts; `plots/` and `utils/` must not depend on `modules/`.
 
 ### 4.8 Utils
 
