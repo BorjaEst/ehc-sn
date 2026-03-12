@@ -12,9 +12,7 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from adam_atan2_pytorch import AdamAtan2 as AdamATan2
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from torch import Tensor, nn
 from torch.distributions import Normal
 from torch.optim import Adam, Optimizer
@@ -22,7 +20,6 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 from ehc_sn import utils
 from ehc_sn.controllers.tem import TEMController, TEMControllerConfig, TEMOutput
-from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
@@ -40,7 +37,7 @@ from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
-from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
+from ehc_sn.training.schedules import SchedulerConfig, SequentialLR
 from ehc_sn.training.step_loop import StepContext, StepLoop
 from ehc_sn.types import Device, Dtype
 from ehc_sn.utils import trunc_normal_init_
@@ -51,10 +48,8 @@ Batch: TypeAlias = Dict[str, Tensor]
 
 
 # =================================================================================================
-class ModelSettings_V1(BaseModel):
+class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
     """ """
-
-    model_config = ConfigDict(extra="forbid", strict=False, arbitrary_types_allowed=True)
 
     hpc: HPCSettings = Field(
         ...,
@@ -69,29 +64,57 @@ class ModelSettings_V1(BaseModel):
         description="Settings for the MEC module, including path integration and correction parameters.",
     )
 
-    @field_validator("hpc", "lec", "mec", mode="after")
+    @model_validator(mode="after")
     def validate_shapes(cls, v):
-        """ """
+        """ """  # FIXME: Validate shapes across hpc, lec and mec settings to ensure they are compatible
         raise NotImplementedError("Module-specific validation not implemented yet.")
 
+    autoencoder: AutoencoderSettings = Field(
+        ...,
+        description="Settings for the autoencoder module used for observation compression.",
+    )
     vocab_size: int = Field(
         ...,
         ge=1,
         description="Number of discrete observation dimensions (input to autoencoder).",
     )
-    autoencoder: AutoencoderSettings = Field(
+
+    @model_validator(mode="after")
+    def validate_features(cls, v):
+        """ """  # FIXME: Validate that the autoencoder's latent dimension with LEC and vocab_size
+        raise NotImplementedError("Module-specific validation not implemented yet.")
+
+    n_actions: int = Field(
         ...,
-        description="Settings for the autoencoder module used for observation compression.",
+        ge=1,
+        description="Number of discrete actions in the environment (output of controller).",
     )
-    lec_projection: ProjectionSettings = Field(
+    f_init: int = Field(
         ...,
+        ge=1,
+        description="Base feature dimension for the model; used to derive dimensions in all modules.",
+    )
+
+    @property
+    def n_stages(self) -> int:
+        """Number of processing stages in the model, determined by the number of frequency modules."""
+        return len(self.mec.shape)  # FIXME Number of grids; exclude ovc
+
+    @property
+    def use_x_cued_recall(self) -> bool:
+        """Whether the HPC recall should be cued with LEC features (x) in addition to MEC features (g)."""
+        return self.hpc.recall_cue in ("x", "both")
+
+    projection_lec: ProjectionSettings = Field(
+        default_factory=lambda: ProjectionSettings(mode="tiling", learnable=False),
         description=(
             "Settings for the projection module between LEC and HPC. "
             "This module projects LEC features into the format expected by HPC memory."
         ),
     )
-    mec_projection: ProjectionSettings = Field(
-        ...,
+    projection_mec: ProjectionSettings = Field(
+        # default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False, rank=[10, 10, 8, 6, 6]),
+        default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False),
         description=(
             "Settings for the projection module between MEC and HPC. "
             "This module projects MEC abstract location codes into the format expected by HPC memory."
@@ -120,6 +143,11 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
         ...,
         description="",
     )
+
+    @model_validator(mode="after")
+    def validate_actions(cls, v):
+        """Validate that the number of actions in the environment matches the model's expected number."""
+        raise NotImplementedError("Cross-field validation not implemented yet.")
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     optimizer: AdamConfig = Field(
@@ -159,18 +187,20 @@ class TEMModelV1(nn.Module):
         """ """
         super().__init__()
         self._config = config
+        n_stages, n_actions = config.n_stages, config.n_actions
+        f_init = config.f_init
 
         # Autoencoder module for observation compression/decoding
         self.autoencoder = Autoencoder(config.autoencoder, device=device, dtype=dtype)
 
         # Entorhinal Hippocampal Circuit components
-        self.lec = LECModel(config.lec, device=device, dtype=dtype)
-        self.mec = MECModel(config.mec, device=device, dtype=dtype)
-        self.hpc = HPCModel(config.hpc, device=device, dtype=dtype)
+        self.hpc = HPCModel(n_stages, f_init, config.hpc, device=device, dtype=dtype)
+        self.mec = MECModel(n_actions, config.hpc.shape, f_init, config.mec, device=device, dtype=dtype)
+        self.lec = LECModel(f_init, config.lec, device=device, dtype=dtype)
 
         # Projection modules
-        self.lec_projection = ProjectionModule(config.lec_projection)
-        self.mec_projection = ProjectionModule(config.mec_projection)
+        self.projection_mec = ProjectionModule(config.projection_mec)
+        self.projection_lec = ProjectionModule(config.projection_lec)
 
     @property
     def config(self) -> ModelSettings_V1:
@@ -178,10 +208,11 @@ class TEMModelV1(nn.Module):
         return self._config
 
     def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int, *,
+        self, batch_size: int, *, memory: Optional[MemoryState],
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> TEMState:  # fmt: skip
         """ """
+        memory = memory if memory is not None else self.hpc.init_memory(batch_size, device, dtype)
         lec_state = self.lec.init_state(batch_size, device)
         state_mec = self.mec.init_state(batch_size, device)
         hpc_state = self.hpc.init_state(batch_size, device, memory=memory)
@@ -195,22 +226,7 @@ class TEMModelV1(nn.Module):
             return state
 
         init_state = self.init_state(int(reset_flag.shape[0]), device=reset_flag.device)
-        lec_state = LECState(
-            cells=self._masked_blocks(state.lec.cells, init_state.lec.cells, reset_flag),
-            filtered=self._masked_blocks(state.lec.filtered, init_state.lec.filtered, reset_flag),
-        )
-        mec_state = state.mec.new(
-            cells=self._masked_blocks(state.mec.cells, init_state.mec.cells, reset_flag),
-            uncertainty=self._masked_optional_blocks(
-                state.mec.uncertainty, init_state.mec.uncertainty, reset_flag
-            ),
-        )
-        hpc_state = state.hpc.new(
-            cells=self._masked_blocks(state.hpc.cells, init_state.hpc.cells, reset_flag),
-            uncertainty=self._masked_optional_blocks(
-                state.hpc.uncertainty, init_state.hpc.uncertainty, reset_flag
-            ),
-        )
+        # TODO: Complete correctly the state reset logic
         return TEMState(lec_state, mec_state, hpc_state)
 
     def set_runtime(  # ---------------------------------------------------------------------------
@@ -229,17 +245,17 @@ class TEMModelV1(nn.Module):
 
         # Observe / infer: LEC filtering + HPC retrieval + MEC correction
         x_inf, state.lec = self.lec.inference(features, state.lec)
-        x_ = self.lec_projection(x_inf)  # Project to memory format
+        x_ = self.projection_lec(x_inf)  # Project to memory format
         p_xi = self.hpc.recall(x_, state.hpc, mode="full") if self.config.use_x_cued_recall else None
 
         # LocationBelief: MEC path integration (action-driven)
         g_gen, state.mec = self.mec.generative(action, locations, state.mec)
-        g_ = self.mec_projection(g_gen)
+        g_ = self.projection_mec(g_gen)
         p_gg = self.hpc.recall(g_, state.hpc, mode="hierarchical")
 
         # Infer abstract location by using state and sensory experience
         g_inf, state.mec = self.mec.inference(p_xi, locations=locations, state=state.mec)
-        g_ = self.mec_projection(g_inf)
+        g_ = self.projection_mec(g_inf)
         p_gi = self.hpc.recall(g_, state.hpc, mode="hierarchical")
 
         # Generate grounded location from inferred abstract location
@@ -253,17 +269,17 @@ class TEMModelV1(nn.Module):
         state.hpc = self.hpc.update(p_inf, p_gen_gi, p_xi, state.hpc)
 
         # Generate observation prediction from inferred grounded location
-        x = self.lec_projection.inverse(p_inf)
+        x = self.projection_lec.inverse(p_inf)
         c_p_inf = self.lec.generative(x)
         logits_inference = self.autoencoder.decode(c_p_inf)
 
         # Generate observation from inferred grounded location
-        x = self.lec_projection.inverse(p_gen_gi)
+        x = self.projection_lec.inverse(p_gen_gi)
         c_p_gen_gi = self.lec.generative(x)
         logits_retrieved = self.autoencoder.decode(c_p_gen_gi)
 
         # Generate observation from generated grounded location
-        x = self.lec_projection.inverse(p_gen_gg)
+        x = self.projection_lec.inverse(p_gen_gg)
         c_p_gen_gg = self.lec.generative(x)
         logits_ancestral = self.autoencoder.decode(c_p_gen_gg)
 
