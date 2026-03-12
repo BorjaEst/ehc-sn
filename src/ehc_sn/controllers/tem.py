@@ -18,6 +18,7 @@ from torch import Tensor
 from ehc_sn.controllers._base import BaseController, RolloutBackbone, RolloutState
 from ehc_sn.envs.dungeon_walk import ACTION_STAY, DungeonWalk
 from ehc_sn.loss.consistency import LatentCode, LatentRelation
+from ehc_sn.modules.mec import NO_PREVIOUS_ACTION
 from ehc_sn.policies import ActionPolicy, PolicyInput, ScriptedPolicyConfig
 from ehc_sn.policies.random_walk import RandomWalkPolicy, RandomWalkPolicyConfig
 from ehc_sn.policies.stay import StayPolicy, StayPolicyConfig
@@ -239,12 +240,28 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
     def _extract_step_data(  # -------------------------------------------------------------------
         self, env_td: TensorDictBase,
     ) -> dict[str, Tensor]:  # fmt: skip
-        """Extract the current-step model payload from an environment state."""
+        """Extract the current-step model payload from an environment state.
+
+        Episode starts are represented to the backbone as "no previous action"
+        rather than as the environment stay action so MEC can preserve the raw
+        reset prior on the first step, matching legacy TEM semantics.
+        """
         keys = (
             "inputs", "observation_target", "previous_action", "location_id", "region_id",
             "landmark_id", "valid_action_mask", "step_count",
         )  # fmt: skip
-        return {key: env_td[key] for key in keys if key in env_td.keys()}
+        payload = {key: env_td[key] for key in keys if key in env_td.keys()}
+        if "previous_action" not in payload or "step_count" not in payload:
+            return payload
+
+        episode_start = payload["step_count"].squeeze(-1).to(torch.int32) == 0
+        if not torch.any(episode_start):
+            return payload
+
+        previous_action = payload["previous_action"].clone()
+        previous_action[episode_start] = NO_PREVIOUS_ACTION
+        payload["previous_action"] = previous_action
+        return payload
 
     def _refresh_halted_slots(  # ---------------------------------------------------------------
         self, batch: Batch, state: TEMRolloutState[ModelState],

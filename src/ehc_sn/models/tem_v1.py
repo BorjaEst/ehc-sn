@@ -29,7 +29,7 @@ from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
 from ehc_sn.modules.hpc import HPCModel, HPCSettings, HPCState, MemoryState
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
-from ehc_sn.modules.mec import MECModel, MECSettings, MECState
+from ehc_sn.modules.mec import MECModel, MECSettings, MECState, resolve_mec_shape
 from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
 from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
@@ -72,8 +72,8 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
         default_factory=lambda: [0.99, 0.3, 0.09, 0.5, 0.4],
         min_length=1,
         description=(
-            "List of initial feature frequencies for the model's modules. "
-            "The length of this list determines the number of frequency modules (stages) in the model."
+            "List of initial feature frequencies for the model's resolved modules. "
+            "Its length must match the full MEC/HPC frequency count after OVC mode resolution."
         ),
     )
     use_x_cued_recall: bool = Field(
@@ -93,19 +93,18 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
             raise ValueError("f_initial values must be strictly between 0 and 1.")
 
     def _validate_stage_alignment(self) -> None:
-        if len(self.mec.grid_shape) != self.n_stages:
-            raise ValueError("len(mec.grid_shape) must equal len(f_initial).")
+        expected_freq = len(self.mec_shape)
+        if expected_freq != self.n_stages:
+            raise ValueError("The resolved MEC frequency count must equal len(f_initial).")
 
     def _validate_frequency_alignment(self) -> None:
-        if len(self.f_initial) != len(self.hpc.shape):
-            raise ValueError("len(f_initial) must equal len(hpc.shape).")
         if len(self.hpc.shape) != self.n_total_freq:
             raise ValueError("len(hpc.shape) must equal the derived total MEC frequency count.")
 
     @computed_field
     @property
     def n_stages(self) -> int:
-        """Return the number of frequency modules (stages) in the model, inferred from f_initial."""
+        """Return the resolved number of TEM frequency modules."""
         return len(self.f_initial)
 
     @computed_field
@@ -152,25 +151,19 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
     @property
     def lec_shape(self) -> list[int]:
         """Return the resolved LEC feature shape across all frequencies."""
-        return [self.lec.feature_dim] * self.n_stages
+        return [self.lec.feature_dim] * self.n_total_freq
 
     @computed_field
     @property
     def mec_ovc_shape(self) -> list[int]:
-        """Return the resolved OVC shape implied by the configured OVC mode."""
-        if self.mec.ovc.mode == "off":
-            return []
-        if self.mec.ovc.mode == "merged":
-            return list(self.mec.grid_shape)
-        return list(self.mec.ovc.shape or [])
+        """Return the appended OVC shape implied by the configured OVC mode."""
+        return list(self.mec.ovc.shape or []) if self.mec.ovc.mode == "separate" else []
 
     @computed_field
     @property
     def mec_shape(self) -> list[int]:
         """Return the full MEC shape including optional OVC modules."""
-        if self.mec.ovc.mode == "separate":
-            return list(self.mec.grid_shape) + self.mec_ovc_shape
-        return list(self.mec.grid_shape)
+        return resolve_mec_shape(self.mec)
 
     @computed_field
     @property
@@ -247,14 +240,14 @@ class TEMModelV1(nn.Module):
         """Construct the TEM backbone from the resolved TEM v1 model settings."""
         super().__init__()
         self._config = config
-        n_stages, n_actions = config.n_stages, config.action_count
+        n_freq, n_actions = config.n_total_freq, config.action_count
         f_initial = config.f_initial
 
         # Autoencoder module for observation compression/decoding
         self.autoencoder = Autoencoder(config.observation_dim, config.lec.feature_dim, config.autoencoder)
 
         # Entorhinal Hippocampal Circuit components
-        self.hpc = HPCModel(n_stages, f_initial, config.hpc, device=device, dtype=dtype)
+        self.hpc = HPCModel(n_freq, f_initial, config.hpc, device=device, dtype=dtype)
         self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
@@ -314,7 +307,6 @@ class TEMModelV1(nn.Module):
         landmark_id = inputs.get("landmark_id")
         obs_embedding = self.autoencoder.encode(obs_inputs)
 
-        # If no state is provided, initialize a fresh state and run the step as usual. This allows us to avoid
         if state is None:
             state = self.init_state(int(obs_inputs.shape[0]), memory=None, device=obs_inputs.device)
 
@@ -383,7 +375,7 @@ class TrainingModel(L.LightningModule):
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(TEM_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(TEM_ROUTES).clone(prefix="val/")
-        self.trace_specs = build_trace_spec("this_prefix_name_to_define")
+        self.trace_specs = build_trace_spec("tem")
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer = FifoBuffer(
