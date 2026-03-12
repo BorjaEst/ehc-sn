@@ -49,7 +49,7 @@ class FigureCallbackSettings(BaseModel, extra="forbid"):
         description="Split to sample for figure generation.",
     )
     figures: list[str] = Field(
-        default_factory=lambda: ["overlay", "evolution"],
+        default_factory=lambda: ["dummy"],
         description="Figure names to generate (from registry).",
     )
     save_pdf: bool = Field(
