@@ -85,11 +85,28 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
     )
 
     @model_validator(mode="after")
-    def validate_frequencies(self) -> "ModelSettings_V1":
-        for value in self.f_initial:
-            if not 0.0 < value < 1.0:
-                raise ValueError("shared.f_initial values must lie strictly between 0 and 1.")
+    def validate_model(self) -> "ModelSettings_V1":
+        self._validate_f_initial()
+        self._validate_grid_shape()
+        self._validate_hpc_shape()
         return self
+
+    def _validate_f_initial(self) -> None:
+        if any(not (0.0 < value < 1.0) for value in self.f_initial):
+            raise ValueError("f_initial values must be strictly between 0 and 1.")
+
+    def _validate_grid_shape(self) -> None:
+        if len(self.mec.grid_shape) != self.n_stages:
+            raise ValueError("len(mec.grid_shape) must equal len(f_initial).")
+
+    def _validate_hpc_shape(self) -> None:
+        if len(self.hpc.shape) != self.n_total_freq:
+            raise ValueError("len(hpc.shape) must equal the derived total MEC frequency count.")
+
+    @computed_field
+    @property
+    def n_stages(self) -> int:
+        return len(self.f_initial)
 
     @computed_field
     @property
@@ -109,25 +126,19 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
         description="Settings for the MEC module, including path integration and correction parameters.",
     )
 
+    @computed_field
     @property
-    def n_stages(self) -> int:
-        """Number of processing stages in the model, determined by the number of frequency modules."""
-        return len(self.mec.grid_shape)  # FIXME Number of grids; exclude ovc
-
-    @model_validator(mode="after")
-    def validate_shapes(cls, v):
-        """ """  # FIXME: Validate shapes across hpc, lec and mec settings to ensure they are compatible
-        raise NotImplementedError("Module-specific validation not implemented yet.")
+    def mec_ovc_shape(self) -> list[int]:
+        if self.mec.ovc.mode == "off":
+            return []
+        if self.mec.ovc.mode == "merged":
+            return list(self.mec.grid_shape)
+        return list(self.mec.ovc.shape or [])
 
     autoencoder: AutoencoderSettings = Field(
         ...,
         description="Settings for the autoencoder module used for observation compression.",
     )
-
-    @model_validator(mode="after")
-    def validate_features(cls, v):
-        """ """  # FIXME: Validate that the autoencoder's latent dimension with LEC and vocab_size
-        raise NotImplementedError("Module-specific validation not implemented yet.")
 
     projection_lec: ProjectionSettings = Field(
         default_factory=lambda: ProjectionSettings(mode="tiling", learnable=False),
@@ -144,6 +155,32 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
             "This module projects MEC abstract location codes into the format expected by HPC memory."
         ),
     )
+
+    @computed_field
+    @property
+    def lec_shape(self) -> list[int]:
+        return [self.lec.feature_dim] * self.n_stages
+
+    @computed_field
+    @property
+    def mec_ovc_shape(self) -> list[int]:
+        if self.mec.ovc.mode == "off":
+            return []
+        if self.mec.ovc.mode == "merged":
+            return list(self.mec.grid_shape)
+        return list(self.mec.ovc.shape or [])
+
+    @computed_field
+    @property
+    def mec_shape(self) -> list[int]:
+        if self.mec.ovc.mode == "separate":
+            return list(self.mec.grid_shape) + self.mec_ovc_shape
+        return list(self.mec.grid_shape)
+
+    @computed_field
+    @property
+    def n_total_freq(self) -> int:
+        return len(self.mec_shape)
 
 
 # =================================================================================================
@@ -167,11 +204,6 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
         ...,
         description="",
     )
-
-    @model_validator(mode="after")
-    def validate_actions(cls, v):
-        """Validate that the number of actions in the environment matches the model's expected number."""
-        raise NotImplementedError("Cross-field validation not implemented yet.")
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     optimizer: AdamConfig = Field(

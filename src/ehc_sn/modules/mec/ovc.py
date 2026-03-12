@@ -43,13 +43,11 @@ class OVCSettings(BaseModel, extra="forbid"):
     )
 
     @model_validator(mode="after")
-    def validate_mode_shape(self) -> "OVCSettings":
-        if self.mode == "separate":
-            if not self.shape:
-                raise ValueError("mec.ovc.shape is required when mec.ovc.mode='separate'.")
-        else:
-            if self.shape is not None:
-                raise ValueError("mec.ovc.shape must be omitted unless mec.ovc.mode='separate'.")
+    def validate_shape_policy(self) -> "OVCSettings":
+        if self.mode == "separate" and not self.shape:
+            raise ValueError("mec.ovc.shape is required when mec.ovc.mode='separate'.")
+        if self.mode != "separate" and self.shape is not None:
+            raise ValueError("mec.ovc.shape is only allowed when mec.ovc.mode='separate'.")
         return self
 
 
