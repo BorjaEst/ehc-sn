@@ -64,7 +64,6 @@ def register_builtin_figures() -> None:
         REGISTRY.register(
             FigureSpec(
                 name="lec_feature_cells",
-                aliases=("feature_cells",),
                 description="LEC feature/cell timeseries diagnostic",
                 plot=feature_cells.plot,
                 default_filename="lec-feature-cells",
@@ -91,7 +90,6 @@ def register_builtin_figures() -> None:
         REGISTRY.register(
             FigureSpec(
                 name="mec_grid_cells",
-                aliases=("grid_cells",),
                 description="Single-frequency MEC grid-cell spatial maps and autocorrelograms",
                 plot=grid_cells.plot,
                 default_filename="mec-grid-cells",
@@ -118,7 +116,6 @@ def register_builtin_figures() -> None:
         REGISTRY.register(
             FigureSpec(
                 name="hpc_place_cells",
-                aliases=("place_cells",),
                 description="Single-frequency HPC place-cell spatial maps and autocorrelograms",
                 plot=place_cells.plot,
                 default_filename="hpc-place-cells",
