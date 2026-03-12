@@ -71,6 +71,13 @@ class MECSettings(BaseModel, extra="forbid"):
         description="OVC module config.",
     )
 
+    @property
+    def mec_shape(self) -> list[int]:
+        """Resolve the full MEC shape from the configured OVC mode."""
+        if self.ovc.mode == "separate":
+            return list(self.grid_shape) + list(self.ovc.shape or [])
+        return list(self.grid_shape)
+
 
 # =================================================================================================
 @dataclass()
@@ -154,7 +161,7 @@ class MECModel(nn.Module):
         super().__init__()
         self._config = config
         self._action_count = action_count
-        self._shape = self._resolve_shape(config)
+        self._shape = config.mec_shape
         self._n_freq = len(self._shape)
         self._n_ovc_modules = len(config.ovc.shape or []) if config.ovc.mode == "separate" else None
 
@@ -187,15 +194,6 @@ class MECModel(nn.Module):
     def n_ovc_modules(self) -> int:
         """Return the number of appended OVC modules."""
         return 0 if self._n_ovc_modules is None else self._n_ovc_modules
-
-    @staticmethod
-    def _resolve_shape(  # ------------------------------------------------------------------------
-        config: MECSettings,
-    ) -> list[int]:  # fmt: skip
-        """Resolve the full MEC shape from the configured OVC mode."""
-        if config.ovc.mode == "separate":
-            return list(config.grid_shape) + list(config.ovc.shape or [])
-        return list(config.grid_shape)
 
     def init_state(  # ----------------------------------------------------------------------------
         self, batch_size: int, device: Optional[Device] = None,

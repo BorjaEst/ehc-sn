@@ -29,7 +29,7 @@ from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
 from ehc_sn.modules.hpc import HPCModel, HPCSettings, HPCState, MemoryState
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
-from ehc_sn.modules.mec import MECModel, MECSettings, MECState, resolve_mec_shape
+from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
 from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
@@ -155,15 +155,15 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
 
     @computed_field
     @property
-    def mec_ovc_shape(self) -> list[int]:
-        """Return the appended OVC shape implied by the configured OVC mode."""
-        return list(self.mec.ovc.shape or []) if self.mec.ovc.mode == "separate" else []
+    def mec_shape(self) -> list[int]:
+        """Return the full MEC shape including optional OVC modules."""
+        return self.mec.mec_shape
 
     @computed_field
     @property
-    def mec_shape(self) -> list[int]:
-        """Return the full MEC shape including optional OVC modules."""
-        return resolve_mec_shape(self.mec)
+    def mec_ovc_shape(self) -> list[int]:
+        """Return the appended OVC shape implied by the configured OVC mode."""
+        return list(self.mec.ovc.shape or []) if self.mec.ovc.mode == "separate" else []
 
     @computed_field
     @property
