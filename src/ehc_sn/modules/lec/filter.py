@@ -30,13 +30,13 @@ class FrequencyFilter(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, f_init: list[float], config: Optional[FreqFilterSettings] = None,
+        self, f_initial: list[float], config: Optional[FreqFilterSettings] = None,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """Initialize the filter.
 
         Args:
-            f_init: Initial filter coefficients per frequency module.
+            f_initial: Initial filter coefficients per frequency module.
             config: Configuration for the filter.
         """
         super().__init__()
@@ -44,7 +44,7 @@ class FrequencyFilter(nn.Module):
 
         # Initialize temporal filtering factors
         # Store as logit(f) so that sigmoid(alpha) recovers the desired frequency
-        alpha_logit = [np.log(f / (1 - f)) for f in f_init]
+        alpha_logit = [np.log(f / (1 - f)) for f in f_initial]
         self.alpha = nn.ParameterList([nn.Parameter(torch.tensor(a, dtype=torch.float)) for a in alpha_logit])
 
     @property

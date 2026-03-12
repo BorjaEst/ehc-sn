@@ -30,8 +30,9 @@ from ehc_sn.utils.detach import DetachMixin
 class LECSettings(BaseModel, extra="forbid"):
     """Settings for LEC modules."""
 
-    shape: list[int] = Field(
+    feature_dim: int = Field(
         ...,
+        ge=1,
         description="Feature dimensionality per frequency module.",
     )
 
@@ -97,17 +98,17 @@ class LECModel(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, f_init: list[float], config: LECSettings,
+        self, f_initial: list[float], config: LECSettings,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """ """
         super().__init__()
         self._config = config
-        n_features, f_init = config.n_features, config.f_init
-        n_freq = len(f_init)
+        n_features, f_initial = config.n_features, config.f_initial
+        n_freq = len(f_initial)
 
         # Composable submodules (single responsibility each)
-        self.filter = FrequencyFilter(f_init, config.filter)
+        self.filter = FrequencyFilter(f_initial, config.filter)
         self.norm = FeatureNorm(config.norm)
         self.reconstruct = Reconstruction(n_features, config.reconstruction)
         self.w_f = nn.ParameterList([nn.Parameter(torch.tensor(1.0)) for _ in range(n_freq)])

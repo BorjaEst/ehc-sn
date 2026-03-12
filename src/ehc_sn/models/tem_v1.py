@@ -12,7 +12,7 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn as nn
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 from torch import Tensor, nn
 from torch.distributions import Normal
 from torch.optim import Adam, Optimizer
@@ -20,7 +20,6 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 from ehc_sn import utils
 from ehc_sn.controllers.tem import TEMController, TEMControllerConfig, TEMOutput
-from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
 from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
@@ -51,6 +50,52 @@ Batch: TypeAlias = Dict[str, Tensor]
 class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
     """ """
 
+    observation_dim: int = Field(
+        ...,
+        ge=1,
+        description="Dimensionality of raw observations from the environment.",
+    )
+    action_count: int = Field(
+        ...,
+        ge=1,
+        description="Number of discrete actions in the environment.",
+    )
+    action0_is_noop: bool = Field(
+        default=True,
+        description="Whether the first action (index 0) is a no-op, which affects the count of move actions.",
+    )
+
+    @computed_field
+    @property
+    def n_move_actions(self) -> int:
+        """ """
+        return self.action_count - 1 if self.action0_is_noop else self.action_count
+
+    f_initial: list[float] = Field(
+        default_factory=lambda: [0.99, 0.3, 0.09, 0.5, 0.4],
+        min_length=1,
+        description=(
+            "List of initial feature frequencies for the model's modules. "
+            "The length of this list determines the number of frequency modules (stages) in the model."
+        ),
+    )
+    use_x_cued_recall: bool = Field(
+        default=True,
+        description="Whether the HPC recall should be cued with LEC features (x) in addition to MEC features (g).",
+    )
+
+    @model_validator(mode="after")
+    def validate_frequencies(self) -> "ModelSettings_V1":
+        for value in self.f_initial:
+            if not 0.0 < value < 1.0:
+                raise ValueError("shared.f_initial values must lie strictly between 0 and 1.")
+        return self
+
+    @computed_field
+    @property
+    def n_freq(self) -> int:
+        return len(self.f_initial)
+
     hpc: HPCSettings = Field(
         ...,
         description="Settings for the HPC module, including Hebbian memory parameters.",
@@ -64,6 +109,11 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
         description="Settings for the MEC module, including path integration and correction parameters.",
     )
 
+    @property
+    def n_stages(self) -> int:
+        """Number of processing stages in the model, determined by the number of frequency modules."""
+        return len(self.mec.grid_shape)  # FIXME Number of grids; exclude ovc
+
     @model_validator(mode="after")
     def validate_shapes(cls, v):
         """ """  # FIXME: Validate shapes across hpc, lec and mec settings to ensure they are compatible
@@ -73,37 +123,11 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
         ...,
         description="Settings for the autoencoder module used for observation compression.",
     )
-    vocab_size: int = Field(
-        ...,
-        ge=1,
-        description="Number of discrete observation dimensions (input to autoencoder).",
-    )
 
     @model_validator(mode="after")
     def validate_features(cls, v):
         """ """  # FIXME: Validate that the autoencoder's latent dimension with LEC and vocab_size
         raise NotImplementedError("Module-specific validation not implemented yet.")
-
-    n_actions: int = Field(
-        ...,
-        ge=1,
-        description="Number of discrete actions in the environment (output of controller).",
-    )
-    f_init: int = Field(
-        ...,
-        ge=1,
-        description="Base feature dimension for the model; used to derive dimensions in all modules.",
-    )
-
-    @property
-    def n_stages(self) -> int:
-        """Number of processing stages in the model, determined by the number of frequency modules."""
-        return len(self.mec.shape)  # FIXME Number of grids; exclude ovc
-
-    @property
-    def use_x_cued_recall(self) -> bool:
-        """Whether the HPC recall should be cued with LEC features (x) in addition to MEC features (g)."""
-        return self.hpc.recall_cue in ("x", "both")
 
     projection_lec: ProjectionSettings = Field(
         default_factory=lambda: ProjectionSettings(mode="tiling", learnable=False),
@@ -188,15 +212,15 @@ class TEMModelV1(nn.Module):
         super().__init__()
         self._config = config
         n_stages, n_actions = config.n_stages, config.n_actions
-        f_init = config.f_init
+        f_initial = config.f_initial
 
         # Autoencoder module for observation compression/decoding
         self.autoencoder = Autoencoder(config.autoencoder, device=device, dtype=dtype)
 
         # Entorhinal Hippocampal Circuit components
-        self.hpc = HPCModel(n_stages, f_init, config.hpc, device=device, dtype=dtype)
-        self.mec = MECModel(n_actions, config.hpc.shape, f_init, config.mec, device=device, dtype=dtype)
-        self.lec = LECModel(f_init, config.lec, device=device, dtype=dtype)
+        self.hpc = HPCModel(n_stages, f_initial, config.hpc, device=device, dtype=dtype)
+        self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
+        self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
         # Projection modules
         self.projection_mec = ProjectionModule(config.projection_mec)

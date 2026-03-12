@@ -38,12 +38,12 @@ class PathIntegrator(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, n_a: int, mec_shape: list[int], f_init: list[float], config: PathSettings,
+        self, n_a: int, mec_shape: list[int], f_initial: list[float], config: PathSettings,
     ) -> None:  # fmt: skip
         """ """
         super().__init__()
         self._n_a, self._mec_shape, self._n_freq = n_a, mec_shape, len(mec_shape)
-        self._connections = conn = utils.connections(f_init)
+        self._connections = conn = utils.connections(f_initial)
         self._conn_indices = [[f_from for f_from in range(self.n_freq) if conn[f_to][f_from]] for f_to in range(self.n_freq)]  # fmt: skip
         self._in_dims = [sum(mec_shape[f_from] for f_from in self._conn_indices[f_to]) for f_to in range(self.n_freq)]  # fmt: skip
         self._mat_shape = [(self._in_dims[f_to], mec_shape[f_to]) for f_to in range(self.n_freq)]

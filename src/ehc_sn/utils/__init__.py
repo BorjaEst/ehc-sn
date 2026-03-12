@@ -673,7 +673,7 @@ def make_update_hierarchical(
     return update_ramp
 
 
-def make_hebbian_write_mask(n_stages: int, shape: list[int], f_init: list[float]) -> torch.Tensor:
+def make_hebbian_write_mask(n_stages: int, shape: list[int], f_initial: list[float]) -> torch.Tensor:
     """Create a Hebbian write-connectivity mask for a block-structured memory matrix.
 
     This mask gates which synapses in the hippocampal memory matrix are allowed
@@ -683,22 +683,22 @@ def make_hebbian_write_mask(n_stages: int, shape: list[int], f_init: list[float]
     size ``shape[f]``. The rule is:
 
     - Within *stages* modules (``f < n_stages``): allow only low→high frequency
-      connections based on ``f_init[from] <= f_init[to]``.
+      connections based on ``f_initial[from] <= f_initial[to]``.
     - Within *attractor* modules (``f >= n_stages``): allow all connections (fully recurrent).
     - Between modules: allow all connections (bidirectional).
 
     Args:
         n_stages: Number of attractor stages (i.e., constrained modules).
         shape: Feature dims per frequency module.
-        f_init: Frequency values per module (length must match ``len(shape)``).
+        f_initial: Frequency values per module (length must match ``len(shape)``).
 
     Returns:
         A tensor of shape ``(sum(shape), sum(shape))`` with 1.0 for allowed
         connections and 0.0 otherwise.
     """
     n_freq = len(shape)
-    if n_freq != len(f_init):
-        raise ValueError(f"Expected f_init length {n_freq}, got {len(f_init)}")
+    if n_freq != len(f_initial):
+        raise ValueError(f"Expected f_initial length {n_freq}, got {len(f_initial)}")
     if not (0 <= int(n_stages) <= n_freq):
         raise ValueError(f"n_stages must be in [0, {n_freq}], got {n_stages}")
 
@@ -707,7 +707,7 @@ def make_hebbian_write_mask(n_stages: int, shape: list[int], f_init: list[float]
     is_constrained = module < int(n_stages)
     same_type = is_constrained[:, None] == is_constrained[None, :]
 
-    f = torch.as_tensor(f_init)
+    f = torch.as_tensor(f_initial)
     low_to_high = f[:, None] <= f[None, :]
     allow = (~same_type) | low_to_high
 

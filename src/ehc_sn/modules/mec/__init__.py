@@ -29,9 +29,13 @@ from ehc_sn.utils.detach import DetachMixin
 class MECSettings(BaseModel, extra="forbid"):
     """Settings for MEC modules."""
 
-    shape: list[int] = Field(
+    grid_shape: list[int] = Field(
         ...,
-        description="",
+        min_length=1,
+        description=(
+            "Sizes of grid-cell frequency modules. "
+            "The number of frequencies is inferred from the length of this list."
+        ),
     )
 
     do_sample: bool = Field(
@@ -61,7 +65,7 @@ class MECSettings(BaseModel, extra="forbid"):
         default_factory=P2GMemSettings,
         description="Place-to-grid memory inference module config.",
     )
-    ovc: Optional[OVCSettings] = Field(
+    ovc: OVCSettings = Field(
         default_factory=OVCSettings,
         description="OVC module config.",
     )
@@ -128,7 +132,7 @@ class MECModel(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, n_actions: int, n_hippocampal: list[int], f_init: list[float], config: MECSettings,
+        self, n_actions: int, n_hippocampal: list[int], f_initial: list[float], config: MECSettings,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """ """
@@ -141,7 +145,7 @@ class MECModel(nn.Module):
         self.uncertainty_init = nn.ParameterList([nn.Parameter(torch.tensor(init_fn(n), dtype=torch.float32)) for n in self.shape])  # fmt: skip
 
         # Instantiate submodules
-        self.path_integration = PathIntegrator(n_actions, self.shape, f_init, config=config.path)
+        self.path_integration = PathIntegrator(n_actions, self.shape, f_initial, config=config.path)
         self.p2g_correction = P2GMemory(n_hippocampal, self.shape, config=config.p2g)
         self.ovc_correction = OVCCorrection(config.ovc.shape, self.shape, config=config.ovc)
 

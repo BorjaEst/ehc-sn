@@ -152,13 +152,13 @@ class HPCModel(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, n_stages: int, f_init: list[float], config: HPCSettings, 
+        self, n_stages: int, f_initial: list[float], config: HPCSettings, 
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """ """
         super().__init__()
         self._config = config
-        shape, n_stages, f_init = config.shape, config.n_stages, config.f_init
+        shape, n_stages, f_initial = config.shape, config.n_stages, config.f_initial
         n_freq = len(shape)
 
         # Stage masks are buffers so `.to(device)` moves them automatically.
@@ -169,7 +169,7 @@ class HPCModel(nn.Module):
         self.register_buffer("masks_full", masks, persistent=False)
 
         # Hebbian write mask gates synapses in the flattened (S, S) matrix.
-        mask = utils.make_hebbian_write_mask(n_stages, shape, f_init)
+        mask = utils.make_hebbian_write_mask(n_stages, shape, f_initial)
         self.register_buffer("update_mask", mask, persistent=False)
 
         # Instantiate submodules

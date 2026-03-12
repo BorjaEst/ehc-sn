@@ -6,10 +6,10 @@ frequency modules (OVC modules) and fuses them with a reference transition.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Literal, Optional
 
 import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn import utils
@@ -22,15 +22,35 @@ from ehc_sn.utils.detach import DetachMixin
 class OVCSettings(BaseModel, extra="forbid"):
     """Settings for OVC modules."""
 
-    shape: list[int] = Field(
-        ...,
-        description="Sizes of OVC frequency modules (must be contiguous and at the end of MEC frequencies).",
+    mode: Literal["off", "merged", "separate"] = Field(
+        default="merged",
+        description=(
+            "OVC mode. If 'off', no OVC correction is applied. "
+            "If 'merged', all OVC frequencies are merged into a single module "
+            "(with size equal to the sum of the specified sizes). "
+            "If 'separate', OVC frequencies are kept separate with sizes specified by `shape`."
+        ),
+    )
+    shape: Optional[list[int]] = Field(
+        default=None,
+        description="Sizes of OVC frequency modules (required if `mode='separate'`).",
     )
     hidden_dim: int = Field(
         default=20,
+        ge=1,
         frozen=True,
         description="Hidden dimension for shiny landmark cue processing (OVC correction).",
     )
+
+    @model_validator(mode="after")
+    def validate_mode_shape(self) -> "OVCSettings":
+        if self.mode == "separate":
+            if not self.shape:
+                raise ValueError("mec.ovc.shape is required when mec.ovc.mode='separate'.")
+        else:
+            if self.shape is not None:
+                raise ValueError("mec.ovc.shape must be omitted unless mec.ovc.mode='separate'.")
+        return self
 
 
 # =================================================================================================
@@ -42,7 +62,7 @@ class OVCCorrection(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, mec_shape: List[int], config: OVCSettings,
+        self, mec_shape: list[int], config: OVCSettings,
     ) -> None:  # fmt: skip
         """ """
         super().__init__()
