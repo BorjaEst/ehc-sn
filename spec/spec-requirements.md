@@ -66,6 +66,7 @@ under `temp/` (not on the Python path).
 | Dependency           | Role                    | Notes                                   |
 | -------------------- | ----------------------- | --------------------------------------- |
 | `torch`              | Core tensor computation | Pin-free (user-managed CUDA compat)     |
+| `torchrl`            | TorchRL environments    | Controller-owned environment stepping   |
 | `lightning`          | Training orchestration  | LightningModule, Trainer, Callbacks     |
 | `gymnasium`          | Environment interface   | Maze environments                       |
 | `pydantic`           | Configuration schema    | `BaseModel(extra="forbid")` pattern     |
@@ -76,30 +77,31 @@ under `temp/` (not on the Python path).
 | `pub-ready-plots`    | Visualization (layout)  | Publication-ready plot utilities        |
 | `tensorboard`        | Logging                 | Metric/scalar/image logging             |
 | `rich`               | Terminal output         | Progress bars, formatted console output |
+| `huggingface_hub`    | Dataset download        | Raw/source dataset retrieval            |
+| `maze-nd`            | Maze generation         | Generator dependency used by scripts    |
+| `dungeongen`         | Dungeon generation      | Generator dependency used by scripts    |
+| `typer`              | Script CLIs             | Data-generation command-line interface  |
 | `adam-atan2-pytorch` | Optimizer               | AdamAtan2 for HRM training              |
 | `setuptools`         | Build backend           | Package build and version management    |
 
 ### 4.2 Audit Candidates
 
-| Dependency | Issue                                                        | Action                                                                                         |
-| ---------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `networkx` | Declared in `pyproject.toml` but **zero imports** in `src/`. | Audit before next release. Do not add new usage until confirmed needed. Candidate for removal. |
+- `networkx`: Declared in `pyproject.toml` but currently has zero imports in `src/`. Audit before next release and remove if it remains unused.
+- `maze-nd`: Declared as a runtime dependency but currently used in `scripts/data-gen/` only. Review whether it should move to a script-only optional dependency.
+- `dungeongen`: Declared as a runtime dependency but currently used in `scripts/data-gen/` only. Review whether it should move to a script-only optional dependency.
+- `huggingface_hub`: Declared as a runtime dependency but currently used in `scripts/data-gen/` only. Review whether it should move to a script-only optional dependency.
+- `typer`: Declared as a runtime dependency but currently used in `scripts/data-gen/` only. Review whether it should move to a script-only optional dependency.
 
 ### 4.3 Known Dependency Bugs
 
-| Dependency | Issue                                                                                                                                                                                                  |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `typer`    | Imported in `scripts/data-gen/build_maze.py` but **not declared** in `pyproject.toml`. Must be added to `[project.optional-dependencies]` (e.g., under a `scripts` extra) or to the main dependencies. |
+No known dependency declaration mismatches are currently recorded.
 
 ### 4.4 Dev / Script-Only Dependencies
 
-| Dependency | Role                          | Where Used                          |
-| ---------- | ----------------------------- | ----------------------------------- |
-| `maze-nd`  | Raw maze structure generation | `scripts/data-gen/` pipeline input. |
-| `typer`    | CLI framework                 | `scripts/data-gen/build_maze.py`    |
-| `pytest`   | Testing                       | `tests/`                            |
-| `black`    | Formatting                    | Dev tooling                         |
-| `mypy`     | Type checking                 | Dev tooling                         |
+- `pytest`: Testing, used in `tests/`.
+- `black`: Formatting, used in dev tooling.
+- `flake`: Linting, used in dev tooling.
+- `mypy`: Type checking, used in dev tooling.
 
 ### 4.5 New Dependency Policy
 
@@ -127,7 +129,7 @@ under `temp/` (not on the Python path).
 - **Python**: ≥ 3.12 (as declared in `pyproject.toml`).
 - **Build backend**: `setuptools` with `pyproject.toml`-based configuration.
 - **Package layout**: `src/` layout (`tool.setuptools.package-dir = {"" = "src"}`).
-- **Packages**: `ehc_sn` (main). `mazes` is a legacy auxiliary package
+- **Packages**: `ehc_sn` is the only active first-party package.
 - **Version**: Single-source in `src/ehc_sn/VERSION`.
 
 ---

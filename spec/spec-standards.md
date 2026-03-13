@@ -112,6 +112,10 @@ or consumed.
   when the architecture, requirements, or standards change.
 - Specs are not duplicated into `docs/`. If the MkDocs site needs to reference
   specs, it should link to the `spec/` files.
+- Changes to top-level packages under `src/ehc_sn/` must update the component
+  taxonomy and dependency rules in `spec/spec-architecture.md` in the same change.
+- Changes to dependency declarations in `pyproject.toml` must update the
+  dependency inventory in `spec/spec-requirements.md` in the same change.
 
 ---
 

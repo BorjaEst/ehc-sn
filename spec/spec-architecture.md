@@ -45,7 +45,7 @@ Layer 4: `experiments/`
 
 Layer 3: `models/`
 
-Layer 2: `modules/`, `controllers/`, `policies/`, `heads/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/`
+Layer 2: `modules/`, `controllers/`, `policies/`, `heads/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/`, `envs/`
 
 Layer 1: `activations/`, `utils/`, `types.py`
 
@@ -64,6 +64,8 @@ R5: `utils/` must not import from any `ehc_sn` subpackage
 R6: Peer imports within a component (for example, `modules/hpc/` → `modules/mec/`) are allowed
 
 R7: `policies/` must not import from `models/`, `controllers/`, `heads/`, `training/`, or `modules/`
+
+R8: `envs/` must not import from `models/`, `controllers/`, `heads/`, or `training/`
 
 ---
 
@@ -215,34 +217,31 @@ Generic algorithmic building blocks — no model-specific code, no model imports
 
 ### 4.6 Data
 
-Data pipeline: maze generation, on-disk storage, dataset loading,
-gymnasium environments, and Lightning DataModules. Three sub-layers
-with strict top-down imports (no reverse dependency):
-`data/*.py` (torch + lightning) → `data/envs/` (gymnasium) → `data/mazes/` (framework-free).
+Data covers on-disk processed format contracts, index parsing, dataset loading,
+channel transforms, and Lightning DataModules. Source-specific generation and
+canonicalization currently live in `scripts/data-gen/`, not in a first-party
+`ehc_sn.data.mazes` package.
 
-#### 4.6.1 Mazes (`data/mazes/`)
+#### 4.6.1 Data Modules (`data/`)
 
-Pure maze infrastructure with **no ML or framework dependencies**. This
-sub-package defines maze structures, generation wrappers, augmentation
-operations, and I/O for the canonical on-disk format.
+ML data infrastructure for processed mazes.
 
-| Module        | Responsibility                                                                                                                                         |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `types.py`    | `MazeGraph`, `Cell`, `Wall`, grid metadata. No neural types.                                                                                           |
-| `generators/` | Thin wrappers around external generators: `maze_nd.py`, `dungeongen.py`, `huggingface.py`.                                                             |
-| `ops.py`      | Pure augmentation functions: `solve()`, `add_start_goal()`, `generate_observations()`, `add_landmarks()`. Operate on `MazeGraph` or raw channel dicts. |
-| `io.py`       | Read/write canonical channel NPZ files and JSONL index entries.                                                                                        |
-
-**Dependency rule:** `ehc_sn.data.mazes` must remain framework-free (no `torch`, `gymnasium`,
-`lightning`, or `ehc_sn.*`). External dependencies are allowed when declared in `pyproject.toml`
-and when they preserve this constraint.
+| Module           | Responsibility                                                                                      |
+| ---------------- | --------------------------------------------------------------------------------------------------- |
+| `schema.py`      | Channel name constants, dtype contracts, and validation for the canonical on-disk format.           |
+| `index.py`       | JSONL index parsing, dataset splitting, channel-availability queries.                               |
+| `datasets.py`    | Map-style `torch.utils.data.Dataset` returning the canonical per-sample channel dict.               |
+| `datamodules.py` | Generic Lightning `DataModule`. Model-specific adaptation is external (model-owned adapters).       |
+| `vocabulary.py`  | Canonical maze semantic enum (SEM IDs: PAD, WALL, EMPTY, START, GOAL) and debug character mappings. |
+| `transforms.py`  | Model-agnostic channel transforms such as augmentation and semantic-grid derivation.                |
 
 #### 4.6.2 Canonical On-Disk Format
 
-Processed maze data lives in `data/processed/` as **one NPZ file per maze**
-plus a JSONL index. Each NPZ contains a `dict[str, numpy.ndarray]` of named
-channels with heterogeneous dtypes (channels vary between `bool` and `int32`).
-Optional channels are represented by key absence, not by zero-filled arrays.
+Processed maze data lives in `data/processed/` as a dataset root with a
+single JSONL index and per-split stacked channel arrays. Each split stores one
+`.npy` file per declared channel with shape `(N, H, W)`, where all samples in
+the split share the same stored spatial shape. Optional channels are optional
+at split scope, not per-sample scope.
 
 **Mandatory channel:**
 
@@ -262,20 +261,28 @@ Optional channels are represented by key absence, not by zero-filled arrays.
 | Regions      | `regions`      | `int32` | `(H, W)` | Room/region ID                                | Future                                                           |
 | Valid mask   | `mask_valid`   | `bool`  | `(H, W)` | Legal agent positions (explicit reachability) | All (when topology alone is insufficient, e.g. dungeongen voids) |
 
+**Split metadata** (`data/processed/<split>/dataset.json`): one JSON object per split.
+
+| Field       | Type        | Description                                       |
+| ----------- | ----------- | ------------------------------------------------- |
+| `source`    | `str`       | Generator or source dataset name                  |
+| `split`     | `str`       | Split name                                        |
+| `n_samples` | `int`       | Number of samples stored in the split             |
+| `shape`     | `list[int]` | Stored normalized maze shape as `[height, width]` |
+| `channels`  | `list[str]` | Channel names present for every sample in split   |
+
 **JSONL index** (`data/processed/index.jsonl`): one JSON object per line.
 
-| Field            | Type        | Description                                |
-| ---------------- | ----------- | ------------------------------------------ |
-| `id`             | `str`       | Unique maze identifier                     |
-| `file`           | `str`       | Relative path to NPZ file                  |
-| `source`         | `str`       | Generator that produced the raw maze       |
-| `split`          | `str`       | Dataset split: `train`, `val`, or `test`   |
-| `height`         | `int`       | Grid height                                |
-| `width`          | `int`       | Grid width                                 |
-| `channels`       | `list[str]` | Channel names present in the NPZ           |
-| `n_observations` | `int`       | Observation vocabulary size (0 if absent)  |
-| `n_goals`        | `int`       | Number of goal cells (0 if absent)         |
-| `difficulty`     | `str`       | Source-defined difficulty label (optional) |
+| Field            | Type              | Description                                  |
+| ---------------- | ----------------- | -------------------------------------------- |
+| `id`             | `str`             | Unique maze identifier                       |
+| `source`         | `str`             | Generator that produced the raw maze         |
+| `split`          | `str`             | Dataset split: `train`, `val`, or `test`     |
+| `shape`          | `tuple[int, int]` | Stored normalized grid shape                 |
+| `channels`       | `list[str]`       | Channel names present for the sample's split |
+| `n_observations` | `int`             | Observation vocabulary size (0 if absent)    |
+| `n_goals`        | `int`             | Number of goal cells (0 if absent)           |
+| `difficulty`     | `str`             | Source-defined difficulty label (optional)   |
 
 **On-disk layout:**
 
@@ -289,34 +296,34 @@ data/
 │   ├── maze-nd/                  #   (solved, start/goal added, etc.)
 │   ├── dungeongen/
 │   └── huggingface/
-└── processed/                    # Canonical channel NPZ format
-    ├── index.jsonl
-    ├── train/
-    │   ├── maze_00001.npz
-    │   └── ...
-    ├── val/
-    └── test/
+└── processed/                    # Canonical split-uniform channel storage
+  ├── index.jsonl
+  ├── train/
+  │   ├── dataset.json
+  │   ├── topology.npy
+  │   ├── observations.npy
+  │   └── ...
+  ├── val/
+  └── test/
 ```
 
 #### 4.6.3 Pipeline
 
 ```text
 Generators (maze-nd, dungeongen, HF)      scripts/data-gen/
-          │                                      │
-          ▼                                      │ augmentation calls
-     data/raw/                                   │ (ehc_sn.data.mazes.ops)
-          │                                      │
-          ▼                                      ▼
-     data/interim/  ◄────── source-specific augmentation
-          │                 (solve, add start/goal, generate obs IDs)
-          ▼
-     data/processed/  ◄──── canonical NPZ + index.jsonl
-          │
-          ├──► ehc_sn.data.datasets    (static)  ──► DataModule → model adapters
-          │
-          └──► ehc_sn.data.envs.MazeEnv (runtime) ──► TEM DataModule
-                    │                               ──► EHC RL training
-                    └──► ObservationWrappers
+    │
+    ▼
+  data/raw/
+    │
+    ▼
+  data/interim/  ◄────── source-specific normalization / augmentation scripts
+    │
+    ▼
+    data/processed/  ◄──── root index + split-uniform stacked arrays
+    │
+    ├──► ehc_sn.data.datasets / datamodules   ──► model adapters
+    │
+    └──► ehc_sn.envs.*                        ──► controller-owned runtime stepping
 ```
 
 **Raw sources:**
@@ -331,72 +338,55 @@ All three are declared runtime dependencies in `pyproject.toml`. Raw output
 is stored in `data/raw/<source>/` and is **not** committed to version control.
 
 **Augmentation (raw → interim):**
-Source-specific augmentation scripts in `scripts/data-gen/` call pure
-functions from `ehc_sn.data.mazes.ops`:
+Source-specific augmentation and canonicalization scripts currently live in
+`scripts/data-gen/`:
 
 - **dungeongen** → add start/goal positions, optionally compute shortest paths.
 - **maze-nd** → solve maze, generate observation IDs, assign landmarks.
 - **HuggingFace** → relabel goals, extract topology from images, normalize
   format.
 
-Scripts are thin CLI orchestrators; all logic lives in `ehc_sn.data.mazes.ops`.
+Scripts are the current source of truth for generator-specific preprocessing.
 Output is stored in `data/interim/<source>/`.
 
 **Canonicalization (interim → processed):**
-A final source-agnostic step reads whatever channels are available and writes
-a conformant NPZ with a corresponding JSONL index entry.
-Output is stored in `data/processed/{train,val,test}/`.
+A final source-agnostic step reads whatever channels are available, normalizes
+each split to a uniform stored shape, stacks channels into `(N, H, W)` arrays,
+and writes split metadata plus corresponding JSONL index entries.
+Output is stored in `data/processed/` with one root index and one storage
+partition per split.
 
-#### 4.6.4 Data Pipeline Modules (`data/`)
+#### 4.6.4 Data Loading Responsibilities
 
-ML data infrastructure: datasets, DataModules, environments, and collation.
-
-| Module           | Responsibility                                                                                      |
-| ---------------- | --------------------------------------------------------------------------------------------------- |
-| `schema.py`      | Channel name constants, dtype contracts, and validation for the canonical on-disk format.           |
-| `index.py`       | JSONL index parsing, dataset splitting, channel-availability queries.                               |
-| `datasets.py`    | Map-style `torch.utils.data.Dataset` returning the canonical maze representation (see §4.6.5).      |
-| `datamodules.py` | Generic Lightning `DataModule`. Model-specific adaptation is external (model-owned adapters).       |
-| `vocabulary.py`  | Canonical maze semantic enum (SEM IDs: PAD, WALL, EMPTY, START, GOAL) and debug character mappings. |
-| `transforms.py`  | Model-agnostic channel transforms: augmentation (dihedral symmetry), canonical grid construction.   |
+`data/` owns persisted processed-data contracts and static loading. Runtime
+interaction is handled by the top-level `envs/` component.
 
 #### 4.6.5 Canonical Dataset Output
 
-`MazeDataset.__getitem__` returns a model-agnostic canonical representation:
+`MazeDataset.__getitem__` returns a model-agnostic per-sample channel mapping:
 
-| Key        | Type                | Shape    | Description                                                                      |
-| ---------- | ------------------- | -------- | -------------------------------------------------------------------------------- |
-| `grid`     | `IntTensor`         | `(H, W)` | Semantic grid using canonical SEM IDs (PAD=0, WALL=1, EMPTY=2, START=3, GOAL=4). |
-| `channels` | `dict[str, Tensor]` | `(H, W)` | Original binary/int channels (e.g., `solution`). Optional.                       |
-| `metadata` | `dict[str, Any]`    | —        | Index fields: maze ID, difficulty, source, etc.                                  |
+| Key              | Type     | Shape    | Description                                         |
+| ---------------- | -------- | -------- | --------------------------------------------------- |
+| `<channel_name>` | `Tensor` | `(H, W)` | Raw tensor for one canonical channel in the sample. |
 
-The `grid` encodes environment state semantics. It does **not** contain
-task-specific annotations (e.g., `solution`). Channel priority when
-building the grid: `WALL < EMPTY < START < GOAL` (later assignments win).
+The dataset layer preserves the stored processed channels for one sample and
+does not synthesize a nested `grid/channels/metadata` structure. Model-specific
+input construction such as semantic grids, tokenization, or environment reset
+batches is handled by downstream adapters, transforms, or runtime components.
 
-Model-specific input construction (tokenization, label building, flattening)
-is performed by model-owned adapters operating on this canonical output.
-Adapters are named by data concern (e.g., "supervised maze adapter"), not
-by consuming model.
+#### 4.6.6 TorchRL Environments (`envs/`)
 
-#### 4.6.6 Gymnasium Environments (`data/envs/`)
+Runtime environments live in the top-level `envs/` package and are stepped by
+controllers, not by dataloaders.
 
-Gymnasium wrappers over processed maze NPZs. Base environment returns
-a rich observation dict; model-specific `ObservationWrapper` subclasses
-adapt it to each model's expected input.
-
-| Module        | Responsibility                                                                                                                 |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `maze_env.py` | Base `MazeEnv(gymnasium.Env)`: loads canonical NPZ, manages agent position, computes reward from goals. Returns rich obs dict. |
-| `wrappers.py` | `ObservationWrapper` subclasses: `TEMObsWrapper` (one-hot vectors), `HRMObsWrapper` (token sequences), etc.                    |
+- `dungeon_walk.py`: `DungeonWalk`, a TorchRL environment for policy-driven dungeon walks from processed maze tensors.
+- `mazehard.py`: `MazeHardEnv`, a TorchRL environment for batched token-prediction deliberation on maze-hard style data.
 
 #### 4.6.7 Model–Data Consumption Paths
 
-| Model   | Data path                                            | Interaction mode  |
-| ------- | ---------------------------------------------------- | ----------------- |
-| **TEM** | NPZ → `MazeEnv` + `TEMObsWrapper` → runtime walks    | Online (env.step) |
-| **HRM** | NPZ → `MazeDataset` → canonical grid → model adapter | Offline (static)  |
-| **EHC** | NPZ → `MazeEnv` → RL episodes                        | Online (env.step) |
+- **TEM**: processed split arrays → `MazeDataset` / `DataModule` → controller reset into `DungeonWalk` for online interaction.
+- **HRM**: processed split arrays → `MazeDataset` → `MazeHardEnv` or model adapters, depending on training regime.
+- **EHC**: processed split arrays → planned dataset/env adapters → RL episodes.
 
 ### 4.7 Evaluation
 
