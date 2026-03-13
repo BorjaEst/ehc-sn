@@ -13,8 +13,9 @@ fraction* coordinates (0..1).
 """
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Optional, Protocol, Sequence, Tuple, cast, overload
+from typing import Any, Literal, Optional, Protocol, Sequence, Tuple, cast, overload
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -31,6 +32,26 @@ class EnvironmentLike(Protocol):
 
     locations: Sequence[Mapping[str, float]]
     n_locations: int
+
+
+def _environment_locations(environment: object) -> Sequence[Mapping[str, Any]]:
+    """Return environment locations from either an object or mapping contract."""
+    if isinstance(environment, Mapping):
+        locations = environment.get("locations", [])
+    else:
+        locations = getattr(environment, "locations", [])
+    return locations if isinstance(locations, Sequence) else []
+
+
+def _environment_n_locations(environment: object) -> int:
+    """Return the declared location count or infer it from the locations list."""
+    if isinstance(environment, Mapping):
+        value = environment.get("n_locations")
+    else:
+        value = getattr(environment, "n_locations", None)
+    if value is None:
+        return len(_environment_locations(environment))
+    return int(value)
 
 
 # =================================================================================================
@@ -67,15 +88,16 @@ def configure_environment_axes(  # ---------------------------------------------
         The same `ax` instance (mutated).
     """
 
-    if environment is not None and environment.locations:
-        coords = np.array([[loc.get("o"), loc.get("y")] for loc in environment.locations], dtype=float)
+    locations = [] if environment is None else _environment_locations(environment)
+    if locations:
+        coords = np.array([[loc.get("o"), loc.get("y")] for loc in locations], dtype=float)
         valid = np.isfinite(coords).all(axis=1)
         coords = coords[valid]
         if coords.size > 0:
             x_min, y_min = coords.min(axis=0)
             x_max, y_max = coords.max(axis=0)
             if radius is None:
-                radius = _default_radius(getattr(environment, "n_locations", 0))
+                radius = _default_radius(_environment_n_locations(environment))
             pad = (radius or 0.02) * padding_scale
             if x_min == x_max:
                 x_min -= 1.0

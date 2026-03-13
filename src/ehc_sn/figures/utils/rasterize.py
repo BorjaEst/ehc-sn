@@ -6,6 +6,8 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial import cKDTree
 
+from ehc_sn.figures.utils.axes import _environment_locations
+
 
 def rasterize_locations(
     world: object,
@@ -72,7 +74,7 @@ def rasterize_locations(
 
 
 def _world_coords(world: object) -> NDArray:
-    locations = getattr(world, "locations", [])
+    locations = _environment_locations(world)
     coords = [[loc["o"], loc["y"]] for loc in locations]
     return np.asarray(coords, dtype=float)
 
