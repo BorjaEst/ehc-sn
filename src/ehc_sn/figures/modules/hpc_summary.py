@@ -1,13 +1,10 @@
-"""Place-cell diagnostic figure with spatial maps and autocorrelograms."""
+"""Place-cell diagnostic figure with spatial maps and semantic memory views."""
 
 from __future__ import annotations
-
-import math
 
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.gridspec import SubplotSpec
 
 from ehc_sn.figures.figures.base import BaseFigureTemplate
 from ehc_sn.figures.figures.panels import colorbar, panel
@@ -50,15 +47,20 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
             ctx: Figure context.
         """
         super().__init__(trace, ctx)
-        self.n_freq = trace.n_freq("state/hpc/location/mean")
+        self.n_freq = trace.n_freq("diagnostic/hpc/location_mean")
         self.env_idx = self.trace.validate_env_idx(self.ctx.env_idx)
-        self.freq_idxs = [self.trace.validate_freq_idx("state/hpc/location/mean", f) for f in range(self.n_freq)]
+        self.freq_idxs = [self.trace.validate_freq_idx("diagnostic/hpc/location_mean", f) for f in range(self.n_freq)]  # fmt: skip
 
         self.world = self.trace.get_world(self.env_idx)
         self.location_ids = self.trace.get("world_step/location_ids")[:, self.env_idx]
-        self.cells = [self.trace.get(f"state/hpc/location/mean/{f}")[:, self.env_idx, :] for f in range(self.n_freq)]
-        self.memory_hier = self.trace.get("state/hpc/_memory/0")[-1, self.env_idx]
-        self.memory_full = self.trace.get("state/hpc/_memory/1")[-1, self.env_idx]
+
+        self.cells = [
+            self.trace.get(f"diagnostic/hpc/location_mean/{f}")[:, self.env_idx, :]
+            for f in range(self.n_freq)
+        ]
+
+        self.memory_hier = self.trace.get("diagnostic/hpc/memory/0")[-1, self.env_idx]
+        self.memory_full = self.trace.get("diagnostic/hpc/memory/1")[-1, self.env_idx]
 
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def map_labels(self, ax: Axes) -> None:
@@ -99,7 +101,8 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def spatial_matrices(self, ax: Axes) -> None:
         nrows = len(self.freq_idxs)
-        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.07)):
+        child_axes = np.ravel(subdivide_axes(ax, nrows, 1, hspace=0.07))
+        for freq_idx, freq_ax in enumerate(child_axes):
             cells = self.cells[freq_idx]
             axes = mosaic_axes(freq_ax, cells.shape[-1], wspace=0.04, hspace=0.04)
             axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]

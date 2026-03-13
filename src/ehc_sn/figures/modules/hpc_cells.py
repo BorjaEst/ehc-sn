@@ -48,10 +48,10 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         """
         super().__init__(trace, ctx)
         self.env_idx = self.trace.validate_env_idx(self.ctx.env_idx)
-        self.freq_idx = self.trace.validate_freq_idx("state/hpc/location/mean", self.ctx.freq_idx)
+        self.freq_idx = self.trace.validate_freq_idx("diagnostic/hpc/location_mean", self.ctx.freq_idx)
         self.world = self.trace.get_world(self.env_idx)
         self.location_ids = self.trace.get("world_step/location_ids")[:, self.env_idx]
-        self.cells = self.trace.get(f"state/hpc/location/mean/{self.freq_idx}")[:, self.env_idx, :]
+        self.cells = self.trace.get(f"diagnostic/hpc/location_mean/{self.freq_idx}")[:, self.env_idx, :]
 
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def map_labels(self, ax: Axes) -> None:
@@ -73,7 +73,7 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         """
         axes = mosaic_axes(ax, self.cells.shape[-1], wspace=0.04, hspace=0.04)
         axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
-        plot_ratematx_mosaic(axes_list, self.world, self.cells, self.location_ids.tolist(), vmin=0.0, vmax=0.10)
+        plot_ratematx_mosaic(axes_list, self.world, self.cells, self.location_ids.tolist(), vmin=0.0, vmax=0.10)  # fmt: skip
         ax.set_title(f"HPC f{self.freq_idx} rate map")
 
     @panel()  # Here some arguments to configure the pannel, position, etc.

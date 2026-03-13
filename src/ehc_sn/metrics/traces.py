@@ -25,7 +25,7 @@ Trace keys follow the same namespace hierarchy as diagnostic signals:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Iterable, Literal
 
 import torch
 from torch import Tensor
@@ -291,8 +291,19 @@ def _build_environment_metadata(  # --------------------------------------------
 
 
 # =================================================================================================
+def _select_trace_fields(  # ----------------------------------------------------------------------
+    fields: tuple[TraceField, ...], include_keys: Iterable[str] | None,
+) -> tuple[TraceField, ...]:  # fmt: skip
+    """Return the selected trace fields for a requested public key set."""
+    if include_keys is None:
+        return fields
+    requested = {key for key in include_keys}
+    return tuple(field for field in fields if field.name in requested)
+
+
+# =================================================================================================
 def build_trace_spec(  # --------------------------------------------------------------------------
-    paradigm: Literal["act", "rl", "tem"],
+    paradigm: Literal["act", "rl", "tem"], *, include_keys: Iterable[str] | None = None,
 ) -> TraceSpec:  # fmt: skip
     """Build a :class:`~ehc_sn.rollouts.collect.TraceSpec` for a training paradigm.
 
@@ -312,11 +323,11 @@ def build_trace_spec(  # -------------------------------------------------------
         ValueError: If *paradigm* is not ``"act"``, ``"rl"``, or ``"tem"``.
     """
     if paradigm == "act":
-        fields = COMMON_TRACE_FIELDS + ACT_TRACE_FIELDS
+        fields = _select_trace_fields(COMMON_TRACE_FIELDS + ACT_TRACE_FIELDS, include_keys)
     elif paradigm == "rl":
-        fields = COMMON_TRACE_FIELDS + RL_TRACE_FIELDS
+        fields = _select_trace_fields(COMMON_TRACE_FIELDS + RL_TRACE_FIELDS, include_keys)
     elif paradigm == "tem":
-        fields = TEM_TRACE_FIELDS
+        fields = _select_trace_fields(TEM_TRACE_FIELDS, include_keys)
     else:
         raise ValueError(f"Unknown paradigm: {paradigm!r}. Expected 'act', 'rl', or 'tem'.")
     return TraceSpec(fields=list(fields))

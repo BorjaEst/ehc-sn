@@ -46,13 +46,20 @@ class GridCellsAutocorr(BaseFigureTemplate):
             ctx: Figure context.
         """
         super().__init__(trace, ctx)
-        self.n_freq = trace.n_freq("state/mec/location/mean")
+
+        self.n_freq = trace.n_freq("diagnostic/mec/location_mean")
         self.env_idx = self.trace.validate_env_idx(self.ctx.env_idx)
-        self.freq_idxs = [self.trace.validate_freq_idx("state/mec/location/mean", f) for f in range(self.n_freq)]
+        self.freq_idxs = [
+            self.trace.validate_freq_idx("diagnostic/mec/location_mean", f)
+            for f in range(self.n_freq)
+        ]  # fmt: skip
+        self.cells = [
+            self.trace.get(f"diagnostic/mec/location_mean/{f}")[:, self.env_idx, :]
+            for f in range(self.n_freq)
+        ]
 
         self.world = self.trace.get_world(self.env_idx)
         self.location_ids = self.trace.get("world_step/location_ids")[:, self.env_idx]
-        self.cells = [self.trace.get(f"state/mec/location/mean/{f}")[:, self.env_idx, :] for f in range(self.n_freq)]
 
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def map_labels(self, ax: Axes) -> None:
@@ -78,7 +85,8 @@ class GridCellsAutocorr(BaseFigureTemplate):
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def spatial_matrices(self, ax: Axes) -> None:
         nrows = len(self.freq_idxs)
-        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.07)):
+        child_axes = np.ravel(subdivide_axes(ax, nrows, 1, hspace=0.07))
+        for freq_idx, freq_ax in enumerate(child_axes):
             cells = self.cells[freq_idx]
             axes = mosaic_axes(freq_ax, cells.shape[-1], wspace=0.04, hspace=0.04)
             axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
