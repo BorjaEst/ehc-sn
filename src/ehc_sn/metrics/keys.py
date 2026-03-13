@@ -21,6 +21,9 @@ TEM_LOSS_OBS_NLL: str = "loss_obs_nll"
 TEM_LOSS_GRID_KL: str = "loss_grid_kl"
 TEM_LOSS_PLACE_CONSISTENCY: str = "loss_place_consistency"
 TEM_LOSS_REG: str = "loss_reg"
+TEM_ACC_OBS_INFERENCE: str = "accuracy_obs_inference"
+TEM_ACC_OBS_RETRIEVED: str = "accuracy_obs_retrieved"
+TEM_ACC_OBS_ANCESTRAL: str = "accuracy_obs_ancestral"
 
 
 # =================================================================================================
@@ -35,7 +38,8 @@ def extra_ratio_paths(  # ------------------------------------------------------
 # =================================================================================================
 __all__ = [
     "ACT_LOSS_Q_CONTINUE", "ACT_LOSS_Q_DONE", "LOSS_LM", "RL_LOSS_ACTOR", "RL_LOSS_CRITIC",
-    "RL_LOSS_ENTROPY", "RL_LOSS_Q_VALUE", "TEM_LOSS_GRID_KL", "TEM_LOSS_OBS_NLL",
+    "RL_LOSS_ENTROPY", "RL_LOSS_Q_VALUE", "TEM_ACC_OBS_ANCESTRAL", "TEM_ACC_OBS_INFERENCE",
+    "TEM_ACC_OBS_RETRIEVED", "TEM_LOSS_GRID_KL", "TEM_LOSS_OBS_NLL",
     "TEM_LOSS_PLACE_CONSISTENCY", "TEM_LOSS_REG", "VAR_LOSS_LATENT", "VAR_LOSS_OBS_NLL",
     "VAR_LOSS_REG", "extra_ratio_paths",
 ]  # fmt: skip

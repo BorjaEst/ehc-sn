@@ -84,10 +84,10 @@ class VariationalLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT](
         carry, outputs = self.controller.step(carry, batch, **options)
         losses = self.compute_losses(outputs, carry, **options)
         metrics = build_variational_step_metrics(
-            self._build_metric_ratios(losses, batch_size=int(carry.halted.shape[0])),
+            self._build_metric_ratios(losses, carry=carry, outputs=outputs, batch_size=int(carry.halted.shape[0])),
             batch_size=int(carry.halted.shape[0]),
             like=losses.total.detach(),
-        )
+        )  # fmt: skip
         signals = self.compute_signals(batch, carry, outputs, losses)
         return self._build_step_output(losses, metrics, signals, outputs), carry, bool(carry.halted.all())
 
@@ -98,7 +98,7 @@ class VariationalLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT](
         raise NotImplementedError
 
     def _build_metric_ratios(  # ------------------------------------------------------------------
-        self, losses: VariationalLosses, *, batch_size: int,
+        self, losses: VariationalLosses, *, carry: Any, outputs: Any, batch_size: int,
     ) -> dict[str, RatioStat]:  # fmt: skip
         """Pack algorithm-specific ratio metrics for logging."""
         raise NotImplementedError

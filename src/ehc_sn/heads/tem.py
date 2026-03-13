@@ -14,21 +14,36 @@ from pydantic import BaseModel, Field
 from torch import Tensor
 
 from ehc_sn.controllers.tem import (
-    GRID_REG_TERM, GRID_TRANSITION_RELATION, PLACE_REG_TERM, PLACE_SENSORY_RELATION,
+    GRID_REG_TERM,
+    GRID_TRANSITION_RELATION,
+    PLACE_REG_TERM,
+    PLACE_SENSORY_RELATION,
     PLACE_TRANSITION_RELATION,
-    TEMController, TEMOutput,
+    TEMController,
+    TEMOutput,
 )
 from ehc_sn.heads._variational import (
-    VariationalLosses, VariationalLossHeadBase, VariationalLossStep,
-    get_reg_term, require_latent_relation,
+    VariationalLosses,
+    VariationalLossHeadBase,
+    VariationalLossStep,
+    get_reg_term,
+    require_latent_relation,
 )
 from ehc_sn.loss.consistency import LatentCode, mean_latent_norm, mse_consistency, sum_latent_terms
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_terms
 from ehc_sn.metrics import signals as S
-from ehc_sn.metrics.keys import TEM_LOSS_GRID_KL, TEM_LOSS_OBS_NLL, TEM_LOSS_PLACE_CONSISTENCY, TEM_LOSS_REG
-from ehc_sn.types import Batch
+from ehc_sn.metrics.keys import (
+    TEM_ACC_OBS_ANCESTRAL,
+    TEM_ACC_OBS_INFERENCE,
+    TEM_ACC_OBS_RETRIEVED,
+    TEM_LOSS_GRID_KL,
+    TEM_LOSS_OBS_NLL,
+    TEM_LOSS_PLACE_CONSISTENCY,
+    TEM_LOSS_REG,
+)
 from ehc_sn.training.types import RatioStat, StepMetrics
+from ehc_sn.types import Batch
 
 
 # =================================================================================================
@@ -159,16 +174,20 @@ class TEMLossHead(VariationalLossHeadBase[TEMController, TEMLossConfig]):
         )
 
     def _build_metric_ratios(  # -----------------------------------------------------------------
-        self, losses: TEMLosses, *, batch_size: int,
+        self, losses: TEMLosses, *, carry: Any, outputs: TEMOutput, batch_size: int,
     ) -> dict[str, RatioStat]:  # fmt: skip
         """Build detached TEM ratio metrics for logging."""
-        batch_count = losses.total.new_tensor(batch_size, dtype=losses.total.new_tensor(0.0).dtype)
+        labels = self._observation_target(carry)
+        batch_count = losses.total.new_tensor(batch_size, dtype=losses.total.dtype)
         return {
+            TEM_ACC_OBS_INFERENCE: RatioStat(_correct_prediction_count(outputs.logits_inference, labels), batch_count),
+            TEM_ACC_OBS_RETRIEVED: RatioStat(_correct_prediction_count(outputs.logits_retrieved, labels), batch_count),
+            TEM_ACC_OBS_ANCESTRAL: RatioStat(_correct_prediction_count(outputs.logits_ancestral, labels), batch_count),
             TEM_LOSS_OBS_NLL: RatioStat(losses.loss_obs_nll_sum.detach(), batch_count),
             TEM_LOSS_GRID_KL: RatioStat(losses.loss_grid_kl_sum.detach(), batch_count),
             TEM_LOSS_PLACE_CONSISTENCY: RatioStat(losses.loss_place_consistency_sum.detach(), batch_count),
             TEM_LOSS_REG: RatioStat(losses.loss_reg_sum.detach(), batch_count),
-        }
+        }  # fmt: skip
 
     def _build_step_output(  # -------------------------------------------------------------------
         self, losses: TEMLosses, metrics: StepMetrics, signals: Dict[str, Any], outputs: Any,
@@ -214,7 +233,9 @@ class TEMLossHead(VariationalLossHeadBase[TEMController, TEMLossConfig]):
             signals[S.THETA_CLS_NORM] = outputs.theta_cls.detach().norm(dim=-1).mean()
         return signals
 
-    def _observation_target(self, carry: Any) -> Tensor:
+    def _observation_target(  # -------------------------------------------------------------------
+        self, carry: Any,
+    ) -> Tensor:  # fmt: skip
         """Return observation targets from TEM carry data.
 
         The preferred carry-data key is ``observation_target``. A fallback to
@@ -236,6 +257,14 @@ class TEMLossHead(VariationalLossHeadBase[TEMController, TEMLossConfig]):
             first_block = code if isinstance(code, Tensor) else next(iter(code))
             return first_block.new_zeros(())
         return coefficient * sum_regularization_terms(code, norm).sum()
+
+
+# =================================================================================================
+def _correct_prediction_count(  # -----------------------------------------------------------------
+    logits: Tensor, labels: Tensor, 
+) -> Tensor:  # fmt: skip
+    """Return the detached count of correct observation predictions for one pathway."""
+    return logits.argmax(dim=-1).eq(labels).sum().to(dtype=logits.dtype).detach()
 
 
 # =================================================================================================

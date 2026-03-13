@@ -2,6 +2,9 @@
 
 from ehc_sn.metrics.adapter import Route
 from ehc_sn.metrics.keys import (
+    TEM_ACC_OBS_ANCESTRAL,
+    TEM_ACC_OBS_INFERENCE,
+    TEM_ACC_OBS_RETRIEVED,
     TEM_LOSS_GRID_KL,
     TEM_LOSS_OBS_NLL,
     TEM_LOSS_PLACE_CONSISTENCY,
@@ -16,6 +19,9 @@ def _with_namespace(namespace: str, routes: tuple[Route, ...]) -> tuple[Route, .
 
 
 TEM_STEP_ROUTES: tuple[Route, ...] = (
+    Route("accuracy/obs_inference", *extra_ratio_paths(TEM_ACC_OBS_INFERENCE)),
+    Route("accuracy/obs_retrieved", *extra_ratio_paths(TEM_ACC_OBS_RETRIEVED)),
+    Route("accuracy/obs_ancestral", *extra_ratio_paths(TEM_ACC_OBS_ANCESTRAL)),
     Route("loss/obs_nll", *extra_ratio_paths(TEM_LOSS_OBS_NLL)),
     Route("loss/grid_kl", *extra_ratio_paths(TEM_LOSS_GRID_KL)),
     Route("loss/place_consistency", *extra_ratio_paths(TEM_LOSS_PLACE_CONSISTENCY)),

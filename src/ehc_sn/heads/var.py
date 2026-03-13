@@ -122,7 +122,7 @@ class VARLossHead(VariationalLossHeadBase[VARController, VARLossConfig]):
         return VARLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
     def _build_metric_ratios(  # -----------------------------------------------------------------
-        self, losses: VARLosses, *, batch_size: int,
+        self, losses: VARLosses, *, carry: Any, outputs: Any, batch_size: int,
     ) -> dict[str, RatioStat]:  # fmt: skip
         """Build detached ratio metrics for logging."""
         batch_count = losses.total.new_tensor(batch_size, dtype=torch.float32)
