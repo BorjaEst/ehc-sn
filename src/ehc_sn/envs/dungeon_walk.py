@@ -56,8 +56,16 @@ DEFAULT_ACTION_COUNT: Final[int] = 5
 class EnvConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`DungeonWalk`."""
 
-    max_steps: int = Field(default=32, ge=1, description="Maximum steps before truncation.")
-    observation_dim: int = Field(..., ge=1, description="Encoded observation feature dimension.")
+    max_steps: int = Field(
+        default=32,
+        ge=1,
+        description="Maximum steps before truncation.",
+    )
+    observation_dim: int = Field(
+        ...,
+        ge=1,
+        description="Encoded observation feature dimension.",
+    )
     action_count: int = Field(
         default=DEFAULT_ACTION_COUNT,
         ge=DEFAULT_ACTION_COUNT,
@@ -93,10 +101,9 @@ class DungeonWalk(EnvBase):
         self._landmarks: Tensor | None = None
         self._height = 0
         self._width = 0
-        self._action_deltas = torch.tensor(
-            [[0, 0], [-1, 0], [0, 1], [1, 0], [0, -1]], dtype=torch.int64, device=self.device
-        )
-        self._generator = torch.Generator(device=self.device if self.device is not None else "cpu")
+        self._action_deltas = torch.tensor([[0, 0], [-1, 0], [0, 1], [1, 0], [0, -1]], dtype=torch.int64)
+        self._generator_seed: int | None = None
+        self._generator = torch.Generator(device="cpu")
         self._make_specs()
 
     @property
@@ -133,17 +140,14 @@ class DungeonWalk(EnvBase):
     ) -> TensorDictBase:  # fmt: skip
         """Reset all slots from a static maze batch."""
         if tensordict is None or tensordict.is_empty():
-            raise ValueError(
-                "DungeonWalk.reset requires a maze batch with topology, observations, and mask_valid."
-            )
+            raise ValueError("DungeonWalk.reset requires a maze batch with topology, observations, and mask_valid.")  # fmt: skip
 
         self._cache_static_maps(tensordict)
+        runtime_device = self._runtime_device()
         location_id = self._sample_start_locations(tensordict)
-        previous_action = torch.zeros((*self.batch_size, 1), dtype=torch.int64, device=self.device)
-        step_count = torch.zeros((*self.batch_size, 1), dtype=torch.int32, device=self.device)
-        return self._build_state(
-            location_id=location_id, previous_action=previous_action, step_count=step_count
-        )
+        previous_action = torch.zeros((*self.batch_size, 1), dtype=torch.int64, device=runtime_device)
+        step_count = torch.zeros((*self.batch_size, 1), dtype=torch.int32, device=runtime_device)
+        return self._build_state(location_id=location_id, previous_action=previous_action, step_count=step_count)  # fmt: skip
 
     @torch.no_grad()
     def _step(  # --------------------------------------------------------------------------------
@@ -151,21 +155,21 @@ class DungeonWalk(EnvBase):
     ) -> TensorDictBase:  # fmt: skip
         """Apply a controller-selected action and emit the next current-state payload."""
         self._require_static_maps()
+        runtime_device = self._runtime_device()
+        self._ensure_runtime_device(runtime_device)
 
-        action = tensordict["action"].to(torch.int64)
+        action = tensordict["action"].to(device=runtime_device, dtype=torch.int64)
         if action.shape != (*self.batch_size, 1):
-            raise ValueError(
-                f"DungeonWalk.step expected action shape {(*self.batch_size, 1)}, got {tuple(action.shape)}."
-            )
+            raise ValueError(f"DungeonWalk.step expected action shape {(*self.batch_size, 1)}, got {tuple(action.shape)}.")  # fmt: skip
 
-        valid_action_mask = tensordict["valid_action_mask"]
+        valid_action_mask = tensordict["valid_action_mask"].to(device=runtime_device)
         invalid = ~valid_action_mask.gather(dim=-1, index=action)
         if torch.any(invalid):
             bad_rows = invalid.squeeze(-1).nonzero(as_tuple=False).flatten().tolist()
             raise ValueError(f"DungeonWalk.step received invalid actions for rows {bad_rows}.")
 
-        location_id = tensordict["location_id"].to(torch.int64)
-        step_count = tensordict["step_count"].to(torch.int32) + 1
+        location_id = tensordict["location_id"].to(device=runtime_device, dtype=torch.int64)
+        step_count = tensordict["step_count"].to(device=runtime_device, dtype=torch.int32) + 1
         rows, cols = self._unflatten_location(location_id.squeeze(-1))
         next_rows = rows + self._action_deltas[action.squeeze(-1), 0]
         next_cols = cols + self._action_deltas[action.squeeze(-1), 1]
@@ -180,7 +184,7 @@ class DungeonWalk(EnvBase):
         truncated = step_count >= self._config.max_steps
         terminated = torch.zeros_like(truncated, dtype=torch.bool)
         done = terminated | truncated
-        reward = torch.zeros((*self.batch_size, 1), dtype=torch.float32, device=self.device)
+        reward = torch.zeros((*self.batch_size, 1), dtype=torch.float32, device=runtime_device)
 
         return TensorDict(
             {
@@ -191,7 +195,7 @@ class DungeonWalk(EnvBase):
                 "done": done,
             },
             batch_size=self.batch_size,
-            device=self.device,
+            device=runtime_device,
         )
 
     def reset_slots(  # --------------------------------------------------------------------------
@@ -211,12 +215,13 @@ class DungeonWalk(EnvBase):
             return state
 
         self._cache_static_maps(tensordict, reset_mask=reset_mask)
+        runtime_device = self._runtime_device()
         reset_location_id = self._sample_start_locations(tensordict, reset_mask=reset_mask)
         reset_previous_action = torch.zeros(
-            (int(reset_mask.sum().item()), 1), dtype=torch.int64, device=self.device
+            (int(reset_mask.sum().item()), 1), dtype=torch.int64, device=runtime_device
         )
         reset_step_count = torch.zeros(
-            (int(reset_mask.sum().item()), 1), dtype=torch.int32, device=self.device
+            (int(reset_mask.sum().item()), 1), dtype=torch.int32, device=runtime_device
         )
         reset_state = self._build_state(
             location_id=reset_location_id,
@@ -238,15 +243,16 @@ class DungeonWalk(EnvBase):
         self, tensordict: TensorDictBase, reset_mask: Tensor | None = None,
     ) -> None:  # fmt: skip
         """Cache static maze tensors for all or selected slots."""
-        topology = self._require_key(tensordict, "topology").to(device=self.device, dtype=torch.bool)
-        observations = self._require_key(tensordict, "observations").to(device=self.device, dtype=torch.int64)
-        mask_valid = self._require_key(tensordict, "mask_valid").to(device=self.device, dtype=torch.bool)
+        topology = self._require_key(tensordict, "topology").to(dtype=torch.bool)
+        runtime_device = topology.device
+        observations = self._require_key(tensordict, "observations").to(device=runtime_device, dtype=torch.int64)  # fmt: skip
+        mask_valid = self._require_key(tensordict, "mask_valid").to(device=runtime_device, dtype=torch.bool)
         regions = tensordict.get("regions")
         if regions is not None:
-            regions = regions.to(device=self.device, dtype=torch.int64)
+            regions = regions.to(device=runtime_device, dtype=torch.int64)
         landmarks = tensordict.get("landmarks")
         if landmarks is not None:
-            landmarks = landmarks.to(device=self.device, dtype=torch.int64)
+            landmarks = landmarks.to(device=runtime_device, dtype=torch.int64)
 
         if topology.shape != observations.shape or topology.shape != mask_valid.shape:
             raise ValueError(
@@ -289,14 +295,16 @@ class DungeonWalk(EnvBase):
     ) -> Tensor:  # fmt: skip
         """Sample one valid reset location per selected slot."""
         self._require_static_maps()
+        runtime_device = self._runtime_device()
+        self._ensure_runtime_device(runtime_device)
         start = tensordict.get("start")
         if start is not None:
-            start = start.to(device=self.device, dtype=torch.bool)
+            start = start.to(device=runtime_device, dtype=torch.bool)
 
         slot_mask = (
             reset_mask
             if reset_mask is not None
-            else torch.ones(self.batch_size, dtype=torch.bool, device=self.device)
+            else torch.ones(self.batch_size, dtype=torch.bool, device=runtime_device)
         )
         slot_ids = slot_mask.nonzero(as_tuple=False).flatten()
         location_ids: list[Tensor] = []
@@ -320,17 +328,18 @@ class DungeonWalk(EnvBase):
             )
             location_ids.append(flat_candidates[choice])
 
-        return torch.stack(location_ids, dim=0).view(-1, 1).to(device=self.device, dtype=torch.int64)
+        return torch.stack(location_ids, dim=0).view(-1, 1).to(device=runtime_device, dtype=torch.int64)
 
     def _build_state(  # -------------------------------------------------------------------------
         self, *, location_id: Tensor, previous_action: Tensor, step_count: Tensor,
     ) -> TensorDict:  # fmt: skip
         """Construct a current-state step payload from location ids."""
         self._require_static_maps()
+        runtime_device = self._runtime_device()
 
         flat_location = location_id.squeeze(-1)
         rows, cols = self._unflatten_location(flat_location)
-        batch_index = torch.arange(flat_location.shape[0], device=self.device)
+        batch_index = torch.arange(flat_location.shape[0], device=runtime_device)
         observation_target = self._observations[batch_index, rows, cols].view(-1, 1)
         self._validate_observation_ids(observation_target)
         inputs = F.one_hot(observation_target.squeeze(-1), num_classes=self._config.observation_dim).to(
@@ -360,12 +369,13 @@ class DungeonWalk(EnvBase):
                 "step_count": step_count.to(torch.int32),
             },
             batch_size=[flat_location.shape[0]],
-            device=self.device,
+            device=runtime_device,
         )
 
     def _compute_valid_action_mask(self, rows: Tensor, cols: Tensor) -> Tensor:
         """Return legal movement actions for the current locations."""
         self._require_static_maps()
+        self._ensure_runtime_device(rows.device)
 
         next_rows = rows.unsqueeze(-1) + self._action_deltas[:, 0]
         next_cols = cols.unsqueeze(-1) + self._action_deltas[:, 1]
@@ -374,7 +384,7 @@ class DungeonWalk(EnvBase):
         )
         safe_rows = next_rows.clamp(0, self._height - 1)
         safe_cols = next_cols.clamp(0, self._width - 1)
-        batch_index = torch.arange(rows.shape[0], device=self.device).unsqueeze(-1).expand_as(safe_rows)
+        batch_index = torch.arange(rows.shape[0], device=rows.device).unsqueeze(-1).expand_as(safe_rows)
         passable = (
             self._topology[batch_index, safe_rows, safe_cols]
             & self._mask_valid[batch_index, safe_rows, safe_cols]
@@ -404,6 +414,26 @@ class DungeonWalk(EnvBase):
         if self._topology is None or self._observations is None or self._mask_valid is None:
             raise RuntimeError("DungeonWalk static maze tensors are not initialized. Call reset() first.")
 
+    def _runtime_device(self) -> torch.device:
+        """Return the device hosting the cached maze tensors."""
+        if self._topology is not None:
+            return self._topology.device
+        return torch.device(self.device) if self.device is not None else torch.device("cpu")
+
+    def _ensure_runtime_device(self, device: Device | str | None) -> None:
+        """Move cached runtime tensors and RNG to the active execution device."""
+        target = torch.device(device) if device is not None else torch.device("cpu")
+        if self._action_deltas.device != target:
+            self._action_deltas = self._action_deltas.to(target)
+
+        generator_device = torch.device(self._generator.device)
+        if generator_device.type == target.type:
+            return
+
+        seed = self._generator_seed if self._generator_seed is not None else self._generator.initial_seed()
+        self._generator = torch.Generator(device=target)
+        self._generator.manual_seed(seed)
+
     @staticmethod
     def _require_key(tensordict: TensorDictBase, key: str) -> Tensor:
         """Return a required reset key or raise a clear error."""
@@ -414,6 +444,7 @@ class DungeonWalk(EnvBase):
     def _set_seed(self, seed: int | None) -> None:
         """Seed the internal reset sampler."""
         if seed is not None:
+            self._generator_seed = seed
             self._generator.manual_seed(seed)
 
 

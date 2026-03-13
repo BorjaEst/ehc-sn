@@ -51,10 +51,11 @@ class PathIntegrator(nn.Module):
         self._conn_indices = [[f_from for f_from in range(self._n_freq) if conn[f_to][f_from]] for f_to in range(self._n_freq)]  # fmt: skip
         self._in_dims = [sum(mec_shape[f_from] for f_from in self._conn_indices[f_to]) for f_to in range(self._n_freq)]  # fmt: skip
         self._mat_shape = [(self._in_dims[f_to], mec_shape[f_to]) for f_to in range(self._n_freq)]
+        self._flat_mat_dims = [in_dim * out_dim for in_dim, out_dim in self._mat_shape]
 
         # LocationBelief weights (action-conditioned)
         hidden_dim = [config.hidden_dim] * self._n_freq
-        self.MLP_D_a = MLP([n_actions] * self._n_freq, mec_shape, [torch.tanh, None], hidden_dim, bias=[True, False])  # fmt: skip
+        self.MLP_D_a = MLP([n_actions] * self._n_freq, self._flat_mat_dims, [torch.tanh, None], hidden_dim, bias=[True, False])  # fmt: skip
         self.MLP_D_a.set_weights(1, 0.0)
         self.D_no_a = nn.ParameterList([nn.Parameter(torch.zeros(m)) for m in self._mat_shape])  # fmt: skip
 

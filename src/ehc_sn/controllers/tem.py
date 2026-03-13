@@ -181,7 +181,7 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         env_td = self.environment.reset(reset_td)
         batch_size = int(reset_td.batch_size[0])
         return TEMRolloutState(
-            model_state=self.backbone.init_state(batch_size),
+            model_state=self.backbone.init_state(batch_size, device=env_td.device),
             steps=self._zeros(batch_size, dtype="int32", device=env_td.device),
             halted=self._zeros(batch_size, dtype="bool", device=env_td.device),
             data=self._extract_step_data(env_td),

@@ -35,7 +35,8 @@ class FifoBuffer:
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, *, capacity_rows: int, keys: Sequence[str], pin_memory: bool = True,
+        self, capacity_rows: int, keys: Sequence[str], *, 
+        pin_memory: bool = True,
     ) -> None:  # fmt: skip
         """Create a FIFO buffer.
 

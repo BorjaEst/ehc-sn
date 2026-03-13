@@ -16,7 +16,7 @@ Provided transforms:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import numpy as np
 
@@ -42,9 +42,15 @@ class Compose:
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, transforms: list[Callable[[Channels], Channels]],
+        self, transforms: Sequence[Callable[[Channels], Channels] | None],
     ) -> None:  # fmt: skip
-        self.transforms = transforms
+        self.transforms = []
+        for transform in transforms:
+            if transform is None:
+                continue
+            if not callable(transform):
+                raise TypeError(f"Compose transforms must be callable or None, got {type(transform).__name__}.")  # fmt: skip
+            self.transforms.append(transform)
 
     def __call__(  # -----------------------------------------------------------------------------
         self, channels: Channels,
@@ -85,7 +91,10 @@ class RandomDihedral:
     def __call__(  # ------------------------------------------------------------------------------
         self, channels: Channels
     ) -> Channels:  # fmt: skip
-        tid = int(self._rng.integers(8))
+        first_channel = next(iter(channels.values()))
+        h, w = first_channel.shape[-2:]
+        valid_tids = (0, 1, 2, 3, 4, 5, 6, 7) if h == w else (0, 2, 4, 5)
+        tid = int(valid_tids[int(self._rng.integers(len(valid_tids)))])
         return {name: dihedral_transform(arr, tid) for name, arr in channels.items()}
 
     def __repr__(  # ------------------------------------------------------------------------------

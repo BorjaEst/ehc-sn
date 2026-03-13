@@ -41,6 +41,8 @@ Batch: TypeAlias = Dict[str, Tensor]
 ObsLogits = tuple[Tensor, Tensor, Tensor]  # (inference, retrieved, ancestral)
 GridCodes = tuple[Tensor, Tensor]  # (posterior, prior)
 PlaceCodes = tuple[Tensor, Tensor, Optional[Tensor]]  # (posterior, prior, sensory-cued retrieval)
+TEM_STATIC_REQUIRED_KEYS = ("topology", "observations", "mask_valid")
+TEM_STATIC_OPTIONAL_KEYS = ("regions", "start", "goals", "landmarks")
 
 
 # =================================================================================================
@@ -455,20 +457,26 @@ class TrainingModel(L.LightningModule):
         self.trace_specs = build_trace_spec("tem")
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
-        self._train_buffer = FifoBuffer(
-            capacity_rows=4 * config.global_batch_size,  # or local batch size if you prefer
-            keys=("inputs", "labels"),
-            pin_memory=True,
-        )
-        self._train_batch_assembler = PartialResetBatchAssembler(
-            buffer=self._train_buffer,
-            keys=("inputs", "labels"),
-        )
+        self._train_buffer: FifoBuffer | None = None
+        self._train_batch_assembler: PartialResetBatchAssembler | None = None
 
     @property
     def config(self) -> ModelConfig_TEM_V1:
         """Return the parsed configuration used by this LightningModule."""
         return self._config
+
+    def _ensure_train_batch_assembler(  # ---------------------------------------------------------
+        self, batch: Batch,
+    ) -> PartialResetBatchAssembler:  # fmt: skip
+        """Create the partial-reset buffer lazily from the observed static maze schema."""
+        if self._train_batch_assembler is not None:
+            return self._train_batch_assembler
+
+        keys = infer_tem_static_batch_keys(batch)
+        capacity_rows = 4 * self.config.global_batch_size
+        self._train_buffer = FifoBuffer(capacity_rows, keys, pin_memory=True)
+        self._train_batch_assembler = PartialResetBatchAssembler(buffer=self._train_buffer, keys=keys)
+        return self._train_batch_assembler
 
     def setup(  # --------------------------------------------------------------------------------
         self, stage: Optional[str] = None,
@@ -517,7 +525,8 @@ class TrainingModel(L.LightningModule):
     ) -> None:  # fmt: skip
         """ """
         self._train_carry = None
-        self._train_buffer.clear()
+        if self._train_buffer is not None:
+            self._train_buffer.clear()
         self.train_metrics.reset()
 
     def on_validation_epoch_start(  # ------------------------------------------------------------
@@ -533,13 +542,14 @@ class TrainingModel(L.LightningModule):
     ) -> Tensor:  # fmt: skip
         """ """
         self._apply_runtime(self.global_step, log_values=True)
+        batch_assembler = self._ensure_train_batch_assembler(batch)
 
         # Initialize carry/state on the first batch
         if self._train_carry is None:
             self._train_carry = self.step_module.initial_carry(batch)
 
         # Assemble partial-reset step batch
-        step_batch = self._train_batch_assembler.make_step_batch(
+        step_batch = batch_assembler.make_step_batch(
             incoming=batch,
             reset_mask=self._train_carry.halted,
         )
@@ -557,7 +567,7 @@ class TrainingModel(L.LightningModule):
         self._train_carry = step.carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
-        local_bs = int(batch["inputs"].shape[0])
+        local_bs = batch_size_from_static_maze_batch(batch)
         loss = _normalize_loss_for_backward(step.outputs.loss, local_bs=local_bs)
         self.manual_backward(loss)
 
@@ -632,3 +642,22 @@ def _normalize_loss_for_backward(  # -------------------------------------------
     if local_bs <= 0:
         raise ValueError(f"local_bs must be positive, got {local_bs}.")
     return total_loss / float(local_bs)
+
+
+# =================================================================================================
+def infer_tem_static_batch_keys(  # ----------------------------------------------------------------
+    batch: Batch,
+) -> tuple[str, ...]:  # fmt: skip
+    """Return the static maze keys that must move together through partial reset."""
+    missing = [key for key in TEM_STATIC_REQUIRED_KEYS if key not in batch]
+    if missing:
+        raise KeyError(f"TEM batch is missing required static maze keys: {', '.join(missing)}.")
+    return TEM_STATIC_REQUIRED_KEYS + tuple(key for key in TEM_STATIC_OPTIONAL_KEYS if key in batch)
+
+
+# =================================================================================================
+def batch_size_from_static_maze_batch(  # ---------------------------------------------------------
+    batch: Batch,
+) -> int:  # fmt: skip
+    """Return the leading batch dimension from the required TEM maze tensor schema."""
+    return int(batch[TEM_STATIC_REQUIRED_KEYS[0]].shape[0])
