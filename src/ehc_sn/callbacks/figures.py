@@ -106,6 +106,7 @@ class FiguresCallback(pl.Callback):
         self._captured_trace: Optional[TraceTree] = None
         self._captured_extras: Optional[dict[str, object]] = None
         self._required_trace_keys: set[str] = set()
+        self._required_meta_keys: set[str] = set()
         self._required_extras_keys: set[str] = set()
         register.register_builtin_figures()  # Ensure built-in figure specs are registered.
         REGISTRY.validate(settings.figures)  # Fail fast on unknown figure names.
@@ -121,10 +122,11 @@ class FiguresCallback(pl.Callback):
         if not self._should_capture(trainer, "validate"):
             return
         self._required_trace_keys = self._required_trace_keys_union(self.settings.figures)
+        self._required_meta_keys = self._required_meta_keys_union(self.settings.figures)
         self._required_extras_keys = self._required_extras_keys_union(self.settings.figures)
         set_keys = getattr(pl_module, "set_eval_trace_keys", None)
         if callable(set_keys):
-            set_keys(self._required_trace_keys)
+            set_keys(self._required_trace_keys | self._required_meta_keys)
         self._reset_capture_state()
 
     def on_validation_batch_end(  # ---------------------------------------------------------------
@@ -206,6 +208,7 @@ class FiguresCallback(pl.Callback):
         for figure_name in figure_names:
             spec = REGISTRY.get(figure_name)
             self._validate_trace_keys(trace, spec.trace_keys, figure_name)
+            self._validate_meta_keys(trace, spec.meta_keys, figure_name)
             self._validate_extras_keys(context.extras, spec.extras_keys, figure_name)
             self.generate_figure(trainer, trace, context, spec)
 
@@ -243,6 +246,15 @@ class FiguresCallback(pl.Callback):
             keys.update(REGISTRY.get(name).extras_keys)
         return keys
 
+    def _required_meta_keys_union(  # -------------------------------------------------------------
+        self, names: Iterable[str],
+    ) -> set[str]:  # fmt: skip
+        """Return the union of metadata trace requirements for the selected figures."""
+        keys: set[str] = set()
+        for name in names:
+            keys.update(REGISTRY.get(name).meta_keys)
+        return keys
+
     def _extract_extras(  # -----------------------------------------------------------------------
         self, batch: Any,
     ) -> dict[str, object]:  # fmt: skip
@@ -269,7 +281,7 @@ class FiguresCallback(pl.Callback):
     def _validate_trace_keys(  # ------------------------------------------------------------------
         self, trace: TraceTree, required: set[str], figure_name: str,
     ) -> None:  # fmt: skip
-        """ """
+        """Validate required numeric trace keys for a figure."""
         if not required:
             return
         missing: list[str] = []
@@ -279,10 +291,20 @@ class FiguresCallback(pl.Callback):
         if missing:
             raise ValueError(f"Figure '{figure_name}' missing required trace keys: {', '.join(missing)}")
 
+    def _validate_meta_keys(  # -------------------------------------------------------------------
+        self, trace: TraceTree, required: set[str], figure_name: str,
+    ) -> None:  # fmt: skip
+        """Validate required metadata trace keys for a figure."""
+        if not required:
+            return
+        missing = [path for path in sorted(required) if not self._trace_has_meta_path(trace, path)]
+        if missing:
+            raise ValueError(f"Figure '{figure_name}' missing required trace metadata: {', '.join(missing)}")
+
     def _trace_has_numeric_path(  # ---------------------------------------------------------------
         self, trace: TraceTree, path: str,
     ) -> bool:  # fmt: skip
-        """ """
+        """Return whether a numeric leaf or numeric subtree exists at ``path``."""
         if not trace.path_to_index:
             return False
 
@@ -295,6 +317,17 @@ class FiguresCallback(pl.Callback):
             if candidate.startswith(prefix) and trace.leaf_is_numeric[candidate_idx]:
                 return True
         return False
+
+    def _trace_has_meta_path(  # ------------------------------------------------------------------
+        self, trace: TraceTree, path: str,
+    ) -> bool:  # fmt: skip
+        """Return whether a metadata leaf exists at ``path``."""
+        if not trace.path_to_index:
+            return False
+        idx = trace.path_to_index.get(path)
+        if idx is None:
+            return False
+        return not trace.leaf_is_numeric[idx]
 
     def _validate_extras_keys(  # -----------------------------------------------------------------
         self, extras: dict[str, Any], required: set[str], figure_name: str,
