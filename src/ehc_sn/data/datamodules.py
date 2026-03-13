@@ -19,7 +19,7 @@ class DatamoduleConfig(BaseModel, extra="forbid"):
 
     dataset_path: Path = Field(
         ...,
-        description="Path to the processed dataset directory (contains index.jsonl + NPZ files).",
+        description="Path to the processed dataset root (contains index.jsonl and per-split channel arrays).",
     )
     global_batch_size: int = Field(
         default=8,

@@ -12,13 +12,13 @@ Typical usage:
 
 ```bash
 # Dungeons dataset (Structure + Perception panels)
-python examples/data_visualization.py --dataset_path data/processed/dungeons --idx 0
+python examples/data_visualization.py --dataset_path data/processed/dungeons --split train --idx 0
 
 # Maze-hard dataset (Navigation panel)
-python examples/data_visualization.py --dataset_path data/processed/maze-30x30-hard-1k --idx 42
+python examples/data_visualization.py --dataset_path data/processed/maze-30x30-hard-1k --split train --idx 42
 
 # Save to file instead of showing
-python examples/data_visualization.py --dataset_path data/processed/dungeons --output sample.pdf
+python examples/data_visualization.py --dataset_path data/processed/dungeons --split train --output sample.pdf
 ```
 """
 
@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Tuple
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -34,11 +33,40 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn.data.datasets import MazeDataset
-from ehc_sn.data.index import filter_index, read_index
+from ehc_sn.data.index import MazeIndexEntry, filter_index, read_index
 from ehc_sn.figures.modules.dataset import plot
 
 NAME = __file__.split("/")[-1].replace(".py", "")
 logger = logging.getLogger(NAME)
+
+
+def resolve_dataset_split(  # ---------------------------------------------------------------------
+    dataset_path: Path, split: str | None,
+) -> tuple[list[MazeIndexEntry], Path, str]:  # fmt: skip
+    """Resolve root-level processed data metadata to one concrete split directory."""
+    if not (dataset_path / "index.jsonl").is_file():
+        if (dataset_path / "dataset.json").is_file() and (dataset_path.parent / "index.jsonl").is_file():
+            raise SystemExit(
+                f"'{dataset_path}' is a split directory, not a dataset root. "
+                f"Pass '{dataset_path.parent}' and set --split={dataset_path.name}."
+            )
+        raise SystemExit(f"Missing dataset index: {dataset_path / 'index.jsonl'}")
+
+    entries = read_index(dataset_path / "index.jsonl")
+    if split is not None:
+        entries = filter_index(entries, split=split)
+    if not entries:
+        raise SystemExit(f"No entries found in {dataset_path / 'index.jsonl'}")
+
+    splits = {entry.split for entry in entries}
+    if len(splits) != 1:
+        available = ", ".join(sorted(splits))
+        raise SystemExit(
+            "Visualization requires exactly one split. " f"Pass --split with one of: {available}."
+        )
+
+    resolved_split = next(iter(splits))
+    return entries, dataset_path / resolved_split, resolved_split
 
 
 # =================================================================================================
@@ -76,7 +104,7 @@ class ExampleArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     # Data settings
     dataset_path: Path = Field(
         ...,
-        description="Path to processed dataset directory (contains index.jsonl + .npy files).",
+        description="Path to the processed dataset root (contains index.jsonl and per-split channel arrays).",
     )
     idx: int = Field(
         default=0,
@@ -117,19 +145,16 @@ def main() -> None:
     # ---------------------------------------------------------------------------------------------
     # Step 1: Load index and optionally filter by split.
     # ---------------------------------------------------------------------------------------------
-    entries = read_index(args.dataset_path / "index.jsonl")
-    if args.split:
-        entries = filter_index(entries, split=args.split)
-    if not entries:
-        raise SystemExit(f"No entries found in {args.dataset_path / 'index.jsonl'}")
+    entries, split_dir, resolved_split = resolve_dataset_split(args.dataset_path, args.split)
 
     print(f"Step 1/3: Loaded {len(entries)} index entries.")
+    print(f" - Resolved split: {resolved_split}")
     print()
 
     # ---------------------------------------------------------------------------------------------
     # Step 2: Load raw sample (no transforms → original channels preserved).
     # ---------------------------------------------------------------------------------------------
-    ds = MazeDataset(entries, args.dataset_path, transform=None)
+    ds = MazeDataset(entries, split_dir, transform=None)
     if args.idx >= len(ds):
         raise SystemExit(f"Index {args.idx} out of range (dataset has {len(ds)} samples)")
 

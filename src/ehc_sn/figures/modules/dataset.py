@@ -55,7 +55,8 @@ def plot(  # -------------------------------------------------------------------
         from ehc_sn.figures.modules.processed import plot
 
         entries = read_index(Path("data/processed/dungeons/index.jsonl"))
-        ds = MazeDataset(entries, Path("data/processed/dungeons"), transform=None)
+        entries = [entry for entry in entries if entry.split == "train"]
+        ds = MazeDataset(entries, Path("data/processed/dungeons/train"), transform=None)
         fig = plot(ds[0])
         fig.savefig("sample.pdf")
     """

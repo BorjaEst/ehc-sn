@@ -34,6 +34,22 @@ class MazeDataset(Dataset):
         self, entries: list[MazeIndexEntry], data_dir: Path, transform: Callable | None = None,
     ) -> None:  # fmt: skip
         """Dataset for maze data, backed by memory-mapped .npy files."""
+        if not entries:
+            raise ValueError("MazeDataset requires at least one index entry.")
+
+        splits = {entry.split for entry in entries}
+        if len(splits) != 1:
+            raise ValueError(
+                "MazeDataset requires entries from exactly one split; resolve a single split before loading arrays."
+            )
+
+        split = next(iter(splits))
+        if (data_dir / split).is_dir():
+            raise ValueError(
+                f"MazeDataset expects a resolved split directory, got dataset root '{data_dir}'. "
+                f"Use '{data_dir / split}' instead."
+            )
+
         self._entries = entries
         self._transform = transform
         channels = entries[0].channels
