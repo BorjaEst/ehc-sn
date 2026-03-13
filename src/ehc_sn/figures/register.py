@@ -29,6 +29,7 @@ def register_builtin_figures() -> None:
                 default_filename="dummy",
                 tags={"episode"},
                 trace_keys=set(),
+                meta_keys=set(),
                 extras_keys=set(),
             )
         )
@@ -46,6 +47,7 @@ def register_builtin_figures() -> None:
                     "act/halted",
                     "pred/solution_overlay",
                 },
+                meta_keys=set(),
                 extras_keys={"inputs", "labels"},
             )
         )
@@ -62,6 +64,7 @@ def register_builtin_figures() -> None:
                     "act/halted",
                     "pred/solution_overlay",
                 },
+                meta_keys=set(),
                 extras_keys={"inputs", "labels"},
             )
         )
@@ -77,7 +80,9 @@ def register_builtin_figures() -> None:
                 trace_keys={
                     "world_step/observation",
                     "diagnostic/lec/cells",
+                    "diagnostic/lec/filtered",
                 },
+                meta_keys=set(),
                 extras_keys=set(),
             )
         )
@@ -94,6 +99,7 @@ def register_builtin_figures() -> None:
                     "world_step/location_ids",
                     "diagnostic/mec/location_mean",
                 },
+                meta_keys={"environments"},
                 extras_keys=set(),
             )
         )
@@ -111,6 +117,7 @@ def register_builtin_figures() -> None:
                     "diagnostic/hpc/location_mean",
                     "diagnostic/hpc/memory",
                 },
+                meta_keys={"environments"},
                 extras_keys=set(),
             )
         )
@@ -127,6 +134,7 @@ def register_builtin_figures() -> None:
                     "world_step/observation",
                     "diagnostic/lec/cells",
                 },
+                meta_keys=set(),
                 extras_keys=set(),
             )
         )
@@ -143,6 +151,7 @@ def register_builtin_figures() -> None:
                     "world_step/location_ids",
                     "diagnostic/mec/location_mean",
                 },
+                meta_keys={"environments"},
                 extras_keys=set(),
             )
         )
@@ -159,6 +168,7 @@ def register_builtin_figures() -> None:
                     "world_step/location_ids",
                     "diagnostic/hpc/location_mean",
                 },
+                meta_keys={"environments"},
                 extras_keys=set(),
             )
         )

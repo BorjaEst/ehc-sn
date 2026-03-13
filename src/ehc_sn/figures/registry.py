@@ -42,6 +42,7 @@ class FigureSpec:
     default_filename: str
     tags: set[str] = field(default_factory=set)
     trace_keys: set[str] = field(default_factory=set)
+    meta_keys: set[str] = field(default_factory=set)
     extras_keys: set[str] = field(default_factory=set)
     description: str = ""
 
