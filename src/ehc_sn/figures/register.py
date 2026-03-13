@@ -80,10 +80,9 @@ def register_builtin_figures() -> None:
                 trace_keys={
                     "world_step/observation",
                     "diagnostic/lec/cells",
-                    "diagnostic/lec/filtered",
                 },
                 meta_keys=set(),
-                extras_keys=set(),
+                extras_keys={"lec/filter/alpha_sigmoid", "lec/w_f_sigmoid"},
             )
         )
 
