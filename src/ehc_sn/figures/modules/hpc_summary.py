@@ -96,7 +96,7 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
     @panel()
     def spatial_matrices(self, ax: Axes) -> None:
         nrows = len(self.freq_idxs)
-        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.07)):
+        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.07, squeeze=True)):
             cells = self.cells[freq_idx]
             axes = mosaic_axes(freq_ax, cells.shape[-1], wspace=0.04, hspace=0.04)
             axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]

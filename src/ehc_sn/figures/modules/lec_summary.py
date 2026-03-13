@@ -39,8 +39,8 @@ class LECOverview(BaseFigureTemplate):
         self.mean_activity = np.asarray([float(np.mean(cells)) for cells in self.cells])
         self.peak_activity = np.asarray([float(np.max(cells)) for cells in self.cells])
 
-        self.alpha = self.trace.get("param/lec/filter/alpha")[:, self.env_idx, :].mean(axis=0)
-        self.w_f = self.trace.get("param/lec/w_f")[:, self.env_idx, :].mean(axis=0)
+        self.alpha = _require_param_vector(self.ctx, "lec/filter/alpha_sigmoid")
+        self.w_f = _require_param_vector(self.ctx, "lec/w_f_sigmoid")
 
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def params(self, ax: Axes) -> None:
@@ -68,7 +68,22 @@ class LECOverview(BaseFigureTemplate):
         """Plot observations and LEC activations over time."""
         nrows = len(self.freq_idxs)
         options = {"vmin": 0.0, "vmax": 1.0, "cmap": "GnBu"}
-        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.1)):
+        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.1, squeeze=True)):
             plot_activation(freq_ax, self.cells[freq_idx], **options)
             freq_ax.set_title(f"Activation timeseries - Freq {freq_idx}", fontsize=7)
             freq_ax.set_yticks([]); freq_ax.set_xticks([])  # fmt: skip
+
+
+# =================================================================================================
+def _require_param_vector(  # ---------------------------------------------------------------------
+    ctx: FigureContext, key: str,
+) -> np.ndarray:  # fmt: skip
+    """Return a required one-dimensional parameter vector from figure extras."""
+    value = ctx.extras.get(key)
+    if value is None:
+        raise ValueError(f"Figure extra '{key}' is required for lec_summary")
+
+    vector = np.asarray(value, dtype=float)
+    if vector.ndim != 1:
+        raise ValueError(f"Figure extra '{key}' must be one-dimensional, got shape {vector.shape}")
+    return vector
