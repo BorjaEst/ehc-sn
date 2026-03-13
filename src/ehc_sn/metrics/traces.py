@@ -25,7 +25,7 @@ Trace keys follow the same namespace hierarchy as diagnostic signals:
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 import torch
 from torch import Tensor
@@ -33,6 +33,23 @@ from torch import Tensor
 from ehc_sn.data.schema import O_ID
 from ehc_sn.rollouts.collect import TraceField, TraceSpec, TraceValue
 from ehc_sn.training.step_loop import StepContext
+
+
+class ReplayableEnvironments:
+    """Non-pytree wrapper for replayable environment metadata."""
+
+    def __init__(self, items: list[dict[str, Any]]) -> None:
+        self._items = items
+
+    def __iter__(self):
+        return iter(self._items)
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        return self._items[index]
+
 
 # =================================================================================================
 # Common — usable in any paradigm (ACT and RL share these accessor paths)
@@ -58,10 +75,22 @@ def _get_solution_overlay(ctx: StepContext) -> TraceValue:
     return (pred == O_ID).to(torch.uint8)
 
 
-TRACE_LOSS = TraceField(name="loss/total", get=_get_loss)
-TRACE_HALTED = TraceField(name="act/halted", get=_get_halted)
-TRACE_STEPS = TraceField(name="act/steps", get=_get_steps)
-TRACE_SOLUTION_OVERLAY = TraceField(name="pred/solution_overlay", get=_get_solution_overlay)
+TRACE_LOSS = TraceField(
+    name="loss/total",
+    get=_get_loss,
+)
+TRACE_HALTED = TraceField(
+    name="act/halted",
+    get=_get_halted,
+)
+TRACE_STEPS = TraceField(
+    name="act/steps",
+    get=_get_steps,
+)
+TRACE_SOLUTION_OVERLAY = TraceField(
+    name="pred/solution_overlay",
+    get=_get_solution_overlay,
+)
 
 COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_LOSS,
@@ -82,7 +111,10 @@ def _get_q_logits_act(ctx: StepContext) -> TraceValue:
     return logits_q.detach()
 
 
-TRACE_Q_LOGITS_ACT = TraceField(name="value/q_logits", get=_get_q_logits_act)
+TRACE_Q_LOGITS_ACT = TraceField(
+    name="value/q_logits",
+    get=_get_q_logits_act,
+)
 
 ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_Q_LOGITS_ACT,)
 
@@ -121,11 +153,96 @@ def _get_rpe(ctx: StepContext) -> TraceValue:
     return (reward - value).detach()
 
 
-TRACE_Q_LOGITS_RL = TraceField(name="value/q_logits", get=_get_q_logits_rl)
-TRACE_R_LOGITS_RL = TraceField(name="value/r_logits", get=_get_r_logits_rl)
-TRACE_REWARD_ENV = TraceField(name="reward/env", get=_get_reward_env)
-TRACE_ACTION = TraceField(name="policy/action", get=_get_action)
-TRACE_RPE = TraceField(name="dopamine/rpe", get=_get_rpe)
+def _get_world_observation_tem(ctx: StepContext) -> TraceValue:
+    """Post-step observation encoding aligned with the current rollout state."""
+    return ctx.carry.data["inputs"].detach()
+
+
+def _get_world_location_ids_tem(ctx: StepContext) -> TraceValue:
+    """Post-step location ids aligned with the current rollout state."""
+    return ctx.carry.data["location_id"].squeeze(-1).detach()
+
+
+def _get_environments_tem(ctx: StepContext) -> TraceValue:
+    """Replayable world metadata derived from the static maze batch."""
+    topology = ctx.carry.static_data["topology"]
+    mask_valid = ctx.carry.static_data.get("mask_valid")
+    return ReplayableEnvironments(
+        [
+            _build_environment_metadata(topology[idx], None if mask_valid is None else mask_valid[idx])
+            for idx in range(int(topology.shape[0]))
+        ]
+    )
+
+
+def _get_diagnostic_lec_cells_tem(ctx: StepContext) -> TraceValue:
+    """Replayable LEC activations by frequency for diagnostic figures."""
+    return [cell.detach() for cell in ctx.carry.model_state.lec.cells]
+
+
+def _get_diagnostic_mec_location_mean_tem(ctx: StepContext) -> TraceValue:
+    """Replayable MEC location codes by frequency for diagnostic figures."""
+    return [cell.detach() for cell in ctx.carry.model_state.mec.cells]
+
+
+def _get_diagnostic_hpc_location_mean_tem(ctx: StepContext) -> TraceValue:
+    """Replayable HPC grounded-location codes by frequency for diagnostic figures."""
+    return [cell.detach() for cell in ctx.carry.model_state.hpc.cells]
+
+
+def _get_diagnostic_hpc_memory_tem(ctx: StepContext) -> TraceValue:
+    """Replayable final-step-compatible HPC memory state for diagnostic figures."""
+    return [memory.detach() for memory in ctx.carry.model_state.hpc.memory]
+
+
+TRACE_Q_LOGITS_RL = TraceField(
+    name="value/q_logits",
+    get=_get_q_logits_rl,
+)
+TRACE_R_LOGITS_RL = TraceField(
+    name="value/r_logits",
+    get=_get_r_logits_rl,
+)
+TRACE_REWARD_ENV = TraceField(
+    name="reward/env",
+    get=_get_reward_env,
+)
+TRACE_ACTION = TraceField(
+    name="policy/action",
+    get=_get_action,
+)
+TRACE_RPE = TraceField(
+    name="dopamine/rpe",
+    get=_get_rpe,
+)
+TRACE_WORLD_OBSERVATION_TEM = TraceField(
+    name="world_step/observation",
+    get=_get_world_observation_tem,
+)
+TRACE_WORLD_LOCATION_IDS_TEM = TraceField(
+    name="world_step/location_ids",
+    get=_get_world_location_ids_tem,
+)
+TRACE_ENVIRONMENTS_TEM = TraceField(
+    name="environments",
+    get=_get_environments_tem,
+)
+TRACE_DIAGNOSTIC_LEC_CELLS_TEM = TraceField(
+    name="diagnostic/lec/cells",
+    get=_get_diagnostic_lec_cells_tem,
+)
+TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM = TraceField(
+    name="diagnostic/mec/location_mean",
+    get=_get_diagnostic_mec_location_mean_tem,
+)
+TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM = TraceField(
+    name="diagnostic/hpc/location_mean",
+    get=_get_diagnostic_hpc_location_mean_tem,
+)
+TRACE_DIAGNOSTIC_HPC_MEMORY_TEM = TraceField(
+    name="diagnostic/hpc/memory",
+    get=_get_diagnostic_hpc_memory_tem,
+)
 
 RL_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_Q_LOGITS_RL,
@@ -145,11 +262,38 @@ TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_LOSS,
     TRACE_HALTED,
     TRACE_STEPS,
+    TRACE_WORLD_OBSERVATION_TEM,
+    TRACE_WORLD_LOCATION_IDS_TEM,
+    TRACE_ENVIRONMENTS_TEM,
+    TRACE_DIAGNOSTIC_LEC_CELLS_TEM,
+    TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
+    TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM,
+    TRACE_DIAGNOSTIC_HPC_MEMORY_TEM,
 )
 
 
 # =================================================================================================
-def build_trace_spec(paradigm: Literal["act", "rl", "tem"]) -> TraceSpec:  # --------------------
+def _build_environment_metadata(  # ---------------------------------------------------------------
+    topology: Tensor, mask_valid: Tensor | None,
+) -> dict[str, Any]:  # fmt: skip
+    """Build a lightweight world-like mapping for replayable spatial figures."""
+    topology_np = topology.detach().cpu().to(torch.bool).numpy()
+    mask_valid_np = None if mask_valid is None else mask_valid.detach().cpu().to(torch.bool).numpy()
+    height, width = topology_np.shape[-2], topology_np.shape[-1]
+    locations: list[dict[str, float | bool]] = []
+    for row in range(height):
+        for col in range(width):
+            valid = bool(topology_np[row, col])
+            if mask_valid_np is not None:
+                valid = valid and bool(mask_valid_np[row, col])
+            locations.append({"o": float(col), "y": float(row), "valid": valid})
+    return {"locations": locations, "n_locations": len(locations)}
+
+
+# =================================================================================================
+def build_trace_spec(  # --------------------------------------------------------------------------
+    paradigm: Literal["act", "rl", "tem"],
+) -> TraceSpec:  # fmt: skip
     """Build a :class:`~ehc_sn.rollouts.collect.TraceSpec` for a training paradigm.
 
     Returns common fields plus paradigm-specific fields.  Pass the returned

@@ -228,6 +228,7 @@ class FiguresCallback(pl.Callback):
     def _required_trace_keys_union(  # ------------------------------------------------------------
         self, names: Iterable[str],
     ) -> set[str]:  # fmt: skip
+        """ """
         keys: set[str] = set()
         for name in names:
             keys.update(REGISTRY.get(name).trace_keys)
@@ -236,6 +237,7 @@ class FiguresCallback(pl.Callback):
     def _required_extras_keys_union(  # -----------------------------------------------------------
         self, names: Iterable[str],
     ) -> set[str]:  # fmt: skip
+        """ """
         keys: set[str] = set()
         for name in names:
             keys.update(REGISTRY.get(name).extras_keys)
@@ -244,6 +246,7 @@ class FiguresCallback(pl.Callback):
     def _extract_extras(  # -----------------------------------------------------------------------
         self, batch: Any,
     ) -> dict[str, object]:  # fmt: skip
+        """ """
         if not self._required_extras_keys:
             return {}
         if isinstance(batch, dict):
@@ -266,22 +269,37 @@ class FiguresCallback(pl.Callback):
     def _validate_trace_keys(  # ------------------------------------------------------------------
         self, trace: TraceTree, required: set[str], figure_name: str,
     ) -> None:  # fmt: skip
+        """ """
         if not required:
             return
         missing: list[str] = []
         for path in sorted(required):
-            idx = trace.path_to_index.get(path) if trace.path_to_index else None
-            if idx is None:
-                missing.append(path)
-                continue
-            if not trace.leaf_is_numeric[idx]:
+            if not self._trace_has_numeric_path(trace, path):
                 missing.append(path)
         if missing:
             raise ValueError(f"Figure '{figure_name}' missing required trace keys: {', '.join(missing)}")
 
+    def _trace_has_numeric_path(  # ---------------------------------------------------------------
+        self, trace: TraceTree, path: str,
+    ) -> bool:  # fmt: skip
+        """ """
+        if not trace.path_to_index:
+            return False
+
+        idx = trace.path_to_index.get(path)
+        if idx is not None:
+            return bool(trace.leaf_is_numeric[idx])
+
+        prefix = f"{path}/"
+        for candidate, candidate_idx in trace.path_to_index.items():
+            if candidate.startswith(prefix) and trace.leaf_is_numeric[candidate_idx]:
+                return True
+        return False
+
     def _validate_extras_keys(  # -----------------------------------------------------------------
         self, extras: dict[str, Any], required: set[str], figure_name: str,
     ) -> None:  # fmt: skip
+        """ """
         if not required:
             return
         missing = [key for key in sorted(required) if key not in extras]

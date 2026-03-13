@@ -189,16 +189,19 @@ class TraceTree:
         self, base_path: str,
     ) -> int:  # fmt: skip
         """Return number of indexed children at a multiscale path."""
-        if not self.paths:
+        if not self.path_strs:
             return 0
-        prefix = tuple(part for part in base_path.split("/") if part)
+
+        prefix = base_path.strip("/")
+        child_prefix = f"{prefix}/"
         indices: set[int] = set()
-        for path in self.paths:
-            if len(path) <= len(prefix):
+        for path_str in self.path_strs:
+            if not path_str.startswith(child_prefix):
                 continue
-            if path[: len(prefix)] != prefix:
+            suffix = path_str[len(child_prefix) :]
+            if not suffix:
                 continue
-            next_seg = path[len(prefix)]
+            next_seg = suffix.split("/", maxsplit=1)[0]
             if next_seg.isdigit():
                 indices.add(int(next_seg))
         return len(indices)
