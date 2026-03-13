@@ -12,7 +12,6 @@ from ehc_sn.figures.plots.autocorr import plot_autocorr_mosaic, plot_radial_auto
 from ehc_sn.figures.plots.trajectory import plot_time_colored_trajectory
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.axes import mosaic_axes, subdivide_axes
-from ehc_sn.rollouts.trace_tree import TraceTree
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
@@ -46,20 +45,13 @@ class GridCellsAutocorr(BaseFigureTemplate):
             ctx: Figure context.
         """
         super().__init__(trace, ctx)
-
         self.n_freq = trace.n_freq("diagnostic/mec/location_mean")
         self.env_idx = self.trace.validate_env_idx(self.ctx.env_idx)
-        self.freq_idxs = [
-            self.trace.validate_freq_idx("diagnostic/mec/location_mean", f)
-            for f in range(self.n_freq)
-        ]  # fmt: skip
-        self.cells = [
-            self.trace.get(f"diagnostic/mec/location_mean/{f}")[:, self.env_idx, :]
-            for f in range(self.n_freq)
-        ]
+        self.freq_idxs = [self.trace.validate_freq_idx("diagnostic/mec/location_mean", f) for f in range(self.n_freq)]  # fmt: skip
 
         self.world = self.trace.get_world(self.env_idx)
         self.location_ids = self.trace.get("world_step/location_ids")[:, self.env_idx]
+        self.cells = [self.trace.get(f"diagnostic/mec/location_mean/{f}")[:, self.env_idx, :] for f in range(self.n_freq)]  # fmt: skip
 
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def map_labels(self, ax: Axes) -> None:
@@ -68,7 +60,7 @@ class GridCellsAutocorr(BaseFigureTemplate):
         Args:
             ax: Axes to draw into.
         """
-        plot_time_colored_trajectory(ax, self.world, self.location_ids.tolist())
+        plot_time_colored_trajectory(ax, self.world, self.location_ids.tolist(), background_shape="square")
         ax.set_title("Trajectory colored by time")
 
     @panel()  # Here some arguments to configure the pannel, position, etc.
@@ -82,11 +74,10 @@ class GridCellsAutocorr(BaseFigureTemplate):
             plot_radial_autocorr_cells(ax, self.world, cells, self.location_ids)
         ax.set_title("Radial autocorr (±1 std)")
 
-    @panel()  # Here some arguments to configure the pannel, position, etc.
+    @panel()
     def spatial_matrices(self, ax: Axes) -> None:
         nrows = len(self.freq_idxs)
-        child_axes = np.ravel(subdivide_axes(ax, nrows, 1, hspace=0.07))
-        for freq_idx, freq_ax in enumerate(child_axes):
+        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.07)):
             cells = self.cells[freq_idx]
             axes = mosaic_axes(freq_ax, cells.shape[-1], wspace=0.04, hspace=0.04)
             axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]

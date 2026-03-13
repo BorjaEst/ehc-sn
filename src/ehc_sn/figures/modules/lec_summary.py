@@ -34,21 +34,22 @@ class LECOverview(BaseFigureTemplate):
         self.freq_idxs = [self.trace.validate_freq_idx("diagnostic/lec/cells", f) for f in range(self.n_freq)]
 
         self.obs_values = self.trace.get("world_step/observation")[:, self.env_idx]
-        self.cells = [
-            self.trace.get(f"diagnostic/lec/cells/{f}")[:, self.env_idx, :] 
-            for f in range(self.n_freq)
-        ]  # fmt: skip
+        self.cells = [self.trace.get(f"diagnostic/lec/cells/{f}")[:, self.env_idx, :] for f in range(self.n_freq)]  # fmt: skip
 
         self.mean_activity = np.asarray([float(np.mean(cells)) for cells in self.cells])
         self.peak_activity = np.asarray([float(np.max(cells)) for cells in self.cells])
 
+        self.alpha = self.trace.get("param/lec/filter/alpha")[:, self.env_idx, :].mean(axis=0)
+        self.w_f = self.trace.get("param/lec/w_f")[:, self.env_idx, :].mean(axis=0)
+
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def params(self, ax: Axes) -> None:
-        """Plot per-frequency LEC activation summaries derived from the rollout trace."""
-        freq_ids = np.arange(self.n_freq)
-        ax.plot(freq_ids, self.mean_activity, marker="o", label="mean activation")
-        ax.plot(freq_ids, self.peak_activity, marker="s", label="peak activation")
-        ax.set_title("LEC activity summary by frequency")
+        """Plot per-frequency LEC parameters if available."""
+        n_freq = min(len(self.alpha), len(self.w_f))
+        freq_ids = np.arange(n_freq)
+        ax.plot(freq_ids, self.alpha[:n_freq], marker="o", label="sigmoid(alpha)")
+        ax.plot(freq_ids, self.w_f[:n_freq], marker="s", label="sigmoid(w_f)")
+        ax.set_title("LEC parameters by frequency")
         ax.set_xlabel("Frequency index")
         ax.set_ylabel("Value")
         ax.set_ylim(0.0, 1.05)
@@ -67,8 +68,7 @@ class LECOverview(BaseFigureTemplate):
         """Plot observations and LEC activations over time."""
         nrows = len(self.freq_idxs)
         options = {"vmin": 0.0, "vmax": 1.0, "cmap": "GnBu"}
-        child_axes = np.ravel(subdivide_axes(ax, nrows, 1, hspace=0.1))
-        for freq_idx, freq_ax in enumerate(child_axes):
+        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.1)):
             plot_activation(freq_ax, self.cells[freq_idx], **options)
             freq_ax.set_title(f"Activation timeseries - Freq {freq_idx}", fontsize=7)
             freq_ax.set_yticks([]); freq_ax.set_xticks([])  # fmt: skip

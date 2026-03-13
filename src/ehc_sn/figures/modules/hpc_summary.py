@@ -53,12 +53,7 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
 
         self.world = self.trace.get_world(self.env_idx)
         self.location_ids = self.trace.get("world_step/location_ids")[:, self.env_idx]
-
-        self.cells = [
-            self.trace.get(f"diagnostic/hpc/location_mean/{f}")[:, self.env_idx, :]
-            for f in range(self.n_freq)
-        ]
-
+        self.cells = [self.trace.get(f"diagnostic/hpc/location_mean/{f}")[:, self.env_idx, :] for f in range(self.n_freq)]  # fmt: skip
         self.memory_hier = self.trace.get("diagnostic/hpc/memory/0")[-1, self.env_idx]
         self.memory_full = self.trace.get("diagnostic/hpc/memory/1")[-1, self.env_idx]
 
@@ -69,11 +64,11 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         Args:
             ax: Axes to draw into.
         """
-        plot_time_colored_trajectory(ax, self.world, self.location_ids.tolist())
+        plot_time_colored_trajectory(ax, self.world, self.location_ids.tolist(), background_shape="square")
         ax.set_title("Trajectory colored by time")
 
     @colorbar(group="memory", label=None)
-    @panel()  # Here some arguments to configure the pannel, position, etc.
+    @panel()
     def memory_panel_a(self, ax: Axes) -> None:
         """Plot HPC hierarchical memory matrices at the final timestep.
 
@@ -86,7 +81,7 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         ax.set_yticklabels([])
 
     @colorbar(group="memory", label=None)
-    @panel()  # Here some arguments to configure the pannel, position, etc.
+    @panel()
     def memory_panel_b(self, ax: Axes) -> None:
         """Plot HPC full memory matrices at the final timestep.
 
@@ -98,11 +93,10 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         ax.set_xticklabels([])
         ax.set_yticklabels([])
 
-    @panel()  # Here some arguments to configure the pannel, position, etc.
+    @panel()
     def spatial_matrices(self, ax: Axes) -> None:
         nrows = len(self.freq_idxs)
-        child_axes = np.ravel(subdivide_axes(ax, nrows, 1, hspace=0.07))
-        for freq_idx, freq_ax in enumerate(child_axes):
+        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.07)):
             cells = self.cells[freq_idx]
             axes = mosaic_axes(freq_ax, cells.shape[-1], wspace=0.04, hspace=0.04)
             axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
