@@ -33,6 +33,7 @@ export HRM_V1_CONFIGURATION_PATH="config/hrm-mazehard.v1.haicore.toml"
 # Precision reproducibility: must be set before CUDA kernels initialise.
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 export PYTHONHASHSEED=0
+export MPLBACKEND=Agg
 
 # Run the training script with srun for proper resource allocation and binding
 srun --cpu-bind=cores \
