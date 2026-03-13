@@ -10,7 +10,11 @@ from matplotlib.colors import Normalize
 from numpy.typing import NDArray
 
 from ehc_sn.figures.utils.actions import action_patch
-from ehc_sn.figures.utils.axes import configure_environment_axes
+from ehc_sn.figures.utils.axes import (
+    _environment_locations,
+    _environment_n_locations,
+    configure_environment_axes,
+)
 
 
 def plot_map(
@@ -48,7 +52,8 @@ def plot_map(
         The axes object with the environment map rendered.
     """
     values = np.asarray(values, dtype=float)
-    n_locations = len(getattr(environment, "locations", []))
+    locations = _environment_locations(environment)
+    n_locations = _environment_n_locations(environment)
     if values.size != n_locations:
         raise ValueError("values length must match number of locations: " f"{values.size} != {n_locations}")
     has_finite = values.size > 0 and np.isfinite(values).any()
@@ -65,7 +70,7 @@ def plot_map(
 
     # Auto-scale radius based on environment density
     if radius is None:
-        radius = _default_radius(getattr(environment, "n_locations", 0))
+        radius = _default_radius(n_locations)
 
     if ax is None:
         _, ax = plt.subplots()
@@ -77,7 +82,7 @@ def plot_map(
     outline_patches: List = []
 
     # Draw locations
-    for i, location in enumerate(environment.locations):
+    for i, location in enumerate(locations):
         is_invalid = invalid_mask[i] if invalid_mask.size else False
         if shape == "square":
             patch = plt.Rectangle(
@@ -102,7 +107,7 @@ def plot_map(
                 if action["probability"] > 0:
                     transitions = np.array(action["transition"])
                     loc_indices = np.where(transitions > 0)[0]
-                    locations_to = [environment.locations[loc_to] for loc_to in loc_indices]
+                    locations_to = [locations[loc_to] for loc_to in loc_indices]
                     for loc_to in locations_to:
                         action_patches.append(
                             action_patch(
@@ -114,7 +119,7 @@ def plot_map(
                         )
 
     # Highlight shiny locations with red outline
-    for location in environment.locations:
+    for location in locations:
         if location.get("shiny", False):
             if shape == "square":
                 outline = plt.Rectangle(

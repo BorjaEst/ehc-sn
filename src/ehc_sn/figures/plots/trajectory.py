@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib.collections import LineCollection
 
 from ehc_sn.figures.plots.map import plot_map
+from ehc_sn.figures.utils.axes import _environment_locations
 
 
 def plot_time_colored_trajectory(
@@ -38,7 +39,7 @@ def plot_time_colored_trajectory(
         ax.axis("off")
         return ax
 
-    n_locations = len(getattr(world, "locations", []))
+    n_locations = len(_environment_locations(world))
     values = np.full(n_locations, np.nan, dtype=float)
     plot_map(world, values, ax=ax, shape=background_shape)
 
@@ -67,7 +68,7 @@ def plot_time_colored_trajectory(
 
 def _trajectory_coords(world: object, location_ids: list[int]) -> np.ndarray:
     coords = []
-    locations = getattr(world, "locations", [])
+    locations = _environment_locations(world)
     for loc_id in location_ids:
         if 0 <= loc_id < len(locations):
             loc = locations[loc_id]
