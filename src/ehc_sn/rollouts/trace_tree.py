@@ -161,6 +161,19 @@ class TraceTree:
         meta = self._meta_at_path("meta")
         return dict(meta) if isinstance(meta, dict) else {}
 
+    def get_meta_path(  # -------------------------------------------------------------------------
+        self, path: str,
+    ) -> Any:  # fmt: skip
+        """Return the metadata leaf stored at ``path``.
+
+        Raises:
+            ValueError: If the trace has no metadata at the requested path.
+        """
+        value = self._meta_at_path(path)
+        if value is None:
+            raise ValueError(f"TraceTree metadata key '{path}' missing")
+        return value
+
     def get_environments(  # ----------------------------------------------------------------------
         self,
     ) -> list[Any]:  # fmt: skip
