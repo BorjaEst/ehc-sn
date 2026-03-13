@@ -85,10 +85,10 @@ diagnostic_level = "standard"
     min_ratio    = 0.01
 
 [runtime.memory]
-    eta            = 0.5
-    eta_it         = 16000
-    hebbian_decay  = 0.9999
-    lambda_it      = 200
+    eta           = 0.5
+    eta_it        = 16000
+    hebbian_decay = 0.9999
+    lambda_it     = 200
 
 [runtime.uncertainty]
     p2g_sig_half_it  = 400
