@@ -35,6 +35,7 @@ from ehc_sn.rollouts.collect import TraceField, TraceSpec, TraceValue
 from ehc_sn.training.step_loop import StepContext
 
 
+# =================================================================================================
 class ReplayableEnvironments:
     """Non-pytree wrapper for replayable environment metadata."""
 
@@ -180,6 +181,11 @@ def _get_diagnostic_lec_cells_tem(ctx: StepContext) -> TraceValue:
     return [cell.detach() for cell in ctx.carry.model_state.lec.cells]
 
 
+def _get_diagnostic_lec_filtered_tem(ctx: StepContext) -> TraceValue:
+    """Replayable LEC filtered by frequency for diagnostic figures."""
+    return [cell.detach() for cell in ctx.carry.model_state.lec.filtered]
+
+
 def _get_diagnostic_mec_location_mean_tem(ctx: StepContext) -> TraceValue:
     """Replayable MEC location codes by frequency for diagnostic figures."""
     return [cell.detach() for cell in ctx.carry.model_state.mec.cells]
@@ -231,6 +237,10 @@ TRACE_DIAGNOSTIC_LEC_CELLS_TEM = TraceField(
     name="diagnostic/lec/cells",
     get=_get_diagnostic_lec_cells_tem,
 )
+TRACE_DIAGNOSTIC_LEC_FILTERED_TEM = TraceField(
+    name="diagnostic/lec/filtered",
+    get=_get_diagnostic_lec_filtered_tem,
+)
 TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM = TraceField(
     name="diagnostic/mec/location_mean",
     get=_get_diagnostic_mec_location_mean_tem,
@@ -266,6 +276,7 @@ TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_WORLD_LOCATION_IDS_TEM,
     TRACE_ENVIRONMENTS_TEM,
     TRACE_DIAGNOSTIC_LEC_CELLS_TEM,
+    TRACE_DIAGNOSTIC_LEC_FILTERED_TEM,
     TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
     TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM,
     TRACE_DIAGNOSTIC_HPC_MEMORY_TEM,
@@ -335,6 +346,7 @@ def build_trace_spec(  # -------------------------------------------------------
 
 # =================================================================================================
 __all__ = [
+    "ReplayableEnvironments",
     "COMMON_TRACE_FIELDS", "ACT_TRACE_FIELDS", "RL_TRACE_FIELDS", TEM_TRACE_FIELDS,
-    "build_trace_spec"
+    "build_trace_spec",
 ]  # fmt: skip
