@@ -150,7 +150,7 @@ class FiguresCallback(pl.Callback):
         if trace is None:
             return
         self._captured_trace = self._to_cpu_trace(trace)
-        self._captured_extras = self._extract_extras(batch)
+        self._captured_extras = self._extract_extras(batch, pl_module)
 
     def on_validation_epoch_end(  # ---------------------------------------------------------------
         self, trainer: Trainer, pl_module: LightningModule,
@@ -256,6 +256,33 @@ class FiguresCallback(pl.Callback):
         return keys
 
     def _extract_extras(  # -----------------------------------------------------------------------
+        self, batch: Any, pl_module: LightningModule,
+    ) -> dict[str, object]:  # fmt: skip
+        """Collect figure extras from the batch first, then from the module if needed."""
+        if not self._required_extras_keys:
+            return {}
+
+        extras = self._extract_batch_extras(batch)
+        missing = self._required_extras_keys.difference(extras)
+        if not missing:
+            return extras
+
+        get_figure_extras = getattr(pl_module, "get_figure_extras", None)
+        if not callable(get_figure_extras):
+            return extras
+
+        model_extras = get_figure_extras(set(missing))
+        if model_extras is None:
+            return extras
+        if not isinstance(model_extras, dict):
+            raise ValueError("get_figure_extras must return a dict[str, object] or None")
+
+        for key, value in model_extras.items():
+            if key in missing and value is not None:
+                extras[key] = self._normalize_extra_value(value)
+        return extras
+
+    def _extract_batch_extras(  # -----------------------------------------------------------------
         self, batch: Any,
     ) -> dict[str, object]:  # fmt: skip
         """ """
@@ -272,11 +299,19 @@ class FiguresCallback(pl.Callback):
             value = batch_dict.get(key)
             if value is None:
                 continue
-            if torch.is_tensor(value):
-                extras[key] = value[:10].detach().cpu().numpy()
-            else:
-                extras[key] = value
+            extras[key] = self._normalize_extra_value(value, truncate_batch_rows=True)
         return extras
+
+    def _normalize_extra_value(  # ---------------------------------------------------------------
+        self, value: object, *, truncate_batch_rows: bool = False,
+    ) -> object:  # fmt: skip
+        """Convert tensor extras to CPU NumPy arrays while preserving non-tensors."""
+        if torch.is_tensor(value):
+            tensor = value.detach().cpu()
+            if truncate_batch_rows and tensor.ndim > 0:
+                tensor = tensor[:10]
+            return tensor.numpy()
+        return value
 
     def _validate_trace_keys(  # ------------------------------------------------------------------
         self, trace: TraceTree, required: set[str], figure_name: str,
