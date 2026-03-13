@@ -455,6 +455,7 @@ class TrainingModel(L.LightningModule):
         self.train_metrics = build_train_metrics(TEM_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(TEM_EPISODE_ROUTES).clone(prefix="val/")
         self.trace_specs = build_trace_spec("tem")
+        self._eval_trace_keys: set[str] | None = None
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer: FifoBuffer | None = None
@@ -535,6 +536,10 @@ class TrainingModel(L.LightningModule):
         """ """
         self.val_metrics.reset()
 
+    def set_eval_trace_keys(self, keys: set[str]) -> None:
+        """Set the semantic trace keys required for evaluation-time figure capture."""
+        self._eval_trace_keys = set(keys)
+
     # -- Training ----------------------------------------------------------------------------------
 
     def training_step(  # -------------------------------------------------------------------------
@@ -600,7 +605,12 @@ class TrainingModel(L.LightningModule):
         carry0 = self.step_module.initial_carry(batch)
 
         # Initialize carry/state on the first batch
-        step, collector = None, TraceCollector(TraceTree(), self.trace_specs)
+        if self._eval_trace_keys is None:
+            trace_specs = self.trace_specs
+        else:
+            trace_specs = build_trace_spec("tem", include_keys=self._eval_trace_keys)
+
+        step, collector = None, TraceCollector(TraceTree(), trace_specs)
         for t, step in StepLoop(self.step_module, step_batches, carry0, options=step_options):
             collector.append(t, step)
         if step is None:
