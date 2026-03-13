@@ -4,17 +4,17 @@ from ehc_sn.figures.modules import (
     dataset,
     dummy,
     evolution,
-    feature_cells,
-    grid_cells,
-    hpc_overview,
-    lec_overview,
-    mec_overview,
+    hpc_cells,
+    hpc_summary,
+    lec_pipeline,
+    lec_summary,
+    mec_cells,
+    mec_summary,
     overlay,
-    place_cells,
 )
 
 # =================================================================================================
 __all__ = [
-	"dataset", "dummy", "evolution", "feature_cells", "grid_cells", "hpc_overview", "lec_overview",
-	"mec_overview", "overlay", "place_cells",
+	"dataset", "dummy", "evolution", "lec_pipeline", "mec_cells", "hpc_summary", "lec_summary",
+	"mec_summary", "overlay", "hpc_cells",
 ]  # fmt: skip

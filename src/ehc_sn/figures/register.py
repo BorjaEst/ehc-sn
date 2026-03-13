@@ -5,13 +5,13 @@ from __future__ import annotations
 from ehc_sn.figures.modules import (
     dummy,
     evolution,
-    feature_cells,
-    grid_cells,
-    hpc_overview,
-    lec_overview,
-    mec_overview,
+    hpc_cells,
+    hpc_summary,
+    lec_pipeline,
+    lec_summary,
+    mec_cells,
+    mec_summary,
     overlay,
-    place_cells,
 )
 from ehc_sn.figures.registry import REGISTRY, FigureSpec
 
@@ -42,7 +42,10 @@ def register_builtin_figures() -> None:
                 plot=overlay.plot,
                 default_filename="overlay",
                 tags={"paper", "mazehard"},
-                trace_keys={"act/halted", "pred/solution_overlay"},
+                trace_keys={
+                    "act/halted",
+                    "pred/solution_overlay",
+                },
                 extras_keys={"inputs", "labels"},
             )
         )
@@ -55,85 +58,107 @@ def register_builtin_figures() -> None:
                 plot=evolution.plot,
                 default_filename="evolution",
                 tags={"mazehard"},
-                trace_keys={"act/halted", "pred/solution_overlay"},
+                trace_keys={
+                    "act/halted",
+                    "pred/solution_overlay",
+                },
                 extras_keys={"inputs", "labels"},
             )
         )
 
-    if not REGISTRY.has("lec_feature_cells"):
+    if not REGISTRY.has("lec_summary"):
         REGISTRY.register(
             FigureSpec(
-                name="lec_feature_cells",
-                description="LEC feature/cell timeseries diagnostic",
-                plot=feature_cells.plot,
-                default_filename="lec-feature-cells",
-                tags={"lec"},
-                trace_keys={"world_step/observation", "output/features"},
-                extras_keys=set(),
-            )
-        )
-
-    if not REGISTRY.has("lec_overview"):
-        REGISTRY.register(
-            FigureSpec(
-                name="lec_overview",
-                description="LEC overview with parameters and per-frequency activations",
-                plot=lec_overview.plot,
+                name="lec_summary",
+                description="LEC overview with observations and per-frequency activations",
+                plot=lec_summary.plot,
                 default_filename="lec-overview",
                 tags={"lec"},
-                trace_keys={"world_step/observation"},
-                extras_keys={"lec"},
-            )
-        )
-
-    if not REGISTRY.has("mec_grid_cells"):
-        REGISTRY.register(
-            FigureSpec(
-                name="mec_grid_cells",
-                description="Single-frequency MEC grid-cell spatial maps and autocorrelograms",
-                plot=grid_cells.plot,
-                default_filename="mec-grid-cells",
-                tags={"mec"},
-                trace_keys={"world_step/location_ids"},
+                trace_keys={
+                    "world_step/observation",
+                    "diagnostic/lec/cells",
+                },
                 extras_keys=set(),
             )
         )
 
-    if not REGISTRY.has("mec_overview"):
+    if not REGISTRY.has("mec_summary"):
         REGISTRY.register(
             FigureSpec(
-                name="mec_overview",
+                name="mec_summary",
                 description="Multi-frequency MEC overview",
-                plot=mec_overview.plot,
+                plot=mec_summary.plot,
                 default_filename="mec-overview",
                 tags={"mec"},
-                trace_keys={"world_step/location_ids"},
+                trace_keys={
+                    "world_step/location_ids",
+                    "diagnostic/mec/location_mean",
+                },
                 extras_keys=set(),
             )
         )
 
-    if not REGISTRY.has("hpc_place_cells"):
+    if not REGISTRY.has("hpc_summary"):
         REGISTRY.register(
             FigureSpec(
-                name="hpc_place_cells",
-                description="Single-frequency HPC place-cell spatial maps and autocorrelograms",
-                plot=place_cells.plot,
-                default_filename="hpc-place-cells",
-                tags={"hpc"},
-                trace_keys={"world_step/location_ids"},
-                extras_keys=set(),
-            )
-        )
-
-    if not REGISTRY.has("hpc_overview"):
-        REGISTRY.register(
-            FigureSpec(
-                name="hpc_overview",
+                name="hpc_summary",
                 description="Multi-frequency HPC overview with memory panels",
-                plot=hpc_overview.plot,
+                plot=hpc_summary.plot,
                 default_filename="hpc-overview",
                 tags={"hpc"},
-                trace_keys={"world_step/location_ids"},
+                trace_keys={
+                    "world_step/location_ids",
+                    "diagnostic/hpc/location_mean",
+                    "diagnostic/hpc/memory",
+                },
+                extras_keys=set(),
+            )
+        )
+
+    if not REGISTRY.has("lec_pipeline"):
+        REGISTRY.register(
+            FigureSpec(
+                name="lec_pipeline",
+                description="Single-frequency LEC activation detail diagnostic",
+                plot=lec_pipeline.plot,
+                default_filename="lec-feature-cells",
+                tags={"lec"},
+                trace_keys={
+                    "world_step/observation",
+                    "diagnostic/lec/cells",
+                },
+                extras_keys=set(),
+            )
+        )
+
+    if not REGISTRY.has("mec_cells"):
+        REGISTRY.register(
+            FigureSpec(
+                name="mec_cells",
+                description="Single-frequency MEC grid-cell spatial maps and autocorrelograms",
+                plot=mec_cells.plot,
+                default_filename="mec-grid-cells",
+                tags={"mec"},
+                trace_keys={
+                    "world_step/location_ids",
+                    "diagnostic/mec/location_mean",
+                },
+                extras_keys=set(),
+            )
+        )
+
+    if not REGISTRY.has("hpc_cells"):
+        REGISTRY.register(
+            FigureSpec(
+                name="hpc_cells",
+                description="Single-frequency HPC place-cell spatial maps and autocorrelograms",
+                plot=hpc_cells.plot,
+                default_filename="hpc-place-cells",
+                tags={"hpc"},
+                trace_keys={
+                    "world_step/location_ids",
+                    "diagnostic/hpc/location_mean",
+                },
                 extras_keys=set(),
             )
         )
