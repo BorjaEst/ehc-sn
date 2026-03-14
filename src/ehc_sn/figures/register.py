@@ -133,6 +133,7 @@ def register_builtin_figures() -> None:
                 trace_keys={
                     "world_step/observation",
                     "diagnostic/lec/cells",
+                    "diagnostic/lec/filtered",
                 },
                 meta_keys=set(),
             )
