@@ -9,6 +9,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
+from ehc_sn.figures.utils.axes import _environment_n_locations
 from ehc_sn.figures.utils.rasterize import rasterize_locations
 from ehc_sn.rollouts.analysis import aggregate_rate_map
 
@@ -121,7 +122,7 @@ def _radial_autocorr_summary(
     n_bins: int = 32,
 ) -> tuple[NDArray, NDArray, NDArray, int]:
     location_ids = np.asarray(location_ids, dtype=int)
-    n_locations = len(getattr(world, "locations", []))
+    n_locations = _environment_n_locations(world)
     rate_map, _ = aggregate_rate_map(cells_trace, location_ids, n_locations)
     if rate_map.size == 0:
         empty = np.zeros((0,), dtype=float)
@@ -280,8 +281,7 @@ def _rate_map_cell_values(
     cell_idx: int,
 ) -> NDArray:
     location_ids = np.asarray(location_ids, dtype=int)
-    n_locations = len(getattr(world, "locations", []))
-    rate_map, _ = aggregate_rate_map(cells_trace, location_ids, n_locations)
+    rate_map, _ = aggregate_rate_map(cells_trace, location_ids, _environment_n_locations(world))
     if rate_map.size == 0 or cell_idx >= rate_map.shape[0]:
         return np.zeros((0,), dtype=float)
     return rate_map[cell_idx]

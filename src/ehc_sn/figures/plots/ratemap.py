@@ -6,6 +6,7 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
 from ehc_sn.figures.plots.map import plot_map
+from ehc_sn.figures.utils.axes import _environment_n_locations
 from ehc_sn.figures.utils.rasterize import rasterize_locations
 from ehc_sn.rollouts.analysis import aggregate_rate_map
 
@@ -38,7 +39,13 @@ def plot_ratemap_cell(
     Returns:
         The axes with the rate map rendered.
     """
-    rate_map, _ = aggregate_rate_map(cells, location_ids, len(world.locations))
+    n_locations = _environment_n_locations(world)
+    rate_map, _ = aggregate_rate_map(cells, location_ids, n_locations)
+    if rate_map.size == 0 or cell_idx < 0 or cell_idx >= rate_map.shape[0]:
+        ax.text(0.5, 0.5, "No data", ha="center", va="center")
+        ax.axis("off")
+        return ax
+
     values = rate_map[cell_idx]
 
     finite_mask = np.isfinite(values)
@@ -79,7 +86,7 @@ def plot_ratematx_cell(
     Returns:
         The axes with the rate map matrix form rendered.
     """
-    n_locations = len(getattr(world, "locations", []))
+    n_locations = _environment_n_locations(world)
     rate_map, _ = aggregate_rate_map(cells, location_ids, n_locations)
     if rate_map.size == 0 or cell_idx < 0 or cell_idx >= rate_map.shape[0]:
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
