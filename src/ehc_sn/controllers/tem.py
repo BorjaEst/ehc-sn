@@ -8,7 +8,7 @@ properties rather than tuple positions or legacy model-internal structures.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Final, Protocol
+from typing import Any, Protocol
 
 import torch
 from pydantic import BaseModel, Field
@@ -29,7 +29,6 @@ PLACE_TRANSITION_RELATION: str = "place_transition"
 PLACE_SENSORY_RELATION: str = "place_sensory"
 GRID_REG_TERM: str = "grid"
 PLACE_REG_TERM: str = "place"
-NO_PREVIOUS_ACTION: Final[int] = -1
 
 
 # ==================================================================================================
@@ -242,25 +241,16 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
     ) -> dict[str, Tensor]:  # fmt: skip
         """Extract the current-step model payload from an environment state.
 
-        Episode starts are represented to the backbone as "no previous action"
-        rather than as the environment stay action so MEC can preserve the raw
-        reset prior on the first step, matching legacy TEM semantics.
+        The model-facing payload keeps raw action ids and adds explicit
+        episode-start metadata derived from the environment step counter.
         """
         keys = (
             "inputs", "observation_target", "previous_action", "location_id", "region_id",
             "landmark_id", "valid_action_mask", "step_count",
         )  # fmt: skip
         payload = {key: env_td[key] for key in keys if key in env_td.keys()}
-        if "previous_action" not in payload or "step_count" not in payload:
-            return payload
-
-        episode_start = payload["step_count"].squeeze(-1).to(torch.int32) == 0
-        if not torch.any(episode_start):
-            return payload
-
-        previous_action = payload["previous_action"].clone()
-        previous_action[episode_start] = NO_PREVIOUS_ACTION
-        payload["previous_action"] = previous_action
+        if "step_count" in payload:
+            payload["episode_start"] = payload["step_count"].squeeze(-1).to(torch.int32) == 0
         return payload
 
     def _refresh_halted_slots(  # ---------------------------------------------------------------
@@ -341,7 +331,7 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
 # =================================================================================================
 __all__ = [
     "GRID_REG_TERM", "GRID_TRANSITION_RELATION", "PLACE_REG_TERM", "PLACE_SENSORY_RELATION",
-    "PLACE_TRANSITION_RELATION", "NO_PREVIOUS_ACTION",
+    "PLACE_TRANSITION_RELATION",
     "TEMController", "TEMControllerConfig", "TEMOutput", "TEMRolloutBackbone",
     "TEMRolloutState",
 ]  # fmt: skip

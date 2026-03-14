@@ -18,7 +18,6 @@ from scipy.stats import truncnorm
 from torch import Tensor, nn
 
 from ehc_sn import utils
-from ehc_sn.controllers.tem import NO_PREVIOUS_ACTION
 from ehc_sn.modules.mec.layout import MECLayout, resolve_mec_layout
 from ehc_sn.modules.mec.ovc import OVCCorrection, OVCSettings
 from ehc_sn.modules.mec.p2g import P2GMemory, P2GMemSettings
@@ -247,12 +246,13 @@ class MECModel(nn.Module):
         raise NotImplementedError("MEC forward not implemented. Use generative() or inference().")
 
     def generative(  # ----------------------------------------------------------------------------
-        self, action: Tensor, landmark_id: Tensor | None, state: MECState,
+        self, action: Tensor, episode_start: Tensor | None, landmark_id: Tensor | None, state: MECState,
     ) -> tuple[AbstractLocation, MECState]:  # fmt: skip
         """Run the generative (path integration) update.
 
         Args:
             action: Action ids of shape `(batch, 1)` from the environment.
+            episode_start: Optional boolean first-step mask of shape `(batch,)` or `(batch, 1)`.
             landmark_id: Optional current-cell landmark ids of shape `(batch, 1)`.
             state: Current MEC state.
 
@@ -260,7 +260,9 @@ class MECModel(nn.Module):
             A tuple `(g_gen, new_state)` where `g_gen` is the generative grid
             code and `new_state` is the updated MEC state.
         """
-        action_encoded, no_previous_action = self._encode_action_ids(action)
+        reset_mask = self._normalize_reset_mask(
+            episode_start, batch_size=action.shape[0], device=action.device
+        )
         no_direc_mask = None
         if landmark_id is not None:
             no_direc_mask = landmark_id.squeeze(-1).to(torch.int64) != 0
@@ -268,7 +270,7 @@ class MECModel(nn.Module):
                 no_direc_mask = None
 
         # 1) Action-driven transition for the state (legacy g_path)
-        transition = self.path_integration(action_encoded, state.cells, no_direc_mask=None)
+        transition = self.path_integration(action, state.cells, no_direc_mask=None)
         if self.config.do_sample:
             cells_next = utils.sample_diag_gaussian(transition)
         else:
@@ -276,15 +278,15 @@ class MECModel(nn.Module):
 
         # 2) g_gen: reuse mu when possible, only compute no_direc when needed
         if no_direc_mask is not None:
-            g_gen = self._clamp(self.path_integration.mean(action_encoded, state.cells, no_direc_mask))
+            g_gen = self._clamp(self.path_integration.mean(action, state.cells, no_direc_mask))
         elif self.config.do_sample:
             g_gen = cells_next  # legacy: g_gen == sampled g when no shiny
         else:
             g_gen = self._clamp(transition.mean)
 
-        if torch.any(no_previous_action):
+        if torch.any(reset_mask):
             g_gen, next_state = self._preserve_reset_rows(
-                no_previous_action, g_gen, state, state.new(cells_next, transition.uncertainty)
+                reset_mask, g_gen, state, state.new(cells_next, transition.uncertainty)
             )
             return g_gen, next_state
 
@@ -336,7 +338,7 @@ class MECModel(nn.Module):
     def _preserve_reset_rows(  # ------------------------------------------------------------------
         reset_mask: Tensor, g_gen: AbstractLocation, state_before: MECState, state_after: MECState,
     ) -> tuple[AbstractLocation, MECState]:  # fmt: skip
-        """Restore pre-step MEC priors for rows with no previous action."""
+        """Restore pre-step MEC priors for rows at episode start."""
         if not torch.any(reset_mask):
             return g_gen, state_after
         return (
@@ -344,23 +346,14 @@ class MECModel(nn.Module):
             state_after.replace_rows(reset_mask, state_before),
         )
 
-    def _encode_action_ids(  # --------------------------------------------------------------------
-        self, action: Tensor,
-    ) -> tuple[Tensor, Tensor]:  # fmt: skip
-        """Encode environment action ids for path integration.
-
-        Returns the one-hot action basis plus a boolean mask selecting rows that
-        represent the controller-internal "no previous action" boundary.
-        """
-        action_ids = action.squeeze(-1).to(torch.int64)
-        no_previous_action = action_ids == NO_PREVIOUS_ACTION
-        invalid = ((action_ids < 0) & ~no_previous_action) | (action_ids >= self._action_count)
-        if torch.any(invalid):
-            bad_ids = action_ids[invalid].unique(sorted=True)
-            raise ValueError(f"Action ids must be in [0, {self._action_count}), got {bad_ids.tolist()}.")
-        encoded_ids = action_ids.masked_fill(no_previous_action, 0)
-        encoded = torch.nn.functional.one_hot(encoded_ids, num_classes=self._action_count).to(torch.float32)
-        return encoded, no_previous_action
+    @staticmethod
+    def _normalize_reset_mask(  # -----------------------------------------------------------------
+        episode_start: Tensor | None, *, batch_size: int, device: torch.device,
+    ) -> Tensor:  # fmt: skip
+        """Normalize optional episode-start metadata to a boolean batch mask."""
+        if episode_start is None:
+            return torch.zeros((batch_size,), dtype=torch.bool, device=device)
+        return episode_start.reshape(batch_size, -1).any(dim=1).to(device=device, dtype=torch.bool)
 
 
 # =================================================================================================

@@ -78,12 +78,12 @@ class PathIntegrator(nn.Module):
         return self._n_freq
 
     def forward(  # -------------------------------------------------------------------------------
-        self, a: Tensor, g_prev: list[Tensor], no_direc_mask: Tensor | None = None,
+        self, action_ids: Tensor, g_prev: list[Tensor], no_direc_mask: Tensor | None = None,
     ) -> LocationBelief:  # fmt: skip
         """Compute the transition distribution for a single step.
 
         Args:
-            a: One-hot action tensor of shape `(batch, n_a)`.
+            action_ids: Discrete action ids of shape `(batch,)` or `(batch, 1)`.
             g_prev: Previous grid-code activations per frequency.
             no_direc_mask: Optional boolean mask of shape `(batch,)` indicating
                 environments that should use the non-directional transition.
@@ -91,17 +91,17 @@ class PathIntegrator(nn.Module):
         Returns:
             A `LocationBelief` with mean and uncertainty per frequency.
         """
-        mu = self.mean(a, g_prev, no_direc_mask)
+        mu = self.mean(action_ids, g_prev, no_direc_mask)
         sigma = self.uncertainty_mlp(g_prev)
         return LocationBelief(mean=mu, uncertainty=sigma)
 
     def mean(  # ----------------------------------------------------------------------------------
-        self, a: Tensor, g: list[Tensor], no_direc_mask: Tensor | None,
+        self, action_ids: Tensor, g: list[Tensor], no_direc_mask: Tensor | None,
     ) -> list[Tensor]:  # fmt: skip
         """Compute the mean transition update.
 
         Args:
-            a: One-hot action tensor of shape `(batch, n_a)`.
+            action_ids: Discrete action ids of shape `(batch,)` or `(batch, 1)`.
             g: Current grid-code activations per frequency.
             no_direc_mask: Optional boolean mask selecting environments that
                 should use the non-directional transition.
@@ -109,7 +109,7 @@ class PathIntegrator(nn.Module):
         Returns:
             Mean grid-code activations after applying the transition.
         """
-        mats = self._transition_matrices(a, no_direc_mask)
+        mats = self._transition_matrices(action_ids, no_direc_mask)
 
         # Build input by concatenating connected frequencies
         g_in = [
@@ -122,18 +122,19 @@ class PathIntegrator(nn.Module):
         return [g_f + delta_f for g_f, delta_f in zip(g, delta)]
 
     def _transition_matrices(  # ------------------------------------------------------------------
-        self, a: Tensor, no_direc_mask: Tensor | None,
+        self, action_ids: Tensor, no_direc_mask: Tensor | None,
     ) -> list[Tensor]:  # fmt: skip
         """Build per-frequency transition matrices.
 
         Args:
-            a: One-hot action tensor of shape `(batch, n_a)`.
+            action_ids: Discrete action ids of shape `(batch,)` or `(batch, 1)`.
             no_direc_mask: Optional boolean mask selecting environments that
                 should use `D_no_a`.
 
         Returns:
             A list of transition matrices, one per frequency module.
         """
+        a = self._encode_action_ids(action_ids)
         d_flat = self.MLP_D_a([a] * self.n_freq)
         mats = [d.reshape(-1, *self._mat_shape[f]) for f, d in enumerate(d_flat)]
 
@@ -145,6 +146,15 @@ class PathIntegrator(nn.Module):
                 mats[f_to] = torch.where(mask, d_no_a, mats[f_to])
 
         return mats
+
+    def _encode_action_ids(self, action_ids: Tensor) -> Tensor:
+        """Convert discrete action ids to one-hot features after validation."""
+        encoded_ids = action_ids.squeeze(-1).to(torch.int64)
+        invalid = (encoded_ids < 0) | (encoded_ids >= self._n_actions)
+        if torch.any(invalid):
+            bad_ids = encoded_ids[invalid].unique(sorted=True)
+            raise ValueError(f"Action ids must be in [0, {self._n_actions}), got {bad_ids.tolist()}.")
+        return torch.nn.functional.one_hot(encoded_ids, num_classes=self._n_actions).to(torch.float32)
 
 
 # =================================================================================================

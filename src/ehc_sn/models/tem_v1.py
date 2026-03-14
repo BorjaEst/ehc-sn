@@ -383,6 +383,7 @@ class TEMModelV1(nn.Module):
         """
         obs_inputs = inputs["inputs"]
         previous_action = inputs["previous_action"]
+        episode_start = inputs.get("episode_start")
         landmark_id = inputs.get("landmark_id")
         obs_embedding = self.autoencoder.encode(obs_inputs)
 
@@ -395,7 +396,7 @@ class TEMModelV1(nn.Module):
         place_sensory = self.hpc.recall(place_query_from_obs, state.hpc, mode="full") if self.config.use_x_cued_recall else None  # fmt: skip
 
         # Grid transition prior from action-driven path integration.
-        grid_prior, state.mec = self.mec.generative(previous_action, landmark_id, state.mec)
+        grid_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)
         place_query_from_grid_prior = self.projection_mec(grid_prior)
         place_recall_from_grid_prior = self.hpc.recall(place_query_from_grid_prior, state.hpc, mode="hierarchical")  # fmt: skip
 
