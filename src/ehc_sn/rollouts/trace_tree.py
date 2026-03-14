@@ -249,7 +249,7 @@ class TraceTree:
         self.meta_first = []
         self.leaf_signatures = []
         for path, leaf in zip(self.paths, leaves, strict=False):
-            if path in self.config.metadata_paths:
+            if _is_global_path(path, global_paths=self.config.metadata_paths):
                 self.leaf_is_numeric.append(False)
                 self.buffers.append(None)
                 self.meta_first.append(None)

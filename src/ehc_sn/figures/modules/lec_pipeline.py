@@ -30,7 +30,7 @@ class FeatCellsTimeseries(BaseFigureTemplate):
 
         self.observations = self.trace.get("world_step/observation")[:, self.env_idx]
         self.cell_series = self.trace.get(f"diagnostic/lec/cells/{self.freq_idx}")[:, self.env_idx, :]
-        self.filtered_series = self.trace.get(f"diagnostic/lec/filtered")[:, self.env_idx, :]
+        self.filtered_series = self.trace.get(f"diagnostic/lec/filtered/{self.freq_idx}")[:, self.env_idx, :]
 
     @colorbar(group="lec_activity", label="Activation")
     @panel()  # Here some arguments to configure the pannel, position, etc.

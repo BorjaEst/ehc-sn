@@ -47,7 +47,7 @@ class TraceCollector(Generic[Context]):
         """Create a collector bound to a tree and a spec."""
         self.tree = tree
         self.spec = spec
-        self.tree.config.metadata_paths.update(tuple(field.name.split("/")) for field in spec.fields if field.storage == "meta")  # fmt: skip
+        self.tree.config.metadata_paths.update((field.name,) for field in spec.fields if field.storage == "meta")  # fmt: skip
 
     def append(self, t: int, ctx: Context) -> None:
         """Append one timestep payload extracted from the given context."""
