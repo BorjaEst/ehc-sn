@@ -11,9 +11,26 @@ from huggingface_hub import hf_hub_download
 from huggingface_hub.errors import RemoteEntryNotFoundError
 from typer import Option, Typer, echo
 
+from ehc_sn.data._canonical import (
+    binary_structural_landmarks,
+    canonical_cell_from_mask,
+    farthest_reachable_cell,
+    largest_component_mask,
+    sample_observations,
+    singleton_mask,
+    stable_text_seed,
+)
 from ehc_sn.data.datasets import MazeMetadata
 from ehc_sn.data.index import MazeIndexEntry, write_index
-from ehc_sn.data.schema import CHANNEL_GOALS, CHANNEL_SOLUTION, CHANNEL_START, CHANNEL_TOPOLOGY
+from ehc_sn.data.schema import (
+    CHANNEL_GOALS,
+    CHANNEL_LANDMARKS,
+    CHANNEL_MASK_VALID,
+    CHANNEL_OBSERVATIONS,
+    CHANNEL_SOLUTION,
+    CHANNEL_START,
+    CHANNEL_TOPOLOGY,
+)
 
 app = Typer(pretty_exceptions_enable=False)
 MAZEHARD_REPO = "sapientinc/maze-30x30-hard-1k"
@@ -33,6 +50,7 @@ def process_huggingface(  # ----------------------------------------------------
     out_dir: Path = Option(Path(PROCESSED_PATH), "--out-dir", help="Output directory for processed data."),
     repo: str = Option(MAZEHARD_REPO, "--repo", help="HuggingFace dataset repo ID."),
     splits: list[str] = Option(["train", "test"], "--splits", help="Dataset splits to download and process."),
+    n_observations: int = Option(45, "--n-obs", help="Observation vocabulary size for deterministic assignment."),
 ) -> None:  # fmt: skip
     """Download mazes from HuggingFace, save raw CSVs, and build per-channel .npy files + JSONL index."""
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -56,7 +74,14 @@ def process_huggingface(  # ----------------------------------------------------
         shutil.copy2(hf_path, raw_csv)
         echo(f"  → Raw CSV saved to {raw_csv}")
         echo(f"Processing split '{split}' …")
-        entries = _process_csv(raw_csv, split=split, out_dir=out_dir, source=repo, start_id=maze_id)
+        entries = _process_csv(
+            raw_csv,
+            split=split,
+            out_dir=out_dir,
+            source=repo,
+            start_id=maze_id,
+            n_observations=n_observations,
+        )
         write_index(entries, index_path, append=True)
         maze_id += len(entries)
         echo(f"  → {len(entries)} mazes written (total so far: {maze_id})")
@@ -71,7 +96,7 @@ def process_huggingface(  # ----------------------------------------------------
 
 # =================================================================================================
 def _process_csv(  # ------------------------------------------------------------------------------
-    csv_path: Path, split: str, out_dir: Path, source: str, start_id: int,
+    csv_path: Path, split: str, out_dir: Path, source: str, start_id: int, n_observations: int,
 ) -> list[MazeIndexEntry]:  # fmt: skip
     """Parse one CSV split, write per-channel .npy files, dataset.json, and return index entries."""
     all_channels: list[dict[str, np.ndarray]] = []
@@ -80,7 +105,7 @@ def _process_csv(  # -----------------------------------------------------------
     with csv_path.open(newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
-            channels, difficulty = _process_csv_row(row)
+            channels, difficulty = _process_csv_row(row, n_observations=n_observations)
             all_channels.append(channels)
             difficulties.append(difficulty)
 
@@ -107,15 +132,31 @@ def _process_csv(  # -----------------------------------------------------------
 
 # =================================================================================================
 def _process_csv_row(  # --------------------------------------------------------------------------
-    row: dict[str, str],
+    row: dict[str, str], *, n_observations: int,
 ) -> tuple[dict[str, np.ndarray], str]:  # fmt: skip
     """Parse one CSV row into channel arrays and difficulty string."""
     q_grid, a_grid = _grid_to_array(row["question"]), _grid_to_array(row["answer"])
+    topology = q_grid != "#"
+    mask_valid = largest_component_mask(topology)
+    start_cell = canonical_cell_from_mask(q_grid == "S", mask_valid)
+    if start_cell is None:
+        fallback = canonical_cell_from_mask(mask_valid, mask_valid)
+        if fallback is None:
+            raise ValueError("MazeHard row has no valid passable cells for a canonical start.")
+        start_cell = fallback
+
+    goal_cell = canonical_cell_from_mask(q_grid == "G", mask_valid, reference=start_cell)
+    if goal_cell is None:
+        goal_cell = farthest_reachable_cell(mask_valid, start_cell)
+
     channels = {
-        CHANNEL_TOPOLOGY: (q_grid != "#"),
-        CHANNEL_START: (q_grid == "S"),
-        CHANNEL_GOALS: (q_grid == "G"),
+        CHANNEL_TOPOLOGY: topology,
+        CHANNEL_MASK_VALID: mask_valid,
+        CHANNEL_START: singleton_mask(topology.shape, start_cell),
+        CHANNEL_GOALS: singleton_mask(topology.shape, goal_cell),
         CHANNEL_SOLUTION: np.where(a_grid == "o", 1, 0).astype(np.int32),
+        CHANNEL_OBSERVATIONS: sample_observations(mask_valid, n_observations, seed=stable_text_seed(row["question"])),  # fmt: skip
+        CHANNEL_LANDMARKS: binary_structural_landmarks(mask_valid),
     }
     return channels, row.get("rating", "")
 
@@ -159,12 +200,16 @@ def _build_idx_entry(  # -------------------------------------------------------
     i: int, start_id: int = 0,
 ) -> MazeIndexEntry:  # fmt: skip
     """Build one MazeIndexEntry for the i-th maze in the split."""
+    obs_arr = channels[i][CHANNEL_OBSERVATIONS]
+    valid = channels[i][CHANNEL_MASK_VALID]
+    n_obs = int(obs_arr[valid].max()) + 1 if valid.any() else 0
     return MazeIndexEntry(
         id=str(start_id + i),
         source=meta.source,
         split=meta.split,
         shape=meta.shape,
         channels=meta.channels,
+        n_observations=n_obs,
         n_goals=int(channels[i][CHANNEL_GOALS].sum()),
         difficulty=difficulties[i],
     )

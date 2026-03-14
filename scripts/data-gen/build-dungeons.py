@@ -11,9 +11,26 @@ from dungeongen.layout.occupancy import CellType
 from dungeongen.layout.params import DungeonArchetype, DungeonSize, GenerationParams
 from typer import Option, Typer, echo
 
+from ehc_sn.data._canonical import (
+    binary_structural_landmarks,
+    farthest_reachable_cell,
+    first_true_cell,
+    largest_component_mask,
+    sample_observations,
+    shortest_path_distances,
+    singleton_mask,
+)
 from ehc_sn.data.datasets import MazeMetadata
 from ehc_sn.data.index import MazeIndexEntry, write_index
-from ehc_sn.data.schema import CHANNEL_MASK_VALID, CHANNEL_OBSERVATIONS, CHANNEL_REGIONS, CHANNEL_TOPOLOGY
+from ehc_sn.data.schema import (
+    CHANNEL_GOALS,
+    CHANNEL_LANDMARKS,
+    CHANNEL_MASK_VALID,
+    CHANNEL_OBSERVATIONS,
+    CHANNEL_REGIONS,
+    CHANNEL_START,
+    CHANNEL_TOPOLOGY,
+)
 
 app = Typer(pretty_exceptions_enable=False)
 RAW_PATH = "data/raw/dungeons"
@@ -141,22 +158,25 @@ def _rasterize_dungeon(  # -----------------------------------------------------
             if 0 <= row < H and 0 <= col < W:
                 regions[row, col] = numeric_id
 
-    # -- Mask valid: explicit reachability (largest connected component) -----------
-    mask_valid = _largest_component_mask(topology)
+    # -- Valid cells + semantic singleton channels --------------------------------
+    mask_valid = largest_component_mask(topology)
+    start_cell = _canonical_entrance_cell(dungeon, topology, mask_valid, ox=ox, oy=oy)
+    goal_cell = _canonical_goal_cell(dungeon, topology, mask_valid, start_cell, ox=ox, oy=oy)
+    start = singleton_mask((H, W), start_cell)
+    goals = singleton_mask((H, W), goal_cell)
 
-    # -- Observations: random assignment over passable & valid cells ---------------
-    rng = np.random.default_rng(rng_seed)
-    observations = np.full((H, W), -1, dtype=np.int32)
-    valid_coords = np.argwhere(mask_valid)
-    obs_ids = rng.integers(0, n_observations, size=len(valid_coords))
-    for (r, c), obs in zip(valid_coords, obs_ids):
-        observations[r, c] = obs
+    # -- Portable TEM cues ---------------------------------------------------------
+    observations = sample_observations(mask_valid, n_observations, seed=rng_seed)
+    landmarks = binary_structural_landmarks(mask_valid)
 
     return {
         CHANNEL_TOPOLOGY: topology,
         CHANNEL_REGIONS: regions,
         CHANNEL_MASK_VALID: mask_valid,
+        CHANNEL_START: start,
+        CHANNEL_GOALS: goals,
         CHANNEL_OBSERVATIONS: observations,
+        CHANNEL_LANDMARKS: landmarks,
     }
 
 
@@ -190,26 +210,142 @@ def _pad_channels_to_common_shape(  # ------------------------------------------
 
 
 # =================================================================================================
-def _largest_component_mask(  # -------------------------------------------------------------------
-    topology: np.ndarray,
-) -> np.ndarray:  # fmt: skip
-    """Return a bool mask selecting only the largest 4-connected component of *topology*.
+def _canonical_entrance_cell(  # ------------------------------------------------------------------
+    dungeon: Dungeon, topology: np.ndarray, mask_valid: np.ndarray, *,
+    ox: int, oy: int,
+) -> tuple[int, int]:  # fmt: skip
+    """Return one canonical entrance cell for the processed dungeon contract."""
+    raw_exits = list(getattr(dungeon, "exits", {}).values())
+    priorities = (
+        lambda ex: bool(getattr(ex, "is_main", False)),
+        _is_entrance_exit,
+        lambda ex: getattr(ex, "room_id", "") == getattr(dungeon, "spine_start_room", None),
+    )
 
-    Uses ``scipy.sparse.csgraph.connected_components`` via flood-fill labelling.
-    Small disconnected pockets (unreachable tiles) are excluded.
-    """
-    from scipy.ndimage import label
+    for predicate in priorities:
+        mapped = [
+            _map_exit_to_valid_cell(ex, dungeon, topology, mask_valid, ox=ox, oy=oy)
+            for ex in raw_exits
+            if predicate(ex)
+        ]
+        mapped = [cell for cell in mapped if cell is not None]
+        if mapped:
+            return min(mapped)
 
-    structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])  # 4-connected
-    labelled, n_components = label(topology, structure=structure)
-    if n_components <= 1:
-        return topology.copy()
+    fallback = first_true_cell(mask_valid)
+    if fallback is None:
+        raise ValueError("Cannot derive a canonical entrance cell from an empty valid mask.")
+    return fallback
 
-    # Find component with most cells.
-    component_sizes = np.bincount(labelled.ravel())
-    component_sizes[0] = 0  # ignore background
-    largest = component_sizes.argmax()
-    return labelled == largest
+
+# =================================================================================================
+def _canonical_goal_cell(  # ----------------------------------------------------------------------
+    dungeon: Dungeon, topology: np.ndarray, mask_valid: np.ndarray, start_cell: tuple[int, int], *,
+    ox: int, oy: int,
+) -> tuple[int, int]:  # fmt: skip
+    """Return one canonical goal cell, preferring non-entrance exits."""
+    raw_exits = list(getattr(dungeon, "exits", {}).values())
+    goal_candidates = [
+        ex for ex in raw_exits if not getattr(ex, "is_main", False) and not _is_entrance_exit(ex)
+    ]
+    if not goal_candidates:
+        goal_candidates = [ex for ex in raw_exits if _map_exit_identity(ex) != _entrance_identity(raw_exits)]
+
+    distances = shortest_path_distances(mask_valid, start_cell)
+    best_goal: tuple[int, int] | None = None
+    best_distance = -1
+    for exit_obj in goal_candidates:
+        cell = _map_exit_to_valid_cell(exit_obj, dungeon, topology, mask_valid, ox=ox, oy=oy)
+        if cell is None or cell == start_cell or distances[cell] < 0:
+            continue
+        distance = int(distances[cell])
+        if distance > best_distance or (
+            distance == best_distance and (best_goal is None or cell < best_goal)
+        ):
+            best_distance = distance
+            best_goal = cell
+
+    return farthest_reachable_cell(mask_valid, start_cell) if best_goal is None else best_goal
+
+
+# =================================================================================================
+def _map_exit_to_valid_cell(  # -------------------------------------------------------------------
+    exit_obj: object, dungeon: Dungeon, topology: np.ndarray, mask_valid: np.ndarray, *,
+    ox: int, oy: int,
+) -> tuple[int, int] | None:  # fmt: skip
+    """Map one raw dungeongen exit to a passable valid raster cell."""
+    world_x = getattr(exit_obj, "x", None)
+    world_y = getattr(exit_obj, "y", None)
+    if world_x is None or world_y is None:
+        return None
+
+    room_center = _room_center(dungeon, getattr(exit_obj, "room_id", ""))
+    candidates: set[tuple[int, int]] = set()
+    for cand_x, cand_y in (
+        (world_x, world_y),
+        (world_x - 1, world_y),
+        (world_x + 1, world_y),
+        (world_x, world_y - 1),
+        (world_x, world_y + 1),
+    ):
+        row = cand_y - oy
+        col = cand_x - ox
+        if row < 0 or row >= topology.shape[0] or col < 0 or col >= topology.shape[1]:
+            continue
+        if topology[row, col] and mask_valid[row, col]:
+            candidates.add((int(row), int(col)))
+
+    if not candidates:
+        return None
+    if room_center is None:
+        return min(candidates)
+    return min(
+        candidates, key=lambda cell: (abs(cell[0] - room_center[1]) + abs(cell[1] - room_center[0]), cell)
+    )
+
+
+# =================================================================================================
+def _room_center(  # ------------------------------------------------------------------------------
+    dungeon: Dungeon, room_id: str,
+) -> tuple[int, int] | None:  # fmt: skip
+    """Return the integer grid center of the room attached to an exit."""
+    room = getattr(dungeon, "rooms", {}).get(room_id)
+    if room is None:
+        return None
+    x = int(getattr(room, "x", 0))
+    y = int(getattr(room, "y", 0))
+    width = int(getattr(room, "width", 1))
+    height = int(getattr(room, "height", 1))
+    return x + width // 2, y + height // 2
+
+
+# =================================================================================================
+def _is_entrance_exit(  # -------------------------------------------------------------------------
+    exit_obj: object,
+) -> bool:  # fmt: skip
+    """Return ``True`` if an exit object should be treated as an entrance."""
+    exit_type = getattr(exit_obj, "exit_type", None)
+    type_name = getattr(exit_type, "name", str(exit_type))
+    return type_name == "ENTRANCE"
+
+
+# =================================================================================================
+def _map_exit_identity(  # ------------------------------------------------------------------------
+    exit_obj: object,
+) -> str:  # fmt: skip
+    """Return a stable identity string for one exit object."""
+    return str(getattr(exit_obj, "id", f"{getattr(exit_obj, 'x', '?')}:{getattr(exit_obj, 'y', '?')}"))
+
+
+# =================================================================================================
+def _entrance_identity(  # ------------------------------------------------------------------------
+    raw_exits: list[object],
+) -> str | None:  # fmt: skip
+    """Return the identity of the first raw entrance-like exit, if any."""
+    for exit_obj in raw_exits:
+        if getattr(exit_obj, "is_main", False) or _is_entrance_exit(exit_obj):
+            return _map_exit_identity(exit_obj)
+    return None
 
 
 # =================================================================================================
@@ -222,14 +358,42 @@ def _dungeon_to_dict(  # -------------------------------------------------------
         "n_rooms": len(dungeon.rooms),
         "n_passages": len(dungeon.passages),
         "bounds": list(dungeon.bounds),
-        "rooms": {
-            rid: {"x": r.x, "y": r.y, "w": r.width, "h": r.height, "shape": r.shape.name, "number": r.number}
-            for rid, r in dungeon.rooms.items()
-        },
-        "passages": {
-            pid: {"start": p.start_room, "end": p.end_room, "waypoints": p.waypoints}
-            for pid, p in dungeon.passages.items()
-        },
+        "rooms": {rid: _parse_room(r) for rid, r in dungeon.rooms.items()},
+        "passages": {pid: _parse_passage(p) for pid, p in dungeon.passages.items()},
+        "exits": {eid: _parse_exit(ex) for eid, ex in getattr(dungeon, "exits", {}).items()},
+    }
+
+
+def _parse_room(room: dict) -> tuple[str, object]:
+    """Parse a room dict from the raw JSON into a plain object."""
+    return {
+        "x": room.x,
+        "y": room.y,
+        "w": room.width,
+        "h": room.height,
+        "shape": room.shape.name,
+        "number": room.number,
+    }
+
+
+def _parse_passage(passage: dict) -> tuple[str, object]:
+    """Parse a passage dict from the raw JSON into a plain object."""
+    return {
+        "start": passage.start_room,
+        "end": passage.end_room,
+        "waypoints": passage.waypoints,
+    }
+
+
+def _parse_exit(exit_obj: dict) -> tuple[str, object]:
+    """Parse an exit dict from the raw JSON into a plain object."""
+    return {
+        "x": exit_obj.x,
+        "y": exit_obj.y,
+        "direction": exit_obj.direction,
+        "exit_type": getattr(exit_obj.exit_type, "name", str(exit_obj.exit_type)),
+        "room_id": exit_obj.room_id,
+        "is_main": exit_obj.is_main,
     }
 
 
