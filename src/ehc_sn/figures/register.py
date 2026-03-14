@@ -75,7 +75,7 @@ def register_builtin_figures() -> None:
                 name="lec_summary",
                 description="LEC overview with observations and per-frequency activations",
                 plot=lec_summary.plot,
-                default_filename="lec-overview",
+                default_filename="lec_summary",
                 kind="diagnostic",
                 tags={"lec"},
                 trace_keys={
@@ -92,7 +92,7 @@ def register_builtin_figures() -> None:
                 name="mec_summary",
                 description="Multi-frequency MEC overview",
                 plot=mec_summary.plot,
-                default_filename="mec-overview",
+                default_filename="mec_summary",
                 kind="diagnostic",
                 tags={"mec"},
                 trace_keys={
@@ -109,7 +109,7 @@ def register_builtin_figures() -> None:
                 name="hpc_summary",
                 description="Multi-frequency HPC overview with memory panels",
                 plot=hpc_summary.plot,
-                default_filename="hpc-overview",
+                default_filename="hpc_summary",
                 kind="diagnostic",
                 tags={"hpc"},
                 trace_keys={
@@ -127,7 +127,7 @@ def register_builtin_figures() -> None:
                 name="lec_pipeline",
                 description="Single-frequency LEC activation detail diagnostic",
                 plot=lec_pipeline.plot,
-                default_filename="lec-feature-cells",
+                default_filename="lec_pipeline",
                 kind="diagnostic",
                 tags={"lec"},
                 trace_keys={
@@ -145,7 +145,7 @@ def register_builtin_figures() -> None:
                 name="mec_cells",
                 description="Single-frequency MEC grid-cell spatial maps and autocorrelograms",
                 plot=mec_cells.plot,
-                default_filename="mec-grid-cells",
+                default_filename="mec_cells",
                 kind="diagnostic",
                 tags={"mec"},
                 trace_keys={
@@ -162,7 +162,7 @@ def register_builtin_figures() -> None:
                 name="hpc_cells",
                 description="Single-frequency HPC place-cell spatial maps and autocorrelograms",
                 plot=hpc_cells.plot,
-                default_filename="hpc-place-cells",
+                default_filename="hpc_cells",
                 kind="diagnostic",
                 tags={"hpc"},
                 trace_keys={
