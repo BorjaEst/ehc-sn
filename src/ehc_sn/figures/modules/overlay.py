@@ -10,7 +10,7 @@ example:
 Data requirements
 -----------------
 
-`FigureContext.extras` must provide:
+The rollout `TraceTree` metadata must provide:
 
 - ``inputs``: array-like of shape ``[B, N]`` (flattened grid tokens)
 - ``labels``: array-like of shape ``[B, N]`` (flattened target tokens)
@@ -35,12 +35,12 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+from ehc_sn.data.schema import O_ID
 from ehc_sn.figures.figures.base import BaseFigureTemplate
 from ehc_sn.figures.figures.panels import panel
 from ehc_sn.figures.plots.mazehard import plot_maze_with_overlay
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.axes import subdivide_axes
-from ehc_sn.data.schema import O_ID
 from ehc_sn.figures.utils.grids import first_halt_index, reshape_grid
 from ehc_sn.rollouts.trace_tree import TraceTree
 
@@ -50,7 +50,7 @@ def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
 
     Args:
         trace: Rollout trace containing predictions and halting signals.
-        ctx: Figure context carrying extras like inputs/labels.
+        ctx: Figure context carrying render-time selection options.
 
     Returns:
         A matplotlib `Figure`.
@@ -71,7 +71,7 @@ class OverlayFigure(BaseFigureTemplate):
 
     def __init__(self, trace: TraceTree, ctx: FigureContext) -> None:
         super().__init__(trace, ctx)
-        self.inputs, self.labels = _get_required_extras(ctx)
+        self.inputs, self.labels = _get_required_metadata(trace)
         self.gt_overlays = _select_gt_overlays(self.labels)
         self.model_overlays = _select_model_overlays(trace)
 
@@ -92,18 +92,14 @@ class OverlayFigure(BaseFigureTemplate):
             plot_maze_with_overlay(ax_i, input_grid, model_grid)
 
 
-def _get_required_extras(ctx: FigureContext) -> tuple[np.ndarray, np.ndarray]:
-    """Read and validate `inputs` and `labels` from `ctx.extras`.
+def _get_required_metadata(trace: TraceTree) -> tuple[np.ndarray, np.ndarray]:
+    """Read and validate `inputs` and `labels` from trace metadata.
 
     The figure only needs a small batch for visualization. We cap the returned
     arrays to 10 items to avoid accidentally rendering very wide figures.
     """
-    inputs = ctx.extras.get("inputs")
-    labels = ctx.extras.get("labels")
-    if inputs is None or labels is None:
-        raise ValueError("overlay requires extras: inputs, labels")
-    inputs_arr = np.asarray(inputs)
-    labels_arr = np.asarray(labels)
+    inputs_arr = np.asarray(trace.get_meta_path("inputs"))
+    labels_arr = np.asarray(trace.get_meta_path("labels"))
     return inputs_arr, labels_arr
 
 

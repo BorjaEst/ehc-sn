@@ -39,8 +39,8 @@ class LECOverview(BaseFigureTemplate):
         self.mean_activity = np.asarray([float(np.mean(cells)) for cells in self.cells])
         self.peak_activity = np.asarray([float(np.max(cells)) for cells in self.cells])
 
-        self.alpha = _require_param_vector(self.ctx, "lec/filter/alpha_sigmoid")
-        self.w_f = _require_param_vector(self.ctx, "lec/w_f_sigmoid")
+        self.alpha = _require_param_vector(self.trace, "lec/filter/alpha_sigmoid")
+        self.w_f = _require_param_vector(self.trace, "lec/w_f_sigmoid")
 
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def params(self, ax: Axes) -> None:
@@ -76,14 +76,12 @@ class LECOverview(BaseFigureTemplate):
 
 # =================================================================================================
 def _require_param_vector(  # ---------------------------------------------------------------------
-    ctx: FigureContext, key: str,
+    trace: TraceTree, key: str,
 ) -> np.ndarray:  # fmt: skip
-    """Return a required one-dimensional parameter vector from figure extras."""
-    value = ctx.extras.get(key)
-    if value is None:
-        raise ValueError(f"Figure extra '{key}' is required for lec_summary")
+    """Return a required one-dimensional parameter vector from trace metadata."""
+    value = trace.get_meta_path(key)
 
     vector = np.asarray(value, dtype=float)
     if vector.ndim != 1:
-        raise ValueError(f"Figure extra '{key}' must be one-dimensional, got shape {vector.shape}")
+        raise ValueError(f"Trace metadata '{key}' must be one-dimensional, got shape {vector.shape}")
     return vector

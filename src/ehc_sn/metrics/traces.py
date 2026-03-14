@@ -76,6 +76,18 @@ def _get_solution_overlay(ctx: StepContext) -> TraceValue:
     return (pred == O_ID).to(torch.uint8)
 
 
+def _get_inputs_meta(ctx: StepContext) -> TraceValue:
+    """Static input batch captured as metadata when figures request it."""
+    value = ctx.carry.data.get("inputs")
+    return None if value is None else value.detach()
+
+
+def _get_labels_meta(ctx: StepContext) -> TraceValue:
+    """Static label batch captured as metadata when figures request it."""
+    value = ctx.carry.data.get("labels")
+    return None if value is None else value.detach()
+
+
 TRACE_LOSS = TraceField(
     name="loss/total",
     get=_get_loss,
@@ -92,12 +104,24 @@ TRACE_SOLUTION_OVERLAY = TraceField(
     name="pred/solution_overlay",
     get=_get_solution_overlay,
 )
+TRACE_INPUTS_META = TraceField(
+    name="inputs",
+    get=_get_inputs_meta,
+    storage="meta",
+)
+TRACE_LABELS_META = TraceField(
+    name="labels",
+    get=_get_labels_meta,
+    storage="meta",
+)
 
 COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_LOSS,
     TRACE_HALTED,
     TRACE_STEPS,
     TRACE_SOLUTION_OVERLAY,
+    TRACE_INPUTS_META,
+    TRACE_LABELS_META,
 )
 
 
@@ -201,6 +225,18 @@ def _get_diagnostic_hpc_memory_tem(ctx: StepContext) -> TraceValue:
     return [memory.detach() for memory in ctx.carry.model_state.hpc.memory]
 
 
+def _get_lec_alpha_sigmoid_tem(ctx: StepContext) -> TraceValue:
+    """Static sigmoid-transformed LEC filter alpha values captured as metadata."""
+    backbone = ctx.step_module.controller.backbone
+    return torch.stack([torch.sigmoid(alpha).detach() for alpha in backbone.lec.filter.alpha])
+
+
+def _get_lec_w_f_sigmoid_tem(ctx: StepContext) -> TraceValue:
+    """Static sigmoid-transformed LEC frequency weights captured as metadata."""
+    backbone = ctx.step_module.controller.backbone
+    return torch.stack([torch.sigmoid(weight).detach() for weight in backbone.lec.w_f])
+
+
 TRACE_Q_LOGITS_RL = TraceField(
     name="value/q_logits",
     get=_get_q_logits_rl,
@@ -253,6 +289,16 @@ TRACE_DIAGNOSTIC_HPC_MEMORY_TEM = TraceField(
     name="diagnostic/hpc/memory",
     get=_get_diagnostic_hpc_memory_tem,
 )
+TRACE_LEC_FILTER_ALPHA_SIGMOID_TEM = TraceField(
+    name="lec/filter/alpha_sigmoid",
+    get=_get_lec_alpha_sigmoid_tem,
+    storage="meta",
+)
+TRACE_LEC_W_F_SIGMOID_TEM = TraceField(
+    name="lec/w_f_sigmoid",
+    get=_get_lec_w_f_sigmoid_tem,
+    storage="meta",
+)
 
 RL_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_Q_LOGITS_RL,
@@ -280,6 +326,8 @@ TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
     TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM,
     TRACE_DIAGNOSTIC_HPC_MEMORY_TEM,
+    TRACE_LEC_FILTER_ALPHA_SIGMOID_TEM,
+    TRACE_LEC_W_F_SIGMOID_TEM,
 )
 
 

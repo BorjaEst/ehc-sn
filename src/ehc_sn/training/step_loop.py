@@ -19,6 +19,7 @@ class StepContext:
     batch: Mapping[str, Tensor]
     carry: Any
     outputs: Any
+    step_module: Any
 
 
 # =================================================================================================
@@ -63,7 +64,7 @@ class StepLoop(Iterator[tuple[int, StepContext]]):
         self.carry = carry
         self.batch_iter = iter([]) if done else self.batch_iter
 
-        context = StepContext(batch=batch, carry=carry, outputs=outputs)
+        context = StepContext(batch=batch, carry=carry, outputs=outputs, step_module=self.step_module)
         return t_trace, context
 
 

@@ -27,10 +27,10 @@ def register_builtin_figures() -> None:
                 description="dummy figure for testing",
                 plot=dummy.plot,
                 default_filename="dummy",
+                kind="dev",
                 tags={"episode"},
                 trace_keys=set(),
                 meta_keys=set(),
-                extras_keys=set(),
             )
         )
 
@@ -42,13 +42,13 @@ def register_builtin_figures() -> None:
                 description="MazeHard overlays: N samples with GT vs model paths",
                 plot=overlay.plot,
                 default_filename="overlay",
+                kind="report",
                 tags={"paper", "mazehard"},
                 trace_keys={
                     "act/halted",
                     "pred/solution_overlay",
                 },
-                meta_keys=set(),
-                extras_keys={"inputs", "labels"},
+                meta_keys={"inputs", "labels"},
             )
         )
 
@@ -59,13 +59,13 @@ def register_builtin_figures() -> None:
                 description=("MazeHard prediction evolution: GT + per-step argmax overlays for one sample"),
                 plot=evolution.plot,
                 default_filename="evolution",
+                kind="diagnostic",
                 tags={"mazehard"},
                 trace_keys={
                     "act/halted",
                     "pred/solution_overlay",
                 },
-                meta_keys=set(),
-                extras_keys={"inputs", "labels"},
+                meta_keys={"inputs", "labels"},
             )
         )
 
@@ -76,13 +76,13 @@ def register_builtin_figures() -> None:
                 description="LEC overview with observations and per-frequency activations",
                 plot=lec_summary.plot,
                 default_filename="lec-overview",
+                kind="diagnostic",
                 tags={"lec"},
                 trace_keys={
                     "world_step/observation",
                     "diagnostic/lec/cells",
                 },
-                meta_keys=set(),
-                extras_keys={"lec/filter/alpha_sigmoid", "lec/w_f_sigmoid"},
+                meta_keys={"lec/filter/alpha_sigmoid", "lec/w_f_sigmoid"},
             )
         )
 
@@ -93,13 +93,13 @@ def register_builtin_figures() -> None:
                 description="Multi-frequency MEC overview",
                 plot=mec_summary.plot,
                 default_filename="mec-overview",
+                kind="diagnostic",
                 tags={"mec"},
                 trace_keys={
                     "world_step/location_ids",
                     "diagnostic/mec/location_mean",
                 },
                 meta_keys={"environments"},
-                extras_keys=set(),
             )
         )
 
@@ -110,6 +110,7 @@ def register_builtin_figures() -> None:
                 description="Multi-frequency HPC overview with memory panels",
                 plot=hpc_summary.plot,
                 default_filename="hpc-overview",
+                kind="diagnostic",
                 tags={"hpc"},
                 trace_keys={
                     "world_step/location_ids",
@@ -117,7 +118,6 @@ def register_builtin_figures() -> None:
                     "diagnostic/hpc/memory",
                 },
                 meta_keys={"environments"},
-                extras_keys=set(),
             )
         )
 
@@ -128,13 +128,13 @@ def register_builtin_figures() -> None:
                 description="Single-frequency LEC activation detail diagnostic",
                 plot=lec_pipeline.plot,
                 default_filename="lec-feature-cells",
+                kind="diagnostic",
                 tags={"lec"},
                 trace_keys={
                     "world_step/observation",
                     "diagnostic/lec/cells",
                 },
                 meta_keys=set(),
-                extras_keys=set(),
             )
         )
 
@@ -145,13 +145,13 @@ def register_builtin_figures() -> None:
                 description="Single-frequency MEC grid-cell spatial maps and autocorrelograms",
                 plot=mec_cells.plot,
                 default_filename="mec-grid-cells",
+                kind="diagnostic",
                 tags={"mec"},
                 trace_keys={
                     "world_step/location_ids",
                     "diagnostic/mec/location_mean",
                 },
                 meta_keys={"environments"},
-                extras_keys=set(),
             )
         )
 
@@ -162,12 +162,12 @@ def register_builtin_figures() -> None:
                 description="Single-frequency HPC place-cell spatial maps and autocorrelograms",
                 plot=hpc_cells.plot,
                 default_filename="hpc-place-cells",
+                kind="diagnostic",
                 tags={"hpc"},
                 trace_keys={
                     "world_step/location_ids",
                     "diagnostic/hpc/location_mean",
                 },
                 meta_keys={"environments"},
-                extras_keys=set(),
             )
         )

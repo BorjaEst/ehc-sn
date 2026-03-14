@@ -60,7 +60,7 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         Args:
             ax: Axes to draw into.
         """
-        plot_time_colored_trajectory(ax, self.world, self.location_ids.tolist())
+        plot_time_colored_trajectory(ax, self.world, self.location_ids.tolist(), background_shape="square")
         ax.set_title("Trajectory colored by time")
 
     @colorbar(group="ratemaps", label="Firing rate")

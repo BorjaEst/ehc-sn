@@ -43,7 +43,7 @@ class PredictionEvolutionFigure(BaseFigureTemplate):
         self, trace: TraceTree, ctx: FigureContext,
     ) -> None:  # fmt: skip
         super().__init__(trace, ctx)
-        self.inputs, self.labels = _get_required_extras(ctx)
+        self.inputs, self.labels = _get_required_metadata(trace)
         self.pred_is_o, self.halted = _get_required_trace(trace)
         self.sample_idx = 0
         self.t_halt = first_halt_index(self.halted[:, self.sample_idx])
@@ -78,14 +78,10 @@ class PredictionEvolutionFigure(BaseFigureTemplate):
 
 
 # =================================================================================================
-def _get_required_extras(  # ----------------------------------------------------------------------
-    ctx: FigureContext,
+def _get_required_metadata(  # --------------------------------------------------------------------
+    trace: TraceTree,
 ) -> tuple[np.ndarray, np.ndarray]:  # fmt: skip
-    inputs = ctx.extras.get("inputs")
-    labels = ctx.extras.get("labels")
-    if inputs is None or labels is None:
-        raise ValueError("evolution requires extras: inputs, labels")
-    return np.asarray(inputs), np.asarray(labels)
+    return np.asarray(trace.get_meta_path("inputs")), np.asarray(trace.get_meta_path("labels"))
 
 
 # =================================================================================================

@@ -30,8 +30,7 @@ class FeatCellsTimeseries(BaseFigureTemplate):
 
         self.observations = self.trace.get("world_step/observation")[:, self.env_idx]
         self.cell_series = self.trace.get(f"diagnostic/lec/cells/{self.freq_idx}")[:, self.env_idx, :]
-        self.mean_activity = np.mean(self.cell_series, axis=-1)
-        self.peak_activity = np.max(self.cell_series, axis=-1)
+        self.filtered_series = self.trace.get(f"diagnostic/lec/filtered")[:, self.env_idx, :]
 
     @colorbar(group="lec_activity", label="Activation")
     @panel()  # Here some arguments to configure the pannel, position, etc.
@@ -50,13 +49,13 @@ class FeatCellsTimeseries(BaseFigureTemplate):
     @colorbar(group="lec_activity", label="Activation")
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def raster_3(self, ax: Axes) -> None:
-        """Plot observations and LEC activations over time."""
+        """Plot semantic LEC cell activations over time with the default scale."""
         plot_activation(ax, self.cell_series)
-        ax.set_title("Filtered activations (before ponderation)")
+        ax.set_title("LEC activations")
 
     @colorbar(group="lec_activity", label="Activation")
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def raster_4(self, ax: Axes) -> None:
         """Plot observations and LEC activations over time."""
         plot_activation(ax, self.filtered_series)
-        ax.set_title("Filtered activations (before ponderation)")
+        ax.set_title("Filtered activations")

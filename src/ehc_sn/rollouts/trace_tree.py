@@ -22,10 +22,12 @@ class TraceConfig:
 
     Attributes:
         global_paths: Segment paths treated as global (no batch axis enforced).
+        metadata_paths: Segment paths forced into the metadata lane even when numeric.
         rebase_time_on_slice: Whether to rebase time to zero on slices.
     """
 
     global_paths: set[tuple[str, ...]] = field(default_factory=set)
+    metadata_paths: set[tuple[str, ...]] = field(default_factory=set)
     rebase_time_on_slice: bool = True
 
 
@@ -67,8 +69,6 @@ class TraceTree:
                     raise ValueError(f"Leaf changed from numeric to meta at {_path_str(path)}")
                 self._append_numeric(idx, arr, path)
             else:
-                if arr is not None:
-                    raise ValueError(f"Leaf changed from meta to numeric at {_path_str(path)}")
                 if self.meta_first[idx] is None:
                     self.meta_first[idx] = leaf
         self.length += 1
@@ -248,7 +248,13 @@ class TraceTree:
         self.buffers = []
         self.meta_first = []
         self.leaf_signatures = []
-        for leaf in leaves:
+        for path, leaf in zip(self.paths, leaves, strict=False):
+            if path in self.config.metadata_paths:
+                self.leaf_is_numeric.append(False)
+                self.buffers.append(None)
+                self.meta_first.append(None)
+                self.leaf_signatures.append(None)
+                continue
             arr = torch_pytree.to_numeric_array(leaf)
             if arr is None:
                 self.leaf_is_numeric.append(False)

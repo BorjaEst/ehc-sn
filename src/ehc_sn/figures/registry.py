@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Optional, Sequence
+from typing import Any, Callable, Iterable, Literal, Optional, Sequence, TypeAlias
 
 import matplotlib.figure as mpl_figure
 import pub_ready_plots as prp
 import scienceplots  # noqa: F401 (registers "science", "nature", ...)
 
 from ehc_sn.rollouts.trace_tree import TraceTree
+
+FigureKind: TypeAlias = Literal["dev", "diagnostic", "report"]
+"""Classification for the intended lifecycle and stability of a figure."""
 
 
 @dataclass(frozen=True)
@@ -29,9 +32,6 @@ class FigureContext:
     global_step: Optional[int] = None
     split_name: Optional[str] = None
 
-    # Optional extra metadata for figures (e.g., model parameters)
-    extras: dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass(frozen=True)
 class FigureSpec:
@@ -40,10 +40,10 @@ class FigureSpec:
     name: str
     plot: Callable[[TraceTree, FigureContext], mpl_figure.Figure]
     default_filename: str
+    kind: FigureKind = "diagnostic"
     tags: set[str] = field(default_factory=set)
     trace_keys: set[str] = field(default_factory=set)
     meta_keys: set[str] = field(default_factory=set)
-    extras_keys: set[str] = field(default_factory=set)
     description: str = ""
 
 
@@ -87,9 +87,15 @@ class Registry:
         if missing:
             raise ValueError(f"Unknown figures: {', '.join(missing)}")
 
-    def list(self) -> list[str]:
-        """Return sorted list of registered figure names."""
-        return sorted(self._specs.keys())
+    def list(self, *, kind: FigureKind | None = None) -> list[str]:
+        """Return sorted list of registered figure names.
+
+        Args:
+            kind: Optional figure kind filter.
+        """
+        if kind is None:
+            return sorted(self._specs.keys())
+        return sorted(name for name, spec in self._specs.items() if spec.kind == kind)
 
 
 REGISTRY = Registry()
