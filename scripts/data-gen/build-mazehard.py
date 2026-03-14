@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import math
 import shutil
 from pathlib import Path
@@ -49,7 +48,7 @@ def process_huggingface(  # ----------------------------------------------------
     raw_dir: Path = Option(Path(RAW_PATH), "--raw-dir", help="Directory to store downloaded raw CSV files."),
     out_dir: Path = Option(Path(PROCESSED_PATH), "--out-dir", help="Output directory for processed data."),
     repo: str = Option(MAZEHARD_REPO, "--repo", help="HuggingFace dataset repo ID."),
-    splits: list[str] = Option(["train", "test"], "--splits", help="Dataset splits to download and process."),
+    splits: list[str] = Option(["train", "val", "test"], "--splits", help="Dataset splits to download and process."),
     n_observations: int = Option(45, "--n-obs", help="Observation vocabulary size for deterministic assignment."),
 ) -> None:  # fmt: skip
     """Download mazes from HuggingFace, save raw CSVs, and build per-channel .npy files + JSONL index."""
@@ -64,21 +63,17 @@ def process_huggingface(  # ----------------------------------------------------
 
     maze_id = 0
     for split in splits:
-        echo(f"Downloading {repo} / {split}.csv …")
-        try:
-            hf_path = Path(hf_hub_download(repo_id=repo, filename=f"{split}.csv", repo_type="dataset"))
-        except RemoteEntryNotFoundError:
-            echo(f"  → Split '{split}' not found in {repo}, skipping.")
+        echo(f"Resolving split '{split}' …")
+        raw_csv, provenance = _resolve_split_csv(raw_dir=raw_dir, repo=repo, split=split)
+        if raw_csv is None:
             continue
-        raw_csv = raw_dir / f"{split}.csv"
-        shutil.copy2(hf_path, raw_csv)
-        echo(f"  → Raw CSV saved to {raw_csv}")
         echo(f"Processing split '{split}' …")
         entries = _process_csv(
             raw_csv,
             split=split,
             out_dir=out_dir,
             source=repo,
+            provenance=provenance,
             start_id=maze_id,
             n_observations=n_observations,
         )
@@ -95,8 +90,53 @@ def process_huggingface(  # ----------------------------------------------------
 
 
 # =================================================================================================
+def _resolve_split_csv(
+    *, raw_dir: Path, repo: str, split: str,
+) -> tuple[Path | None, dict[str, str]]:  # fmt: skip
+    """Resolve one raw CSV split, preferring local overrides over remote downloads."""
+    raw_csv = raw_dir / f"{split}.csv"
+    if raw_csv.exists():
+        echo(f"  → Using local override: {raw_csv}")
+        return raw_csv, _build_provenance(split=split, source=repo, raw_csv=raw_csv, origin="local_override")
+
+    hf_path = _download_remote_split(repo=repo, split=split)
+    if hf_path is None:
+        echo(f"  → Split '{split}' not found locally or in {repo}, skipping.")
+        return None, _build_provenance(split=split, source=repo, raw_csv=raw_csv, origin="missing")
+
+    shutil.copy2(hf_path, raw_csv)
+    echo(f"  → Downloaded remote split to {raw_csv}")
+    return raw_csv, _build_provenance(split=split, source=repo, raw_csv=raw_csv, origin="remote_download")
+
+
+# =================================================================================================
+def _download_remote_split(
+    *, repo: str, split: str,
+) -> Path | None:  # fmt: skip
+    """Download one split CSV from HuggingFace and return the cached file path."""
+    try:
+        return Path(hf_hub_download(repo_id=repo, filename=f"{split}.csv", repo_type="dataset"))
+    except RemoteEntryNotFoundError:
+        return None
+
+
+# =================================================================================================
+def _build_provenance(
+    *, split: str, source: str, raw_csv: Path, origin: str,
+) -> dict[str, str]:  # fmt: skip
+    """Build per-split provenance metadata written into dataset.json."""
+    return {
+        "origin": origin,
+        "raw_path": str(raw_csv),
+        "remote_repo": source,
+        "remote_file": f"{split}.csv",
+    }
+
+
+# =================================================================================================
 def _process_csv(  # ------------------------------------------------------------------------------
-    csv_path: Path, split: str, out_dir: Path, source: str, start_id: int, n_observations: int,
+    csv_path: Path, split: str, out_dir: Path, source: str, provenance: dict[str, str], start_id: int,
+    n_observations: int,
 ) -> list[MazeIndexEntry]:  # fmt: skip
     """Parse one CSV split, write per-channel .npy files, dataset.json, and return index entries."""
     all_channels: list[dict[str, np.ndarray]] = []
@@ -110,7 +150,7 @@ def _process_csv(  # -----------------------------------------------------------
             difficulties.append(difficulty)
 
     # Stack per channel → (N, H, W) and save as individual .npy files.
-    meta = _build_metadata(source, split, channels=all_channels)
+    meta = _build_metadata(source, split, channels=all_channels, provenance=provenance)
     split_dir = out_dir / split
     split_dir.mkdir(parents=True, exist_ok=True)
 
@@ -182,7 +222,7 @@ def _grid_to_array(  # ---------------------------------------------------------
 
 # =================================================================================================
 def _build_metadata(
-    source: str, split: str, *, channels: list[dict[str, np.ndarray]], 
+    source: str, split: str, *, channels: list[dict[str, np.ndarray]], provenance: dict[str, str],
 ) -> MazeMetadata:  # fmt: skip
     """Extract metadata from channel dict for dataset.json."""
     return MazeMetadata(
@@ -191,6 +231,7 @@ def _build_metadata(
         n_samples=len(channels),
         shape=list(channels[0][CHANNEL_TOPOLOGY].shape),
         channels=list(channels[0].keys()),
+        **provenance,
     )
 
 
