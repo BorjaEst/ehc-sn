@@ -66,7 +66,7 @@ class GridCellsAutocorr(BaseFigureTemplate):
     @colorbar(group="ratemaps", label="Firing rate")
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def spatial_maps(self, ax: Axes) -> None:
-        """Plot a HPC rate map for all cells.
+        """Plot a MEC rate map for all cells.
 
         Args:
             ax: Axes to draw into.
@@ -74,7 +74,7 @@ class GridCellsAutocorr(BaseFigureTemplate):
         axes = mosaic_axes(ax, self.cells.shape[-1], wspace=0.04, hspace=0.04)
         axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
         plot_ratematx_mosaic(axes_list, self.world, abs(self.cells), self.location_ids.tolist(), vmin=0.0, vmax=0.10)  # fmt: skip
-        ax.set_title(f"HPC f{self.freq_idx} rate map")
+        ax.set_title(f"MEC f{self.freq_idx} rate map")
 
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def matrices_labels(self, ax: Axes) -> None:
@@ -85,11 +85,12 @@ class GridCellsAutocorr(BaseFigureTemplate):
         """
         plot_radial_autocorr_cells(ax, self.world, self.cells, self.location_ids)
         ax.set_title("Mean radial autocorr (±1 std)")
+        ax.yaxis.set_label_position("right")
 
     @colorbar(group="autocorr", label="Autocorr")
     @panel()  # Here some arguments to configure the pannel, position, etc.
     def spatial_matrices(self, ax: Axes) -> None:
-        """Plot a spatial autocorrelogram for all cell.
+        """Plot a spatial autocorrelogram for all cells.
 
         Args:
             ax: Axes to draw into.
@@ -97,4 +98,4 @@ class GridCellsAutocorr(BaseFigureTemplate):
         axes = mosaic_axes(ax, self.cells.shape[-1], wspace=0.04, hspace=0.04)
         axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
         plot_autocorr_mosaic(axes_list, self.world, self.cells, self.location_ids, vmin=-0.10, vmax=0.10)
-        ax.set_title(f"HPC f{self.freq_idx} spatial autocorr")
+        ax.set_title(f"MEC f{self.freq_idx} spatial autocorr")

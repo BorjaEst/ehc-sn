@@ -31,8 +31,8 @@ def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
 class PlaceCellsAutocorr(BaseFigureTemplate):
     """Encapsulate state and rendering logic for the place-cell overview."""
 
-    HEIGHT_FRAC: float = 0.60
-    MOSAIC_KWARGS = {"width_ratios": [2.0, 6.0]}
+    HEIGHT_FRAC: float = 0.65
+    MOSAIC_KWARGS = {"width_ratios": [2.2, 6.0], "height_ratios": [1.0, 1.0, 1.0]}
     MOSAIC = [
         ["map_labels", "spatial_matrices"],
         ["memory_panel_a", "spatial_matrices"],
@@ -57,7 +57,7 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         self.memory_hier = self.trace.get("diagnostic/hpc/memory/0")[-1, self.env_idx]
         self.memory_full = self.trace.get("diagnostic/hpc/memory/1")[-1, self.env_idx]
 
-    @panel()  # Here some arguments to configure the pannel, position, etc.
+    @panel()
     def map_labels(self, ax: Axes) -> None:
         """Plot the trajectory colored by time.
 
@@ -65,9 +65,9 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
             ax: Axes to draw into.
         """
         plot_time_colored_trajectory(ax, self.world, self.location_ids.tolist(), background_shape="square")
-        ax.set_title("Trajectory colored by time")
+        ax.set_title("Trajectory colored by time", loc="left")
 
-    @colorbar(group="memory", label=None)
+    @colorbar(group="memory", label=None, tick_labelsize=6)
     @panel()
     def memory_panel_a(self, ax: Axes) -> None:
         """Plot HPC hierarchical memory matrices at the final timestep.
@@ -77,10 +77,12 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         """
         ax.matshow(self.memory_hier, cmap="coolwarm", vmin=-0.1, vmax=0.1)
         ax.set_title("Hierarchical memory")
+        ax.set_xlabel("Retrieved feature index")
+        ax.set_ylabel("Cue feature index")
         ax.set_xticklabels([])
         ax.set_yticklabels([])
 
-    @colorbar(group="memory", label=None)
+    @colorbar(group="memory", label=None, tick_labelsize=6)
     @panel()
     def memory_panel_b(self, ax: Axes) -> None:
         """Plot HPC full memory matrices at the final timestep.
@@ -90,15 +92,18 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         """
         ax.matshow(self.memory_full, cmap="coolwarm", vmin=-0.1, vmax=0.1)
         ax.set_title("Full memory")
+        ax.set_xlabel("Retrieved feature index")
+        ax.set_ylabel("Cue feature index")
         ax.set_xticklabels([])
         ax.set_yticklabels([])
 
     @panel()
     def spatial_matrices(self, ax: Axes) -> None:
         nrows = len(self.freq_idxs)
+        shared_n_items = max(int(cells.shape[-1]) for cells in self.cells)
         for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.07, squeeze=True)):
             cells = self.cells[freq_idx]
-            axes = mosaic_axes(freq_ax, cells.shape[-1], wspace=0.04, hspace=0.04)
+            axes = mosaic_axes(freq_ax, shared_n_items, wspace=0.04, hspace=0.04)
             axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
             plot_ratematx_mosaic(axes_list, self.world, cells, self.location_ids)
             freq_ax.set_title(f"Spatial rate maps - Freq {freq_idx}", fontsize=7)

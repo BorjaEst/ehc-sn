@@ -34,6 +34,38 @@ class EnvironmentLike(Protocol):
     n_locations: int
 
 
+@dataclass(frozen=True)
+class _AxesRect:
+    """Rectangle in container coordinates."""
+
+    x0: float
+    y0: float
+    width: float
+    height: float
+
+
+@dataclass(frozen=True)
+class _SolvedMosaic:
+    """Aspect-aware mosaic solution in container coordinates.
+
+    The rectangle list always describes a full rectangular lattice with
+    ``nrows * ncols`` slots. If the caller renders fewer items than slots,
+    the trailing slots remain part of the centered footprint and are expected
+    to be hidden or left empty by the renderer.
+    """
+
+    nrows: int
+    ncols: int
+    panel_width: float
+    panel_height: float
+    occupied_width: float
+    occupied_height: float
+    rectangles: tuple[_AxesRect, ...]
+
+
+PlacementMode = Literal["center", "top-left"]
+
+
 def _environment_locations(environment: object) -> Sequence[Mapping[str, Any]]:
     """Return environment locations from either an object or mapping contract."""
     if isinstance(environment, Mapping):
@@ -128,29 +160,17 @@ def _default_radius(n_locations: int) -> float:
     return 2 * (0.01 + 1 / (10 * np.sqrt(n_locations)))
 
 
+def _hide_parent_axes(ax: Axes) -> None:
+    """Hide ticks, spines, and patch for a parent axes hosting inset children."""
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.patch.set_alpha(0.0)
+    ax.set_navigate(False)
+
+
 # =================================================================================================
-@overload
-def subdivide_axes(  # ----------------------------------------------------------------------------
-    ax: Axes, nrows: int = 1, ncols: int = 1,
-    *,
-    wspace: float = 0.0, hspace: float = 0.0, left_pad: float = 0.0, right_pad: float = 0.0,
-    top_pad: float = 0.0, bottom_pad: float = 0.0, hide_parent: bool = True,
-    squeeze: Literal[False] = False,
-) -> NDArray[np.object_]:  # fmt: skip
-    ...  # fmt: skip
-
-
-@overload
-def subdivide_axes(  # ----------------------------------------------------------------------------
-    ax: Axes, nrows: int = 1, ncols: int = 1,
-    *,
-    wspace: float = 0.0, hspace: float = 0.0, left_pad: float = 0.0, right_pad: float = 0.0,
-    top_pad: float = 0.0, bottom_pad: float = 0.0, hide_parent: bool = True,
-    squeeze: Literal[True] = True,
-) -> Axes | NDArray[np.object_]:  # fmt: skip
-    ...  # fmt: skip
-
-
 def subdivide_axes(  # ----------------------------------------------------------------------------
     ax: Axes, nrows: int = 1, ncols: int = 1,
     *,
@@ -204,12 +224,7 @@ def subdivide_axes(  # ---------------------------------------------------------
         raise ValueError(f"nrows and ncols must be positive, got nrows={nrows}, ncols={ncols}")
 
     if hide_parent:
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-        ax.patch.set_alpha(0.0)
-        ax.set_navigate(False)
+        _hide_parent_axes(ax)
 
     # Usable area inside the parent axes, in parent axes coordinates.
     usable_w = 1.0 - left_pad - right_pad
@@ -247,21 +262,13 @@ def subdivide_axes(  # ---------------------------------------------------------
 
 
 # =================================================================================================
-@dataclass(frozen=True)
-class _MosaicChoice:
-    nrows: int
-    ncols: int
-    key: tuple[float, float, int]
-
-
-# =================================================================================================
 def mosaic_axes(  # -------------------------------------------------------------------------------
     ax: Axes, n_items: int,
     *,
     wspace: float = 0.0, hspace: float = 0.0, left_pad: float = 0.0, right_pad: float = 0.0,
     top_pad: float = 0.0, bottom_pad: float = 0.0, hide_parent: bool = True,
 ) -> NDArray[np.object_]:  # fmt: skip
-    """Create a roughly square mosaic of axes sized to fit `n_items` plots.
+    """Create a mosaic of inset axes within `ax`.
 
     Args:
         ax: Slot axes whose bounding box defines the available space.
@@ -272,6 +279,11 @@ def mosaic_axes(  # ------------------------------------------------------------
         right_pad: Right padding in parent-axes fraction units (0..1).
         top_pad: Top padding in parent-axes fraction units (0..1).
         bottom_pad: Bottom padding in parent-axes fraction units (0..1).
+
+    Notes:
+        This helper samples the parent axes bounding box after the current
+        figure layout has been resolved and treats that geometry as fixed while
+        creating inset axes.
 
     Returns:
         A 2D numpy array of Axes instances laid out within the slot.
@@ -295,45 +307,80 @@ def mosaic_axes(  # ------------------------------------------------------------
     if slot_w_in <= 0 or slot_h_in <= 0:
         raise ValueError("Parent axes has no drawable area.")
 
-    aspect = slot_w_in / slot_h_in
-    usable_w = 1.0 - left_pad - right_pad
-    usable_h = 1.0 - top_pad - bottom_pad
+    nrows, ncols = _choose_generic_mosaic_shape(
+        container_width=slot_w_in,
+        container_height=slot_h_in,
+        n_items=n_items,
+        wspace=wspace * slot_w_in,
+        hspace=hspace * slot_h_in,
+        left_pad=left_pad * slot_w_in,
+        right_pad=right_pad * slot_w_in,
+        top_pad=top_pad * slot_h_in,
+        bottom_pad=bottom_pad * slot_h_in,
+    )
+    return subdivide_axes(
+        ax,
+        int(nrows),
+        int(ncols),
+        wspace=wspace,
+        hspace=hspace,
+        left_pad=left_pad,
+        right_pad=right_pad,
+        bottom_pad=bottom_pad,
+        top_pad=top_pad,
+        hide_parent=hide_parent,
+        squeeze=False,
+    )
+
+
+# =================================================================================================
+@dataclass(frozen=True)
+class _MosaicChoice:
+    nrows: int
+    ncols: int
+    key: tuple[float, int, float]
+
+
+def _choose_generic_mosaic_shape(  # --------------------------------------------------------------
+    *,
+    container_width: float, container_height: float, n_items: int, 
+    wspace: float = 0.0, hspace: float = 0.0,
+    left_pad: float = 0.0, right_pad: float = 0.0, top_pad: float = 0.0, bottom_pad: float = 0.0,
+) -> tuple[int, int]:  # fmt: skip
+    """Choose a free-aspect mosaic shape using effective drawable cell sizes."""
+    if n_items <= 0:
+        raise ValueError(f"n_items must be positive, got n_items={n_items}")
+    if not np.isfinite(container_width) or container_width <= 0:
+        raise ValueError(f"container_width must be positive, got {container_width}")
+    if not np.isfinite(container_height) or container_height <= 0:
+        raise ValueError(f"container_height must be positive, got {container_height}")
+
+    usable_w = container_width - left_pad - right_pad
+    usable_h = container_height - top_pad - bottom_pad
     if usable_w <= 0 or usable_h <= 0:
-        raise ValueError("Padding leaves no usable space in the parent axes.")
-
-    def clamp_cols(value: int) -> int:
-        return max(1, min(int(value), n_items))
-
-    ncols0 = int(round(math.sqrt(n_items * aspect)))
-    candidates = {clamp_cols(ncols0 - 1), clamp_cols(ncols0), clamp_cols(ncols0 + 1)}
+        raise ValueError("Padding leaves no usable space in the container.")
 
     best: Optional[_MosaicChoice] = None
-    for ncols in sorted(candidates):
+    for ncols in range(1, n_items + 1):
         nrows = int(math.ceil(n_items / ncols))
         cell_w = (usable_w - (ncols - 1) * wspace) / ncols
         cell_h = (usable_h - (nrows - 1) * hspace) / nrows
         if cell_w <= 0 or cell_h <= 0:
             continue
-        cell_w_in = cell_w * slot_w_in
-        cell_h_in = cell_h * slot_h_in
-        score = min(cell_w_in, cell_h_in)
+
+        score = min(cell_w, cell_h)
         if score <= 0:
             continue
 
-        squareness = 1.0 - abs(cell_w_in - cell_h_in) / max(cell_w_in, cell_h_in)
+        squareness = 1.0 - abs(cell_w - cell_h) / max(cell_w, cell_h)
         empties = nrows * ncols - n_items
-        key = (float(score), float(squareness), int(-empties))
+        key = (float(score), int(-empties), float(squareness))
         if best is None or key > best.key:
             best = _MosaicChoice(nrows=nrows, ncols=ncols, key=key)
 
     if best is None:
         raise ValueError("No valid mosaic layout found for given constraints.")
-
-    return subdivide_axes(
-        ax, int(best.nrows), int(best.ncols),
-        wspace=wspace, hspace=hspace, left_pad=left_pad, right_pad=right_pad, bottom_pad=bottom_pad,
-        top_pad=top_pad, hide_parent=hide_parent, squeeze=False,
-    )  # fmt: skip
+    return int(best.nrows), int(best.ncols)
 
 
 # =================================================================================================

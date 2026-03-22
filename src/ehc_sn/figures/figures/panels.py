@@ -7,20 +7,25 @@ from typing import Any, Callable, Sequence
 
 # =================================================================================================
 def colorbar(  # ----------------------------------------------------------------------------------
-    *, group: str, label: str | None = None,
+    *, group: str, label: str | None = None, tick_labelsize: float | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:  # fmt: skip
     """Attach colorbar grouping metadata to a panel method.
 
     Args:
         group: Shared colorbar group name.
         label: Optional colorbar label.
+        tick_labelsize: Optional tick label size for the grouped colorbar.
 
     Returns:
         A decorator that attaches metadata to the function.
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        setattr(fn, "_tem_colorbar", {"group": group, "label": label})
+        setattr(
+            fn,
+            "_tem_colorbar",
+            {"group": group, "label": label, "tick_labelsize": tick_labelsize},
+        )
         return fn
 
     return decorator

@@ -53,7 +53,7 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         self.location_ids = self.trace.get("world_step/location_ids")[:, self.env_idx]
         self.cells = self.trace.get(f"diagnostic/hpc/location_mean/{self.freq_idx}")[:, self.env_idx, :]
 
-    @panel()  # Here some arguments to configure the pannel, position, etc.
+    @panel()
     def map_labels(self, ax: Axes) -> None:
         """Plot the trajectory colored by time.
 
@@ -64,7 +64,7 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         ax.set_title("Trajectory colored by time")
 
     @colorbar(group="ratemaps", label="Firing rate")
-    @panel()  # Here some arguments to configure the pannel, position, etc.
+    @panel()
     def spatial_maps(self, ax: Axes) -> None:
         """Plot a HPC rate map for all cells.
 
@@ -76,7 +76,7 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         plot_ratematx_mosaic(axes_list, self.world, self.cells, self.location_ids.tolist(), vmin=0.0, vmax=0.10)  # fmt: skip
         ax.set_title(f"HPC f{self.freq_idx} rate map")
 
-    @panel()  # Here some arguments to configure the pannel, position, etc.
+    @panel()
     def matrices_labels(self, ax: Axes) -> None:
         """Plot radial autocorrelation matrix labels for all cells.
 
@@ -85,9 +85,10 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         """
         plot_radial_autocorr_cells(ax, self.world, self.cells, self.location_ids)
         ax.set_title("Mean radial autocorr (±1 std)")
+        ax.yaxis.set_label_position("right")
 
     @colorbar(group="autocorr", label="Autocorr")
-    @panel()  # Here some arguments to configure the pannel, position, etc.
+    @panel()
     def spatial_matrices(self, ax: Axes) -> None:
         """Plot a spatial autocorrelogram for all cells.
 

@@ -114,12 +114,18 @@ class BaseFigureTemplate(ABC):
 
         group = meta["group"]
         label = meta.get("label", None)
-        group_state = colorbar_groups.setdefault(group, {"axes": [], "mappable": None, "label": label})
+        tick_labelsize = meta.get("tick_labelsize", None)
+        group_state = colorbar_groups.setdefault(
+            group,
+            {"axes": [], "mappable": None, "label": label, "tick_labelsize": tick_labelsize},
+        )
         group_state["axes"].extend(axes)
 
         # Keep first non-empty label (avoid overwriting)
         if group_state.get("label") is None and label is not None:
             group_state["label"] = label
+        if group_state.get("tick_labelsize") is None and tick_labelsize is not None:
+            group_state["tick_labelsize"] = tick_labelsize
 
         # Discover a mappable (primary axis first, then additional axes)
         mappable = self._find_group_mappable(axes)
@@ -137,7 +143,10 @@ class BaseFigureTemplate(ABC):
             # Avoid duplicates in case the same axis is collected multiple times.
             axes = list(dict.fromkeys(axes))
             label = group_state.get("label", None)
-            self.fig.colorbar(mappable, ax=axes, label=label)
+            cbar = self.fig.colorbar(mappable, ax=axes, label=label)
+            tick_labelsize = group_state.get("tick_labelsize", None)
+            if tick_labelsize is not None:
+                cbar.ax.tick_params(labelsize=tick_labelsize)
 
     def _discover_panels(self) -> list[_PanelSpec]:
         panels: list[_PanelSpec] = []

@@ -13,7 +13,7 @@ persistent_workers = true
 max_steps           = 200000
 log_every_n_steps   = 10
 val_check_interval  = 100
-limit_val_batches   = 10
+limit_val_batches   = 1
 enable_progress_bar = true
 
 trainer_accelerator = "gpu"
@@ -130,10 +130,17 @@ diagnostic_level = "standard"
 
 # -- Figures & diagnostics ------------------------------------------------------------------------
 [figures]
-    enabled         = true
-    split           = "validate"
-    figures         = ["dummy"]
-    save_pdf        = true
+    enabled = true
+    split = "validate"
+    figures = [
+        # "lec_summary",
+        "mec_summary",
+        "hpc_summary",
+        "lec_pipeline",
+        "mec_cells",
+        "hpc_cells",
+    ]
+    save_pdf = true
     log_tensorboard = true
-    env_idx         = 0
-    freq_idx        = 0
+    env_idx = 0
+    freq_idx = 0
