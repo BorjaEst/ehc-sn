@@ -55,7 +55,7 @@ def process_dungeongen(  # -----------------------------------------------------
     archetype: str = Option("classic", "--archetype", help="Dungeon archetype (classic, warren, temple, crypt, cavern, fortress, lair)."),
     n_observations: int = Option(45, "--n-obs", help="Observation vocabulary size for random assignment."),
     density: float = Option(0.6, "--density", help="Room packing density (0.0 sparse … 1.0 tight)."),
-    seed: int = Option(42, "--seed", help="Base RNG seed (incremented per dungeon)."),
+    seed: int = Option(43, "--seed", help="Base RNG seed (incremented per dungeon)."),
     margin: int = Option(1, "--margin", help="Grid margin (wall border) around the dungeon bounding box."),
 ) -> None:  # fmt: skip
     """Generate dungeons with dungeongen, rasterize to grids, and write per-channel .npy files + JSONL index."""

@@ -602,7 +602,7 @@ class TrainingModel(L.LightningModule):
         """
         self._apply_runtime(self.global_step, log_values=False)
         step_batches = repeat(batch)  # Run until all examples halt
-        step_options = {}  # FIXME after the HeadLoss and TEMController support options
+        step_options = {"allow_halt": False, "explore": False}
         carry0 = self.step_module.initial_carry(batch)
 
         # Initialize carry/state on the first batch
@@ -614,11 +614,9 @@ class TrainingModel(L.LightningModule):
         step, collector = None, TraceCollector(TraceTree(), trace_specs)
         for t, step in StepLoop(self.step_module, step_batches, carry0, options=step_options):
             collector.append(t, step)
+            update_metrics_from_step(self.val_metrics, step.outputs.metrics, TEM_EPISODE_ROUTES)
         if step is None:
             raise ValueError("Evaluation loop did not yield any steps, cannot log metrics.")
-
-        # Update metrics with the final step's metrics and log to TensorBoard.
-        update_metrics_from_step(self.val_metrics, step.outputs.metrics, TEM_EPISODE_ROUTES)
 
         return {"trace": collector.tree}
 
