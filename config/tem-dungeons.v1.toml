@@ -72,13 +72,13 @@ diagnostic_level = "standard"
     mode      = "low_rank"
     init      = "identity"
     learnable = false
+    rank      = [10, 10, 8, 6, 6]
 
 # -- Optimizer and scheduler settings -------------------------------------------------------
 [optimizer]
     lr           = 1e-4
     weight_decay = 1e-2
     betas        = [0.9, 0.98]
-
 
 [scheduler]
     warmup_steps = 1000
