@@ -12,7 +12,7 @@ persistent_workers = true
 
 max_steps           = 200000
 log_every_n_steps   = 10
-val_check_interval  = 100
+val_check_interval  = 1000
 limit_val_batches   = 1
 enable_progress_bar = true
 

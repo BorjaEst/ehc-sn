@@ -192,7 +192,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ),
     )
     val_check_interval: int = Field(
-        default=100,
+        default=1000,
         description="Validation check interval (in training steps).",
     )
     enable_progress_bar: bool = Field(
