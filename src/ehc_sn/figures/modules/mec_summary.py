@@ -82,10 +82,10 @@ class GridCellsAutocorr(BaseFigureTemplate):
     def spatial_matrices(self, ax: Axes) -> None:
         nrows = len(self.freq_idxs)
         shared_n_items = min(max(int(cells.shape[-1]) for cells in self.cells), self.MAX_SPATIAL_CELLS)
-        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.07, squeeze=True)):
+        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.05, squeeze=True)):
             cells = self.cells[freq_idx]
             cell_indices = list(range(min(int(cells.shape[-1]), shared_n_items)))
-            axes = mosaic_axes(freq_ax, shared_n_items, wspace=0.04, hspace=0.04)
+            axes = mosaic_axes(freq_ax, shared_n_items, wspace=0.01, hspace=0.01)
             axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
             plot_autocorr_mosaic(axes_list, self.world, cells, self.location_ids, cell_indices=cell_indices)
             freq_ax.set_title(f"Spatial autocorr - Freq {freq_idx}", fontsize=7)
