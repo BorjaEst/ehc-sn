@@ -4,7 +4,6 @@ from typing import List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import cm
 from matplotlib.collections import PatchCollection
 from matplotlib.colors import Normalize
 from numpy.typing import NDArray
@@ -34,6 +33,8 @@ def plot_map(
 
     Draws locations as colored circles/squares where color represents the value.
     Optionally overlays action arrows. Shiny locations are highlighted with red outlines.
+    When location metadata includes a boolean ``valid`` field, invalid cells are
+    omitted entirely so the background reflects accessible occupancy only.
 
     Args:
         environment: Environment object with .locations list and .n_locations, .n_actions.
@@ -62,11 +63,12 @@ def plot_map(
     vmin = (np.nanmin(values) if has_finite else 0.0) if vmin is None else vmin
     vmax = (np.nanmax(values) if has_finite else 1.0) if vmax is None else vmax
 
-    location_cm = cm.get_cmap(location_cm, num_cols)
-    action_cm = cm.get_cmap(action_cm, max(getattr(environment, "n_actions", 0), 1))
+    location_cm = plt.get_cmap(location_cm, num_cols)
+    action_cm = plt.get_cmap(action_cm, max(getattr(environment, "n_actions", 0), 1))
 
     # Track invalid values for dedicated styling
     invalid_mask = ~np.isfinite(values)
+    valid_locations = _location_valid_mask(locations)
 
     # Auto-scale radius based on environment density
     if radius is None:
@@ -83,6 +85,9 @@ def plot_map(
 
     # Draw locations
     for i, location in enumerate(locations):
+        if not valid_locations[i]:
+            continue
+
         is_invalid = invalid_mask[i] if invalid_mask.size else False
         if shape == "square":
             patch = plt.Rectangle(
@@ -106,7 +111,7 @@ def plot_map(
             for action in location["actions"]:
                 if action["probability"] > 0:
                     transitions = np.array(action["transition"])
-                    loc_indices = np.where(transitions > 0)[0]
+                    loc_indices = np.where((transitions > 0) & valid_locations)[0]
                     locations_to = [locations[loc_to] for loc_to in loc_indices]
                     for loc_to in locations_to:
                         action_patches.append(
@@ -119,7 +124,9 @@ def plot_map(
                         )
 
     # Highlight shiny locations with red outline
-    for location in locations:
+    for i, location in enumerate(locations):
+        if not valid_locations[i]:
+            continue
         if location.get("shiny", False):
             if shape == "square":
                 outline = plt.Rectangle(
@@ -157,9 +164,7 @@ def plot_map(
             linewidth=0.0,
         )
         location_collection.set_norm(Normalize(vmin=vmin, vmax=vmax))
-        location_collection.set_array(
-            np.asarray(values[~invalid_mask], dtype=float),
-        )
+        location_collection.set_array(np.asarray(values[valid_locations & ~invalid_mask], dtype=float))  # fmt: skip
         ax.add_collection(location_collection)
 
     # Add action arrows and shiny outlines on top of the locations.
@@ -173,3 +178,15 @@ def _default_radius(n_locations: int) -> float:
     if n_locations <= 0:
         return 0.05
     return 2 * (0.01 + 1 / (10 * np.sqrt(n_locations)))
+
+
+def _location_valid_mask(locations: List[dict]) -> NDArray[np.bool_]:
+    """Return the canonical occupancy mask for environment locations.
+
+    When location metadata provides a ``valid`` field, invalid cells are treated
+    as structurally inaccessible and omitted from background rendering. Missing
+    ``valid`` fields default to ``True`` for backward compatibility.
+    """
+    if not locations:
+        return np.zeros((0,), dtype=bool)
+    return np.asarray([bool(location.get("valid", True)) for location in locations], dtype=bool)
