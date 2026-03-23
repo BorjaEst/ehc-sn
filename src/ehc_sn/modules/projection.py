@@ -29,9 +29,13 @@ class ProjectionSettings(BaseModel, extra="forbid"):
         default=False,
         description="If True, projection matrices are learnable",
     )
-    rank: Optional[int] = Field(
+    rank: Optional[int | list[int]] = Field(
         default=None,
-        description="Low_rank rank for low_rank mode (auto-derived via GCD if None)",
+        description=(
+            "Low-rank bottleneck size for low_rank mode. "
+            "Provide one integer to reuse the same rank across frequencies, "
+            "or a per-frequency rank list. Auto-derived via GCD when omitted."
+        ),
     )
 
 
