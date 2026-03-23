@@ -474,20 +474,20 @@ class TrainingModel(L.LightningModule):
         local_bs = int(batch["inputs"].shape[0])
         out = step.outputs
         loss = _normalize_loss_for_backward(out.loss, local_bs)
-        self.manual_backward(loss)
 
-        # Optimizer step and reset gradient for all optimizers
+        # Zero gradients before backward so each step uses only the current batch.
         opt_sup, opt_rl, opt_qv = self.optimizers()  # type: ignore[misc]
         sch_sup, sch_rl, sch_qv = self.lr_schedulers()  # type: ignore[misc]
+        opt_sup.zero_grad(set_to_none=True)
+        opt_rl.zero_grad(set_to_none=True)
+        opt_qv.zero_grad(set_to_none=True)
 
-        opt_sup.step(); opt_sup.zero_grad(set_to_none=True); sch_sup.step()  # fmt: skip
+        self.manual_backward(loss)
+
+        opt_sup.step(); sch_sup.step()  # fmt: skip
         if not is_warmup:
-            opt_rl.step(); opt_rl.zero_grad(set_to_none=True); sch_rl.step()  # fmt: skip
-            opt_qv.step(); opt_qv.zero_grad(set_to_none=True); sch_qv.step()  # fmt: skip
-        else:
-            # Keep gradients clean even when optimizers are intentionally frozen.
-            opt_rl.zero_grad(set_to_none=True)
-            opt_qv.zero_grad(set_to_none=True)
+            opt_rl.step(); sch_rl.step()  # fmt: skip
+            opt_qv.step(); sch_qv.step()  # fmt: skip
 
         # Update metrics with unnormalized loss and log to TensorBoard.
         update_metrics_from_step(self.train_metrics, step.outputs.metrics, RL_STEP_ROUTES)

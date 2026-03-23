@@ -365,7 +365,7 @@ class TrainingModel(L.LightningModule):
 
         Notes:
             - Horizon is effectively 1: we run exactly one rollout step per mini-batch.
-            - Loss is normalized by the *global* effective batch size for parity with legacy code.
+            - Loss is normalized by the local batch size; DDP averages gradients across ranks.
         """
         # Initialize carry/state on the first batch
         if self._train_carry is None:
@@ -394,12 +394,15 @@ class TrainingModel(L.LightningModule):
         # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = int(batch["inputs"].shape[0])
         loss = _normalize_loss_for_backward(step.outputs.loss, local_bs=local_bs)
-        self.manual_backward(loss)
 
         optimizers = self.optimizers()
         for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
+            opt.zero_grad(set_to_none=True)  # type: ignore
+
+        self.manual_backward(loss)
+
+        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
             opt.step()  # type: ignore
-            opt.zero_grad(set_to_none=True)
 
         scheduler = self.lr_schedulers()
         for sch in scheduler if isinstance(scheduler, list) else [scheduler]:

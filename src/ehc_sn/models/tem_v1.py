@@ -545,8 +545,13 @@ class TrainingModel(L.LightningModule):
 
     def training_step(  # -------------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
-    ) -> Tensor:  # fmt: skip
-        """ """
+    ) -> Dict[str, object]:  # fmt: skip
+        """Run one TEM training step with manual optimization.
+
+        Step-based checkpoints are treated as post-update recovery checkpoints.
+        This loop intentionally does not snapshot pre-optimization weights inside
+        ``training_step``.
+        """
         self._apply_runtime(self.global_step, log_values=True)
         batch_assembler = self._ensure_train_batch_assembler(batch)
 
@@ -575,12 +580,15 @@ class TrainingModel(L.LightningModule):
         # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = batch_size_from_static_maze_batch(batch)
         loss = _normalize_loss_for_backward(step.outputs.loss, local_bs=local_bs)
-        self.manual_backward(loss)
 
         optimizers = self.optimizers()
         for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
+            opt.zero_grad(set_to_none=True)  # type: ignore
+
+        self.manual_backward(loss)
+
+        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
             opt.step()  # type: ignore
-            opt.zero_grad(set_to_none=True)
 
         scheduler = self.lr_schedulers()
         for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
