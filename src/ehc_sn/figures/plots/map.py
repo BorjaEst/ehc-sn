@@ -36,6 +36,13 @@ def plot_map(
     When location metadata includes a boolean ``valid`` field, invalid cells are
     omitted entirely so the background reflects accessible occupancy only.
 
+    Spatial convention
+    ------------------
+
+    Environment locations use image/grid coordinates: ``o`` is the column index
+    and ``y`` is the row index. The rendered map therefore uses a top-left
+    origin so row 0 appears at the top, matching processed-dataset figures.
+
     Args:
         environment: Environment object with .locations list and .n_locations, .n_actions.
         values: Per-location scalar values (shape: n_locations,).
@@ -76,7 +83,7 @@ def plot_map(
 
     if ax is None:
         _, ax = plt.subplots()
-    ax = configure_environment_axes(ax, environment=environment, radius=radius)
+    ax = configure_environment_axes(ax, environment=environment, radius=radius, invert_y=True)
 
     location_patches: List = []
     nan_patches: List = []

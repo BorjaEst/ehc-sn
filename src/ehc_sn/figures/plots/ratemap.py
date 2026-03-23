@@ -73,6 +73,10 @@ def plot_ratematx_cell(
 ) -> Axes:
     """Plot a single cell's rate matrix on an existing axes.
 
+    The rasterized matrix uses the same image/grid convention as the vector
+    map renderers: ``o`` is the column index, ``y`` is the row index, and row
+    0 is displayed at the top.
+
     Args:
         ax: Axes to draw into.
         world: Environment world with location coordinates.
@@ -95,6 +99,7 @@ def plot_ratematx_cell(
 
     values = rate_map[cell_idx]
     grid, _, extent = rasterize_locations(world, values)
+    extent = _expand_degenerate_extent(extent)
 
     if grid.size == 0 or not np.isfinite(grid).any():
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
@@ -114,7 +119,7 @@ def plot_ratematx_cell(
 
     ax.imshow(
         grid,
-        origin="lower",
+        origin="upper",
         interpolation="nearest",
         cmap=cm,
         vmin=vmin,
@@ -124,6 +129,24 @@ def plot_ratematx_cell(
     )
     ax.axis("off")
     return ax
+
+
+def _expand_degenerate_extent(
+    extent: tuple[float, float, float, float],
+    *,
+    min_span: float = 1.0,
+) -> tuple[float, float, float, float]:
+    """Return an ``imshow`` extent with non-zero span on both axes."""
+    xmin, xmax, ymin, ymax = extent
+    if xmin == xmax:
+        half = min_span / 2
+        xmin -= half
+        xmax += half
+    if ymin == ymax:
+        half = min_span / 2
+        ymin -= half
+        ymax += half
+    return xmin, xmax, ymin, ymax
 
 
 def plot_ratematx_mosaic(

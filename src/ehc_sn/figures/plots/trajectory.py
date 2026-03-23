@@ -22,6 +22,10 @@ def plot_time_colored_trajectory(
 ) -> plt.Axes:
     """Plot a trajectory colored by time on an existing axes.
 
+    The trajectory uses the same image/grid coordinate convention as
+    :func:`ehc_sn.figures.plots.map.plot_map`: ``o`` is the column index,
+    ``y`` is the row index, and row 0 is displayed at the top.
+
     Args:
         ax: Axes to draw into.
         world: Environment world with location coordinates.
@@ -67,6 +71,7 @@ def plot_time_colored_trajectory(
 
 
 def _trajectory_coords(world: object, location_ids: list[int]) -> np.ndarray:
+    """Return trajectory coordinates in canonical world order ``(o, y)``."""
     coords = []
     locations = _environment_locations(world)
     for loc_id in location_ids:
