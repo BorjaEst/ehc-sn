@@ -2,6 +2,7 @@ import datetime
 import logging
 import math
 import os
+from dataclasses import fields, is_dataclass, replace
 from itertools import combinations
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
@@ -75,6 +76,38 @@ def merge_rows(flag: Tensor, current: Tensor, fresh: Tensor) -> Tensor:
 def merge_multiscale_rows(flag: Tensor, current: Sequence[Tensor], fresh: Sequence[Tensor]) -> list[Tensor]:
     """Apply row-wise replacement over a multiscale latent code."""
     return [merge_rows(flag, current_f, fresh_f) for current_f, fresh_f in zip(current, fresh, strict=True)]
+
+
+def merge_tree_rows(flag: Tensor, current: Any, fresh: Any) -> Any:
+    """Recursively apply row-wise replacement to tensor-bearing structures.
+
+    Supported inputs are tensors, dataclass instances, and nested lists/tuples
+    composed from those leaves. Both inputs must share the same structure.
+    """
+    if isinstance(current, torch.Tensor) and isinstance(fresh, torch.Tensor):
+        return merge_rows(flag, current, fresh)
+
+    if type(current) is not type(fresh):
+        raise TypeError(
+            f"merge_tree_rows requires matching types, got {type(current).__name__} and {type(fresh).__name__}"
+        )
+
+    if isinstance(current, list):
+        return [merge_tree_rows(flag, current_v, fresh_v) for current_v, fresh_v in zip(current, fresh, strict=True)]
+
+    if isinstance(current, tuple):
+        return tuple(
+            merge_tree_rows(flag, current_v, fresh_v) for current_v, fresh_v in zip(current, fresh, strict=True)
+        )
+
+    if is_dataclass(current) and is_dataclass(fresh):
+        updates = {
+            field.name: merge_tree_rows(flag, getattr(current, field.name), getattr(fresh, field.name))
+            for field in fields(current)
+        }
+        return replace(current, **updates)
+
+    raise TypeError(f"Unsupported merge_tree_rows input type: {type(current).__name__}")
 
 
 def inv_var_trans(

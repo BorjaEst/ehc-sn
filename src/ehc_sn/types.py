@@ -13,9 +13,10 @@ Longer background notes live in `docs/foundations.md`.
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Tuple, TypeAlias, Union
+from typing import Any, Dict, Literal, Optional, Protocol, Sequence, TypeAlias, runtime_checkable
 
 import numpy as np
+import torch
 from torch import Tensor
 
 # =============================================================================
@@ -156,16 +157,32 @@ Notes:
 # Memory Structures
 # =============================================================================
 
+
+@runtime_checkable
+class SupportsExplicitMemory(Protocol):
+    """Protocol for backend memory stores with explicit key/value slots.
+
+    Attributes:
+        keys: Stored key tensor of shape ``(B, T, S)``.
+        values: Stored value tensor of shape ``(B, T, S)``.
+        valid_mask: Boolean validity mask of shape ``(B, T)``.
+    """
+
+    keys: Tensor
+    values: Tensor
+    valid_mask: Tensor
+
+
 HebbianMemory = list[Matrix]
 """Attractor network connection weights for memory storage.
 
 Structure:
-    - Single memory: [M_gen]
-    - Dual memory: [M_gen, M_inf]
+    - Single memory: [M_g_cued]
+    - Dual memory: [M_g_cued, M_x_cued]
     
 Where:
-    - M_gen: Generative memory (g → p pathway for generation)
-    - M_inf: Inference memory (o → p pathway for inference, optional)
+    - M_g_cued: Memory retrieved from abstract-location/grid cues.
+    - M_x_cued: Memory retrieved from sensory cues (optional).
 
 Shape:
     Each matrix: [batch_size, sum(n_p), sum(n_p)]
@@ -175,12 +192,42 @@ Notes:
     `docs/foundations.md`.
 """
 
-MemoryState = HebbianMemory
-"""Complete memory state at a given timestep.
 
-Alias for HebbianMemory to clarify temporal context when passing
-memory state between iterations or for serialization/checkpointing.
+MemoryEntry: TypeAlias = Matrix | SupportsExplicitMemory
+"""Single backend-specific memory entry.
+
+    Supported variants:
+        - Dense Hebbian memory matrix with shape ``(B, S, S)``.
+        - Explicit key/value memory store with tensors ``keys`` and ``values``
+          shaped ``(B, T, S)`` and ``valid_mask`` shaped ``(B, T)``.
 """
+
+
+@dataclass
+class MemoryState:
+    """Complete HPC memory state at a given timestep.
+
+    Attributes:
+        g_cued: Retrieval entry used when recall is indexed by abstract-location
+            or grid-side cues. This corresponds to the paper's main memory M.
+        x_cued: Retrieval entry used when recall is indexed by sensory cues.
+            This corresponds to the optional inference memory M_x.
+
+    Notes:
+        Dense attractor memory uses matrices, while explicit attention memory
+        uses per-slot key/value stores.
+    """
+
+    g_cued: MemoryEntry
+    x_cued: MemoryEntry
+
+    def for_operation(self, operation: Literal["generative", "inference"]) -> MemoryEntry:
+        """Return the memory entry selected by HPC operation role."""
+        if operation == "generative":
+            return self.g_cued
+        if operation == "inference":
+            return self.x_cued
+        raise ValueError(f"Invalid operation '{operation}'. Expected 'generative' or 'inference'.")
 
 
 # =============================================================================
@@ -333,10 +380,10 @@ ProjectionMode = Literal["identity", "tiling", "low_rank", "random"]
 InitStrategy = Literal["identity", "random"]
 
 
-import torch
-from torch import Tensor
-
 Device = torch.device
 Dtype = torch.dtype
 Channels = dict[str, np.ndarray]
 Batch = Dict[str, Tensor]  # Generic batch type, can be specialized as needed
+
+
+OperationMode = Literal["generative", "inference"]

@@ -93,10 +93,8 @@ class LECState(DetachMixin):
         """Return a state where flagged rows are replaced from ``fresh``."""
         return self.new(
             features=utils.merge_multiscale_rows(flag, self.features, fresh.features),
-            filtered_features=utils.merge_multiscale_rows(
-                flag, self.filtered_features, fresh.filtered_features
-            ),
-        )
+            filtered_features=utils.merge_multiscale_rows(flag, self.filtered_features, fresh.filtered_features),
+        )  # fmt: skip
 
 
 # =================================================================================================

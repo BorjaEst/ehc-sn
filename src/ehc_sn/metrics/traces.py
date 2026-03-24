@@ -222,7 +222,21 @@ def _get_diagnostic_hpc_location_mean_tem(ctx: StepContext) -> TraceValue:
 
 def _get_diagnostic_hpc_memory_tem(ctx: StepContext) -> TraceValue:
     """Replayable final-step-compatible HPC memory state for diagnostic figures."""
-    return [memory.detach() for memory in ctx.carry.model_state.hpc.memory]
+    memory = ctx.carry.model_state.hpc.memory
+    return {
+        "g_cued": _memory_entry_for_trace(memory.g_cued),
+        "x_cued": _memory_entry_for_trace(memory.x_cued),
+    }
+
+
+def _memory_entry_for_trace(memory: TraceValue) -> TraceValue:
+    """Convert backend-specific memory entries into replayable trace tensors."""
+    if isinstance(memory, torch.Tensor):
+        return memory.detach()
+    values = getattr(memory, "values", None)
+    if isinstance(values, torch.Tensor):
+        return values.detach()
+    return memory
 
 
 def _get_lec_alpha_sigmoid_tem(ctx: StepContext) -> TraceValue:

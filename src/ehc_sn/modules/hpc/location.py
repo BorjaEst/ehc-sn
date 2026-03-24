@@ -11,7 +11,7 @@ Notes:
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
@@ -29,15 +29,15 @@ class GroundLocSettings(BaseModel, extra="forbid"):
     activation: Activation = Field(
         default="leaky_relu",
         frozen=True,
-        description="Activation function for attractor dynamics.",
+        description="Activation function for grounded-location inference.",
     )
     clamp_min: float = Field(
         default=-1.0,
-        description="Minimum clamp value for Hebbian memory weights.",
+        description="Minimum clamp value for grounded-location activations.",
     )
     clamp_max: float = Field(
         default=1.0,
-        description="Maximum clamp value for Hebbian memory weights.",
+        description="Maximum clamp value for grounded-location activations.",
     )
 
 

@@ -10,7 +10,7 @@ mask (typically produced by `ehc_sn.utils.make_hebbian_write_mask`).
 """
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
@@ -97,7 +97,7 @@ class HebbianUpdate(nn.Module):
         """
         eta, hebbian_decay = self.runtime.eta, self.runtime.hebbian_decay
         p_inf, p_gen = [torch.cat(p, dim=1) for p in (p_inf, p_gen)]
-        update = torch.squeeze(torch.unsqueeze(p_inf + p_gen, 2) @ torch.unsqueeze(p_inf - p_gen, 1))
+        update = (p_inf + p_gen).unsqueeze(2) @ (p_inf - p_gen).unsqueeze(1)
         update = update * mask.to(dtype=memory.dtype) if mask is not None else update
         return self.clamp_memory(hebbian_decay * memory + eta * update)
 

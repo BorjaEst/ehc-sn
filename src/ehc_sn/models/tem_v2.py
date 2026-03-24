@@ -25,8 +25,9 @@ from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
+from ehc_sn.models.tem_transition import TEMMemoryTransition
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
-from ehc_sn.modules.hpc import HPCModel, HPCSettings, HPCState, MemoryState
+from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCSensoryStepInput, HPCState
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
@@ -37,7 +38,7 @@ from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
 from ehc_sn.training.step_loop import StepLoop
-from ehc_sn.types import Device, Dtype
+from ehc_sn.types import Device, Dtype, MemoryState
 from ehc_sn.utils.detach import DetachMixin
 
 # Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
@@ -114,7 +115,7 @@ class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
         """Return the total number of frequency modules."""
         return len(self.f_initial)
 
-    hpc: HPCSettings = Field(
+    hpc: HPCAttentionSettings = Field(
         ...,
         description="Settings for the HPC module, including Hebbian memory parameters.",
     )
@@ -330,7 +331,7 @@ class TEMModelV2(nn.Module):
         self.autoencoder = Autoencoder(config.observation_dim, config.lec.feature_dim, config.autoencoder)
 
         # Entorhinal Hippocampal Circuit components
-        self.hpc = HPCModel(n_freq, f_initial, config.hpc, device=device, dtype=dtype)
+        self.hpc = HPCAttention(n_freq, f_initial, config.hpc, device=device, dtype=dtype)
         self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
@@ -366,7 +367,12 @@ class TEMModelV2(nn.Module):
         return TEMState(
             lec=state.lec.replace_rows(reset_flag, fresh.lec),
             mec=state.mec.replace_rows(reset_flag, fresh.mec),
-            hpc=state.hpc.replace_rows(reset_flag, fresh.hpc),
+            hpc=state.hpc.replace_rows(
+                reset_flag,
+                fresh.hpc,
+                merge_memory_rows=self.hpc.merge_memory_rows,
+                common_memory=self.hpc.config.common_memory,
+            ),
         )
 
     def set_runtime(  # ---------------------------------------------------------------------------
@@ -397,25 +403,37 @@ class TEMModelV2(nn.Module):
         # Sensory inference: encode observations into LEC features and query place memory from them.
         lec_features_post, state.lec = self.lec.inference(obs_embedding, state.lec)
         place_query_from_obs = self.projection_lec(lec_features_post)
-        place_sensory = self.hpc.recall(place_query_from_obs, state.hpc, mode="full") if self.config.use_x_cued_recall else None  # fmt: skip
+        sensory = self.hpc.prepare_sensory_step(
+            HPCSensoryStepInput(
+                state=state.hpc,
+                sensory_query=place_query_from_obs,
+                use_x_cued_recall=self.config.use_x_cued_recall,
+            )
+        )
 
         # Grid transition prior from action-driven path integration.
         grid_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)
         place_query_from_grid_prior = self.projection_mec(grid_prior)
-        place_recall_from_grid_prior = self.hpc.recall(place_query_from_grid_prior, state.hpc, mode="hierarchical")  # fmt: skip
 
         # Grid posterior after correcting the prior with recalled place evidence.
-        grid_post, state.mec = self.mec.inference(place_sensory, landmark_id=landmark_id, state=state.mec)  # fmt: skip
+        grid_post, state.mec = self.mec.inference(sensory.sensory_recall, landmark_id=landmark_id, state=state.mec)  # fmt: skip
         place_query_from_grid_post = self.projection_mec(grid_post)
-        place_recall_from_grid_post = self.hpc.recall(place_query_from_grid_post, state.hpc, mode="hierarchical")  # fmt: skip
+        transition = TEMMemoryTransition(
+            sensory=sensory,
+            grid_prior=grid_prior,
+            grid_query_prior=place_query_from_grid_prior,
+            grid_post=grid_post,
+            grid_query_posterior=place_query_from_grid_post,
+        )
 
-        # Place prior and posterior terms used by the TEM variational losses.
-        place_retrieved, state.hpc = self.hpc.generative(place_recall_from_grid_post, state.hpc)
-        place_prior, state.hpc = self.hpc.generative(place_recall_from_grid_prior, state.hpc)
-        place_post, state.hpc = self.hpc.inference(place_query_from_obs, place_query_from_grid_post, state.hpc)  # fmt: skip
-
-        # Hebbian update uses the posterior place code and the sensory-cued retrieval when available.
-        state.hpc = self.hpc.update(place_post, place_retrieved, place_sensory, state.hpc)
+        step = self.hpc.step(transition.to_hpc_step_input(state.hpc))
+        place_sensory = step.sensory.sensory_recall
+        place_recall_from_grid_prior = step.grid_prior_recall
+        place_recall_from_grid_post = step.grid_posterior_recall
+        place_prior = step.place_prior
+        place_retrieved = step.place_retrieved
+        place_post = step.place_post
+        state.hpc = step.state
 
         # Decode observation logits for the three TEM pathways.
         lec_features_from_place_post = self.projection_lec.inverse(place_post)
@@ -432,7 +450,7 @@ class TEMModelV2(nn.Module):
 
         # Return controller-compatible rollout outputs for the TEM loss head.
         obs_logits = (logits_inference, logits_retrieved, logits_ancestral)
-        grid = (grid_post, grid_prior)
+        grid = (transition.grid_post, transition.grid_prior)
         place = (place_post, place_prior, place_sensory)
         return state, obs_logits, None, grid, place  # Action=None as TEM provides no direct action outputs
 

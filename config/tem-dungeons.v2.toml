@@ -35,9 +35,7 @@ diagnostic_level = "standard"
     observation_dim = 45
     action_count    = 5
 
-    # Current schema says int, but legacy TEM semantics strongly suggest this should
-    # be a list of frequencies. This value only makes the TOML match the current
-    # field name, not the intended legacy behavior.
+    # Initial multiscale frequency values used by the TEM modules.
     f_initial = [0.99, 0.3, 0.09, 0.5, 0.4]
 
 [model.autoencoder]
@@ -45,10 +43,14 @@ diagnostic_level = "standard"
     decode_mode = "mlp"
 
 [model.hpc]
-    shape         = [100, 100, 80, 60, 60]
-    common_memory = false
-    do_sample     = false
+    shape             = [100, 100, 80, 60, 60]
+    common_memory     = false
+    do_sample         = false
 
+[model.hpc.attention]
+    memory_capacity = 512
+    temperature     = 1.0
+    empty_retrieval = "query"
 
 [model.lec]
     feature_dim = 10
@@ -78,6 +80,7 @@ diagnostic_level = "standard"
     lr           = 1e-4
     weight_decay = 1e-2
     betas        = [0.9, 0.98]
+
 
 [scheduler]
     warmup_steps = 1000

@@ -55,8 +55,8 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         self.world = self.trace.get_world(self.env_idx)
         self.location_ids = self.trace.get("world_step/location_ids")[:, self.env_idx]
         self.cells = [self.trace.get(f"diagnostic/hpc/location_mean/{f}")[:, self.env_idx, :] for f in range(self.n_freq)]  # fmt: skip
-        self.memory_hier = self.trace.get("diagnostic/hpc/memory/0")[-1, self.env_idx]
-        self.memory_full = self.trace.get("diagnostic/hpc/memory/1")[-1, self.env_idx]
+        self.memory_g_cued = self.trace.get("diagnostic/hpc/memory/g_cued")[-1, self.env_idx]
+        self.memory_x_cued = self.trace.get("diagnostic/hpc/memory/x_cued")[-1, self.env_idx]
 
     @panel()
     def map_labels(self, ax: Axes) -> None:
@@ -71,13 +71,13 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
     @colorbar(group="memory", label=None, tick_labelsize=6)
     @panel()
     def memory_panel_a(self, ax: Axes) -> None:
-        """Plot HPC hierarchical memory matrices at the final timestep.
+        """Plot HPC g-cued memory matrices at the final timestep.
 
         Args:
             ax: Axes to draw into.
         """
-        ax.matshow(self.memory_hier, cmap="coolwarm", vmin=-0.1, vmax=0.1)
-        ax.set_title("Hierarchical memory")
+        ax.matshow(self.memory_g_cued, cmap="coolwarm", vmin=-0.1, vmax=0.1)
+        ax.set_title("G-cued memory")
         ax.set_xlabel("Retrieved feature index")
         ax.set_ylabel("Cue feature index")
         ax.set_xticklabels([])
@@ -86,13 +86,13 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
     @colorbar(group="memory", label=None, tick_labelsize=6)
     @panel()
     def memory_panel_b(self, ax: Axes) -> None:
-        """Plot HPC full memory matrices at the final timestep.
+        """Plot HPC x-cued memory matrices at the final timestep.
 
         Args:
             ax: Axes to draw into.
         """
-        ax.matshow(self.memory_full, cmap="coolwarm", vmin=-0.1, vmax=0.1)
-        ax.set_title("Full memory")
+        ax.matshow(self.memory_x_cued, cmap="coolwarm", vmin=-0.1, vmax=0.1)
+        ax.set_title("X-cued memory")
         ax.set_xlabel("Retrieved feature index")
         ax.set_ylabel("Cue feature index")
         ax.set_xticklabels([])
