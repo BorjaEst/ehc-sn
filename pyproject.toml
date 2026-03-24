@@ -70,7 +70,7 @@
     ehc_sn = ["py.typed", "**/*.yaml", "**/*.yml"]
 
 [tool.black]
-    line-length    = 110
+    line-length    = 140
     target-version = ["py312"]
     include        = '\.pyi?$'
 

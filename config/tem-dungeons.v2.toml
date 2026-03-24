@@ -47,10 +47,12 @@ diagnostic_level = "standard"
     common_memory     = false
     do_sample         = false
 
-[model.hpc.attention]
-    memory_capacity = 512
+[model.hpc.retrieval]
     temperature     = 1.0
     empty_retrieval = "query"
+
+[model.hpc.write]
+    memory_capacity = 512
 
 [model.lec]
     feature_dim = 10

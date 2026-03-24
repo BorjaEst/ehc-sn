@@ -117,7 +117,7 @@ class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
 
     hpc: HPCAttentionSettings = Field(
         ...,
-        description="Settings for the HPC module, including Hebbian memory parameters.",
+        description="Settings for the episodic-attention HPC module.",
     )
     lec: LECSettings = Field(
         ...,
@@ -176,11 +176,16 @@ class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
 
 # =================================================================================================
 class MemoryRuntimeConfig(BaseModel, extra="forbid"):
-    """Step-based runtime schedule for Hebbian memory dynamics."""
+    """Shared memory runtime schedule kept for TEM contract parity.
+
+    The TEM v2 attention backend currently ignores these values, but the
+    runtime surface is kept aligned with TEM v1 so the surrounding training
+    stack does not need a special-case path.
+    """
 
     eta: float = Field(
         default=0.5,
-        description="Target Hebbian write rate reached after the eta ramp completes.",
+        description="Shared memory write-rate value reached after the eta ramp completes.",
     )
     eta_it: int = Field(
         default=16000,
@@ -189,12 +194,12 @@ class MemoryRuntimeConfig(BaseModel, extra="forbid"):
     )
     hebbian_decay: float = Field(
         default=0.9999,
-        description="Target Hebbian decay reached after the decay ramp completes.",
+        description="Shared memory decay value reached after the decay ramp completes.",
     )
     lambda_it: int = Field(
         default=200,
         ge=1,
-        description="Number of optimizer steps used to ramp Hebbian decay to its target value.",
+        description="Number of optimizer steps used to ramp the shared memory decay value.",
     )
 
 
@@ -234,7 +239,7 @@ class RuntimeConfig(BaseModel, extra="forbid"):
 
     memory: MemoryRuntimeConfig = Field(
         default_factory=MemoryRuntimeConfig,
-        description="Runtime schedule for Hebbian plasticity parameters.",
+        description="Shared memory runtime schedule retained for TEM contract parity.",
     )
     uncertainty: UncertaintyRuntimeConfig = Field(
         default_factory=UncertaintyRuntimeConfig,
