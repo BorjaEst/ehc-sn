@@ -13,6 +13,7 @@ from ehc_sn.types import Activation, Device, Dtype, RetrievalRole
 MissingCueBehavior: TypeAlias = Literal["error", "use_available", "zeros"]
 
 
+# =================================================================================================
 class RoleQueryPolicySettings(BaseModel, extra="forbid"):
     """Role-aware compatibility policy matching the legacy TEM query flow."""
 
@@ -100,16 +101,13 @@ QueryPolicySettings: TypeAlias = Annotated[
 ]
 
 
+# =================================================================================================
 class QueryPolicy(nn.Module, ABC):
     """Resolve a retrieval query from the available sensory and grid cues."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self,
-        shape: list[int],
-        config: QueryPolicySettings,
-        *,
-        device: Optional[Device] = None,
-        dtype: Optional[Dtype] = None,
+        self, shape: list[int], config: QueryPolicySettings, *,
+        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
         del device, dtype
         super().__init__()
@@ -127,11 +125,8 @@ class QueryPolicy(nn.Module, ABC):
         return self._config
 
     def forward(  # -------------------------------------------------------------------------------
-        self,
-        *,
-        x_query: Optional[list[Tensor]],
-        g_query: Optional[list[Tensor]],
-        role: RetrievalRole,
+        self, *, 
+        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
         """Return a resolved multi-scale query for memory retrieval."""
         self._validate_query(x_query, name="x_query")
@@ -140,11 +135,8 @@ class QueryPolicy(nn.Module, ABC):
 
     @abstractmethod
     def _forward(  # ------------------------------------------------------------------------------
-        self,
-        *,
-        x_query: Optional[list[Tensor]],
-        g_query: Optional[list[Tensor]],
-        role: RetrievalRole,
+        self, *,
+        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
         """Implement policy-specific query resolution."""
 
@@ -170,12 +162,9 @@ class QueryPolicy(nn.Module, ABC):
                 raise ValueError(f"All tensors in {name} must share the same batch size.")
 
     def _fallback(  # -----------------------------------------------------------------------------
-        self,
-        *,
-        preferred: Optional[list[Tensor]],
-        other: Optional[list[Tensor]],
+        self, *,
+        preferred: Optional[list[Tensor]], preferred_name: str, other: Optional[list[Tensor]],
         missing_behavior: MissingCueBehavior,
-        preferred_name: str,
     ) -> list[Tensor]:  # fmt: skip
         """Return the configured fallback query when the preferred cue is missing."""
         if preferred is not None:
@@ -195,11 +184,8 @@ class RoleQueryPolicy(QueryPolicy):
         return super().config  # type: ignore[return-value]
 
     def _forward(  # ------------------------------------------------------------------------------
-        self,
-        *,
-        x_query: Optional[list[Tensor]],
-        g_query: Optional[list[Tensor]],
-        role: RetrievalRole,
+        self, *,
+        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
         if role == "inference":
             return self._fallback(
@@ -224,11 +210,8 @@ class XOnlyQueryPolicy(QueryPolicy):
         return super().config  # type: ignore[return-value]
 
     def _forward(  # ------------------------------------------------------------------------------
-        self,
-        *,
-        x_query: Optional[list[Tensor]],
-        g_query: Optional[list[Tensor]],
-        role: RetrievalRole,
+        self, *,
+        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
         del role
         return self._fallback(
@@ -247,11 +230,8 @@ class GOnlyQueryPolicy(QueryPolicy):
         return super().config  # type: ignore[return-value]
 
     def _forward(  # ------------------------------------------------------------------------------
-        self,
-        *,
-        x_query: Optional[list[Tensor]],
-        g_query: Optional[list[Tensor]],
-        role: RetrievalRole,
+        self, *,
+        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
         del role
         return self._fallback(
@@ -266,12 +246,8 @@ class GatedMixQueryPolicy(QueryPolicy):
     """Learn a per-frequency convex interpolation between x and g cues."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self,
-        shape: list[int],
-        config: GatedMixQueryPolicySettings,
-        *,
-        device: Optional[Device] = None,
-        dtype: Optional[Dtype] = None,
+        self, shape: list[int], config: GatedMixQueryPolicySettings, *,
+        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
         super().__init__(shape, config, device=device, dtype=dtype)
         self._gates = nn.ModuleList([nn.Linear(2 * width, width, device=device, dtype=dtype) for width in shape])
@@ -282,11 +258,8 @@ class GatedMixQueryPolicy(QueryPolicy):
         return super().config  # type: ignore[return-value]
 
     def _forward(  # ------------------------------------------------------------------------------
-        self,
-        *,
-        x_query: Optional[list[Tensor]],
-        g_query: Optional[list[Tensor]],
-        role: RetrievalRole,
+        self, *,
+        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
         del role
         if x_query is None or g_query is None:
@@ -316,12 +289,8 @@ class ConjunctiveQueryPolicy(QueryPolicy):
     """Build a learned conjunctive query from sensory and grid cues."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self,
-        shape: list[int],
-        config: ConjunctiveQueryPolicySettings,
-        *,
-        device: Optional[Device] = None,
-        dtype: Optional[Dtype] = None,
+        self, shape: list[int], config: ConjunctiveQueryPolicySettings, *,
+        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
         super().__init__(shape, config, device=device, dtype=dtype)
         self._activation_fn = utils.activation_from_str(config.activation)
@@ -333,11 +302,8 @@ class ConjunctiveQueryPolicy(QueryPolicy):
         return super().config  # type: ignore[return-value]
 
     def _forward(  # ------------------------------------------------------------------------------
-        self,
-        *,
-        x_query: Optional[list[Tensor]],
-        g_query: Optional[list[Tensor]],
-        role: RetrievalRole,
+        self, *,
+        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
         del role
         if x_query is None or g_query is None:
@@ -367,12 +333,10 @@ class ConjunctiveQueryPolicy(QueryPolicy):
             projection.weight.data[:, 2 * width : 3 * width] = identity
 
 
+# =================================================================================================
 def build_query_policy(  # ------------------------------------------------------------------------
-    shape: list[int],
-    config: QueryPolicySettings,
-    *,
-    device: Optional[Device] = None,
-    dtype: Optional[Dtype] = None,
+    shape: list[int], config: QueryPolicySettings, *,
+    device: Optional[Device] = None, dtype: Optional[Dtype] = None,
 ) -> QueryPolicy:  # fmt: skip
     """Construct the configured query policy."""
     if config.kind == "by_role":
@@ -388,14 +352,10 @@ def build_query_policy(  # -----------------------------------------------------
     raise ValueError(f"Unsupported query policy '{config.kind}'.")
 
 
+# =================================================================================================
 __all__ = [
-    "ConjunctiveQueryPolicySettings",
-    "GOnlyQueryPolicySettings",
-    "GatedMixQueryPolicySettings",
-    "MissingCueBehavior",
-    "QueryPolicy",
-    "QueryPolicySettings",
-    "RoleQueryPolicySettings",
-    "XOnlyQueryPolicySettings",
+    "ConjunctiveQueryPolicySettings", "GOnlyQueryPolicySettings", "GatedMixQueryPolicySettings",
+    "QueryPolicySettings", "RoleQueryPolicySettings", "XOnlyQueryPolicySettings",
+    "MissingCueBehavior", "QueryPolicy",
     "build_query_policy",
-]
+]  # fmt: skip

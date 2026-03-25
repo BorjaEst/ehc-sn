@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Store representations and exact operator helpers for HPC memory backends."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Protocol
