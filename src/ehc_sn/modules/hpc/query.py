@@ -14,15 +14,30 @@ from ehc_sn import utils
 from ehc_sn.types import Activation, FactorMemoryView, LinearMemoryView
 
 
+# =================================================================================================
 class AttractorSettings(BaseModel, extra="forbid"):
     """Settings for attractor dynamics modules."""
 
-    kappa: float = Field(default=0.8, description="Hebbian retrieval decay term")
-    activation: Activation = Field(default="leaky_relu", frozen=True, description="Activation function for attractor dynamics.")
-    clamp_min: float = Field(default=-1.0, description="Minimum clamp value for attractor dynamics.")
-    clamp_max: float = Field(default=1.0, description="Maximum clamp value for attractor dynamics.")
+    kappa: float = Field(
+        default=0.8,
+        description="Hebbian retrieval decay term",
+    )
+    activation: Activation = Field(
+        default="leaky_relu",
+        frozen=True,
+        description="Activation function for attractor dynamics.",
+    )
+    clamp_min: float = Field(
+        default=-1.0,
+        description="Minimum clamp value for attractor dynamics.",
+    )
+    clamp_max: float = Field(
+        default=1.0,
+        description="Maximum clamp value for attractor dynamics.",
+    )
 
 
+# =================================================================================================
 class AttractorNetwork(nn.Module):
     """Attractor retrieval dynamics over a linear memory view."""
 
@@ -52,6 +67,7 @@ class AttractorNetwork(nn.Module):
         return self._activation_fn(code)
 
 
+# =================================================================================================
 class AttentionSettings(BaseModel, extra="forbid"):
     """Settings for explicit factor-memory retrieval."""
 
@@ -68,13 +84,18 @@ class AttentionSettings(BaseModel, extra="forbid"):
         default="log_count",
         description="Optional sharpening factor based on the number of populated factor slots.",
     )
-    iterations: int = Field(default=1, ge=1, description="Number of factor retrieval iterations to apply.")
+    iterations: int = Field(
+        default=1,
+        ge=1,
+        description="Number of factor retrieval iterations to apply.",
+    )
     recurrence: Literal["none", "multiplicative"] = Field(
         default="none",
         description="Recurrence rule used after the first retrieval iteration.",
     )
 
 
+# =================================================================================================
 class FactorRetrieval(nn.Module):
     """Masked-softmax retrieval over explicit factor-memory slots."""
 
@@ -107,14 +128,9 @@ class FactorRetrieval(nn.Module):
     def read_values(self, weights: Tensor, values: Tensor) -> Tensor:
         return torch.einsum("bt,bts->bs", weights, values)
 
-    def recall_from_logits(
-        self,
-        logits: Tensor,
-        values: Tensor,
-        *,
-        valid_mask: Tensor,
-        fallback_query: Tensor,
-    ) -> Tensor:
+    def recall_from_logits(  # --------------------------------------------------------------------
+        self, logits: Tensor, values: Tensor, *, valid_mask: Tensor, fallback_query: Tensor
+    ) -> Tensor:  # fmt: skip
         weights, has_valid_slot = self.weights_from_logits(logits, valid_mask=valid_mask)
         recalled = self.read_values(weights, values)
         fallback = self._empty_fallback(fallback_query)
@@ -132,13 +148,5 @@ class FactorRetrieval(nn.Module):
         return query
 
 
-EpisodicRetrieval = FactorRetrieval
-
-
-__all__ = [
-    "AttentionSettings",
-    "AttractorNetwork",
-    "AttractorSettings",
-    "EpisodicRetrieval",
-    "FactorRetrieval",
-]
+# =================================================================================================
+__all__ = ["AttentionSettings", "AttractorNetwork", "AttractorSettings", "FactorRetrieval"]
