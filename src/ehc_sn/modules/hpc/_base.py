@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Optional, Protocol
+from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
@@ -154,52 +154,11 @@ class HPCStepOutput:
 
 
 # =================================================================================================
-class HPCBackendAdapter(Protocol):
-    """Backend-local storage/read/write contract used by ``HPCBase``.
-
-    Public HPC methods keep the semantic multi-scale API. Backend helpers own
-    the store-specific memory representation and operate on flattened
-    memory-space tensors with shape ``(B, S)`` where ``S = sum(shape)``.
-    """
-
-    def init_memory(  # ---------------------------------------------------------------------------
-        self, batch_size: int, *,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> MemoryState:  # fmt: skip
-        """Initialize backend-specific memory state."""
-
-    def set_runtime(  # ---------------------------------------------------------------------------
-        self, *, eta: float, hebbian_decay: float,
-    ) -> None:  # fmt: skip
-        """Apply runtime parameters required by the concrete memory system."""
-
-    def recall_flat(  # ---------------------------------------------------------------------------
-        self, query: Tensor, memory: MemoryEntry, *, role: RetrievalRole,
-    ) -> Tensor:  # fmt: skip
-        """Return a flattened recalled code with shape ``(B, S)``.
-
-        ``role`` communicates the retrieval role. A backend may either use
-        it to change retrieval dynamics or rely on the caller-selected memory
-        entry when the same retrieval rule applies to both roles.
-        """
-
-    def update_memory(  # -------------------------------------------------------------------------
-        self, memory: MemoryState, key: Tensor, g_value: Tensor, x_value: Optional[Tensor],
-    ) -> MemoryState:  # fmt: skip
-        """Write one TEM step into backend-specific memory state."""
-
-    def merge_memory_rows(  # ---------------------------------------------------------------------
-        self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
-    ) -> MemoryEntry:  # fmt: skip
-        """Merge backend-specific memory rows during partial reset."""
-
-
-# =================================================================================================
 class HPCBase(nn.Module, ABC):
     """Shared orchestration for hippocampal memory modules.
 
-    Concrete classes provide a backend helper that owns memory representation,
-    runtime, recall, update, and row-merge semantics. The base class owns
+    Concrete classes implement memory representation, runtime, recall, update,
+    and row-merge semantics through protected hooks. The base class owns
     grounded-location inference, semantic multi-scale IO, generative sampling,
     and the TEM-compatible two-phase step choreography.
     """
@@ -264,10 +223,36 @@ class HPCBase(nn.Module, ABC):
 
         return list(torch.split(flat_code, split_size_or_sections=self.shape, dim=1))
 
-    @property
     @abstractmethod
-    def memory_backend(self) -> HPCBackendAdapter:
-        """Return the backend helper implementing memory-specific behavior."""
+    def _init_memory_impl(
+        self,
+        batch_size: int,
+        *,
+        device: Optional[Device] = None,
+    ) -> MemoryState:
+        """Initialize the concrete memory representation."""
+
+    @abstractmethod
+    def _set_runtime_impl(self, *, eta: float, hebbian_decay: float) -> None:
+        """Apply runtime write parameters to the concrete memory system."""
+
+    @abstractmethod
+    def _recall_flat_impl(self, query: Tensor, memory: MemoryEntry, *, role: RetrievalRole) -> Tensor:
+        """Return a flattened recalled code with shape ``(B, S)``."""
+
+    @abstractmethod
+    def _update_memory_impl(
+        self,
+        memory: MemoryState,
+        key: Tensor,
+        g_value: Tensor,
+        x_value: Optional[Tensor],
+    ) -> MemoryState:
+        """Write one TEM step into the concrete memory state."""
+
+    @abstractmethod
+    def _merge_memory_rows_impl(self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry) -> MemoryEntry:
+        """Merge backend-specific memory rows during partial reset."""
 
     def init_state(  # ----------------------------------------------------------------------------
         self, batch_size: int, *, memory: Optional[MemoryState] = None,
@@ -284,13 +269,14 @@ class HPCBase(nn.Module, ABC):
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> MemoryState:  # fmt: skip
         """Initialize backend-specific memory state."""
-        return self.memory_backend.init_memory(batch_size=batch_size, device=device)
+        del dtype
+        return self._init_memory_impl(batch_size=batch_size, device=device)
 
     def set_runtime(  # ---------------------------------------------------------------------------
         self, *, eta: float, hebbian_decay: float,
     ) -> None:  # fmt: skip
         """Apply runtime parameters required by the concrete memory system."""
-        self.memory_backend.set_runtime(eta=eta, hebbian_decay=hebbian_decay)
+        self._set_runtime_impl(eta=eta, hebbian_decay=hebbian_decay)
 
     def recall(  # --------------------------------------------------------------------------------
         self, *, x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]],
@@ -298,7 +284,7 @@ class HPCBase(nn.Module, ABC):
     ) -> list[Tensor]:  # fmt: skip
         """Retrieve grounded-location code from backend-specific memory."""
         p_query = self.query_policy(x_query=x_query, g_query=g_query, role=role)
-        recalled = self.memory_backend.recall_flat(
+        recalled = self._recall_flat_impl(
             self._flatten_memory_code(p_query),
             state.memory.for_role(role),
             role=role,
@@ -310,7 +296,7 @@ class HPCBase(nn.Module, ABC):
         state: HPCState,
     ) -> HPCState:  # fmt: skip
         """Write one TEM step into backend-specific memory state."""
-        memory = self.memory_backend.update_memory(
+        memory = self._update_memory_impl(
             state.memory,
             self._flatten_memory_code(p_inf),
             self._flatten_memory_code(p_gen_gi),
@@ -322,7 +308,7 @@ class HPCBase(nn.Module, ABC):
         self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
     ) -> MemoryEntry:  # fmt: skip
         """Merge backend-specific memory rows during partial reset."""
-        return self.memory_backend.merge_memory_rows(flag, current, fresh)
+        return self._merge_memory_rows_impl(flag, current, fresh)
 
     def prepare_sensory_step(  # ------------------------------------------------------------------
         self, step_input: HPCSensoryStepInput,
@@ -395,5 +381,5 @@ class HPCBase(nn.Module, ABC):
 # =================================================================================================
 __all__ = [
     "HPCCommonSettings", "HPCState", "HPCSensoryStepInput", "HPCSensoryStepOutput",
-    "HPCStepInput", "HPCStepOutput", "HPCBackendAdapter", "HPCBase",
+    "HPCStepInput", "HPCStepOutput", "HPCBase",
 ]  # fmt: skip
