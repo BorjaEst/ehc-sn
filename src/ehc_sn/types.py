@@ -12,6 +12,7 @@ Conventions:
 Longer background notes live in `docs/foundations.md`.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional, Sequence, TypeAlias
 
@@ -157,6 +158,49 @@ Notes:
 # Memory Structures
 # =============================================================================
 
+MemoryWriteKind: TypeAlias = Literal["hebbian", "append"]
+"""Canonical write-strategy labels for HPC memory presets."""
+
+MemoryStoreKind: TypeAlias = Literal["dense", "factor"]
+"""Canonical store-representation labels for HPC memory presets."""
+
+MemoryReadKind: TypeAlias = Literal["attractor_n", "attention_n"]
+"""Canonical read-strategy labels for HPC memory presets."""
+
+
+@dataclass(frozen=True)
+class HPCPresetSignature:
+    """Public signature of a canonical HPC family.
+
+    The signature makes the write / store / read tuple explicit without
+    exposing the whole product space as a public configuration surface.
+    """
+
+    write: MemoryWriteKind
+    store: MemoryStoreKind
+    read: MemoryReadKind
+
+
+@dataclass(frozen=True)
+class LinearMemoryView:
+    """Capability view exposing a linear memory operator.
+
+    The callable implements the row-vector map ``h -> h @ M`` for batched
+    queries ``h`` with shape ``(B, S)``.
+    """
+
+    apply: Callable[[Tensor], Tensor]
+
+
+@dataclass(frozen=True)
+class FactorMemoryView:
+    """Capability view exposing an explicit factor-memory bank."""
+
+    keys: Tensor
+    values: Tensor
+    valid_mask: Tensor
+    coefficients: Optional[Tensor] = None
+
 
 HebbianMemory = list[Matrix]
 """Attractor network connection weights for memory storage.
@@ -188,16 +232,31 @@ class DenseMemoryStore:
 
     matrix: Tensor
 
+    def as_linear_view(self) -> LinearMemoryView:
+        """Return the linear-operator capability supported by dense memory."""
+        return LinearMemoryView(apply=lambda query: (query.unsqueeze(1) @ self.matrix.to(dtype=query.dtype)).squeeze(1))
+
+    def as_factor_view(self) -> FactorMemoryView:
+        """Raise because dense stores do not expose explicit factor slots."""
+        raise TypeError("Dense memory stores do not expose factor-memory views.")
+
     def clone(self) -> "DenseMemoryStore":
         """Return a cloned dense-memory store preserving tensor semantics."""
         return DenseMemoryStore(matrix=self.matrix.clone())
 
+    @property
+    def kind(self) -> MemoryStoreKind:
+        """Return the canonical store kind for dense memory."""
+        return "dense"
+
 
 @dataclass
-class EpisodicMemoryStore:
-    """Explicit episodic key/value memory store.
+class FactorMemoryStore:
+    """Explicit factor-memory store.
 
     Attributes:
+        coefficients: Per-atom coefficients with shape ``(B, T)``. When unset,
+            all atoms are treated as having coefficient 1.0.
         keys: Stored key vectors with shape ``(B, T, S)``.
         values: Stored value vectors with shape ``(B, T, S)``.
         valid_mask: Boolean mask of shape ``(B, T)`` marking populated slots.
@@ -206,20 +265,68 @@ class EpisodicMemoryStore:
     keys: Tensor
     values: Tensor
     valid_mask: Tensor
+    coefficients: Optional[Tensor] = None
+
+    def as_linear_view(self) -> LinearMemoryView:
+        """Return the exact linear operator induced by the stored factors."""
+        return LinearMemoryView(apply=lambda query: self.apply(query))
+
+    def as_factor_view(self) -> FactorMemoryView:
+        """Return the explicit factor-bank capability used by attention recall."""
+        return FactorMemoryView(
+            keys=self.keys,
+            values=self.values,
+            valid_mask=self.valid_mask,
+            coefficients=self.coefficients,
+        )
 
     @property
     def capacity(self) -> int:
         """Return the current slot count carried by the store."""
         return int(self.keys.shape[1])
 
+    @property
+    def kind(self) -> MemoryStoreKind:
+        """Return the canonical store kind for factor memory."""
+        return "factor"
 
-MemoryEntry: TypeAlias = DenseMemoryStore | EpisodicMemoryStore
+    def coefficient_tensor(self) -> Tensor:
+        """Return coefficients, defaulting missing entries to ones."""
+        if self.coefficients is None:
+            return torch.ones_like(self.valid_mask, dtype=self.values.dtype)
+        return self.coefficients.to(dtype=self.values.dtype)
+
+    def apply(self, query: Tensor) -> Tensor:
+        """Apply the exact linear operator represented by the stored factors."""
+        if query.ndim != 2:
+            raise ValueError(f"query must be rank-2 `(B, S)`, got shape {tuple(query.shape)}.")
+        coefficients = self.coefficient_tensor() * self.valid_mask.to(dtype=self.values.dtype)
+        scores = torch.einsum("bs,bts->bt", query.to(dtype=self.keys.dtype), self.keys)
+        return torch.einsum("bt,bt,bts->bs", scores, coefficients, self.values)
+
+    def clone(self) -> "FactorMemoryStore":
+        """Return a cloned factor-memory store preserving tensor semantics."""
+        coefficients = None if self.coefficients is None else self.coefficients.clone()
+        return FactorMemoryStore(
+            keys=self.keys.clone(),
+            values=self.values.clone(),
+            valid_mask=self.valid_mask.clone(),
+            coefficients=coefficients,
+        )
+
+
+EpisodicMemoryStore = FactorMemoryStore
+"""Backward-compatible alias for the current TEM-t explicit factor store."""
+
+
+MemoryEntry: TypeAlias = DenseMemoryStore | FactorMemoryStore
 """Single backend-specific memory entry.
 
     Supported variants:
         - Dense Hebbian-memory store exposing ``matrix`` with shape ``(B, S, S)``.
-                - Explicit episodic-memory store with tensors ``keys`` and ``values``
-          shaped ``(B, T, S)`` and ``valid_mask`` shaped ``(B, T)``.
+        - Explicit factor-memory store with tensors ``keys`` and ``values``
+          shaped ``(B, T, S)``, ``valid_mask`` shaped ``(B, T)``, and optional
+          ``coefficients`` shaped ``(B, T)``.
 """
 
 

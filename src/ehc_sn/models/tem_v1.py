@@ -23,7 +23,7 @@ from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.tem_transition import TEMMemoryTransition
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
-from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCSensoryStepInput, HPCState
+from ehc_sn.modules.hpc import HPCSensoryStepInput, HPCSettings, HPCState, build_hpc
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
@@ -111,9 +111,9 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
         """Return the total number of frequency modules."""
         return len(self.f_initial)
 
-    hpc: HPCAttractorSettings = Field(
+    hpc: HPCSettings = Field(
         ...,
-        description="Settings for the HPC module, including Hebbian memory parameters.",
+        description="Settings for the hippocampal memory backend family.",
     )
     lec: LECSettings = Field(
         ...,
@@ -327,7 +327,7 @@ class TEMModelV1(nn.Module):
         self.autoencoder = Autoencoder(config.observation_dim, config.lec.feature_dim, config.autoencoder)
 
         # Entorhinal Hippocampal Circuit components
-        self.hpc = HPCAttractor(n_freq, f_initial, config.hpc, device=device, dtype=dtype)
+        self.hpc = build_hpc(config.hpc, n_freq, f_initial, device=device, dtype=dtype)
         self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
@@ -396,20 +396,21 @@ class TEMModelV1(nn.Module):
         if state is None:
             state = self.init_state(int(obs_inputs.shape[0]), memory=None, device=obs_inputs.device)
 
+        # Grid transition prior from action-driven path integration.
+        grid_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)
+        place_query_from_grid_prior = self.projection_mec(grid_prior)
+
         # Sensory inference: encode observations into LEC features and query place memory from them.
         lec_features_post, state.lec = self.lec.inference(obs_embedding, state.lec)
         place_query_from_obs = self.projection_lec(lec_features_post)
         sensory = self.hpc.prepare_sensory_step(
             HPCSensoryStepInput(
                 state=state.hpc,
-                sensory_query=place_query_from_obs,
+                x_query=place_query_from_obs,
+                g_query=place_query_from_grid_prior,
                 use_x_cued_recall=self.config.use_x_cued_recall,
             )
         )
-
-        # Grid transition prior from action-driven path integration.
-        grid_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)
-        place_query_from_grid_prior = self.projection_mec(grid_prior)
 
         # Grid posterior after correcting the prior with recalled place evidence.
         grid_post, state.mec = self.mec.inference(sensory.sensory_recall, landmark_id=landmark_id, state=state.mec)  # fmt: skip

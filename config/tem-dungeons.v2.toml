@@ -43,16 +43,27 @@ diagnostic_level = "standard"
     decode_mode = "mlp"
 
 [model.hpc]
+    kind             = "temt_softmax"
     shape             = [100, 100, 80, 60, 60]
     common_memory     = false
     do_sample         = false
 
+[model.hpc.query_policy]
+    kind = "conjunctive"
+    missing_behavior = "use_available"
+
 [model.hpc.retrieval]
-    temperature     = 1.0
-    empty_retrieval = "query"
+    temperature          = 1.0
+    empty_retrieval      = "query"
+    memory_count_scaling = "log_count"
+    iterations           = 1
+    recurrence           = "none"
 
 [model.hpc.write]
-    memory_capacity = 512
+    memory_capacity    = 512
+    policy             = "append_if_novel"
+    novelty_similarity = "cosine"
+    novelty_threshold  = 0.95
 
 [model.lec]
     feature_dim = 10

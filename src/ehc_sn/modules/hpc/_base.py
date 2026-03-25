@@ -11,6 +11,7 @@ from torch import Tensor, nn
 
 from ehc_sn import utils
 from ehc_sn.modules.hpc.location import GroundLocation, GroundLocSettings
+from ehc_sn.modules.hpc.query_policy import QueryPolicySettings, RoleQueryPolicySettings, build_query_policy
 from ehc_sn.types import Device, Dtype, LocationBelief, MemoryEntry, MemoryState, RetrievalRole
 from ehc_sn.utils.detach import DetachMixin
 
@@ -39,6 +40,10 @@ class HPCCommonSettings(BaseModel, extra="forbid"):
     location: GroundLocSettings = Field(
         default_factory=GroundLocSettings,
         description="Grounded-location inference module config.",
+    )
+    query_policy: QueryPolicySettings = Field(
+        default_factory=RoleQueryPolicySettings,
+        description="Policy used to resolve a retrieval query from the available x and g cues.",
     )
 
 
@@ -108,7 +113,8 @@ class HPCSensoryStepInput:
     """Phase-1 HPC inputs resolved before MEC posterior inference."""
 
     state: HPCState
-    sensory_query: list[Tensor]
+    x_query: list[Tensor]
+    g_query: Optional[list[Tensor]] = None
     use_x_cued_recall: bool = True
 
 
@@ -117,7 +123,8 @@ class HPCSensoryStepInput:
 class HPCSensoryStepOutput:
     """Phase-1 HPC outputs passed from TEM into MEC posterior inference."""
 
-    sensory_query: list[Tensor]
+    x_query: list[Tensor]
+    g_query: Optional[list[Tensor]]
     sensory_recall: Optional[list[Tensor]]
 
 
@@ -198,7 +205,7 @@ class HPCBase(nn.Module, ABC):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: HPCCommonSettings, *, 
+        self, config: HPCCommonSettings, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
         """Initialize HPC base."""
@@ -207,6 +214,7 @@ class HPCBase(nn.Module, ABC):
         self._shape = list(config.shape)
         self._n_freq = len(config.shape)
         self.grounded_location = GroundLocation(self._shape, config.location, device=device, dtype=dtype)
+        self.query_policy = build_query_policy(self._shape, config.query_policy, device=device, dtype=dtype)
 
     @property
     def config(self) -> HPCCommonSettings:
@@ -285,9 +293,11 @@ class HPCBase(nn.Module, ABC):
         self.memory_backend.set_runtime(eta=eta, hebbian_decay=hebbian_decay)
 
     def recall(  # --------------------------------------------------------------------------------
-        self, p_query: list[Tensor], state: HPCState, *, role: RetrievalRole,
+        self, *, x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]],
+        state: HPCState, role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
         """Retrieve grounded-location code from backend-specific memory."""
+        p_query = self.query_policy(x_query=x_query, g_query=g_query, role=role)
         recalled = self.memory_backend.recall_flat(
             self._flatten_memory_code(p_query),
             state.memory.for_role(role),
@@ -315,14 +325,20 @@ class HPCBase(nn.Module, ABC):
         return self.memory_backend.merge_memory_rows(flag, current, fresh)
 
     def prepare_sensory_step(  # ------------------------------------------------------------------
-            self, step_input: HPCSensoryStepInput,
+        self, step_input: HPCSensoryStepInput,
     ) -> HPCSensoryStepOutput:  # fmt: skip
         """Resolve the phase-1 observation-cued recall used by MEC inference."""
         sensory_recall = None
         if step_input.use_x_cued_recall:
-            sensory_recall = self.recall(step_input.sensory_query, step_input.state, role="inference")
+            sensory_recall = self.recall(
+                x_query=step_input.x_query,
+                g_query=step_input.g_query,
+                state=step_input.state,
+                role="inference",
+            )
         return HPCSensoryStepOutput(
-            sensory_query=step_input.sensory_query,
+            x_query=step_input.x_query,
+            g_query=step_input.g_query,
             sensory_recall=sensory_recall,
         )
 
@@ -331,12 +347,22 @@ class HPCBase(nn.Module, ABC):
     ) -> HPCStepOutput:  # fmt: skip
         """Run phase 2 of the TEM-compatible HPC transition."""
         state = step_input.state
-        grid_prior_recall = self.recall(step_input.grid_query_prior, state, role="generative")
-        grid_posterior_recall = self.recall(step_input.grid_query_posterior, state, role="generative")
+        grid_prior_recall = self.recall(
+            x_query=step_input.sensory.x_query,
+            g_query=step_input.grid_query_prior,
+            state=state,
+            role="generative",
+        )
+        grid_posterior_recall = self.recall(
+            x_query=step_input.sensory.x_query,
+            g_query=step_input.grid_query_posterior,
+            state=state,
+            role="generative",
+        )
 
         place_retrieved, state = self.generative(grid_posterior_recall, state)
         place_prior, state = self.generative(grid_prior_recall, state)
-        place_post, state = self.inference(step_input.sensory.sensory_query, step_input.grid_query_posterior, state)  # fmt: skip
+        place_post, state = self.inference(step_input.sensory.x_query, step_input.grid_query_posterior, state)  # fmt: skip
         state = self.update(place_post, place_retrieved, step_input.sensory.sensory_recall, state)
 
         return HPCStepOutput(

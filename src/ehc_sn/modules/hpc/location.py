@@ -47,7 +47,7 @@ class GroundLocation(nn.Module):
 
     def __init__(  # ------------------------------------------------------------------------------
         self, shape: list[int], config: GroundLocSettings,
-        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
+        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
         """Initialize grounded-location inference.
 
