@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Query systems for HPC memory backends."""
+"""Query systems for HPC memory modules."""
 
 import math
 from collections.abc import Sequence
@@ -50,7 +50,9 @@ class AttractorNetwork(nn.Module):
     def config(self) -> AttractorSettings:
         return self._config
 
-    def forward(self, query: Tensor, memory_view: LinearMemoryView, *, masks: Sequence[Tensor]) -> Tensor:
+    def forward(  # -------------------------------------------------------------------------------
+        self, query: Tensor, memory_view: LinearMemoryView, *, masks: Sequence[Tensor],
+    ) -> Tensor:  # fmt: skip
         kappa = self.config.kappa
         state = self.activation(query)
         stage_masks = [mask.to(dtype=state.dtype) for mask in masks]
@@ -62,7 +64,9 @@ class AttractorNetwork(nn.Module):
             state = (1 - mask) * state + mask * self.activation(field)
         return state
 
-    def activation(self, code: Tensor) -> Tensor:
+    def activation(  # ----------------------------------------------------------------------------
+        self, code: Tensor,
+    ) -> Tensor:  # fmt: skip
         code = torch.clamp(code, min=self.config.clamp_min, max=self.config.clamp_max)
         return self._activation_fn(code)
 
@@ -107,16 +111,25 @@ class FactorRetrieval(nn.Module):
     def config(self) -> AttentionSettings:
         return self._config
 
-    def forward(self, query: Tensor, memory_view: FactorMemoryView) -> Tensor:
+    def forward(  # -------------------------------------------------------------------------------
+        self, query: Tensor, memory_view: FactorMemoryView,
+    ) -> Tensor:  # fmt: skip
         logits = self.compute_logits(query, memory_view.keys)
-        return self.recall_from_logits(logits, memory_view.values, valid_mask=memory_view.valid_mask, fallback_query=query)
+        return self.recall_from_logits(
+            logits,
+            memory_view.values,
+            valid_mask=memory_view.valid_mask,
+            fallback_query=query,
+        )
 
     def compute_logits(self, query: Tensor, memory_bank: Tensor) -> Tensor:
         query = query.to(dtype=memory_bank.dtype)
         scale = math.sqrt(max(query.shape[1], 1)) * self.config.temperature
         return torch.einsum("bs,bts->bt", query, memory_bank) / scale
 
-    def weights_from_logits(self, logits: Tensor, *, valid_mask: Tensor) -> tuple[Tensor, Tensor]:
+    def weights_from_logits(  # -------------------------------------------------------------------
+        self, logits: Tensor, *, valid_mask: Tensor,
+    ) -> tuple[Tensor, Tensor]:  # fmt: skip
         scaled_logits = logits * self._memory_count_multiplier(valid_mask)
         has_valid_slot = valid_mask.any(dim=1, keepdim=True)
         masked_logits = torch.where(valid_mask, scaled_logits, torch.full_like(scaled_logits, torch.finfo(scaled_logits.dtype).min))
