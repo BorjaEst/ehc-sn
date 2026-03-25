@@ -1,4 +1,4 @@
-"""Store representations and exact operator helpers for HPC memory backends."""
+"""Store representations and exact operator helpers for HPC memory modules."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from ehc_sn.types import DenseMemoryStore, Device, FactorMemoryStore, MemoryEntr
 
 # =================================================================================================
 class HebbianStoreApplier(Protocol):
-    """Store-specific Hebbian write strategy used by attractor backends."""
+    """Store-specific Hebbian write strategy used by attractor implementations."""
 
     def apply(  # -------------------------------------------------------------------------------
         self, store: MemoryEntry, key: Tensor, value: Tensor, *, masked: bool,
@@ -23,7 +23,7 @@ class HebbianStoreApplier(Protocol):
 
 
 class AppendStoreApplier(Protocol):
-    """Store-specific append-write strategy used by attention backends."""
+    """Store-specific append-write strategy used by attention implementations."""
 
     def apply(  # -------------------------------------------------------------------------------
         self, store: MemoryEntry, key: Tensor, value: Tensor,
@@ -32,7 +32,7 @@ class AppendStoreApplier(Protocol):
 
 
 class MemoryStoreFactory(Protocol):
-    """Constructor-time store factory used by backend init/reset paths."""
+    """Constructor-time store factory used by init/reset paths."""
 
     def init_store(  # ---------------------------------------------------------------------------
         self, batch_size: int, *, device: Optional[Device] = None,
@@ -80,7 +80,12 @@ class DenseMemoryStoreFactory:
     def init_store(  # ---------------------------------------------------------------------------
         self, batch_size: int, *, device: Optional[Device] = None,
     ) -> DenseMemoryStore:  # fmt: skip
-        return DenseMemoryStore(matrix=torch.zeros((batch_size, self._feature_dim, self._feature_dim), dtype=torch.float, device=device))
+        matrix = torch.zeros(
+            (batch_size, self._feature_dim, self._feature_dim),
+            dtype=torch.float,
+            device=device,
+        )
+        return DenseMemoryStore(matrix=matrix)
 
 
 class FactorMemoryStoreFactory:
@@ -214,7 +219,7 @@ def apply_factor_memory(  # ----------------------------------------------------
     """Apply a factor-store operator to a flattened row-vector query.
 
     This is the linear, non-softmax operator induced by the factor atoms and is
-    exact with respect to `factor_memory_to_dense(store)`.
+    exact with respect to ``factor_memory_to_dense(store)``.
     """
     return store.apply(query)
 
@@ -290,11 +295,11 @@ def concat_factor_memory(  # ---------------------------------------------------
 
 # =================================================================================================
 __all__ = [
-    "AppendStoreApplier", "AppendStoreComponents", "DenseMemoryStoreFactory", "DenseMemoryResetStrategy",
-    "FactorMemoryStoreFactory", "FactorMemoryResetStrategy",
-    "HebbianStoreApplier", "HebbianStoreComponents",
-    "MemoryResetStrategy", "MemoryStoreFactory",
-    "apply_factor_memory", "concat_factor_memory", "decay_factor_memory", "dense_memory_to_factor",
-    "factor_memory_to_dense",
+    "AppendStoreApplier", "HebbianStoreApplier", "MemoryStoreFactory", "MemoryResetStrategy",
+    "AppendStoreComponents", "HebbianStoreComponents",
+    "DenseMemoryStoreFactory", "FactorMemoryStoreFactory",
+    "DenseMemoryResetStrategy", "FactorMemoryResetStrategy",
+    "factor_memory_to_dense", "dense_memory_to_factor",
+    "apply_factor_memory", "concat_factor_memory", "decay_factor_memory",
     "merge_dense_memory_rows", "merge_episodic_memory_rows", "merge_factor_memory_rows",
 ]  # fmt: skip
