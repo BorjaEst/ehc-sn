@@ -9,6 +9,7 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
+from ehc_sn.modules.hpc import memory
 from ehc_sn.modules.hpc.memory import (
     AppendStoreComponents,
     DenseMemoryResetStrategy,
@@ -16,10 +17,6 @@ from ehc_sn.modules.hpc.memory import (
     FactorMemoryResetStrategy,
     FactorMemoryStoreFactory,
     HebbianStoreComponents,
-    concat_factor_memory,
-    decay_factor_memory,
-    dense_memory_to_factor,
-    factor_memory_to_dense,
 )
 from ehc_sn.types import DenseMemoryStore, Device, Dtype, FactorMemoryStore, MemoryEntry
 
@@ -189,18 +186,18 @@ class FactorHebbianStoreApplier:
             raise TypeError("FactorHebbianStoreApplier expected factor memory stores.")
 
         runtime = self._write_system.runtime
-        decayed = decay_factor_memory(store, runtime.hebbian_decay)
+        decayed = memory.decay_factor_memory(store, runtime.hebbian_decay)
         if masked:
             increment = compile_masked_hebbian_factors(key, value, eta=runtime.eta, n_stages=self._n_stages, shape=self._shape, f_initial=self._f_initial)  # fmt: skip
         else:
             increment = compile_hebbian_factors(key, value, eta=runtime.eta)
 
-        updated = concat_factor_memory(decayed, increment)
-        dense_matrix = factor_memory_to_dense(updated)
+        updated = memory.concat_factor_memory(decayed, increment)
+        dense_matrix = memory.factor_memory_to_dense(updated)
         clamped = self._write_system.clamp_memory(dense_matrix)
         if torch.equal(clamped, dense_matrix):
             return updated
-        return dense_memory_to_factor(clamped)
+        return memory.dense_memory_to_factor(clamped)
 
 
 # =================================================================================================
