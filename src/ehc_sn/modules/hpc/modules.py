@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Optional, TypeAlias
+from typing import Optional
 
 from pydantic import Field
+from torch import Tensor
 
 from ehc_sn import utils
 from ehc_sn.modules.hpc import update
-from ehc_sn.modules.hpc._base import HPCBackendAdapter, HPCBase, HPCCommonSettings, HPCState
+from ehc_sn.modules.hpc._base import HPCBase, HPCCommonSettings, HPCState
 from ehc_sn.modules.hpc.query import AttentionSettings, AttractorNetwork, AttractorSettings, FactorRetrieval
 from ehc_sn.modules.hpc.update import FactorMemoryWrite, FactorMemoryWriteSettings, HebbianMemoryWrite, HebbianMemoryWriteSettings
-from ehc_sn.types import Device, Dtype, HPCPresetSignature, MemoryEntry, MemoryState, RetrievalRole
+from ehc_sn.types import Device, Dtype, MemoryEntry, MemoryState, RetrievalRole
 
 
 # =================================================================================================
 class HPCAttractorSettings(HPCCommonSettings):
-    kind: Literal["tem_dense"] = Field(
-        default="tem_dense",
-        description="HPC backend family with attractor-based retrieval and Hebbian write.",
-    )
     retrieval: AttractorSettings = Field(
         default_factory=AttractorSettings,
         description="Settings for attractor retrieval dynamics.",
@@ -32,10 +29,6 @@ class HPCAttractorSettings(HPCCommonSettings):
 
 # =================================================================================================
 class HPCAttentionSettings(HPCCommonSettings):
-    kind: Literal["temt_softmax"] = Field(
-        default="temt_softmax",
-        description="HPC backend family with attention-based retrieval and append write.",
-    )
     retrieval: AttentionSettings = Field(
         default_factory=AttentionSettings,
         description="Settings for attention retrieval.",
@@ -44,84 +37,6 @@ class HPCAttentionSettings(HPCCommonSettings):
         default_factory=FactorMemoryWriteSettings,
         description="Settings for factor-memory write.",
     )
-
-
-# =================================================================================================
-class AttractorMemoryBackend(HPCBackendAdapter):
-    """ """
-
-    def __init__(  # ------------------------------------------------------------------------------
-        self, retrieval_system: AttractorNetwork, write_system: HebbianMemoryWrite,
-        *,
-        masks_hierarchical, masks_full,
-        store_factory, store_applier, reset_strategy,
-        common_memory: bool,
-    ) -> None:  # fmt: skip
-        """ """
-        self._retrieval_system = retrieval_system
-        self._write_system = write_system
-        self._masks_hierarchical = masks_hierarchical
-        self._masks_full = masks_full
-        self._store_factory = store_factory
-        self._store_applier = store_applier
-        self._reset_strategy = reset_strategy
-        self._common_memory = common_memory
-
-    def init_memory(self, batch_size: int, *, device: Optional[Device] = None) -> MemoryState:
-        g_cued = self._store_factory.init_store(batch_size, device=device)
-        x_cued = g_cued if self._common_memory else g_cued.clone()
-        return MemoryState(g_cued=g_cued, x_cued=x_cued)
-
-    def set_runtime(self, *, eta: float, hebbian_decay: float) -> None:
-        self._write_system.runtime.eta = float(eta)
-        self._write_system.runtime.hebbian_decay = float(hebbian_decay)
-
-    def recall_flat(self, query, memory: MemoryEntry, *, role: RetrievalRole):
-        masks = self._masks_hierarchical if role == "generative" else self._masks_full
-        return self._retrieval_system(query, memory.as_linear_view(), masks=masks)
-
-    def update_memory(self, memory: MemoryState, key, g_value, x_value):
-        g_cued = self._store_applier.apply(memory.g_cued, key, g_value, masked=True)
-        x_cued = g_cued if self._common_memory else memory.x_cued
-        if not self._common_memory and x_value is not None:
-            x_cued = self._store_applier.apply(memory.x_cued, key, x_value, masked=False)
-        return MemoryState(g_cued=g_cued, x_cued=x_cued)
-
-    def merge_memory_rows(self, flag, current: MemoryEntry, fresh: MemoryEntry) -> MemoryEntry:
-        return self._reset_strategy.merge_rows(flag, current, fresh)
-
-
-class AttentionMemoryBackend(HPCBackendAdapter):
-    def __init__(self, retrieval_system: FactorRetrieval, *, store_factory, store_applier, reset_strategy, common_memory: bool) -> None:
-        self._retrieval_system = retrieval_system
-        self._store_factory = store_factory
-        self._store_applier = store_applier
-        self._reset_strategy = reset_strategy
-        self._common_memory = common_memory
-
-    def init_memory(self, batch_size: int, *, device: Optional[Device] = None) -> MemoryState:
-        g_cued = self._store_factory.init_store(batch_size, device=device)
-        x_cued = g_cued if self._common_memory else self._store_factory.init_store(batch_size, device=device)
-        return MemoryState(g_cued=g_cued, x_cued=x_cued)
-
-    def set_runtime(self, *, eta: float, hebbian_decay: float) -> None:
-        del eta, hebbian_decay
-
-    def recall_flat(self, query, memory: MemoryEntry, *, role: RetrievalRole):
-        del role
-        return self._retrieval_system(query, memory.as_factor_view())
-
-    def update_memory(self, memory: MemoryState, key, g_value, x_value):
-        g_cued = self._store_applier.apply(memory.g_cued, key, g_value)
-        x_cued = g_cued if self._common_memory else memory.x_cued
-        if self._common_memory:
-            x_cued = g_cued
-        elif x_value is not None:
-            x_cued = self._store_applier.apply(memory.x_cued, key, x_value)
-        return MemoryState(g_cued=g_cued, x_cued=x_cued)
-
-    def merge_memory_rows(self, flag, current: MemoryEntry, fresh: MemoryEntry) -> MemoryEntry:
-        return self._reset_strategy.merge_rows(flag, current, fresh)
 
 
 class HPCAttractor(HPCBase):
@@ -155,24 +70,42 @@ class HPCAttractor(HPCBase):
             shape=self.shape,
             f_initial=f_initial,
         )
-        self._memory_backend = AttractorMemoryBackend(
-            self.retrieval_module,
-            self.write_module,
-            masks_hierarchical=self.masks_hierarchical,
-            masks_full=self.masks_full,
-            store_factory=store_components.store_factory,
-            store_applier=store_components.store_applier,
-            reset_strategy=store_components.reset_strategy,
-            common_memory=config.common_memory,
-        )
+        self._store_factory = store_components.store_factory
+        self._store_applier = store_components.store_applier
+        self._reset_strategy = store_components.reset_strategy
 
     @property
     def config(self) -> HPCAttractorSettings:
         return super().config  # type: ignore[return-value]
 
-    @property
-    def memory_backend(self) -> AttractorMemoryBackend:
-        return self._memory_backend
+    def _init_memory_impl(self, batch_size: int, *, device: Optional[Device] = None) -> MemoryState:
+        g_cued = self._store_factory.init_store(batch_size, device=device)
+        x_cued = g_cued if self.config.common_memory else g_cued.clone()
+        return MemoryState(g_cued=g_cued, x_cued=x_cued)
+
+    def _set_runtime_impl(self, *, eta: float, hebbian_decay: float) -> None:
+        self.write_module.runtime.eta = float(eta)
+        self.write_module.runtime.hebbian_decay = float(hebbian_decay)
+
+    def _recall_flat_impl(self, query: Tensor, memory: MemoryEntry, *, role: RetrievalRole) -> Tensor:
+        masks = self.masks_hierarchical if role == "generative" else self.masks_full
+        return self.retrieval_module(query, memory.as_linear_view(), masks=masks)
+
+    def _update_memory_impl(
+        self,
+        memory: MemoryState,
+        key: Tensor,
+        g_value: Tensor,
+        x_value: Optional[Tensor],
+    ) -> MemoryState:
+        g_cued = self._store_applier.apply(memory.g_cued, key, g_value, masked=True)
+        x_cued = g_cued if self.config.common_memory else memory.x_cued
+        if not self.config.common_memory and x_value is not None:
+            x_cued = self._store_applier.apply(memory.x_cued, key, x_value, masked=False)
+        return MemoryState(g_cued=g_cued, x_cued=x_cued)
+
+    def _merge_memory_rows_impl(self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry) -> MemoryEntry:
+        return self._reset_strategy.merge_rows(flag, current, fresh)
 
 
 class HPCAttention(HPCBase):
@@ -190,21 +123,43 @@ class HPCAttention(HPCBase):
         self.retrieval_module = FactorRetrieval(config.retrieval)
         self.write_module = FactorMemoryWrite(self.shape, config.write)
         store_components = update.build_factor_store_components(self.write_module)
-        self._memory_backend = AttentionMemoryBackend(
-            self.retrieval_module,
-            store_factory=store_components.store_factory,
-            store_applier=store_components.store_applier,
-            reset_strategy=store_components.reset_strategy,
-            common_memory=config.common_memory,
-        )
+        self._store_factory = store_components.store_factory
+        self._store_applier = store_components.store_applier
+        self._reset_strategy = store_components.reset_strategy
 
     @property
     def config(self) -> HPCAttentionSettings:
         return super().config  # type: ignore[return-value]
 
-    @property
-    def memory_backend(self) -> AttentionMemoryBackend:
-        return self._memory_backend
+    def _init_memory_impl(self, batch_size: int, *, device: Optional[Device] = None) -> MemoryState:
+        g_cued = self._store_factory.init_store(batch_size, device=device)
+        x_cued = g_cued if self.config.common_memory else self._store_factory.init_store(batch_size, device=device)
+        return MemoryState(g_cued=g_cued, x_cued=x_cued)
+
+    def _set_runtime_impl(self, *, eta: float, hebbian_decay: float) -> None:
+        del eta, hebbian_decay
+
+    def _recall_flat_impl(self, query: Tensor, memory: MemoryEntry, *, role: RetrievalRole) -> Tensor:
+        del role
+        return self.retrieval_module(query, memory.as_factor_view())
+
+    def _update_memory_impl(
+        self,
+        memory: MemoryState,
+        key: Tensor,
+        g_value: Tensor,
+        x_value: Optional[Tensor],
+    ) -> MemoryState:
+        g_cued = self._store_applier.apply(memory.g_cued, key, g_value)
+        x_cued = g_cued if self.config.common_memory else memory.x_cued
+        if self.config.common_memory:
+            x_cued = g_cued
+        elif x_value is not None:
+            x_cued = self._store_applier.apply(memory.x_cued, key, x_value)
+        return MemoryState(g_cued=g_cued, x_cued=x_cued)
+
+    def _merge_memory_rows_impl(self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry) -> MemoryEntry:
+        return self._reset_strategy.merge_rows(flag, current, fresh)
 
     def recall(self, *, x_query, g_query, state: HPCState, role: RetrievalRole):
         p_query = self.query_policy(x_query=x_query, g_query=g_query, role=role)
@@ -237,33 +192,12 @@ class HPCAttention(HPCBase):
         return self._unflatten_memory_code(recalled)
 
 
-HPCSettings: TypeAlias = Annotated[HPCAttractorSettings | HPCAttentionSettings, Field(discriminator="kind")]
-
-
-_CANONICAL_PRESET_SIGNATURES: dict[str, HPCPresetSignature] = {
-    "tem_dense": HPCPresetSignature(write="hebbian", store="dense", read="attractor_n"),
-    "temt_softmax": HPCPresetSignature(write="append", store="factor", read="attention_n"),
-}
-
-
-def resolve_hpc_preset_signature(config: HPCSettings) -> HPCPresetSignature:
-    try:
-        return _CANONICAL_PRESET_SIGNATURES[config.kind]
-    except KeyError as exc:
-        raise ValueError(f"Unsupported HPC backend family '{config.kind}'.") from exc
-
-
-def build_hpc(
-    config: HPCSettings,
-    n_stages: int,
-    f_initial: list[float],
-    *,
-    device: Device | None = None,
-    dtype: Dtype | None = None,
-) -> HPCBase:
-    resolve_hpc_preset_signature(config)
-    if config.kind == "tem_dense":
-        return HPCAttractor(n_stages, f_initial, config, device=device, dtype=dtype)
-    if config.kind == "temt_softmax":
-        return HPCAttention(n_stages, f_initial, config, device=device, dtype=dtype)
-    raise ValueError(f"Unsupported HPC backend family '{config.kind}'.")
+__all__ = [
+    "HPCAttention",
+    "HPCAttentionSettings",
+    "HPCAttractor",
+    "HPCAttractorSettings",
+    "HPCBase",
+    "HPCCommonSettings",
+    "HPCState",
+]  # fmt: skip

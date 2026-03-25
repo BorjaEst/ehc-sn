@@ -45,7 +45,6 @@ diagnostic_level = "standard"
     decode_mode = "mlp"
 
 [model.hpc]
-    kind          = "tem_dense"
     shape         = [100, 100, 80, 60, 60]
     common_memory = false
     do_sample     = false

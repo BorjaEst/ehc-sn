@@ -23,7 +23,7 @@ from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.tem_transition import TEMMemoryTransition
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
-from ehc_sn.modules.hpc import HPCSensoryStepInput, HPCSettings, HPCState, build_hpc
+from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCSensoryStepInput, HPCState
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
@@ -111,9 +111,9 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
         """Return the total number of frequency modules."""
         return len(self.f_initial)
 
-    hpc: HPCSettings = Field(
+    hpc: HPCAttractorSettings = Field(
         ...,
-        description="Settings for the hippocampal memory backend family.",
+        description="Settings for the attractor-based hippocampal module.",
     )
     lec: LECSettings = Field(
         ...,
@@ -327,7 +327,7 @@ class TEMModelV1(nn.Module):
         self.autoencoder = Autoencoder(config.observation_dim, config.lec.feature_dim, config.autoencoder)
 
         # Entorhinal Hippocampal Circuit components
-        self.hpc = build_hpc(config.hpc, n_freq, f_initial, device=device, dtype=dtype)
+        self.hpc = HPCAttractor(n_freq, f_initial, config.hpc, device=device, dtype=dtype)
         self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
