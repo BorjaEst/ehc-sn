@@ -115,6 +115,7 @@ class QueryPolicy(nn.Module, ABC):
         self, shape: list[int], config: QueryPolicySettings, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
+        """Initialize shared query-policy state for the configured cue widths."""
         del device, dtype
         super().__init__()
         self._shape = list(shape)
@@ -187,12 +188,14 @@ class RoleQueryPolicy(QueryPolicy):
 
     @property
     def config(self) -> RoleQueryPolicySettings:
+        """Return typed settings for the role-aware query policy."""
         return super().config  # type: ignore[return-value]
 
     def _forward(  # ------------------------------------------------------------------------------
         self, *,
         x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
+        """Select the legacy role-preferred cue, with configured fallback behavior."""
         if role == "inference":
             return self._fallback(
                 preferred=x_query,
@@ -213,12 +216,14 @@ class XOnlyQueryPolicy(QueryPolicy):
 
     @property
     def config(self) -> XOnlyQueryPolicySettings:
+        """Return typed settings for the x-only query policy."""
         return super().config  # type: ignore[return-value]
 
     def _forward(  # ------------------------------------------------------------------------------
         self, *,
         x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
+        """Resolve retrieval queries using only sensory cues when available."""
         del role
         return self._fallback(
             preferred=x_query,
@@ -233,12 +238,14 @@ class GOnlyQueryPolicy(QueryPolicy):
 
     @property
     def config(self) -> GOnlyQueryPolicySettings:
+        """Return typed settings for the g-only query policy."""
         return super().config  # type: ignore[return-value]
 
     def _forward(  # ------------------------------------------------------------------------------
         self, *,
         x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
+        """Resolve retrieval queries using only grid cues when available."""
         del role
         return self._fallback(
             preferred=g_query,
@@ -255,18 +262,21 @@ class GatedMixQueryPolicy(QueryPolicy):
         self, shape: list[int], config: GatedMixQueryPolicySettings, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
+        """Initialize one gate per frequency module for x/g cue mixing."""
         super().__init__(shape, config, device=device, dtype=dtype)
         self._gates = nn.ModuleList([nn.Linear(2 * width, width, device=device, dtype=dtype) for width in shape])
         self._reset_parameters()
 
     @property
     def config(self) -> GatedMixQueryPolicySettings:
+        """Return typed settings for the gated-mix query policy."""
         return super().config  # type: ignore[return-value]
 
     def _forward(  # ------------------------------------------------------------------------------
         self, *,
         x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
+        """Blend sensory and grid cues with a learned convex gate per frequency."""
         del role
         if x_query is None or g_query is None:
             return self._fallback(
@@ -298,6 +308,7 @@ class ConjunctiveQueryPolicy(QueryPolicy):
         self, shape: list[int], config: ConjunctiveQueryPolicySettings, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
+        """Initialize per-frequency conjunctive projections over x, g, and x*g."""
         super().__init__(shape, config, device=device, dtype=dtype)
         self._activation_fn = utils.activation_from_str(config.activation)
         self._projections = nn.ModuleList([nn.Linear(3 * width, width, device=device, dtype=dtype) for width in shape])
@@ -305,12 +316,14 @@ class ConjunctiveQueryPolicy(QueryPolicy):
 
     @property
     def config(self) -> ConjunctiveQueryPolicySettings:
+        """Return typed settings for the conjunctive query policy."""
         return super().config  # type: ignore[return-value]
 
     def _forward(  # ------------------------------------------------------------------------------
         self, *,
         x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
+        """Project sensory and grid cues into a learned conjunctive query."""
         del role
         if x_query is None or g_query is None:
             return self._fallback(

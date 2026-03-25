@@ -75,11 +75,13 @@ class DenseMemoryStoreFactory:
     def __init__(  # ------------------------------------------------------------------------------
         self, *, feature_dim: int,
     ) -> None:  # fmt: skip
+        """Initialize a dense-store factory for the given flattened feature width."""
         self._feature_dim = int(feature_dim)
 
     def init_store(  # ---------------------------------------------------------------------------
         self, batch_size: int, *, device: Optional[Device] = None,
     ) -> DenseMemoryStore:  # fmt: skip
+        """Allocate an empty dense memory matrix for each batch row."""
         matrix = torch.zeros(
             (batch_size, self._feature_dim, self._feature_dim),
             dtype=torch.float,
@@ -94,11 +96,13 @@ class FactorMemoryStoreFactory:
     def __init__(  # ------------------------------------------------------------------------------
         self, *, feature_dim: int,
     ) -> None:  # fmt: skip
+        """Initialize a factor-store factory for the given flattened feature width."""
         self._feature_dim = int(feature_dim)
 
     def init_store(  # ---------------------------------------------------------------------------
         self, batch_size: int, *, device: Optional[Device] = None,
     ) -> FactorMemoryStore:  # fmt: skip
+        """Allocate an empty factor store with zero populated atoms."""
         return FactorMemoryStore(
             keys=torch.zeros((batch_size, 0, self._feature_dim), dtype=torch.float, device=device),
             values=torch.zeros((batch_size, 0, self._feature_dim), dtype=torch.float, device=device),
@@ -114,6 +118,7 @@ class DenseMemoryResetStrategy:
     def merge_rows(  # ---------------------------------------------------------------------------
         self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
     ) -> DenseMemoryStore:  # fmt: skip
+        """Merge dense stores by replacing flagged rows with fresh rows."""
         if not isinstance(current, DenseMemoryStore) or not isinstance(fresh, DenseMemoryStore):
             raise TypeError("DenseMemoryResetStrategy expected dense memory stores.")
         return merge_dense_memory_rows(flag, current, fresh)
@@ -125,6 +130,7 @@ class FactorMemoryResetStrategy:
     def merge_rows(  # ---------------------------------------------------------------------------
         self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
     ) -> FactorMemoryStore:  # fmt: skip
+        """Merge factor stores by replacing flagged rows with fresh rows."""
         if not isinstance(current, FactorMemoryStore) or not isinstance(fresh, FactorMemoryStore):
             raise TypeError("FactorMemoryResetStrategy expected factor memory stores.")
         return merge_factor_memory_rows(flag, current, fresh)

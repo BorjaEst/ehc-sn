@@ -42,17 +42,20 @@ class AttractorNetwork(nn.Module):
     """Attractor retrieval dynamics over a linear memory view."""
 
     def __init__(self, config: AttractorSettings) -> None:
+        """Initialize attractor retrieval dynamics from the provided settings."""
         super().__init__()
         self._config = config
         self._activation_fn = utils.activation_from_str(self._config.activation)
 
     @property
     def config(self) -> AttractorSettings:
+        """Return attractor retrieval settings."""
         return self._config
 
     def forward(  # -------------------------------------------------------------------------------
         self, query: Tensor, memory_view: LinearMemoryView, *, masks: Sequence[Tensor],
     ) -> Tensor:  # fmt: skip
+        """Run staged attractor dynamics over the provided linear memory view."""
         kappa = self.config.kappa
         state = self.activation(query)
         stage_masks = [mask.to(dtype=state.dtype) for mask in masks]
@@ -67,6 +70,7 @@ class AttractorNetwork(nn.Module):
     def activation(  # ----------------------------------------------------------------------------
         self, code: Tensor,
     ) -> Tensor:  # fmt: skip
+        """Clamp a code vector and apply the configured attractor activation."""
         code = torch.clamp(code, min=self.config.clamp_min, max=self.config.clamp_max)
         return self._activation_fn(code)
 
@@ -104,16 +108,19 @@ class FactorRetrieval(nn.Module):
     """Masked-softmax retrieval over explicit factor-memory slots."""
 
     def __init__(self, config: AttentionSettings) -> None:
+        """Initialize factor-memory retrieval from the provided settings."""
         super().__init__()
         self._config = config
 
     @property
     def config(self) -> AttentionSettings:
+        """Return factor-retrieval settings."""
         return self._config
 
     def forward(  # -------------------------------------------------------------------------------
         self, query: Tensor, memory_view: FactorMemoryView,
     ) -> Tensor:  # fmt: skip
+        """Retrieve a value vector from factor memory for the provided query."""
         logits = self.compute_logits(query, memory_view.keys)
         return self.recall_from_logits(
             logits,
@@ -123,6 +130,7 @@ class FactorRetrieval(nn.Module):
         )
 
     def compute_logits(self, query: Tensor, memory_bank: Tensor) -> Tensor:
+        """Compute scaled query-key similarity logits for factor slots."""
         query = query.to(dtype=memory_bank.dtype)
         scale = math.sqrt(max(query.shape[1], 1)) * self.config.temperature
         return torch.einsum("bs,bts->bt", query, memory_bank) / scale
@@ -130,6 +138,7 @@ class FactorRetrieval(nn.Module):
     def weights_from_logits(  # -------------------------------------------------------------------
         self, logits: Tensor, *, valid_mask: Tensor,
     ) -> tuple[Tensor, Tensor]:  # fmt: skip
+        """Convert logits into masked retrieval weights and valid-row indicators."""
         scaled_logits = logits * self._memory_count_multiplier(valid_mask)
         has_valid_slot = valid_mask.any(dim=1, keepdim=True)
         masked_logits = torch.where(valid_mask, scaled_logits, torch.full_like(scaled_logits, torch.finfo(scaled_logits.dtype).min))
@@ -139,23 +148,27 @@ class FactorRetrieval(nn.Module):
         return weights, has_valid_slot
 
     def read_values(self, weights: Tensor, values: Tensor) -> Tensor:
+        """Read factor values with the provided slot weights."""
         return torch.einsum("bt,bts->bs", weights, values)
 
     def recall_from_logits(  # --------------------------------------------------------------------
         self, logits: Tensor, values: Tensor, *, valid_mask: Tensor, fallback_query: Tensor
     ) -> Tensor:  # fmt: skip
+        """Read from factor memory using precomputed logits and fallback behavior."""
         weights, has_valid_slot = self.weights_from_logits(logits, valid_mask=valid_mask)
         recalled = self.read_values(weights, values)
         fallback = self._empty_fallback(fallback_query)
         return torch.where(has_valid_slot, recalled, fallback)
 
     def _memory_count_multiplier(self, valid_mask: Tensor) -> Tensor:
+        """Return an optional sharpening multiplier based on populated slot count."""
         if self.config.memory_count_scaling == "none":
             return torch.ones((valid_mask.shape[0], 1), dtype=torch.float, device=valid_mask.device)
         valid_count = valid_mask.sum(dim=1, keepdim=True).to(dtype=torch.float)
         return torch.maximum(torch.log1p(valid_count), torch.ones_like(valid_count))
 
     def _empty_fallback(self, query: Tensor) -> Tensor:
+        """Return the configured value for rows with no populated memory slots."""
         if self.config.empty_retrieval == "zeros":
             return torch.zeros_like(query)
         return query

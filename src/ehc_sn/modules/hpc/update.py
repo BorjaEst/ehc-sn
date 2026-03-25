@@ -81,6 +81,7 @@ class HebbianMemoryWrite(nn.Module):
         self, config: HebbianMemoryWriteSettings,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
+        """Initialize dense Hebbian write logic and mutable runtime parameters."""
         del device, dtype
         super().__init__()
         self._config = config
@@ -88,15 +89,18 @@ class HebbianMemoryWrite(nn.Module):
 
     @property
     def config(self) -> HebbianMemoryWriteSettings:
+        """Return static Hebbian write settings."""
         return self._config
 
     @property
     def runtime(self) -> HebbianMemoryRuntime:
+        """Return mutable runtime hyperparameters for Hebbian updates."""
         return self._runtime
 
     def _normalize_code(  # ----------------------------------------------------------------------
         self, code: Tensor | list[Tensor], *, name: str,
     ) -> Tensor:  # fmt: skip
+        """Normalize flattened or multi-scale codes into a rank-2 tensor."""
         if isinstance(code, Tensor):
             if code.ndim != 2:
                 raise ValueError(f"{name} must be rank-2 `(B, S)`, got shape {tuple(code.shape)}.")
@@ -120,6 +124,7 @@ class HebbianMemoryWrite(nn.Module):
         self, memory: Tensor, p_inf: Tensor | list[Tensor], p_gen: Tensor | list[Tensor], *,
         mask: Optional[Tensor] = None,
     ) -> Tensor:  # fmt: skip
+        """Apply one Hebbian update step to a dense memory operator."""
         if memory.ndim != 3:
             raise ValueError(f"memory must be rank-3 `(B, S, S)`, got shape {tuple(memory.shape)}.")
 
@@ -142,6 +147,7 @@ class HebbianMemoryWrite(nn.Module):
         return self.clamp_memory(hebbian_decay * memory + eta * update)
 
     def clamp_memory(self, memory: Tensor) -> Tensor:
+        """Clamp dense memory weights to the configured numeric range."""
         return torch.clamp(memory, min=self._config.clamp_min, max=self._config.clamp_max)
 
 
@@ -149,12 +155,14 @@ class DenseHebbianStoreApplier:
     """Apply Hebbian writes directly to dense memory stores."""
 
     def __init__(self, write_system: HebbianMemoryWrite, *, update_mask: Tensor) -> None:
+        """Bind dense Hebbian updates to a shared write system and optional mask."""
         self._write_system = write_system
         self._update_mask = update_mask
 
     def apply(  # -------------------------------------------------------------------------------
         self, store: MemoryEntry, key: Tensor, value: Tensor, *, masked: bool,
     ) -> DenseMemoryStore:  # fmt: skip
+        """Apply a dense Hebbian update to the provided memory entry."""
         if not isinstance(store, DenseMemoryStore):
             raise TypeError("DenseHebbianStoreApplier expected dense memory stores.")
         mask = self._update_mask if masked else None
@@ -169,6 +177,7 @@ class FactorHebbianStoreApplier:
         self, write_system: HebbianMemoryWrite, *,
         n_stages: int, shape: list[int], f_initial: list[float],
     ) -> None:  # fmt: skip
+        """Bind factorized Hebbian updates to the configured hierarchy metadata."""
         self._write_system = write_system
         self._n_stages = int(n_stages)
         self._shape = list(shape)
@@ -177,6 +186,7 @@ class FactorHebbianStoreApplier:
     def apply(  # -------------------------------------------------------------------------------
         self, store: MemoryEntry, key: Tensor, value: Tensor, *, masked: bool,
     ) -> FactorMemoryStore:  # fmt: skip
+        """Apply a Hebbian update and keep the resulting store in factor form."""
         if not isinstance(store, FactorMemoryStore):
             raise TypeError("FactorHebbianStoreApplier expected factor memory stores.")
 
@@ -208,6 +218,7 @@ def build_hebbian_store_components(  # -----------------------------------------
     emit_store: Literal["dense", "factor"], feature_dim: int, update_mask: Tensor,
     n_stages: int, shape: list[int], f_initial: list[float],
 ) -> HebbianStoreComponents:  # fmt: skip
+    """Construct store factory, applier, and reset strategy for Hebbian memory."""
     if emit_store == "factor":
         return HebbianStoreComponents(
             store_factory=FactorMemoryStoreFactory(feature_dim=feature_dim),
@@ -232,21 +243,25 @@ class EpisodicMemoryWrite:
     """Append-only factor-store allocation and write helpers."""
 
     def __init__(self, shape: list[int], config: EpisodicMemoryWriteSettings) -> None:
+        """Initialize append-only episodic memory with the configured capacity policy."""
         self._shape = list(shape)
         self._config = config
 
     @property
     def config(self) -> EpisodicMemoryWriteSettings:
+        """Return static episodic-write settings."""
         return self._config
 
     @property
     def memory_capacity(self) -> Optional[int]:
+        """Return the maximum retained atom count, if one is configured."""
         return self.config.memory_capacity
 
     def init_store(  # ---------------------------------------------------------------------------
         self, batch_size: int, *,
         device: Optional[Device] = None,
     ) -> FactorMemoryStore:  # fmt: skip
+        """Allocate an empty episodic factor store for the given batch size."""
         feature_dim = sum(self._shape)
         capacity = 0 if self.memory_capacity is None else int(self.memory_capacity)
         keys = torch.zeros((batch_size, capacity, feature_dim), dtype=torch.float, device=device)
@@ -258,6 +273,7 @@ class EpisodicMemoryWrite:
     def append(  # -------------------------------------------------------------------------------
         self, store: FactorMemoryStore, key: Tensor, value: Tensor,
     ) -> FactorMemoryStore:  # fmt: skip
+        """Append a factor-memory atom, optionally skipping rows deemed non-novel."""
         key = key.to(dtype=store.keys.dtype) if store.capacity > 0 else key.to(dtype=torch.float)
         value = value.to(dtype=store.values.dtype) if store.capacity > 0 else value.to(dtype=torch.float)
 
@@ -287,6 +303,7 @@ class EpisodicMemoryWrite:
     def _already_stored(  # ----------------------------------------------------------------------
         self, store: FactorMemoryStore, key: Tensor, value: Tensor,
     ) -> Tensor:  # fmt: skip
+        """Return which batch rows already contain a sufficiently similar atom."""
         if store.capacity == 0:
             return torch.zeros((key.shape[0],), dtype=torch.bool, device=key.device)
 
@@ -306,12 +323,14 @@ class FactorAppendStoreFactory:
     """Allocate empty factor stores through the configured append-write system."""
 
     def __init__(self, write_system: EpisodicMemoryWrite) -> None:
+        """Bind the append-store factory to an episodic write system."""
         self._write_system = write_system
 
     def init_store(  # ---------------------------------------------------------------------------
         self, batch_size: int, *,
         device: Optional[Device] = None,
     ) -> FactorMemoryStore:  # fmt: skip
+        """Allocate an empty factor store using the bound episodic write system."""
         return self._write_system.init_store(batch_size, device=device)
 
 
@@ -319,11 +338,13 @@ class FactorAppendStoreApplier:
     """Apply append writes to factor memory stores."""
 
     def __init__(self, write_system: EpisodicMemoryWrite) -> None:
+        """Bind append-store updates to an episodic write system."""
         self._write_system = write_system
 
     def apply(  # -------------------------------------------------------------------------------
         self, store: MemoryEntry, key: Tensor, value: Tensor,
     ) -> FactorMemoryStore:  # fmt: skip
+        """Append a factor-memory atom to the provided memory entry."""
         if not isinstance(store, FactorMemoryStore):
             raise TypeError("FactorAppendStoreApplier expected factor memory stores.")
         return self._write_system.append(store, key, value)
@@ -333,6 +354,7 @@ class FactorAppendStoreApplier:
 def build_factor_store_components(  # -------------------------------------------------------------
     write_system: EpisodicMemoryWrite,
 ) -> AppendStoreComponents:  # fmt: skip
+    """Construct store factory, applier, and reset strategy for episodic memory."""
     return AppendStoreComponents(
         store_factory=FactorAppendStoreFactory(write_system),
         store_applier=FactorAppendStoreApplier(write_system),
@@ -344,6 +366,7 @@ def build_factor_store_components(  # ------------------------------------------
 def compile_hebbian_factors(  # ------------------------------------------------------------------
     p_inf: Tensor, p_gen: Tensor, *, eta: float,
 ) -> FactorMemoryStore:  # fmt: skip
+    """Compile one dense Hebbian update step into a single factor-memory atom."""
     if p_inf.ndim != 2 or p_gen.ndim != 2:
         raise ValueError("p_inf and p_gen must both be rank-2 `(B, S)` tensors.")
     if p_inf.shape != p_gen.shape:
@@ -396,6 +419,7 @@ def compile_masked_hebbian_factors(  # -----------------------------------------
     p_inf: Tensor, p_gen: Tensor, *,
     eta: float, n_stages: int, shape: list[int], f_initial: list[float],
 ) -> FactorMemoryStore:  # fmt: skip
+    """Compile a masked hierarchical Hebbian update into factor-memory atoms."""
     if p_inf.ndim != 2 or p_gen.ndim != 2:
         raise ValueError("p_inf and p_gen must both be rank-2 `(B, S)` tensors.")
     if p_inf.shape != p_gen.shape:
