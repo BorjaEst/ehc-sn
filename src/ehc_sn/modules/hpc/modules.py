@@ -51,6 +51,7 @@ class HPCAttractor(HPCBase):
         self, n_stages: int, f_initial: list[float], config: HPCAttractorSettings, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
+        """Initialize attractor retrieval, Hebbian writes, and masked update helpers."""
         super().__init__(config, device=device, dtype=dtype)
 
         masks = utils.update_to_masks(self.shape, update=utils.make_update_hierarchical(n_stages, self.n_freq))
@@ -78,12 +79,14 @@ class HPCAttractor(HPCBase):
 
     @property
     def config(self) -> HPCAttractorSettings:
+        """Return the typed config for the attractor memory module."""
         return super().config  # type: ignore[return-value]
 
     def _init_memory_impl(  # --------------------------------------------------------------------
         self, batch_size: int, *,
         device: Optional[Device] = None,
     ) -> MemoryState:  # fmt: skip
+        """Initialize linear Hebbian stores for g-cued and optional x-cued memory."""
         g_cued = self._store_factory.init_store(batch_size, device=device)
         x_cued = g_cued if self.config.common_memory else g_cued.clone()
         return MemoryState(g_cued=g_cued, x_cued=x_cued)
@@ -91,18 +94,21 @@ class HPCAttractor(HPCBase):
     def _set_runtime_impl(  # --------------------------------------------------------------------
         self, *, eta: float, hebbian_decay: float,
     ) -> None:  # fmt: skip
+        """Apply runtime Hebbian learning rate and decay parameters."""
         self.write_module.runtime.eta = float(eta)
         self.write_module.runtime.hebbian_decay = float(hebbian_decay)
 
     def _recall_flat_impl(  # --------------------------------------------------------------------
         self, query: Tensor, memory: MemoryEntry, *, role: RetrievalRole,
     ) -> Tensor:  # fmt: skip
+        """Recall a flattened code using role-specific attractor update masks."""
         masks = self.masks_hierarchical if role == "generative" else self.masks_full
         return self.retrieval_module(query, memory.as_linear_view(), masks=masks)
 
     def _update_memory_impl(  # -------------------------------------------------------------------
         self, memory: MemoryState, key: Tensor, g_value: Tensor, x_value: Optional[Tensor],
     ) -> MemoryState:  # fmt: skip
+        """Write flattened values into the Hebbian store for the active memory entries."""
         g_cued = self._store_applier.apply(memory.g_cued, key, g_value, masked=True)
         x_cued = g_cued if self.config.common_memory else memory.x_cued
         if not self.config.common_memory and x_value is not None:
@@ -112,6 +118,7 @@ class HPCAttractor(HPCBase):
     def _merge_memory_rows_impl(  # ---------------------------------------------------------------
         self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
     ) -> MemoryEntry:  # fmt: skip
+        """Merge representation rows during partial reset using the Hebbian reset strategy."""
         return self._reset_strategy.merge_rows(flag, current, fresh)
 
 
@@ -123,6 +130,7 @@ class HPCAttention(HPCBase):
         self, n_stages: int, f_initial: list[float], config: HPCAttentionSettings, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
+        """Initialize factor-slot retrieval and write modules."""
         del n_stages, f_initial
         super().__init__(config, device=device, dtype=dtype)
         self.retrieval_module = FactorRetrieval(config.retrieval)
@@ -134,12 +142,14 @@ class HPCAttention(HPCBase):
 
     @property
     def config(self) -> HPCAttentionSettings:
+        """Return the typed config for the attention memory module."""
         return super().config  # type: ignore[return-value]
 
     def _init_memory_impl(  # --------------------------------------------------------------------
         self, batch_size: int, *,
         device: Optional[Device] = None,
     ) -> MemoryState:  # fmt: skip
+        """Initialize factor stores for g-cued memory and optional separate x-cued memory."""
         g_cued = self._store_factory.init_store(batch_size, device=device)
         x_cued = g_cued if self.config.common_memory else self._store_factory.init_store(batch_size, device=device)
         return MemoryState(g_cued=g_cued, x_cued=x_cued)
@@ -147,17 +157,20 @@ class HPCAttention(HPCBase):
     def _set_runtime_impl(  # --------------------------------------------------------------------
         self, *, eta: float, hebbian_decay: float,
     ) -> None:  # fmt: skip
+        """Ignore Hebbian runtime parameters for slot-based attention memory."""
         del eta, hebbian_decay
 
     def _recall_flat_impl(  # --------------------------------------------------------------------
         self, query: Tensor, memory: MemoryEntry, *, role: RetrievalRole,
     ) -> Tensor:  # fmt: skip
+        """Recall a flattened code from factor memory without role-specific masking."""
         del role
         return self.retrieval_module(query, memory.as_factor_view())
 
     def _update_memory_impl(  # -------------------------------------------------------------------
         self, memory: MemoryState, key: Tensor, g_value: Tensor, x_value: Optional[Tensor],
     ) -> MemoryState:  # fmt: skip
+        """Write flattened values into factor slots for the active memory entries."""
         g_cued = self._store_applier.apply(memory.g_cued, key, g_value)
         x_cued = g_cued if self.config.common_memory else memory.x_cued
         if self.config.common_memory:
@@ -169,12 +182,13 @@ class HPCAttention(HPCBase):
     def _merge_memory_rows_impl(  # ---------------------------------------------------------------
         self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
     ) -> MemoryEntry:  # fmt: skip
+        """Merge representation rows during partial reset using the factor-store strategy."""
         return self._reset_strategy.merge_rows(flag, current, fresh)
 
     def recall(  # --------------------------------------------------------------------------------
         self, *, x_query, g_query, state: HPCState, role: RetrievalRole,
     ):  # fmt: skip
-        """Recall from factor memory, optionally with iterative attention refinement."""
+        """Recall from factor memory with optional iterative recurrent refinement."""
         p_query = self.query_policy(x_query=x_query, g_query=g_query, role=role)
         view = state.memory.for_role(role).as_factor_view()
         flat_query = self._flatten_memory_code(p_query)
