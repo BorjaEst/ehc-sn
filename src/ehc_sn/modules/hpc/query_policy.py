@@ -1,3 +1,5 @@
+"""Policies for resolving retrieval queries from sensory and grid cues."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -27,6 +29,7 @@ class RoleQueryPolicySettings(BaseModel, extra="forbid"):
     )
 
 
+# =================================================================================================
 class XOnlyQueryPolicySettings(BaseModel, extra="forbid"):
     """Always use the sensory cue as the retrieval query."""
 
@@ -40,6 +43,7 @@ class XOnlyQueryPolicySettings(BaseModel, extra="forbid"):
     )
 
 
+# =================================================================================================
 class GOnlyQueryPolicySettings(BaseModel, extra="forbid"):
     """Always use the grid cue as the retrieval query."""
 
@@ -53,6 +57,7 @@ class GOnlyQueryPolicySettings(BaseModel, extra="forbid"):
     )
 
 
+# =================================================================================================
 class GatedMixQueryPolicySettings(BaseModel, extra="forbid"):
     """Learn a per-frequency mixture between x and g cues."""
 
@@ -66,6 +71,7 @@ class GatedMixQueryPolicySettings(BaseModel, extra="forbid"):
     )
 
 
+# =================================================================================================
 class ConjunctiveQueryPolicySettings(BaseModel, extra="forbid"):
     """Build a learned conjunctive query from sensory and grid cues."""
 
@@ -356,6 +362,5 @@ def build_query_policy(  # -----------------------------------------------------
 __all__ = [
     "ConjunctiveQueryPolicySettings", "GOnlyQueryPolicySettings", "GatedMixQueryPolicySettings",
     "QueryPolicySettings", "RoleQueryPolicySettings", "XOnlyQueryPolicySettings",
-    "MissingCueBehavior", "QueryPolicy",
-    "build_query_policy",
+    "MissingCueBehavior", "QueryPolicy", "build_query_policy",
 ]  # fmt: skip
