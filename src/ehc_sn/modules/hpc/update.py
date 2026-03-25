@@ -138,9 +138,7 @@ class HebbianMemoryWrite(nn.Module):
         if int(p_inf.shape[0]) != batch_size or int(p_gen.shape[0]) != batch_size:
             raise ValueError("memory, p_inf, and p_gen must share the same batch size.")
         if int(p_inf.shape[1]) != feature_dim or int(p_gen.shape[1]) != feature_dim:
-            raise ValueError(
-                f"p_inf and p_gen must have width {feature_dim} to match memory, " f"got {int(p_inf.shape[1])} and {int(p_gen.shape[1])}."
-            )
+            raise ValueError(f"p_inf and p_gen must have width {feature_dim} to match memory, got {int(p_inf.shape[1])} and {int(p_gen.shape[1])}.")  # fmt: skip
 
         update = (p_inf + p_gen).unsqueeze(2) @ (p_inf - p_gen).unsqueeze(1)
         update = update * mask.to(dtype=memory.dtype) if mask is not None else update
@@ -193,14 +191,7 @@ class FactorHebbianStoreApplier:
         runtime = self._write_system.runtime
         decayed = decay_factor_memory(store, runtime.hebbian_decay)
         if masked:
-            increment = compile_masked_hebbian_factors(
-                key,
-                value,
-                eta=runtime.eta,
-                n_stages=self._n_stages,
-                shape=self._shape,
-                f_initial=self._f_initial,
-            )
+            increment = compile_masked_hebbian_factors(key, value, eta=runtime.eta, n_stages=self._n_stages, shape=self._shape, f_initial=self._f_initial)  # fmt: skip
         else:
             increment = compile_hebbian_factors(key, value, eta=runtime.eta)
 
@@ -222,12 +213,7 @@ def build_hebbian_store_components(  # -----------------------------------------
     if emit_store == "factor":
         return HebbianStoreComponents(
             store_factory=FactorMemoryStoreFactory(feature_dim=feature_dim),
-            store_applier=FactorHebbianStoreApplier(
-                write_system,
-                n_stages=n_stages,
-                shape=shape,
-                f_initial=f_initial,
-            ),
+            store_applier=FactorHebbianStoreApplier(write_system, n_stages=n_stages, shape=shape, f_initial=f_initial),
             reset_strategy=FactorMemoryResetStrategy(),
         )
 
@@ -285,10 +271,7 @@ class EpisodicMemoryWrite:
 
         keys = torch.cat((store.keys, key.unsqueeze(1)), dim=1)
         values = torch.cat((store.values, value.unsqueeze(1)), dim=1)
-        coefficients = torch.cat(
-            (store.coefficient_tensor(), keep_row.unsqueeze(1).to(dtype=value.dtype)),
-            dim=1,
-        )
+        coefficients = torch.cat((store.coefficient_tensor(), keep_row.unsqueeze(1).to(dtype=value.dtype)), dim=1)
         valid_mask = torch.cat((store.valid_mask, keep_row.unsqueeze(1)), dim=1)
 
         if self.memory_capacity is not None:
@@ -377,12 +360,7 @@ def compile_hebbian_factors(  # ------------------------------------------------
     batch_size = int(p_inf.shape[0])
     coefficients = torch.full((batch_size, 1), float(eta), dtype=a_t.dtype, device=a_t.device)
     valid_mask = torch.ones((batch_size, 1), dtype=torch.bool, device=a_t.device)
-    return FactorMemoryStore(
-        keys=a_t.unsqueeze(1),
-        values=b_t.unsqueeze(1),
-        valid_mask=valid_mask,
-        coefficients=coefficients,
-    )
+    return FactorMemoryStore(keys=a_t.unsqueeze(1), values=b_t.unsqueeze(1), valid_mask=valid_mask, coefficients=coefficients)
 
 
 # =================================================================================================
