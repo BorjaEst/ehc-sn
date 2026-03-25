@@ -11,7 +11,7 @@ from ehc_sn import utils
 from ehc_sn.modules.hpc import update
 from ehc_sn.modules.hpc._base import HPCBase, HPCCommonSettings, HPCState
 from ehc_sn.modules.hpc.query import AttentionSettings, AttractorNetwork, AttractorSettings, FactorRetrieval
-from ehc_sn.modules.hpc.update import FactorMemoryWrite, FactorMemoryWriteSettings, HebbianMemoryWrite, HebbianMemoryWriteSettings
+from ehc_sn.modules.hpc.update import EpisodicMemoryWrite, EpisodicMemoryWriteSettings, HebbianMemoryWrite, HebbianMemoryWriteSettings
 from ehc_sn.types import Device, Dtype, MemoryEntry, MemoryState, RetrievalRole
 
 
@@ -37,8 +37,8 @@ class HPCAttentionSettings(HPCCommonSettings):
         default_factory=AttentionSettings,
         description="Settings for attention retrieval.",
     )
-    write: FactorMemoryWriteSettings = Field(
-        default_factory=FactorMemoryWriteSettings,
+    write: EpisodicMemoryWriteSettings = Field(
+        default_factory=EpisodicMemoryWriteSettings,
         description="Settings for factor-memory write.",
     )
 
@@ -134,7 +134,7 @@ class HPCAttention(HPCBase):
         del n_stages, f_initial
         super().__init__(config, device=device, dtype=dtype)
         self.retrieval_module = FactorRetrieval(config.retrieval)
-        self.write_module = FactorMemoryWrite(self.shape, config.write)
+        self.write_module = EpisodicMemoryWrite(self.shape, config.write)
         store_components = update.build_factor_store_components(self.write_module)
         self._store_factory = store_components.store_factory
         self._store_applier = store_components.store_applier
