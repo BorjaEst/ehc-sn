@@ -9,7 +9,6 @@ from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
-from lightning.pytorch.strategies import DDPStrategy
 from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
@@ -23,6 +22,7 @@ from ehc_sn.envs.dungeon_walk import EnvConfig
 from ehc_sn.heads.tem import TEMLossConfig
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.models.tem_v2 import ModelConfig_TEM_V2, ModelSettings_V2, RuntimeConfig, TrainingModel
+from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamConfig
 from ehc_sn.training.schedules import SchedulerConfig
 
@@ -60,16 +60,12 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     project_name: Optional[str] = Field(
         default=None,
         description=(
-            "Project name. If not set, it defaults to the capitalized name of the dataset "
-            "(for example `Dungeons` -> `Dungeons`)."
+            "Project name. If not set, it defaults to the capitalized name of the dataset " "(for example `Dungeons` -> `Dungeons`)."
         ),
     )
     run_name: Optional[str] = Field(
         default=None,
-        description=(
-            "Run name. If not set, it defaults to `<arch_name> <random_slug>` "
-            "(for example `tem-v2 cool-slug`)."
-        ),
+        description=("Run name. If not set, it defaults to `<arch_name> <random_slug>` " "(for example `tem-v2 cool-slug`)."),
     )
 
     # ---------------------------------------------------------------------------------------------
@@ -122,8 +118,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     global_batch_size: int = Field(
         ...,
         description=(
-            "Global batch size across all devices. "
-            "The per-device batch size is computed as `global_batch_size // world_size`."
+            "Global batch size across all devices. " "The per-device batch size is computed as `global_batch_size // world_size`."
         ),
     )
     num_workers: int = Field(
@@ -220,8 +215,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     trainer_precision: str = Field(
         default="16-mixed",
         description=(
-            "Lightning Trainer precision. '32-true' = full fp32 (paper-parity default). "
-            "Use 'bf16-mixed' for throughput on Ampere+."
+            "Lightning Trainer precision. '32-true' = full fp32 (paper-parity default). " "Use 'bf16-mixed' for throughput on Ampere+."
         ),
     )
 
@@ -229,10 +223,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     # Checkpointing and evaluation settings (passed as kwargs to Trainer and Checkpoint callback)
     checkpoint_path: Optional[str] = Field(
         default=None,
-        description=(
-            "Path to save checkpoints and logs. "
-            "If not set, it defaults to `checkpoints/<project_name>/<run_name>`."
-        ),
+        description=("Path to save checkpoints and logs. " "If not set, it defaults to `checkpoints/<project_name>/<run_name>`."),
     )
     checkpoint_every_eval: bool = Field(
         default=False,
@@ -266,26 +257,6 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
 
 
 # =================================================================================================
-def _validate_global_batch_size(settings: RunArguments) -> None:
-    """Validate that global_batch_size is divisible by world_size for distributed training."""
-    slurm_world_size = int(os.environ.get("SLURM_NTASKS", "1"))
-    if os.environ.get("SLURM_JOB_ID"):
-        world_size = slurm_world_size
-    elif settings.trainer_strategy == "ddp":
-        world_size = settings.trainer_devices * settings.trainer_num_nodes
-    else:
-        world_size = 1
-
-    if world_size <= 0:
-        raise ValueError("World size must be a positive integer.")
-    if settings.global_batch_size % world_size != 0:
-        raise ValueError(
-            "global_batch_size must be divisible by world_size. "
-            f"Got global_batch_size={settings.global_batch_size}, world_size={world_size}."
-        )
-
-
-# =================================================================================================
 # Main Entrypoint
 # =================================================================================================
 if __name__ == "__main__":
@@ -293,7 +264,12 @@ if __name__ == "__main__":
     # CLI arguments override TOML values; Pydantic defaults fill in anything missing.
     defaults_from_path = tomllib.load(Path(CONFIGURATION_PATH).open("rb"))
     settings = RunArguments(**defaults_from_path)
-    _validate_global_batch_size(settings)
+    world_size = resolve_effective_world_size(
+        settings.trainer_strategy,
+        settings.trainer_devices,
+        settings.trainer_num_nodes,
+    )
+    validate_batch_size_divisibility(settings.global_batch_size, world_size)
 
     # Seed everything for reproducibility.
     seed_everything(settings.seed)
@@ -309,18 +285,13 @@ if __name__ == "__main__":
 
     # Build the PyTorch Lightning Trainer.
     # This wires together logging, callbacks, and training control.
-    strategy: DDPStrategy | str = (
-        DDPStrategy(find_unused_parameters=True)
-        if settings.trainer_strategy == "ddp"
-        else settings.trainer_strategy
-    )
     trainer = Trainer(
         # Logger + callbacks handle metrics/hparams, figures, and checkpointing.
         logger=Logger(settings.logger) if settings.logger is not None else None,
         callbacks=callbacks_list if callbacks_list else None,
         # Lightning Trainer kwargs (extracted from config)
         accelerator=settings.trainer_accelerator,
-        strategy=strategy,
+        strategy=resolve_trainer_strategy(settings.trainer_strategy, world_size, find_unused_parameters=True),
         devices=settings.trainer_devices,
         num_nodes=settings.trainer_num_nodes,
         precision=settings.trainer_precision,
