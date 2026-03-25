@@ -61,7 +61,7 @@ class GroundLocation(nn.Module):
         self._shape, self._n_freq = list(shape), len(shape)
         self._activation_fn = utils.activation_from_str(self._config.activation)
 
-        # Uncertainty from predicted grounded location
+        # Predict uncertainty directly from the inferred grounded-location mean.
         self.uncertainty_mlp = MLP(shape, shape, [torch.tanh, torch.exp], [2 * n for n in shape])
 
     @property
@@ -89,10 +89,10 @@ class GroundLocation(nn.Module):
             g_: Projected abstract location per frequency module.
 
         Returns:
-            A `LocationBelief` with:
+            A ``LocationBelief`` with:
 
-            - `mean`: inferred grounded-location mean per frequency
-            - `uncertainty`: inferred grounded-location uncertainty per frequency
+            - ``mean``: inferred grounded-location mean per frequency
+            - ``uncertainty``: inferred grounded-location uncertainty per frequency
         """
         mu_p = [self.activation(g_[f] * x_[f]) for f in range(self.n_freq)]
         sigma_p = self.uncertainty_mlp(mu_p)
