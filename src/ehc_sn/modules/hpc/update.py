@@ -138,7 +138,8 @@ class HebbianMemoryWrite(nn.Module):
             raise ValueError(f"p_inf and p_gen must have width {feature_dim} to match memory, got {int(p_inf.shape[1])} and {int(p_gen.shape[1])}.")  # fmt: skip
 
         update = (p_inf + p_gen).unsqueeze(2) @ (p_inf - p_gen).unsqueeze(1)
-        update = update * mask.to(dtype=memory.dtype) if mask is not None else update
+        if mask is not None:
+            update = update * mask.to(device=memory.device, dtype=memory.dtype)
         return self.clamp_memory(hebbian_decay * memory + eta * update)
 
     def clamp_memory(self, memory: Tensor) -> Tensor:
@@ -146,13 +147,14 @@ class HebbianMemoryWrite(nn.Module):
         return torch.clamp(memory, min=self._config.clamp_min, max=self._config.clamp_max)
 
 
-class DenseHebbianStoreApplier:
+class DenseHebbianStoreApplier(nn.Module):
     """Apply Hebbian writes directly to dense memory stores."""
 
     def __init__(self, write_system: HebbianMemoryWrite, *, update_mask: Tensor) -> None:
         """Bind dense Hebbian updates to a shared write system and optional mask."""
+        super().__init__()
         self._write_system = write_system
-        self._update_mask = update_mask
+        self.register_buffer("update_mask", update_mask, persistent=False)
 
     def apply(  # -------------------------------------------------------------------------------
         self, store: MemoryEntry, key: Tensor, value: Tensor, *, masked: bool,
@@ -160,7 +162,7 @@ class DenseHebbianStoreApplier:
         """Apply a dense Hebbian update to the provided memory entry."""
         if not isinstance(store, DenseMemoryStore):
             raise TypeError("DenseHebbianStoreApplier expected dense memory stores.")
-        mask = self._update_mask if masked else None
+        mask = self.update_mask if masked else None
         return DenseMemoryStore(matrix=self._write_system(store.matrix, key, value, mask=mask))
 
 
