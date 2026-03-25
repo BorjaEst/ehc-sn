@@ -1,60 +1,63 @@
-from __future__ import annotations
-
 """HPC memory package composed from shared base, store, update, and query layers."""
+
+from __future__ import annotations
 
 from typing import Annotated, Literal, Optional, TypeAlias
 
 from pydantic import Field
 
 from ehc_sn import utils
-from ehc_sn.modules.hpc._base import (
-    HPCBackendAdapter,
-    HPCBase,
-    HPCCommonSettings,
-    HPCSensoryStepInput,
-    HPCSensoryStepOutput,
-    HPCState,
-    HPCStepInput,
-    HPCStepOutput,
-)
+from ehc_sn.modules.hpc import update
+from ehc_sn.modules.hpc._base import HPCBackendAdapter, HPCBase, HPCCommonSettings, HPCState
 from ehc_sn.modules.hpc.query import AttentionSettings, AttractorNetwork, AttractorSettings, FactorRetrieval
-from ehc_sn.modules.hpc.query_policy import QueryPolicySettings, build_query_policy
-from ehc_sn.modules.hpc.update import (
-    FactorMemoryWrite,
-    FactorMemoryWriteSettings,
-    HebbianMemoryWrite,
-    HebbianMemoryWriteSettings,
-    build_factor_store_components,
-    build_hebbian_store_components,
-)
+from ehc_sn.modules.hpc.update import FactorMemoryWrite, FactorMemoryWriteSettings, HebbianMemoryWrite, HebbianMemoryWriteSettings
 from ehc_sn.types import Device, Dtype, HPCPresetSignature, MemoryEntry, MemoryState, RetrievalRole
 
 
+# =================================================================================================
 class HPCAttractorSettings(HPCCommonSettings):
-    kind: Literal["tem_dense"] = Field(default="tem_dense")
-    retrieval: AttractorSettings = Field(default_factory=AttractorSettings)
-    write: HebbianMemoryWriteSettings = Field(default_factory=HebbianMemoryWriteSettings)
+    kind: Literal["tem_dense"] = Field(
+        default="tem_dense",
+        description="HPC backend family with attractor-based retrieval and Hebbian write.",
+    )
+    retrieval: AttractorSettings = Field(
+        default_factory=AttractorSettings,
+        description="Settings for attractor retrieval dynamics.",
+    )
+    write: HebbianMemoryWriteSettings = Field(
+        default_factory=HebbianMemoryWriteSettings,
+        description="Settings for Hebbian memory write.",
+    )
 
 
+# =================================================================================================
 class HPCAttentionSettings(HPCCommonSettings):
-    kind: Literal["temt_softmax"] = Field(default="temt_softmax")
-    retrieval: AttentionSettings = Field(default_factory=AttentionSettings)
-    write: FactorMemoryWriteSettings = Field(default_factory=FactorMemoryWriteSettings)
+    kind: Literal["temt_softmax"] = Field(
+        default="temt_softmax",
+        description="HPC backend family with attention-based retrieval and append write.",
+    )
+    retrieval: AttentionSettings = Field(
+        default_factory=AttentionSettings,
+        description="Settings for attention retrieval.",
+    )
+    write: FactorMemoryWriteSettings = Field(
+        default_factory=FactorMemoryWriteSettings,
+        description="Settings for factor-memory write.",
+    )
 
 
+# =================================================================================================
 class AttractorMemoryBackend(HPCBackendAdapter):
-    def __init__(
-        self,
-        retrieval_system: AttractorNetwork,
-        write_system: HebbianMemoryWrite,
+    """ """
+
+    def __init__(  # ------------------------------------------------------------------------------
+        self, retrieval_system: AttractorNetwork, write_system: HebbianMemoryWrite,
         *,
-        masks_hierarchical,
-        masks_full,
-        store_factory,
-        store_applier,
-        reset_strategy,
+        masks_hierarchical, masks_full,
+        store_factory, store_applier, reset_strategy,
         common_memory: bool,
-    ) -> None:
+    ) -> None:  # fmt: skip
+        """ """
         self._retrieval_system = retrieval_system
         self._write_system = write_system
         self._masks_hierarchical = masks_hierarchical
@@ -143,7 +146,7 @@ class HPCAttractor(HPCBase):
 
         self.retrieval_module = AttractorNetwork(config.retrieval)
         self.write_module = HebbianMemoryWrite(config.write, device=device, dtype=dtype)
-        store_components = build_hebbian_store_components(
+        store_components = update.build_hebbian_store_components(
             self.write_module,
             emit_store=config.write.emit_store,
             feature_dim=sum(self.shape),
@@ -186,7 +189,7 @@ class HPCAttention(HPCBase):
         super().__init__(config, device=device, dtype=dtype)
         self.retrieval_module = FactorRetrieval(config.retrieval)
         self.write_module = FactorMemoryWrite(self.shape, config.write)
-        store_components = build_factor_store_components(self.write_module)
+        store_components = update.build_factor_store_components(self.write_module)
         self._memory_backend = AttentionMemoryBackend(
             self.retrieval_module,
             store_factory=store_components.store_factory,
@@ -264,21 +267,3 @@ def build_hpc(
     if config.kind == "temt_softmax":
         return HPCAttention(n_stages, f_initial, config, device=device, dtype=dtype)
     raise ValueError(f"Unsupported HPC backend family '{config.kind}'.")
-
-
-__all__ = [
-    "HPCAttractor",
-    "HPCAttractorSettings",
-    "HPCAttention",
-    "HPCAttentionSettings",
-    "HPCSettings",
-    "HPCSensoryStepInput",
-    "HPCSensoryStepOutput",
-    "HPCState",
-    "HPCStepInput",
-    "HPCStepOutput",
-    "QueryPolicySettings",
-    "build_hpc",
-    "build_query_policy",
-    "resolve_hpc_preset_signature",
-]

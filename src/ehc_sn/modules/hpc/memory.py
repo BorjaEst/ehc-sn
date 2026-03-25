@@ -22,7 +22,6 @@ class HebbianStoreApplier(Protocol):
         """Return the updated store after one Hebbian write step."""
 
 
-# =================================================================================================
 class AppendStoreApplier(Protocol):
     """Store-specific append-write strategy used by attention backends."""
 
@@ -32,7 +31,6 @@ class AppendStoreApplier(Protocol):
         """Return the updated store after one append write step."""
 
 
-# =================================================================================================
 class MemoryStoreFactory(Protocol):
     """Constructor-time store factory used by backend init/reset paths."""
 
@@ -42,7 +40,6 @@ class MemoryStoreFactory(Protocol):
         """Return an empty store for the configured representation."""
 
 
-# =================================================================================================
 class MemoryResetStrategy(Protocol):
     """Store-specific row merge strategy used during partial reset."""
 
@@ -52,6 +49,7 @@ class MemoryResetStrategy(Protocol):
         """Return the merged store after applying the partial-reset mask."""
 
 
+# =================================================================================================
 @dataclass(frozen=True)
 class HebbianStoreComponents:
     """Constructor-time bundle for store representation strategies."""
@@ -85,7 +83,6 @@ class DenseMemoryStoreFactory:
         return DenseMemoryStore(matrix=torch.zeros((batch_size, self._feature_dim, self._feature_dim), dtype=torch.float, device=device))
 
 
-# =================================================================================================
 class FactorMemoryStoreFactory:
     """Allocate empty exact factor stores."""
 
@@ -117,7 +114,6 @@ class DenseMemoryResetStrategy:
         return merge_dense_memory_rows(flag, current, fresh)
 
 
-# =================================================================================================
 class FactorMemoryResetStrategy:
     """Partial-reset row merge for exact factor stores."""
 
@@ -130,21 +126,15 @@ class FactorMemoryResetStrategy:
 
 
 # =================================================================================================
-# =================================================================================================
 def merge_dense_memory_rows(  # ------------------------------------------------------------------
-    flag: Tensor,
-    current: DenseMemoryStore,
-    fresh: DenseMemoryStore,
+    flag: Tensor, current: DenseMemoryStore, fresh: DenseMemoryStore,
 ) -> DenseMemoryStore:  # fmt: skip
     """Replace flagged dense-memory rows with fresh rows during partial reset."""
     return DenseMemoryStore(matrix=utils.merge_rows(flag, current.matrix, fresh.matrix))
 
 
-# =================================================================================================
 def merge_factor_memory_rows(  # -----------------------------------------------------------------
-    flag: Tensor,
-    current: FactorMemoryStore,
-    fresh: FactorMemoryStore,
+    flag: Tensor, current: FactorMemoryStore, fresh: FactorMemoryStore,
 ) -> FactorMemoryStore:  # fmt: skip
     """Replace flagged factor-memory rows with fresh rows during partial reset.
 
@@ -300,22 +290,11 @@ def concat_factor_memory(  # ---------------------------------------------------
 
 # =================================================================================================
 __all__ = [
-    "AppendStoreApplier",
-    "AppendStoreComponents",
-    "DenseMemoryStoreFactory",
-    "DenseMemoryResetStrategy",
-    "FactorMemoryStoreFactory",
-    "FactorMemoryResetStrategy",
-    "HebbianStoreApplier",
-    "HebbianStoreComponents",
-    "MemoryResetStrategy",
-    "MemoryStoreFactory",
-    "apply_factor_memory",
-    "concat_factor_memory",
-    "decay_factor_memory",
-    "dense_memory_to_factor",
+    "AppendStoreApplier", "AppendStoreComponents", "DenseMemoryStoreFactory", "DenseMemoryResetStrategy",
+    "FactorMemoryStoreFactory", "FactorMemoryResetStrategy",
+    "HebbianStoreApplier", "HebbianStoreComponents",
+    "MemoryResetStrategy", "MemoryStoreFactory",
+    "apply_factor_memory", "concat_factor_memory", "decay_factor_memory", "dense_memory_to_factor",
     "factor_memory_to_dense",
-    "merge_dense_memory_rows",
-    "merge_episodic_memory_rows",
-    "merge_factor_memory_rows",
-]
+    "merge_dense_memory_rows", "merge_episodic_memory_rows", "merge_factor_memory_rows",
+]  # fmt: skip
