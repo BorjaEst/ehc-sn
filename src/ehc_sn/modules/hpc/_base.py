@@ -12,14 +12,9 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from ehc_sn import utils
+from ehc_sn.modules.hpc import query_policy
 from ehc_sn.modules.hpc.location import GroundLocation, GroundLocSettings
-from ehc_sn.modules.hpc.query_policy import (
-    QueryPolicySettings,
-    RetrievalEvidence,
-    RetrievalTarget,
-    RoleQueryPolicySettings,
-    build_query_policy,
-)
+from ehc_sn.modules.hpc.query_policy import AnchorQueryPolicySettings, CueBundle, QueryPolicySettings, RetrievalEvidence, RetrievalTarget
 from ehc_sn.types import Device, Dtype, LocationBelief, MemoryEntry, MemoryState, RetrievalRole
 from ehc_sn.utils.detach import DetachMixin
 
@@ -50,8 +45,8 @@ class HPCCommonSettings(BaseModel, extra="forbid"):
         description="Grounded-location inference module config.",
     )
     query_policy: QueryPolicySettings = Field(
-        default_factory=RoleQueryPolicySettings,
-        description="Policy used to resolve a retrieval query from the available x and g cues.",
+        default_factory=AnchorQueryPolicySettings,
+        description="Policy used to resolve a retrieval query from the available named cue families.",
     )
 
 
@@ -123,8 +118,7 @@ class HPCSensoryStepInput:
     """Phase-1 HPC inputs resolved before MEC posterior inference."""
 
     state: HPCState
-    x_query: list[Tensor]
-    g_query: Optional[list[Tensor]] = None
+    cues: CueBundle
     use_x_cued_recall: bool = True
 
 
@@ -133,8 +127,7 @@ class HPCSensoryStepInput:
 class HPCSensoryStepOutput:
     """Phase-1 HPC outputs passed from TEM into MEC posterior inference."""
 
-    x_query: list[Tensor]
-    g_query: Optional[list[Tensor]]
+    cues: CueBundle
     sensory_recall: Optional[list[Tensor]]
 
 
@@ -183,7 +176,7 @@ class HPCBase(nn.Module, ABC):
         self._shape = list(config.shape)
         self._n_freq = len(config.shape)
         self.grounded_location = GroundLocation(self._shape, config.location, device=device, dtype=dtype)
-        self.query_policy = build_query_policy(self._shape, config.query_policy, device=device, dtype=dtype)
+        self.query_policy = query_policy.build_query_policy(self._shape, config.query_policy, device=device, dtype=dtype)
 
     @property
     def config(self) -> HPCCommonSettings:
@@ -290,45 +283,40 @@ class HPCBase(nn.Module, ABC):
         self._set_runtime_impl(eta=eta, hebbian_decay=hebbian_decay)
 
     def recall(  # --------------------------------------------------------------------------------
-        self, *, x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]],
-        state: HPCState, role: RetrievalRole,
+        self, *,
+        cues: CueBundle, state: HPCState, role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
         """Retrieve grounded-location code from the concrete memory representation."""
         memory = state.memory.for_role(role)
-        evidence = self.compose_retrieval_evidence(
-            x_query=x_query,
-            g_query=g_query,
-            memory=memory,
-            role=role,
-            target="grounded",
-        )
+        evidence = self.compose_retrieval_evidence(cues=cues, memory=memory, role=role, target="grounded")
         if evidence.mode != "anchor_query":
-            raise TypeError(
-                f"Base recall does not support retrieval evidence mode '{evidence.mode}'. Override recall in the concrete module."
-            )
+            raise TypeError(f"Base recall does not support retrieval evidence mode '{evidence.mode}'. Override recall in module.")
         query = evidence.anchor_query if evidence.anchor_query is not None else evidence.fallback_query
         if query is None:
             raise ValueError("Retrieval evidence must provide an anchor or fallback query for base recall.")
-        recalled = self._recall_flat_impl(
-            query,
-            memory,
-            role=role,
-        )
+        recalled = self._recall_flat_impl(query, memory, role=role)
         return self._unflatten_memory_code(recalled)
 
     def compose_retrieval_evidence(  # -----------------------------------------------------------
         self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], memory: MemoryEntry,
-        role: RetrievalRole, target: RetrievalTarget,
+        cues: CueBundle, memory: MemoryEntry, role: RetrievalRole, target: RetrievalTarget,
     ) -> RetrievalEvidence:  # fmt: skip
         """Compose structured retrieval evidence before backend-specific memory read."""
-        return self.query_policy.compose_evidence(
-            x_query=x_query,
-            g_query=g_query,
-            role=role,
+        return self.query_policy.compose(
+            cues=cues,
             target=target,
             memory=memory,
+            role=role,
+            anchor_family=self._anchor_family_for_role(role),
         )
+
+    def _anchor_family_for_role(self, role: RetrievalRole) -> str:
+        """Return the backend-selected anchor family for the current retrieval phase."""
+        if role == "inference":
+            return "x"
+        if role == "generative":
+            return "g"
+        raise ValueError(f"Unrecognized retrieval role '{role}'.")
 
     def update(  # --------------------------------------------------------------------------------
         self, p_inf: list[Tensor], p_gen_gi: list[Tensor], p_xi: Optional[list[Tensor]],
@@ -355,39 +343,22 @@ class HPCBase(nn.Module, ABC):
         """Resolve the phase-1 observation-cued recall used by MEC inference."""
         sensory_recall = None
         if step_input.use_x_cued_recall:
-            sensory_recall = self.recall(
-                x_query=step_input.x_query,
-                g_query=step_input.g_query,
-                state=step_input.state,
-                role="inference",
-            )
-        return HPCSensoryStepOutput(
-            x_query=step_input.x_query,
-            g_query=step_input.g_query,
-            sensory_recall=sensory_recall,
-        )
+            sensory_recall = self.recall(cues=step_input.cues, state=step_input.state, role="inference")
+        return HPCSensoryStepOutput(cues=step_input.cues, sensory_recall=sensory_recall)
 
     def step(  # ----------------------------------------------------------------------------------
         self, step_input: HPCStepInput,
     ) -> HPCStepOutput:  # fmt: skip
         """Run phase 2 of the TEM-compatible HPC transition."""
         state = step_input.state
-        grid_prior_recall = self.recall(
-            x_query=step_input.sensory.x_query,
-            g_query=step_input.grid_query_prior,
-            state=state,
-            role="generative",
-        )
-        grid_posterior_recall = self.recall(
-            x_query=step_input.sensory.x_query,
-            g_query=step_input.grid_query_posterior,
-            state=state,
-            role="generative",
-        )
+        prior_cues = step_input.sensory.cues.with_family("g", step_input.grid_query_prior)
+        grid_prior_recall = self.recall(cues=prior_cues, state=state, role="generative")
+        posterior_cues = step_input.sensory.cues.with_family("g", step_input.grid_query_posterior)
+        grid_posterior_recall = self.recall(cues=posterior_cues, state=state, role="generative")
 
         place_retrieved, state = self.generative(grid_posterior_recall, state)
         place_prior, state = self.generative(grid_prior_recall, state)
-        place_post, state = self.inference(step_input.sensory.x_query, step_input.grid_query_posterior, state)
+        place_post, state = self.inference(step_input.sensory.cues.require("x"), step_input.grid_query_posterior, state)
         state = self.update(place_post, place_retrieved, step_input.sensory.sensory_recall, state)
 
         return HPCStepOutput(
