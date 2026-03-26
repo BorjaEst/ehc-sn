@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Annotated, Literal, Optional, TypeAlias
+from typing import Annotated, Iterable, Literal, Optional, TypeAlias
 
 import torch
 from pydantic import BaseModel, Field
@@ -15,8 +15,10 @@ from ehc_sn import utils
 from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, Activation, Device, Dtype, FactorMemoryStore, MemoryEntry, RetrievalRole
 
 MissingCueBehavior: TypeAlias = Literal["error", "use_available", "zeros"]
+CueFamily: TypeAlias = str
 RetrievalTarget: TypeAlias = Literal["grounded", "sensory", "structural"]
 RetrievalEvidenceMode: TypeAlias = Literal["anchor_query", "factor_logits", "anchor_refine"]
+PairwiseMode: TypeAlias = Literal["gated_sum", "product_projection"]
 RefinementCompose: TypeAlias = Literal["additive", "multiplicative"]
 RefinementReference: TypeAlias = Literal["anchor", "current"]
 RefinementSource: TypeAlias = Literal["retrieved_value"]
@@ -28,9 +30,32 @@ RefinementBankField: TypeAlias = Literal["keys", "values"]
 class CueBundle:
     """Available multi-scale cues supplied to retrieval composition."""
 
-    x: Optional[list[Tensor]] = None
-    g: Optional[list[Tensor]] = None
-    extras: dict[str, list[Tensor]] = field(default_factory=dict)
+    families: dict[CueFamily, list[Tensor]] = field(default_factory=dict)
+
+    def get(self, family: CueFamily) -> Optional[list[Tensor]]:
+        """Return one named cue family when present."""
+        return self.families.get(family)
+
+    def require(self, family: CueFamily) -> list[Tensor]:
+        """Return one named cue family or raise when it is absent."""
+        query = self.get(family)
+        if query is None:
+            raise ValueError(f"Cue family '{family}' is required.")
+        return query
+
+    def items(self) -> Iterable[tuple[CueFamily, list[Tensor]]]:
+        """Iterate over named cue families and their multi-scale codes."""
+        return self.families.items()
+
+    def names(self) -> tuple[CueFamily, ...]:
+        """Return the available cue-family names in insertion order."""
+        return tuple(self.families.keys())
+
+    def with_family(self, family: CueFamily, query: list[Tensor]) -> "CueBundle":
+        """Return a new cue bundle with one family inserted or replaced."""
+        families = dict(self.families)
+        families[family] = query
+        return CueBundle(families=families)
 
 
 # =================================================================================================
@@ -78,84 +103,50 @@ class RetrievalEvidence:
 
 
 # =================================================================================================
-class RoleQueryPolicySettings(BaseModel, extra="forbid"):
-    """Role-aware compatibility policy matching the legacy TEM query flow."""
+class AnchorQueryPolicySettings(BaseModel, extra="forbid"):
+    """Resolve one named cue family as the dense retrieval anchor."""
 
-    kind: Literal["by_role"] = Field(
-        default="by_role",
-        description="Use x for inference recall and g for generative recall, with optional fallback.",
+    kind: Literal["anchor"] = Field(
+        default="anchor",
+        description="Resolve one named cue family as the retrieval anchor query.",
     )
     missing_behavior: MissingCueBehavior = Field(
         default="use_available",
-        description="Fallback behavior when the role-preferred cue is unavailable.",
+        description="Fallback behavior when the requested anchor family is unavailable.",
     )
 
 
 # =================================================================================================
-class XOnlyQueryPolicySettings(BaseModel, extra="forbid"):
-    """Always use the sensory cue as the retrieval query."""
+class PairwiseQueryPolicySettings(BaseModel, extra="forbid"):
+    """Compose a dense query from one ordered pair of cue families."""
 
-    kind: Literal["x_only"] = Field(
-        default="x_only",
-        description="Use only the observation-derived cue as the retrieval query.",
+    kind: Literal["pairwise"] = Field(
+        default="pairwise",
+        description="Compose a dense retrieval query from an ordered pair of cue families.",
+    )
+    families: tuple[str, str] = Field(
+        ...,
+        description="Ordered cue families consumed by the pairwise dense composer.",
+    )
+    mode: PairwiseMode = Field(
+        ...,
+        description="Pairwise dense-composition mode.",
     )
     missing_behavior: MissingCueBehavior = Field(
         default="use_available",
-        description="Fallback behavior when the sensory cue is unavailable.",
-    )
-
-
-# =================================================================================================
-class GOnlyQueryPolicySettings(BaseModel, extra="forbid"):
-    """Always use the grid cue as the retrieval query."""
-
-    kind: Literal["g_only"] = Field(
-        default="g_only",
-        description="Use only the grid-derived cue as the retrieval query.",
-    )
-    missing_behavior: MissingCueBehavior = Field(
-        default="use_available",
-        description="Fallback behavior when the grid cue is unavailable.",
-    )
-
-
-# =================================================================================================
-class GatedMixQueryPolicySettings(BaseModel, extra="forbid"):
-    """Learn a per-frequency mixture between x and g cues."""
-
-    kind: Literal["gated_mix"] = Field(
-        default="gated_mix",
-        description="Learn a per-frequency gate between sensory and grid cues.",
-    )
-    missing_behavior: MissingCueBehavior = Field(
-        default="use_available",
-        description="Fallback behavior when one cue is unavailable.",
-    )
-
-
-# =================================================================================================
-class ConjunctiveQueryPolicySettings(BaseModel, extra="forbid"):
-    """Build a learned conjunctive query from sensory and grid cues."""
-
-    kind: Literal["conjunctive"] = Field(
-        default="conjunctive",
-        description="Combine sensory and grid cues through a learned conjunctive projection.",
-    )
-    missing_behavior: MissingCueBehavior = Field(
-        default="use_available",
-        description="Fallback behavior when one cue is unavailable.",
+        description="Fallback behavior when one cue family in the ordered pair is unavailable.",
     )
     activation: Activation = Field(
         default="leaky_relu",
-        description="Activation applied after the conjunctive projection.",
+        description="Activation applied after product-projection composition.",
     )
     clamp_min: float = Field(
         default=-1.0,
-        description="Minimum clamp value applied before conjunctive activation.",
+        description="Minimum clamp applied before product-projection activation.",
     )
     clamp_max: float = Field(
         default=1.0,
-        description="Maximum clamp value applied before conjunctive activation.",
+        description="Maximum clamp applied before product-projection activation.",
     )
 
 
@@ -165,20 +156,16 @@ class _FactorScoreQueryPolicySettings(BaseModel, extra="forbid"):
 
     missing_behavior: MissingCueBehavior = Field(
         default="use_available",
-        description="Fallback behavior when one cue is unavailable.",
+        description="Fallback behavior when one cue family is unavailable.",
     )
     temperature: float = Field(
         default=1.0,
         gt=0.0,
         description="Temperature divisor used when projecting cues against factor-memory keys.",
     )
-    x_bank: str = Field(
-        default="sensory",
-        description="Factor-memory bank used when scoring sensory cue queries.",
-    )
-    g_bank: str = Field(
-        default="structural",
-        description="Factor-memory bank used when scoring grid cue queries.",
+    cue_to_score_bank: dict[str, str] = Field(
+        default_factory=dict,
+        description="Optional cue-family to score-bank mapping for factor-memory score terms.",
     )
     read_bank: str = Field(
         default=DEFAULT_FACTOR_BANK_NAME,
@@ -188,21 +175,21 @@ class _FactorScoreQueryPolicySettings(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class AdditiveQueryPolicySettings(_FactorScoreQueryPolicySettings):
-    """Compose x- and g-cued factor-memory scores additively."""
+    """Compose factor-memory scores additively across named cue families."""
 
     kind: Literal["additive"] = Field(
         default="additive",
-        description="Compose factor-memory logits from x and g cues using a sum in score space.",
+        description="Compose factor-memory logits from named cue families using a sum in score space.",
     )
 
 
 # =================================================================================================
 class MultiplicativeQueryPolicySettings(_FactorScoreQueryPolicySettings):
-    """Compose x- and g-cued factor-memory scores multiplicatively."""
+    """Compose factor-memory scores multiplicatively across named cue families."""
 
     kind: Literal["multiplicative"] = Field(
         default="multiplicative",
-        description="Compose factor-memory logits from x and g cues using an elementwise product.",
+        description="Compose factor-memory logits from named cue families using an elementwise product.",
     )
 
 
@@ -212,7 +199,7 @@ class AnchorRefineQueryPolicySettings(_FactorScoreQueryPolicySettings):
 
     kind: Literal["anchor_refine"] = Field(
         default="anchor_refine",
-        description="Use a role-selected anchor query and explicit retrieval refinement steps.",
+        description="Use an explicit anchor query and refinement metadata for factor retrieval.",
     )
     iterations: int = Field(
         default=2,
@@ -243,11 +230,8 @@ class AnchorRefineQueryPolicySettings(_FactorScoreQueryPolicySettings):
 
 # =================================================================================================
 QueryPolicySettings: TypeAlias = Annotated[
-    RoleQueryPolicySettings
-    | XOnlyQueryPolicySettings
-    | GOnlyQueryPolicySettings
-    | GatedMixQueryPolicySettings
-    | ConjunctiveQueryPolicySettings
+    AnchorQueryPolicySettings
+    | PairwiseQueryPolicySettings
     | AdditiveQueryPolicySettings
     | MultiplicativeQueryPolicySettings
     | AnchorRefineQueryPolicySettings,
@@ -279,27 +263,20 @@ class QueryPolicy(nn.Module, ABC):
         """Return query-policy settings."""
         return self._config
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, *, 
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
+    def resolve_query(  # -------------------------------------------------------------------------
+        self, *, cues: CueBundle, anchor_family: Optional[CueFamily] = None,
     ) -> list[Tensor]:  # fmt: skip
         """Return a resolved multi-scale anchor query for memory retrieval."""
-        self._validate_query(x_query, name="x_query")
-        self._validate_query(g_query, name="g_query")
-        return self._forward(x_query=x_query, g_query=g_query, role=role)
+        self._validate_cues(cues)
+        return self._resolve_query(cues=cues, anchor_family=anchor_family)
 
-    def compose_evidence(  # ----------------------------------------------------------------------
-        self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
-        target: RetrievalTarget, memory: MemoryEntry,
+    def compose(  # -------------------------------------------------------------------------------
+        self, *, cues: CueBundle, target: RetrievalTarget, memory: MemoryEntry, role: RetrievalRole,
+        anchor_family: Optional[CueFamily] = None,
     ) -> RetrievalEvidence:  # fmt: skip
-        """Return structured retrieval evidence for the configured backend.
-
-        The default implementation emits only an anchor query, which is the
-        dense-attractor-compatible special case.
-        """
+        """Compose structured retrieval evidence from a generic cue bundle."""
         del memory
-        anchor = self._flatten_query(self.forward(x_query=x_query, g_query=g_query, role=role))
+        anchor = self._flatten_query(self.resolve_query(cues=cues, anchor_family=anchor_family))
         return RetrievalEvidence(
             mode="anchor_query",
             target=target,
@@ -312,11 +289,18 @@ class QueryPolicy(nn.Module, ABC):
         )
 
     @abstractmethod
-    def _forward(  # ------------------------------------------------------------------------------
-        self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
+    def _resolve_query(  # ------------------------------------------------------------------------
+        self, *, cues: CueBundle,
+        anchor_family: Optional[CueFamily] = None,
     ) -> list[Tensor]:  # fmt: skip
-        """Implement policy-specific query resolution."""
+        """Implement policy-specific query resolution from named cue families."""
+
+    def _validate_cues(  # ------------------------------------------------------------------------
+        self, cues: CueBundle,
+    ) -> None:  # fmt: skip
+        """Validate all populated cue families in one cue bundle."""
+        for family, query in cues.items():
+            self._validate_query(query, name=f"cues[{family!r}]")
 
     def _validate_query(  # -----------------------------------------------------------------------
         self, query: Optional[list[Tensor]], *, name: str,
@@ -345,190 +329,143 @@ class QueryPolicy(nn.Module, ABC):
         """Flatten a validated multi-scale query into shape ``(B, S)``."""
         return torch.cat(query, dim=1)
 
-    def _fallback(  # -----------------------------------------------------------------------------
+    def _resolve_family_query(  # -----------------------------------------------------------------
         self, *,
-        preferred: Optional[list[Tensor]], preferred_name: str, other: Optional[list[Tensor]],
-        missing_behavior: MissingCueBehavior,
+        cues: CueBundle, preferred_family: Optional[CueFamily], missing_behavior: MissingCueBehavior,
+        label: str,
     ) -> list[Tensor]:  # fmt: skip
-        """Return the configured fallback query when the preferred cue is missing."""
+        """Resolve one cue family from the available bundle with fallback semantics."""
+        preferred = cues.get(preferred_family) if preferred_family is not None else None
         if preferred is not None:
             return preferred
-        if missing_behavior == "use_available" and other is not None:
-            return other
-        if missing_behavior == "zeros" and other is not None:
-            return [torch.zeros_like(tensor) for tensor in other]
-        raise ValueError(f"{preferred_name} is required for query policy '{self.config.kind}'.")
+        available = next(iter(cues.families.values()), None)
+        if missing_behavior == "use_available" and available is not None:
+            return available
+        if missing_behavior == "zeros" and available is not None:
+            return [torch.zeros_like(tensor) for tensor in available]
+        if preferred_family is None:
+            raise ValueError(f"{label} must be provided for query policy '{self.config.kind}'.")
+        raise ValueError(f"Cue family '{preferred_family}' is required for query policy '{self.config.kind}'.")
+
+    def _score_bank_for_family(  # ----------------------------------------------------------------
+        self, family: CueFamily,
+    ) -> str:  # fmt: skip
+        """Return the configured score bank for one cue family when available."""
+        cue_to_score_bank = getattr(self.config, "cue_to_score_bank", {})
+        return cue_to_score_bank.get(family, family)
+
+    def _resolve_pair_family_queries(  # ----------------------------------------------------------
+        self, *,
+        cues: CueBundle, families: tuple[CueFamily, CueFamily], missing_behavior: MissingCueBehavior,
+    ) -> tuple[list[Tensor], list[Tensor]]:  # fmt: skip
+        """Resolve the ordered pair of cue families used by a dense pairwise composer."""
+        left_family, right_family = families
+        left_query = cues.get(left_family)
+        right_query = cues.get(right_family)
+        if left_query is not None and right_query is not None:
+            return left_query, right_query
+        if missing_behavior == "use_available":
+            if left_query is not None:
+                return left_query, left_query
+            if right_query is not None:
+                return right_query, right_query
+        if missing_behavior == "zeros":
+            template = left_query if left_query is not None else right_query
+            if template is not None:
+                zeros = [torch.zeros_like(tensor) for tensor in template]
+                return (left_query or zeros), (right_query or zeros)
+        raise ValueError(
+            f"Cue families {families!r} are required for query policy '{self.config.kind}' "
+            f"with missing_behavior='{missing_behavior}'."
+        )  # fmt: skip
 
 
 # =================================================================================================
-class RoleQueryPolicy(QueryPolicy):
-    """Compatibility policy that preserves the legacy TEM role-based query selection."""
+class AnchorQueryPolicy(QueryPolicy):
+    """Resolve one named cue family as the dense retrieval anchor."""
 
     @property
-    def config(self) -> RoleQueryPolicySettings:
-        """Return typed settings for the role-aware query policy."""
+    def config(self) -> AnchorQueryPolicySettings:
+        """Return typed settings for the anchor query policy."""
         return super().config  # type: ignore[return-value]
 
-    def _forward(  # ------------------------------------------------------------------------------
-        self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
+    def _resolve_query(  # ------------------------------------------------------------------------
+        self, *, cues: CueBundle, anchor_family: Optional[CueFamily] = None,
     ) -> list[Tensor]:  # fmt: skip
-        """Select the legacy role-preferred cue, with configured fallback behavior."""
-        if role == "inference":
-            return self._fallback(
-                preferred=x_query,
-                other=g_query,
-                missing_behavior=self.config.missing_behavior,
-                preferred_name="x_query",
-            )
-        if role == "generative":
-            return self._fallback(
-                preferred=g_query,
-                other=x_query,
-                missing_behavior=self.config.missing_behavior,
-                preferred_name="g_query",
-            )
-        raise ValueError(f"Unrecognized retrieval role '{role}' for query policy '{self.config.kind}'.")
-
-
-# =================================================================================================
-class XOnlyQueryPolicy(QueryPolicy):
-    """Policy that always prefers the sensory cue."""
-
-    @property
-    def config(self) -> XOnlyQueryPolicySettings:
-        """Return typed settings for the x-only query policy."""
-        return super().config  # type: ignore[return-value]
-
-    def _forward(  # ------------------------------------------------------------------------------
-        self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
-    ) -> list[Tensor]:  # fmt: skip
-        """Resolve retrieval queries using only sensory cues when available."""
-        del role
-        return self._fallback(
-            preferred=x_query,
-            other=g_query,
+        """Resolve the caller-selected anchor family."""
+        return self._resolve_family_query(
+            cues=cues,
+            preferred_family=anchor_family,
             missing_behavior=self.config.missing_behavior,
-            preferred_name="x_query",
+            label="anchor_family",
         )
 
 
 # =================================================================================================
-class GOnlyQueryPolicy(QueryPolicy):
-    """Policy that always prefers the grid cue."""
-
-    @property
-    def config(self) -> GOnlyQueryPolicySettings:
-        """Return typed settings for the g-only query policy."""
-        return super().config  # type: ignore[return-value]
-
-    def _forward(  # ------------------------------------------------------------------------------
-        self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
-    ) -> list[Tensor]:  # fmt: skip
-        """Resolve retrieval queries using only grid cues when available."""
-        del role
-        return self._fallback(
-            preferred=g_query,
-            other=x_query,
-            missing_behavior=self.config.missing_behavior,
-            preferred_name="g_query",
-        )
-
-
-# =================================================================================================
-class GatedMixQueryPolicy(QueryPolicy):
-    """Learn a per-frequency convex interpolation between x and g cues."""
+class PairwiseQueryPolicy(QueryPolicy):
+    """Compose one dense retrieval query from an ordered pair of cue families."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, shape: list[int], config: GatedMixQueryPolicySettings, *,
+        self, shape: list[int], config: PairwiseQueryPolicySettings, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
-        """Initialize one gate per frequency module for x/g cue mixing."""
+        """Initialize pairwise dense composition modules."""
         super().__init__(shape, config, device=device, dtype=dtype)
-        self._gates = nn.ModuleList([nn.Linear(2 * width, width, device=device, dtype=dtype) for width in shape])
-        self._reset_parameters()
+        if config.mode == "gated_sum":
+            self._gates = nn.ModuleList([nn.Linear(2 * width, width, device=device, dtype=dtype) for width in shape])
+            self._projections = None
+            self._activation_fn = None
+            self._reset_gates()
+            return
+
+        self._gates = None
+        self._projections = nn.ModuleList([nn.Linear(3 * width, width, device=device, dtype=dtype) for width in shape])
+        self._activation_fn = utils.activation_from_str(config.activation)
+        self._reset_projections()
 
     @property
-    def config(self) -> GatedMixQueryPolicySettings:
-        """Return typed settings for the gated-mix query policy."""
+    def config(self) -> PairwiseQueryPolicySettings:
+        """Return typed settings for the pairwise query policy."""
         return super().config  # type: ignore[return-value]
 
-    def _forward(  # ------------------------------------------------------------------------------
-        self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
+    def _resolve_query(  # ------------------------------------------------------------------------
+        self, *, cues: CueBundle, anchor_family: Optional[CueFamily] = None,
     ) -> list[Tensor]:  # fmt: skip
-        """Blend sensory and grid cues with a learned convex gate per frequency."""
-        del role
-        if x_query is None or g_query is None:
-            return self._fallback(
-                preferred=x_query,
-                other=g_query,
-                missing_behavior=self.config.missing_behavior,
-                preferred_name="x_query and g_query",
-            )
+        """Compose a dense query from an ordered cue-family pair."""
+        del anchor_family
+        left_query, right_query = self._resolve_pair_family_queries(
+            cues=cues,
+            families=self.config.families,
+            missing_behavior=self.config.missing_behavior,
+        )
+        if self.config.mode == "gated_sum":
+            assert self._gates is not None
+            mixed: list[Tensor] = []
+            for gate_layer, left_tensor, right_tensor in zip(self._gates, left_query, right_query, strict=True):
+                gate = torch.sigmoid(gate_layer(torch.cat((left_tensor, right_tensor), dim=1)))
+                mixed.append(gate * left_tensor + (1.0 - gate) * right_tensor)
+            return mixed
 
-        mixed: list[Tensor] = []
-        for gate_layer, x_tensor, g_tensor in zip(self._gates, x_query, g_query, strict=True):
-            gate = torch.sigmoid(gate_layer(torch.cat((x_tensor, g_tensor), dim=1)))
-            mixed.append(gate * x_tensor + (1.0 - gate) * g_tensor)
-        return mixed
+        assert self._projections is not None
+        assert self._activation_fn is not None
+        composed: list[Tensor] = []
+        for projection, left_tensor, right_tensor in zip(self._projections, left_query, right_query, strict=True):
+            joined = torch.cat((left_tensor, right_tensor, left_tensor * right_tensor), dim=1)
+            tensor = projection(joined)
+            tensor = torch.clamp(tensor, min=self.config.clamp_min, max=self.config.clamp_max)
+            composed.append(self._activation_fn(tensor))
+        return composed
 
-    def _reset_parameters(  # ---------------------------------------------------------------------
-        self,
-    ) -> None:  # fmt: skip
-        """Initialize gates to an even mixture before training."""
+    def _reset_gates(self) -> None:
+        """Initialize gating layers to an even mixture before training."""
+        assert self._gates is not None
         for layer in self._gates:
             nn.init.zeros_(layer.weight)
             nn.init.zeros_(layer.bias)
 
-
-# =================================================================================================
-class ConjunctiveQueryPolicy(QueryPolicy):
-    """Build a learned conjunctive query from sensory and grid cues."""
-
-    def __init__(  # ------------------------------------------------------------------------------
-        self, shape: list[int], config: ConjunctiveQueryPolicySettings, *,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> None:  # fmt: skip
-        """Initialize per-frequency conjunctive projections over x, g, and x*g."""
-        super().__init__(shape, config, device=device, dtype=dtype)
-        self._activation_fn = utils.activation_from_str(config.activation)
-        self._projections = nn.ModuleList([nn.Linear(3 * width, width, device=device, dtype=dtype) for width in shape])
-        self._reset_parameters()
-
-    @property
-    def config(self) -> ConjunctiveQueryPolicySettings:
-        """Return typed settings for the conjunctive query policy."""
-        return super().config  # type: ignore[return-value]
-
-    def _forward(  # ------------------------------------------------------------------------------
-        self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
-    ) -> list[Tensor]:  # fmt: skip
-        """Project sensory and grid cues into a learned conjunctive query."""
-        del role
-        if x_query is None or g_query is None:
-            return self._fallback(
-                preferred=x_query,
-                other=g_query,
-                missing_behavior=self.config.missing_behavior,
-                preferred_name="x_query and g_query",
-            )
-
-        conjunctive: list[Tensor] = []
-        for projection, x_tensor, g_tensor in zip(self._projections, x_query, g_query, strict=True):
-            joined = torch.cat((x_tensor, g_tensor, x_tensor * g_tensor), dim=1)
-            tensor = projection(joined)
-            tensor = torch.clamp(tensor, min=self.config.clamp_min, max=self.config.clamp_max)
-            conjunctive.append(self._activation_fn(tensor))
-        return conjunctive
-
-    def _reset_parameters(  # ---------------------------------------------------------------------
-        self,
-    ) -> None:  # fmt: skip
-        """Initialize projections to start from the classic x*g conjunction."""
+    def _reset_projections(self) -> None:
+        """Initialize pairwise product-projection layers to the elementwise product path."""
+        assert self._projections is not None
         for width, projection in zip(self.shape, self._projections, strict=True):
             nn.init.zeros_(projection.weight)
             nn.init.zeros_(projection.bias)
@@ -544,35 +481,25 @@ class _FactorScoreQueryPolicy(QueryPolicy, ABC):
     def config(self) -> _FactorScoreQueryPolicySettings:
         return super().config  # type: ignore[return-value]
 
-    def _forward(  # ------------------------------------------------------------------------------
-        self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
+    def _resolve_query(  # ------------------------------------------------------------------------
+        self, *, cues: CueBundle, anchor_family: Optional[CueFamily] = None,
     ) -> list[Tensor]:  # fmt: skip
-        if role == "inference":
-            return self._fallback(
-                preferred=x_query,
-                other=g_query,
-                missing_behavior=self.config.missing_behavior,
-                preferred_name="x_query",
-            )
-        return self._fallback(
-            preferred=g_query,
-            other=x_query,
+        return self._resolve_family_query(
+            cues=cues,
+            preferred_family=anchor_family,
             missing_behavior=self.config.missing_behavior,
-            preferred_name="g_query",
+            label="anchor_family",
         )
 
-    def compose_evidence(  # ----------------------------------------------------------------------
-        self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
-        target: RetrievalTarget, memory: MemoryEntry,
+    def compose(  # -------------------------------------------------------------------------------
+        self, *, cues: CueBundle, target: RetrievalTarget, memory: MemoryEntry, role: RetrievalRole,
+        anchor_family: Optional[CueFamily] = None,
     ) -> RetrievalEvidence:  # fmt: skip
-        anchor = self._flatten_query(self.forward(x_query=x_query, g_query=g_query, role=role))
-        fallback = anchor
+        anchor = self._flatten_query(self.resolve_query(cues=cues, anchor_family=anchor_family))
         if not isinstance(memory, FactorMemoryStore):
             return self._anchor_only_evidence(target=target, role=role, anchor=anchor)
 
-        score_terms = self._collect_score_terms(memory=memory, x_query=x_query, g_query=g_query)
+        score_terms = self._collect_score_terms(memory=memory, cues=cues)
         if not score_terms:
             return self._anchor_only_evidence(target=target, role=role, anchor=anchor)
 
@@ -584,7 +511,7 @@ class _FactorScoreQueryPolicy(QueryPolicy, ABC):
             score_terms=score_terms,
             composed_logits=composed_logits,
             anchor_logits=composed_logits,
-            fallback_query=fallback,
+            fallback_query=anchor,
             anchor_query=anchor,
             read_bank=self.config.read_bank,
             metadata={"temperature": float(self.config.temperature)},
@@ -607,71 +534,50 @@ class _FactorScoreQueryPolicy(QueryPolicy, ABC):
             anchor_query=anchor,
         )
 
-    def _collect_score_terms(
-        self,
-        *,
-        memory: FactorMemoryStore,
-        x_query: Optional[list[Tensor]],
-        g_query: Optional[list[Tensor]],
-    ) -> list[ScoreTerm]:
+    def _collect_score_terms(  # ------------------------------------------------------------------
+        self, *, memory: FactorMemoryStore, cues: CueBundle,
+    ) -> list[ScoreTerm]:  # fmt: skip
         """Collect cue-scored logits against the configured banks."""
         score_terms = [
             term
-            for term in (
-                self._cue_score_term("x", x_query, memory, self.config.x_bank),
-                self._cue_score_term("g", g_query, memory, self.config.g_bank),
-            )
+            for family, query in cues.items()
+            for term in [self._cue_score_term(family, query, memory, self._score_bank_for_family(family))]
             if term is not None
         ]
         if score_terms:
-            return self._fill_missing_terms(score_terms)
+            return self._fill_missing_terms(score_terms, cues=cues)
         if self.config.missing_behavior == "error":
-            raise ValueError(f"Both x_query and g_query are required for query policy '{self.config.kind}'.")
+            raise ValueError(f"At least one cue family is required for query policy '{self.config.kind}'.")
         return []
 
-    def _fill_missing_terms(self, score_terms: list[ScoreTerm]) -> list[ScoreTerm]:
+    def _fill_missing_terms(  # -------------------------------------------------------------------
+        self, score_terms: list[ScoreTerm], *, cues: CueBundle,
+    ) -> list[ScoreTerm]:  # fmt: skip
         """Apply missing-cue behavior to any absent factor score terms."""
         if self.config.missing_behavior != "zeros":
             return score_terms
         present = {term.name for term in score_terms}
-        if len(present) == 2:
+        expected = set(cues.names()) | set(self.config.cue_to_score_bank)
+        if present == expected:
             return score_terms
         template = score_terms[0]
         completed = list(score_terms)
-        if "x" not in present:
+        for family in sorted(expected - present):
             completed.append(
                 ScoreTerm(
-                    name="x",
+                    name=family,
                     logits=torch.zeros_like(template.logits),
-                    source_cues=("x",),
-                    bank_name=self.config.x_bank,
-                    normalization="temperature_scaled",
-                )
-            )
-        if "g" not in present:
-            completed.append(
-                ScoreTerm(
-                    name="g",
-                    logits=torch.zeros_like(template.logits),
-                    source_cues=("g",),
-                    bank_name=self.config.g_bank,
+                    source_cues=(family,),
+                    bank_name=self._score_bank_for_family(family),
                     normalization="temperature_scaled",
                 )
             )
         return completed
 
-    def _cue_score_term(
-        self,
-        cue_name: str,
-        query: Optional[list[Tensor]],
-        memory: FactorMemoryStore,
-        bank_name: str,
-    ) -> Optional[ScoreTerm]:
+    def _cue_score_term(  # -----------------------------------------------------------------------
+        self, cue_name: str, query: list[Tensor], memory: FactorMemoryStore, bank_name: str,
+    ) -> Optional[ScoreTerm]:  # fmt: skip
         """Return one cue-specific score term when that cue is available."""
-        if query is None:
-            if self.config.missing_behavior == "error":
-                raise ValueError(f"{cue_name}_query is required for query policy '{self.config.kind}'.")
-            return None
         bank = memory.bank(bank_name, fallback_to_default=True)
         logits = self._compute_logits(self._flatten_query(query), bank.keys)
         return ScoreTerm(
@@ -682,7 +588,9 @@ class _FactorScoreQueryPolicy(QueryPolicy, ABC):
             normalization="temperature_scaled",
         )
 
-    def _compute_logits(self, query: Tensor, keys: Tensor) -> Tensor:
+    def _compute_logits(  # -----------------------------------------------------------------------
+        self, query: Tensor, keys: Tensor,
+    ) -> Tensor:  # fmt: skip
         """Project a flattened query against one key bank."""
         scale = math.sqrt(max(query.shape[1], 1)) * self.config.temperature
         return torch.einsum("bs,bts->bt", query.to(dtype=keys.dtype), keys) / scale
@@ -690,7 +598,7 @@ class _FactorScoreQueryPolicy(QueryPolicy, ABC):
 
 # =================================================================================================
 class AdditiveQueryPolicy(_FactorScoreQueryPolicy):
-    """Compose x- and g-cued factor-memory scores with a sum in logit space."""
+    """Compose factor-memory scores with a sum in logit space."""
 
     @property
     def config(self) -> AdditiveQueryPolicySettings:
@@ -702,7 +610,7 @@ class AdditiveQueryPolicy(_FactorScoreQueryPolicy):
 
 # =================================================================================================
 class MultiplicativeQueryPolicy(_FactorScoreQueryPolicy):
-    """Compose x- and g-cued factor-memory scores using an elementwise product."""
+    """Compose factor-memory scores using an elementwise product."""
 
     @property
     def config(self) -> MultiplicativeQueryPolicySettings:
@@ -717,36 +625,28 @@ class MultiplicativeQueryPolicy(_FactorScoreQueryPolicy):
 
 # =================================================================================================
 class AnchorRefineQueryPolicy(QueryPolicy):
-    """Compose a role-selected anchor query with explicit refinement metadata."""
+    """Compose an explicit anchor query with explicit refinement metadata."""
 
     @property
     def config(self) -> AnchorRefineQueryPolicySettings:
         return super().config  # type: ignore[return-value]
 
-    def _forward(  # ------------------------------------------------------------------------------
-        self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
+    def _resolve_query(  # ------------------------------------------------------------------------
+        self, *, cues: CueBundle, anchor_family: Optional[CueFamily] = None,
     ) -> list[Tensor]:  # fmt: skip
-        if role == "inference":
-            return self._fallback(
-                preferred=x_query,
-                other=g_query,
-                missing_behavior=self.config.missing_behavior,
-                preferred_name="x_query",
-            )
-        return self._fallback(
-            preferred=g_query,
-            other=x_query,
+        return self._resolve_family_query(
+            cues=cues,
+            preferred_family=anchor_family,
             missing_behavior=self.config.missing_behavior,
-            preferred_name="g_query",
+            label="anchor_family",
         )
 
-    def compose_evidence(  # ----------------------------------------------------------------------
+    def compose(  # -------------------------------------------------------------------------------
         self, *,
-        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], role: RetrievalRole,
-        target: RetrievalTarget, memory: MemoryEntry,
+        cues: CueBundle, target: RetrievalTarget, memory: MemoryEntry, role: RetrievalRole,
+        anchor_family: Optional[CueFamily] = None,
     ) -> RetrievalEvidence:  # fmt: skip
-        anchor_query = self._flatten_query(self.forward(x_query=x_query, g_query=g_query, role=role))
+        anchor_query = self._flatten_query(self.resolve_query(cues=cues, anchor_family=anchor_family))
         if not isinstance(memory, FactorMemoryStore):
             return RetrievalEvidence(
                 mode="anchor_query",
@@ -759,7 +659,9 @@ class AnchorRefineQueryPolicy(QueryPolicy):
                 anchor_query=anchor_query,
             )
 
-        anchor_bank_name = self.config.x_bank if role == "inference" else self.config.g_bank
+        if anchor_family is None:
+            raise ValueError("anchor_family is required for query policy 'anchor_refine'.")
+        anchor_bank_name = self._score_bank_for_family(anchor_family)
         anchor_bank = memory.bank(anchor_bank_name, fallback_to_default=True)
         anchor_logits = self._compute_logits(anchor_query, anchor_bank.keys)
         return RetrievalEvidence(
@@ -770,7 +672,7 @@ class AnchorRefineQueryPolicy(QueryPolicy):
                 ScoreTerm(
                     name="anchor",
                     logits=anchor_logits,
-                    source_cues=(("x",) if role == "inference" else ("g",)),
+                    source_cues=(anchor_family,),
                     bank_name=anchor_bank_name,
                     normalization="temperature_scaled",
                 )
@@ -794,7 +696,10 @@ class AnchorRefineQueryPolicy(QueryPolicy):
             metadata={"temperature": float(self.config.temperature)},
         )
 
-    def _compute_logits(self, query: Tensor, keys: Tensor) -> Tensor:
+    def _compute_logits(  # -----------------------------------------------------------------------
+        self, query: Tensor, keys: Tensor,
+    ) -> Tensor:  # fmt: skip
+        """Project a flattened query against one refinement key bank."""
         scale = math.sqrt(max(query.shape[1], 1)) * self.config.temperature
         return torch.einsum("bs,bts->bt", query.to(dtype=keys.dtype), keys) / scale
 
@@ -805,16 +710,10 @@ def build_query_policy(  # -----------------------------------------------------
     device: Optional[Device] = None, dtype: Optional[Dtype] = None,
 ) -> QueryPolicy:  # fmt: skip
     """Construct the configured query policy."""
-    if config.kind == "by_role":
-        return RoleQueryPolicy(shape, config, device=device, dtype=dtype)
-    if config.kind == "x_only":
-        return XOnlyQueryPolicy(shape, config, device=device, dtype=dtype)
-    if config.kind == "g_only":
-        return GOnlyQueryPolicy(shape, config, device=device, dtype=dtype)
-    if config.kind == "gated_mix":
-        return GatedMixQueryPolicy(shape, config, device=device, dtype=dtype)
-    if config.kind == "conjunctive":
-        return ConjunctiveQueryPolicy(shape, config, device=device, dtype=dtype)
+    if config.kind == "anchor":
+        return AnchorQueryPolicy(shape, config, device=device, dtype=dtype)
+    if config.kind == "pairwise":
+        return PairwiseQueryPolicy(shape, config, device=device, dtype=dtype)
     if config.kind == "additive":
         return AdditiveQueryPolicy(shape, config, device=device, dtype=dtype)
     if config.kind == "multiplicative":
@@ -826,9 +725,8 @@ def build_query_policy(  # -----------------------------------------------------
 
 # =================================================================================================
 __all__ = [
-    "AdditiveQueryPolicySettings", "AnchorRefineQueryPolicySettings",
-    "ConjunctiveQueryPolicySettings", "GOnlyQueryPolicySettings", "GatedMixQueryPolicySettings",
-    "MultiplicativeQueryPolicySettings", "QueryPolicySettings", "RoleQueryPolicySettings",
-    "XOnlyQueryPolicySettings", "CueBundle", "MissingCueBehavior", "QueryPolicy",
-    "RetrievalEvidence", "RetrievalRefinementStep", "RetrievalTarget", "ScoreTerm", "build_query_policy",
+    "AdditiveQueryPolicySettings", "AnchorQueryPolicySettings", "AnchorRefineQueryPolicySettings",
+    "CueBundle", "MissingCueBehavior", "MultiplicativeQueryPolicySettings",
+    "PairwiseQueryPolicySettings", "QueryPolicy", "QueryPolicySettings", "RetrievalEvidence",
+    "RetrievalRefinementStep", "RetrievalTarget", "ScoreTerm", "build_query_policy",
 ]  # fmt: skip

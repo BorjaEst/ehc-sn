@@ -50,7 +50,7 @@ diagnostic_level = "standard"
     do_sample     = false
 
 [model.hpc.query_policy]
-    kind = "by_role"
+    kind = "anchor"
 
 
 [model.lec]

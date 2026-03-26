@@ -48,7 +48,9 @@ diagnostic_level = "standard"
     do_sample        = false
 
 [model.hpc.query_policy]
-    kind = "conjunctive"
+    kind = "pairwise"
+    families = ["x", "g"]
+    mode = "product_projection"
     missing_behavior = "use_available"
 
 [model.hpc.retrieval]
