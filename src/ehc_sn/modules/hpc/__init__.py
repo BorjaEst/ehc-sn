@@ -2,11 +2,11 @@
 
 from ehc_sn.modules.hpc._base import HPCSensoryStepInput, HPCSensoryStepOutput, HPCState, HPCStepInput, HPCStepOutput
 from ehc_sn.modules.hpc.modules import HPCAttention, HPCAttentionSettings, HPCAttractor, HPCAttractorSettings
-from ehc_sn.modules.hpc.query_policy import QueryPolicySettings
+from ehc_sn.modules.hpc.query_policy import CueBundle, QueryPolicySettings
 
 # =================================================================================================
 __all__ = [
     "HPCAttention", "HPCAttentionSettings", "HPCAttractor", "HPCAttractorSettings",
     "HPCSensoryStepInput", "HPCSensoryStepOutput", "HPCState", "HPCStepInput", "HPCStepOutput",
-    "QueryPolicySettings",
+    "CueBundle", "QueryPolicySettings",
 ]  # fmt: skip

@@ -24,6 +24,7 @@ from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.tem_transition import TEMMemoryTransition
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
 from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCSensoryStepInput, HPCState
+from ehc_sn.modules.hpc.query_policy import CueBundle
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
@@ -406,8 +407,7 @@ class TEMModelV1(nn.Module):
         sensory = self.hpc.prepare_sensory_step(
             HPCSensoryStepInput(
                 state=state.hpc,
-                x_query=place_query_from_obs,
-                g_query=place_query_from_grid_prior,
+                cues=CueBundle(families={"x": place_query_from_obs, "g": place_query_from_grid_prior}),
                 use_x_cued_recall=self.config.use_x_cued_recall,
             )
         )
