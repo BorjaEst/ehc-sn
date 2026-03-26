@@ -11,6 +11,7 @@ from ehc_sn import utils
 from ehc_sn.modules.hpc import update
 from ehc_sn.modules.hpc._base import HPCBase, HPCCommonSettings, HPCState
 from ehc_sn.modules.hpc.query import AttentionSettings, AttractorNetwork, AttractorSettings, FactorRetrieval
+from ehc_sn.modules.hpc.query_policy import CueBundle
 from ehc_sn.modules.hpc.update import EpisodicMemoryWrite, EpisodicMemoryWriteSettings, HebbianMemoryWrite, HebbianMemoryWriteSettings
 from ehc_sn.types import Device, Dtype, MemoryEntry, MemoryState, RetrievalRole
 
@@ -186,17 +187,11 @@ class HPCAttention(HPCBase):
         return self._reset_strategy.merge_rows(flag, current, fresh)
 
     def recall(  # --------------------------------------------------------------------------------
-        self, *, x_query, g_query, state: HPCState, role: RetrievalRole,
+        self, *, cues: CueBundle, state: HPCState, role: RetrievalRole,
     ):  # fmt: skip
         """Recall from factor memory through composer-produced retrieval evidence."""
         memory = state.memory.for_role(role)
-        evidence = self.compose_retrieval_evidence(
-            x_query=x_query,
-            g_query=g_query,
-            memory=memory,
-            role=role,
-            target="grounded",
-        )
+        evidence = self.compose_retrieval_evidence(cues=cues, memory=memory, role=role, target="grounded")
         recalled = self.retrieval_module.recall_from_evidence(evidence, memory.as_factor_view())
         return self._unflatten_memory_code(recalled)
 
