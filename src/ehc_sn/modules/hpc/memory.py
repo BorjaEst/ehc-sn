@@ -9,7 +9,7 @@ import torch
 from torch import Tensor
 
 from ehc_sn import utils
-from ehc_sn.types import DenseMemoryStore, Device, FactorMemoryStore, MemoryEntry
+from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, DenseMemoryStore, Device, FactorMemoryStore, FactorSlotBank, MemoryEntry
 
 
 # =================================================================================================
@@ -152,9 +152,9 @@ def merge_factor_memory_rows(  # -----------------------------------------------
     ``flag`` follows the shared partial-reset convention: flagged rows are taken
     from ``fresh`` and unflagged rows are kept from ``current``.
     """
-    target = max(current.capacity, fresh.capacity)
-    current = _pad_store(current, target)
-    fresh = _pad_store(fresh, target)
+    capacities = _bank_capacities(current, fresh)
+    current = _pad_store(current, capacities)
+    fresh = _pad_store(fresh, capacities)
     return utils.merge_tree_rows(flag, current, fresh)
 
 
@@ -164,45 +164,12 @@ merge_episodic_memory_rows = merge_factor_memory_rows
 
 # =================================================================================================
 def _pad_store(  # --------------------------------------------------------------------------------
-    store: FactorMemoryStore, target_capacity: int,
+    store: FactorMemoryStore, target_capacity: dict[str, int],
 ) -> FactorMemoryStore:  # fmt: skip
-    """Pad a store with empty slots up to ``target_capacity``."""
-    coefficients = store.coefficient_tensor()
-    if store.capacity >= target_capacity:
-        return FactorMemoryStore(
-            keys=store.keys,
-            values=store.values,
-            valid_mask=store.valid_mask,
-            coefficients=coefficients,
-        )
-
-    pad = target_capacity - store.capacity
-    key_padding = torch.zeros(
-        (*store.keys.shape[:1], pad, store.keys.shape[2]),
-        dtype=store.keys.dtype,
-        device=store.keys.device,
-    )
-    value_padding = torch.zeros(
-        (*store.values.shape[:1], pad, store.values.shape[2]),
-        dtype=store.values.dtype,
-        device=store.values.device,
-    )
-    mask_padding = torch.zeros(
-        (*store.valid_mask.shape[:1], pad),
-        dtype=store.valid_mask.dtype,
-        device=store.valid_mask.device,
-    )
-    coefficient_padding = torch.zeros(
-        (*coefficients.shape[:1], pad),
-        dtype=coefficients.dtype,
-        device=coefficients.device,
-    )
-    return FactorMemoryStore(
-        keys=torch.cat((store.keys, key_padding), dim=1),
-        values=torch.cat((store.values, value_padding), dim=1),
-        valid_mask=torch.cat((store.valid_mask, mask_padding), dim=1),
-        coefficients=torch.cat((coefficients, coefficient_padding), dim=1),
-    )
+    """Pad each bank in a store up to the requested capacities."""
+    current_banks = _store_banks(store)
+    padded = {name: _pad_bank(_get_bank(current_banks, name, store=store), target_capacity[name]) for name in target_capacity}
+    return _store_from_banks(padded)
 
 
 # =================================================================================================
@@ -215,8 +182,14 @@ def factor_memory_to_dense(  # -------------------------------------------------
     contributes `gamma * key^T value`, so that `(h @ M)` yields
     `sum_i gamma_i (h · key_i) value_i`.
     """
-    coefficients = store.coefficient_tensor() * store.valid_mask.to(dtype=store.values.dtype)
-    return torch.einsum("bt,btk,bts->bks", coefficients, store.keys, store.values)
+    dense: Tensor | None = None
+    for bank in _store_banks(store).values():
+        coefficients = bank.coefficient_tensor() * bank.valid_mask.to(dtype=bank.values.dtype)
+        contribution = torch.einsum("bt,btk,bts->bks", coefficients, bank.keys, bank.values)
+        dense = contribution if dense is None else dense + contribution
+    if dense is None:
+        raise ValueError("Factor memory store must contain at least one bank.")
+    return dense
 
 
 def apply_factor_memory(  # -----------------------------------------------------------------------
@@ -255,12 +228,16 @@ def decay_factor_memory(  # ----------------------------------------------------
     store: FactorMemoryStore, decay: float,
 ) -> FactorMemoryStore:  # fmt: skip
     """Scale factor coefficients to apply dense-memory decay exactly."""
-    return FactorMemoryStore(
-        keys=store.keys,
-        values=store.values,
-        valid_mask=store.valid_mask,
-        coefficients=store.coefficient_tensor() * float(decay),
-    )
+    scaled = {
+        name: FactorSlotBank(
+            keys=bank.keys,
+            values=bank.values,
+            valid_mask=bank.valid_mask,
+            coefficients=bank.coefficient_tensor() * float(decay),
+        )
+        for name, bank in _store_banks(store).items()
+    }
+    return _store_from_banks(scaled)
 
 
 def concat_factor_memory(  # ----------------------------------------------------------------------
@@ -274,29 +251,126 @@ def concat_factor_memory(  # ---------------------------------------------------
     Both stores must share batch size and feature width. When ``capacity`` is
     provided, the oldest atoms are truncated from the left.
     """
+    merged: dict[str, FactorSlotBank] = {}
+    bank_names = sorted(set(_store_banks(current)) | set(_store_banks(fresh)))
+    for name in bank_names:
+        current_bank = _get_bank(_store_banks(current), name, store=current)
+        fresh_bank = _get_bank(_store_banks(fresh), name, store=fresh)
+        _validate_bank_pair(current_bank, fresh_bank)
+
+        keys = torch.cat((current_bank.keys, fresh_bank.keys.to(dtype=current_bank.keys.dtype)), dim=1)
+        values = torch.cat((current_bank.values, fresh_bank.values.to(dtype=current_bank.values.dtype)), dim=1)
+        valid_mask = torch.cat((current_bank.valid_mask, fresh_bank.valid_mask.to(dtype=current_bank.valid_mask.dtype)), dim=1)
+        coefficients = torch.cat(
+            (current_bank.coefficient_tensor(), fresh_bank.coefficient_tensor().to(dtype=current_bank.values.dtype)),
+            dim=1,
+        )
+
+        if capacity is not None:
+            limit = int(capacity)
+            keys = keys[:, -limit:, :]
+            values = values[:, -limit:, :]
+            valid_mask = valid_mask[:, -limit:]
+            coefficients = coefficients[:, -limit:]
+
+        merged[name] = FactorSlotBank(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients)
+
+    return _store_from_banks(merged)
+
+
+def _store_banks(store: FactorMemoryStore) -> dict[str, FactorSlotBank]:
+    """Return all factor banks, including the legacy default bank."""
+    return {DEFAULT_FACTOR_BANK_NAME: store.default_bank(), **store.banks}
+
+
+def _store_from_banks(banks: dict[str, FactorSlotBank]) -> FactorMemoryStore:
+    """Rebuild a factor-memory store from a bank mapping."""
+    default_bank = banks[DEFAULT_FACTOR_BANK_NAME]
+    named_banks = {name: bank for name, bank in banks.items() if name != DEFAULT_FACTOR_BANK_NAME}
+    return FactorMemoryStore(
+        keys=default_bank.keys,
+        values=default_bank.values,
+        valid_mask=default_bank.valid_mask,
+        coefficients=default_bank.coefficients,
+        banks=named_banks,
+    )
+
+
+def _bank_capacities(*stores: FactorMemoryStore) -> dict[str, int]:
+    """Return the maximum capacity required for each bank across stores."""
+    capacities: dict[str, int] = {}
+    for store in stores:
+        for name, bank in _store_banks(store).items():
+            capacities[name] = max(capacities.get(name, 0), bank.capacity)
+    return capacities
+
+
+def _get_bank(banks: dict[str, FactorSlotBank], name: str, *, store: FactorMemoryStore) -> FactorSlotBank:
+    """Return a bank or an empty compatible bank when it is absent."""
+    bank = banks.get(name)
+    if bank is not None:
+        return bank
+    reference = store.default_bank()
+    return FactorSlotBank(
+        keys=torch.zeros((reference.keys.shape[0], 0, reference.keys.shape[2]), dtype=reference.keys.dtype, device=reference.keys.device),
+        values=torch.zeros(
+            (reference.values.shape[0], 0, reference.values.shape[2]), dtype=reference.values.dtype, device=reference.values.device
+        ),
+        valid_mask=torch.zeros((reference.valid_mask.shape[0], 0), dtype=reference.valid_mask.dtype, device=reference.valid_mask.device),
+        coefficients=torch.zeros(
+            (reference.valid_mask.shape[0], 0), dtype=reference.coefficient_tensor().dtype, device=reference.valid_mask.device
+        ),
+    )
+
+
+def _pad_bank(bank: FactorSlotBank, target_capacity: int) -> FactorSlotBank:
+    """Pad one bank with empty slots up to ``target_capacity``."""
+    coefficients = bank.coefficient_tensor()
+    if bank.capacity >= target_capacity:
+        return FactorSlotBank(
+            keys=bank.keys,
+            values=bank.values,
+            valid_mask=bank.valid_mask,
+            coefficients=coefficients,
+        )
+
+    pad = target_capacity - bank.capacity
+    key_padding = torch.zeros(
+        (*bank.keys.shape[:1], pad, bank.keys.shape[2]),
+        dtype=bank.keys.dtype,
+        device=bank.keys.device,
+    )
+    value_padding = torch.zeros(
+        (*bank.values.shape[:1], pad, bank.values.shape[2]),
+        dtype=bank.values.dtype,
+        device=bank.values.device,
+    )
+    mask_padding = torch.zeros(
+        (*bank.valid_mask.shape[:1], pad),
+        dtype=bank.valid_mask.dtype,
+        device=bank.valid_mask.device,
+    )
+    coefficient_padding = torch.zeros(
+        (*coefficients.shape[:1], pad),
+        dtype=coefficients.dtype,
+        device=coefficients.device,
+    )
+    return FactorSlotBank(
+        keys=torch.cat((bank.keys, key_padding), dim=1),
+        values=torch.cat((bank.values, value_padding), dim=1),
+        valid_mask=torch.cat((bank.valid_mask, mask_padding), dim=1),
+        coefficients=torch.cat((coefficients, coefficient_padding), dim=1),
+    )
+
+
+def _validate_bank_pair(current: FactorSlotBank, fresh: FactorSlotBank) -> None:
+    """Validate that two banks can be concatenated safely."""
     if current.keys.ndim != 3 or fresh.keys.ndim != 3:
         raise ValueError("factor stores must use rank-3 key tensors `(B, T, S)`.")
     if current.keys.shape[0] != fresh.keys.shape[0]:
         raise ValueError("factor stores must share batch size.")
     if current.keys.shape[2] != fresh.keys.shape[2]:
         raise ValueError("factor stores must share feature width.")
-
-    keys = torch.cat((current.keys, fresh.keys.to(dtype=current.keys.dtype)), dim=1)
-    values = torch.cat((current.values, fresh.values.to(dtype=current.values.dtype)), dim=1)
-    valid_mask = torch.cat((current.valid_mask, fresh.valid_mask.to(dtype=current.valid_mask.dtype)), dim=1)
-    coefficients = torch.cat(
-        (current.coefficient_tensor(), fresh.coefficient_tensor().to(dtype=current.values.dtype)),
-        dim=1,
-    )
-
-    if capacity is not None:
-        limit = int(capacity)
-        keys = keys[:, -limit:, :]
-        values = values[:, -limit:, :]
-        valid_mask = valid_mask[:, -limit:]
-        coefficients = coefficients[:, -limit:]
-
-    return FactorMemoryStore(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients)
 
 
 # =================================================================================================

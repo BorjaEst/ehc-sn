@@ -188,34 +188,16 @@ class HPCAttention(HPCBase):
     def recall(  # --------------------------------------------------------------------------------
         self, *, x_query, g_query, state: HPCState, role: RetrievalRole,
     ):  # fmt: skip
-        """Recall from factor memory with optional iterative recurrent refinement."""
-        p_query = self.query_policy(x_query=x_query, g_query=g_query, role=role)
-        view = state.memory.for_role(role).as_factor_view()
-        flat_query = self._flatten_memory_code(p_query)
-
-        if self.config.retrieval.iterations == 1 or self.config.retrieval.recurrence == "none":
-            recalled = self.retrieval_module(flat_query, view)
-            return self._unflatten_memory_code(recalled)
-
-        anchor_query = self._flatten_memory_code(g_query) if g_query is not None else flat_query
-        anchor_logits = self.retrieval_module.compute_logits(anchor_query, view.keys)
-        recalled = self.retrieval_module.recall_from_logits(
-            anchor_logits,
-            view.values,
-            valid_mask=view.valid_mask,
-            fallback_query=flat_query,
+        """Recall from factor memory through composer-produced retrieval evidence."""
+        memory = state.memory.for_role(role)
+        evidence = self.compose_retrieval_evidence(
+            x_query=x_query,
+            g_query=g_query,
+            memory=memory,
+            role=role,
+            target="grounded",
         )
-
-        for _ in range(self.config.retrieval.iterations - 1):
-            value_logits = self.retrieval_module.compute_logits(recalled, view.values)
-            recurrent_logits = anchor_logits * value_logits
-            recalled = self.retrieval_module.recall_from_logits(
-                recurrent_logits,
-                view.values,
-                valid_mask=view.valid_mask,
-                fallback_query=flat_query,
-            )
-
+        recalled = self.retrieval_module.recall_from_evidence(evidence, memory.as_factor_view())
         return self._unflatten_memory_code(recalled)
 
 

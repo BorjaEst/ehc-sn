@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from ehc_sn import utils
+from ehc_sn.modules.hpc.query_policy import RetrievalEvidence
 from ehc_sn.types import Activation, FactorMemoryView, LinearMemoryView
 
 
@@ -129,6 +130,55 @@ class FactorRetrieval(nn.Module):
             fallback_query=query,
         )
 
+    def recall_from_evidence(  # ------------------------------------------------------------------
+        self, evidence: RetrievalEvidence, memory_view: FactorMemoryView,
+    ) -> Tensor:  # fmt: skip
+        """Execute one-shot or multi-pass retrieval from structured evidence."""
+        fallback_query = evidence.fallback_query if evidence.fallback_query is not None else evidence.anchor_query
+        if fallback_query is None:
+            raise ValueError("Retrieval evidence must provide a fallback or anchor query.")
+
+        read_bank = memory_view.bank(evidence.read_bank, fallback_to_default=True)
+        if evidence.mode == "anchor_query":
+            if evidence.anchor_query is None:
+                raise ValueError("Anchor-query evidence requires `anchor_query`.")
+            logits = self.compute_logits(evidence.anchor_query, read_bank.keys)
+            return self.recall_from_logits(logits, read_bank.values, valid_mask=read_bank.valid_mask, fallback_query=fallback_query)
+
+        if evidence.mode == "factor_logits":
+            logits = evidence.composed_logits if evidence.composed_logits is not None else evidence.anchor_logits
+            if logits is None:
+                if evidence.anchor_query is None:
+                    raise ValueError("Factor-logit evidence requires logits or an anchor query.")
+                logits = self.compute_logits(evidence.anchor_query, read_bank.keys)
+            return self.recall_from_logits(logits, read_bank.values, valid_mask=read_bank.valid_mask, fallback_query=fallback_query)
+
+        if evidence.mode != "anchor_refine":
+            raise ValueError(f"Unsupported retrieval evidence mode '{evidence.mode}'.")
+
+        anchor_logits = evidence.anchor_logits
+        if anchor_logits is None:
+            if evidence.anchor_query is None:
+                raise ValueError("Anchor-refine evidence requires `anchor_logits` or `anchor_query`.")
+            anchor_logits = self.compute_logits(evidence.anchor_query, read_bank.keys)
+
+        current_logits = anchor_logits
+        recalled = self.recall_from_logits(current_logits, read_bank.values, valid_mask=read_bank.valid_mask, fallback_query=fallback_query)
+        for _ in range(evidence.iterations - 1):
+            refined_logits = anchor_logits
+            for step in evidence.refinement_steps:
+                source = self._resolve_refinement_source(step.source, recalled)
+                bank = memory_view.bank(step.bank_name, fallback_to_default=True)
+                bank_tensor = bank.keys if step.bank_field == "keys" else bank.values
+                step_logits = self.compute_logits(source, bank_tensor)
+                reference_logits = anchor_logits if step.reference == "anchor" else current_logits
+                refined_logits = self._combine_logits(reference_logits, step_logits, mode=step.compose)
+            current_logits = refined_logits
+            recalled = self.recall_from_logits(
+                current_logits, read_bank.values, valid_mask=read_bank.valid_mask, fallback_query=fallback_query
+            )
+        return recalled
+
     def compute_logits(self, query: Tensor, memory_bank: Tensor) -> Tensor:
         """Compute scaled query-key similarity logits for factor slots."""
         query = query.to(dtype=memory_bank.dtype)
@@ -166,6 +216,20 @@ class FactorRetrieval(nn.Module):
             return torch.ones((valid_mask.shape[0], 1), dtype=torch.float, device=valid_mask.device)
         valid_count = valid_mask.sum(dim=1, keepdim=True).to(dtype=torch.float)
         return torch.maximum(torch.log1p(valid_count), torch.ones_like(valid_count))
+
+    def _combine_logits(
+        self, reference_logits: Tensor, refinement_logits: Tensor, *, mode: Literal["additive", "multiplicative"]
+    ) -> Tensor:
+        """Combine anchor/current logits with one refinement term."""
+        if mode == "additive":
+            return reference_logits + refinement_logits
+        return reference_logits * refinement_logits
+
+    def _resolve_refinement_source(self, source: Literal["retrieved_value"], recalled: Tensor) -> Tensor:
+        """Resolve the tensor used to compute refinement logits."""
+        if source != "retrieved_value":
+            raise ValueError(f"Unsupported refinement source '{source}'.")
+        return recalled
 
     def _empty_fallback(self, query: Tensor) -> Tensor:
         """Return the configured value for rows with no populated memory slots."""

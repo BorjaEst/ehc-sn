@@ -149,11 +149,11 @@ diagnostic_level = "standard"
     split = "validate"
     figures = [
         # "lec_summary",
-        "mec_summary",
-        "hpc_summary",
-        "lec_pipeline",
-        "mec_cells",
-        "hpc_cells",
+        # "mec_summary",
+        # "hpc_summary",
+        # "lec_pipeline",
+        # "mec_cells",
+        # "hpc_cells",
     ]
     save_pdf = true
     log_tensorboard = true

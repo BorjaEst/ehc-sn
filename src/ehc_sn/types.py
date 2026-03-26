@@ -13,7 +13,7 @@ Longer background notes live in `docs/foundations.md`.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Literal, Optional, Sequence, TypeAlias
 
 import numpy as np
@@ -193,6 +193,57 @@ class LinearMemoryView:
 
 
 @dataclass(frozen=True)
+class FactorSlotBank:
+    """One explicit factor-memory bank.
+
+    Attributes:
+        coefficients: Per-atom coefficients with shape ``(B, T)``. When unset,
+            all atoms are treated as having coefficient 1.0.
+        keys: Stored key vectors with shape ``(B, T, S)``.
+        values: Stored value vectors with shape ``(B, T, S)``.
+        valid_mask: Boolean mask of shape ``(B, T)`` marking populated slots.
+    """
+
+    keys: Tensor
+    values: Tensor
+    valid_mask: Tensor
+    coefficients: Optional[Tensor] = None
+
+    @property
+    def capacity(self) -> int:
+        """Return the current slot count carried by this bank."""
+        return int(self.keys.shape[1])
+
+    def coefficient_tensor(self) -> Tensor:
+        """Return coefficients, defaulting missing entries to ones."""
+        if self.coefficients is None:
+            return torch.ones_like(self.valid_mask, dtype=self.values.dtype)
+        return self.coefficients.to(dtype=self.values.dtype)
+
+    def apply(self, query: Tensor) -> Tensor:
+        """Apply the exact linear operator represented by this factor bank."""
+        if query.ndim != 2:
+            raise ValueError(f"query must be rank-2 `(B, S)`, got shape {tuple(query.shape)}.")
+        coefficients = self.coefficient_tensor() * self.valid_mask.to(dtype=self.values.dtype)
+        scores = torch.einsum("bs,bts->bt", query.to(dtype=self.keys.dtype), self.keys)
+        return torch.einsum("bt,bt,bts->bs", scores, coefficients, self.values)
+
+    def clone(self) -> "FactorSlotBank":
+        """Return a cloned factor bank preserving tensor semantics."""
+        coefficients = None if self.coefficients is None else self.coefficients.clone()
+        return FactorSlotBank(
+            keys=self.keys.clone(),
+            values=self.values.clone(),
+            valid_mask=self.valid_mask.clone(),
+            coefficients=coefficients,
+        )
+
+
+DEFAULT_FACTOR_BANK_NAME = "default"
+"""Canonical name of the legacy factor-memory bank."""
+
+
+@dataclass(frozen=True)
 class FactorMemoryView:
     """Capability view exposing an explicit factor-memory bank."""
 
@@ -200,6 +251,27 @@ class FactorMemoryView:
     values: Tensor
     valid_mask: Tensor
     coefficients: Optional[Tensor] = None
+    banks: Dict[str, FactorSlotBank] = field(default_factory=dict)
+
+    def default_bank(self) -> FactorSlotBank:
+        """Return the legacy default factor bank."""
+        return FactorSlotBank(
+            keys=self.keys,
+            values=self.values,
+            valid_mask=self.valid_mask,
+            coefficients=self.coefficients,
+        )
+
+    def bank(self, name: str, *, fallback_to_default: bool = False) -> FactorSlotBank:
+        """Return a named bank, optionally falling back to the default bank."""
+        if name == DEFAULT_FACTOR_BANK_NAME:
+            return self.default_bank()
+        bank = self.banks.get(name)
+        if bank is not None:
+            return bank
+        if fallback_to_default:
+            return self.default_bank()
+        raise KeyError(f"Factor-memory bank '{name}' is not available.")
 
 
 HebbianMemory = list[Matrix]
@@ -266,6 +338,7 @@ class FactorMemoryStore:
     values: Tensor
     valid_mask: Tensor
     coefficients: Optional[Tensor] = None
+    banks: Dict[str, FactorSlotBank] = field(default_factory=dict)
 
     def as_linear_view(self) -> LinearMemoryView:
         """Return the exact linear operator induced by the stored factors."""
@@ -278,7 +351,33 @@ class FactorMemoryStore:
             values=self.values,
             valid_mask=self.valid_mask,
             coefficients=self.coefficients,
+            banks={name: bank.clone() for name, bank in self.banks.items()},
         )
+
+    def default_bank(self) -> FactorSlotBank:
+        """Return the legacy default factor bank."""
+        return FactorSlotBank(
+            keys=self.keys,
+            values=self.values,
+            valid_mask=self.valid_mask,
+            coefficients=self.coefficients,
+        )
+
+    def bank(self, name: str, *, fallback_to_default: bool = False) -> FactorSlotBank:
+        """Return a named bank, optionally falling back to the default bank."""
+        if name == DEFAULT_FACTOR_BANK_NAME:
+            return self.default_bank()
+        bank = self.banks.get(name)
+        if bank is not None:
+            return bank
+        if fallback_to_default:
+            return self.default_bank()
+        raise KeyError(f"Factor-memory bank '{name}' is not available.")
+
+    @property
+    def bank_names(self) -> tuple[str, ...]:
+        """Return explicit named banks excluding the legacy default bank."""
+        return tuple(self.banks.keys())
 
     @property
     def capacity(self) -> int:
@@ -292,17 +391,15 @@ class FactorMemoryStore:
 
     def coefficient_tensor(self) -> Tensor:
         """Return coefficients, defaulting missing entries to ones."""
-        if self.coefficients is None:
-            return torch.ones_like(self.valid_mask, dtype=self.values.dtype)
-        return self.coefficients.to(dtype=self.values.dtype)
+        return self.default_bank().coefficient_tensor()
 
-    def apply(self, query: Tensor) -> Tensor:
+    def apply(self, query: Tensor, *, bank_name: Optional[str] = None) -> Tensor:
         """Apply the exact linear operator represented by the stored factors."""
-        if query.ndim != 2:
-            raise ValueError(f"query must be rank-2 `(B, S)`, got shape {tuple(query.shape)}.")
-        coefficients = self.coefficient_tensor() * self.valid_mask.to(dtype=self.values.dtype)
-        scores = torch.einsum("bs,bts->bt", query.to(dtype=self.keys.dtype), self.keys)
-        return torch.einsum("bt,bt,bts->bs", scores, coefficients, self.values)
+        if bank_name is not None:
+            return self.bank(bank_name, fallback_to_default=True).apply(query)
+
+        banks = [self.default_bank(), *self.banks.values()]
+        return sum((bank.apply(query) for bank in banks), torch.zeros_like(query, dtype=self.values.dtype))
 
     def clone(self) -> "FactorMemoryStore":
         """Return a cloned factor-memory store preserving tensor semantics."""
@@ -312,6 +409,7 @@ class FactorMemoryStore:
             values=self.values.clone(),
             valid_mask=self.valid_mask.clone(),
             coefficients=coefficients,
+            banks={name: bank.clone() for name, bank in self.banks.items()},
         )
 
 
@@ -326,7 +424,8 @@ MemoryEntry: TypeAlias = DenseMemoryStore | FactorMemoryStore
         - Dense Hebbian-memory store exposing ``matrix`` with shape ``(B, S, S)``.
         - Explicit factor-memory store with tensors ``keys`` and ``values``
           shaped ``(B, T, S)``, ``valid_mask`` shaped ``(B, T)``, and optional
-          ``coefficients`` shaped ``(B, T)``.
+                    ``coefficients`` shaped ``(B, T)``, plus optional named banks with
+                    the same tensor conventions.
 """
 
 

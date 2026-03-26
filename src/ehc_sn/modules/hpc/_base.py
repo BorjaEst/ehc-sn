@@ -13,7 +13,13 @@ from torch import Tensor, nn
 
 from ehc_sn import utils
 from ehc_sn.modules.hpc.location import GroundLocation, GroundLocSettings
-from ehc_sn.modules.hpc.query_policy import QueryPolicySettings, RoleQueryPolicySettings, build_query_policy
+from ehc_sn.modules.hpc.query_policy import (
+    QueryPolicySettings,
+    RetrievalEvidence,
+    RetrievalTarget,
+    RoleQueryPolicySettings,
+    build_query_policy,
+)
 from ehc_sn.types import Device, Dtype, LocationBelief, MemoryEntry, MemoryState, RetrievalRole
 from ehc_sn.utils.detach import DetachMixin
 
@@ -288,13 +294,41 @@ class HPCBase(nn.Module, ABC):
         state: HPCState, role: RetrievalRole,
     ) -> list[Tensor]:  # fmt: skip
         """Retrieve grounded-location code from the concrete memory representation."""
-        p_query = self.query_policy(x_query=x_query, g_query=g_query, role=role)
+        memory = state.memory.for_role(role)
+        evidence = self.compose_retrieval_evidence(
+            x_query=x_query,
+            g_query=g_query,
+            memory=memory,
+            role=role,
+            target="grounded",
+        )
+        if evidence.mode != "anchor_query":
+            raise TypeError(
+                f"Base recall does not support retrieval evidence mode '{evidence.mode}'. Override recall in the concrete module."
+            )
+        query = evidence.anchor_query if evidence.anchor_query is not None else evidence.fallback_query
+        if query is None:
+            raise ValueError("Retrieval evidence must provide an anchor or fallback query for base recall.")
         recalled = self._recall_flat_impl(
-            self._flatten_memory_code(p_query),
-            state.memory.for_role(role),
+            query,
+            memory,
             role=role,
         )
         return self._unflatten_memory_code(recalled)
+
+    def compose_retrieval_evidence(  # -----------------------------------------------------------
+        self, *,
+        x_query: Optional[list[Tensor]], g_query: Optional[list[Tensor]], memory: MemoryEntry,
+        role: RetrievalRole, target: RetrievalTarget,
+    ) -> RetrievalEvidence:  # fmt: skip
+        """Compose structured retrieval evidence before backend-specific memory read."""
+        return self.query_policy.compose_evidence(
+            x_query=x_query,
+            g_query=g_query,
+            role=role,
+            target=target,
+            memory=memory,
+        )
 
     def update(  # --------------------------------------------------------------------------------
         self, p_inf: list[Tensor], p_gen_gi: list[Tensor], p_xi: Optional[list[Tensor]],

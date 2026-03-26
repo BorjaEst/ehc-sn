@@ -18,7 +18,7 @@ from ehc_sn.modules.hpc.memory import (
     FactorMemoryStoreFactory,
     HebbianStoreComponents,
 )
-from ehc_sn.types import DenseMemoryStore, Device, Dtype, FactorMemoryStore, MemoryEntry
+from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, DenseMemoryStore, Device, Dtype, FactorMemoryStore, FactorSlotBank, MemoryEntry
 
 
 # =================================================================================================
@@ -59,6 +59,14 @@ class EpisodicMemoryWriteSettings(BaseModel, extra="forbid"):
     novelty_threshold: float = Field(
         default=0.95,
         description="Similarity threshold above which a candidate is treated as already stored.",
+    )
+    bank_names: tuple[str, ...] = Field(
+        default=(),
+        description="Optional additional named factor-memory banks allocated alongside the default bank.",
+    )
+    write_bank: str = Field(
+        default=DEFAULT_FACTOR_BANK_NAME,
+        description="Name of the bank updated by append writes.",
     )
 
 
@@ -253,25 +261,38 @@ class EpisodicMemoryWrite:
         values = torch.zeros((batch_size, capacity, feature_dim), dtype=torch.float, device=device)
         valid_mask = torch.zeros((batch_size, capacity), dtype=torch.bool, device=device)
         coefficients = torch.zeros((batch_size, capacity), dtype=torch.float, device=device)
-        return FactorMemoryStore(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients)
+        banks = {
+            name: FactorSlotBank(
+                keys=keys.clone(),
+                values=values.clone(),
+                valid_mask=valid_mask.clone(),
+                coefficients=coefficients.clone(),
+            )
+            for name in self.config.bank_names
+            if name != DEFAULT_FACTOR_BANK_NAME
+        }
+        return FactorMemoryStore(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients, banks=banks)
 
     def append(  # -------------------------------------------------------------------------------
-        self, store: FactorMemoryStore, key: Tensor, value: Tensor,
+        self, store: FactorMemoryStore, key: Tensor, value: Tensor, *, bank_name: Optional[str] = None,
     ) -> FactorMemoryStore:  # fmt: skip
         """Append a factor-memory atom, optionally skipping rows deemed non-novel."""
-        key = key.to(dtype=store.keys.dtype) if store.capacity > 0 else key.to(dtype=torch.float)
-        value = value.to(dtype=store.values.dtype) if store.capacity > 0 else value.to(dtype=torch.float)
+        target_bank_name = self.config.write_bank if bank_name is None else bank_name
+        current_bank = store.bank(target_bank_name, fallback_to_default=(target_bank_name == DEFAULT_FACTOR_BANK_NAME))
+
+        key = key.to(dtype=current_bank.keys.dtype) if current_bank.capacity > 0 else key.to(dtype=torch.float)
+        value = value.to(dtype=current_bank.values.dtype) if current_bank.capacity > 0 else value.to(dtype=torch.float)
 
         keep_row = torch.ones((key.shape[0],), dtype=torch.bool, device=key.device)
         if self.config.policy == "append_if_novel":
-            keep_row = ~self._already_stored(store, key, value)
+            keep_row = ~self._already_stored(current_bank, key, value)
             if not keep_row.any():
                 return store
 
-        keys = torch.cat((store.keys, key.unsqueeze(1)), dim=1)
-        values = torch.cat((store.values, value.unsqueeze(1)), dim=1)
-        coefficients = torch.cat((store.coefficient_tensor(), keep_row.unsqueeze(1).to(dtype=value.dtype)), dim=1)
-        valid_mask = torch.cat((store.valid_mask, keep_row.unsqueeze(1)), dim=1)
+        keys = torch.cat((current_bank.keys, key.unsqueeze(1)), dim=1)
+        values = torch.cat((current_bank.values, value.unsqueeze(1)), dim=1)
+        coefficients = torch.cat((current_bank.coefficient_tensor(), keep_row.unsqueeze(1).to(dtype=value.dtype)), dim=1)
+        valid_mask = torch.cat((current_bank.valid_mask, keep_row.unsqueeze(1)), dim=1)
 
         if self.memory_capacity is not None:
             capacity = int(self.memory_capacity)
@@ -280,10 +301,28 @@ class EpisodicMemoryWrite:
             coefficients = coefficients[:, -capacity:]
             valid_mask = valid_mask[:, -capacity:]
 
-        return FactorMemoryStore(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients)
+        updated_bank = FactorSlotBank(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients)
+        if target_bank_name == DEFAULT_FACTOR_BANK_NAME:
+            return FactorMemoryStore(
+                keys=updated_bank.keys,
+                values=updated_bank.values,
+                valid_mask=updated_bank.valid_mask,
+                coefficients=updated_bank.coefficients,
+                banks={name: bank.clone() for name, bank in store.banks.items()},
+            )
+
+        banks = {name: bank.clone() for name, bank in store.banks.items()}
+        banks[target_bank_name] = updated_bank
+        return FactorMemoryStore(
+            keys=store.keys,
+            values=store.values,
+            valid_mask=store.valid_mask,
+            coefficients=store.coefficients,
+            banks=banks,
+        )
 
     def _already_stored(  # ----------------------------------------------------------------------
-        self, store: FactorMemoryStore, key: Tensor, value: Tensor,
+        self, store: FactorSlotBank, key: Tensor, value: Tensor,
     ) -> Tensor:  # fmt: skip
         """Return which batch rows already contain a sufficiently similar atom."""
         if store.capacity == 0:
