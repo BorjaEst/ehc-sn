@@ -81,8 +81,9 @@ def merge_multiscale_rows(flag: Tensor, current: Sequence[Tensor], fresh: Sequen
 def merge_tree_rows(flag: Tensor, current: Any, fresh: Any) -> Any:
     """Recursively apply row-wise replacement to tensor-bearing structures.
 
-    Supported inputs are tensors, dataclass instances, and nested lists/tuples
-    composed from those leaves. Both inputs must share the same structure.
+    Supported inputs are tensors, dataclass instances, dictionaries, and
+    nested lists/tuples composed from those leaves. Both inputs must share the
+    same structure.
     """
     if isinstance(current, torch.Tensor) and isinstance(fresh, torch.Tensor):
         return merge_rows(flag, current, fresh)
@@ -99,6 +100,11 @@ def merge_tree_rows(flag: Tensor, current: Any, fresh: Any) -> Any:
         return tuple(
             merge_tree_rows(flag, current_v, fresh_v) for current_v, fresh_v in zip(current, fresh, strict=True)
         )
+
+    if isinstance(current, dict):
+        if current.keys() != fresh.keys():
+            raise TypeError("merge_tree_rows requires matching dict keys.")
+        return {key: merge_tree_rows(flag, current[key], fresh[key]) for key in current}
 
     if is_dataclass(current) and is_dataclass(fresh):
         updates = {
