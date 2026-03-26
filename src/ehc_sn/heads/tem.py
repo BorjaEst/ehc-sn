@@ -22,13 +22,7 @@ from ehc_sn.controllers.tem import (
     TEMController,
     TEMOutput,
 )
-from ehc_sn.heads._variational import (
-    VariationalLosses,
-    VariationalLossHeadBase,
-    VariationalLossStep,
-    get_reg_term,
-    require_latent_relation,
-)
+from ehc_sn.heads._variational import VariationalLosses, VariationalLossHeadBase, VariationalLossStep, get_reg_term, require_latent_relation
 from ehc_sn.loss.consistency import LatentCode, mean_latent_norm, mse_consistency, sum_latent_terms
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_terms
@@ -86,10 +80,6 @@ class TEMLossConfig(BaseModel, extra="forbid"):
     place_reg_norm: RegularizationNorm = Field(
         default="l1",
         description="Regularization norm for place codes.",
-    )
-    use_x_cued_recall: bool = Field(
-        default=True,
-        description="Whether to include sensory-cued place consistency.",
     )
 
 
@@ -149,7 +139,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMController, TEMLossConfig]):
 
         place_transition = sum_latent_terms(mse_consistency, place_transition_relation.lhs, place_transition_relation.rhs)  # fmt: skip
         place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
-        if self.config.use_x_cued_recall and place_sensory_relation is not None:
+        if place_sensory_relation is not None:
             place_sensory = sum_latent_terms(mse_consistency, place_sensory_relation.lhs, place_sensory_relation.rhs)  # fmt: skip
         else:
             place_sensory = place_transition.new_zeros(place_transition.shape)
@@ -209,7 +199,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMController, TEMLossConfig]):
         loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels).sum().detach()
         loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels).sum().detach()
         place_transition = sum_latent_terms(mse_consistency, place_transition_relation.lhs, place_transition_relation.rhs).sum().detach()  # fmt: skip
-        if self.config.use_x_cued_recall and place_sensory_relation is not None:
+        if place_sensory_relation is not None:
             place_sensory = sum_latent_terms(mse_consistency, place_sensory_relation.lhs, place_sensory_relation.rhs).sum().detach()  # fmt: skip
         else:
             place_sensory = losses.loss_place_consistency_sum.new_zeros(())

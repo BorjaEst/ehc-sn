@@ -187,11 +187,11 @@ class HPCAttention(HPCBase):
         return self._reset_strategy.merge_rows(flag, current, fresh)
 
     def recall(  # --------------------------------------------------------------------------------
-        self, *, cues: CueBundle, state: HPCState, role: RetrievalRole,
+        self, *, cues: CueBundle, state: HPCState, role: RetrievalRole, anchor_family: Optional[str] = None,
     ):  # fmt: skip
         """Recall from factor memory through composer-produced retrieval evidence."""
         memory = state.memory.for_role(role)
-        evidence = self.compose_retrieval_evidence(cues=cues, memory=memory, role=role, target="grounded")
+        evidence = self.compose_retrieval_evidence(cues=cues, memory=memory, role=role, anchor_family=anchor_family)
         recalled = self.retrieval_module.recall_from_evidence(evidence, memory.as_factor_view())
         return self._unflatten_memory_code(recalled)
 

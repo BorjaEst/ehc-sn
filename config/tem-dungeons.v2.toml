@@ -34,6 +34,7 @@ diagnostic_level = "standard"
 [model]
     observation_dim = 45
     action_count    = 5
+    enable_sensory_recall = true
 
     # Initial multiscale frequency values used by the TEM modules.
     f_initial = [0.99, 0.3, 0.09, 0.5, 0.4]
@@ -122,7 +123,6 @@ diagnostic_level = "standard"
     c_place_reg       = 0.02
     grid_reg_norm     = "l2"
     place_reg_norm    = "l1"
-    use_x_cued_recall = true
 
 # -- Controller settings --------------------------------------------------------------------------
 [controller]

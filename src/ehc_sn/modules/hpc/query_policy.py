@@ -16,7 +16,6 @@ from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, Activation, Device, Dtype, Fa
 
 MissingCueBehavior: TypeAlias = Literal["error", "use_available", "zeros"]
 CueFamily: TypeAlias = str
-RetrievalTarget: TypeAlias = Literal["grounded", "sensory", "structural"]
 RetrievalEvidenceMode: TypeAlias = Literal["anchor_query", "factor_logits", "anchor_refine"]
 PairwiseMode: TypeAlias = Literal["gated_sum", "product_projection"]
 RefinementCompose: TypeAlias = Literal["additive", "multiplicative"]
@@ -89,7 +88,6 @@ class RetrievalEvidence:
     """Structured retrieval evidence emitted before backend-specific memory read."""
 
     mode: RetrievalEvidenceMode
-    target: RetrievalTarget
     role: RetrievalRole
     score_terms: list[ScoreTerm]
     composed_logits: Optional[Tensor]
@@ -271,7 +269,7 @@ class QueryPolicy(nn.Module, ABC):
         return self._resolve_query(cues=cues, anchor_family=anchor_family)
 
     def compose(  # -------------------------------------------------------------------------------
-        self, *, cues: CueBundle, target: RetrievalTarget, memory: MemoryEntry, role: RetrievalRole,
+        self, *, cues: CueBundle, memory: MemoryEntry, role: RetrievalRole,
         anchor_family: Optional[CueFamily] = None,
     ) -> RetrievalEvidence:  # fmt: skip
         """Compose structured retrieval evidence from a generic cue bundle."""
@@ -279,7 +277,6 @@ class QueryPolicy(nn.Module, ABC):
         anchor = self._flatten_query(self.resolve_query(cues=cues, anchor_family=anchor_family))
         return RetrievalEvidence(
             mode="anchor_query",
-            target=target,
             role=role,
             score_terms=[],
             composed_logits=None,
@@ -492,21 +489,20 @@ class _FactorScoreQueryPolicy(QueryPolicy, ABC):
         )
 
     def compose(  # -------------------------------------------------------------------------------
-        self, *, cues: CueBundle, target: RetrievalTarget, memory: MemoryEntry, role: RetrievalRole,
+        self, *, cues: CueBundle, memory: MemoryEntry, role: RetrievalRole,
         anchor_family: Optional[CueFamily] = None,
     ) -> RetrievalEvidence:  # fmt: skip
         anchor = self._flatten_query(self.resolve_query(cues=cues, anchor_family=anchor_family))
         if not isinstance(memory, FactorMemoryStore):
-            return self._anchor_only_evidence(target=target, role=role, anchor=anchor)
+            return self._anchor_only_evidence(role=role, anchor=anchor)
 
         score_terms = self._collect_score_terms(memory=memory, cues=cues)
         if not score_terms:
-            return self._anchor_only_evidence(target=target, role=role, anchor=anchor)
+            return self._anchor_only_evidence(role=role, anchor=anchor)
 
         composed_logits = self._compose_score_terms(score_terms)
         return RetrievalEvidence(
             mode="factor_logits",
-            target=target,
             role=role,
             score_terms=score_terms,
             composed_logits=composed_logits,
@@ -521,11 +517,10 @@ class _FactorScoreQueryPolicy(QueryPolicy, ABC):
     def _compose_score_terms(self, score_terms: list[ScoreTerm]) -> Tensor:
         """Compose the per-cue score terms into one logit tensor."""
 
-    def _anchor_only_evidence(self, *, target: RetrievalTarget, role: RetrievalRole, anchor: Tensor) -> RetrievalEvidence:
+    def _anchor_only_evidence(self, *, role: RetrievalRole, anchor: Tensor) -> RetrievalEvidence:
         """Return dense-compatible anchor-query evidence."""
         return RetrievalEvidence(
             mode="anchor_query",
-            target=target,
             role=role,
             score_terms=[],
             composed_logits=None,
@@ -643,14 +638,13 @@ class AnchorRefineQueryPolicy(QueryPolicy):
 
     def compose(  # -------------------------------------------------------------------------------
         self, *,
-        cues: CueBundle, target: RetrievalTarget, memory: MemoryEntry, role: RetrievalRole,
+        cues: CueBundle, memory: MemoryEntry, role: RetrievalRole,
         anchor_family: Optional[CueFamily] = None,
     ) -> RetrievalEvidence:  # fmt: skip
         anchor_query = self._flatten_query(self.resolve_query(cues=cues, anchor_family=anchor_family))
         if not isinstance(memory, FactorMemoryStore):
             return RetrievalEvidence(
                 mode="anchor_query",
-                target=target,
                 role=role,
                 score_terms=[],
                 composed_logits=None,
@@ -666,7 +660,6 @@ class AnchorRefineQueryPolicy(QueryPolicy):
         anchor_logits = self._compute_logits(anchor_query, anchor_bank.keys)
         return RetrievalEvidence(
             mode="anchor_refine",
-            target=target,
             role=role,
             score_terms=[
                 ScoreTerm(
@@ -728,5 +721,5 @@ __all__ = [
     "AdditiveQueryPolicySettings", "AnchorQueryPolicySettings", "AnchorRefineQueryPolicySettings",
     "CueBundle", "MissingCueBehavior", "MultiplicativeQueryPolicySettings",
     "PairwiseQueryPolicySettings", "QueryPolicy", "QueryPolicySettings", "RetrievalEvidence",
-    "RetrievalRefinementStep", "RetrievalTarget", "ScoreTerm", "build_query_policy",
+    "RetrievalRefinementStep", "ScoreTerm", "build_query_policy",
 ]  # fmt: skip

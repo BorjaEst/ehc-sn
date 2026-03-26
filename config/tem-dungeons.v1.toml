@@ -34,6 +34,7 @@ diagnostic_level = "standard"
 [model]
     observation_dim = 45
     action_count    = 5
+    enable_sensory_recall = true
 
     # Current schema says int, but legacy TEM semantics strongly suggest this should
     # be a list of frequencies. This value only makes the TOML match the current
@@ -108,7 +109,6 @@ diagnostic_level = "standard"
     c_place_reg       = 0.02
     grid_reg_norm     = "l2"
     place_reg_norm    = "l1"
-    use_x_cued_recall = true
 
 # -- Controller settings --------------------------------------------------------------------------
 [controller]

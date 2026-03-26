@@ -25,7 +25,7 @@ from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
-from ehc_sn.models.tem_transition import TEMMemoryTransition
+from ehc_sn.models._tem_contracts import TEMMemoryTransition
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
 from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCSensoryStepInput, HPCState
 from ehc_sn.modules.hpc.query_policy import CueBundle
@@ -79,9 +79,9 @@ class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
             "Its length must match the full MEC/HPC frequency count after OVC mode resolution."
         ),
     )
-    use_x_cued_recall: bool = Field(
+    enable_sensory_recall: bool = Field(
         default=True,
-        description="Whether the HPC recall should be cued with LEC features (x) in addition to MEC features (g).",
+        description="Whether the HPC should perform sensory-cued recall during the phase-1 TEM step.",
     )
 
     @model_validator(mode="after")
@@ -414,7 +414,8 @@ class TEMModelV2(nn.Module):
             HPCSensoryStepInput(
                 state=state.hpc,
                 cues=CueBundle(families={"x": place_query_from_obs, "g": place_query_from_grid_prior}),
-                use_x_cued_recall=self.config.use_x_cued_recall,
+                anchor_family="x",
+                enable_sensory_recall=self.config.enable_sensory_recall,
             )
         )
 
