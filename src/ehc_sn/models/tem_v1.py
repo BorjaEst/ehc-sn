@@ -425,31 +425,25 @@ class TEMModelV1(nn.Module):
         )
 
         step = self.hpc.step(transition.to_hpc_step_input(state.hpc))
-        place_sensory = step.sensory.sensory_recall
-        place_recall_from_grid_prior = step.grid_prior_recall
-        place_recall_from_grid_post = step.grid_posterior_recall
-        place_prior = step.place_prior
-        place_retrieved = step.place_retrieved
-        place_post = step.place_post
         state.hpc = step.state
 
         # Decode observation logits for the three TEM pathways.
-        lec_features_from_place_post = self.projection_lec.inverse(place_post)
+        lec_features_from_place_post = self.projection_lec.inverse(step.place_post)
         obs_features_inference = self.lec.generative(lec_features_from_place_post)
         logits_inference = self.autoencoder.decode(obs_features_inference)
 
-        lec_features_from_place_retrieved = self.projection_lec.inverse(place_retrieved)
+        lec_features_from_place_retrieved = self.projection_lec.inverse(step.place_retrieved)
         obs_features_retrieved = self.lec.generative(lec_features_from_place_retrieved)
         logits_retrieved = self.autoencoder.decode(obs_features_retrieved)
 
-        lec_features_from_place_prior = self.projection_lec.inverse(place_prior)
+        lec_features_from_place_prior = self.projection_lec.inverse(step.place_prior)
         obs_features_ancestral = self.lec.generative(lec_features_from_place_prior)
         logits_ancestral = self.autoencoder.decode(obs_features_ancestral)
 
         # Return controller-compatible rollout outputs for the TEM loss head.
         obs_logits = (logits_inference, logits_retrieved, logits_ancestral)
         grid = (transition.grid_post, transition.grid_prior)
-        place = (place_post, place_prior, place_sensory)
+        place = (step.place_post, step.place_prior, step.place_sensory)
         return state, obs_logits, None, grid, place  # Action=None as TEM provides no direct action outputs
 
 
