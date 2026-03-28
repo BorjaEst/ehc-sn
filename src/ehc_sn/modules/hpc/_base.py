@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 import torch
@@ -12,9 +12,8 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from ehc_sn import utils
-from ehc_sn.modules.hpc import query_policy
-from ehc_sn.modules.hpc.location import GroundLocation, GroundLocSettings
-from ehc_sn.modules.hpc.query_policy import AnchorQueryPolicySettings, CueBundle, QueryPolicySettings, RetrievalEvidence
+from ehc_sn.modules.hpc.location import PlaceInference, PlaceInferenceSettings
+from ehc_sn.modules.hpc.query_policy import MemoryRead, PreparedCueRead, PreparedRead, ReadCues, build_read_composer
 from ehc_sn.types import Device, Dtype, LocationBelief, MemoryEntry, MemoryState, RetrievalRole
 from ehc_sn.utils.detach import DetachMixin
 
@@ -40,13 +39,9 @@ class HPCCommonSettings(BaseModel, extra="forbid"):
         default=False,
         description="Whether to sample from grounded-location beliefs or use their means.",
     )
-    location: GroundLocSettings = Field(
-        default_factory=GroundLocSettings,
+    location: PlaceInferenceSettings = Field(
+        default_factory=PlaceInferenceSettings,
         description="Grounded-location inference module config.",
-    )
-    query_policy: QueryPolicySettings = Field(
-        default_factory=AnchorQueryPolicySettings,
-        description="Policy used to resolve a retrieval query from the available named cue families.",
     )
 
 
@@ -114,46 +109,56 @@ class HPCState(DetachMixin):
 
 # =================================================================================================
 @dataclass(frozen=True)
-class HPCSensoryStepInput:
-    """Phase-1 HPC inputs resolved before MEC posterior inference."""
+class SensoryRead:
+    """Operator inputs for the phase-1 sensory-cued memory read."""
 
     state: HPCState
-    cues: CueBundle
-    anchor_family: Optional[str] = None
+    read_cues: ReadCues
+    read: MemoryRead
     enable_sensory_recall: bool = True
 
 
 # =================================================================================================
 @dataclass
-class HPCSensoryStepOutput:
-    """Phase-1 HPC outputs passed from TEM into MEC posterior inference."""
+class SensoryReadResult:
+    """Results produced by the phase-1 sensory-cued memory read."""
 
-    cues: CueBundle
-    anchor_family: Optional[str]
-    sensory_recall: Optional[list[Tensor]]
+    read_cues: ReadCues
+    recall: Optional[list[Tensor]]
 
 
 # =================================================================================================
 @dataclass(frozen=True)
-class HPCStepInput:
-    """Phase-2 HPC inputs after MEC has resolved the posterior structural state."""
+class WritePayload:
+    """Projected values written to hippocampal memory for one TEM step."""
+
+    generative: list[Tensor]
+    inference: Optional[list[Tensor]]
+    named_writes: dict[str, list[Tensor]] = field(default_factory=dict)
+
+
+# =================================================================================================
+@dataclass(frozen=True)
+class HPCTransition:
+    """Inputs for the full phase-2 hippocampal transition."""
 
     state: HPCState
-    sensory: HPCSensoryStepOutput
-    prior_cues: CueBundle
-    prior_anchor_family: Optional[str]
-    posterior_cues: CueBundle
-    posterior_anchor_family: Optional[str]
+    sensory: SensoryReadResult
+    prior_read_cues: ReadCues
+    prior_read: MemoryRead
+    posterior_read_cues: ReadCues
+    posterior_read: MemoryRead
     inference_sensory_query: list[Tensor]
     inference_structural_query: list[Tensor]
+    named_writes: dict[str, list[Tensor]] = field(default_factory=dict)
 
 
 # =================================================================================================
 @dataclass
-class HPCStepOutput:
-    """Structured outputs for the second HPC transition phase."""
+class HPCTransitionResult:
+    """Outputs produced by the full phase-2 hippocampal transition."""
 
-    sensory: HPCSensoryStepOutput
+    sensory: SensoryReadResult
     grid_prior_recall: list[Tensor]
     grid_posterior_recall: list[Tensor]
     place_prior: list[Tensor]
@@ -181,8 +186,8 @@ class HPCBase(nn.Module, ABC):
         self._config = config
         self._shape = list(config.shape)
         self._n_freq = len(config.shape)
-        self.grounded_location = GroundLocation(self._shape, config.location, device=device, dtype=dtype)
-        self.query_policy = query_policy.build_query_policy(self._shape, config.query_policy, device=device, dtype=dtype)
+        self.place_inference = PlaceInference(self._shape, config.location, device=device, dtype=dtype)
+        self.read_composer = build_read_composer(self._shape, device=device, dtype=dtype)
 
     @property
     def config(self) -> HPCCommonSettings:
@@ -253,7 +258,7 @@ class HPCBase(nn.Module, ABC):
     @abstractmethod
     def _update_memory_impl(  # -------------------------------------------------------------------
         self, memory: MemoryState, key: Tensor,
-        g_value: Tensor, x_value: Optional[Tensor],
+        g_value: Tensor, x_value: Optional[Tensor], named_writes: dict[str, Tensor],
     ) -> MemoryState:  # fmt: skip
         """Write one TEM step into the concrete memory state.
 
@@ -290,36 +295,35 @@ class HPCBase(nn.Module, ABC):
 
     def recall(  # --------------------------------------------------------------------------------
         self, *,
-        cues: CueBundle, state: HPCState, role: RetrievalRole, anchor_family: Optional[str] = None,
+        read_cues: ReadCues, state: HPCState, role: RetrievalRole, read: MemoryRead,
     ) -> list[Tensor]:  # fmt: skip
         """Retrieve grounded-location code from the concrete memory representation."""
         memory = state.memory.for_role(role)
-        evidence = self.compose_retrieval_evidence(cues=cues, memory=memory, role=role, anchor_family=anchor_family)
-        if evidence.mode != "anchor_query":
-            raise TypeError(f"Base recall does not support retrieval evidence mode '{evidence.mode}'. Override recall in module.")
-        query = evidence.anchor_query if evidence.anchor_query is not None else evidence.fallback_query
-        if query is None:
-            raise ValueError("Retrieval evidence must provide an anchor or fallback query for base recall.")
-        recalled = self._recall_flat_impl(query, memory, role=role)
+        prepared_read = self.prepare_read(read_cues=read_cues, read=read)
+        if not isinstance(prepared_read, PreparedCueRead):
+            raise TypeError(f"{type(self).__name__} only supports resolved read requests.")
+        recalled = self._recall_flat_impl(prepared_read.query, memory, role=role)
         return self._unflatten_memory_code(recalled)
 
-    def compose_retrieval_evidence(  # -----------------------------------------------------------
+    def prepare_read(  # -------------------------------------------------------------------------
         self, *,
-        cues: CueBundle, memory: MemoryEntry, role: RetrievalRole, anchor_family: Optional[str] = None,
-    ) -> RetrievalEvidence:  # fmt: skip
+        read_cues: ReadCues, read: MemoryRead,
+    ) -> PreparedRead:  # fmt: skip
         """Compose structured retrieval evidence before backend-specific memory read."""
-        return self.query_policy.compose(cues=cues, memory=memory, role=role, anchor_family=anchor_family)
+        return self.read_composer.compose(read_cues=read_cues, read=read)
 
     def update(  # --------------------------------------------------------------------------------
-        self, p_inf: list[Tensor], p_gen_gi: list[Tensor], p_xi: Optional[list[Tensor]],
+        self, key: list[Tensor], write: WritePayload,
         state: HPCState,
     ) -> HPCState:  # fmt: skip
         """Write one TEM step into the concrete memory state."""
+        named_writes = {name: self._flatten_memory_code(value) for name, value in write.named_writes.items()}
         memory = self._update_memory_impl(
             state.memory,
-            self._flatten_memory_code(p_inf),
-            self._flatten_memory_code(p_gen_gi),
-            None if p_xi is None else self._flatten_memory_code(p_xi),
+            self._flatten_memory_code(key),
+            self._flatten_memory_code(write.generative),
+            None if write.inference is None else self._flatten_memory_code(write.inference),
+            named_writes,
         )
         return HPCState(state.grounded_belief, _memory=memory)
 
@@ -329,49 +333,49 @@ class HPCBase(nn.Module, ABC):
         """Merge concrete memory rows during partial reset."""
         return self._merge_memory_rows_impl(flag, current, fresh)
 
-    def prepare_sensory_step(  # ------------------------------------------------------------------
-        self, step_input: HPCSensoryStepInput,
-    ) -> HPCSensoryStepOutput:  # fmt: skip
+    def read_sensory(  # -------------------------------------------------------------------------
+        self, sensory_read: SensoryRead,
+    ) -> SensoryReadResult:  # fmt: skip
         """Resolve the phase-1 observation-cued recall used by MEC inference."""
         sensory_recall = None
-        if step_input.enable_sensory_recall:
+        if sensory_read.enable_sensory_recall:
             sensory_recall = self.recall(
-                cues=step_input.cues,
-                state=step_input.state,
+                read_cues=sensory_read.read_cues,
+                state=sensory_read.state,
                 role="inference",
-                anchor_family=step_input.anchor_family,
+                read=sensory_read.read,
             )
-        return HPCSensoryStepOutput(
-            cues=step_input.cues,
-            anchor_family=step_input.anchor_family,
-            sensory_recall=sensory_recall,
+        return SensoryReadResult(
+            read_cues=sensory_read.read_cues,
+            recall=sensory_recall,
         )
 
-    def step(  # ----------------------------------------------------------------------------------
-        self, step_input: HPCStepInput,
-    ) -> HPCStepOutput:  # fmt: skip
+    def transition(  # ---------------------------------------------------------------------------
+        self, transition: HPCTransition,
+    ) -> HPCTransitionResult:  # fmt: skip
         """Run phase 2 of the TEM-compatible HPC transition."""
-        state = step_input.state
+        state = transition.state
         grid_prior_recall = self.recall(
-            cues=step_input.prior_cues,
+            read_cues=transition.prior_read_cues,
             state=state,
             role="generative",
-            anchor_family=step_input.prior_anchor_family,
+            read=transition.prior_read,
         )
         grid_posterior_recall = self.recall(
-            cues=step_input.posterior_cues,
+            read_cues=transition.posterior_read_cues,
             state=state,
             role="generative",
-            anchor_family=step_input.posterior_anchor_family,
+            read=transition.posterior_read,
         )
 
         place_retrieved, state = self.generative(grid_posterior_recall, state)
         place_prior, state = self.generative(grid_prior_recall, state)
-        place_post, state = self.inference(step_input.inference_sensory_query, step_input.inference_structural_query, state)
-        state = self.update(place_post, place_retrieved, step_input.sensory.sensory_recall, state)
+        place_post, state = self.inference(transition.inference_sensory_query, transition.inference_structural_query, state)
+        payload = WritePayload(generative=place_retrieved, inference=transition.sensory.recall, named_writes=transition.named_writes)
+        state = self.update(place_post, payload, state)
 
-        return HPCStepOutput(
-            sensory=step_input.sensory,
+        return HPCTransitionResult(
+            sensory=transition.sensory,
             grid_prior_recall=grid_prior_recall,
             grid_posterior_recall=grid_posterior_recall,
             place_prior=place_prior,
@@ -392,13 +396,13 @@ class HPCBase(nn.Module, ABC):
         self, x_: list[Tensor], g_: list[Tensor], state: HPCState,
     ) -> tuple[list[Tensor], HPCState]:  # fmt: skip
         """Infer grounded location from projected sensory and abstract features."""
-        transition = self.grounded_location(x_, g_)
+        transition = self.place_inference(x_, g_)
         p_inf = utils.sample_diag_gaussian(transition) if self.config.do_sample else transition.mean
         return p_inf, state.new(p_inf, transition.uncertainty)
 
 
 # =================================================================================================
 __all__ = [
-    "HPCCommonSettings", "HPCSensoryStepInput", "HPCSensoryStepOutput", "HPCBase",
-    "HPCState", "HPCStepInput", "HPCStepOutput",
+    "HPCCommonSettings", "SensoryRead", "SensoryReadResult", "HPCBase",
+    "HPCState", "HPCTransition", "HPCTransitionResult", "WritePayload",
 ]  # fmt: skip

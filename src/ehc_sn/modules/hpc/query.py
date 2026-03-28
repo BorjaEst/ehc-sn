@@ -11,12 +11,12 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from ehc_sn import utils
-from ehc_sn.modules.hpc.query_policy import RetrievalEvidence
+from ehc_sn.modules.hpc.query_policy import PreparedCueRead, PreparedRead, PreparedTargetRead
 from ehc_sn.types import Activation, FactorMemoryView, LinearMemoryView
 
 
 # =================================================================================================
-class AttractorSettings(BaseModel, extra="forbid"):
+class AttractorReadSettings(BaseModel, extra="forbid"):
     """Settings for attractor dynamics modules."""
 
     kappa: float = Field(
@@ -39,17 +39,17 @@ class AttractorSettings(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class AttractorNetwork(nn.Module):
+class AttractorRead(nn.Module):
     """Attractor retrieval dynamics over a linear memory view."""
 
-    def __init__(self, config: AttractorSettings) -> None:
+    def __init__(self, config: AttractorReadSettings) -> None:
         """Initialize attractor retrieval dynamics from the provided settings."""
         super().__init__()
         self._config = config
         self._activation_fn = utils.activation_from_str(self._config.activation)
 
     @property
-    def config(self) -> AttractorSettings:
+    def config(self) -> AttractorReadSettings:
         """Return attractor retrieval settings."""
         return self._config
 
@@ -77,21 +77,21 @@ class AttractorNetwork(nn.Module):
 
 
 # =================================================================================================
-class AttentionSettings(BaseModel, extra="forbid"):
-    """Settings for explicit factor-memory retrieval."""
+class FactorReadSettings(BaseModel, extra="forbid"):
+    """Settings for explicit factor-memory reads."""
 
-    temperature: float = Field(
+    beta: float = Field(
         default=1.0,
         gt=0.0,
-        description="Softmax temperature divisor applied after dot-product scaling.",
+        description="Query-key sharpening factor applied after dot-product scaling.",
     )
     empty_retrieval: Literal["query", "zeros"] = Field(
         default="query",
         description="Fallback returned when no factor slots are populated.",
     )
-    memory_count_scaling: Literal["none", "log_count"] = Field(
-        default="log_count",
-        description="Optional sharpening factor based on the number of populated factor slots.",
+    beta_scaling: Literal["none", "log_memory_count"] = Field(
+        default="log_memory_count",
+        description="Optional sharpening multiplier based on the number of populated factor slots.",
     )
     iterations: int = Field(
         default=1,
@@ -102,19 +102,23 @@ class AttentionSettings(BaseModel, extra="forbid"):
         default="none",
         description="Recurrence rule used after the first retrieval iteration.",
     )
+    score_compose: Literal["additive", "multiplicative"] = Field(
+        default="multiplicative",
+        description="How targeted-read score terms are composed before softmax.",
+    )
 
 
 # =================================================================================================
-class FactorRetrieval(nn.Module):
+class FactorRead(nn.Module):
     """Masked-softmax retrieval over explicit factor-memory slots."""
 
-    def __init__(self, config: AttentionSettings) -> None:
+    def __init__(self, config: FactorReadSettings) -> None:
         """Initialize factor-memory retrieval from the provided settings."""
         super().__init__()
         self._config = config
 
     @property
-    def config(self) -> AttentionSettings:
+    def config(self) -> FactorReadSettings:
         """Return factor-retrieval settings."""
         return self._config
 
@@ -122,68 +126,35 @@ class FactorRetrieval(nn.Module):
         self, query: Tensor, memory_view: FactorMemoryView,
     ) -> Tensor:  # fmt: skip
         """Retrieve a value vector from factor memory for the provided query."""
-        logits = self.compute_logits(query, memory_view.keys)
-        return self.recall_from_logits(
-            logits,
+        return self._recall_iterative_resolved(
+            query,
+            memory_view.keys,
             memory_view.values,
             valid_mask=memory_view.valid_mask,
-            fallback_query=query,
         )
 
     def recall_from_evidence(  # ------------------------------------------------------------------
-        self, evidence: RetrievalEvidence, memory_view: FactorMemoryView,
+        self, evidence: PreparedRead, memory_view: FactorMemoryView,
     ) -> Tensor:  # fmt: skip
-        """Execute one-shot or multi-pass retrieval from structured evidence."""
-        fallback_query = evidence.fallback_query if evidence.fallback_query is not None else evidence.anchor_query
-        if fallback_query is None:
-            raise ValueError("Retrieval evidence must provide a fallback or anchor query.")
+        """Execute retrieval from one read-evidence payload."""
+        if isinstance(evidence, PreparedTargetRead):
+            return self._recall_iterative_targeted(evidence, memory_view)
+        if not isinstance(evidence, PreparedCueRead):
+            raise TypeError(f"Unsupported read evidence type '{type(evidence).__name__}'.")
 
         read_bank = memory_view.bank(evidence.read_bank, fallback_to_default=True)
-        if evidence.mode == "anchor_query":
-            if evidence.anchor_query is None:
-                raise ValueError("Anchor-query evidence requires `anchor_query`.")
-            logits = self.compute_logits(evidence.anchor_query, read_bank.keys)
-            return self.recall_from_logits(logits, read_bank.values, valid_mask=read_bank.valid_mask, fallback_query=fallback_query)
-
-        if evidence.mode == "factor_logits":
-            logits = evidence.composed_logits if evidence.composed_logits is not None else evidence.anchor_logits
-            if logits is None:
-                if evidence.anchor_query is None:
-                    raise ValueError("Factor-logit evidence requires logits or an anchor query.")
-                logits = self.compute_logits(evidence.anchor_query, read_bank.keys)
-            return self.recall_from_logits(logits, read_bank.values, valid_mask=read_bank.valid_mask, fallback_query=fallback_query)
-
-        if evidence.mode != "anchor_refine":
-            raise ValueError(f"Unsupported retrieval evidence mode '{evidence.mode}'.")
-
-        anchor_logits = evidence.anchor_logits
-        if anchor_logits is None:
-            if evidence.anchor_query is None:
-                raise ValueError("Anchor-refine evidence requires `anchor_logits` or `anchor_query`.")
-            anchor_logits = self.compute_logits(evidence.anchor_query, read_bank.keys)
-
-        current_logits = anchor_logits
-        recalled = self.recall_from_logits(current_logits, read_bank.values, valid_mask=read_bank.valid_mask, fallback_query=fallback_query)
-        for _ in range(evidence.iterations - 1):
-            refined_logits = anchor_logits
-            for step in evidence.refinement_steps:
-                source = self._resolve_refinement_source(step.source, recalled)
-                bank = memory_view.bank(step.bank_name, fallback_to_default=True)
-                bank_tensor = bank.keys if step.bank_field == "keys" else bank.values
-                step_logits = self.compute_logits(source, bank_tensor)
-                reference_logits = anchor_logits if step.reference == "anchor" else current_logits
-                refined_logits = self._combine_logits(reference_logits, step_logits, mode=step.compose)
-            current_logits = refined_logits
-            recalled = self.recall_from_logits(
-                current_logits, read_bank.values, valid_mask=read_bank.valid_mask, fallback_query=fallback_query
-            )
-        return recalled
+        return self._recall_iterative_resolved(
+            evidence.query,
+            read_bank.keys,
+            read_bank.values,
+            valid_mask=read_bank.valid_mask,
+        )
 
     def compute_logits(self, query: Tensor, memory_bank: Tensor) -> Tensor:
         """Compute scaled query-key similarity logits for factor slots."""
         query = query.to(dtype=memory_bank.dtype)
-        scale = math.sqrt(max(query.shape[1], 1)) * self.config.temperature
-        return torch.einsum("bs,bts->bt", query, memory_bank) / scale
+        scale = math.sqrt(max(query.shape[1], 1))
+        return torch.einsum("bs,bts->bt", query, memory_bank) * (self.config.beta / scale)
 
     def weights_from_logits(  # -------------------------------------------------------------------
         self, logits: Tensor, *, valid_mask: Tensor,
@@ -210,26 +181,99 @@ class FactorRetrieval(nn.Module):
         fallback = self._empty_fallback(fallback_query)
         return torch.where(has_valid_slot, recalled, fallback)
 
+    def _recall_iterative_resolved(  # ------------------------------------------------------------
+        self, anchor_query: Tensor, keys: Tensor, values: Tensor, *, valid_mask: Tensor,
+    ) -> Tensor:  # fmt: skip
+        """Execute one resolved-read factor retrieval loop."""
+        logits = self.compute_logits(anchor_query, keys)
+        recalled = self.recall_from_logits(logits, values, valid_mask=valid_mask, fallback_query=anchor_query)
+        for _ in range(self.config.iterations - 1):
+            recurrent_query = self._recurrent_query(anchor_query, recalled)
+            logits = self.compute_logits(recurrent_query, keys)
+            recalled = self.recall_from_logits(logits, values, valid_mask=valid_mask, fallback_query=anchor_query)
+        return recalled
+
+    def _recall_iterative_targeted(self, evidence: PreparedTargetRead, memory_view: FactorMemoryView) -> Tensor:
+        """Execute the targeted source-to-target retrieval loop."""
+        target_bank = memory_view.bank(evidence.read_bank, fallback_to_default=True)
+        source_logits = self.compose_source_logits(
+            source_queries=evidence.source_queries,
+            memory_view=memory_view,
+            target=evidence.target,
+            target_shape=target_bank.valid_mask.shape,
+        )
+        first_logits = source_logits
+        if evidence.initial_target_query is not None:
+            initial_target_logits = self.compute_logits(evidence.initial_target_query, target_bank.keys)
+            self._validate_logit_shape(initial_target_logits, target_bank.valid_mask.shape, label="initial target")
+            first_logits = self._compose_logits([source_logits, initial_target_logits])
+
+        recalled = self.recall_from_logits(
+            first_logits,
+            target_bank.values,
+            valid_mask=target_bank.valid_mask,
+            fallback_query=evidence.fallback_query,
+        )
+        for _ in range(self.config.iterations - 1):
+            target_logits = self.compute_logits(recalled, target_bank.keys)
+            self._validate_logit_shape(target_logits, target_bank.valid_mask.shape, label="recurrent target")
+            recalled = self.recall_from_logits(
+                self._compose_logits([source_logits, target_logits]),
+                target_bank.values,
+                valid_mask=target_bank.valid_mask,
+                fallback_query=evidence.fallback_query,
+            )
+        return recalled
+
+    def compose_source_logits(  # -----------------------------------------------------------------
+        self, *, source_queries: dict[str, Tensor], memory_view: FactorMemoryView,
+        target: str, target_shape: torch.Size,
+    ) -> Tensor:  # fmt: skip
+        """Return source logits from all non-target cue families."""
+        source_logits: list[Tensor] = []
+        for family, query in source_queries.items():
+            if family == target:
+                continue
+            bank = memory_view.bank(family, fallback_to_default=True)
+            logits = self.compute_logits(query, bank.keys)
+            self._validate_logit_shape(logits, target_shape, label=f"source family {family!r}")
+            source_logits.append(logits)
+
+        if not source_logits:
+            raise ValueError("Targeted retrieval requires at least one non-target source query.")
+        return self._compose_logits(source_logits)
+
+    def _compose_logits(self, score_terms: list[Tensor]) -> Tensor:
+        """Compose source and target score terms for targeted retrieval."""
+        if len(score_terms) == 1:
+            return score_terms[0]
+        if self.config.score_compose == "additive":
+            return sum((term for term in score_terms[1:]), score_terms[0])
+
+        composed = score_terms[0]
+        for term in score_terms[1:]:
+            composed = composed * term
+        return composed
+
     def _memory_count_multiplier(self, valid_mask: Tensor) -> Tensor:
         """Return an optional sharpening multiplier based on populated slot count."""
-        if self.config.memory_count_scaling == "none":
+        if self.config.beta_scaling == "none":
             return torch.ones((valid_mask.shape[0], 1), dtype=torch.float, device=valid_mask.device)
         valid_count = valid_mask.sum(dim=1, keepdim=True).to(dtype=torch.float)
-        return torch.maximum(torch.log1p(valid_count), torch.ones_like(valid_count))
+        safe_count = torch.clamp(valid_count, min=1.0)
+        return torch.maximum(torch.log(safe_count), torch.ones_like(valid_count))
 
-    def _combine_logits(
-        self, reference_logits: Tensor, refinement_logits: Tensor, *, mode: Literal["additive", "multiplicative"]
-    ) -> Tensor:
-        """Combine anchor/current logits with one refinement term."""
-        if mode == "additive":
-            return reference_logits + refinement_logits
-        return reference_logits * refinement_logits
+    def _validate_logit_shape(self, logits: Tensor, target_shape: torch.Size, *, label: str) -> None:
+        """Validate that one logit tensor is compatible with the target-bank slot axis."""
+        expected_shape = tuple(int(dim) for dim in target_shape)
+        if tuple(int(dim) for dim in logits.shape) != expected_shape:
+            raise ValueError(f"{label} logits must match target-bank slot shape {expected_shape}, got {tuple(logits.shape)}.")
 
-    def _resolve_refinement_source(self, source: Literal["retrieved_value"], recalled: Tensor) -> Tensor:
-        """Resolve the tensor used to compute refinement logits."""
-        if source != "retrieved_value":
-            raise ValueError(f"Unsupported refinement source '{source}'.")
-        return recalled
+    def _recurrent_query(self, anchor_query: Tensor, recalled: Tensor) -> Tensor:
+        """Return the query used for the next retrieval iteration."""
+        if self.config.recurrence == "none":
+            return anchor_query
+        return anchor_query * recalled
 
     def _empty_fallback(self, query: Tensor) -> Tensor:
         """Return the configured value for rows with no populated memory slots."""
@@ -239,4 +283,4 @@ class FactorRetrieval(nn.Module):
 
 
 # =================================================================================================
-__all__ = ["AttentionSettings", "AttractorNetwork", "AttractorSettings", "FactorRetrieval"]
+__all__ = ["AttractorRead", "AttractorReadSettings", "FactorRead", "FactorReadSettings"]

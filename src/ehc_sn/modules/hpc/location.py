@@ -23,8 +23,8 @@ from ehc_sn.types import Activation, Device, Dtype, LocationBelief
 
 
 # =================================================================================================
-class GroundLocSettings(BaseModel, extra="forbid"):
-    """Settings for location distribution modules."""
+class PlaceInferenceSettings(BaseModel, extra="forbid"):
+    """Settings for place-inference modules."""
 
     activation: Activation = Field(
         default="leaky_relu",
@@ -42,18 +42,18 @@ class GroundLocSettings(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class GroundLocation(nn.Module):
+class PlaceInference(nn.Module):
     """Infer grounded-location beliefs from sensory and abstract codes."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, shape: list[int], config: GroundLocSettings,
+        self, shape: list[int], config: PlaceInferenceSettings,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
-        """Initialize grounded-location inference.
+        """Initialize place inference.
 
         Args:
             shape: Grounded-location feature sizes per frequency module.
-            config: Grounded-location inference config.
+            config: Place-inference config.
         """
         super().__init__()
         self._config = config
@@ -65,8 +65,8 @@ class GroundLocation(nn.Module):
         self.uncertainty_mlp = MLP(shape, shape, [torch.tanh, torch.exp], [2 * n for n in shape])
 
     @property
-    def config(self) -> GroundLocSettings:
-        """Return grounded-location inference config."""
+    def config(self) -> PlaceInferenceSettings:
+        """Return place-inference config."""
         return self._config
 
     @property
@@ -107,4 +107,4 @@ class GroundLocation(nn.Module):
 
 
 # =================================================================================================
-__all__ = ["GroundLocSettings", "GroundLocation"]
+__all__ = ["PlaceInferenceSettings", "PlaceInference"]

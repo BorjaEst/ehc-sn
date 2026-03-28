@@ -25,10 +25,11 @@ from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
-from ehc_sn.models._tem_contracts import TEMMemoryTransition
+from ehc_sn.models._tem_contracts import TEMTransitionPlan
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
-from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCSensoryStepInput, HPCState
-from ehc_sn.modules.hpc.query_policy import CueBundle
+from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState
+from ehc_sn.modules.hpc import SensoryRead as HPCSensoryRead
+from ehc_sn.modules.hpc.query_policy import ReadCues, TargetRead
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
@@ -410,28 +411,29 @@ class TEMModelV2(nn.Module):
         # Sensory inference: encode observations into LEC features and query place memory from them.
         lec_features_post, state.lec = self.lec.inference(obs_embedding, state.lec)
         place_query_from_obs = self.projection_lec(lec_features_post)
-        sensory = self.hpc.prepare_sensory_step(
-            HPCSensoryStepInput(
+        sensory = self.hpc.read_sensory(
+            HPCSensoryRead(
                 state=state.hpc,
-                cues=CueBundle(families={"x": place_query_from_obs, "g": place_query_from_grid_prior}),
-                anchor_family="x",
+                read_cues=ReadCues(families={"x": place_query_from_obs, "g": place_query_from_grid_prior}),
+                read=TargetRead(kind="target", sources=("g",), target="x", target_init="x"),
                 enable_sensory_recall=self.config.enable_sensory_recall,
             )
         )
 
         # Grid posterior after correcting the prior with recalled place evidence.
-        grid_post, state.mec = self.mec.inference(sensory.sensory_recall, landmark_id=landmark_id, state=state.mec)  # fmt: skip
+        grid_post, state.mec = self.mec.inference(sensory.recall, landmark_id=landmark_id, state=state.mec)  # fmt: skip
         place_query_from_grid_post = self.projection_mec(grid_post)
-        transition = TEMMemoryTransition(
+        transition = TEMTransitionPlan(
             sensory=sensory,
             grid_prior=grid_prior,
             grid_query_prior=place_query_from_grid_prior,
             grid_post=grid_post,
             grid_query_posterior=place_query_from_grid_post,
+            generative_read=TargetRead(kind="target", sources=("g",), target="x"),
         )
 
-        step = self.hpc.step(transition.to_hpc_step_input(state.hpc))
-        place_sensory = step.sensory.sensory_recall
+        step = self.hpc.transition(transition.to_hpc_transition(state.hpc))
+        place_sensory = step.sensory.recall
         place_recall_from_grid_prior = step.grid_prior_recall
         place_recall_from_grid_post = step.grid_posterior_recall
         place_prior = step.place_prior

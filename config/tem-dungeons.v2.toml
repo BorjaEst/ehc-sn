@@ -48,16 +48,10 @@ diagnostic_level = "standard"
     common_memory     = false
     do_sample         = false
 
-[model.hpc.query_policy]
-    kind = "pairwise"
-    families = ["x", "g"]
-    mode = "product_projection"
-    missing_behavior = "use_available"
-
-[model.hpc.retrieval]
-    temperature          = 1.0
+[model.hpc.read]
+    beta                 = 1.0
     empty_retrieval      = "query"
-    memory_count_scaling = "log_count"
+    beta_scaling         = "log_memory_count"
     iterations           = 1
     recurrence           = "none"
 
@@ -66,6 +60,7 @@ diagnostic_level = "standard"
     policy             = "append_if_novel"
     novelty_similarity = "cosine"
     novelty_threshold  = 0.95
+    bank_names         = ["c"]
 
 [model.lec]
     feature_dim = 10

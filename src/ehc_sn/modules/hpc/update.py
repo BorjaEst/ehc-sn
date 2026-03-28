@@ -22,7 +22,7 @@ from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, DenseMemoryStore, Device, Dty
 
 
 # =================================================================================================
-class HebbianMemoryWriteSettings(BaseModel, extra="forbid"):
+class HebbianWriteSettings(BaseModel, extra="forbid"):
     """Settings for dense Hebbian-memory write modules."""
 
     emit_store: Literal["dense", "factor"] = Field(
@@ -40,7 +40,7 @@ class HebbianMemoryWriteSettings(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class EpisodicMemoryWriteSettings(BaseModel, extra="forbid"):
+class EpisodicWriteSettings(BaseModel, extra="forbid"):
     """Settings for append-only factor-memory writes."""
 
     memory_capacity: Optional[int] = Field(
@@ -72,33 +72,34 @@ class EpisodicMemoryWriteSettings(BaseModel, extra="forbid"):
 
 # =================================================================================================
 @dataclass
-class HebbianMemoryRuntime:
+class HebbianWriteRuntime:
     """Runtime hyperparameters for dense Hebbian memory."""
 
     eta: float = 0.5
     hebbian_decay: float = 0.9999
 
 
-class HebbianMemoryWrite(nn.Module):
+# =================================================================================================
+class HebbianWrite(nn.Module):
     """Hebbian write/update logic for grounded-location memory."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: HebbianMemoryWriteSettings,
+        self, config: HebbianWriteSettings,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
         """Initialize dense Hebbian write logic and mutable runtime parameters."""
         del device, dtype
         super().__init__()
         self._config = config
-        self._runtime = HebbianMemoryRuntime()
+        self._runtime = HebbianWriteRuntime()
 
     @property
-    def config(self) -> HebbianMemoryWriteSettings:
+    def config(self) -> HebbianWriteSettings:
         """Return static Hebbian write settings."""
         return self._config
 
     @property
-    def runtime(self) -> HebbianMemoryRuntime:
+    def runtime(self) -> HebbianWriteRuntime:
         """Return mutable runtime hyperparameters for Hebbian updates."""
         return self._runtime
 
@@ -155,10 +156,11 @@ class HebbianMemoryWrite(nn.Module):
         return torch.clamp(memory, min=self._config.clamp_min, max=self._config.clamp_max)
 
 
+# =================================================================================================
 class DenseHebbianStoreApplier(nn.Module):
     """Apply Hebbian writes directly to dense memory stores."""
 
-    def __init__(self, write_system: HebbianMemoryWrite, *, update_mask: Tensor) -> None:
+    def __init__(self, write_system: HebbianWrite, *, update_mask: Tensor) -> None:
         """Bind dense Hebbian updates to a shared write system and optional mask."""
         super().__init__()
         self._write_system = write_system
@@ -179,7 +181,7 @@ class FactorHebbianStoreApplier:
     """Apply Hebbian writes while storing the result as exact factor atoms."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, write_system: HebbianMemoryWrite, *,
+        self, write_system: HebbianWrite, *,
         n_stages: int, shape: list[int], f_initial: list[float],
     ) -> None:  # fmt: skip
         """Bind factorized Hebbian updates to the configured hierarchy metadata."""
@@ -212,7 +214,7 @@ class FactorHebbianStoreApplier:
 
 # =================================================================================================
 def build_hebbian_store_components(  # ------------------------------------------------------------
-    write_system: HebbianMemoryWrite, *,
+    write_system: HebbianWrite, *,
     emit_store: Literal["dense", "factor"], feature_dim: int, update_mask: Tensor,
     n_stages: int, shape: list[int], f_initial: list[float],
 ) -> HebbianStoreComponents:  # fmt: skip
@@ -232,16 +234,16 @@ def build_hebbian_store_components(  # -----------------------------------------
 
 
 # =================================================================================================
-class EpisodicMemoryWrite:
+class EpisodicWrite:
     """Append-only factor-store allocation and write helpers."""
 
-    def __init__(self, shape: list[int], config: EpisodicMemoryWriteSettings) -> None:
+    def __init__(self, shape: list[int], config: EpisodicWriteSettings) -> None:
         """Initialize append-only episodic memory with the configured capacity policy."""
         self._shape = list(shape)
         self._config = config
 
     @property
-    def config(self) -> EpisodicMemoryWriteSettings:
+    def config(self) -> EpisodicWriteSettings:
         """Return static episodic-write settings."""
         return self._config
 
@@ -340,10 +342,11 @@ class EpisodicMemoryWrite:
         return similarity.max(dim=1).values >= self.config.novelty_threshold
 
 
+# =================================================================================================
 class FactorAppendStoreFactory:
     """Allocate empty factor stores through the configured append-write system."""
 
-    def __init__(self, write_system: EpisodicMemoryWrite) -> None:
+    def __init__(self, write_system: EpisodicWrite) -> None:
         """Bind the append-store factory to an episodic write system."""
         self._write_system = write_system
 
@@ -355,25 +358,26 @@ class FactorAppendStoreFactory:
         return self._write_system.init_store(batch_size, device=device)
 
 
+# =================================================================================================
 class FactorAppendStoreApplier:
     """Apply append writes to factor memory stores."""
 
-    def __init__(self, write_system: EpisodicMemoryWrite) -> None:
+    def __init__(self, write_system: EpisodicWrite) -> None:
         """Bind append-store updates to an episodic write system."""
         self._write_system = write_system
 
     def apply(  # -------------------------------------------------------------------------------
-        self, store: MemoryEntry, key: Tensor, value: Tensor,
+        self, store: MemoryEntry, key: Tensor, value: Tensor, *, bank_name: Optional[str] = None,
     ) -> FactorMemoryStore:  # fmt: skip
         """Append a factor-memory atom to the provided memory entry."""
         if not isinstance(store, FactorMemoryStore):
             raise TypeError("FactorAppendStoreApplier expected factor memory stores.")
-        return self._write_system.append(store, key, value)
+        return self._write_system.append(store, key, value, bank_name=bank_name)
 
 
 # =================================================================================================
 def build_factor_store_components(  # -------------------------------------------------------------
-    write_system: EpisodicMemoryWrite,
+    write_system: EpisodicWrite,
 ) -> AppendStoreComponents:  # fmt: skip
     """Construct store factory, applier, and reset strategy for episodic memory."""
     return AppendStoreComponents(
@@ -467,8 +471,8 @@ def compile_masked_hebbian_factors(  # -----------------------------------------
 __all__ = [
     "DenseHebbianStoreApplier", "FactorAppendStoreApplier", "FactorAppendStoreFactory",
     "FactorHebbianStoreApplier",
-    "EpisodicMemoryWrite", "EpisodicMemoryWriteSettings",
-    "HebbianMemoryWrite", "HebbianMemoryWriteSettings", "HebbianMemoryRuntime",
+    "EpisodicWrite", "EpisodicWriteSettings",
+    "HebbianWrite", "HebbianWriteSettings", "HebbianWriteRuntime",
     "build_factor_store_components", "build_hebbian_store_components",
     "compile_hebbian_factors", "compile_masked_hebbian_factors", "hebbian_block_pairs",
 ]  # fmt: skip

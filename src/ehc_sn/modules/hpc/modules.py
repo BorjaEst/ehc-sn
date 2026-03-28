@@ -10,9 +10,9 @@ from torch import Tensor
 from ehc_sn import utils
 from ehc_sn.modules.hpc import update
 from ehc_sn.modules.hpc._base import HPCBase, HPCCommonSettings, HPCState
-from ehc_sn.modules.hpc.query import AttentionSettings, AttractorNetwork, AttractorSettings, FactorRetrieval
-from ehc_sn.modules.hpc.query_policy import CueBundle
-from ehc_sn.modules.hpc.update import EpisodicMemoryWrite, EpisodicMemoryWriteSettings, HebbianMemoryWrite, HebbianMemoryWriteSettings
+from ehc_sn.modules.hpc.query import AttractorRead, AttractorReadSettings, FactorRead, FactorReadSettings
+from ehc_sn.modules.hpc.query_policy import MemoryRead, ReadCues
+from ehc_sn.modules.hpc.update import EpisodicWrite, EpisodicWriteSettings, HebbianWrite, HebbianWriteSettings
 from ehc_sn.types import Device, Dtype, MemoryEntry, MemoryState, RetrievalRole
 
 
@@ -20,12 +20,12 @@ from ehc_sn.types import Device, Dtype, MemoryEntry, MemoryState, RetrievalRole
 class HPCAttractorSettings(HPCCommonSettings):
     """Settings for the attractor-based hippocampal implementation."""
 
-    retrieval: AttractorSettings = Field(
-        default_factory=AttractorSettings,
+    read: AttractorReadSettings = Field(
+        default_factory=AttractorReadSettings,
         description="Settings for attractor retrieval dynamics.",
     )
-    write: HebbianMemoryWriteSettings = Field(
-        default_factory=HebbianMemoryWriteSettings,
+    write: HebbianWriteSettings = Field(
+        default_factory=HebbianWriteSettings,
         description="Settings for Hebbian memory write.",
     )
 
@@ -34,12 +34,12 @@ class HPCAttractorSettings(HPCCommonSettings):
 class HPCAttentionSettings(HPCCommonSettings):
     """Settings for the attention-based hippocampal implementation."""
 
-    retrieval: AttentionSettings = Field(
-        default_factory=AttentionSettings,
-        description="Settings for attention retrieval.",
+    read: FactorReadSettings = Field(
+        default_factory=FactorReadSettings,
+        description="Settings for factor-memory retrieval.",
     )
-    write: EpisodicMemoryWriteSettings = Field(
-        default_factory=EpisodicMemoryWriteSettings,
+    write: EpisodicWriteSettings = Field(
+        default_factory=EpisodicWriteSettings,
         description="Settings for factor-memory write.",
     )
 
@@ -63,8 +63,8 @@ class HPCAttractor(HPCBase):
         mask = utils.make_hebbian_write_mask(n_stages, self.shape, f_initial)
         self.register_buffer("update_mask", mask, persistent=False)
 
-        self.retrieval_module = AttractorNetwork(config.retrieval)
-        self.write_module = HebbianMemoryWrite(config.write, device=device, dtype=dtype)
+        self.retrieval_module = AttractorRead(config.read)
+        self.write_module = HebbianWrite(config.write, device=device, dtype=dtype)
         store_components = update.build_hebbian_store_components(
             self.write_module,
             emit_store=config.write.emit_store,
@@ -108,8 +108,12 @@ class HPCAttractor(HPCBase):
 
     def _update_memory_impl(  # -------------------------------------------------------------------
         self, memory: MemoryState, key: Tensor, g_value: Tensor, x_value: Optional[Tensor],
+        named_writes: dict[str, Tensor],
     ) -> MemoryState:  # fmt: skip
         """Write flattened values into the Hebbian store for the active memory entries."""
+        if named_writes:
+            names = ", ".join(sorted(named_writes))
+            raise TypeError(f"{type(self).__name__} does not support named bank writes: {names}.")
         g_cued = self._store_applier.apply(memory.g_cued, key, g_value, masked=True)
         x_cued = g_cued if self.config.common_memory else memory.x_cued
         if not self.config.common_memory and x_value is not None:
@@ -134,8 +138,8 @@ class HPCAttention(HPCBase):
         """Initialize factor-slot retrieval and write modules."""
         del n_stages, f_initial
         super().__init__(config, device=device, dtype=dtype)
-        self.retrieval_module = FactorRetrieval(config.retrieval)
-        self.write_module = EpisodicMemoryWrite(self.shape, config.write)
+        self.retrieval_module = FactorRead(config.read)
+        self.write_module = EpisodicWrite(self.shape, config.write)
         store_components = update.build_factor_store_components(self.write_module)
         self._store_factory = store_components.store_factory
         self._store_applier = store_components.store_applier
@@ -170,6 +174,7 @@ class HPCAttention(HPCBase):
 
     def _update_memory_impl(  # -------------------------------------------------------------------
         self, memory: MemoryState, key: Tensor, g_value: Tensor, x_value: Optional[Tensor],
+        named_writes: dict[str, Tensor],
     ) -> MemoryState:  # fmt: skip
         """Write flattened values into factor slots for the active memory entries."""
         g_cued = self._store_applier.apply(memory.g_cued, key, g_value)
@@ -178,6 +183,22 @@ class HPCAttention(HPCBase):
             x_cued = g_cued
         elif x_value is not None:
             x_cued = self._store_applier.apply(memory.x_cued, key, x_value)
+
+        if named_writes:
+            available_bank_names = set(memory.g_cued.bank_names) | set(memory.x_cued.bank_names)
+            missing_bank_names = sorted(set(named_writes) - available_bank_names)
+            if missing_bank_names:
+                names = ", ".join(repr(name) for name in missing_bank_names)
+                raise ValueError(f"Named factor-memory banks {names} are not available for writing.")
+
+            for bank_name, bank_value in named_writes.items():
+                if bank_name in g_cued.bank_names:
+                    g_cued = self._store_applier.apply(g_cued, key, bank_value, bank_name=bank_name)
+                if self.config.common_memory:
+                    x_cued = g_cued
+                elif bank_name in x_cued.bank_names:
+                    x_cued = self._store_applier.apply(x_cued, key, bank_value, bank_name=bank_name)
+
         return MemoryState(g_cued=g_cued, x_cued=x_cued)
 
     def _merge_memory_rows_impl(  # ---------------------------------------------------------------
@@ -187,11 +208,11 @@ class HPCAttention(HPCBase):
         return self._reset_strategy.merge_rows(flag, current, fresh)
 
     def recall(  # --------------------------------------------------------------------------------
-        self, *, cues: CueBundle, state: HPCState, role: RetrievalRole, anchor_family: Optional[str] = None,
+        self, *, read_cues: ReadCues, state: HPCState, role: RetrievalRole, read: MemoryRead,
     ):  # fmt: skip
         """Recall from factor memory through composer-produced retrieval evidence."""
         memory = state.memory.for_role(role)
-        evidence = self.compose_retrieval_evidence(cues=cues, memory=memory, role=role, anchor_family=anchor_family)
+        evidence = self.prepare_read(read_cues=read_cues, read=read)
         recalled = self.retrieval_module.recall_from_evidence(evidence, memory.as_factor_view())
         return self._unflatten_memory_code(recalled)
 

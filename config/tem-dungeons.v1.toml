@@ -50,10 +50,6 @@ diagnostic_level = "standard"
     common_memory = false
     do_sample     = false
 
-[model.hpc.query_policy]
-    kind = "anchor"
-
-
 [model.lec]
     feature_dim = 10
     clamp_min   = -1.0
