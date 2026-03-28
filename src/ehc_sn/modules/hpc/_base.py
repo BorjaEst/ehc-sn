@@ -1,4 +1,10 @@
-"""Shared orchestration and state contracts for hippocampal memory modules."""
+"""Shared state, operators, and TEM transition choreography for HPC memory.
+
+This module defines the stable contracts shared by all hippocampal memory
+implementations in the repo: configuration, recurrent state, phase-1 sensory
+reads, phase-2 transition payloads, and the common orchestration implemented by
+``HPCBase``.
+"""
 
 from __future__ import annotations
 
@@ -22,8 +28,10 @@ from ehc_sn.utils.detach import DetachMixin
 class HPCCommonSettings(BaseModel, extra="forbid"):
     """Settings shared by all hippocampal memory implementations.
 
-    These fields are consumed either by ``HPCBase`` directly or by both
-    concrete memory implementations.
+    These fields define the grounded-location feature layout exposed to the
+    rest of TEM, whether cue-specific memories are shared, the sampling policy
+    applied to grounded-location beliefs, and the nested configuration for the
+    grounded-location inference module.
     """
 
     shape: list[int] = Field(
@@ -48,11 +56,12 @@ class HPCCommonSettings(BaseModel, extra="forbid"):
 # =================================================================================================
 @dataclass
 class HPCState(DetachMixin):
-    """Container for HPC state.
+    """Recurrent HPC state carried between TEM steps.
 
     Attributes:
-        grounded_belief: A ``LocationBelief`` over grounded location codes.
-        memory: Memory state with named g-cued and x-cued retrieval entries.
+        grounded_belief: Current grounded-location belief over place-like codes.
+        memory: Backend-specific memory state with cue-indexed retrieval
+            entries.
     """
 
     grounded_belief: LocationBelief
@@ -62,7 +71,18 @@ class HPCState(DetachMixin):
         self, cells: list[Tensor], uncertainty: Optional[list[Tensor]], *,
         memory: Optional[MemoryState] = None,
     ) -> "HPCState":  # fmt: skip
-        """Return a copy with updated grounded belief and optional memory."""
+        """Return a copy with updated grounded belief and optional memory.
+
+        Args:
+            cells: Grounded-location mean per frequency, each tensor shaped
+                ``(B, N_f)``.
+            uncertainty: Optional grounded-location uncertainty per frequency.
+            memory: Optional replacement memory state. When omitted, the current
+                memory is preserved.
+
+        Returns:
+            A new ``HPCState`` with the requested fields updated.
+        """
         return replace(
             self,
             grounded_belief=LocationBelief(mean=cells, uncertainty=uncertainty),
@@ -71,17 +91,17 @@ class HPCState(DetachMixin):
 
     @property
     def cells(self) -> list[Tensor]:
-        """Return grounded location features."""
+        """Return grounded-location means per frequency."""
         return self.grounded_belief.mean
 
     @property
     def uncertainty(self) -> Optional[list[Tensor]]:
-        """Return grounded location uncertainty."""
+        """Return grounded-location uncertainty per frequency."""
         return self.grounded_belief.uncertainty
 
     @property
     def memory(self) -> MemoryState:
-        """Return the two cue-indexed memory entries for this state."""
+        """Return the cue-indexed memory entries carried by this state."""
         return self._memory
 
     def replace_rows(  # --------------------------------------------------------------------------
@@ -89,7 +109,11 @@ class HPCState(DetachMixin):
         merge_memory_rows: Callable[[Tensor, MemoryEntry, MemoryEntry], MemoryEntry],
         common_memory: bool = False,
     ) -> "HPCState":  # fmt: skip
-        """Return a state where flagged rows are replaced from ``fresh``."""
+        """Return a state where flagged batch rows are replaced from ``fresh``.
+
+        This helper supports partial-reset training loops by row-wise merging
+        grounded-location beliefs and backend-specific memory entries.
+        """
         uncertainty = None
         if self.uncertainty is not None and fresh.uncertainty is not None:
             uncertainty = utils.merge_multiscale_rows(flag, self.uncertainty, fresh.uncertainty)
@@ -110,7 +134,11 @@ class HPCState(DetachMixin):
 # =================================================================================================
 @dataclass(frozen=True)
 class SensoryRead:
-    """Operator inputs for the phase-1 sensory-cued memory read."""
+    """Operator inputs for the phase-1 sensory-cued memory read.
+
+    Phase 1 resolves observation-driven recall before MEC performs its
+    correction step.
+    """
 
     state: HPCState
     read_cues: ReadCues
@@ -121,7 +149,11 @@ class SensoryRead:
 # =================================================================================================
 @dataclass
 class SensoryReadResult:
-    """Results produced by the phase-1 sensory-cued memory read."""
+    """Results produced by the phase-1 sensory-cued memory read.
+
+    ``recall`` is optional so TEM can disable sensory recall while preserving a
+    uniform handoff contract.
+    """
 
     read_cues: ReadCues
     recall: Optional[list[Tensor]]
@@ -130,7 +162,13 @@ class SensoryReadResult:
 # =================================================================================================
 @dataclass(frozen=True)
 class WritePayload:
-    """Projected values written to hippocampal memory for one TEM step."""
+    """Projected values written to hippocampal memory for one TEM step.
+
+    ``generative`` is the recalled place code used for the generative memory
+    entry, ``inference`` is the optional sensory-driven place code used for the
+    inference entry, and ``named_writes`` carries any additional backend-
+    specific bank writes.
+    """
 
     generative: list[Tensor]
     inference: Optional[list[Tensor]]
@@ -140,7 +178,11 @@ class WritePayload:
 # =================================================================================================
 @dataclass(frozen=True)
 class HPCTransition:
-    """Inputs for the full phase-2 hippocampal transition."""
+    """Inputs for the full phase-2 hippocampal transition.
+
+    The model layer assembles this payload after phase-1 sensory recall and MEC
+    prior/posterior updates are available.
+    """
 
     state: HPCState
     sensory: SensoryReadResult
@@ -156,7 +198,11 @@ class HPCTransition:
 # =================================================================================================
 @dataclass
 class HPCTransitionResult:
-    """Outputs produced by the full phase-2 hippocampal transition."""
+    """Outputs produced by the full phase-2 hippocampal transition.
+
+    The result exposes both the intermediate recalls used for TEM diagnostics
+    and the updated ``HPCState`` carried into the next timestep.
+    """
 
     sensory: SensoryReadResult
     grid_prior_recall: list[Tensor]
@@ -181,7 +227,13 @@ class HPCBase(nn.Module, ABC):
         self, config: HPCCommonSettings, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
-        """Initialize HPC base."""
+        """Initialize the shared HPC orchestration layer.
+
+        Args:
+            config: Shared HPC configuration.
+            device: Optional device used when allocating submodules.
+            dtype: Optional dtype used when allocating submodules.
+        """
         super().__init__()
         self._config = config
         self._shape = list(config.shape)
@@ -208,7 +260,17 @@ class HPCBase(nn.Module, ABC):
         self, batch_size: int, *, memory: Optional[MemoryState] = None,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> HPCState:  # fmt: skip
-        """Create an initial ``HPCState``."""
+        """Create an initial ``HPCState`` for one batch.
+
+        Args:
+            batch_size: Number of batch rows carried by the returned state.
+            memory: Optional preallocated memory state to reuse.
+            device: Optional device for newly allocated tensors.
+            dtype: Unused placeholder kept for API parity with other modules.
+
+        Returns:
+            A fresh state whose grounded-location mean is zero-initialized.
+        """
         p_init = [torch.zeros((batch_size, n), device=device) for n in self.shape]
         grounded_belief = LocationBelief(mean=p_init, uncertainty=None)
         memory = memory or self.init_memory(batch_size=batch_size, device=device)
@@ -251,7 +313,7 @@ class HPCBase(nn.Module, ABC):
         self, batch_size: int, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> MemoryState:  # fmt: skip
-        """Initialize the concrete memory state."""
+        """Initialize the concrete memory state for one batch."""
         del dtype
         return self._init_memory_impl(batch_size=batch_size, device=device)
 
@@ -264,7 +326,11 @@ class HPCBase(nn.Module, ABC):
     def set_runtime(  # ---------------------------------------------------------------------------
         self, *, eta: float, hebbian_decay: float,
     ) -> None:  # fmt: skip
-        """Apply runtime parameters required by the concrete memory system."""
+        """Apply runtime parameters required by the concrete memory system.
+
+        Some implementations consume both values directly, while others ignore
+        them to preserve a uniform model-level contract.
+        """
         self._set_runtime_impl(eta=eta, hebbian_decay=hebbian_decay)
 
     @abstractmethod
@@ -277,7 +343,11 @@ class HPCBase(nn.Module, ABC):
         self, *,
         read_cues: ReadCues, state: HPCState, role: RetrievalRole, read: MemoryRead,
     ) -> list[Tensor]:  # fmt: skip
-        """Retrieve grounded-location code from the concrete memory representation."""
+        """Retrieve a grounded-location code from the concrete memory system.
+
+        The base implementation supports cue-resolved reads only. Implementations
+        that support richer evidence payloads may override this method.
+        """
         memory = state.memory.for_role(role)
         prepared_read = self.prepare_read(read_cues=read_cues, read=read)
         if not isinstance(prepared_read, PreparedCueRead):
@@ -295,7 +365,16 @@ class HPCBase(nn.Module, ABC):
         self, key: list[Tensor], write: WritePayload,
         state: HPCState,
     ) -> HPCState:  # fmt: skip
-        """Write one TEM step into the concrete memory state."""
+        """Write one TEM step into the concrete memory state.
+
+        Args:
+            key: Multi-frequency grounded-location key used to index memory.
+            write: Flattenable values to write into the backend-specific memory.
+            state: Current HPC state whose memory will be updated.
+
+        Returns:
+            A new ``HPCState`` with unchanged grounded belief and updated memory.
+        """
         named_writes = {name: self._flatten_memory_code(value) for name, value in write.named_writes.items()}
         memory = self._update_memory_impl(
             state.memory,
@@ -332,7 +411,7 @@ class HPCBase(nn.Module, ABC):
         self, *,
         read_cues: ReadCues, read: MemoryRead,
     ) -> PreparedRead:  # fmt: skip
-        """Compose structured retrieval evidence before backend-specific memory read."""
+        """Compose structured retrieval evidence before backend-specific recall."""
         return self.read_composer.compose(read_cues=read_cues, read=read)
 
     def read_sensory(  # -------------------------------------------------------------------------
@@ -352,7 +431,12 @@ class HPCBase(nn.Module, ABC):
     def transition(  # ---------------------------------------------------------------------------
         self, transition: HPCTransition,
     ) -> HPCTransitionResult:  # fmt: skip
-        """Run phase 2 of the TEM-compatible HPC transition."""
+        """Run phase 2 of the TEM-compatible HPC transition.
+
+        Phase 2 recalls place codes from prior and posterior structural cues,
+        produces generative and inference grounded-location beliefs, and writes
+        the resulting episode into memory.
+        """
         state = transition.state
         grid_prior_recall = self.recall(
             read_cues=transition.prior_read_cues,
@@ -386,7 +470,11 @@ class HPCBase(nn.Module, ABC):
     def generative(  # ----------------------------------------------------------------------------
         self, p_g: list[Tensor], state: HPCState,
     ) -> tuple[list[Tensor], HPCState]:  # fmt: skip
-        """Return a grounded-location sample or mean from a provided distribution."""
+        """Return a generative grounded-location sample or mean.
+
+        The provided ``p_g`` is interpreted as the mean of a grounded-location
+        belief whose uncertainty is inherited from the current state.
+        """
         transition = LocationBelief(mean=p_g, uncertainty=state.uncertainty)
         p_gen = utils.sample_diag_gaussian(transition) if self.config.do_sample else transition.mean
         return p_gen, state.new(p_gen, state.uncertainty)
@@ -394,7 +482,7 @@ class HPCBase(nn.Module, ABC):
     def inference(  # -----------------------------------------------------------------------------
         self, x_: list[Tensor], g_: list[Tensor], state: HPCState,
     ) -> tuple[list[Tensor], HPCState]:  # fmt: skip
-        """Infer grounded location from projected sensory and abstract features."""
+        """Infer grounded location from projected sensory and structural cues."""
         transition = self.place_inference(x_, g_)
         p_inf = utils.sample_diag_gaussian(transition) if self.config.do_sample else transition.mean
         return p_inf, state.new(p_inf, transition.uncertainty)

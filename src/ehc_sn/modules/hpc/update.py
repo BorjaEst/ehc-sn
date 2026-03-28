@@ -1,4 +1,9 @@
-"""Write systems and learning-rule helpers for hippocampal memory modules."""
+"""Write rules and learning-layout helpers for hippocampal memory modules.
+
+This module implements the dense Hebbian update used by attractor memory, the
+append-only episodic writer used by factor memory, and the shared layout logic
+that keeps dense and factorized Hebbian updates consistent.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +19,7 @@ from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, Device, Dtype, FactorMemorySt
 
 # =================================================================================================
 class HebbianWriteSettings(BaseModel, extra="forbid"):
-    """Settings for dense Hebbian-memory write modules."""
+    """Static configuration for dense Hebbian-memory updates."""
 
     clamp_min: float = Field(
         default=-1.0,
@@ -28,7 +33,7 @@ class HebbianWriteSettings(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class EpisodicWriteSettings(BaseModel, extra="forbid"):
-    """Settings for append-only factor-memory write policy."""
+    """Static configuration for append-only factor-memory writes."""
 
     policy: Literal["append_all", "append_if_novel"] = Field(
         default="append_if_novel",
@@ -51,7 +56,7 @@ class EpisodicWriteSettings(BaseModel, extra="forbid"):
 # =================================================================================================
 @dataclass
 class HebbianWriteRuntime:
-    """Runtime hyperparameters for dense Hebbian memory."""
+    """Mutable runtime hyperparameters for dense Hebbian memory."""
 
     eta: float = 0.5
     hebbian_decay: float = 0.9999
@@ -81,7 +86,12 @@ class HebbianLayout:
     def compile_factors(  # -----------------------------------------------------------------------
         self, p_inf: Tensor, p_gen: Tensor, *, eta: float, masked: bool,
     ) -> FactorMemoryStore:  # fmt: skip
-        """Compile one Hebbian increment into factor-memory atoms."""
+        """Compile one Hebbian increment into factor-memory atoms.
+
+        When ``masked`` is true, one atom is emitted per allowed block pair in
+        the hierarchical write layout. Otherwise a single unmasked factor atom
+        represents the whole update.
+        """
         _validate_hebbian_codes(p_inf, p_gen, feature_dim=self.feature_dim)
         if not masked:
             return _compile_hebbian_factors_unmasked(p_inf, p_gen, eta=eta)
@@ -203,7 +213,11 @@ def _compile_hebbian_factors_unmasked(  # --------------------------------------
 
 # =================================================================================================
 class HebbianWrite(nn.Module):
-    """Hebbian write/update logic for grounded-location memory."""
+    """Dense Hebbian write/update logic for grounded-location memory.
+
+    The update uses the TEM-style outer-product form built from inferred and
+    generative grounded-location codes.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: HebbianWriteSettings,
@@ -289,7 +303,7 @@ class HebbianWrite(nn.Module):
 
 # =================================================================================================
 class EpisodicWrite:
-    """Append-only factor-store write policy helpers."""
+    """Append-only factor-store write policy with optional novelty gating."""
 
     def __init__(self, config: EpisodicWriteSettings) -> None:
         """Initialize append-only episodic write policy."""
@@ -304,7 +318,18 @@ class EpisodicWrite:
         self, store: FactorMemoryStore, key: Tensor, value: Tensor, *,
         bank_name: Optional[str] = None, capacity: Optional[int] = None,
     ) -> FactorMemoryStore:  # fmt: skip
-        """Append a factor-memory atom, optionally skipping rows deemed non-novel."""
+        """Append a factor-memory atom, optionally skipping non-novel rows.
+
+        Args:
+            store: Factor-memory store to update.
+            key: Flattened key tensor with shape ``(B, S)``.
+            value: Flattened value tensor with shape ``(B, S)``.
+            bank_name: Optional explicit bank override.
+            capacity: Optional maximum number of retained slots.
+
+        Returns:
+            A new ``FactorMemoryStore`` reflecting the requested append policy.
+        """
         target_bank_name = self.config.write_bank if bank_name is None else bank_name
         current_bank = store.bank(target_bank_name, fallback_to_default=(target_bank_name == DEFAULT_FACTOR_BANK_NAME))
 
@@ -352,7 +377,11 @@ class EpisodicWrite:
     def _already_stored(  # ----------------------------------------------------------------------
         self, store: FactorSlotBank, key: Tensor, value: Tensor,
     ) -> Tensor:  # fmt: skip
-        """Return which batch rows already contain a sufficiently similar atom."""
+        """Return which batch rows already contain a sufficiently similar atom.
+
+        Similarity is computed over concatenated key-value vectors using the
+        configured metric.
+        """
         if store.capacity == 0:
             return torch.zeros((key.shape[0],), dtype=torch.bool, device=key.device)
 

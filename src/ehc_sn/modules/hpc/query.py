@@ -1,6 +1,11 @@
-from __future__ import annotations
+"""Retrieval systems for hippocampal memory modules.
 
-"""Query systems for HPC memory modules."""
+This module implements the two retrieval backends used by the HPC package:
+dense attractor dynamics over a linear memory operator and attention-style
+retrieval over explicit factor-memory slots.
+"""
+
+from __future__ import annotations
 
 import math
 from collections.abc import Sequence
@@ -17,7 +22,7 @@ from ehc_sn.types import Activation, FactorMemoryView, LinearMemoryView
 
 # =================================================================================================
 class AttractorReadSettings(BaseModel, extra="forbid"):
-    """Settings for attractor dynamics modules."""
+    """Static hyperparameters for attractor-style retrieval dynamics."""
 
     kappa: float = Field(
         default=0.8,
@@ -40,7 +45,12 @@ class AttractorReadSettings(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class AttractorRead(nn.Module):
-    """Attractor retrieval dynamics over a linear memory view."""
+    """Attractor retrieval dynamics over a linear memory view.
+
+    The module performs staged pattern completion by repeatedly applying the
+    current state to a linear memory operator and mixing the result with
+    stage-specific update masks.
+    """
 
     def __init__(self, config: AttractorReadSettings) -> None:
         """Initialize attractor retrieval dynamics from the provided settings."""
@@ -56,7 +66,17 @@ class AttractorRead(nn.Module):
     def forward(  # -------------------------------------------------------------------------------
         self, query: Tensor, memory_view: LinearMemoryView, *, masks: Sequence[Tensor],
     ) -> Tensor:  # fmt: skip
-        """Run staged attractor dynamics over the provided linear memory view."""
+        """Run staged attractor dynamics over a linear memory view.
+
+        Args:
+            query: Flattened query tensor with shape ``(B, S)``.
+            memory_view: Linear memory operator applied at each attractor step.
+            masks: Stage masks broadcastable to ``(B, S)`` that determine which
+                feature blocks update at each stage.
+
+        Returns:
+            The recalled flattened code with shape ``(B, S)``.
+        """
         kappa = self.config.kappa
         state = self.activation(query)
         stage_masks = [mask.to(dtype=state.dtype) for mask in masks]
@@ -71,14 +91,14 @@ class AttractorRead(nn.Module):
     def activation(  # ----------------------------------------------------------------------------
         self, code: Tensor,
     ) -> Tensor:  # fmt: skip
-        """Clamp a code vector and apply the configured attractor activation."""
+        """Clamp a code tensor and apply the configured attractor activation."""
         code = torch.clamp(code, min=self.config.clamp_min, max=self.config.clamp_max)
         return self._activation_fn(code)
 
 
 # =================================================================================================
 class FactorReadSettings(BaseModel, extra="forbid"):
-    """Settings for explicit factor-memory reads."""
+    """Static hyperparameters for explicit factor-memory retrieval."""
 
     beta: float = Field(
         default=1.0,
@@ -110,7 +130,11 @@ class FactorReadSettings(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class FactorRead(nn.Module):
-    """Masked-softmax retrieval over explicit factor-memory slots."""
+    """Masked-softmax retrieval over explicit factor-memory slots.
+
+    The reader supports both resolved cue reads and targeted source-to-target
+    retrieval over named factor-memory banks.
+    """
 
     def __init__(self, config: FactorReadSettings) -> None:
         """Initialize factor-memory retrieval from the provided settings."""
@@ -125,7 +149,15 @@ class FactorRead(nn.Module):
     def forward(  # -------------------------------------------------------------------------------
         self, query: Tensor, memory_view: FactorMemoryView,
     ) -> Tensor:  # fmt: skip
-        """Retrieve a value vector from factor memory for the provided query."""
+        """Retrieve a flattened value code from factor memory.
+
+        Args:
+            query: Flattened query tensor with shape ``(B, S)``.
+            memory_view: Explicit factor-memory slots used for retrieval.
+
+        Returns:
+            A flattened recalled tensor with shape ``(B, S)``.
+        """
         return self._recall_iterative_resolved(
             query,
             memory_view.keys,
@@ -136,7 +168,7 @@ class FactorRead(nn.Module):
     def recall_from_evidence(  # ------------------------------------------------------------------
         self, evidence: PreparedRead, memory_view: FactorMemoryView,
     ) -> Tensor:  # fmt: skip
-        """Execute retrieval from one read-evidence payload."""
+        """Execute retrieval from one prepared read-evidence payload."""
         if isinstance(evidence, PreparedTargetRead):
             return self._recall_iterative_targeted(evidence, memory_view)
         if not isinstance(evidence, PreparedCueRead):
@@ -184,7 +216,7 @@ class FactorRead(nn.Module):
     def _recall_iterative_resolved(  # ------------------------------------------------------------
         self, anchor_query: Tensor, keys: Tensor, values: Tensor, *, valid_mask: Tensor,
     ) -> Tensor:  # fmt: skip
-        """Execute one resolved-read factor retrieval loop."""
+        """Execute iterative retrieval for one resolved cue query."""
         logits = self.compute_logits(anchor_query, keys)
         recalled = self.recall_from_logits(logits, values, valid_mask=valid_mask, fallback_query=anchor_query)
         for _ in range(self.config.iterations - 1):
@@ -194,7 +226,7 @@ class FactorRead(nn.Module):
         return recalled
 
     def _recall_iterative_targeted(self, evidence: PreparedTargetRead, memory_view: FactorMemoryView) -> Tensor:
-        """Execute the targeted source-to-target retrieval loop."""
+        """Execute iterative targeted retrieval from source cues into one bank."""
         target_bank = memory_view.bank(evidence.read_bank, fallback_to_default=True)
         source_logits = self.compose_source_logits(
             source_queries=evidence.source_queries,
@@ -229,7 +261,7 @@ class FactorRead(nn.Module):
         self, *, source_queries: dict[str, Tensor], memory_view: FactorMemoryView,
         target: str, target_shape: torch.Size,
     ) -> Tensor:  # fmt: skip
-        """Return source logits from all non-target cue families."""
+        """Return composed source logits from all non-target cue families."""
         source_logits: list[Tensor] = []
         for family, query in source_queries.items():
             if family == target:
@@ -244,7 +276,7 @@ class FactorRead(nn.Module):
         return self._compose_logits(source_logits)
 
     def _compose_logits(self, score_terms: list[Tensor]) -> Tensor:
-        """Compose source and target score terms for targeted retrieval."""
+        """Compose score terms for targeted retrieval."""
         if len(score_terms) == 1:
             return score_terms[0]
         if self.config.score_compose == "additive":
@@ -256,7 +288,7 @@ class FactorRead(nn.Module):
         return composed
 
     def _memory_count_multiplier(self, valid_mask: Tensor) -> Tensor:
-        """Return an optional sharpening multiplier based on populated slot count."""
+        """Return the optional sharpening multiplier based on populated slot count."""
         if self.config.beta_scaling == "none":
             return torch.ones((valid_mask.shape[0], 1), dtype=torch.float, device=valid_mask.device)
         valid_count = valid_mask.sum(dim=1, keepdim=True).to(dtype=torch.float)
@@ -264,7 +296,7 @@ class FactorRead(nn.Module):
         return torch.maximum(torch.log(safe_count), torch.ones_like(valid_count))
 
     def _validate_logit_shape(self, logits: Tensor, target_shape: torch.Size, *, label: str) -> None:
-        """Validate that one logit tensor is compatible with the target-bank slot axis."""
+        """Validate that one logit tensor matches the target-bank slot axis."""
         expected_shape = tuple(int(dim) for dim in target_shape)
         if tuple(int(dim) for dim in logits.shape) != expected_shape:
             raise ValueError(f"{label} logits must match target-bank slot shape {expected_shape}, got {tuple(logits.shape)}.")

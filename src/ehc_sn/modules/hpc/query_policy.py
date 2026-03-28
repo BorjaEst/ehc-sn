@@ -1,4 +1,10 @@
-"""Operator-style read requests and prepared read inputs for HPC memory."""
+"""Read-operator contracts and evidence preparation for HPC retrieval.
+
+This module separates model-level retrieval intent from backend-specific tensor
+inputs. TEM code expresses reads as named cue-family operators, and the
+composer resolves those operators into flattened evidence consumed by dense or
+factor-memory readers.
+"""
 
 from __future__ import annotations
 
@@ -12,30 +18,63 @@ from torch import Tensor, nn
 from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, Device, Dtype
 
 CueFamily: TypeAlias = str
+"""Semantic name of one retrieval cue family.
+
+Examples include ``"x"`` for sensory queries and ``"g"`` for structural or
+grid-derived queries.
+"""
 
 
 # =================================================================================================
 @dataclass(frozen=True)
 class ReadCues:
-    """Named multi-scale cues available to one memory read."""
+    """Named multi-scale cues available to one memory read.
+
+    Each family stores a multi-frequency query bundle aligned with the target
+    HPC shape. The mapping keeps cue semantics explicit at the TEM model layer
+    instead of relying on positional arguments.
+    """
 
     families: dict[CueFamily, list[Tensor]] = field(default_factory=dict)
 
     def get(self, family: Optional[CueFamily]) -> Optional[list[Tensor]]:
-        """Return one named cue family when present."""
+        """Return one cue family when present.
+
+        Args:
+            family: Cue-family name to retrieve, or ``None``.
+
+        Returns:
+            The corresponding multi-scale query when available, otherwise
+            ``None``.
+        """
         if family is None:
             return None
         return self.families.get(family)
 
     def require(self, family: CueFamily) -> list[Tensor]:
-        """Return one named cue family or raise when it is absent."""
+        """Return one cue family or raise when it is absent.
+
+        Args:
+            family: Cue-family name that must exist in ``families``.
+
+        Returns:
+            The stored multi-scale query for ``family``.
+        """
         query = self.get(family)
         if query is None:
             raise ValueError(f"Cue family '{family}' is required.")
         return query
 
     def with_family(self, family: CueFamily, query: list[Tensor]) -> "ReadCues":
-        """Return a new cue mapping with one family inserted or replaced."""
+        """Return a new cue mapping with one family inserted or replaced.
+
+        Args:
+            family: Cue-family name to insert or replace.
+            query: Multi-scale query bundle aligned with the HPC shape.
+
+        Returns:
+            A new ``ReadCues`` instance containing ``family``.
+        """
         families = dict(self.families)
         families[family] = query
         return ReadCues(families=families)
@@ -43,7 +82,11 @@ class ReadCues:
 
 # =================================================================================================
 class CueRead(BaseModel, extra="forbid"):
-    """Read memory from exactly one cue family."""
+    """Request a read resolved directly from one cue family.
+
+    ``CueRead`` is the simplest read operator: flatten one named cue bundle and
+    retrieve from the selected memory bank with no source-target composition.
+    """
 
     kind: Literal["cue"] = "cue"
     cue: CueFamily
@@ -52,7 +95,12 @@ class CueRead(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class TargetRead(BaseModel, extra="forbid"):
-    """Read one target family from one or more source families."""
+    """Request a targeted read from source families into one target family.
+
+    Targeted reads are used by factor-memory retrieval, where one or more
+    source cue families define the slot scores and an optional target-side seed
+    initializes recurrent target retrieval.
+    """
 
     kind: Literal["target"] = "target"
     sources: tuple[CueFamily, ...]
@@ -63,12 +111,19 @@ class TargetRead(BaseModel, extra="forbid"):
 
 # =================================================================================================
 MemoryRead: TypeAlias = Annotated[CueRead | TargetRead, Field(discriminator="kind")]
+"""Discriminated union of model-level memory read operators."""
 
 
 # =================================================================================================
 @dataclass(frozen=True)
 class PreparedCueRead:
-    """Prepared backend input for one cue read."""
+    """Prepared backend input for one resolved cue read.
+
+    Attributes:
+        query: Flattened cue tensor with shape ``(B, S)``.
+        read_bank: Factor-memory bank name used by readers that support named
+            banks.
+    """
 
     query: Tensor
     read_bank: str = DEFAULT_FACTOR_BANK_NAME
@@ -77,7 +132,15 @@ class PreparedCueRead:
 # =================================================================================================
 @dataclass(frozen=True)
 class PreparedTargetRead:
-    """Prepared backend input for one target read."""
+    """Prepared backend input for one targeted read request.
+
+    Attributes:
+        source_queries: Flattened source cue tensors keyed by cue family.
+        target: Cue family whose bank is treated as the retrieval target.
+        fallback_query: Fallback value used when the target bank is empty.
+        read_bank: Factor-memory bank name used for target retrieval.
+        initial_target_query: Optional flattened target-side seed.
+    """
 
     source_queries: dict[CueFamily, Tensor]
     target: CueFamily
@@ -88,17 +151,17 @@ class PreparedTargetRead:
 
 # =================================================================================================
 PreparedRead: TypeAlias = PreparedCueRead | PreparedTargetRead
+"""Backend-ready evidence payload returned by a read composer."""
 
 
 class _BaseQueryComposer(nn.Module):
-    """Base class for internal cue composers."""
+    """Internal base class for cue validation and evidence composition."""
 
     @property
     def shape(self) -> list[int]:
         """Return the multi-frequency query widths expected by this policy."""
         raise NotImplementedError
 
-    @property
     def compose(  # -------------------------------------------------------------------------------
         self, *, read_cues: ReadCues, read: MemoryRead,
     ) -> PreparedRead:  # fmt: skip
@@ -163,13 +226,24 @@ class _BaseQueryComposer(nn.Module):
 
 # =================================================================================================
 class ReadComposer(_BaseQueryComposer):
-    """Prepare backend-ready retrieval inputs from typed read operators."""
+    """Canonical composer that resolves typed read operators into tensors.
+
+    The composer validates cue-family bundles against the configured
+    multi-frequency shape and then emits flattened evidence understood by the
+    retrieval backends.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, shape: list[int], *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
-        """Initialize the internal cue composer."""
+        """Initialize a read composer for one HPC feature shape.
+
+        Args:
+            shape: Per-frequency feature widths expected in cue bundles.
+            device: Unused placeholder for parity with other builders.
+            dtype: Unused placeholder for parity with other builders.
+        """
         del device, dtype
         super().__init__()
         self._shape = list(shape)
@@ -182,7 +256,16 @@ class ReadComposer(_BaseQueryComposer):
     def compose(  # -------------------------------------------------------------------------------
         self, *, read_cues: ReadCues, read: MemoryRead,
     ) -> PreparedRead:  # fmt: skip
-        """Compose backend-ready evidence from one typed read request."""
+        """Compose backend-ready evidence from one typed read request.
+
+        Args:
+            read_cues: Available named multi-scale cue bundles.
+            read: Read operator describing how those cue bundles should be used.
+
+        Returns:
+            Either ``PreparedCueRead`` or ``PreparedTargetRead`` depending on
+            the operator variant.
+        """
         self._validate_cues(read_cues)
         self._validate_request(read)
         if isinstance(read, CueRead):
@@ -209,7 +292,11 @@ class ReadComposer(_BaseQueryComposer):
         )
 
     def _compose_source_fallback(self, source_queries: tuple[Tensor, ...]) -> Tensor:
-        """Return the fallback query used when a targeted read has no target-side seed."""
+        """Return the fallback query used when a targeted read has no seed.
+
+        With a single source family the fallback is that source query; with
+        multiple source families the fallback is their mean.
+        """
         if len(source_queries) == 1:
             return source_queries[0]
         return torch.stack(list(source_queries), dim=0).mean(dim=0)
@@ -220,7 +307,7 @@ def build_read_composer(  # ----------------------------------------------------
     shape: list[int], *,
     device: Optional[Device] = None, dtype: Optional[Dtype] = None,
 ) -> ReadComposer:  # fmt: skip
-    """Construct the internal cue composer."""
+    """Construct the canonical cue composer for one HPC shape."""
     return ReadComposer(shape, device=device, dtype=dtype)
 
 

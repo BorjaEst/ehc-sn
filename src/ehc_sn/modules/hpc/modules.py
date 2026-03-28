@@ -1,4 +1,9 @@
-"""Concrete hippocampal memory modules composed from shared HPC layers."""
+"""Concrete hippocampal memory implementations composed from shared HPC layers.
+
+The module exposes the two supported HPC realizations in the repo: an
+attractor-style dense Hebbian memory and an attention-style explicit
+factor-memory system.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ from ehc_sn.types import Device, Dtype, MemoryEntry, MemoryState, RetrievalRole
 
 # =================================================================================================
 class HPCAttractorSettings(HPCCommonSettings):
-    """Settings for the attractor-based hippocampal implementation."""
+    """Configuration for dense Hebbian memory with attractor recall."""
 
     read: AttractorReadSettings = Field(
         default_factory=AttractorReadSettings,
@@ -36,7 +41,7 @@ class HPCAttractorSettings(HPCCommonSettings):
 
 # =================================================================================================
 class HPCAttentionSettings(HPCCommonSettings):
-    """Settings for the attention-based hippocampal implementation."""
+    """Configuration for explicit factor memory with attention-style recall."""
 
     read: FactorReadSettings = Field(
         default_factory=FactorReadSettings,
@@ -54,13 +59,27 @@ class HPCAttentionSettings(HPCCommonSettings):
 
 # =================================================================================================
 class HPCAttractor(HPCBase):
-    """Attractor-based hippocampal memory with Hebbian write dynamics."""
+    """Attractor-based hippocampal memory with dense Hebbian write dynamics.
+
+    This implementation stores cue-indexed memories as dense linear operators
+    and retrieves place codes via staged attractor dynamics.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, n_stages: int, f_initial: list[float], config: HPCAttractorSettings, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
-        """Initialize attractor retrieval, Hebbian writes, and masked update helpers."""
+        """Initialize attractor retrieval, Hebbian writes, and update masks.
+
+        Args:
+            n_stages: Number of hierarchical stages used by the retrieval and
+                write masks.
+            f_initial: Frequency ordering used to build hierarchical Hebbian
+                connectivity.
+            config: Attractor-memory configuration.
+            device: Optional device used when allocating submodules.
+            dtype: Optional dtype used when allocating submodules.
+        """
         super().__init__(config, device=device, dtype=dtype)
 
         masks = utils.update_to_masks(self.shape, update=utils.make_update_hierarchical(n_stages, self.n_freq))
@@ -125,13 +144,21 @@ class HPCAttractor(HPCBase):
 
 # =================================================================================================
 class HPCAttention(HPCBase):
-    """Attention-based hippocampal memory with explicit factor slots."""
+    """Attention-based hippocampal memory with explicit factor slots.
+
+    This implementation stores episodes as explicit key-value factors and
+    supports both resolved cue reads and targeted source-to-target retrieval.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, n_stages: int, f_initial: list[float], config: HPCAttentionSettings, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
-        """Initialize factor-slot retrieval and write modules."""
+        """Initialize factor-slot retrieval and append-only write modules.
+
+        ``n_stages`` and ``f_initial`` are accepted for constructor parity with
+        ``HPCAttractor`` but are not currently used by the attention backend.
+        """
         del n_stages, f_initial
         super().__init__(config, device=device, dtype=dtype)
         self.retrieval_module = FactorRead(config.read)
@@ -202,8 +229,13 @@ class HPCAttention(HPCBase):
 
     def recall(  # --------------------------------------------------------------------------------
         self, *, read_cues: ReadCues, state: HPCState, role: RetrievalRole, read: MemoryRead,
-    ):  # fmt: skip
-        """Recall from factor memory through composer-produced retrieval evidence."""
+    ) -> list[Tensor]:  # fmt: skip
+        """Recall from factor memory using composer-produced retrieval evidence.
+
+        Unlike the base implementation, this method accepts both resolved cue
+        reads and targeted read operators because the factor-memory reader can
+        consume either evidence form directly.
+        """
         memory = state.memory.for_role(role)
         evidence = self.prepare_read(read_cues=read_cues, read=read)
         recalled = self.retrieval_module.recall_from_evidence(evidence, memory.as_factor_view())

@@ -1,12 +1,14 @@
-"""HPC grounded-location distribution.
+"""Grounded-location inference for hippocampal memory.
 
-This module infers a distribution over grounded location codes (place-cell-like)
-from projected sensory features and projected abstract location.
+This module combines projected sensory features and projected abstract-location
+features into a grounded-location belief over place-like codes. The resulting
+``LocationBelief`` is the HPC-side distribution carried through the TEM memory
+cycle.
 
 Notes:
-    The uncertainty head is conceptually reusable across modules (e.g. MEC).
-    If refactoring towards a shared "LocationBelief uncertainty" component, this
-    module is a likely consumer.
+    The uncertainty head is conceptually reusable across modules. If the repo
+    later factors out shared ``LocationBelief`` uncertainty prediction, this
+    module is a primary candidate consumer.
 """
 
 from __future__ import annotations
@@ -24,7 +26,12 @@ from ehc_sn.types import Activation, Device, Dtype, LocationBelief
 
 # =================================================================================================
 class PlaceInferenceSettings(BaseModel, extra="forbid"):
-    """Settings for place-inference modules."""
+    """Static configuration for grounded-location inference.
+
+    The settings define the nonlinearity applied to the multiplicative sensory
+    and structural interaction, together with the activation clamp used for
+    numerical stability before uncertainty prediction.
+    """
 
     activation: Activation = Field(
         default="leaky_relu",
@@ -43,17 +50,24 @@ class PlaceInferenceSettings(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class PlaceInference(nn.Module):
-    """Infer grounded-location beliefs from sensory and abstract codes."""
+    """Infer grounded-location beliefs from sensory and abstract-location cues.
+
+    The module implements the HPC-side fusion step that maps projected sensory
+    features ``x_`` and projected structural features ``g_`` into a
+    ``LocationBelief`` over grounded, place-like codes.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, shape: list[int], config: PlaceInferenceSettings,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
-        """Initialize place inference.
+        """Initialize grounded-location inference.
 
         Args:
-            shape: Grounded-location feature sizes per frequency module.
-            config: Place-inference config.
+            shape: Grounded-location feature widths per frequency module.
+            config: Static inference configuration.
+            device: Optional allocation device for parameter tensors.
+            dtype: Optional floating-point dtype for parameter tensors.
         """
         super().__init__()
         self._config = config
@@ -85,14 +99,14 @@ class PlaceInference(nn.Module):
         """Infer grounded-location mean and uncertainty.
 
         Args:
-            x_: Projected sensory features per frequency module.
-            g_: Projected abstract location per frequency module.
+            x_: Projected sensory features per frequency module. Each tensor has
+                shape ``(B, N_f)``.
+            g_: Projected abstract-location features per frequency module. Each
+                tensor has shape ``(B, N_f)``.
 
         Returns:
-            A ``LocationBelief`` with:
-
-            - ``mean``: inferred grounded-location mean per frequency
-            - ``uncertainty``: inferred grounded-location uncertainty per frequency
+            A ``LocationBelief`` whose ``mean`` and ``uncertainty`` are lists of
+            per-frequency tensors with shape ``(B, N_f)``.
         """
         mu_p = [self.activation(g_[f] * x_[f]) for f in range(self.n_freq)]
         sigma_p = self.uncertainty_mlp(mu_p)
@@ -101,7 +115,15 @@ class PlaceInference(nn.Module):
     def activation(  # ----------------------------------------------------------------------------
         self, p: Tensor,
     ) -> Tensor:  # fmt: skip
-        """Apply the configured activation with clamping."""
+        """Clamp and activate one grounded-location tensor.
+
+        Args:
+            p: One per-frequency grounded-location pre-activation tensor with
+                shape ``(B, N_f)``.
+
+        Returns:
+            The clamped and activated tensor with the same shape as ``p``.
+        """
         p = torch.clamp(p, min=self.config.clamp_min, max=self.config.clamp_max)
         return self._activation_fn(p)
 

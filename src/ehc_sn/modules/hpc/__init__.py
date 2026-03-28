@@ -1,4 +1,9 @@
-"""Public API for hippocampal memory modules."""
+"""Public exports for the TEM hippocampal memory subsystem.
+
+The package exposes the concrete HPC implementations, their configuration
+models, recurrent state carriers, phase-transition payloads, and typed
+read-operator contracts used by TEM model code.
+"""
 
 from ehc_sn.modules.hpc._base import HPCState, HPCTransition, HPCTransitionResult, SensoryRead, SensoryReadResult, WritePayload
 from ehc_sn.modules.hpc.modules import HPCAttention, HPCAttentionSettings, HPCAttractor, HPCAttractorSettings

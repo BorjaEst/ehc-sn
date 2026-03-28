@@ -1,4 +1,9 @@
-"""Store settings, backends, and compatibility validation for HPC memory modules."""
+"""Store settings and backend adapters for HPC memory representations.
+
+This module defines the configuration models and runtime backends that connect
+high-level HPC write and recall logic to concrete dense or factorized memory
+stores.
+"""
 
 from __future__ import annotations
 
@@ -14,12 +19,20 @@ from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, DenseMemoryStore, Device, Fac
 
 # =================================================================================================
 class LinearStoreSettings(BaseModel, extra="forbid"):
-    """Settings for Hebbian stores that must expose a linear operator."""
+    """Marker settings for stores that only need linear-operator compatibility.
+
+    The model is intentionally empty because dense Hebbian stores currently do
+    not expose additional static store parameters beyond the write layout.
+    """
 
 
 # =================================================================================================
 class FactorStoreSettings(BaseModel, extra="forbid"):
-    """Settings for explicit factor-memory stores."""
+    """Static configuration for explicit factor-memory stores.
+
+    These settings control optional slot truncation and the allocation of
+    auxiliary named banks alongside the default factor-memory bank.
+    """
 
     memory_capacity: Optional[int] = Field(
         default=None,
@@ -44,7 +57,7 @@ class FactorStoreSettings(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class StoreBackend(Protocol):
-    """Behavior-bearing backend for one memory-entry representation family."""
+    """Runtime backend contract for one memory-entry representation family."""
 
     def init_store(  # ---------------------------------------------------------------------------
         self, batch_size: int, *, device: Optional[Device] = None,
@@ -77,7 +90,11 @@ class AppendStoreBackend(StoreBackend, Protocol):
 
 # =================================================================================================
 class DenseHebbianStoreBackend(nn.Module):
-    """Dense-store backend for Hebbian memory writes."""
+    """Dense-store backend for Hebbian memory writes.
+
+    The backend owns dense-store allocation, masked Hebbian updates, and row
+    merges used by partial-reset training.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, write_rule: HebbianWriteRule, *, layout: HebbianLayout,
@@ -115,7 +132,11 @@ class DenseHebbianStoreBackend(nn.Module):
 
 # =================================================================================================
 class FactorHebbianStoreBackend:
-    """Factor-store backend for Hebbian memory writes."""
+    """Factor-store backend for Hebbian memory writes.
+
+    This backend preserves Hebbian updates in factorized form when possible,
+    materializing a dense operator only when post-clamp exactness requires it.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, write_rule: HebbianWriteRule, *, layout: HebbianLayout,
@@ -165,7 +186,11 @@ class FactorHebbianStoreBackend:
 
 # =================================================================================================
 class FactorAppendStoreBackend:
-    """Factor-store backend for append-only episodic writes."""
+    """Factor-store backend for append-only episodic writes.
+
+    The backend allocates explicit slot memories and delegates append semantics,
+    novelty gating, and named-bank selection to the episodic write policy.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
         self, write_system: object, *, feature_dim: int, settings: FactorStoreSettings,
