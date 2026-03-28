@@ -323,7 +323,9 @@ class HPCBase(nn.Module, ABC):
         return self._merge_memory_rows_impl(flag, current, fresh)
 
     @abstractmethod
-    def _merge_memory_rows_impl(self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry) -> MemoryEntry:
+    def _merge_memory_rows_impl(  # ---------------------------------------------------------------
+        self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
+    ) -> MemoryEntry:  # fmt: skip
         """Merge representation-specific memory rows during partial reset."""
 
     def prepare_read(  # -------------------------------------------------------------------------

@@ -79,7 +79,9 @@ class AppendStoreBackend(StoreBackend, Protocol):
 class DenseHebbianStoreBackend(nn.Module):
     """Dense-store backend for Hebbian memory writes."""
 
-    def __init__(self, write_rule: HebbianWriteRule, *, layout: HebbianLayout) -> None:
+    def __init__(  # ------------------------------------------------------------------------------
+        self, write_rule: HebbianWriteRule, *, layout: HebbianLayout,
+    ) -> None:  # fmt: skip
         """Bind dense Hebbian allocation, write, and merge behavior to one backend."""
         super().__init__()
         self._write_rule = write_rule
@@ -165,7 +167,9 @@ class FactorHebbianStoreBackend:
 class FactorAppendStoreBackend:
     """Factor-store backend for append-only episodic writes."""
 
-    def __init__(self, write_system: object, *, feature_dim: int, settings: FactorStoreSettings) -> None:
+    def __init__(  # ------------------------------------------------------------------------------
+        self, write_system: object, *, feature_dim: int, settings: FactorStoreSettings,
+    ) -> None:  # fmt: skip
         """Bind factor allocation, append, and merge behavior to one backend."""
         self._write_system = write_system
         self._feature_dim = int(feature_dim)

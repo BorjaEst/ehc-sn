@@ -57,10 +57,12 @@ class HebbianWriteRuntime:
     hebbian_decay: float = 0.9999
 
 
+# =================================================================================================
 HebbianBlockPair = tuple[int, int, slice, slice]
 """One allowed block pair in the hierarchical Hebbian write layout."""
 
 
+# =================================================================================================
 @dataclass(frozen=True)
 class HebbianLayout:
     """Canonical masked Hebbian write layout shared by dense and factor stores.
@@ -76,14 +78,9 @@ class HebbianLayout:
     block_pairs: tuple[HebbianBlockPair, ...]
     feature_dim: int
 
-    def compile_factors(
-        self,
-        p_inf: Tensor,
-        p_gen: Tensor,
-        *,
-        eta: float,
-        masked: bool,
-    ) -> FactorMemoryStore:
+    def compile_factors(  # -----------------------------------------------------------------------
+        self, p_inf: Tensor, p_gen: Tensor, *, eta: float, masked: bool,
+    ) -> FactorMemoryStore:  # fmt: skip
         """Compile one Hebbian increment into factor-memory atoms."""
         _validate_hebbian_codes(p_inf, p_gen, feature_dim=self.feature_dim)
         if not masked:
@@ -106,6 +103,7 @@ class HebbianLayout:
         return FactorMemoryStore(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients)
 
 
+# =================================================================================================
 class HebbianWriteRule(Protocol):
     """Explicit collaborator contract required by Hebbian store backends."""
 
@@ -123,7 +121,10 @@ class HebbianWriteRule(Protocol):
         """Clamp one dense memory tensor to the configured numeric range."""
 
 
-def _hebbian_allow_matrix(n_stages: int, shape: list[int], f_initial: list[float]) -> Tensor:
+# =================================================================================================
+def _hebbian_allow_matrix(  # ---------------------------------------------------------------------
+    n_stages: int, shape: list[int], f_initial: list[float],
+) -> Tensor:  # fmt: skip
     """Return module-level Hebbian connectivity for the configured layout."""
     n_freq = len(shape)
     if len(f_initial) != n_freq:
@@ -139,7 +140,10 @@ def _hebbian_allow_matrix(n_stages: int, shape: list[int], f_initial: list[float
     return (~same_type) | low_to_high
 
 
-def _hebbian_offsets(shape: list[int]) -> list[int]:
+# =================================================================================================
+def _hebbian_offsets(  # --------------------------------------------------------------------------
+    shape: list[int],
+) -> list[int]:  # fmt: skip
     """Return cumulative feature offsets for a multi-frequency code shape."""
     offsets = [0]
     for width in shape:
@@ -147,7 +151,10 @@ def _hebbian_offsets(shape: list[int]) -> list[int]:
     return offsets
 
 
-def build_hebbian_layout(n_stages: int, shape: list[int], f_initial: list[float]) -> HebbianLayout:
+# =================================================================================================
+def build_hebbian_layout(  # ----------------------------------------------------------------------
+    n_stages: int, shape: list[int], f_initial: list[float],
+) -> HebbianLayout:  # fmt: skip
     """Return the canonical masked Hebbian write layout for one HPC configuration."""
     allow = _hebbian_allow_matrix(n_stages, shape, f_initial)
     offsets = _hebbian_offsets(shape)
@@ -167,7 +174,10 @@ def build_hebbian_layout(n_stages: int, shape: list[int], f_initial: list[float]
     return HebbianLayout(dense_mask=dense_mask, block_pairs=tuple(block_pairs), feature_dim=feature_dim)
 
 
-def _validate_hebbian_codes(p_inf: Tensor, p_gen: Tensor, *, feature_dim: Optional[int] = None) -> None:
+# =================================================================================================
+def _validate_hebbian_codes(  # -------------------------------------------------------------------
+    p_inf: Tensor, p_gen: Tensor, *, feature_dim: Optional[int] = None,
+) -> None:  # fmt: skip
     """Validate one pair of flattened Hebbian codes."""
     if p_inf.ndim != 2 or p_gen.ndim != 2:
         raise ValueError("p_inf and p_gen must both be rank-2 `(B, S)` tensors.")
@@ -177,7 +187,10 @@ def _validate_hebbian_codes(p_inf: Tensor, p_gen: Tensor, *, feature_dim: Option
         raise ValueError(f"Expected flattened code width {feature_dim}, got {int(p_inf.shape[1])}.")
 
 
-def _compile_hebbian_factors_unmasked(p_inf: Tensor, p_gen: Tensor, *, eta: float) -> FactorMemoryStore:
+# =================================================================================================
+def _compile_hebbian_factors_unmasked(  # ---------------------------------------------------------
+    p_inf: Tensor, p_gen: Tensor, *, eta: float
+) -> FactorMemoryStore:  # fmt: skip
     """Compile one unmasked Hebbian increment into a single factor-memory atom."""
     _validate_hebbian_codes(p_inf, p_gen)
     a_t = p_inf + p_gen
@@ -267,7 +280,9 @@ class HebbianWrite(nn.Module):
             update = update * mask.to(device=memory.device, dtype=memory.dtype)
         return self.clamp_memory(hebbian_decay * memory + eta * update)
 
-    def clamp_memory(self, memory: Tensor) -> Tensor:
+    def clamp_memory(  # --------------------------------------------------------------------------
+        self, memory: Tensor,
+    ) -> Tensor:  # fmt: skip
         """Clamp dense memory weights to the configured numeric range."""
         return torch.clamp(memory, min=self._config.clamp_min, max=self._config.clamp_max)
 
