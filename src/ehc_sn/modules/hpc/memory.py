@@ -112,7 +112,7 @@ class DenseHebbianStoreBackend(nn.Module):
 
 
 # =================================================================================================
-class FactorHebbianStoreBackend(nn.Module):
+class FactorHebbianStoreBackend:
     """Factor-store backend for Hebbian memory writes."""
 
     def __init__(  # ------------------------------------------------------------------------------
@@ -162,7 +162,7 @@ class FactorHebbianStoreBackend(nn.Module):
 
 
 # =================================================================================================
-class FactorAppendStoreBackend(nn.Module):
+class FactorAppendStoreBackend:
     """Factor-store backend for append-only episodic writes."""
 
     def __init__(self, write_system: object, *, feature_dim: int, settings: FactorStoreSettings) -> None:
