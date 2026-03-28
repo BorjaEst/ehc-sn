@@ -56,10 +56,13 @@ diagnostic_level = "standard"
     recurrence           = "multiplicative"
 
 [model.hpc.write]
-    memory_capacity    = 512
     policy             = "append_if_novel"
     novelty_similarity = "cosine"
     novelty_threshold  = 0.95
+    write_bank         = "default"
+
+[model.hpc.store]
+    memory_capacity    = 512
     bank_names         = ["c"]
 
 [model.lec]

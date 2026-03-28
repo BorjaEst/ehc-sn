@@ -1,4 +1,4 @@
-"""Write systems and store-application strategies for hippocampal memory modules."""
+"""Write systems and learning-rule helpers for hippocampal memory modules."""
 
 from __future__ import annotations
 
@@ -9,26 +9,13 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
-from ehc_sn.modules.hpc import memory
-from ehc_sn.modules.hpc.memory import (
-    AppendStoreComponents,
-    DenseMemoryResetStrategy,
-    DenseMemoryStoreFactory,
-    FactorMemoryResetStrategy,
-    FactorMemoryStoreFactory,
-    HebbianStoreComponents,
-)
-from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, DenseMemoryStore, Device, Dtype, FactorMemoryStore, FactorSlotBank, MemoryEntry
+from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, Device, Dtype, FactorMemoryStore, FactorSlotBank
 
 
 # =================================================================================================
 class HebbianWriteSettings(BaseModel, extra="forbid"):
     """Settings for dense Hebbian-memory write modules."""
 
-    emit_store: Literal["dense", "factor"] = Field(
-        default="dense",
-        description="Internal storage form used after each Hebbian write update.",
-    )
     clamp_min: float = Field(
         default=-1.0,
         description="Minimum clamp value for Hebbian memory weights.",
@@ -41,13 +28,8 @@ class HebbianWriteSettings(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class EpisodicWriteSettings(BaseModel, extra="forbid"):
-    """Settings for append-only factor-memory writes."""
+    """Settings for append-only factor-memory write policy."""
 
-    memory_capacity: Optional[int] = Field(
-        default=None,
-        ge=1,
-        description="Maximum number of factor slots retained; unset keeps all stored steps.",
-    )
     policy: Literal["append_all", "append_if_novel"] = Field(
         default="append_if_novel",
         description="Write policy applied to factor-memory insertion.",
@@ -59,10 +41,6 @@ class EpisodicWriteSettings(BaseModel, extra="forbid"):
     novelty_threshold: float = Field(
         default=0.95,
         description="Similarity threshold above which a candidate is treated as already stored.",
-    )
-    bank_names: tuple[str, ...] = Field(
-        default=(),
-        description="Optional additional named factor-memory banks allocated alongside the default bank.",
     )
     write_bank: str = Field(
         default=DEFAULT_FACTOR_BANK_NAME,
@@ -157,89 +135,11 @@ class HebbianWrite(nn.Module):
 
 
 # =================================================================================================
-class DenseHebbianStoreApplier(nn.Module):
-    """Apply Hebbian writes directly to dense memory stores."""
-
-    def __init__(self, write_system: HebbianWrite, *, update_mask: Tensor) -> None:
-        """Bind dense Hebbian updates to a shared write system and optional mask."""
-        super().__init__()
-        self._write_system = write_system
-        self.register_buffer("update_mask", update_mask, persistent=False)
-
-    def apply(  # -------------------------------------------------------------------------------
-        self, store: MemoryEntry, key: Tensor, value: Tensor, *, masked: bool,
-    ) -> DenseMemoryStore:  # fmt: skip
-        """Apply a dense Hebbian update to the provided memory entry."""
-        if not isinstance(store, DenseMemoryStore):
-            raise TypeError("DenseHebbianStoreApplier expected dense memory stores.")
-        mask = self.update_mask if masked else None
-        return DenseMemoryStore(matrix=self._write_system(store.matrix, key, value, mask=mask))
-
-
-# =================================================================================================
-class FactorHebbianStoreApplier:
-    """Apply Hebbian writes while storing the result as exact factor atoms."""
-
-    def __init__(  # ------------------------------------------------------------------------------
-        self, write_system: HebbianWrite, *,
-        n_stages: int, shape: list[int], f_initial: list[float],
-    ) -> None:  # fmt: skip
-        """Bind factorized Hebbian updates to the configured hierarchy metadata."""
-        self._write_system = write_system
-        self._n_stages = int(n_stages)
-        self._shape = list(shape)
-        self._f_initial = list(f_initial)
-
-    def apply(  # -------------------------------------------------------------------------------
-        self, store: MemoryEntry, key: Tensor, value: Tensor, *, masked: bool,
-    ) -> FactorMemoryStore:  # fmt: skip
-        """Apply a Hebbian update and keep the resulting store in factor form."""
-        if not isinstance(store, FactorMemoryStore):
-            raise TypeError("FactorHebbianStoreApplier expected factor memory stores.")
-
-        runtime = self._write_system.runtime
-        decayed = memory.decay_factor_memory(store, runtime.hebbian_decay)
-        if masked:
-            increment = compile_masked_hebbian_factors(key, value, eta=runtime.eta, n_stages=self._n_stages, shape=self._shape, f_initial=self._f_initial)  # fmt: skip
-        else:
-            increment = compile_hebbian_factors(key, value, eta=runtime.eta)
-
-        updated = memory.concat_factor_memory(decayed, increment)
-        dense_matrix = memory.factor_memory_to_dense(updated)
-        clamped = self._write_system.clamp_memory(dense_matrix)
-        if torch.equal(clamped, dense_matrix):
-            return updated
-        return memory.dense_memory_to_factor(clamped)
-
-
-# =================================================================================================
-def build_hebbian_store_components(  # ------------------------------------------------------------
-    write_system: HebbianWrite, *,
-    emit_store: Literal["dense", "factor"], feature_dim: int, update_mask: Tensor,
-    n_stages: int, shape: list[int], f_initial: list[float],
-) -> HebbianStoreComponents:  # fmt: skip
-    """Construct store factory, applier, and reset strategy for Hebbian memory."""
-    if emit_store == "factor":
-        return HebbianStoreComponents(
-            store_factory=FactorMemoryStoreFactory(feature_dim=feature_dim),
-            store_applier=FactorHebbianStoreApplier(write_system, n_stages=n_stages, shape=shape, f_initial=f_initial),
-            reset_strategy=FactorMemoryResetStrategy(),
-        )
-
-    return HebbianStoreComponents(
-        store_factory=DenseMemoryStoreFactory(feature_dim=feature_dim),
-        store_applier=DenseHebbianStoreApplier(write_system, update_mask=update_mask),
-        reset_strategy=DenseMemoryResetStrategy(),
-    )
-
-
-# =================================================================================================
 class EpisodicWrite:
-    """Append-only factor-store allocation and write helpers."""
+    """Append-only factor-store write policy helpers."""
 
-    def __init__(self, shape: list[int], config: EpisodicWriteSettings) -> None:
-        """Initialize append-only episodic memory with the configured capacity policy."""
-        self._shape = list(shape)
+    def __init__(self, config: EpisodicWriteSettings) -> None:
+        """Initialize append-only episodic write policy."""
         self._config = config
 
     @property
@@ -247,36 +147,9 @@ class EpisodicWrite:
         """Return static episodic-write settings."""
         return self._config
 
-    @property
-    def memory_capacity(self) -> Optional[int]:
-        """Return the maximum retained atom count, if one is configured."""
-        return self.config.memory_capacity
-
-    def init_store(  # ---------------------------------------------------------------------------
-        self, batch_size: int, *,
-        device: Optional[Device] = None,
-    ) -> FactorMemoryStore:  # fmt: skip
-        """Allocate an empty episodic factor store for the given batch size."""
-        feature_dim = sum(self._shape)
-        capacity = 0 if self.memory_capacity is None else int(self.memory_capacity)
-        keys = torch.zeros((batch_size, capacity, feature_dim), dtype=torch.float, device=device)
-        values = torch.zeros((batch_size, capacity, feature_dim), dtype=torch.float, device=device)
-        valid_mask = torch.zeros((batch_size, capacity), dtype=torch.bool, device=device)
-        coefficients = torch.zeros((batch_size, capacity), dtype=torch.float, device=device)
-        banks = {
-            name: FactorSlotBank(
-                keys=keys.clone(),
-                values=values.clone(),
-                valid_mask=valid_mask.clone(),
-                coefficients=coefficients.clone(),
-            )
-            for name in self.config.bank_names
-            if name != DEFAULT_FACTOR_BANK_NAME
-        }
-        return FactorMemoryStore(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients, banks=banks)
-
     def append(  # -------------------------------------------------------------------------------
-        self, store: FactorMemoryStore, key: Tensor, value: Tensor, *, bank_name: Optional[str] = None,
+        self, store: FactorMemoryStore, key: Tensor, value: Tensor, *,
+        bank_name: Optional[str] = None, capacity: Optional[int] = None,
     ) -> FactorMemoryStore:  # fmt: skip
         """Append a factor-memory atom, optionally skipping rows deemed non-novel."""
         target_bank_name = self.config.write_bank if bank_name is None else bank_name
@@ -296,12 +169,12 @@ class EpisodicWrite:
         coefficients = torch.cat((current_bank.coefficient_tensor(), keep_row.unsqueeze(1).to(dtype=value.dtype)), dim=1)
         valid_mask = torch.cat((current_bank.valid_mask, keep_row.unsqueeze(1)), dim=1)
 
-        if self.memory_capacity is not None:
-            capacity = int(self.memory_capacity)
-            keys = keys[:, -capacity:, :]
-            values = values[:, -capacity:, :]
-            coefficients = coefficients[:, -capacity:]
-            valid_mask = valid_mask[:, -capacity:]
+        if capacity is not None:
+            limit = int(capacity)
+            keys = keys[:, -limit:, :]
+            values = values[:, -limit:, :]
+            coefficients = coefficients[:, -limit:]
+            valid_mask = valid_mask[:, -limit:]
 
         updated_bank = FactorSlotBank(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients)
         if target_bank_name == DEFAULT_FACTOR_BANK_NAME:
@@ -340,51 +213,6 @@ class EpisodicWrite:
         invalid_fill = torch.full_like(similarity, torch.finfo(similarity.dtype).min)
         similarity = torch.where(store.valid_mask, similarity, invalid_fill)
         return similarity.max(dim=1).values >= self.config.novelty_threshold
-
-
-# =================================================================================================
-class FactorAppendStoreFactory:
-    """Allocate empty factor stores through the configured append-write system."""
-
-    def __init__(self, write_system: EpisodicWrite) -> None:
-        """Bind the append-store factory to an episodic write system."""
-        self._write_system = write_system
-
-    def init_store(  # ---------------------------------------------------------------------------
-        self, batch_size: int, *,
-        device: Optional[Device] = None,
-    ) -> FactorMemoryStore:  # fmt: skip
-        """Allocate an empty factor store using the bound episodic write system."""
-        return self._write_system.init_store(batch_size, device=device)
-
-
-# =================================================================================================
-class FactorAppendStoreApplier:
-    """Apply append writes to factor memory stores."""
-
-    def __init__(self, write_system: EpisodicWrite) -> None:
-        """Bind append-store updates to an episodic write system."""
-        self._write_system = write_system
-
-    def apply(  # -------------------------------------------------------------------------------
-        self, store: MemoryEntry, key: Tensor, value: Tensor, *, bank_name: Optional[str] = None,
-    ) -> FactorMemoryStore:  # fmt: skip
-        """Append a factor-memory atom to the provided memory entry."""
-        if not isinstance(store, FactorMemoryStore):
-            raise TypeError("FactorAppendStoreApplier expected factor memory stores.")
-        return self._write_system.append(store, key, value, bank_name=bank_name)
-
-
-# =================================================================================================
-def build_factor_store_components(  # -------------------------------------------------------------
-    write_system: EpisodicWrite,
-) -> AppendStoreComponents:  # fmt: skip
-    """Construct store factory, applier, and reset strategy for episodic memory."""
-    return AppendStoreComponents(
-        store_factory=FactorAppendStoreFactory(write_system),
-        store_applier=FactorAppendStoreApplier(write_system),
-        reset_strategy=FactorMemoryResetStrategy(),
-    )
 
 
 # =================================================================================================
@@ -469,10 +297,7 @@ def compile_masked_hebbian_factors(  # -----------------------------------------
 
 # =================================================================================================
 __all__ = [
-    "DenseHebbianStoreApplier", "FactorAppendStoreApplier", "FactorAppendStoreFactory",
-    "FactorHebbianStoreApplier",
     "EpisodicWrite", "EpisodicWriteSettings",
     "HebbianWrite", "HebbianWriteSettings", "HebbianWriteRuntime",
-    "build_factor_store_components", "build_hebbian_store_components",
     "compile_hebbian_factors", "compile_masked_hebbian_factors", "hebbian_block_pairs",
 ]  # fmt: skip

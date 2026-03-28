@@ -50,6 +50,16 @@ diagnostic_level = "standard"
     common_memory = false
     do_sample     = false
 
+[model.hpc.read]
+    kappa = 0.8
+
+[model.hpc.write]
+    clamp_min = -1.0
+    clamp_max = 1.0
+
+[model.hpc.store]
+    representation = "dense"
+
 [model.lec]
     feature_dim = 10
     clamp_min   = -1.0
