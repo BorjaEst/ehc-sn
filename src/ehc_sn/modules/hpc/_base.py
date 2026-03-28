@@ -204,6 +204,16 @@ class HPCBase(nn.Module, ABC):
         """Return the number of HPC frequency modules."""
         return self._n_freq
 
+    def init_state(  # ----------------------------------------------------------------------------
+        self, batch_size: int, *, memory: Optional[MemoryState] = None,
+        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
+    ) -> HPCState:  # fmt: skip
+        """Create an initial ``HPCState``."""
+        p_init = [torch.zeros((batch_size, n), device=device) for n in self.shape]
+        grounded_belief = LocationBelief(mean=p_init, uncertainty=None)
+        memory = memory or self.init_memory(batch_size=batch_size, device=device)
+        return HPCState(grounded_belief=grounded_belief, _memory=memory)
+
     def _flatten_memory_code(  # ------------------------------------------------------------------
         self, code: list[Tensor],
     ) -> Tensor:  # fmt: skip
@@ -237,48 +247,6 @@ class HPCBase(nn.Module, ABC):
 
         return list(torch.split(flat_code, split_size_or_sections=self.shape, dim=1))
 
-    @abstractmethod
-    def _init_memory_impl(  # ---------------------------------------------------------------------
-        self, batch_size: int, *, device: Optional[Device] = None,
-    ) -> MemoryState:  # fmt: skip
-        """Initialize the concrete memory representation for a batch."""
-
-    @abstractmethod
-    def _set_runtime_impl(  # ---------------------------------------------------------------------
-        self, *, eta: float, hebbian_decay: float,
-    ) -> None:  # fmt: skip
-        """Apply runtime write parameters to the concrete memory system."""
-
-    @abstractmethod
-    def _recall_flat_impl(  # ---------------------------------------------------------------------
-        self, query: Tensor, memory: MemoryEntry, *, role: RetrievalRole,
-    ) -> Tensor:  # fmt: skip
-        """Return a flattened recalled code with shape ``(B, S)``."""
-
-    @abstractmethod
-    def _update_memory_impl(  # -------------------------------------------------------------------
-        self, memory: MemoryState, key: Tensor,
-        g_value: Tensor, x_value: Optional[Tensor], named_writes: dict[str, Tensor],
-    ) -> MemoryState:  # fmt: skip
-        """Write one TEM step into the concrete memory state.
-
-        All tensors are flattened memory-space tensors with shape ``(B, S)``.
-        """
-
-    @abstractmethod
-    def _merge_memory_rows_impl(self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry) -> MemoryEntry:
-        """Merge representation-specific memory rows during partial reset."""
-
-    def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int, *, memory: Optional[MemoryState] = None,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> HPCState:  # fmt: skip
-        """Create an initial ``HPCState``."""
-        p_init = [torch.zeros((batch_size, n), device=device) for n in self.shape]
-        grounded_belief = LocationBelief(mean=p_init, uncertainty=None)
-        memory = memory or self.init_memory(batch_size=batch_size, device=device)
-        return HPCState(grounded_belief=grounded_belief, _memory=memory)
-
     def init_memory(  # ---------------------------------------------------------------------------
         self, batch_size: int, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
@@ -287,11 +255,23 @@ class HPCBase(nn.Module, ABC):
         del dtype
         return self._init_memory_impl(batch_size=batch_size, device=device)
 
+    @abstractmethod
+    def _init_memory_impl(  # ---------------------------------------------------------------------
+        self, batch_size: int, *, device: Optional[Device] = None,
+    ) -> MemoryState:  # fmt: skip
+        """Initialize the concrete memory representation for a batch."""
+
     def set_runtime(  # ---------------------------------------------------------------------------
         self, *, eta: float, hebbian_decay: float,
     ) -> None:  # fmt: skip
         """Apply runtime parameters required by the concrete memory system."""
         self._set_runtime_impl(eta=eta, hebbian_decay=hebbian_decay)
+
+    @abstractmethod
+    def _set_runtime_impl(  # ---------------------------------------------------------------------
+        self, *, eta: float, hebbian_decay: float,
+    ) -> None:  # fmt: skip
+        """Apply runtime write parameters to the concrete memory system."""
 
     def recall(  # --------------------------------------------------------------------------------
         self, *,
@@ -305,12 +285,11 @@ class HPCBase(nn.Module, ABC):
         recalled = self._recall_flat_impl(prepared_read.query, memory, role=role)
         return self._unflatten_memory_code(recalled)
 
-    def prepare_read(  # -------------------------------------------------------------------------
-        self, *,
-        read_cues: ReadCues, read: MemoryRead,
-    ) -> PreparedRead:  # fmt: skip
-        """Compose structured retrieval evidence before backend-specific memory read."""
-        return self.read_composer.compose(read_cues=read_cues, read=read)
+    @abstractmethod
+    def _recall_flat_impl(  # ---------------------------------------------------------------------
+        self, query: Tensor, memory: MemoryEntry, *, role: RetrievalRole,
+    ) -> Tensor:  # fmt: skip
+        """Return a flattened recalled code with shape ``(B, S)``."""
 
     def update(  # --------------------------------------------------------------------------------
         self, key: list[Tensor], write: WritePayload,
@@ -327,11 +306,32 @@ class HPCBase(nn.Module, ABC):
         )
         return HPCState(state.grounded_belief, _memory=memory)
 
+    @abstractmethod
+    def _update_memory_impl(  # -------------------------------------------------------------------
+        self, memory: MemoryState, key: Tensor,
+        g_value: Tensor, x_value: Optional[Tensor], named_writes: dict[str, Tensor],
+    ) -> MemoryState:  # fmt: skip
+        """Write one TEM step into the concrete memory state.
+
+        All tensors are flattened memory-space tensors with shape ``(B, S)``.
+        """
+
     def merge_memory_rows(  # ---------------------------------------------------------------------
         self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
     ) -> MemoryEntry:  # fmt: skip
         """Merge concrete memory rows during partial reset."""
         return self._merge_memory_rows_impl(flag, current, fresh)
+
+    @abstractmethod
+    def _merge_memory_rows_impl(self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry) -> MemoryEntry:
+        """Merge representation-specific memory rows during partial reset."""
+
+    def prepare_read(  # -------------------------------------------------------------------------
+        self, *,
+        read_cues: ReadCues, read: MemoryRead,
+    ) -> PreparedRead:  # fmt: skip
+        """Compose structured retrieval evidence before backend-specific memory read."""
+        return self.read_composer.compose(read_cues=read_cues, read=read)
 
     def read_sensory(  # -------------------------------------------------------------------------
         self, sensory_read: SensoryRead,
@@ -345,10 +345,7 @@ class HPCBase(nn.Module, ABC):
                 role="inference",
                 read=sensory_read.read,
             )
-        return SensoryReadResult(
-            read_cues=sensory_read.read_cues,
-            recall=sensory_recall,
-        )
+        return SensoryReadResult(read_cues=sensory_read.read_cues, recall=sensory_recall)
 
     def transition(  # ---------------------------------------------------------------------------
         self, transition: HPCTransition,
