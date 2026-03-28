@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal, Optional, Protocol
 
 import torch
 from pydantic import BaseModel, Field
@@ -55,6 +55,137 @@ class HebbianWriteRuntime:
 
     eta: float = 0.5
     hebbian_decay: float = 0.9999
+
+
+HebbianBlockPair = tuple[int, int, slice, slice]
+"""One allowed block pair in the hierarchical Hebbian write layout."""
+
+
+@dataclass(frozen=True)
+class HebbianLayout:
+    """Canonical masked Hebbian write layout shared by dense and factor stores.
+
+    Attributes:
+        dense_mask: Dense connectivity mask with shape ``(S, S)``.
+        block_pairs: Allowed block-pair metadata used to compile masked factor
+            increments without re-deriving the write policy.
+        feature_dim: Flattened code width ``S = sum(shape)``.
+    """
+
+    dense_mask: Tensor
+    block_pairs: tuple[HebbianBlockPair, ...]
+    feature_dim: int
+
+    def compile_factors(
+        self,
+        p_inf: Tensor,
+        p_gen: Tensor,
+        *,
+        eta: float,
+        masked: bool,
+    ) -> FactorMemoryStore:
+        """Compile one Hebbian increment into factor-memory atoms."""
+        _validate_hebbian_codes(p_inf, p_gen, feature_dim=self.feature_dim)
+        if not masked:
+            return _compile_hebbian_factors_unmasked(p_inf, p_gen, eta=eta)
+
+        batch_size = int(p_inf.shape[0])
+        atom_count = len(self.block_pairs)
+        a_t = p_inf + p_gen
+        b_t = p_inf - p_gen
+
+        keys = torch.zeros((batch_size, atom_count, self.feature_dim), dtype=a_t.dtype, device=a_t.device)
+        values = torch.zeros((batch_size, atom_count, self.feature_dim), dtype=b_t.dtype, device=b_t.device)
+        valid_mask = torch.ones((batch_size, atom_count), dtype=torch.bool, device=a_t.device)
+        coefficients = torch.full((batch_size, atom_count), float(eta), dtype=a_t.dtype, device=a_t.device)
+
+        for atom_index, (_, _, row_slice, col_slice) in enumerate(self.block_pairs):
+            keys[:, atom_index, row_slice] = a_t[:, row_slice]
+            values[:, atom_index, col_slice] = b_t[:, col_slice]
+
+        return FactorMemoryStore(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients)
+
+
+class HebbianWriteRule(Protocol):
+    """Explicit collaborator contract required by Hebbian store backends."""
+
+    @property
+    def runtime(self) -> HebbianWriteRuntime:
+        """Return mutable runtime hyperparameters for Hebbian updates."""
+
+    def apply_dense(
+        self, memory: Tensor, p_inf: Tensor | list[Tensor], p_gen: Tensor | list[Tensor], *,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:  # fmt: skip
+        """Apply one dense Hebbian update step to a memory operator."""
+
+    def clamp_memory(self, memory: Tensor) -> Tensor:
+        """Clamp one dense memory tensor to the configured numeric range."""
+
+
+def _hebbian_allow_matrix(n_stages: int, shape: list[int], f_initial: list[float]) -> Tensor:
+    """Return module-level Hebbian connectivity for the configured layout."""
+    n_freq = len(shape)
+    if len(f_initial) != n_freq:
+        raise ValueError(f"Expected f_initial length {n_freq}, got {len(f_initial)}.")
+    if not (0 <= int(n_stages) <= n_freq):
+        raise ValueError(f"n_stages must be in [0, {n_freq}], got {n_stages}.")
+
+    module = torch.arange(n_freq)
+    constrained = module < int(n_stages)
+    same_type = constrained[:, None] == constrained[None, :]
+    frequencies = torch.as_tensor(f_initial, dtype=torch.float)
+    low_to_high = frequencies[:, None] <= frequencies[None, :]
+    return (~same_type) | low_to_high
+
+
+def _hebbian_offsets(shape: list[int]) -> list[int]:
+    """Return cumulative feature offsets for a multi-frequency code shape."""
+    offsets = [0]
+    for width in shape:
+        offsets.append(offsets[-1] + int(width))
+    return offsets
+
+
+def build_hebbian_layout(n_stages: int, shape: list[int], f_initial: list[float]) -> HebbianLayout:
+    """Return the canonical masked Hebbian write layout for one HPC configuration."""
+    allow = _hebbian_allow_matrix(n_stages, shape, f_initial)
+    offsets = _hebbian_offsets(shape)
+    feature_dim = offsets[-1]
+
+    block_pairs: list[HebbianBlockPair] = []
+    for row_index in range(len(shape)):
+        row_slice = slice(offsets[row_index], offsets[row_index + 1])
+        for col_index in range(len(shape)):
+            if bool(allow[row_index, col_index]):
+                col_slice = slice(offsets[col_index], offsets[col_index + 1])
+                block_pairs.append((row_index, col_index, row_slice, col_slice))
+
+    widths = torch.as_tensor(shape, dtype=torch.long)
+    module_ids = torch.arange(len(shape)).repeat_interleave(widths)
+    dense_mask = allow[module_ids[:, None], module_ids[None, :]].to(dtype=torch.float)
+    return HebbianLayout(dense_mask=dense_mask, block_pairs=tuple(block_pairs), feature_dim=feature_dim)
+
+
+def _validate_hebbian_codes(p_inf: Tensor, p_gen: Tensor, *, feature_dim: Optional[int] = None) -> None:
+    """Validate one pair of flattened Hebbian codes."""
+    if p_inf.ndim != 2 or p_gen.ndim != 2:
+        raise ValueError("p_inf and p_gen must both be rank-2 `(B, S)` tensors.")
+    if p_inf.shape != p_gen.shape:
+        raise ValueError(f"p_inf and p_gen must share shape, got {tuple(p_inf.shape)} and {tuple(p_gen.shape)}.")
+    if feature_dim is not None and int(p_inf.shape[1]) != feature_dim:
+        raise ValueError(f"Expected flattened code width {feature_dim}, got {int(p_inf.shape[1])}.")
+
+
+def _compile_hebbian_factors_unmasked(p_inf: Tensor, p_gen: Tensor, *, eta: float) -> FactorMemoryStore:
+    """Compile one unmasked Hebbian increment into a single factor-memory atom."""
+    _validate_hebbian_codes(p_inf, p_gen)
+    a_t = p_inf + p_gen
+    b_t = p_inf - p_gen
+    batch_size = int(p_inf.shape[0])
+    coefficients = torch.full((batch_size, 1), float(eta), dtype=a_t.dtype, device=a_t.device)
+    valid_mask = torch.ones((batch_size, 1), dtype=torch.bool, device=a_t.device)
+    return FactorMemoryStore(keys=a_t.unsqueeze(1), values=b_t.unsqueeze(1), valid_mask=valid_mask, coefficients=coefficients)
 
 
 # =================================================================================================
@@ -109,6 +240,13 @@ class HebbianWrite(nn.Module):
         mask: Optional[Tensor] = None,
     ) -> Tensor:  # fmt: skip
         """Apply one Hebbian update step to a dense memory operator."""
+        return self.apply_dense(memory, p_inf, p_gen, mask=mask)
+
+    def apply_dense(  # ---------------------------------------------------------------------------
+        self, memory: Tensor, p_inf: Tensor | list[Tensor], p_gen: Tensor | list[Tensor], *,
+        mask: Optional[Tensor] = None,
+    ) -> Tensor:  # fmt: skip
+        """Apply one dense Hebbian update step to a memory operator."""
         if memory.ndim != 3:
             raise ValueError(f"memory must be rank-3 `(B, S, S)`, got shape {tuple(memory.shape)}.")
 
@@ -220,17 +358,7 @@ def compile_hebbian_factors(  # ------------------------------------------------
     p_inf: Tensor, p_gen: Tensor, *, eta: float,
 ) -> FactorMemoryStore:  # fmt: skip
     """Compile one dense Hebbian update step into a single factor-memory atom."""
-    if p_inf.ndim != 2 or p_gen.ndim != 2:
-        raise ValueError("p_inf and p_gen must both be rank-2 `(B, S)` tensors.")
-    if p_inf.shape != p_gen.shape:
-        raise ValueError(f"p_inf and p_gen must share shape, got {tuple(p_inf.shape)} and {tuple(p_gen.shape)}.")
-
-    a_t = p_inf + p_gen
-    b_t = p_inf - p_gen
-    batch_size = int(p_inf.shape[0])
-    coefficients = torch.full((batch_size, 1), float(eta), dtype=a_t.dtype, device=a_t.device)
-    valid_mask = torch.ones((batch_size, 1), dtype=torch.bool, device=a_t.device)
-    return FactorMemoryStore(keys=a_t.unsqueeze(1), values=b_t.unsqueeze(1), valid_mask=valid_mask, coefficients=coefficients)
+    return _compile_hebbian_factors_unmasked(p_inf, p_gen, eta=eta)
 
 
 # =================================================================================================
@@ -238,28 +366,7 @@ def hebbian_block_pairs(  # ----------------------------------------------------
     n_stages: int, shape: list[int], f_initial: list[float],
 ) -> list[tuple[int, int, slice, slice]]:  # fmt: skip
     """Return the block pairs allowed by the hierarchical Hebbian update mask."""
-
-    n_freq = len(shape)
-    if len(f_initial) != n_freq:
-        raise ValueError(f"Expected f_initial length {n_freq}, got {len(f_initial)}.")
-
-    offsets = [0]
-    for width in shape:
-        offsets.append(offsets[-1] + int(width))
-
-    def block_slice(index: int) -> slice:
-        return slice(offsets[index], offsets[index + 1])
-
-    block_pairs: list[tuple[int, int, slice, slice]] = []
-    for f_from in range(n_freq):
-        constrained_from = f_from < int(n_stages)
-        for f_to in range(n_freq):
-            constrained_to = f_to < int(n_stages)
-            same_type = constrained_from == constrained_to
-            allow = (not same_type) or (float(f_initial[f_from]) <= float(f_initial[f_to]))
-            if allow:
-                block_pairs.append((f_from, f_to, block_slice(f_from), block_slice(f_to)))
-    return block_pairs
+    return list(build_hebbian_layout(n_stages, shape, f_initial).block_pairs)
 
 
 # =================================================================================================
@@ -268,36 +375,14 @@ def compile_masked_hebbian_factors(  # -----------------------------------------
     eta: float, n_stages: int, shape: list[int], f_initial: list[float],
 ) -> FactorMemoryStore:  # fmt: skip
     """Compile a masked hierarchical Hebbian update into factor-memory atoms."""
-    if p_inf.ndim != 2 or p_gen.ndim != 2:
-        raise ValueError("p_inf and p_gen must both be rank-2 `(B, S)` tensors.")
-    if p_inf.shape != p_gen.shape:
-        raise ValueError(f"p_inf and p_gen must share shape, got {tuple(p_inf.shape)} and {tuple(p_gen.shape)}.")
-
-    feature_dim = sum(shape)
-    if int(p_inf.shape[1]) != feature_dim:
-        raise ValueError(f"Expected flattened code width {feature_dim}, got {int(p_inf.shape[1])}.")
-
-    block_pairs = hebbian_block_pairs(n_stages, shape, f_initial)
-    batch_size = int(p_inf.shape[0])
-    atom_count = len(block_pairs)
-    a_t = p_inf + p_gen
-    b_t = p_inf - p_gen
-
-    keys = torch.zeros((batch_size, atom_count, feature_dim), dtype=a_t.dtype, device=a_t.device)
-    values = torch.zeros((batch_size, atom_count, feature_dim), dtype=b_t.dtype, device=b_t.device)
-    valid_mask = torch.ones((batch_size, atom_count), dtype=torch.bool, device=a_t.device)
-    coefficients = torch.full((batch_size, atom_count), float(eta), dtype=a_t.dtype, device=a_t.device)
-
-    for atom_index, (_, _, row_slice, col_slice) in enumerate(block_pairs):
-        keys[:, atom_index, row_slice] = a_t[:, row_slice]
-        values[:, atom_index, col_slice] = b_t[:, col_slice]
-
-    return FactorMemoryStore(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients)
+    layout = build_hebbian_layout(n_stages, shape, f_initial)
+    return layout.compile_factors(p_inf, p_gen, eta=eta, masked=True)
 
 
 # =================================================================================================
 __all__ = [
     "EpisodicWrite", "EpisodicWriteSettings",
+    "HebbianBlockPair", "HebbianLayout", "HebbianWriteRule",
     "HebbianWrite", "HebbianWriteSettings", "HebbianWriteRuntime",
-    "compile_hebbian_factors", "compile_masked_hebbian_factors", "hebbian_block_pairs",
+    "build_hebbian_layout", "compile_hebbian_factors", "compile_masked_hebbian_factors", "hebbian_block_pairs",
 ]  # fmt: skip

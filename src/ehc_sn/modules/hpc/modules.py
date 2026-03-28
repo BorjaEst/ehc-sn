@@ -9,26 +9,10 @@ from torch import Tensor
 
 from ehc_sn import utils
 from ehc_sn.modules.hpc._base import HPCBase, HPCCommonSettings, HPCState
-from ehc_sn.modules.hpc.memory import (
-    AppendStoreBackend,
-    FactorStoreSettings,
-    HebbianStoreBackend,
-    LinearStoreSettings,
-    build_factor_store_backend,
-    build_hebbian_store_backend,
-    validate_attention_store_backend,
-    validate_attractor_store_backend,
-)
+from ehc_sn.modules.hpc.memory import DenseHebbianStoreBackend, FactorAppendStoreBackend, FactorStoreSettings, LinearStoreSettings
 from ehc_sn.modules.hpc.query import AttractorRead, AttractorReadSettings, FactorRead, FactorReadSettings
 from ehc_sn.modules.hpc.query_policy import MemoryRead, ReadCues
-from ehc_sn.modules.hpc.update import (
-    EpisodicWrite,
-    EpisodicWriteSettings,
-    HebbianWrite,
-    HebbianWriteSettings,
-    compile_hebbian_factors,
-    compile_masked_hebbian_factors,
-)
+from ehc_sn.modules.hpc.update import EpisodicWrite, EpisodicWriteSettings, HebbianWrite, HebbianWriteSettings, build_hebbian_layout
 from ehc_sn.types import Device, Dtype, MemoryEntry, MemoryState, RetrievalRole
 
 
@@ -84,23 +68,11 @@ class HPCAttractor(HPCBase):
         masks = utils.update_to_masks(self.shape, update=utils.make_update_full(n_stages, self.n_freq))
         self.register_buffer("masks_full", masks, persistent=False)
 
-        mask = utils.make_hebbian_write_mask(n_stages, self.shape, f_initial)
-        self.register_buffer("update_mask", mask, persistent=False)
+        hebbian_layout = build_hebbian_layout(n_stages, self.shape, f_initial)
 
         self.retrieval_module = AttractorRead(config.read)
         self.write_module = HebbianWrite(config.write, device=device, dtype=dtype)
-        self._store_backend: HebbianStoreBackend = build_hebbian_store_backend(
-            self.write_module,
-            store=config.store,
-            feature_dim=sum(self.shape),
-            update_mask=self.update_mask,
-            n_stages=n_stages,
-            shape=self.shape,
-            f_initial=f_initial,
-            compile_hebbian_factors=compile_hebbian_factors,
-            compile_masked_hebbian_factors=compile_masked_hebbian_factors,
-        )
-        validate_attractor_store_backend(self._store_backend)
+        self.store_backend = DenseHebbianStoreBackend(self.write_module, layout=hebbian_layout)
 
     @property
     def config(self) -> HPCAttractorSettings:
@@ -112,7 +84,7 @@ class HPCAttractor(HPCBase):
         device: Optional[Device] = None,
     ) -> MemoryState:  # fmt: skip
         """Initialize linear Hebbian stores for g-cued and optional x-cued memory."""
-        g_cued = self._store_backend.init_store(batch_size, device=device)
+        g_cued = self.store_backend.init_store(batch_size, device=device)
         x_cued = g_cued if self.config.common_memory else g_cued.clone()
         return MemoryState(g_cued=g_cued, x_cued=x_cued)
 
@@ -138,17 +110,17 @@ class HPCAttractor(HPCBase):
         if named_writes:
             names = ", ".join(sorted(named_writes))
             raise TypeError(f"{type(self).__name__} does not support named bank writes: {names}.")
-        g_cued = self._store_backend.apply_write(memory.g_cued, key, g_value, masked=True)
+        g_cued = self.store_backend.apply_write(memory.g_cued, key, g_value, masked=True)
         x_cued = g_cued if self.config.common_memory else memory.x_cued
         if not self.config.common_memory and x_value is not None:
-            x_cued = self._store_backend.apply_write(memory.x_cued, key, x_value, masked=False)
+            x_cued = self.store_backend.apply_write(memory.x_cued, key, x_value, masked=False)
         return MemoryState(g_cued=g_cued, x_cued=x_cued)
 
     def _merge_memory_rows_impl(  # ---------------------------------------------------------------
         self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
     ) -> MemoryEntry:  # fmt: skip
         """Merge representation rows during partial reset using the Hebbian reset strategy."""
-        return self._store_backend.merge_rows(flag, current, fresh)
+        return self.store_backend.merge_rows(flag, current, fresh)
 
 
 # =================================================================================================
@@ -164,12 +136,7 @@ class HPCAttention(HPCBase):
         super().__init__(config, device=device, dtype=dtype)
         self.retrieval_module = FactorRead(config.read)
         self.write_module = EpisodicWrite(config.write)
-        self._store_backend: AppendStoreBackend = build_factor_store_backend(
-            self.write_module,
-            store=config.store,
-            feature_dim=sum(self.shape),
-        )
-        validate_attention_store_backend(self._store_backend)
+        self.store_backend = FactorAppendStoreBackend(self.write_module, feature_dim=sum(self.shape), settings=config.store)
 
     @property
     def config(self) -> HPCAttentionSettings:
@@ -181,8 +148,8 @@ class HPCAttention(HPCBase):
         device: Optional[Device] = None,
     ) -> MemoryState:  # fmt: skip
         """Initialize factor stores for g-cued memory and optional separate x-cued memory."""
-        g_cued = self._store_backend.init_store(batch_size, device=device)
-        x_cued = g_cued if self.config.common_memory else self._store_backend.init_store(batch_size, device=device)
+        g_cued = self.store_backend.init_store(batch_size, device=device)
+        x_cued = g_cued if self.config.common_memory else self.store_backend.init_store(batch_size, device=device)
         return MemoryState(g_cued=g_cued, x_cued=x_cued)
 
     def _set_runtime_impl(  # --------------------------------------------------------------------
@@ -203,12 +170,12 @@ class HPCAttention(HPCBase):
         named_writes: dict[str, Tensor],
     ) -> MemoryState:  # fmt: skip
         """Write flattened values into factor slots for the active memory entries."""
-        g_cued = self._store_backend.append_write(memory.g_cued, key, g_value)
+        g_cued = self.store_backend.append_write(memory.g_cued, key, g_value)
         x_cued = g_cued if self.config.common_memory else memory.x_cued
         if self.config.common_memory:
             x_cued = g_cued
         elif x_value is not None:
-            x_cued = self._store_backend.append_write(memory.x_cued, key, x_value)
+            x_cued = self.store_backend.append_write(memory.x_cued, key, x_value)
 
         if named_writes:
             available_bank_names = set(memory.g_cued.bank_names) | set(memory.x_cued.bank_names)
@@ -219,11 +186,11 @@ class HPCAttention(HPCBase):
 
             for bank_name, bank_value in named_writes.items():
                 if bank_name in g_cued.bank_names:
-                    g_cued = self._store_backend.append_write(g_cued, key, bank_value, bank_name=bank_name)
+                    g_cued = self.store_backend.append_write(g_cued, key, bank_value, bank_name=bank_name)
                 if self.config.common_memory:
                     x_cued = g_cued
                 elif bank_name in x_cued.bank_names:
-                    x_cued = self._store_backend.append_write(x_cued, key, bank_value, bank_name=bank_name)
+                    x_cued = self.store_backend.append_write(x_cued, key, bank_value, bank_name=bank_name)
 
         return MemoryState(g_cued=g_cued, x_cued=x_cued)
 
@@ -231,7 +198,7 @@ class HPCAttention(HPCBase):
         self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
     ) -> MemoryEntry:  # fmt: skip
         """Merge representation rows during partial reset using the factor-store strategy."""
-        return self._store_backend.merge_rows(flag, current, fresh)
+        return self.store_backend.merge_rows(flag, current, fresh)
 
     def recall(  # --------------------------------------------------------------------------------
         self, *, read_cues: ReadCues, state: HPCState, role: RetrievalRole, read: MemoryRead,

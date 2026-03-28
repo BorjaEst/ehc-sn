@@ -2,23 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Callable, Literal, Optional, Protocol
+from typing import Optional, Protocol
 
 import torch
 from pydantic import BaseModel, Field, field_validator
 from torch import Tensor, nn
 
+from ehc_sn.modules.hpc.update import HebbianLayout, HebbianWriteRule
 from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, DenseMemoryStore, Device, FactorMemoryStore, FactorSlotBank, MemoryEntry
 
 
 # =================================================================================================
 class LinearStoreSettings(BaseModel, extra="forbid"):
     """Settings for Hebbian stores that must expose a linear operator."""
-
-    representation: Literal["dense", "factor"] = Field(
-        default="dense",
-        description="Internal representation used to store the Hebbian operator.",
-    )
 
 
 # =================================================================================================
@@ -49,9 +45,6 @@ class FactorStoreSettings(BaseModel, extra="forbid"):
 # =================================================================================================
 class StoreBackend(Protocol):
     """Behavior-bearing backend for one memory-entry representation family."""
-
-    supports_linear_view: bool
-    supports_factor_view: bool
 
     def init_store(  # ---------------------------------------------------------------------------
         self, batch_size: int, *, device: Optional[Device] = None,
@@ -86,15 +79,12 @@ class AppendStoreBackend(StoreBackend, Protocol):
 class DenseHebbianStoreBackend(nn.Module):
     """Dense-store backend for Hebbian memory writes."""
 
-    supports_linear_view = True
-    supports_factor_view = False
-
-    def __init__(self, write_system: nn.Module, *, feature_dim: int, update_mask: Tensor) -> None:
+    def __init__(self, write_rule: HebbianWriteRule, *, layout: HebbianLayout) -> None:
         """Bind dense Hebbian allocation, write, and merge behavior to one backend."""
         super().__init__()
-        self._write_system = write_system
-        self._feature_dim = int(feature_dim)
-        self.register_buffer("update_mask", update_mask, persistent=False)
+        self._write_rule = write_rule
+        self._feature_dim = int(layout.feature_dim)
+        self.register_buffer("dense_mask", layout.dense_mask, persistent=False)
 
     def init_store(  # ---------------------------------------------------------------------------
         self, batch_size: int, *, device: Optional[Device] = None,
@@ -117,34 +107,21 @@ class DenseHebbianStoreBackend(nn.Module):
         """Apply a dense Hebbian update to the provided memory entry."""
         if not isinstance(store, DenseMemoryStore):
             raise TypeError("DenseHebbianStoreBackend expected dense memory stores.")
-        mask = self.update_mask if masked else None
-        return DenseMemoryStore(matrix=self._write_system(store.matrix, key, value, mask=mask))
+        mask = self.dense_mask if masked else None
+        return DenseMemoryStore(matrix=self._write_rule.apply_dense(store.matrix, key, value, mask=mask))
 
 
 # =================================================================================================
-class FactorHebbianStoreBackend:
+class FactorHebbianStoreBackend(nn.Module):
     """Factor-store backend for Hebbian memory writes."""
 
-    supports_linear_view = True
-    supports_factor_view = True
-
     def __init__(  # ------------------------------------------------------------------------------
-        self, write_system: nn.Module, *,
-        feature_dim: int,
-        n_stages: int,
-        shape: list[int],
-        f_initial: list[float],
-        compile_hebbian_factors: Callable[..., FactorMemoryStore],
-        compile_masked_hebbian_factors: Callable[..., FactorMemoryStore],
+        self, write_rule: HebbianWriteRule, *, layout: HebbianLayout,
     ) -> None:  # fmt: skip
         """Bind factorized Hebbian allocation, write, and merge behavior to one backend."""
-        self._write_system = write_system
-        self._feature_dim = int(feature_dim)
-        self._n_stages = int(n_stages)
-        self._shape = list(shape)
-        self._f_initial = list(f_initial)
-        self._compile_hebbian_factors = compile_hebbian_factors
-        self._compile_masked_hebbian_factors = compile_masked_hebbian_factors
+        self._write_rule = write_rule
+        self._layout = layout
+        self._feature_dim = int(layout.feature_dim)
 
     def init_store(  # ---------------------------------------------------------------------------
         self, batch_size: int, *, device: Optional[Device] = None,
@@ -172,34 +149,21 @@ class FactorHebbianStoreBackend:
         if not isinstance(store, FactorMemoryStore):
             raise TypeError("FactorHebbianStoreBackend expected factor memory stores.")
 
-        runtime = self._write_system.runtime
+        runtime = self._write_rule.runtime
         decayed = store.decayed(runtime.hebbian_decay)
-        if masked:
-            increment = self._compile_masked_hebbian_factors(
-                key,
-                value,
-                eta=runtime.eta,
-                n_stages=self._n_stages,
-                shape=self._shape,
-                f_initial=self._f_initial,
-            )
-        else:
-            increment = self._compile_hebbian_factors(key, value, eta=runtime.eta)
+        increment = self._layout.compile_factors(key, value, eta=runtime.eta, masked=masked)
 
         updated = decayed.concatenated(increment)
         dense_matrix = updated.to_dense()
-        clamped = self._write_system.clamp_memory(dense_matrix)
+        clamped = self._write_rule.clamp_memory(dense_matrix)
         if torch.equal(clamped, dense_matrix):
             return updated
         return FactorMemoryStore.from_dense(clamped)
 
 
 # =================================================================================================
-class FactorAppendStoreBackend:
+class FactorAppendStoreBackend(nn.Module):
     """Factor-store backend for append-only episodic writes."""
-
-    supports_linear_view = True
-    supports_factor_view = True
 
     def __init__(self, write_system: object, *, feature_dim: int, settings: FactorStoreSettings) -> None:
         """Bind factor allocation, append, and merge behavior to one backend."""
@@ -217,12 +181,7 @@ class FactorAppendStoreBackend:
         valid_mask = torch.zeros((batch_size, capacity), dtype=torch.bool, device=device)
         coefficients = torch.zeros((batch_size, capacity), dtype=torch.float, device=device)
         banks = {
-            name: FactorSlotBank(
-                keys=keys.clone(),
-                values=values.clone(),
-                valid_mask=valid_mask.clone(),
-                coefficients=coefficients.clone(),
-            )
+            name: FactorSlotBank(keys=keys.clone(), values=values.clone(), valid_mask=valid_mask.clone(), coefficients=coefficients.clone())
             for name in self._settings.bank_names
         }
         return FactorMemoryStore(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients, banks=banks)
@@ -245,56 +204,8 @@ class FactorAppendStoreBackend:
 
 
 # =================================================================================================
-def build_hebbian_store_backend(  # ---------------------------------------------------------------
-    write_system: nn.Module, *,
-    store: LinearStoreSettings,
-    feature_dim: int,
-    update_mask: Tensor,
-    n_stages: int,
-    shape: list[int],
-    f_initial: list[float],
-    compile_hebbian_factors: Callable[..., FactorMemoryStore],
-    compile_masked_hebbian_factors: Callable[..., FactorMemoryStore],
-) -> HebbianStoreBackend:  # fmt: skip
-    """Construct one behavior-bearing backend for Hebbian memory."""
-    if store.representation == "factor":
-        return FactorHebbianStoreBackend(
-            write_system,
-            feature_dim=feature_dim,
-            n_stages=n_stages,
-            shape=shape,
-            f_initial=f_initial,
-            compile_hebbian_factors=compile_hebbian_factors,
-            compile_masked_hebbian_factors=compile_masked_hebbian_factors,
-        )
-
-    return DenseHebbianStoreBackend(write_system, feature_dim=feature_dim, update_mask=update_mask)
-
-
-def build_factor_store_backend(  # ----------------------------------------------------------------
-    write_system: object, *, store: FactorStoreSettings, feature_dim: int,
-) -> AppendStoreBackend:  # fmt: skip
-    """Construct one behavior-bearing backend for episodic factor memory."""
-    return FactorAppendStoreBackend(write_system, feature_dim=feature_dim, settings=store)
-
-
-def validate_attractor_store_backend(backend: StoreBackend) -> None:
-    """Validate that one backend can support attractor retrieval."""
-    if not backend.supports_linear_view:
-        raise TypeError("Attractor modules require a store backend that exposes a linear-memory view.")
-
-
-def validate_attention_store_backend(backend: StoreBackend) -> None:
-    """Validate that one backend can support factor-memory retrieval."""
-    if not backend.supports_factor_view:
-        raise TypeError("Attention modules require a store backend that exposes factor-memory banks.")
-
-
-# =================================================================================================
 __all__ = [
     "AppendStoreBackend", "FactorAppendStoreBackend", "FactorStoreSettings",
     "DenseHebbianStoreBackend", "FactorHebbianStoreBackend", "HebbianStoreBackend",
     "LinearStoreSettings", "StoreBackend",
-    "build_factor_store_backend", "build_hebbian_store_backend",
-    "validate_attractor_store_backend", "validate_attention_store_backend",
 ]  # fmt: skip

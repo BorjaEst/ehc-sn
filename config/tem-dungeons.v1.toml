@@ -57,9 +57,6 @@ diagnostic_level = "standard"
     clamp_min = -1.0
     clamp_max = 1.0
 
-[model.hpc.store]
-    representation = "dense"
-
 [model.lec]
     feature_dim = 10
     clamp_min   = -1.0
