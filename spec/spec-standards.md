@@ -160,3 +160,24 @@ is the single source of truth. Do not duplicate the precedence order elsewhere.
   conventions rather than ad hoc figure-level state.
 
 ---
+
+## 9 Experiment Reporting Standards
+
+- Canonical benchmark writeups must identify the benchmark id (`B0`, `B1`,
+  `B2`, or `B3`) and state the exact corpus, split sizes, and any generated OOD
+  corpora used in the run.
+- Reports for B2 one-shot evaluation must explicitly state that learned weights
+  were frozen during exposure and probe episodes and must distinguish fast-memory
+  adaptation from any gradient-based learning.
+- Every canonical benchmark report must list: seed count, baseline pack,
+  compute-budget settings, primary metrics, and preregistered success criteria.
+- Aggregate plots are not sufficient on their own. Benchmark reports must show
+  per-seed scatter or equivalent seed-resolved summaries alongside means and
+  confidence intervals.
+- When reporting adaptive-computation models, include results at the canonical
+  internal-step budgets `4`, `8`, and `16` in addition to any unconstrained best
+  result.
+- If a manuscript or report draws broader general-reasoning conclusions from
+  navigation benchmarks, it must label those conclusions as architectural
+  interpretation unless an explicit non-navigation benchmark suite is also
+  reported.

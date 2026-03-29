@@ -44,6 +44,22 @@ under `temp/` (not on the Python path).
   `ehc_sn/policies/` once they are intended for cross-controller reuse.
 - Policy APIs must consume typed rollout-state views or documented tensor
   mappings, not arbitrary controller internals.
+- If a canonical model defines an explicit BG or arbitration module, policies
+  must consume that module's declared outputs and must not themselves perform
+  loop-level bundle-score integration or subsume STR/BG responsibilities.
+- Hard action constraints must be represented explicitly in the policy input.
+  Environment feasibility, logical compatibility, and other admissibility
+  conditions must not be left implicit in downstream losses.
+- When action semantics are structured, prefer typed channel families or
+  documented admissible-bundle mappings over opaque flat encodings.
+- Policy logits used for action selection must remain conceptually distinct
+  from reward-prediction or state-value heads unless a canonical spec documents
+  a deliberate combined head.
+- STR contracts remain narrow by default: reward prediction and optional
+  reward-sensitive bias signals. Full bundle arbitration, admissibility-owned
+  score integration, and generic sampling semantics belong to an explicit BG /
+  arbitration module or to the reusable policy layer according to the canonical
+  architecture spec.
 - Policy objects own policy-local randomness and sampling semantics; controllers
   may pass mode flags (for example train/eval) but must not duplicate policy
   sampling logic.
@@ -159,7 +175,48 @@ validation.
 
 ---
 
-## 8 Cross-Component Change Policy
+## 8 Evaluation Protocol Constraints
+
+The canonical EHC benchmark contract is defined by the navigation-centered
+benchmark suite in `spec/spec-architecture.md`.
+
+- Claims about **within-episode reasoning** for EHC must be supported by the
+  B1 dungeon-reasoning benchmark. B0 MazeHard results are optional supporting
+  evidence and do not replace B1 for navigation-centered claims.
+- Claims about **one-shot adaptation** must be supported by the B2 one-shot
+  goal-relocation benchmark.
+- Claims that the EHC decomposition reduces interference or improves controlled
+  memory routing must be supported by the B3 interference-and-control
+  benchmark.
+- B1 uses the processed dungeon split as the in-distribution corpus
+  (`800/100/100` train/val/test layouts) plus four OOD generated corpora of
+  `100` layouts each: `medium/classic`, `large/classic`, `small/temple`, and
+  `small/cavern`.
+- B2 and B3 must precompute, for each layout, 6 candidate goals and 3 probe
+  starts from the largest connected component. Goal selection must enforce
+  shortest-path distance at least `8` from the canonical start and at least `6`
+  between selected goals. Probe starts must be reachable and have shortest-path
+  distance at least `6` from every selected goal.
+- B2 training uses goals `1-4`. Held-out one-shot evaluation uses goals `5-6`.
+  The one-shot protocol is: one rewarded exposure episode from start `1`, then
+  immediate probe episodes from starts `2-3`.
+- During B2 and B3 evaluation, **no optimizer step, gradient update, or weight
+  mutation is allowed**. Only online fast-memory state and other explicitly
+  declared ephemeral rollout state may change.
+- All canonical benchmark reports must use `5` independent training seeds and
+  report mean, `95%` confidence interval, and per-seed scatter.
+- Canonical benchmark reports must include fixed internal-compute budgets of
+  `4`, `8`, and `16` micro-steps or recurrent cycles when the model exposes
+  adaptive internal computation.
+- Any paper or report claiming strong ML / RL performance for EHC must include
+  at least the following baseline pack on the relevant benchmark: one HRM-style
+  recurrent baseline, one memory-disabled or `no-HPC-write` ablation, one
+  pooled-cue or fused-retrieval ablation, and one generic RL baseline when the
+  claim is framed as broad RL competence.
+
+---
+
+## 9 Cross-Component Change Policy
 
 Code changes that cross component boundaries require a tracked plan in
 `.copilot-tracking/plans/` **before** implementation begins. This includes:

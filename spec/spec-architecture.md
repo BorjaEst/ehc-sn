@@ -77,7 +77,10 @@ If a new package is created, this table must be updated.
 ### 4.1 Brain-Region Modules
 
 These implement neuroscience-grounded circuit components. Each is a `nn.Module`
-(or collection of modules) that can be composed by a top-level model.
+(or collection of modules) that can be composed by a top-level model. The
+canonical table may include planned modules required by the target
+architecture even before implementation lands in `src/ehc_sn/`; such rows must
+state that status explicitly.
 
 | Component | Path           | Biological Role                                                                                                                                                          | Computational Responsibility                                                                                                                                                                                                                                                                   |
 | --------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -85,7 +88,8 @@ These implement neuroscience-grounded circuit components. Each is a `nn.Module`
 | **MEC**   | `modules/mec/` | Medial entorhinal cortex (MEC): path integration, grid-cell spatial coding, and object-vector cell (OVC) representations.                                                | Grid-cell dynamics, abstract-location projections, and OVC encoding.                                                                                                                                                                                                                           |
 | **HPC**   | `modules/hpc/` | Hippocampus (HPC): episodic memory formation, pattern completion via attractor dynamics, and place-cell spatial coding.                                                  | Hebbian associative memory, attractor retrieval, and grounded-location inference.                                                                                                                                                                                                              |
 | **PFC**   | `modules/pfc/` | Prefrontal cortex (PFC): working memory maintenance and goal-directed reasoning over episodic memory.                                                                    | Two-level recurrent architecture ($z_H$, $z_L$) with transformer blocks and alternating update cycles.                                                                                                                                                                                         |
-| **STR**   | `modules/str/` | Striatum (STR): action selection and gating via Go/NoGo (D1/D2-like) pathways. Receives projections from PFC and (optionally) HPC; modulates when to act vs. deliberate. | `nn.Module`(s) and protocols defining STR's public contract (`HaltingHead`, `ACTRolloutBackbone`). Current scope: binary halt/continue head consuming PFC features. Migration target: multi-input interface with separate PFC/HPC projections, external reward signal, and N-action selection. |
+| **BG**    | `modules/bg/`  | Basal-ganglia arbitration module (planned): loop-level arbitration across admissible internal-operation, motor, modifier, and submit channels within broader cortico-basal-ganglia-thalamo-cortical control. | Planned `nn.Module`(s) owning explicit bundle-score integration and arbitration. BG combines cortical candidate scores, explicit admissibility structure, and optional striatal reward-sensitive bias inputs into policy-ready channel or bundle scores. BG does not sample actions, step environments, or replace reusable policy layers. |
+| **STR**   | `modules/str/` | Striatum (STR): reward-learning and reward-sensitive bias interface inside broader basal-ganglia arbitration. Receives summary projections from PFC and may later receive richer cortical or hippocampal inputs. | `nn.Module`(s) defining STR's public contract as reward prediction and optional reward-sensitive bias signals. Current scope: scalar immediate-reward prediction from detached PFC summary features plus cortical action/policy scores. STR must not own admissibility logic, bundle arbitration, generic policy sampling, or the full action ontology. Migration target: recurrent reward-learning state and bias heads consumed by a separate BG arbitration module. |
 
 ### 4.2 Shared Neural-Network Building Blocks
 
@@ -107,13 +111,20 @@ file per model version). A model file co-locates:
 
 | Model      | `nn.Module`  | `LightningModule` | Config             | State      | Composes                                       | Status         |
 | ---------- | ------------ | ----------------- | ------------------ | ---------- | ---------------------------------------------- | -------------- |
-| **TEM v1** | `TEMModelV1` | `TEMTrainerV1`    | `ModelSettings_V1` | `TEMState` | LEC + MEC + HPC + Autoencoder + Projections    | Needs refactor |
-| **HRM v1** | `HRMModelV1` | `HRMTrainerV1`    | `PFCSettings`      | `HRMState` | PFC + STR                                      | Needs refactor |
-| **EHC v1** | `EHCModelV1` | `EHCTrainerV1`    | `EHCConfig`        | `EHCState` | LEC + MEC + HPC + PFC + STR + shared NN blocks | `NOT_STARTED`  |
+| **TEM v1** | `TEMModelV1` | `TEMTrainerV1`    | `ModelSettings_V1` | `TEMState` | LEC + MEC + HPC + Autoencoder + Projections         | Needs refactor |
+| **HRM v1** | `HRMModelV1` | `HRMTrainerV1`    | `PFCSettings`      | `HRMState` | PFC + STR                                           | Needs refactor |
+| **EHC v1** | `EHCModelV1` | `EHCTrainerV1`    | `EHCConfig`        | `EHCState` | LEC + MEC + HPC + PFC + BG + STR + shared NN blocks | `NOT_STARTED`  |
 
 **Multiple trainers per model.** E.g., `EHCModelV1` might have both
 `EHCTrainerV1` (RL) and `EHCPretrainV1` (supervised). All live in the
 same model file. Models compose modules; they do not subclass them.
+
+Canonical EHC separation: PFC maintains and scores candidate control content,
+STR supplies reward-learning and optional reward-sensitive bias signals, BG owns
+loop-level arbitration over admissible channel bundles, policies sample from
+declared score tensors, and controllers execute rollout/environment mechanics.
+Direct PFC-to-policy shortcuts are interim implementation paths, not the target
+architecture boundary.
 
 ### 4.4 Loss
 
@@ -127,7 +138,7 @@ names, no multi-scale iteration, no orchestration logic.
 | `cross_entropy.py`  | Token-/observation-level cross-entropy: `stablemax_cross_entropy`, `softmax_cross_entropy`. `(logits, labels, ignore_index) → (*)`.  |
 | `consistency.py`    | Representation consistency: `mse_consistency(pred, target) → (B,)`, `nll_consistency(pred, mean, std) → (B,)`. Flat `(B, D)` inputs. |
 | `regularization.py` | Activation penalties: L1 sparsity, L2 norm on flat `(B, D)` codes.                                                                   |
-| `decision.py`       | Gating losses: BCE for halt/continue. Extensible to N-action selection.                                                              |
+| `decision.py`       | Decision and selection losses over admissible actions or channel bundles. Legacy halt/continue BCE remains allowed as a narrow special case, but canonical designs should support structured policy-logit supervision and RL-compatible selection losses. |
 
 ### 4.5 Runtime Orchestration
 
@@ -145,7 +156,10 @@ no imports from `models/`, no Lightning code, and no dataset ownership.
 Adaptive Computation Time rollout control: halting policy, recurrent carry, TD bootstrap targets.
 
 `RL`: `controllers/rl.py`.
-Environment-coupled rollout control: action sampling, env stepping, recurrent carry, done propagation.
+Environment-coupled rollout control: policy invocation over admissibility-aware action views, env stepping, recurrent carry, and done propagation.
+
+Controllers execute declared model outputs. They must not absorb loop-level
+bundle-score integration that belongs to an explicit BG or arbitration module.
 
 Shared rollout-state helpers and thin controller bases live in the same
 component when they exist only to support these controllers.
@@ -180,11 +194,15 @@ Responsibilities:
 - Define a narrow public policy protocol for action selection.
 - Define typed policy-input/config contracts when reuse across controllers is intended.
 - Own policy-local RNG and exploration semantics.
+- Apply explicit admissibility information supplied by controller or environment, including hard feasibility masks and documented logical-compatibility constraints.
 - Remain reusable across TEM, RL, scripted evaluation, and data-generation workflows.
 
 Constraints:
 
 - Policies consume typed rollout-state views or documented tensor mappings.
+- Policies may sample from score tensors emitted by PFC, BG, or other declared model modules, but they must not absorb loop-level bundle-score integration or broader arbitration responsibilities.
+- Policies must treat hard constraints as explicit inputs rather than inferring them only from downstream losses or controller internals.
+- Structured action selection should prefer documented channel families or admissible bundle mappings over opaque flat encodings when the task semantics depend on parallel internal-operation and motor channels.
 - Policies must not depend on controller internals or model classes.
 - Controllers invoke policies and pass resulting actions to environments.
 - Environments validate and apply actions but do not silently define policy behavior.
@@ -194,6 +212,7 @@ Examples:
 - Random walk over a valid-action mask.
 - Deterministic stay / no-op policy.
 - Region-biased or novelty-biased scripted walk policies.
+- Learned selection over admissible internal-operation, motor, modifier, or submit-channel bundles.
 
 #### 4.5.4 Training
 
@@ -398,7 +417,32 @@ Metrics, trace/rollout collection, and publication-ready visualization.
 | **Rollouts** | `rollouts/` | Trace collection (`TraceCollector`, `TraceSpec`) and tree-structured rollout data (`TraceTree`). Feeds both training diagnostics and figures.                                                                         |
 | **Figures**  | `figures/`  | Publication-ready plotting. Public API centers on `FigureContext`, `FigureSpec`, `REGISTRY`, built-in registration, figure modules, sinks, and reusable plotting/layout helpers. Uses SciencePlots + pub-ready-plots. |
 
-#### 4.7.1 Figures Internal Layers
+#### 4.7.1 Canonical Research Benchmark Suite
+
+The canonical research claim for EHC-SN is navigation-centered: EHC is
+evaluated as an architecture for partially observable navigation that combines
+strong within-episode reasoning with across-episode one-shot adaptation.
+Broader general-reasoning claims are interpretive extrapolations from these
+navigation benchmarks unless an explicit non-navigation benchmark suite is
+added.
+
+| Benchmark | Purpose | Canonical split / protocol | Current runtime status |
+| --------- | ------- | -------------------------- | ---------------------- |
+| **B0 MazeHard bridge** | Optional bridge to HRM-style deliberation benchmarks. | Use the existing `maze-30x30-hard-1k` processed split: 1000 train / 1000 val / 1000 test 30x30 mazes. Report full test plus a preregistered hard subset derived from the `difficulty` field in the processed index. | Supported today by `envs/mazehard.py` and the HRM experiment entrypoints. |
+| **B1 Dungeon reasoning** | Main within-episode reasoning benchmark for navigation. | Train on the existing processed dungeon split: 800 train / 100 val / 100 test layouts generated by `scripts/data-gen/build-dungeons.py`. Evaluate both in-distribution and on OOD generated test corpora: 100 `medium/classic`, 100 `large/classic`, 100 `small/temple`, and 100 `small/cavern` layouts. | Requires a goal-reaching reward/runtime adapter layered on the dungeon processed-data contract; `DungeonWalk` alone is a zero-reward walk surface. |
+| **B2 One-shot goal relocation** | Main across-episode one-shot adaptation benchmark. | Reuse the B1 layouts. For each layout precompute 6 candidate goals and 3 probe starts from the largest connected component. Train with goals 1-4. Reserve goals 5-6 for held-out one-shot evaluation. Evaluation uses one rewarded exposure episode from start 1 followed immediately by probe episodes from starts 2-3 with all learned weights frozen. | Requires the same goal-reaching reward/runtime adapter as B1 plus explicit frozen-weight evaluation support. |
+| **B3 Interference and control** | Main mechanism benchmark for complementary-memory claims. | Reuse the B1 layouts with the same precomputed 6-goal / 3-start contract. Train on goals 1-4 under equal-budget blocked and interleaved schedules. Test on rapid goal-switch sequences over held-out starts 2-3. | Requires the same goal-reaching reward/runtime adapter as B1 plus retrieval/control diagnostics on top of the rollout traces. |
+
+Status note: `MazeHardEnv` already implements the fixed-horizon deliberation
+surface for HRM-style token-prediction tasks. `DungeonWalk` is currently a
+policy-driven walk environment with zero reward and therefore does not by
+itself satisfy the B1-B3 goal-reaching benchmark contract. Canonical EHC
+benchmark work must introduce either a reward-owning dungeon environment or a
+clearly documented adapter that adds goal-reaching reward, termination, and the
+one-shot exposure/probe protocol without changing the processed dataset
+contract.
+
+#### 4.7.2 Figures Internal Layers
 
 The `figures/` component is internally split into four layers:
 
