@@ -1,0 +1,13 @@
+base_config_path = "hrm-mazehard.v2.toml"
+
+[benchmark]
+benchmark_id = "b0"
+model_kind = "hrm_v2"
+model_id = "hrm_v2"
+variant_id = "mazehard-bridge-v2"
+dataset_path = "data/processed/maze-30x30-hard-1k"
+hard_subset_manifest = "data/processed/maze-30x30-hard-1k/benchmarks/b0-hard-subset.json"
+results_dir = "outputs/benchmarks/b0"
+compute_budget_field = "environment.max_steps"
+bridge_only = true
+primary_navigation_claim = false
