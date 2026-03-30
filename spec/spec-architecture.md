@@ -43,7 +43,7 @@ Internal imports follow a top-down DAG: import from your own layer or below,
 
 Layer 4: `experiments/`, `benchmarks/`
 
-Layer 3: `models/`, `benchmark\`
+Layer 3: `models/`, `benchmark/`, `runtimes/`
 
 Layer 2: `modules/`, `controllers/`, `policies/`, `heads/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/`, `envs/`
 
@@ -51,23 +51,25 @@ Layer 1: `activations/`, `utils/`, `types.py`
 
 **Additional constraints:**
 
-R1: `training/` must not import from `modules/`
+R1: `training/` must not import from `modules/`, `models/`, or `runtimes/`
 
-R2: `modules/` must not import from `training/`, `controllers/`, or `heads/`
+R2: `modules/` must not import from `training/`, `controllers/`, `heads/`, `models/`, or `runtimes/`
 
-R3: `controllers/` and `heads/` must not import from `models/`
+R3: `controllers/` and `heads/` must not import from `models/` or `runtimes/`
 
-R4: `data/` must not import from `modules/`, `training/`, `controllers/`, or `heads/`
+R4: `data/` must not import from `modules/`, `training/`, `controllers/`, `heads/`, `models/`, or `runtimes/`
 
 R5: `utils/` must not import from any `ehc_sn` subpackage
 
 R6: Peer imports within a component (for example, `modules/hpc/` → `modules/mec/`) are allowed
 
-R7: `policies/` must not import from `models/`, `controllers/`, `heads/`, `training/`, or `modules/`
+R7: `policies/` must not import from `models/`, `runtimes/`, `controllers/`, `heads/`, `training/`, or `modules/`
 
-R8: `envs/` must not import from `models/`, `controllers/`, `heads/`, or `training/`
+R8: `envs/` must not import from `models/`, `runtimes/`, `controllers/`, `heads/`, or `training/`
 
-R9: `benchmark/` is a reusable orchestration component in Layer 3. It may import from `models/` and lower layers. Layer 4 entrypoints may import `benchmark/`. Components in Layers 1-3 other than `benchmark/` itself must not import upward from `benchmark/`.
+R9: `benchmark/` is a reusable orchestration component in Layer 3. It may import from lower reusable layers, but it must not import from `models/`, `runtimes/`, `controllers/`, `heads/`, or `training/`. Concrete benchmark execution, checkpoint loading, and model-aware policy-factory resolution belong in `runtimes/benchmark/`. Layer 4 entrypoints may import `benchmark/`. Components in Layers 1-3 other than `benchmark/` itself must not import upward from `benchmark/`.
+
+R10: `runtimes/` is a reusable execution component in Layer 3. It may import from `models/` and lower reusable layers. It owns model-aware executable surfaces such as Lightning trainers, concrete benchmark executors, checkpoint loading, and model-aware policy factories. Layer 4 entrypoints may import `runtimes/`. Components in Layers 1-2 and `benchmark/` must not import upward from `runtimes/`.
 
 ---
 
@@ -103,23 +105,31 @@ Model-agnostic modules reused across brain-region components.
 
 ### 4.3 Models
 
-Each model is a self-contained unit living in `models/` as a flat file (one
-file per model version). A model file co-locates:
+Each model is a self-contained architecture unit living in `models/` as a flat
+file (one file per model version). A model file co-locates:
 
 - A **pure `nn.Module`** — framework-agnostic forward pass.
-- One or more **`LightningModule` trainers** — model-specific training wiring.
-- **Pydantic configs** — architecture config and training config.
+- **Pydantic architecture config(s)** — dimensions, structural options, and
+  module-composition settings required to construct the pure model.
 - **State dataclasses** — explicit recurrent state.
+- Optional model-local helper functions required to construct or adapt the pure
+  model, provided they do not introduce training, benchmark, checkpoint-loading,
+  or environment-wiring orchestration.
 
-| Model      | `nn.Module`  | `LightningModule` | Config             | State      | Composes                                       | Status         |
-| ---------- | ------------ | ----------------- | ------------------ | ---------- | ---------------------------------------------- | -------------- |
-| **TEM v1** | `TEMModelV1` | `TEMTrainerV1`    | `ModelSettings_V1` | `TEMState` | LEC + MEC + HPC + Autoencoder + Projections         | Needs refactor |
-| **HRM v1** | `HRMModelV1` | `HRMTrainerV1`    | `PFCSettings`      | `HRMState` | PFC + STR                                           | Needs refactor |
-| **EHC v1** | `EHCModelV1` | `EHCTrainerV1`    | `EHCConfig`        | `EHCState` | LEC + MEC + HPC + PFC + BG + STR + shared NN blocks | `NOT_STARTED`  |
+A model file does **not** define Lightning trainers, benchmark executors,
+checkpoint-loading surfaces, dataset/env assembly, or task-specific policy-factory
+resolution. Those executable surfaces live in `runtimes/`.
 
-**Multiple trainers per model.** E.g., `EHCModelV1` might have both
-`EHCTrainerV1` (RL) and `EHCPretrainV1` (supervised). All live in the
-same model file. Models compose modules; they do not subclass them.
+| Model      | `nn.Module`  | Architecture Config | State      | Composes                                       | Status         |
+| ---------- | ------------ | ------------------- | ---------- | ---------------------------------------------- | -------------- |
+| **TEM v1** | `TEMModelV1` | `ModelSettings_V1`  | `TEMState` | LEC + MEC + HPC + Autoencoder + Projections    | Needs refactor |
+| **HRM v1** | `HRMModelV1` | `PFCSettings`       | `HRMState` | PFC + STR                                      | Needs refactor |
+| **EHC v1** | `EHCModelV1` | `EHCConfig`         | `EHCState` | LEC + MEC + HPC + PFC + BG + STR + shared NN blocks | `NOT_STARTED`  |
+
+**Multiple runtimes per model.** A model may be consumed by multiple training
+or benchmark runtimes. For example, one model may have both RL and supervised
+training runtimes, plus one or more benchmark-evaluation runtimes, all defined
+outside `models/`. Models compose modules; they do not subclass them.
 
 Canonical EHC separation: PFC maintains and scores candidate control content,
 STR supplies reward-learning and optional reward-sensitive bias signals, BG owns
@@ -128,7 +138,42 @@ declared score tensors, and controllers execute rollout/environment mechanics.
 Direct PFC-to-policy shortcuts are interim implementation paths, not the target
 architecture boundary.
 
-### 4.4 Loss
+### 4.4 Runtimes
+
+`runtimes/` owns model-aware executable surfaces that adapt pure models plus
+lower-layer reusable infrastructure into concrete training, evaluation, and
+benchmark workflows.
+
+It is split by execution domain rather than by model family:
+
+- `runtimes/training/`: model-specific Lightning trainers, optimizer/scheduler
+  wiring, training/validation hooks, checkpoint-restore logic needed by the
+  training runtime, and trainer-local configuration.
+- `runtimes/benchmark/`: concrete benchmark executors, benchmark-time
+  checkpoint loading, model-aware policy factories, tokenization/runtime
+  assembly, and benchmark-specific execution glue consumed by `benchmark/`
+  protocols.
+
+Responsibilities:
+
+- Adapt `models/` plus lower-layer reusable primitives into executable
+  surfaces.
+- Own model-aware runtime wiring.
+- Own runtime-local configuration that is not part of the pure architecture
+  contract.
+- Remain reusable across entrypoints that need the same executable surface.
+
+Constraints:
+
+- `runtimes/` may import from `models/` and lower reusable layers.
+- `runtimes/` must not own canonical benchmark definitions or benchmark job
+  scheduling; that belongs in `benchmark/`.
+- `runtimes/` must not own generic training primitives; that belongs in
+  `training/`.
+- `runtimes/` must not own reusable scripted or learned action-selection
+  policies; that belongs in `policies/`.
+
+### 4.5 Loss
 
 Generic, composable loss primitives operating on flat tensors. Each module
 provides stateless functions as the primary API, with optional thin
@@ -142,13 +187,13 @@ names, no multi-scale iteration, no orchestration logic.
 | `regularization.py` | Activation penalties: L1 sparsity, L2 norm on flat `(B, D)` codes.                                                                   |
 | `decision.py`       | Decision and selection losses over admissible actions or channel bundles. Legacy halt/continue BCE remains allowed as a narrow special case, but canonical designs should support structured policy-logit supervision and RL-compatible selection losses. |
 
-### 4.5 Runtime Orchestration
+### 4.6 Runtime Orchestration
 
 Runtime orchestration is split into controllers and heads so action/halting
 mechanics and per-step loss composition can evolve independently while staying
 outside `models/`.
 
-#### 4.5.1 Controllers
+#### 4.6.1 Controllers
 
 Controllers own recurrent rollout carry, slot refresh/reset behavior, and the
 algorithm-specific step policy for a model backbone. They are model-agnostic:
@@ -166,7 +211,7 @@ bundle-score integration that belongs to an explicit BG or arbitration module.
 Shared rollout-state helpers and thin controller bases live in the same
 component when they exist only to support these controllers.
 
-#### 4.5.2 Heads
+#### 4.6.2 Heads
 
 Heads adapt a controller to the `StepModule` contract and assemble per-step
 losses, metrics, and diagnostic signals. They may import from `controllers/`,
@@ -181,7 +226,7 @@ Actor-critic losses, supervised token loss, halted/token aggregation, diagnostic
 Shared head utilities and thin base heads live in the same component when they
 serve multiple head variants without introducing model semantics.
 
-#### 4.5.3 Policies
+#### 4.6.3 Policies
 
 Policies own reusable action-selection logic over rollout-state views. They are
 not environments and not controllers: they do not advance environment state,
@@ -216,9 +261,11 @@ Examples:
 - Region-biased or novelty-biased scripted walk policies.
 - Learned selection over admissible internal-operation, motor, modifier, or submit-channel bundles.
 
-#### 4.5.4 Training
+#### 4.6.4 Training Primitives
 
-Generic algorithmic building blocks — no model-specific code, no model imports.
+Generic algorithmic building blocks — no model-specific code, no model imports,
+and no executable training runtimes. Lightning trainers and other model-aware
+training surfaces live in `runtimes/training/`.
 
 | Component         | Path(s)            | Paradigm   | Responsibility                                                                                                |
 | ----------------- | ------------------ | ---------- | ------------------------------------------------------------------------------------------------------------- |
@@ -236,14 +283,14 @@ Generic algorithmic building blocks — no model-specific code, no model imports
 (`buffers.py`). Regime files are named by paradigm
 (`supervised.py`, `rl.py`, `elbo.py`).
 
-### 4.6 Data
+### 4.7 Data
 
 Data covers on-disk processed format contracts, index parsing, dataset loading,
 channel transforms, and Lightning DataModules. Source-specific generation and
 canonicalization currently live in `scripts/data-gen/`, not in a first-party
 `ehc_sn.data.mazes` package.
 
-#### 4.6.1 Data Modules (`data/`)
+#### 4.7.1 Data Modules (`data/`)
 
 ML data infrastructure for processed mazes.
 
@@ -252,11 +299,11 @@ ML data infrastructure for processed mazes.
 | `schema.py`      | Channel name constants, dtype contracts, and validation for the canonical on-disk format.           |
 | `index.py`       | JSONL index parsing, dataset splitting, channel-availability queries.                               |
 | `datasets.py`    | Map-style `torch.utils.data.Dataset` returning the canonical per-sample channel dict.               |
-| `datamodules.py` | Generic Lightning `DataModule`. Model-specific adaptation is external (model-owned adapters).       |
+| `datamodules.py` | Generic Lightning `DataModule`. Model-specific adaptation is external and belongs in `runtimes/`.   |
 | `vocabulary.py`  | Canonical maze semantic enum (SEM IDs: PAD, WALL, EMPTY, START, GOAL) and debug character mappings. |
 | `transforms.py`  | Model-agnostic channel transforms such as augmentation and semantic-grid derivation.                |
 
-#### 4.6.2 Canonical On-Disk Format
+#### 4.7.2 Canonical On-Disk Format
 
 Processed maze data lives in `data/processed/` as a dataset root with a
 single JSONL index and per-split stacked channel arrays. Each split stores one
@@ -409,20 +456,21 @@ controllers, not by dataloaders.
 - **HRM**: processed split arrays → `MazeDataset` → `MazeHardEnv` or model adapters, depending on training regime.
 - **EHC**: processed split arrays → planned dataset/env adapters → RL episodes.
 
-### 4.7 Evaluation
+### 4.8 Evaluation
 
 Metrics, trace/rollout collection, and publication-ready visualization.
 
 | Component    | Path        | Responsibility                                                                                                                                                                                                        |
 | ------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Benchmark** | `benchmark/` | Shared benchmark orchestration: wrapper-config loading, adapter selection, job scheduling, artifact writing, and benchmark-specific aggregation. Consumes `data/`, `envs/`, `rollouts/`, and `metrics/`, but does not own manifest schemas, environment dynamics, or metric kernels. |
+| **Runtimes** | `runtimes/` | Model-aware executable surfaces: Lightning trainers, concrete benchmark executors, checkpoint-loading wrappers, and model-aware policy factories. Consumes `models/` and lower reusable layers, but does not own canonical benchmark definitions, generic training primitives, or reusable policies. |
+| **Benchmark** | `benchmark/` | Shared benchmark orchestration: wrapper-config loading, protocol-driven runner invocation, job scheduling, artifact writing, and benchmark-specific aggregation. Consumes `data/`, `envs/`, `rollouts/`, and `metrics/`, but does not own manifest schemas, environment dynamics, metric kernels, concrete model construction, checkpoint loading, or model-aware policy-factory resolution. |
 | **Metrics**  | `metrics/`  | TorchMetrics-based evaluation (accuracy, loss ratios, halting stats). Adapter pattern for model-output → metric update.                                                                                               |
 | **Rollouts** | `rollouts/` | Trace collection (`TraceCollector`, `TraceSpec`) and tree-structured rollout data (`TraceTree`). Feeds both training diagnostics and figures.                                                                         |
 | **Figures**  | `figures/`  | Publication-ready plotting. Public API centers on `FigureContext`, `FigureSpec`, `REGISTRY`, built-in registration, figure modules, sinks, and reusable plotting/layout helpers. Uses SciencePlots + pub-ready-plots. |
 
-Repository-root benchmarks/ contains canonical benchmark entrypoints and thin CLIs that delegate into ehc_sn.benchmark. Repository-root experiments/ is reserved for exploratory, paper-specific, or non-canonical research runners and must not become a second home for shared benchmark wrapper logic.
+Repository-root benchmarks/ contains canonical benchmark entrypoints and thin CLIs that delegate into `ehc_sn.benchmark` and `ehc_sn.runtimes.benchmark`. Repository-root experiments/ is reserved for exploratory, paper-specific, or non-canonical research runners and must not become a second home for shared benchmark wrapper logic.
 
-#### 4.7.1 Canonical Research Benchmark Suite
+#### 4.8.1 Canonical Research Benchmark Suite
 
 The canonical research claim for EHC-SN is navigation-centered: EHC is
 evaluated as an architecture for partially observable navigation that combines
@@ -433,7 +481,7 @@ added.
 
 | Benchmark | Purpose | Canonical split / protocol | Current runtime status |
 | --------- | ------- | -------------------------- | ---------------------- |
-| **B0 MazeHard bridge** | Optional bridge to HRM-style deliberation benchmarks. | Use the existing `maze-30x30-hard-1k` processed split: 1000 train / 1000 val / 1000 test 30x30 mazes. Report full test plus a preregistered hard subset derived from the `difficulty` field in the processed index. | Supported today by `envs/mazehard.py` and the HRM experiment entrypoints. |
+| **B0 MazeHard bridge** | Optional bridge to HRM-style deliberation benchmarks. | Use the existing `maze-30x30-hard-1k` processed split: 1000 train / 1000 val / 1000 test 30x30 mazes. Report full test plus a preregistered hard subset derived from the `difficulty` field in the processed index. | Supported today by `envs/mazehard.py` and the HRM experiment entrypoints. Canonical benchmark orchestration stays in `benchmark/`, while concrete HRM bridge runners live in `runtimes/benchmark/`. |
 | **B1 Dungeon reasoning** | Main within-episode reasoning benchmark for navigation. | Train on the existing processed dungeon split: 800 train / 100 val / 100 test layouts generated by `scripts/data-gen/build-dungeons.py`. Evaluate both in-distribution and on OOD generated test corpora: 100 `medium/classic`, 100 `large/classic`, 100 `small/temple`, and 100 `small/cavern` layouts. | Requires a goal-reaching reward/runtime adapter layered on the dungeon processed-data contract; `DungeonWalk` alone is a zero-reward walk surface. |
 | **B2 One-shot goal relocation** | Main across-episode one-shot adaptation benchmark. | Reuse the B1 layouts. For each layout precompute 6 candidate goals and 3 probe starts from the largest connected component. Train with goals 1-4. Reserve goals 5-6 for held-out one-shot evaluation. Evaluation uses one rewarded exposure episode from start 1 followed immediately by probe episodes from starts 2-3 with all learned weights frozen. | Requires the same goal-reaching reward/runtime adapter as B1 plus explicit frozen-weight evaluation support. |
 | **B3 Interference and control** | Main mechanism benchmark for complementary-memory claims. | Reuse the B1 layouts with the same precomputed 6-goal / 3-start contract. Train on goals 1-4 under equal-budget blocked and interleaved schedules. Test on rapid goal-switch sequences over held-out starts 2-3. | Requires the same goal-reaching reward/runtime adapter as B1 plus retrieval/control diagnostics on top of the rollout traces. |
@@ -447,7 +495,7 @@ clearly documented adapter that adds goal-reaching reward, termination, and the
 one-shot exposure/probe protocol without changing the processed dataset
 contract.
 
-#### 4.7.2 Figures Internal Layers
+#### 4.8.2 Figures Internal Layers
 
 The `figures/` component is internally split into four layers:
 
@@ -458,7 +506,7 @@ The `figures/` component is internally split into four layers:
 
 Dependency direction inside the component is one-way: `modules/` may depend on the authoring framework, `plots/`, `utils/`, and registry contracts; `plots/` and `utils/` must not depend on `modules/`.
 
-### 4.8 Utils
+### 4.9 Utils
 
 Path: `utils/` — generic, reusable helpers with no brain-region, model, or
 training semantics. Must **not** import from any `ehc_sn` subpackage.
@@ -506,9 +554,11 @@ Cross-cutting support that wraps external frameworks.
 
 ## 5 Model Composition
 
-Each model co-locates a **config**, a **pure `nn.Module`**, a **state
-dataclass**, and one or more **trainers** (`LightningModule`) in
-`models/`. Generic training infrastructure lives in `training/`.
+Each model co-locates a **config**, a **pure `nn.Module`**, and a **state
+dataclass** in `models/`. Executable training surfaces such as
+`LightningModule` trainers live in `runtimes/training/`. Executable benchmark
+surfaces live in `runtimes/benchmark/`. Generic training infrastructure lives
+in `training/`.
 
 ### 5.1 State Management
 
@@ -530,7 +580,7 @@ def forward(self, ..., state: ModelState) -> tuple[ModelState, Logits, Features]
     ...
 ```
 
-The trainer's `training_step` iterates over `StepLoop`, yielding
+The training runtime's `training_step` may iterate over `StepLoop`, yielding
 `(t, step_output)` pairs per timestep.
 
 ### 5.3 Module Reuse Protocol
@@ -571,13 +621,13 @@ those modules.
 | ----------------------- | ----------------------------------------------------- | --------------------------------------------- | ---------------------------- | --------------------------------- |
 | **Component config**    | `pydantic.BaseModel(extra="forbid")`                  | Single-component settings                     | Same file as the `nn.Module` | `AttractorSettings`               |
 | **Model config**        | `pydantic.BaseModel(extra="forbid")`                  | Architecture: dimensions, layers, activations | `models/*.py`                | `ModelSettings_V1`, `PFCSettings` |
-| **Training config**     | `pydantic.BaseModel(extra="forbid")`                  | Optimizer, LR schedule, loss weights, buffers | `models/*.py` (with trainer) | `HRMTrainingConfig`               |
+| **Training runtime config** | `pydantic.BaseModel(extra="forbid")`              | Optimizer, LR schedule, loss weights, buffers, trainer-local runtime settings | `runtimes/training/*.py` | `HRMTrainingConfig`               |
 | **Data config**         | `pydantic.BaseModel(extra="forbid")`                  | Dataset paths, batch size, workers            | `data/*.py`                  | `DatamoduleConfig`                |
 | **Experiment settings** | `pydantic_settings.BaseSettings(cli_parse_args=True)` | Composes all above + Trainer knobs            | `experiments/*.py`           | `RunArguments`                    |
 
-Architectural dimensions use `frozen=True`. Training configs are separate
-from model configs; the trainer passes only the architecture config to
-the `nn.Module` constructor.
+Architectural dimensions use `frozen=True`. Training runtime configs are
+separate from model configs; the runtime passes only the architecture config to
+the pure `nn.Module` constructor.
 
 ### 6.2 Static Defaults
 

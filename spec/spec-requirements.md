@@ -153,9 +153,22 @@ No known dependency declaration mismatches are currently recorded.
 ## 7 Training Infrastructure Constraints
 
 All code in `training/` is **model-agnostic**: it must not import from
-`models/` or `modules/`. Model-specific orchestration lives in the
-`LightningModule` trainer in `models/*.py`. Single-model primitives
-must be generalized or relocated before next release.
+`models/`, `modules/`, or `runtimes/`. `training/` owns generic optimization,
+step-loop, scheduling, buffer, and loss-support primitives only.
+
+All executable model-specific training orchestration lives in
+`runtimes/training/`. This includes Lightning trainers, optimizer assembly,
+scheduler assembly, trainer-local checkpoint restore logic, and
+training/validation runtime hooks.
+
+All executable model-specific benchmark orchestration lives in
+`runtimes/benchmark/`. This includes concrete benchmark executors,
+benchmark-time checkpoint loading, model-aware policy-factory resolution,
+and benchmark-time dataset or environment assembly.
+
+All code in `benchmark/` remains **model-agnostic** and owns only benchmark
+definitions, scheduling, protocol contracts, artifact writing, and summary
+aggregation. `benchmark/` must not import from `models/` or `runtimes/`.
 
 All code in `controllers/` and `heads/` is also **model-agnostic**: it must not
 import from `models/`. Controllers own rollout carry/state and step orchestration;
@@ -215,11 +228,17 @@ benchmark suite in `spec/spec-architecture.md`.
   claim is framed as broad RL competence.
 - Benchmark orchestration code intended for reuse across B0-B3 belongs in 
   ehc_sn.benchmark.
+- Concrete benchmark execution and model-aware policy-factory resolution belong
+  in `ehc_sn.runtimes.benchmark`.
+- `ehc_sn.benchmark` must not dispatch on `model_kind`, instantiate concrete
+  training models, load checkpoints, or own model-aware policy-factory
+  resolution.
 - Canonical benchmark entrypoints belong under benchmarks/ as thin wrappers that
-  parse user input and delegate execution to the orchestration component.
+  parse user input, delegate scheduling and aggregation to `ehc_sn.benchmark`,
+  and resolve concrete execution surfaces from `ehc_sn.runtimes.benchmark`.
 - Scripts under experiments/ are exploratory or paper-specific and must not 
-  duplicate shared benchmark job planning, adapter selection, or artifact-writing
-  logic.
+  duplicate shared benchmark job planning, runtime resolution, or
+  artifact-writing logic.
 
 ---
 
