@@ -1,0 +1,12 @@
+base_config_path = "hrm-mazehard.v1.toml"
+
+[benchmark]
+benchmark_id = "b1"
+model_id = "hrm_recurrent"
+variant_id = "hrm-recurrent"
+baseline_family = "hrm_recurrent"
+adapter_kind = "unavailable"
+availability = "blocked"
+blocking_reason = "No dungeon benchmark adapter exists for the HRM-style recurrent baseline in the current repo."
+compute_budget_supported = true
+results_dir = "outputs/benchmarks/b1"
