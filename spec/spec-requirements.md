@@ -213,6 +213,13 @@ benchmark suite in `spec/spec-architecture.md`.
   recurrent baseline, one memory-disabled or `no-HPC-write` ablation, one
   pooled-cue or fused-retrieval ablation, and one generic RL baseline when the
   claim is framed as broad RL competence.
+- Benchmark orchestration code intended for reuse across B0-B3 belongs in 
+  ehc_sn.benchmark.
+- Canonical benchmark entrypoints belong under benchmarks/ as thin wrappers that
+  parse user input and delegate execution to the orchestration component.
+- Scripts under experiments/ are exploratory or paper-specific and must not 
+  duplicate shared benchmark job planning, adapter selection, or artifact-writing
+  logic.
 
 ---
 

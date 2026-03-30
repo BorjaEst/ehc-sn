@@ -68,6 +68,11 @@ cli_parse_args=True)`. CLI source must have highest precedence.
   `config/defaults_ehc.toml` (empty — to be populated).
 - **Validation**: Use Pydantic validators (`@field_validator`) for non-trivial
   constraints. Fail fast with actionable error messages.
+- Benchmark entry points under benchmarks/ should be thin wrappers over 
+  ehc_sn.benchmark and should not duplicate shared job planning, adapter selection,
+  or artifact-writing logic.
+- Benchmark-like scripts under experiments/ are non-canonical and should be used
+  only for exploratory or one-off research workflows.
 
 ---
 

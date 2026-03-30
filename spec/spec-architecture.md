@@ -41,9 +41,9 @@ Any component may import external dependencies declared in `pyproject.toml`.
 Internal imports follow a top-down DAG: import from your own layer or below,
 **never** upward.
 
-Layer 4: `experiments/`
+Layer 4: `experiments/`, `benchmarks/`
 
-Layer 3: `models/`
+Layer 3: `models/`, `benchmark\`
 
 Layer 2: `modules/`, `controllers/`, `policies/`, `heads/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/`, `envs/`
 
@@ -66,6 +66,8 @@ R6: Peer imports within a component (for example, `modules/hpc/` → `modules/me
 R7: `policies/` must not import from `models/`, `controllers/`, `heads/`, `training/`, or `modules/`
 
 R8: `envs/` must not import from `models/`, `controllers/`, `heads/`, or `training/`
+
+R9: `benchmark/` is a reusable orchestration component in Layer 3. It may import from `models/` and lower layers. Layer 4 entrypoints may import `benchmark/`. Components in Layers 1-3 other than `benchmark/` itself must not import upward from `benchmark/`.
 
 ---
 
@@ -413,9 +415,12 @@ Metrics, trace/rollout collection, and publication-ready visualization.
 
 | Component    | Path        | Responsibility                                                                                                                                                                                                        |
 | ------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Benchmark** | `benchmark/` | Shared benchmark orchestration: wrapper-config loading, adapter selection, job scheduling, artifact writing, and benchmark-specific aggregation. Consumes `data/`, `envs/`, `rollouts/`, and `metrics/`, but does not own manifest schemas, environment dynamics, or metric kernels. |
 | **Metrics**  | `metrics/`  | TorchMetrics-based evaluation (accuracy, loss ratios, halting stats). Adapter pattern for model-output → metric update.                                                                                               |
 | **Rollouts** | `rollouts/` | Trace collection (`TraceCollector`, `TraceSpec`) and tree-structured rollout data (`TraceTree`). Feeds both training diagnostics and figures.                                                                         |
 | **Figures**  | `figures/`  | Publication-ready plotting. Public API centers on `FigureContext`, `FigureSpec`, `REGISTRY`, built-in registration, figure modules, sinks, and reusable plotting/layout helpers. Uses SciencePlots + pub-ready-plots. |
+
+Repository-root benchmarks/ contains canonical benchmark entrypoints and thin CLIs that delegate into ehc_sn.benchmark. Repository-root experiments/ is reserved for exploratory, paper-specific, or non-canonical research runners and must not become a second home for shared benchmark wrapper logic.
 
 #### 4.7.1 Canonical Research Benchmark Suite
 
