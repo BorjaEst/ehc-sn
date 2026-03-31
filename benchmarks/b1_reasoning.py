@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSetti
 
 from ehc_sn.benchmark import b1
 from ehc_sn.benchmark.b1 import CORPUS_ID
+from ehc_sn.policies.benchmark_scripted import build_scripted_policy
 
 # Configure PyTorch for better performance on modern GPUs
 torch.set_float32_matmul_precision("high")
@@ -97,7 +98,7 @@ if __name__ == "__main__":
         manifest_path=settings.manifest_path,
         corpus_selector=settings.corpus_selector,
         output_root=settings.output_root,
-        build_adapter_fn=b1.build_adapter,
+        policy_factory=build_scripted_policy,
     )
     print(
         f"Wrote {len(manifest['artifact_paths'])} B1 artifacts "

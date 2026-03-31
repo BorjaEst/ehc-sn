@@ -21,7 +21,8 @@ from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.heads.act import ACTLossConfig
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.models import hrm_v1
-from ehc_sn.models.hrm_v1 import ModelConfig_HRM_V1, ModelSettings_V1, TrainingModel
+from ehc_sn.models.hrm_v1 import ModelSettings_V1
+from ehc_sn.runtimes.training.hrm_v1 import ModelConfig_HRM_V1, TrainingModel
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig

@@ -10,6 +10,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn.benchmark import b0
+from ehc_sn.runtimes.benchmark import resolve_b0_runner
 
 # Configure PyTorch for better performance on modern GPUs
 torch.set_float32_matmul_precision("high")
@@ -92,6 +93,7 @@ if __name__ == "__main__":
         compute_budget=settings.compute_budget,
         output_root=settings.output_root,
         checkpoint_path=settings.checkpoint_path,
+        runner=resolve_b0_runner(wrapper.benchmark.model_kind),
     )
     print(
         f"Wrote {len(manifest['artifact_paths'])} B0 result artifacts "

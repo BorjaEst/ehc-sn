@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSetti
 
 from ehc_sn.benchmark import b3
 from ehc_sn.benchmark.b3 import ALL_SCHEDULE_TYPES_SELECTOR
+from ehc_sn.policies.benchmark_scripted import build_scripted_policy
 
 # Configure PyTorch for better performance on modern GPUs
 torch.set_float32_matmul_precision("high")
@@ -91,7 +92,7 @@ if __name__ == "__main__":
         manifest_path=settings.manifest_path,
         schedule_type_selector=settings.schedule_type,
         output_root=settings.output_root,
-        build_adapter_fn=b3.build_adapter,
+        policy_factory=build_scripted_policy,
     )
     print(
         f"Wrote {len(manifest['artifact_paths'])} B3 artifacts "

@@ -22,7 +22,8 @@ from ehc_sn.envs.dungeon_walk import EnvConfig
 from ehc_sn.heads.tem import TEMLossConfig
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.models import tem_v1
-from ehc_sn.models.tem_v1 import ModelConfig_TEM_V1, ModelSettings_V1, RuntimeConfig, TrainingModel
+from ehc_sn.models.tem_v1 import ModelSettings_V1
+from ehc_sn.runtimes.training.tem_v1 import ModelConfig_TEM_V1, RuntimeConfig, TrainingModel
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamConfig
 from ehc_sn.training.schedules import SchedulerConfig

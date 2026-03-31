@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSetti
 
 from ehc_sn.benchmark import b2
 from ehc_sn.benchmark.b2 import ALL_LAYOUT_MODES_SELECTOR
+from ehc_sn.policies.benchmark_scripted import build_scripted_policy
 
 # Configure PyTorch for better performance on modern GPUs
 torch.set_float32_matmul_precision("high")
@@ -100,7 +101,7 @@ if __name__ == "__main__":
         layout_mode_selector=settings.layout_mode,
         output_root=settings.output_root,
         failure_test_mode=settings.failure_test_mode,
-        build_adapter_fn=b2.build_adapter,
+        policy_factory=build_scripted_policy,
     )
     print(
         f"Wrote {len(manifest['artifact_paths'])} B2 artifacts "
