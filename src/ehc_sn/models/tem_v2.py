@@ -9,7 +9,7 @@ import torch
 from pydantic import BaseModel, Field, computed_field, model_validator
 from torch import Tensor, nn
 
-from ehc_sn.models._tem_contracts import TEMTransitionPlan
+from ehc_sn.models.tem_base import TEMTransitionPlan
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
 from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState
 from ehc_sn.modules.hpc import SensoryRead as HPCSensoryRead
@@ -149,79 +149,6 @@ class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
 
 
 # =================================================================================================
-class MemoryRuntimeConfig(BaseModel, extra="forbid"):
-    """Shared memory runtime schedule kept for TEM contract parity.
-
-    The TEM v2 attention backend currently ignores these values, but the
-    runtime surface is kept aligned with TEM v1 so the surrounding training
-    stack does not need a special-case path.
-    """
-
-    eta: float = Field(
-        default=0.5,
-        description="Shared memory write-rate value reached after the eta ramp completes.",
-    )
-    eta_it: int = Field(
-        default=16000,
-        ge=1,
-        description="Number of optimizer steps used to ramp eta to its target value.",
-    )
-    hebbian_decay: float = Field(
-        default=0.9999,
-        description="Shared memory decay value reached after the decay ramp completes.",
-    )
-    lambda_it: int = Field(
-        default=200,
-        ge=1,
-        description="Number of optimizer steps used to ramp the shared memory decay value.",
-    )
-
-
-# =================================================================================================
-class UncertaintyRuntimeConfig(BaseModel, extra="forbid"):
-    """Step-based runtime schedule for MEC uncertainty correction."""
-
-    p2g_sig_half_it: int = Field(
-        default=400,
-        ge=0,
-        description="Sigmoid midpoint for the p->g uncertainty offset schedule.",
-    )
-    p2g_sig_scale_it: int = Field(
-        default=200,
-        ge=1,
-        description="Sigmoid scale for the p->g uncertainty offset schedule.",
-    )
-    offset_min: float = Field(
-        default=0.0,
-        description="Minimum additive uncertainty offset applied at convergence.",
-    )
-    offset_max: float = Field(
-        default=10000.0,
-        description="Maximum additive uncertainty offset applied at the start of training.",
-    )
-
-    @model_validator(mode="after")
-    def validate_offset_range(self) -> "UncertaintyRuntimeConfig":
-        if self.offset_max < self.offset_min:
-            raise ValueError("offset_max must be greater than or equal to offset_min.")
-        return self
-
-
-# =================================================================================================
-class RuntimeConfig(BaseModel, extra="forbid"):
-    """Step-based runtime schedules for TEM model dynamics."""
-
-    memory: MemoryRuntimeConfig = Field(
-        default_factory=MemoryRuntimeConfig,
-        description="Shared memory runtime schedule retained for TEM contract parity.",
-    )
-    uncertainty: UncertaintyRuntimeConfig = Field(
-        default_factory=UncertaintyRuntimeConfig,
-        description="Runtime schedule for MEC uncertainty parameters.",
-    )
-
-
-# =================================================================================================
 @dataclass
 class TEMState(DetachMixin):
     """Container for the full recurrent TEM state."""
@@ -231,17 +158,6 @@ class TEMState(DetachMixin):
     hpc: HPCState
 
 
-# =================================================================================================
-@dataclass(frozen=True)
-class TEMRuntimeState:
-    """Resolved TEM runtime values for the current optimizer step."""
-
-    eta: float
-    hebbian_decay: float
-    p2g_uncertainty_offset: float
-
-
-# =================================================================================================
 class TEMModelV2(nn.Module):
     """TEM v2 backbone with a TEM v1-compatible forward contract."""
 
@@ -387,6 +303,6 @@ class TEMModelV2(nn.Module):
 
 # =================================================================================================
 __all__ = [
-    "ModelSettings_V2", "RuntimeConfig", "TEMState", "TEMRuntimeState", "TEMModelV2",
+    "ModelSettings_V2", "TEMState", "TEMModelV2",
     "Batch", "ObsLogits", "GridCodes", "PlaceCodes",
 ]  # fmt: skip

@@ -1,1 +1,1 @@
-"""LightningModules and their submodules"""
+"""Pure model architecture modules and shared model-local contracts."""

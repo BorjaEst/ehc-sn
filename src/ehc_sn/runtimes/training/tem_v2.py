@@ -1,8 +1,7 @@
-""" """
+"""TEM v2 Lightning runtime."""
 
 from __future__ import annotations
 
-import math
 from itertools import repeat
 from typing import Any, Dict, Optional, TypeAlias
 
@@ -18,9 +17,10 @@ from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
-from ehc_sn.models.tem_v2 import Batch, ModelSettings_V2, RuntimeConfig, TEMModelV2, TEMRuntimeState
+from ehc_sn.models.tem_v2 import Batch, ModelSettings_V2, TEMModelV2
 from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.runtimes.training.tem_base import RuntimeConfig, TEMRuntimeState, resolve_tem_runtime
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
@@ -279,29 +279,6 @@ class TrainingModel(L.LightningModule):
         return {"trace": collector.tree}
 
 
-# =================================================================================================
-def resolve_tem_runtime(  # -----------------------------------------------------------------------
-    step: int, config: RuntimeConfig,
-) -> TEMRuntimeState:  # fmt: skip
-    """Resolve TEM runtime values from the current global training step."""
-    if step < 0:
-        raise ValueError(f"step must be non-negative, got {step}.")
-
-    memory = config.memory
-    uncertainty = config.uncertainty
-    progress_eta = min((step + 1) / float(memory.eta_it), 1.0)
-    progress_decay = min((step + 1) / float(memory.lambda_it), 1.0)
-    p2g_scale = 1.0 / (1.0 + math.exp((step - uncertainty.p2g_sig_half_it) / uncertainty.p2g_sig_scale_it))
-    p2g_uncertainty_offset = uncertainty.offset_min + (uncertainty.offset_max - uncertainty.offset_min) * p2g_scale  # fmt: skip
-
-    return TEMRuntimeState(
-        eta=progress_eta * memory.eta,
-        hebbian_decay=progress_decay * memory.hebbian_decay,
-        p2g_uncertainty_offset=p2g_uncertainty_offset,
-    )
-
-
-# =================================================================================================
 def _normalize_loss_for_backward(  # --------------------------------------------------------------
     total_loss: Tensor, local_bs: int,
 ) -> Tensor:  # fmt: skip

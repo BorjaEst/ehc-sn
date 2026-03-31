@@ -9,7 +9,7 @@ import torch
 from pydantic import BaseModel, Field, computed_field, model_validator
 from torch import Tensor, nn
 
-from ehc_sn.models._tem_contracts import TEMTransitionPlan
+from ehc_sn.models.tem_base import TEMTransitionPlan
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
 from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCState
 from ehc_sn.modules.hpc import SensoryRead as HPCSensoryRead
@@ -152,74 +152,6 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
 
 
 # =================================================================================================
-class MemoryRuntimeConfig(BaseModel, extra="forbid"):
-    """Step-based runtime schedule for Hebbian memory dynamics."""
-
-    eta: float = Field(
-        default=0.5,
-        description="Target Hebbian write rate reached after the eta ramp completes.",
-    )
-    eta_it: int = Field(
-        default=16000,
-        ge=1,
-        description="Number of optimizer steps used to ramp eta to its target value.",
-    )
-    hebbian_decay: float = Field(
-        default=0.9999,
-        description="Target Hebbian decay reached after the decay ramp completes.",
-    )
-    lambda_it: int = Field(
-        default=200,
-        ge=1,
-        description="Number of optimizer steps used to ramp Hebbian decay to its target value.",
-    )
-
-
-# =================================================================================================
-class UncertaintyRuntimeConfig(BaseModel, extra="forbid"):
-    """Step-based runtime schedule for MEC uncertainty correction."""
-
-    p2g_sig_half_it: int = Field(
-        default=400,
-        ge=0,
-        description="Sigmoid midpoint for the p->g uncertainty offset schedule.",
-    )
-    p2g_sig_scale_it: int = Field(
-        default=200,
-        ge=1,
-        description="Sigmoid scale for the p->g uncertainty offset schedule.",
-    )
-    offset_min: float = Field(
-        default=0.0,
-        description="Minimum additive uncertainty offset applied at convergence.",
-    )
-    offset_max: float = Field(
-        default=10000.0,
-        description="Maximum additive uncertainty offset applied at the start of training.",
-    )
-
-    @model_validator(mode="after")
-    def validate_offset_range(self) -> "UncertaintyRuntimeConfig":
-        if self.offset_max < self.offset_min:
-            raise ValueError("offset_max must be greater than or equal to offset_min.")
-        return self
-
-
-# =================================================================================================
-class RuntimeConfig(BaseModel, extra="forbid"):
-    """Step-based runtime schedules for TEM model dynamics."""
-
-    memory: MemoryRuntimeConfig = Field(
-        default_factory=MemoryRuntimeConfig,
-        description="Runtime schedule for Hebbian plasticity parameters.",
-    )
-    uncertainty: UncertaintyRuntimeConfig = Field(
-        default_factory=UncertaintyRuntimeConfig,
-        description="Runtime schedule for MEC uncertainty parameters.",
-    )
-
-
-# =================================================================================================
 @dataclass
 class TEMState(DetachMixin):
     """Container for the full recurrent TEM state."""
@@ -229,17 +161,6 @@ class TEMState(DetachMixin):
     hpc: HPCState
 
 
-# =================================================================================================
-@dataclass(frozen=True)
-class TEMRuntimeState:
-    """Resolved TEM runtime values for the current optimizer step."""
-
-    eta: float
-    hebbian_decay: float
-    p2g_uncertainty_offset: float
-
-
-# =================================================================================================
 class TEMModelV1(nn.Module):
     """ """
 
@@ -379,6 +300,6 @@ class TEMModelV1(nn.Module):
 
 # =================================================================================================
 __all__ = [
-    "ModelSettings_V1", "RuntimeConfig", "TEMState", "TEMRuntimeState", "TEMModelV1",
+    "ModelSettings_V1", "TEMState", "TEMModelV1",
     "Batch", "ObsLogits", "GridCodes", "PlaceCodes",
 ]  # fmt: skip
