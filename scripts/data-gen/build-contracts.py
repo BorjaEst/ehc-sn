@@ -10,7 +10,6 @@ import numpy as np
 from typer import Option, Typer, echo
 
 from ehc_sn.data._canonical import shortest_path_distances
-from ehc_sn.data.benchmark_contracts import build_layout_benchmark_contract, component_from_channels, resolve_preferred_start
 from ehc_sn.data.benchmark_manifest import (
     HELD_OUT_ONE_SHOT_ROLE,
     TRAIN_ROLE,
@@ -22,6 +21,7 @@ from ehc_sn.data.benchmark_manifest import (
     b23_contracts_path,
     write_dungeon_benchmark_manifest,
 )
+from ehc_sn.data.contracts import build_layout_benchmark_contract, component_from_channels, resolve_preferred_start
 from ehc_sn.data.index import MazeIndexEntry, read_index
 from ehc_sn.data.schema import CHANNEL_MASK_VALID, CHANNEL_START, CHANNEL_TOPOLOGY
 

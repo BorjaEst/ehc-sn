@@ -10,7 +10,7 @@ import torch
 from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
-from ehc_sn import benchmark, models
+from ehc_sn import benchmarks, models
 
 # Configure PyTorch for better performance on modern GPUs
 torch.set_float32_matmul_precision("high")
@@ -79,7 +79,7 @@ if __name__ == "__main__":
 
     # TODO: Load model, dataset, and evaluation configuration based ...
     model = models...
-    benchmark = benchmark.B0BridgeBenchmark(...)
+    benchmarks = benchmarks.B0BridgeBenchmark(...)
 
     manifest = ...
     print(

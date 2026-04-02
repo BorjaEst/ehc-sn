@@ -22,7 +22,7 @@ from ehc_sn.data._canonical import (
     shortest_path_distances,
     singleton_mask,
 )
-from ehc_sn.data.benchmark_contracts import build_layout_benchmark_contract
+from ehc_sn.data.contracts import build_layout_benchmark_contract
 from ehc_sn.data.datasets import MazeMetadata
 from ehc_sn.data.index import MazeIndexEntry, write_index
 from ehc_sn.data.schema import (

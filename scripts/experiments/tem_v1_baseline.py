@@ -20,10 +20,10 @@ from ehc_sn.controllers.tem import TEMControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.envs.dungeon_walk import EnvConfig
 from ehc_sn.heads.tem import TEMLossConfig
-from ehc_sn.lightning.tem_v1 import ModelConfig_TEM_V1, RuntimeConfig, TrainingModel
+from ehc_sn.lightning.tem.tem_v1 import ModelConfig_TEM_V1, RuntimeConfig, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.models import tem_v1
-from ehc_sn.models.tem_v1 import ModelSettings_V1
+from ehc_sn.models.tem import tem_v1
+from ehc_sn.models.tem.tem_v1 import ModelSettings_V1
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamConfig
 from ehc_sn.training.schedules import SchedulerConfig

@@ -20,10 +20,10 @@ from ehc_sn.controllers.rl import RLControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.envs.mazehard import EnvConfig
 from ehc_sn.heads.rl import RLLossConfig
-from ehc_sn.lightning.hrm_v2 import ModelConfig_HRM_V2, TrainingModel
+from ehc_sn.lightning.hrm.hrm_v2 import ModelConfig_HRM_V2, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.models import hrm_v2
-from ehc_sn.models.hrm_v2 import ModelSettings_V2
+from ehc_sn.models.hrm import hrm_v2
+from ehc_sn.models.hrm.hrm_v2 import ModelSettings_V2
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
