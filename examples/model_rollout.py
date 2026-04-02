@@ -38,7 +38,7 @@ from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.sinks import save_pdf
 from ehc_sn.heads.act import ACTLossConfig
-from ehc_sn.models.hrm_v1 import Model, ModelConfig_HRM_V1, supervised_maze_tokenize
+from ehc_sn.models.hrm.hrm_v1 import Model, ModelConfig_HRM_V1, supervised_maze_tokenize
 from ehc_sn.modules.pfc import PFCSettings
 from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
@@ -98,10 +98,7 @@ class ExampleArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     # Model architecture and data
     architecture: PFCSettings = Field(
         ...,
-        description=(
-            "Architecture config for the HRM model. The keys in `architecture` are passed to the"
-            "HRModel constructor."
-        ),
+        description=("Architecture config for the HRM model. The keys in `architecture` are passed to the" "HRModel constructor."),
     )
     act_controller: ACTControllerConfig = Field(
         ...,
@@ -177,10 +174,7 @@ def main() -> None:
     # Step 0: Parse settings (CLI overrides TOML; TOML provides defaults).
     config_path = Path(CONFIGURATION_PATH)
     if not config_path.exists():
-        raise FileNotFoundError(
-            f"Config file not found: {config_path}. "
-            "Set EXP01_CONFIGURATION_PATH or create config/defaults.toml."
-        )
+        raise FileNotFoundError(f"Config file not found: {config_path}. " "Set EXP01_CONFIGURATION_PATH or create config/defaults.toml.")
 
     with config_path.open("rb") as f:
         defaults_from_path = tomllib.load(f)

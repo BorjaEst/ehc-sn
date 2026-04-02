@@ -9,11 +9,11 @@ import torch
 from pydantic import BaseModel, Field, computed_field, model_validator
 from torch import Tensor, nn
 
-from ehc_sn.models.tem_base import TEMTransitionPlan
+from ehc_sn.models.tem.core.tem_base import TEMTransitionPlan
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
-from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCState
+from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState
 from ehc_sn.modules.hpc import SensoryRead as HPCSensoryRead
-from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues
+from ehc_sn.modules.hpc.query_policy import ReadCues, TargetRead
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
@@ -28,8 +28,8 @@ PlaceCodes = tuple[Tensor, Tensor, Optional[Tensor]]  # (posterior, prior, senso
 
 
 # =================================================================================================
-class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
-    """Canonical TEM v1 model settings.
+class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
+    """Canonical TEM v2 model settings.
 
     This compact schema keeps the environment-facing observation/action
     contract, shared multiscale frequencies, and component-local settings in a
@@ -61,7 +61,7 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
     )
 
     @model_validator(mode="after")
-    def validate_model(self) -> "ModelSettings_V1":
+    def validate_model(self) -> "ModelSettings_V2":
         self._validate_f_initial()
         self._validate_stage_alignment()
         self._validate_frequency_alignment()
@@ -92,10 +92,7 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
         """Return the total number of frequency modules."""
         return len(self.f_initial)
 
-    hpc: HPCAttractorSettings = Field(
-        ...,
-        description="Settings for the attractor-based hippocampal module.",
-    )
+    hpc: HPCAttentionSettings = Field(..., description="Settings for the attention-based hippocampal module.")
     lec: LECSettings = Field(
         ...,
         description="Settings for the LEC module, including feature filtering parameters.",
@@ -161,14 +158,14 @@ class TEMState(DetachMixin):
     hpc: HPCState
 
 
-class TEMModelV1(nn.Module):
-    """ """
+class TEMModelV2(nn.Module):
+    """TEM v2 backbone with a TEM v1-compatible forward contract."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: ModelSettings_V1, *,
+        self, config: ModelSettings_V2, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
-        """Construct the TEM backbone from the resolved TEM v1 model settings."""
+        """Construct the TEM backbone from the resolved TEM v2 model settings."""
         super().__init__()
         self._config = config
         n_freq, n_actions = config.n_total_freq, config.action_count
@@ -178,7 +175,7 @@ class TEMModelV1(nn.Module):
         self.autoencoder = Autoencoder(config.observation_dim, config.lec.feature_dim, config.autoencoder)
 
         # Entorhinal Hippocampal Circuit components
-        self.hpc = HPCAttractor(n_freq, f_initial, config.hpc, device=device, dtype=dtype)
+        self.hpc = HPCAttention(n_freq, f_initial, config.hpc, device=device, dtype=dtype)
         self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
@@ -187,8 +184,8 @@ class TEMModelV1(nn.Module):
         self.projection_lec = ProjectionModule(self.lec, self.hpc, config.projection_lec)
 
     @property
-    def config(self) -> ModelSettings_V1:
-        """ """
+    def config(self) -> ModelSettings_V2:
+        """Return the parsed TEM v2 model settings."""
         return self._config
 
     def init_state(  # ----------------------------------------------------------------------------
@@ -225,7 +222,7 @@ class TEMModelV1(nn.Module):
     def set_runtime(  # ---------------------------------------------------------------------------
         self, eta: float, hebbian_decay: float, p2g_uncertainty_offset: float,
     ) -> None:  # fmt: skip
-        """ """
+        """Apply runtime parameters resolved by the training loop."""
         self.mec.set_runtime(p2g_uncertainty_offset=p2g_uncertainty_offset)
         self.hpc.set_runtime(eta=eta, hebbian_decay=hebbian_decay)
 
@@ -258,7 +255,7 @@ class TEMModelV1(nn.Module):
             HPCSensoryRead(
                 state=state.hpc,
                 read_cues=ReadCues(families={"x": place_query_from_obs, "g": place_query_from_grid_prior}),
-                read=CueRead(kind="cue", cue="x"),
+                read=TargetRead(kind="target", sources=("g",), target="x", target_init="x"),
                 enable_sensory_recall=self.config.enable_sensory_recall,
             )
         )
@@ -272,34 +269,40 @@ class TEMModelV1(nn.Module):
             grid_query_prior=place_query_from_grid_prior,
             grid_post=grid_post,
             grid_query_posterior=place_query_from_grid_post,
-            generative_read=CueRead(kind="cue", cue="g"),
+            generative_read=TargetRead(kind="target", sources=("g",), target="x"),
         )
 
         step = self.hpc.transition(transition.to_hpc_transition(state.hpc))
+        place_sensory = step.sensory.recall
+        place_recall_from_grid_prior = step.grid_prior_recall
+        place_recall_from_grid_post = step.grid_posterior_recall
+        place_prior = step.place_prior
+        place_retrieved = step.place_retrieved
+        place_post = step.place_post
         state.hpc = step.state
 
         # Decode observation logits for the three TEM pathways.
-        lec_features_from_place_post = self.projection_lec.inverse(step.place_post)
+        lec_features_from_place_post = self.projection_lec.inverse(place_post)
         obs_features_inference = self.lec.generative(lec_features_from_place_post)
         logits_inference = self.autoencoder.decode(obs_features_inference)
 
-        lec_features_from_place_retrieved = self.projection_lec.inverse(step.place_retrieved)
+        lec_features_from_place_retrieved = self.projection_lec.inverse(place_retrieved)
         obs_features_retrieved = self.lec.generative(lec_features_from_place_retrieved)
         logits_retrieved = self.autoencoder.decode(obs_features_retrieved)
 
-        lec_features_from_place_prior = self.projection_lec.inverse(step.place_prior)
+        lec_features_from_place_prior = self.projection_lec.inverse(place_prior)
         obs_features_ancestral = self.lec.generative(lec_features_from_place_prior)
         logits_ancestral = self.autoencoder.decode(obs_features_ancestral)
 
         # Return controller-compatible rollout outputs for the TEM loss head.
         obs_logits = (logits_inference, logits_retrieved, logits_ancestral)
         grid = (transition.grid_post, transition.grid_prior)
-        place = (step.place_post, step.place_prior, step.sensory.recall)
+        place = (place_post, place_prior, place_sensory)
         return state, obs_logits, None, grid, place  # Action=None as TEM provides no direct action outputs
 
 
 # =================================================================================================
 __all__ = [
-    "ModelSettings_V1", "TEMState", "TEMModelV1",
+    "ModelSettings_V2", "TEMState", "TEMModelV2",
     "Batch", "ObsLogits", "GridCodes", "PlaceCodes",
 ]  # fmt: skip
