@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import os
+import tomllib
 from pathlib import Path
 
 import torch
 from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
-from ehc_sn.benchmark import b0
-from ehc_sn.runtimes.benchmark import resolve_b0_runner
+from ehc_sn import benchmark, models
 
 # Configure PyTorch for better performance on modern GPUs
 torch.set_float32_matmul_precision("high")
@@ -37,29 +37,34 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True, populate_b
         extra = [init_settings, env_settings, dotenv_settings, file_secret_settings]
         return CliSettingsSource(settings_cls), *extra
 
-    config_path: Path = Field(
-        default=Path(CONFIGURATION_PATH),
-        alias="config-path",
+    benchmark_config: Path = Field(
+        ...,
         description="Path to the B0 benchmark wrapper TOML file.",
     )
+    model_kind: str = Field(
+        default="hrm_v1",
+        description="The B0 model kind to evaluate. Supported values: 'hrm_v1'.",
+    )
+    model_config: Path = Field(
+        ...,
+        description="Path to the B0 model configuration TOML file that specifies the model.",
+    )
+    model_checkpoint: Path | None = Field(
+        default=None,
+        description="Optional checkpoint override used for evaluation.",
+    )
+
     seed: int | None = Field(
         default=None,
         description="Optional seed override. When omitted, use canonical benchmark seeds.",
     )
     compute_budget: int | None = Field(
         default=None,
-        alias="compute-budget",
         description="Optional compute-budget override. When omitted, use the wrapper default behavior.",
     )
-    output_root: Path | None = Field(
+    output_dir: Path | None = Field(
         default=None,
-        alias="output-root",
         description="Optional output directory override for benchmark artifacts.",
-    )
-    checkpoint_path: Path | None = Field(
-        default=None,
-        alias="checkpoint-path",
-        description="Optional checkpoint override used for evaluation.",
     )
 
 
@@ -67,34 +72,16 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True, populate_b
 # Main Entrypoint
 # =================================================================================================
 if __name__ == "__main__":
-    """Run the B0 benchmark wrapper with optional dry-run scheduling output."""
-    # Load the wrapper configuration and build jobs
-    settings = RunArguments()
-    wrapper, _ = b0.load_b0_wrapper_config(
-        config_path=settings.config_path,
-    )
+    # Load defaults from TOML, then parse settings.
+    # CLI arguments override TOML values; Pydantic defaults fill in anything missing.
+    defaults = tomllib.load(Path(CONFIGURATION_PATH).open("rb"))
+    settings = RunArguments(**defaults)
 
-    # Load the dataset partitions and build jobs
-    partitions = b0.load_b0_partitions(
-        dataset_root=wrapper.benchmark.dataset_path,
-        hard_subset_manifest_path=wrapper.benchmark.hard_subset_manifest,
-    )
-    jobs = b0.build_b0_jobs(
-        partitions=partitions,
-        seed=settings.seed,
-        compute_budget=settings.compute_budget,
-        benchmark_config=wrapper.benchmark,
-    )
+    # TODO: Load model, dataset, and evaluation configuration based ...
+    model = models...
+    benchmark = benchmark.B0BridgeBenchmark(...)
 
-    # Execute the jobs and write results
-    manifest = b0.execute_b0_jobs(
-        config_path=settings.config_path,
-        seed=settings.seed,
-        compute_budget=settings.compute_budget,
-        output_root=settings.output_root,
-        checkpoint_path=settings.checkpoint_path,
-        runner=resolve_b0_runner(wrapper.benchmark.model_kind),
-    )
+    manifest = ...
     print(
         f"Wrote {len(manifest['artifact_paths'])} B0 result artifacts "
         f"to {manifest['output_root']}"

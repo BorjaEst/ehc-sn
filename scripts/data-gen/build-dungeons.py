@@ -1,3 +1,5 @@
+"""Generate canonical dungeon datasets and benchmark OOD corpora."""
+
 from __future__ import annotations
 
 import gzip
@@ -20,6 +22,7 @@ from ehc_sn.data._canonical import (
     shortest_path_distances,
     singleton_mask,
 )
+from ehc_sn.data.benchmark_contracts import build_layout_benchmark_contract
 from ehc_sn.data.datasets import MazeMetadata
 from ehc_sn.data.index import MazeIndexEntry, write_index
 from ehc_sn.data.schema import (
@@ -32,14 +35,44 @@ from ehc_sn.data.schema import (
     CHANNEL_TOPOLOGY,
 )
 
+# =================================================================================================
+# Configuration
+# -------------------------------------------------------------------------------------------------
+
 app = Typer(pretty_exceptions_enable=False)
 RAW_PATH = "data/raw/dungeons"
 PROCESSED_PATH = "data/processed/dungeons"
 PASSABLE_TYPES = frozenset({CellType.ROOM, CellType.PASSAGE, CellType.DOOR})
+OOD_BENCHMARK_RECIPES = {
+    "medium-classic": {
+        "size": "medium",
+        "archetype": "classic",
+        "seed": 4300,
+        "out_dirname": "dungeons-ood-medium-classic",
+    },
+    "large-classic": {
+        "size": "large",
+        "archetype": "classic",
+        "seed": 4400,
+        "out_dirname": "dungeons-ood-large-classic",
+    },
+    "small-temple": {
+        "size": "small",
+        "archetype": "temple",
+        "seed": 4500,
+        "out_dirname": "dungeons-ood-small-temple",
+    },
+    "small-cavern": {
+        "size": "small",
+        "archetype": "cavern",
+        "seed": 4600,
+        "out_dirname": "dungeons-ood-small-cavern",
+    },
+}
 
 
 # =================================================================================================
-# CLI command
+# CLI Commands
 # -------------------------------------------------------------------------------------------------
 
 
@@ -57,6 +90,8 @@ def process_dungeongen(  # -----------------------------------------------------
     density: float = Option(0.6, "--density", help="Room packing density (0.0 sparse … 1.0 tight)."),
     seed: int = Option(43, "--seed", help="Base RNG seed (incremented per dungeon)."),
     margin: int = Option(1, "--margin", help="Grid margin (wall border) around the dungeon bounding box."),
+    require_benchmark_contract: bool = Option(False, "--require-benchmark-contract", help="Reject generated layouts that cannot satisfy the canonical B23 benchmark contract."),
+    max_attempt_multiplier: int = Option(20, "--max-attempt-multiplier", min=1, help="Maximum candidate layouts to try per accepted layout when benchmark filtering is enabled."),
 ) -> None:  # fmt: skip
     """Generate dungeons with dungeongen, rasterize to grids, and write per-channel .npy files + JSONL index."""
     dg_size = DungeonSize[size.upper()]
@@ -71,25 +106,54 @@ def process_dungeongen(  # -----------------------------------------------------
 
     splits: list[tuple[str, int]] = [("train", n_train), ("val", n_val), ("test", n_test)]
     maze_id = 0
+    candidate_seed_offset = 0
 
     for split, count in splits:
         echo(f"Generating {count} {split} dungeons (size={size}, archetype={archetype}) …")
+        if count == 0:
+            echo(f"  → skipping empty split '{split}'")
+            continue
+
         all_channels: list[dict[str, np.ndarray]] = []
         raw_records: list[dict] = []
+        rejected = 0
+        attempts = 0
+        max_attempts = count * max_attempt_multiplier if require_benchmark_contract else count
 
-        for i in range(count):
-            dungeon_seed = seed + maze_id + i
+        # Generate candidate layouts until the split reaches its target count.
+        while len(all_channels) < count:
+            if attempts >= max_attempts:
+                raise ValueError(
+                    f"Failed to generate {count} benchmark-compatible dungeons for split '{split}' after {attempts} attempts; "
+                    f"accepted {len(all_channels)}, rejected {rejected}."
+                )
+
+            dungeon_seed = seed + candidate_seed_offset
+            candidate_seed_offset += 1
+            attempts += 1
             params = GenerationParams(size=dg_size, archetype=dg_arch, density=density, seed=dungeon_seed)
             generator = DungeonGenerator(params)
             dungeon = generator.generate(seed=dungeon_seed)
 
-            # Collect raw dungeon record in memory (written as compressed archive later).
-            raw_records.append(_dungeon_to_dict(dungeon))
-
             # Rasterize dungeon → channel arrays.
             channels = _rasterize_dungeon(generator, dungeon, n_observations, margin, rng_seed=dungeon_seed)
+            if require_benchmark_contract:
+                try:
+                    build_layout_benchmark_contract(
+                        component=channels[CHANNEL_MASK_VALID],
+                        entry_id=str(dungeon_seed),
+                        split=split,
+                        preferred_start=first_true_cell(channels[CHANNEL_START]),
+                    )
+                except ValueError:
+                    rejected += 1
+                    continue
+
+            # Collect raw dungeon record in memory (written as compressed archive later).
+            raw_records.append(_dungeon_to_dict(dungeon))
             all_channels.append(channels)
 
+        # Persist the accepted layouts and derived processed tensors for this split.
         # Flush all raw records to a single compressed JSONL file.
         _save_raw_split(raw_records, raw_dir / f"{split}.jsonl.gz")
 
@@ -109,13 +173,49 @@ def process_dungeongen(  # -----------------------------------------------------
         entries = [_build_idx_entry(meta, all_channels, i=i, start_id=maze_id) for i in range(count)]
         write_index(entries, index_path, append=True)
         maze_id += count
-        echo(f"  → {count} dungeons written (total so far: {maze_id})")
+        if require_benchmark_contract:
+            echo(f"  → {count} dungeons written (rejected {rejected} infeasible layouts; total so far: {maze_id})")
+        else:
+            echo(f"  → {count} dungeons written (total so far: {maze_id})")
 
     echo(f"\nDone. Index written to {index_path}")
 
 
 # =================================================================================================
-# Internal helpers
+@app.command("process-benchmark-ood")
+def process_benchmark_ood(  # --------------------------------------------------------------------
+    recipe: str = Option(..., "--recipe", help="Benchmark OOD recipe alias."),
+    out_root: Path = Option(Path("data/processed"), "--out-root", help="Parent directory for processed benchmark datasets."),
+    raw_root: Path = Option(Path(RAW_PATH), "--raw-root", help="Parent directory for raw benchmark dungeon archives."),
+    n_observations: int = Option(45, "--n-obs", help="Observation vocabulary size for random assignment."),
+    density: float = Option(0.6, "--density", help="Room packing density."),
+    margin: int = Option(1, "--margin", help="Grid margin around the dungeon bounding box."),
+) -> None:  # fmt: skip
+    """Generate one of the canonical B1 OOD corpora with deterministic naming and seed policy."""
+    if recipe not in OOD_BENCHMARK_RECIPES:
+        known = ", ".join(sorted(OOD_BENCHMARK_RECIPES))
+        raise ValueError(f"Unknown benchmark OOD recipe '{recipe}'. Expected one of: {known}.")
+
+    config = OOD_BENCHMARK_RECIPES[recipe]
+    process_dungeongen(
+        out_dir=out_root / config["out_dirname"],
+        raw_dir=raw_root / config["out_dirname"],
+        n_train=0,
+        n_val=0,
+        n_test=100,
+        size=str(config["size"]),
+        archetype=str(config["archetype"]),
+        n_observations=n_observations,
+        density=density,
+        seed=int(config["seed"]),
+        margin=margin,
+        require_benchmark_contract=False,
+        max_attempt_multiplier=20,
+    )
+
+
+# =================================================================================================
+# Rasterization Helpers
 # -------------------------------------------------------------------------------------------------
 
 
@@ -210,6 +310,11 @@ def _pad_channels_to_common_shape(  # ------------------------------------------
 
 
 # =================================================================================================
+# Exit Mapping Helpers
+# -------------------------------------------------------------------------------------------------
+
+
+# =================================================================================================
 def _canonical_entrance_cell(  # ------------------------------------------------------------------
     dungeon: Dungeon, topology: np.ndarray, mask_valid: np.ndarray, *,
     ox: int, oy: int,
@@ -223,11 +328,7 @@ def _canonical_entrance_cell(  # -----------------------------------------------
     )
 
     for predicate in priorities:
-        mapped = [
-            _map_exit_to_valid_cell(ex, dungeon, topology, mask_valid, ox=ox, oy=oy)
-            for ex in raw_exits
-            if predicate(ex)
-        ]
+        mapped = [_map_exit_to_valid_cell(ex, dungeon, topology, mask_valid, ox=ox, oy=oy) for ex in raw_exits if predicate(ex)]
         mapped = [cell for cell in mapped if cell is not None]
         if mapped:
             return min(mapped)
@@ -245,9 +346,7 @@ def _canonical_goal_cell(  # ---------------------------------------------------
 ) -> tuple[int, int]:  # fmt: skip
     """Return one canonical goal cell, preferring non-entrance exits."""
     raw_exits = list(getattr(dungeon, "exits", {}).values())
-    goal_candidates = [
-        ex for ex in raw_exits if not getattr(ex, "is_main", False) and not _is_entrance_exit(ex)
-    ]
+    goal_candidates = [ex for ex in raw_exits if not getattr(ex, "is_main", False) and not _is_entrance_exit(ex)]
     if not goal_candidates:
         goal_candidates = [ex for ex in raw_exits if _map_exit_identity(ex) != _entrance_identity(raw_exits)]
 
@@ -259,9 +358,7 @@ def _canonical_goal_cell(  # ---------------------------------------------------
         if cell is None or cell == start_cell or distances[cell] < 0:
             continue
         distance = int(distances[cell])
-        if distance > best_distance or (
-            distance == best_distance and (best_goal is None or cell < best_goal)
-        ):
+        if distance > best_distance or (distance == best_distance and (best_goal is None or cell < best_goal)):
             best_distance = distance
             best_goal = cell
 
@@ -299,9 +396,7 @@ def _map_exit_to_valid_cell(  # ------------------------------------------------
         return None
     if room_center is None:
         return min(candidates)
-    return min(
-        candidates, key=lambda cell: (abs(cell[0] - room_center[1]) + abs(cell[1] - room_center[0]), cell)
-    )
+    return min(candidates, key=lambda cell: (abs(cell[0] - room_center[1]) + abs(cell[1] - room_center[0]), cell))
 
 
 # =================================================================================================
@@ -346,6 +441,11 @@ def _entrance_identity(  # -----------------------------------------------------
         if getattr(exit_obj, "is_main", False) or _is_entrance_exit(exit_obj):
             return _map_exit_identity(exit_obj)
     return None
+
+
+# =================================================================================================
+# Raw Serialization
+# -------------------------------------------------------------------------------------------------
 
 
 # =================================================================================================
@@ -398,6 +498,11 @@ def _parse_exit(exit_obj: dict) -> tuple[str, object]:
 
 
 # =================================================================================================
+# Processed Metadata
+# -------------------------------------------------------------------------------------------------
+
+
+# =================================================================================================
 def _save_raw_split(  # ---------------------------------------------------------------------------
     records: list[dict], path: Path,
 ) -> None:  # fmt: skip
@@ -444,6 +549,11 @@ def _build_idx_entry(  # -------------------------------------------------------
         channels=meta.channels,
         n_observations=n_obs,
     )
+
+
+# =================================================================================================
+# Entry Point
+# -------------------------------------------------------------------------------------------------
 
 
 # =================================================================================================
