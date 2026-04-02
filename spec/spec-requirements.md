@@ -153,22 +153,32 @@ No known dependency declaration mismatches are currently recorded.
 ## 7 Training Infrastructure Constraints
 
 All code in `training/` is **model-agnostic**: it must not import from
-`models/`, `modules/`, or `runtimes/`. `training/` owns generic optimization,
+`models/`, `modules/`, or `lightning/`. `training/` owns generic optimization,
 step-loop, scheduling, buffer, and loss-support primitives only.
 
 All executable model-specific training orchestration lives in
-`runtimes/training/`. This includes Lightning trainers, optimizer assembly,
-scheduler assembly, trainer-local checkpoint restore logic, and
-training/validation runtime hooks.
+`lightning/`. This includes Lightning trainers, optimizer assembly, scheduler
+assembly, trainer-local checkpoint restore logic, and training/validation
+hooks.
 
-All executable model-specific benchmark orchestration lives in
-`runtimes/benchmark/`. This includes concrete benchmark executors,
-benchmark-time checkpoint loading, model-aware policy-factory resolution,
-and benchmark-time dataset or environment assembly.
+All reusable benchmark code lives in `benchmarks/`.
 
-All code in `benchmark/` remains **model-agnostic** and owns only benchmark
-definitions, scheduling, protocol contracts, artifact writing, and summary
-aggregation. `benchmark/` must not import from `models/` or `runtimes/`.
+Within `benchmarks/`, `_capabilities/` and `_infra/` remain
+**model-agnostic**. They own only benchmark capability contracts and
+mechanical benchmark support such as artifact writing, seeding, timing, and
+shared result types. These subareas must not import from `models/` or
+`lightning/`.
+
+Within `benchmarks/`, `_bindings/` is the only model-aware benchmark subarea.
+It may import from `models/` and lower reusable layers to adapt pure models to
+benchmark capability protocols, perform observation-to-tensor conversion, and
+hydrate resolved checkpoint payloads. `_bindings/` must not own benchmark
+semantics, evaluator loops, or benchmark-specific metrics.
+
+Benchmark-semantic packages under `benchmarks/` (for example `b0/`-`b3/`)
+own evaluator loops, manifests, metric interpretation, and benchmark-specific
+protocols such as B2 frozen-weight exposure/probe rules. These packages remain
+model-agnostic and must not import from `models/` or `lightning/`.
 
 All code in `controllers/` and `heads/` is also **model-agnostic**: it must not
 import from `models/`. Controllers own rollout carry/state and step orchestration;
@@ -226,16 +236,16 @@ benchmark suite in `spec/spec-architecture.md`.
   recurrent baseline, one memory-disabled or `no-HPC-write` ablation, one
   pooled-cue or fused-retrieval ablation, and one generic RL baseline when the
   claim is framed as broad RL competence.
-- Benchmark orchestration code intended for reuse across B0-B3 belongs in 
-  ehc_sn.benchmark.
-- Concrete benchmark execution and model-aware policy-factory resolution belong
-  in `ehc_sn.runtimes.benchmark`.
-- `ehc_sn.benchmark` must not dispatch on `model_kind`, instantiate concrete
-  training models, load checkpoints, or own model-aware policy-factory
-  resolution.
-- Canonical benchmark entrypoints belong under benchmarks/ as thin wrappers that
-  parse user input, delegate scheduling and aggregation to `ehc_sn.benchmark`,
-  and resolve concrete execution surfaces from `ehc_sn.runtimes.benchmark`.
+- Benchmark orchestration code intended for reuse across B0-B3 belongs in
+  `ehc_sn.benchmarks`.
+- Model-aware benchmark bindings, observation-to-tensor conversion, and
+  benchmark-time checkpoint hydration belong in `ehc_sn.benchmarks._bindings`.
+- Benchmark-semantic packages under `ehc_sn.benchmarks` must not dispatch on
+  `model_kind`, instantiate concrete training models, or load checkpoints
+  directly.
+- Canonical benchmark entrypoints belong under `scripts/benchmarks/` as thin
+  wrappers that parse user input, resolve checkpoint paths and binding
+  selection, and delegate to evaluators in `ehc_sn.benchmarks`.
 - Scripts under experiments/ are exploratory or paper-specific and must not 
   duplicate shared benchmark job planning, runtime resolution, or
   artifact-writing logic.
