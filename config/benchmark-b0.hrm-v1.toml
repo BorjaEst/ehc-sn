@@ -1,13 +1,8 @@
-base_config_path = "config/hrm-mazehard.v1.toml"
-
-[benchmark]
-benchmark_id = "b0"
+benchmark_conifg = "config/benchmarks/b0-example.toml"
 model_kind = "hrm_v1"
-model_id = "hrm_v1"
-variant_id = "mazehard-bridge-v1"
-dataset_path = "data/processed/maze-30x30-hard-1k"
-hard_subset_manifest = "data/processed/maze-30x30-hard-1k/benchmarks/b0-hard-subset.json"
-results_dir = "outputs/benchmarks/b0"
-compute_budget_field = "act_controller.max_steps"
-bridge_only = true
-primary_navigation_claim = false
+model_config = "config/models/hrm_v1.toml"
+model_checkpoint = "checkpoints/hrm_v1/best.ckpt"
+
+seed = 42
+compute_budget = 100000
+output_dir = "outputs/benchmarks/b0-hrm-v1"
