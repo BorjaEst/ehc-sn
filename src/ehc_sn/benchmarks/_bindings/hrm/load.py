@@ -9,6 +9,7 @@ from typing import Any
 import torch
 
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettings_V1
+from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettings_V2
 
 
 def _resolve_checkpoint_state_dict(  # ------------------------------------------------------------
@@ -54,4 +55,29 @@ def load_hrm_v1_model(  # ------------------------------------------------------
     return model.to(device).eval()
 
 
-__all__ = ["load_hrm_v1_model"]
+def load_hrm_v2_model(  # ------------------------------------------------------------------------
+    *,
+    model_config_path: str | Path,
+    checkpoint_path: str | Path | None = None,
+    device: str = "cpu",
+) -> HRModelV2:
+    """Instantiate HRM v2 and optionally hydrate it from a checkpoint."""
+    resolved_model_config = Path(model_config_path)
+    config = ModelSettings_V2.model_validate(tomllib.load(resolved_model_config.open("rb")))
+    model = HRModelV2(config)
+
+    if checkpoint_path is not None:
+        resolved_checkpoint = Path(checkpoint_path)
+        state_dict = _resolve_checkpoint_state_dict(resolved_checkpoint)
+        try:
+            model.load_state_dict(state_dict, strict=True)
+        except RuntimeError as exc:
+            raise ValueError(
+                f"Failed to load HRM v2 checkpoint from {resolved_checkpoint}. "
+                "The checkpoint is not compatible with the current HRModelV2 surface."
+            ) from exc
+
+    return model.to(device).eval()
+
+
+__all__ = ["load_hrm_v1_model", "load_hrm_v2_model"]
