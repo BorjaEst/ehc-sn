@@ -1,1 +1,0 @@
-"""HRM rollout-binding module."""

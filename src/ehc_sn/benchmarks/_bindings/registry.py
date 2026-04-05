@@ -1,17 +1,17 @@
-"""Explicit resolver for benchmark bindings."""
+"""Explicit registry for internal benchmark bindings."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeAlias
 
-BindingFactory = Callable[..., Any]
+BindingFactory: TypeAlias = Callable[..., Any]
 
 _BINDINGS: dict[tuple[str, str], BindingFactory] = {}
 
 
 def register_binding(*, model_family: str, capability: str, factory: BindingFactory) -> None:
-    """Register one explicit benchmark binding factory."""
+    """Register one benchmark binding factory for ``(model_family, capability)``."""
     _BINDINGS[(model_family, capability)] = factory
 
 

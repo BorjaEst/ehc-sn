@@ -11,7 +11,7 @@ from ehc_sn.benchmarks._capabilities import BatchPredicts
 from ehc_sn.benchmarks._infra import ensure_directory, seed_benchmark_process, write_artifact_json
 from ehc_sn.benchmarks.b0.manifest import B0Manifest
 from ehc_sn.benchmarks.b0.metrics import build_sample_result, summarize_results
-from ehc_sn.data.benchmarks.b0 import b0_hard_subset_path, read_mazehard_subset_manifest
+from ehc_sn.data.benchmarks.mazehard_b0 import b0_hard_subset_path, read_mazehard_subset_manifest
 from ehc_sn.data.datasets import MazeDataset
 from ehc_sn.data.index import filter_index, read_index
 
