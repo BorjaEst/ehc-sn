@@ -1,7 +1,9 @@
 """ """
 
 import math
+import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple, TypeAlias
 
 import torch
@@ -56,6 +58,12 @@ class ModelSettings_V1(BaseModel, extra="forbid"):
     def pos_encodings(self) -> str:
         """Positional encoding mode shared by both H and L reasoning modules."""
         return self.pfc.reasoning_h.cortex.pos_encodings
+
+    @classmethod
+    def from_config(cls, path: Path) -> "ModelSettings_V1":
+        """Load model settings from a TOML configuration file."""
+        config_map = tomllib.load(Path(path).open("rb"))
+        return ModelSettings_V1.model_validate(config_map)
 
 
 # =================================================================================================

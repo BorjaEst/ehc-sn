@@ -48,7 +48,6 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True, populate_b
     )
     model_config_path: Path = Field(
         ...,
-        alias="model_config",
         description="Path to the model configuration TOML file that specifies the model.",
     )
     model_checkpoint: Path | None = Field(

@@ -38,6 +38,7 @@ from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.heads.rl import RLLossConfig, RLLossHead
+from ehc_sn.lightning.hrm.core.runtime import normalize_loss_for_backward
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
@@ -270,7 +271,7 @@ class TrainingModel(L.LightningModule):
         # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = int(batch["inputs"].shape[0])
         out = step.outputs
-        loss = _normalize_loss_for_backward(out.loss, local_bs)
+        loss = normalize_loss_for_backward(out.loss, local_bs)
 
         # Zero gradients before backward so each step uses only the current batch.
         opt_sup, opt_rl, opt_qv = self.optimizers()  # type: ignore[misc]
@@ -316,52 +317,3 @@ class TrainingModel(L.LightningModule):
             raise ValueError("Evaluation loop did not yield any steps.")
 
         return {"trace": collector.tree}
-
-
-# =================================================================================================
-def _normalize_loss_for_backward(  # --------------------------------------------------------------
-    total_loss: Tensor, local_bs: int,
-) -> Tensor:  # fmt: skip
-    """Normalize the total loss by the local batch size for distributed training.
-
-    In distributed training (e.g. DDP), each rank computes gradients on its local mini-batch.
-    To ensure that the overall gradient magnitudes are consistent regardless of the number of
-    devices, we normalize the loss by the local batch size (the number of examples processed
-    by this rank). DDP will then average the gradients across ranks, effectively normalizing by
-    the global batch size.
-
-    Args:
-        total_loss: The unnormalized loss computed for the current mini-batch (scalar tensor).
-        local_bs: The effective batch size for this mini-batch on the current rank (number of examples).
-
-    Returns:
-        The loss normalized by the local batch size, ready for backward().
-    """
-    if local_bs <= 0:
-        raise ValueError(f"local_bs must be positive, got {local_bs}.")
-    return total_loss / float(local_bs)
-
-
-# =================================================================================================
-def supervised_maze_tokenize(  # ------------------------------------------------------------------
-    channels: dict[str, np.ndarray],
-) -> dict[str, np.ndarray]:  # fmt: skip
-    """Convert raw maze channels into flattened input/label token sequences.
-
-    Uses :func:`~ehc_sn.data.transforms.channels_to_grid` to merge topology,
-    start, and goals into a canonical ``int32`` grid, then flattens to a 1-D
-    token sequence.  The label sequence overwrites solution-path cells with
-    :data:`O_ID` (HRM-private supervision token).
-
-    Args:
-        channels: Raw NPZ channel dict (as returned by ``MazeDataset``).
-
-    Returns:
-        ``{"inputs": int32 (H*W,), "labels": int32 (H*W,)}``.
-    """
-    grid = channels_to_grid(channels)["grid"]  # (H, W) int32
-    inputs = grid.ravel()
-    labels = inputs.copy()
-    if CHANNEL_SOLUTION in channels:
-        labels[channels[CHANNEL_SOLUTION].ravel() > 0] = O_ID
-    return {"inputs": inputs, "labels": labels}

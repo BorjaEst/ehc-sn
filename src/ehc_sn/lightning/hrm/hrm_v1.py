@@ -17,21 +17,18 @@ The batch structure used throughout this file is a plain ``dict[str, Tensor]``
 with keys ``"inputs"`` and ``"labels"``.
 """
 
-from dataclasses import dataclass
 from itertools import repeat
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple, TypeAlias
 
 import lightning as L
-import numpy as np
 from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 from pydantic import BaseModel, Field
-from torch import Tensor
 from torch.optim import Optimizer
 
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
-from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
-from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
+from ehc_sn.lightning.hrm.core.runtime import normalize_loss_for_backward
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
@@ -58,11 +55,10 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
         - `global_batch_size` is used for scaling losses/metrics in a distributed setup.
     """
 
-    model: ModelSettings_V1 = Field(
+    model_config_path: Path = Field(
         ...,
-        description="",
+        description="Path to the model configuration TOML file that specifies the HRM v1 architecture.",
     )
-
     act_controller: ACTControllerConfig = Field(
         ...,
         description=(
@@ -71,19 +67,16 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
             "The keys in `act_controller` are passed to the ACTController constructor."
         ),
     )
-
     loss: ACTLossConfig = Field(
         ...,
         description="Loss config. The keys in `loss` are passed to the loss head constructor.",
     )
-
     optimizer: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
         description=(
             "Main optimizer config for model parameters (e.g. Adam). " "The keys in `optim_main` are passed to the optimizer constructor."
         ),
     )
-
     scheduler: SchedulerConfig = Field(
         default_factory=SchedulerConfig,
         description=(
@@ -91,7 +84,6 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
             "The keys in `scheduler` are passed to the scheduler constructor."
         ),
     )
-
     global_batch_size: int = Field(
         ...,
         description=(
@@ -127,7 +119,8 @@ class TrainingModel(L.LightningModule):
             - `_train_carry` is initialized lazily from the first batch via `step_module`.
         """
         super().__init__()
-        self.model = HRModelV1(config.model)
+        model_settings = ModelSettings_V1.from_config(config.model_config_path)
+        self.model = HRModelV1(model_settings)
         self.controller = ACTController(self.model, config.act_controller)
         self.step_module = ACTLossHead(self.controller, config.loss)
         self._config = config
@@ -229,7 +222,7 @@ class TrainingModel(L.LightningModule):
 
         # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = int(batch["inputs"].shape[0])
-        loss = _normalize_loss_for_backward(step.outputs.loss, local_bs=local_bs)
+        loss = normalize_loss_for_backward(step.outputs.loss, local_bs=local_bs)
 
         optimizers = self.optimizers()
         for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
@@ -271,52 +264,3 @@ class TrainingModel(L.LightningModule):
             raise ValueError("Evaluation loop did not yield any steps, cannot log metrics.")
 
         return {"trace": collector.tree}
-
-
-# =================================================================================================
-def _normalize_loss_for_backward(  # --------------------------------------------------------------
-    total_loss: Tensor, local_bs: int,
-) -> Tensor:  # fmt: skip
-    """Normalize the total loss by the local batch size for distributed training.
-
-    In distributed training (e.g. DDP), each rank computes gradients on its local mini-batch.
-    To ensure that the overall gradient magnitudes are consistent regardless of the number of
-    devices, we normalize the loss by the local batch size (the number of examples processed
-    by this rank). DDP will then average the gradients across ranks, effectively normalizing by
-    the global batch size.
-
-    Args:
-        total_loss: The unnormalized loss computed for the current mini-batch (scalar tensor).
-        local_bs: The effective batch size for this mini-batch on the current rank (number of examples).
-
-    Returns:
-        The loss normalized by the local batch size, ready for backward().
-    """
-    if local_bs <= 0:
-        raise ValueError(f"local_bs must be positive, got {local_bs}.")
-    return total_loss / float(local_bs)
-
-
-# =================================================================================================
-def supervised_maze_tokenize(  # ------------------------------------------------------------------
-    channels: dict[str, np.ndarray],
-) -> dict[str, np.ndarray]:  # fmt: skip
-    """Convert raw maze channels into flattened input/label token sequences.
-
-    Uses :func:`~ehc_sn.data.transforms.channels_to_grid` to merge topology,
-    start, and goals into a canonical ``int32`` grid, then flattens to a 1-D
-    token sequence.  The label sequence is a copy where solution-path cells are
-    overwritten with :data:`O_ID` (HRM-private supervision token).
-
-    Args:
-        channels: Raw NPZ channel dict (as returned by ``MazeDataset``).
-
-    Returns:
-        ``{"inputs": int32 (H*W,), "labels": int32 (H*W,)}``.
-    """
-    grid = channels_to_grid(channels)["grid"]  # (H, W) int32
-    inputs = grid.ravel()
-    labels = inputs.copy()
-    if CHANNEL_SOLUTION in channels:
-        labels[channels[CHANNEL_SOLUTION].ravel() > 0] = O_ID
-    return {"inputs": inputs, "labels": labels}
