@@ -1,8 +1,8 @@
-benchmark_conifg = "config/benchmarks/b0-example.toml"
+benchmark_config = "config/benchmarks/b0-example.toml"
 model_kind = "hrm_v1"
-model_config = "config/models/hrm_v1.toml"
-model_checkpoint = "checkpoints/hrm_v1/best.ckpt"
+model_config = "config/models/hrm.v1.toml"
+model_checkpoint = "models/hrm-epoch=274-step=17000.ckpt"
 
 seed = 42
-compute_budget = 100000
+device = "cuda"
 output_dir = "outputs/benchmarks/b0-hrm-v1"
