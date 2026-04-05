@@ -21,7 +21,7 @@ from ehc_sn.data._canonical import (
     singleton_mask,
     stable_text_seed,
 )
-from ehc_sn.data.benchmark_manifest import MazeHardSubsetManifest, b0_hard_subset_path, write_mazehard_subset_manifest
+from ehc_sn.data.benchmarks.mazehard_b0 import MazeHardSubsetManifest, b0_hard_subset_path, write_mazehard_subset_manifest
 from ehc_sn.data.datasets import MazeMetadata
 from ehc_sn.data.index import MazeIndexEntry, read_index, write_index
 from ehc_sn.data.schema import (
