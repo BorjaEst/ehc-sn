@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Optional, TypeAlias
 
 import torch
@@ -146,6 +148,12 @@ class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
     def n_total_freq(self) -> int:
         """Return the total number of MEC/HPC frequencies after OVC expansion."""
         return self.mec.n_total_freq
+
+    @classmethod
+    def from_config(cls, path: Path) -> "ModelSettings_V2":
+        """Load model settings from a TOML configuration file."""
+        config_map = tomllib.load(Path(path).open("rb"))
+        return cls.model_validate(config_map)
 
 
 # =================================================================================================

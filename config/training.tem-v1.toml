@@ -1,0 +1,89 @@
+# =============================================================================
+# TEM v1 Baseline — Default Smoke Configuration
+# =============================================================================
+
+# -- Model architecture -------------------------------------------------------
+model_config_path = "config/models/tem-v1.toml"
+
+# -- General settings ---------------------------------------------------------
+dataset_path         = "temp/benchmark-dungeons-smoke"
+global_batch_size    = 2
+epochs               = 100
+seed                 = 42
+augment              = true
+num_workers          = 4
+prefetch_factor      = 2
+pin_memory           = true
+persistent_workers   = true
+max_steps            = 200000
+log_every_n_steps    = 10
+val_check_interval   = 1000
+limit_val_batches    = 10
+enable_progress_bar  = true
+trainer_accelerator  = "gpu"
+trainer_strategy     = "ddp"
+trainer_devices      = 1
+trainer_num_nodes    = 1
+trainer_precision    = "16-mixed"
+diagnostic_level     = "standard"
+
+# -- Environment --------------------------------------------------------------
+[environment]
+    max_steps         = 300
+    observation_dim   = 45
+    action_count      = 5
+    use_start_channel = true
+
+# -- Optimization -------------------------------------------------------------
+[optimizer]
+    lr           = 1e-4
+    weight_decay = 1e-2
+    betas        = [0.9, 0.98]
+
+[scheduler]
+    warmup_steps = 1000
+    min_ratio    = 0.01
+
+[runtime.memory]
+    eta           = 0.5
+    eta_it        = 16000
+    hebbian_decay = 0.9999
+    lambda_it     = 200
+
+[runtime.uncertainty]
+    p2g_sig_half_it  = 400
+    p2g_sig_scale_it = 200
+    offset_min       = 0.0
+    offset_max       = 10000.0
+
+# -- Controller & loss --------------------------------------------------------
+[loss]
+    observation_loss = "softmax_cross_entropy"
+    c_obs            = 1.0
+    c_grid           = 1.0
+    c_place          = 1.0
+    c_grid_reg       = 0.01
+    c_place_reg      = 0.02
+    grid_reg_norm    = "l2"
+    place_reg_norm   = "l1"
+
+[controller]
+    max_steps = 20
+
+[controller.policy]
+    kind = "random_walk"
+    seed = 42
+
+[logger]
+    save_dir  = "logs"
+    name      = "tem-dungeons-smoke-v1"
+    log_graph = false
+    prefix    = ""
+
+[checkpoint]
+    every_n_epochs          = 1
+    save_on_train_epoch_end = false
+    save_last               = true
+
+[figures]
+    enabled = false

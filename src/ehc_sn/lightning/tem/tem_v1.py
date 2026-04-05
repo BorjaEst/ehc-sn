@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from itertools import repeat
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import lightning as L
@@ -37,9 +38,9 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
     """Top-level TEM v1 training config."""
 
     # ~~ Model architecture ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    model: ModelSettings_V1 = Field(
+    model_config_path: Path = Field(
         ...,
-        description="",
+        description="Path to the model configuration TOML file that specifies the TEM v1 architecture.",
     )
     environment: EnvironmentConfig = Field(
         ...,
@@ -76,9 +77,10 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
 
     @model_validator(mode="after")
     def validate_environment_contract(self) -> "ModelConfig_TEM_V1":
-        if self.environment.observation_dim != self.model.observation_dim:
+        model_settings = ModelSettings_V1.from_config(self.model_config_path)
+        if self.environment.observation_dim != model_settings.observation_dim:
             raise ValueError("environment.observation_dim must match model.observation_dim.")
-        if self.environment.action_count != self.model.action_count:
+        if self.environment.action_count != model_settings.action_count:
             raise ValueError("environment.action_count must match model.action_count.")
         return self
 
@@ -92,7 +94,8 @@ class TrainingModel(L.LightningModule):
     ) -> None:  # fmt: skip
         """ """
         super().__init__()
-        self.model = TEMModelV1(config.model)
+        model_settings = ModelSettings_V1.from_config(config.model_config_path)
+        self.model = TEMModelV1(model_settings)
         self.environment: Environment | None = None  #  Lazy init in setup() to avoid GPU alloc issues
         self.controller: TEMController | None = None  #  Lazy init in setup() to avoid GPU alloc issues
         self.step_module: TEMLossHead | None = None  #  Lazy init in setup() to avoid GPU alloc issues

@@ -22,8 +22,6 @@ from ehc_sn.envs.dungeon_walk import EnvConfig
 from ehc_sn.heads.tem import TEMLossConfig
 from ehc_sn.lightning.tem.tem_v1 import ModelConfig_TEM_V1, RuntimeConfig, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.models.tem import tem_v1
-from ehc_sn.models.tem.tem_v1 import ModelSettings_V1
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamConfig
 from ehc_sn.training.schedules import SchedulerConfig
@@ -36,7 +34,7 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
-CONFIGURATION_PATH = os.environ.get("TEM_V1_CONFIGURATION_PATH", "config/tem-dungeons.v1.toml")
+CONFIGURATION_PATH = os.environ.get("TEM_V1_CONFIGURATION_PATH", "config/training.tem-v1.toml")
 
 
 # =================================================================================================
@@ -72,9 +70,9 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
 
     # ---------------------------------------------------------------------------------------------
     # Model architecture and data
-    model: ModelSettings_V1 = Field(
+    model_config_path: Path = Field(
         ...,
-        description="TEM v1 model architecture settings (PFC + embedding/LM-head).",
+        description="Path to the model configuration TOML file that specifies the TEM v1 architecture.",
     )
     environment: EnvConfig = Field(
         ...,

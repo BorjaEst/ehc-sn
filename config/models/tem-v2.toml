@@ -1,0 +1,57 @@
+# =============================================================================
+# TEM v2 Architecture
+# =============================================================================
+
+observation_dim       = 45
+action_count          = 5
+enable_sensory_recall = true
+f_initial             = [0.99, 0.3, 0.09, 0.5, 0.4]
+
+[autoencoder]
+    encode_mode = "two_hot"
+    decode_mode = "mlp"
+
+[hpc]
+    shape         = [100, 100, 80, 60, 60]
+    common_memory = false
+    do_sample     = false
+
+[hpc.read]
+    beta            = 1.0
+    empty_retrieval = "query"
+    beta_scaling    = "log_memory_count"
+    iterations      = 1
+    recurrence      = "none"
+
+[hpc.write]
+    policy             = "append_if_novel"
+    novelty_similarity = "cosine"
+    novelty_threshold  = 0.95
+    write_bank         = "default"
+
+[hpc.store]
+    memory_capacity = 512
+    bank_names      = ["c"]
+
+[lec]
+    feature_dim = 10
+    clamp_min   = -1.0
+    clamp_max   = 1.0
+
+[projection_lec]
+    mode      = "tiling"
+    init      = "identity"
+    learnable = false
+
+[mec]
+    grid_shape = [30, 24, 18, 24, 18]
+    do_sample  = false
+    sigma_init = 0.5
+    clamp_min  = -1.0
+    clamp_max  = 1.0
+
+[projection_mec]
+    mode      = "low_rank"
+    init      = "identity"
+    learnable = false
+    rank      = [10, 10, 8, 6, 6]

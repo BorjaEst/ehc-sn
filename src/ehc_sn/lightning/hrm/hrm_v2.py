@@ -24,6 +24,7 @@ with keys ``"inputs"`` and ``"labels"``.
 """
 
 from itertools import repeat
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TypeAlias
 
 import lightning as L
@@ -71,9 +72,9 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
     """
 
     # ~~ Model architecture ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    model: ModelSettings_V2 = Field(
+    model_config_path: Path = Field(
         ...,
-        description="",
+        description="Path to the model configuration TOML file that specifies the HRM v2 architecture.",
     )
     environment: EnvConfig = Field(
         ...,
@@ -140,7 +141,8 @@ class TrainingModel(L.LightningModule):
         self, config: ModelConfig_HRM_V2,
     ) -> None:  # fmt: skip
         super().__init__()
-        self.model = HRModelV2(config.model)
+        model_settings = ModelSettings_V2.from_config(config.model_config_path)
+        self.model = HRModelV2(model_settings)
         self.environment: MazeHardEnv | None = None  # Lazy init in setup() to avoid GPU allocation issues
         self.controller: RLController | None = None  # Initialized in setup() after environment is ready
         self.step_module: RLLossHead | None = None  # Initialized in setup() after controller is ready

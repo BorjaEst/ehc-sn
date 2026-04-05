@@ -1,7 +1,9 @@
 """ """
 
 import math
+import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TypeAlias
 
 import torch
@@ -73,6 +75,12 @@ class ModelSettings_V2(BaseModel, extra="forbid"):
     def init_std(self) -> float:
         """Convenience property for standard deviation of truncated normal initialization."""
         return 1.0 / math.sqrt(self.hidden_size)
+
+    @classmethod
+    def from_config(cls, path: Path) -> "ModelSettings_V2":
+        """Load model settings from a TOML configuration file."""
+        config_map = tomllib.load(Path(path).open("rb"))
+        return cls.model_validate(config_map)
 
 
 # =================================================================================================

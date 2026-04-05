@@ -20,10 +20,9 @@ from ehc_sn.controllers.rl import RLControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.envs.mazehard import EnvConfig
 from ehc_sn.heads.rl import RLLossConfig
+from ehc_sn.lightning.hrm.core.runtime import supervised_maze_tokenize
 from ehc_sn.lightning.hrm.hrm_v2 import ModelConfig_HRM_V2, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.models.hrm import hrm_v2
-from ehc_sn.models.hrm.hrm_v2 import ModelSettings_V2
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
@@ -36,7 +35,7 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
-CONFIGURATION_PATH = os.environ.get("HRM_V2_CONFIGURATION_PATH", "config/hrm-mazehard.v2.toml")
+CONFIGURATION_PATH = os.environ.get("HRM_V2_CONFIGURATION_PATH", "config/training.hrm-v2.toml")
 
 
 # =================================================================================================
@@ -72,9 +71,9 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
 
     # ---------------------------------------------------------------------------------------------
     # Model architecture and data
-    model: ModelSettings_V2 = Field(
+    model_config_path: Path = Field(
         ...,
-        description="HRM v2 model architecture settings (PFC + embedding/LM-head).",
+        description="Path to the model configuration TOML file that specifies the HRM v2 architecture.",
     )
     environment: EnvConfig = Field(
         ...,
@@ -325,7 +324,7 @@ if __name__ == "__main__":
         # Lightning module: training step, optimizer and schedule setup.
         model=TrainingModel(settings.hrm_config),
         # Data module: dataset + DataLoader construction.
-        datamodule=Datamodule(settings.datamodule, transform=hrm_v2.supervised_maze_tokenize),
+        datamodule=Datamodule(settings.datamodule, transform=supervised_maze_tokenize),
         # Optional: resume training from a checkpoint.
         ckpt_path=settings.checkpoint_path,
     )
