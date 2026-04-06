@@ -200,29 +200,61 @@ validation.
 
 ## 8 Evaluation Protocol Constraints
 
-The canonical EHC benchmark contract is defined by the navigation-centered
-benchmark suite in `spec/spec-architecture.md`.
+The canonical EHC benchmark contract is defined by the benchmark suite in
+`spec/spec-architecture.md`, which is divided into bridge benchmarks (`B0`,
+`M0`) and primary navigation benchmarks (`B1`-`B3`).
 
-- Claims about **within-episode reasoning** for EHC must be supported by the
-  B1 dungeon-reasoning benchmark. B0 MazeHard results are optional supporting
-  evidence and do not replace B1 for navigation-centered claims.
-- Claims about **one-shot adaptation** must be supported by the B2 one-shot
-  goal-relocation benchmark.
+- Claims about preserving **HRM-style deliberative capability** may cite the
+  B0 HRM Deliberation Bridge as supporting evidence.
+- Claims about preserving **TEM-style episodic-memory capability** may cite the
+  M0 Episodic Memory Bridge as supporting evidence.
+- Claims about **within-episode navigation reasoning** for EHC must be
+  supported by the B1 Dungeon Navigation Reasoning benchmark. Bridge benchmark
+  results do not replace B1 for navigation-centered claims.
+- Claims about **one-shot adaptation** must be supported by the B2 One-Shot
+  Goal Relocation benchmark.
 - Claims that the EHC decomposition reduces interference or improves controlled
-  memory routing must be supported by the B3 interference-and-control
+  memory routing must be supported by the B3 Interference and Control
   benchmark.
 - B1 uses the processed dungeon split as the in-distribution corpus
   (`800/100/100` train/val/test layouts) plus four OOD generated corpora of
   `100` layouts each: `medium/classic`, `large/classic`, `small/temple`, and
   `small/cavern`.
-- B2 and B3 must precompute, for each layout, 6 candidate goals and 3 probe
-  starts from the largest connected component. Goal selection must enforce
+- B2 and B3 must precompute, for each layout, a six-goal / three-start
+  contract from the largest connected component: canonical start `1` plus
+  probe starts `2-3`. Goal selection must enforce
   shortest-path distance at least `8` from the canonical start and at least `6`
   between selected goals. Probe starts must be reachable and have shortest-path
   distance at least `6` from every selected goal.
 - B2 training uses goals `1-4`. Held-out one-shot evaluation uses goals `5-6`.
   The one-shot protocol is: one rewarded exposure episode from start `1`, then
   immediate probe episodes from starts `2-3`.
+- M0 reuses the B1 processed dungeon split and OOD corpora together with the
+  B2/B3 six-goal / three-start contract.
+- Canonical M0 evaluation uses benchmark-owned shortest-path exposure traces
+  from start `1` to held-out goals `5-6`, followed by fixed probe traces from
+  starts `2-3`.
+- M0 reports current-location localization, held-out-goal recall,
+  write/read consistency from exposure to probe, and interference under
+  sequential held-out-goal exposures.
+- Any model family evaluated on B1-B3 must expose benchmark-time action
+  selection either through a native policy/action head or through an explicit
+  attached policy layer satisfying the rollout contract. Memory or world-model
+  backbones that only update latent state do not qualify as standalone
+  navigation agents.
+- For B1, B2, and B3 specifically, the reported rollout contract may compose a
+  recurrent backbone/state updater with a separate policy layer, but
+  benchmark-facing docs and reports must state explicitly which layer owns
+  action selection.
+- M0 is a bridge benchmark over benchmark-owned trajectory or exposure/probe
+  contracts. It measures memory/state capability rather than full navigation
+  competence and must not be reported as a substitute for B1-B3.
+- During M0 evaluation, no benchmark-time action selection, optimizer step,
+  gradient update, or learned-weight mutation is allowed. Only online
+  fast-memory state and other explicitly declared recurrent state may change.
+- If a benchmark adapter or readout for M0 is learned, it must be fit only on
+  training layouts and goals `1-4`; held-out evaluation on goals `5-6` must
+  remain frozen.
 - During B2 and B3 evaluation, **no optimizer step, gradient update, or weight
   mutation is allowed**. Only online fast-memory state and other explicitly
   declared ephemeral rollout state may change.
@@ -236,7 +268,7 @@ benchmark suite in `spec/spec-architecture.md`.
   recurrent baseline, one memory-disabled or `no-HPC-write` ablation, one
   pooled-cue or fused-retrieval ablation, and one generic RL baseline when the
   claim is framed as broad RL competence.
-- Benchmark orchestration code intended for reuse across B0-B3 belongs in
+- Benchmark orchestration code intended for reuse across B0, M0, and B1-B3 belongs in
   `ehc_sn.benchmarks`.
 - Model-aware benchmark bindings, observation-to-tensor conversion, and
   benchmark-time checkpoint hydration belong in `ehc_sn.benchmarks._bindings`.

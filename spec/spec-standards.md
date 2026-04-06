@@ -169,9 +169,9 @@ is the single source of truth. Do not duplicate the precedence order elsewhere.
 
 ## 9 Experiment Reporting Standards
 
-- Canonical benchmark writeups must identify the benchmark id (`B0`, `B1`,
-  `B2`, or `B3`) and state the exact corpus, split sizes, and any generated OOD
-  corpora used in the run.
+- Canonical benchmark writeups must identify the benchmark id (`B0`, `M0`,
+  `B1`, `B2`, or `B3`) and state the exact corpus, split sizes, and any
+  generated OOD corpora used in the run.
 - Reports for B2 one-shot evaluation must explicitly state that learned weights
   were frozen during exposure and probe episodes and must distinguish fast-memory
   adaptation from any gradient-based learning.
