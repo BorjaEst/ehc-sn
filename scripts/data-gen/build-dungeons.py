@@ -22,7 +22,8 @@ from ehc_sn.data._canonical import (
     shortest_path_distances,
     singleton_mask,
 )
-from ehc_sn.data.contracts import build_layout_benchmark_contract
+from ehc_sn.data.benchmarks.dungeon_b23 import build_layout_benchmark_contract, resolve_preferred_start
+from ehc_sn.data.benchmarks.dungeon_m0 import validate_m0_layout_feasibility
 from ehc_sn.data.datasets import MazeMetadata
 from ehc_sn.data.index import MazeIndexEntry, write_index
 from ehc_sn.data.schema import (
@@ -43,32 +44,7 @@ app = Typer(pretty_exceptions_enable=False)
 RAW_PATH = "data/raw/dungeons"
 PROCESSED_PATH = "data/processed/dungeons"
 PASSABLE_TYPES = frozenset({CellType.ROOM, CellType.PASSAGE, CellType.DOOR})
-OOD_BENCHMARK_RECIPES = {
-    "medium-classic": {
-        "size": "medium",
-        "archetype": "classic",
-        "seed": 4300,
-        "out_dirname": "dungeons-ood-medium-classic",
-    },
-    "large-classic": {
-        "size": "large",
-        "archetype": "classic",
-        "seed": 4400,
-        "out_dirname": "dungeons-ood-large-classic",
-    },
-    "small-temple": {
-        "size": "small",
-        "archetype": "temple",
-        "seed": 4500,
-        "out_dirname": "dungeons-ood-small-temple",
-    },
-    "small-cavern": {
-        "size": "small",
-        "archetype": "cavern",
-        "seed": 4600,
-        "out_dirname": "dungeons-ood-small-cavern",
-    },
-}
+BENCHMARK_SAFE_ATTEMPT_MULTIPLIER = 20
 
 
 # =================================================================================================
@@ -90,8 +66,6 @@ def process_dungeongen(  # -----------------------------------------------------
     density: float = Option(0.6, "--density", help="Room packing density (0.0 sparse … 1.0 tight)."),
     seed: int = Option(43, "--seed", help="Base RNG seed (incremented per dungeon)."),
     margin: int = Option(1, "--margin", help="Grid margin (wall border) around the dungeon bounding box."),
-    require_benchmark_contract: bool = Option(False, "--require-benchmark-contract", help="Reject generated layouts that cannot satisfy the canonical B23 benchmark contract."),
-    max_attempt_multiplier: int = Option(20, "--max-attempt-multiplier", min=1, help="Maximum candidate layouts to try per accepted layout when benchmark filtering is enabled."),
 ) -> None:  # fmt: skip
     """Generate dungeons with dungeongen, rasterize to grids, and write per-channel .npy files + JSONL index."""
     dg_size = DungeonSize[size.upper()]
@@ -116,16 +90,17 @@ def process_dungeongen(  # -----------------------------------------------------
 
         all_channels: list[dict[str, np.ndarray]] = []
         raw_records: list[dict] = []
-        rejected = 0
         attempts = 0
-        max_attempts = count * max_attempt_multiplier if require_benchmark_contract else count
+        rejected = 0
+        last_rejection: str | None = None
+        max_attempts = max(1, count * BENCHMARK_SAFE_ATTEMPT_MULTIPLIER)
 
-        # Generate candidate layouts until the split reaches its target count.
         while len(all_channels) < count:
             if attempts >= max_attempts:
+                detail = "" if last_rejection is None else f" Last rejection: {last_rejection}"
                 raise ValueError(
-                    f"Failed to generate {count} benchmark-compatible dungeons for split '{split}' after {attempts} attempts; "
-                    f"accepted {len(all_channels)}, rejected {rejected}."
+                    f"Failed to generate {count} benchmark-safe dungeons for split {split!r} after {attempts} attempts; "
+                    f"accepted {len(all_channels)}, rejected {rejected}.{detail}"
                 )
 
             dungeon_seed = seed + candidate_seed_offset
@@ -137,17 +112,16 @@ def process_dungeongen(  # -----------------------------------------------------
 
             # Rasterize dungeon → channel arrays.
             channels = _rasterize_dungeon(generator, dungeon, n_observations, margin, rng_seed=dungeon_seed)
-            if require_benchmark_contract:
-                try:
-                    build_layout_benchmark_contract(
-                        component=channels[CHANNEL_MASK_VALID],
-                        entry_id=str(dungeon_seed),
-                        split=split,
-                        preferred_start=first_true_cell(channels[CHANNEL_START]),
-                    )
-                except ValueError:
-                    rejected += 1
-                    continue
+            try:
+                _ensure_layout_benchmark_feasible(
+                    channels=channels,
+                    entry_id=str(dungeon_seed),
+                    split=split,
+                )
+            except ValueError as exc:
+                rejected += 1
+                last_rejection = str(exc)
+                continue
 
             # Collect raw dungeon record in memory (written as compressed archive later).
             raw_records.append(_dungeon_to_dict(dungeon))
@@ -170,47 +144,38 @@ def process_dungeongen(  # -----------------------------------------------------
         (split_dir / "dataset.json").write_text(meta.model_dump_json(indent=2))
 
         # Build JSONL index entries.
-        entries = [_build_idx_entry(meta, all_channels, i=i, start_id=maze_id) for i in range(count)]
+        entries = [_build_idx_entry(meta, all_channels, i=i, start_id=maze_id) for i in range(len(all_channels))]
         write_index(entries, index_path, append=True)
-        maze_id += count
-        if require_benchmark_contract:
-            echo(f"  → {count} dungeons written (rejected {rejected} infeasible layouts; total so far: {maze_id})")
-        else:
-            echo(f"  → {count} dungeons written (total so far: {maze_id})")
+        maze_id += len(entries)
+        echo(f"  → {len(entries)} dungeons written (rejected {rejected} infeasible layouts; total so far: {maze_id})")
 
     echo(f"\nDone. Index written to {index_path}")
 
 
-# =================================================================================================
-@app.command("process-benchmark-ood")
-def process_benchmark_ood(  # --------------------------------------------------------------------
-    recipe: str = Option(..., "--recipe", help="Benchmark OOD recipe alias."),
-    out_root: Path = Option(Path("data/processed"), "--out-root", help="Parent directory for processed benchmark datasets."),
-    raw_root: Path = Option(Path(RAW_PATH), "--raw-root", help="Parent directory for raw benchmark dungeon archives."),
-    n_observations: int = Option(45, "--n-obs", help="Observation vocabulary size for random assignment."),
-    density: float = Option(0.6, "--density", help="Room packing density."),
-    margin: int = Option(1, "--margin", help="Grid margin around the dungeon bounding box."),
-) -> None:  # fmt: skip
-    """Generate one of the canonical B1 OOD corpora with deterministic naming and seed policy."""
-    if recipe not in OOD_BENCHMARK_RECIPES:
-        known = ", ".join(sorted(OOD_BENCHMARK_RECIPES))
-        raise ValueError(f"Unknown benchmark OOD recipe '{recipe}'. Expected one of: {known}.")
-
-    config = OOD_BENCHMARK_RECIPES[recipe]
-    process_dungeongen(
-        out_dir=out_root / config["out_dirname"],
-        raw_dir=raw_root / config["out_dirname"],
-        n_train=0,
-        n_val=0,
-        n_test=100,
-        size=str(config["size"]),
-        archetype=str(config["archetype"]),
-        n_observations=n_observations,
-        density=density,
-        seed=int(config["seed"]),
-        margin=margin,
-        require_benchmark_contract=False,
-        max_attempt_multiplier=20,
+def _ensure_layout_benchmark_feasible(
+    *,
+    channels: dict[str, np.ndarray],
+    entry_id: str,
+    split: str,
+) -> None:
+    """Raise ``ValueError`` unless one rasterized layout satisfies the shared benchmark contract."""
+    component = np.asarray(channels[CHANNEL_MASK_VALID], dtype=bool)
+    preferred_start = resolve_preferred_start(
+        component=component,
+        start_mask=np.asarray(channels[CHANNEL_START], dtype=bool),
+    )
+    build_layout_benchmark_contract(
+        component=component,
+        entry_id=entry_id,
+        split=split,
+        preferred_start=preferred_start,
+    )
+    validate_m0_layout_feasibility(
+        valid_mask=component,
+        observation_grid=np.asarray(channels[CHANNEL_OBSERVATIONS], dtype=np.int32),
+        start_mask=np.asarray(channels[CHANNEL_START], dtype=bool),
+        entry_id=entry_id,
+        split=split,
     )
 
 

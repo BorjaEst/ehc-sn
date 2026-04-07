@@ -1,4 +1,4 @@
-"""Download and process MazeHard splits plus derived benchmark subsets."""
+"""Download and process MazeHard splits into the canonical processed corpus."""
 
 from __future__ import annotations
 
@@ -21,9 +21,8 @@ from ehc_sn.data._canonical import (
     singleton_mask,
     stable_text_seed,
 )
-from ehc_sn.data.benchmarks.mazehard_b0 import MazeHardSubsetManifest, b0_hard_subset_path, write_mazehard_subset_manifest
 from ehc_sn.data.datasets import MazeMetadata
-from ehc_sn.data.index import MazeIndexEntry, read_index, write_index
+from ehc_sn.data.index import MazeIndexEntry, write_index
 from ehc_sn.data.schema import (
     CHANNEL_GOALS,
     CHANNEL_LANDMARKS,
@@ -89,43 +88,6 @@ def process_huggingface(  # ----------------------------------------------------
         echo(f"  → {len(entries)} mazes written (total so far: {maze_id})")
 
     echo(f"\nDone. Index written to {index_path}")
-
-
-@app.command("build-b0-hard-subset")
-def build_b0_hard_subset(  # ----------------------------------------------------------------------
-    dataset_root: Path = Option(Path(PROCESSED_PATH), "--dataset-root", help="Processed MazeHard dataset root."),
-    split: str = Option("test", "--split", help="Dataset split used to derive the benchmark hard subset."),
-    quantile: float = Option(0.9, "--quantile", min=0.0, max=1.0, help="Inclusive difficulty quantile threshold."),
-    out_path: Path | None = Option(None, "--out-path", help="Optional override for the hard-subset manifest path."),
-) -> None:  # fmt: skip
-    """Materialize the preregistered B0 hard-subset manifest from the processed difficulty index."""
-    index_path = dataset_root / "index.jsonl"
-    entries = [entry for entry in read_index(index_path) if entry.split == split]
-    if not entries:
-        raise ValueError(f"No MazeHard index entries found for split '{split}' in {index_path}.")
-
-    difficulties = [_parse_difficulty_value(entry.difficulty, entry_id=entry.id) for entry in entries]
-    threshold = int(np.quantile(np.asarray(difficulties, dtype=np.int32), quantile, method="higher"))
-
-    selected = sorted(
-        ((entry.id, difficulty) for entry, difficulty in zip(entries, difficulties, strict=True) if difficulty >= threshold),
-        key=lambda item: int(item[0]) if item[0].isdigit() else item[0],
-    )
-    if not selected:
-        raise ValueError(f"No MazeHard entries met the requested hard-subset threshold {threshold} for split '{split}'.")
-
-    manifest = MazeHardSubsetManifest(
-        dataset_root=str(dataset_root),
-        source=entries[0].source,
-        split=split,
-        selection_rule=f"difficulty >= split quantile {quantile:.3f} (threshold={threshold})",
-        sample_ids=[sample_id for sample_id, _ in selected],
-        difficulty_values=[difficulty for _, difficulty in selected],
-        n_selected=len(selected),
-    )
-    resolved_out_path = b0_hard_subset_path(dataset_root) if out_path is None else out_path
-    write_mazehard_subset_manifest(manifest, resolved_out_path)
-    echo(f"Wrote B0 hard-subset manifest with {manifest.n_selected} ids to {resolved_out_path}")
 
 
 # =================================================================================================
@@ -219,15 +181,6 @@ def _process_csv(  # -----------------------------------------------------------
     return entries
 
 
-def _parse_difficulty_value(difficulty: str, *, entry_id: str) -> int:
-    """Return one integer MazeHard difficulty value from the processed index."""
-    try:
-        return int(difficulty)
-    except ValueError as exc:
-        raise ValueError(f"MazeHard entry {entry_id} has a non-integer difficulty value: {difficulty!r}.") from exc
-
-
-# =================================================================================================
 def _process_csv_row(  # --------------------------------------------------------------------------
     row: dict[str, str], *, n_observations: int,
 ) -> tuple[dict[str, np.ndarray], str]:  # fmt: skip
