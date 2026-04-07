@@ -1,6 +1,6 @@
 benchmark_id = "b0"
 dataset_root = "data/processed/maze-30x30-hard-1k"
 split = "test"
-hard_subset_manifest_path = "data/processed/maze-30x30-hard-1k/b0-hard-subset.json"
+hard_subset_manifest_path = "data/processed/maze-30x30-hard-1k/benchmarks/b0/manifest.json"
 compute_budget = 16
 write_sample_records = true
