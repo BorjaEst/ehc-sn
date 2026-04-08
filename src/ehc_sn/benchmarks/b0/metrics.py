@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from ehc_sn.benchmarks._capabilities import BatchPrediction
+from ehc_sn.benchmarks._capabilities.batch_prediction import BatchPrediction
 
 MetricMap = dict[str, float]
 

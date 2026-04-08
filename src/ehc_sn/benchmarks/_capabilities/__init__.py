@@ -1,15 +1,13 @@
-"""Internal benchmark capability contracts."""
+"""Internal benchmark role contracts."""
 
-from ehc_sn.benchmarks._capabilities.batch_prediction import BatchPrediction, BatchPredicts
-from ehc_sn.benchmarks._capabilities.online_adaptation import IngestTransition, OnlineAdaptationAgent
-from ehc_sn.benchmarks._capabilities.rollout import Acts, ResetState, RolloutAgent
+from ehc_sn.benchmarks._capabilities.batch_prediction import BatchPredicts
+from ehc_sn.benchmarks._capabilities.episodic_memory import EpisodicMemoryAgent
+from ehc_sn.benchmarks._capabilities.online_adaptation import OnlineAdaptationAgent
+from ehc_sn.benchmarks._capabilities.rollout import RolloutAgent
 
 __all__ = [
-    "Acts",
-    "BatchPrediction",
     "BatchPredicts",
-    "IngestTransition",
+    "EpisodicMemoryAgent",
     "OnlineAdaptationAgent",
-    "ResetState",
     "RolloutAgent",
 ]

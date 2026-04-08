@@ -1,36 +1,33 @@
-"""B0 HRM Deliberation Bridge benchmark package."""
+"""M0 Episodic Memory Bridge benchmark package."""
 
 from pathlib import Path
 
 from ehc_sn.benchmarks._bindings import resolve_binding
-from ehc_sn.benchmarks._capabilities import BatchPredicts
-from ehc_sn.benchmarks.b0.evaluator import B0Benchmark, B0BenchmarkConfig
-from ehc_sn.benchmarks.b0.manifest import B0Manifest
+from ehc_sn.benchmarks._capabilities import EpisodicMemoryAgent
+from ehc_sn.benchmarks.m0.evaluator import M0Benchmark, M0BenchmarkConfig
+from ehc_sn.benchmarks.m0.manifest import M0Manifest
 
 
 # =================================================================================================
-def build_b0_predictor(  # ------------------------------------------------------------------------
+def build_m0_agent(  # ----------------------------------------------------------------------------
     model_kind: str,
     *,
     model_config_path: Path,
     checkpoint_path: Path | None,
-    compute_budget: int,
     device: str,
-) -> BatchPredicts:
-    """Return a predictor instance for the given B0 bridge model kind."""
+) -> EpisodicMemoryAgent:
     factory = resolve_binding(
         model_family=model_kind,
-        capability="batch_prediction",
+        capability="episodic_memory",
     )
     return factory(
         model_config_path=model_config_path,
         checkpoint_path=checkpoint_path,
-        compute_budget=compute_budget,
         device=device,
     )
 
 
 # =================================================================================================
 __all__ = [
-    "B0Benchmark", "B0BenchmarkConfig", "B0Manifest", "build_b0_predictor",
+    "M0Benchmark", "M0BenchmarkConfig", "M0Manifest", "build_m0_agent",
 ]  # fmt: skip

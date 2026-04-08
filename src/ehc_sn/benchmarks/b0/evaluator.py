@@ -1,4 +1,4 @@
-"""Shared orchestration for the B0 MazeHard bridge benchmark."""
+"""Shared orchestration for the B0 HRM Deliberation Bridge."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from ehc_sn.data.index import filter_index, read_index
 
 # =================================================================================================
 class B0BenchmarkConfig(BaseModel, extra="forbid"):
-    """Benchmark-owned configuration for B0 MazeHard evaluation."""
+    """Benchmark-owned configuration for the B0 HRM Deliberation Bridge."""
 
     benchmark_id: str = Field(
         default="b0",
@@ -62,7 +62,7 @@ class B0BenchmarkConfig(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class B0Benchmark:
-    """Shared orchestration for the B0 MazeHard bridge benchmark."""
+    """Shared orchestration for the B0 HRM Deliberation Bridge."""
 
     def __init__(self, config: B0BenchmarkConfig) -> None:
         self.config = config

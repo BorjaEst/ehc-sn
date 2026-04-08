@@ -10,7 +10,7 @@ import torch
 
 from ehc_sn.benchmarks._bindings.hrm.load import load_hrm_v1_model, load_hrm_v2_model
 from ehc_sn.benchmarks._bindings.hrm.preprocess import supervised_maze_tokenize
-from ehc_sn.benchmarks._capabilities import BatchPrediction, BatchPredicts
+from ehc_sn.benchmarks._capabilities.batch_prediction import BatchPrediction, BatchPredicts
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2

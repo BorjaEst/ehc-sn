@@ -18,4 +18,4 @@ class OnlineAdaptationAgent(RolloutAgent, IngestTransition, Protocol):
     """Composite capability for exposure/probe style benchmarks."""
 
 
-__all__ = ["IngestTransition", "OnlineAdaptationAgent"]
+__all__ = ["OnlineAdaptationAgent"]

@@ -23,4 +23,4 @@ class RolloutAgent(ResetState, Acts, Protocol):
     """Composite rollout capability used by navigation-style benchmarks."""
 
 
-__all__ = ["Acts", "ResetState", "RolloutAgent"]
+__all__ = ["RolloutAgent"]
