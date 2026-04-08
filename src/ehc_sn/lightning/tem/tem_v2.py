@@ -23,6 +23,7 @@ from ehc_sn.models.tem.tem_v2 import Batch, ModelSettings_V2, TEMModelV2
 from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.buffers import FifoBuffer
+from ehc_sn.training.collector import PartialResetCollector
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
@@ -128,6 +129,10 @@ class TrainingModel(L.LightningModule):
         trainer = getattr(self, "_trainer", None)
         world_size = max(getattr(trainer, "world_size", 1), 1)
         return max(self.config.global_batch_size // world_size, 1)
+
+    def _train_chunk_steps(self) -> int:
+        """Return the TEM TBPTT chunk length used for one optimizer update."""
+        return self.config.runtime.sequence.tbptt_steps
 
     def _build_runtime(self, *, batch_size: int) -> tuple[Environment, TEMController, TEMLossHead]:
         """Construct one phase-local TEM rollout runtime around the shared model."""
@@ -239,12 +244,7 @@ class TrainingModel(L.LightningModule):
     def training_step(  # -------------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
     ) -> Dict[str, object]:  # fmt: skip
-        """Run one TEM training step with manual optimization.
-
-        Step-based checkpoints are treated as post-update recovery checkpoints.
-        This loop intentionally does not snapshot pre-optimization weights inside
-        ``training_step``.
-        """
+        """Run one TEM chunked-TBPTT optimizer update with manual optimization."""
         self._apply_runtime(self.global_step, log_values=True)
         train_step_module = self._require_train_step_module()
         batch_assembler = self._ensure_train_batch_assembler(batch)
@@ -253,27 +253,31 @@ class TrainingModel(L.LightningModule):
         if self._train_carry is None:
             self._train_carry = train_step_module.initial_carry(batch)
 
-        # Assemble partial-reset step batch
-        step_batch = batch_assembler.make_step_batch(
-            incoming=batch,
-            reset_mask=self._train_carry.halted,
-        )
-
-        # Horizon=1 step loop: run one step of the controller
-        step_batches = repeat(step_batch, 1)
+        collector = PartialResetCollector(incoming=batch, assembler=batch_assembler, carry0=self._train_carry)
         step_options = {}  # FIXME after the HeadLoss and TEMController support options
-        carry0 = self._train_carry
+        carry = self._train_carry
+        accumulated_loss = None
+        last_step_output = None
 
-        step = None
-        for _t, step in StepLoop(train_step_module, step_batches, carry0, options=step_options):
-            pass  # horizon = 1; loop runs exactly once
-        if step is None:
-            raise ValueError("StepLoop did not yield any steps.")
-        self._train_carry = step.carry.detach()
+        for _t in range(self._train_chunk_steps()):
+            try:
+                step_batch = next(collector)
+            except StopIteration:
+                break
+
+            step_output, carry, _all_halted = train_step_module(step_batch, carry, **step_options)
+            collector.update(carry=carry)
+            accumulated_loss = step_output.loss if accumulated_loss is None else accumulated_loss + step_output.loss
+            update_metrics_from_step(self.train_metrics, step_output.metrics, TEM_STEP_ROUTES)
+            last_step_output = step_output
+
+        if accumulated_loss is None or last_step_output is None:
+            raise ValueError("TEM training chunk did not yield any steps.")
+        self._train_carry = carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = batch_size_from_static_maze_batch(batch)
-        loss = _normalize_loss_for_backward(step.outputs.loss, local_bs=local_bs)
+        loss = _normalize_loss_for_backward(accumulated_loss, local_bs=local_bs)
 
         optimizers = self.optimizers()
         for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
@@ -288,11 +292,10 @@ class TrainingModel(L.LightningModule):
         for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
             sch.step()  # type: ignore
 
-        # Update metrics with unnormalized loss and log to TensorBoard.
-        update_metrics_from_step(self.train_metrics, step.outputs.metrics, TEM_STEP_ROUTES)
+        # Log the accumulated chunk loss to TensorBoard.
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
-        return {"loss": loss.detach(), "signals": step.outputs.signals}
+        return {"loss": loss.detach(), "signals": last_step_output.signals}
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,

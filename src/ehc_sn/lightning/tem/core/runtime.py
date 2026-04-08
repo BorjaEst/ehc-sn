@@ -60,6 +60,16 @@ class UncertaintyRuntimeConfig(BaseModel, extra="forbid"):
         return self
 
 
+class SequenceRuntimeConfig(BaseModel, extra="forbid"):
+    """Sequence-level training settings for TEM chunked TBPTT."""
+
+    tbptt_steps: int = Field(
+        default=25,
+        ge=1,
+        description="Number of rollout steps accumulated before each optimizer update.",
+    )
+
+
 class RuntimeConfig(BaseModel, extra="forbid"):
     """Step-based runtime schedules for TEM training dynamics."""
 
@@ -70,6 +80,10 @@ class RuntimeConfig(BaseModel, extra="forbid"):
     uncertainty: UncertaintyRuntimeConfig = Field(
         default_factory=UncertaintyRuntimeConfig,
         description="Runtime schedule for MEC uncertainty parameters.",
+    )
+    sequence: SequenceRuntimeConfig = Field(
+        default_factory=SequenceRuntimeConfig,
+        description="Chunked-TBPTT sequence settings for TEM training.",
     )
 
 
@@ -104,6 +118,7 @@ def resolve_tem_runtime(step: int, config: RuntimeConfig) -> TEMRuntimeState:
 __all__ = [
     "MemoryRuntimeConfig",
     "RuntimeConfig",
+    "SequenceRuntimeConfig",
     "TEMRuntimeState",
     "UncertaintyRuntimeConfig",
     "resolve_tem_runtime",

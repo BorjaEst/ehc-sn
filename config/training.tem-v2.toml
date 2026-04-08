@@ -56,6 +56,9 @@ diagnostic_level     = "standard"
     offset_min       = 0.0
     offset_max       = 10000.0
 
+[runtime.sequence]
+    tbptt_steps = 25
+
 # -- Controller & loss --------------------------------------------------------
 [loss]
     observation_loss = "softmax_cross_entropy"
@@ -68,7 +71,7 @@ diagnostic_level     = "standard"
     place_reg_norm   = "l1"
 
 [controller]
-    max_steps = 20
+    max_steps = 300
 
 [controller.policy]
     kind = "random_walk"
