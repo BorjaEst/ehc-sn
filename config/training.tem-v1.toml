@@ -6,7 +6,7 @@
 model_config_path = "config/models/tem-v1.toml"
 
 # -- General settings ---------------------------------------------------------
-dataset_path         = "temp/benchmark-dungeons-smoke"
+dataset_path         = "data/processed/dungeons"
 global_batch_size    = 2
 epochs               = 100
 seed                 = 42
@@ -76,7 +76,7 @@ diagnostic_level     = "standard"
 
 [logger]
     save_dir  = "logs"
-    name      = "tem-dungeons-smoke-v1"
+    name      = "tem-v1"
     log_graph = false
     prefix    = ""
 

@@ -33,6 +33,12 @@ val_check_interval = 1000
     warmup_steps = 2000
     min_ratio    = 1.00
 
+[logger]
+    save_dir  = "logs"
+    name      = "hrm-v1"
+    log_graph = false
+    prefix    = ""
+
 [checkpoint]
     every_n_epochs          = 1
     save_on_train_epoch_end = false

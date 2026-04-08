@@ -76,7 +76,7 @@ diagnostic_level     = "standard"
 
 [logger]
     save_dir  = "logs"
-    name      = "tem-dungeons-smoke-v2"
+    name      = "tem-v2"
     log_graph = false
     prefix    = ""
 

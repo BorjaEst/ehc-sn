@@ -49,6 +49,12 @@ warmup_steps       = 5000
     c_entropy = 0.01
     c_q_value = 0.5
 
+[logger]
+    save_dir  = "logs"
+    name      = "hrm-v2"
+    log_graph = false
+    prefix    = ""
+
 [checkpoint]
     every_n_epochs          = 1
     save_on_train_epoch_end = false
