@@ -238,7 +238,10 @@ class TEMLossHead(VariationalLossHeadBase[TEMController, TEMLossConfig]):
         if labels is None:
             raise KeyError("TEM carry data must provide 'observation_target' or legacy 'labels'.")
         if labels.ndim > 1:
-            return labels.argmax(dim=-1)
+            if labels.shape[-1] == 1:
+                return labels.squeeze(-1)
+            if labels.is_floating_point():
+                return labels.argmax(dim=-1)
         return labels
 
     def _regularization_sum(  # ------------------------------------------------------------------

@@ -210,25 +210,24 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         next controller iteration.
         """
         static_data, env_td = self._refresh_halted_slots(batch, state)
-        data = self._extract_step_data(env_td)
+        current_data = self._extract_step_data(env_td)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, obs_logits, _, grid, place = self.backbone(data, model_state)
+        model_state, obs_logits, _, grid, place = self.backbone(current_data, model_state)
 
         latent_relations = self._coerce_latent(grid, place)
         reg_terms = self._coerce_regularization(grid, place)
         action = self._policy_action(env_td, explore=explore)
 
-        env_td = env_td.clone()  # Next env_td
-        env_td["action"] = action
-        env_td = self.environment.step(env_td)["next"]
-        data = self._extract_step_data(env_td)  # Next data
+        next_env_td = env_td.clone()
+        next_env_td["action"] = action
+        next_env_td = self.environment.step(next_env_td)["next"]
 
         steps = self.advance_steps(state)
-        done = env_td["done"].squeeze(-1)
+        done = next_env_td["done"].squeeze(-1)
         if allow_halt:
             done = done | (steps >= self.config.max_steps)
 
-        state = TEMRolloutState( model_state=model_state, steps=steps, halted=done, data=data, env_td=env_td, static_data=static_data)  # fmt: skip
+        state = TEMRolloutState(model_state=model_state, steps=steps, halted=done, data=current_data, env_td=next_env_td, static_data=static_data)  # fmt: skip
         output = TEMOutput(obs_logits=obs_logits, latent_relations=latent_relations, reg_terms=reg_terms)
 
         return state, output
