@@ -208,21 +208,15 @@ class DungeonWalk(EnvBase):
         state outside the environment.
         """
         if reset_mask.shape != self.batch_size:
-            raise ValueError(
-                f"reset_mask must have shape {tuple(self.batch_size)}, got {tuple(reset_mask.shape)}."
-            )
+            raise ValueError(f"reset_mask must have shape {tuple(self.batch_size)}, got {tuple(reset_mask.shape)}.")
         if not torch.any(reset_mask):
             return state
 
         self._cache_static_maps(tensordict, reset_mask=reset_mask)
         runtime_device = self._runtime_device()
         reset_location_id = self._sample_start_locations(tensordict, reset_mask=reset_mask)
-        reset_previous_action = torch.zeros(
-            (int(reset_mask.sum().item()), 1), dtype=torch.int64, device=runtime_device
-        )
-        reset_step_count = torch.zeros(
-            (int(reset_mask.sum().item()), 1), dtype=torch.int32, device=runtime_device
-        )
+        reset_previous_action = torch.zeros((int(reset_mask.sum().item()), 1), dtype=torch.int64, device=runtime_device)
+        reset_step_count = torch.zeros((int(reset_mask.sum().item()), 1), dtype=torch.int32, device=runtime_device)
         reset_state = self._build_state(
             location_id=reset_location_id,
             previous_action=reset_previous_action,
@@ -255,24 +249,28 @@ class DungeonWalk(EnvBase):
             landmarks = landmarks.to(device=runtime_device, dtype=torch.int64)
 
         if topology.shape != observations.shape or topology.shape != mask_valid.shape:
-            raise ValueError(
-                "DungeonWalk reset tensors must share the same shape for topology, observations, and mask_valid."
-            )
+            raise ValueError("DungeonWalk reset tensors must share the same shape for topology, observations, and mask_valid.")
         if topology.shape[0] != self.batch_size[0]:
-            raise ValueError(
-                f"DungeonWalk expected batch dimension {self.batch_size[0]}, got {topology.shape[0]}."
-            )
+            raise ValueError(f"DungeonWalk expected batch dimension {self.batch_size[0]}, got {topology.shape[0]}.")
 
-        self._height, self._width = int(topology.shape[-2]), int(topology.shape[-1])
+        incoming_height, incoming_width = int(topology.shape[-2]), int(topology.shape[-1])
         if reset_mask is None or self._topology is None:
+            self._height, self._width = incoming_height, incoming_width
             self._topology = topology
             self._observations = observations
             self._mask_valid = mask_valid
             self._regions = regions if regions is not None else torch.zeros_like(observations, dtype=torch.int64)  # fmt: skip
-            self._landmarks = (
-                landmarks if landmarks is not None else torch.zeros_like(observations, dtype=torch.int64)
-            )
+            self._landmarks = landmarks if landmarks is not None else torch.zeros_like(observations, dtype=torch.int64)
             return
+
+        incoming_spatial = (incoming_height, incoming_width)
+        cached_spatial = (self._height, self._width)
+        if incoming_spatial != cached_spatial:
+            raise ValueError(
+                "DungeonWalk partial reset received maze with spatial shape "
+                f"{incoming_spatial}, but cached maze has shape {cached_spatial}. "
+                "Spatial dimensions must match for reset_slots(). Call reset() instead to initialize a new maze."
+            )
 
         self._topology[reset_mask] = topology[reset_mask]
         self._observations[reset_mask] = observations[reset_mask]
@@ -301,11 +299,7 @@ class DungeonWalk(EnvBase):
         if start is not None:
             start = start.to(device=runtime_device, dtype=torch.bool)
 
-        slot_mask = (
-            reset_mask
-            if reset_mask is not None
-            else torch.ones(self.batch_size, dtype=torch.bool, device=runtime_device)
-        )
+        slot_mask = reset_mask if reset_mask is not None else torch.ones(self.batch_size, dtype=torch.bool, device=runtime_device)
         slot_ids = slot_mask.nonzero(as_tuple=False).flatten()
         location_ids: list[Tensor] = []
         valid_cells = self._topology & self._mask_valid
@@ -342,18 +336,12 @@ class DungeonWalk(EnvBase):
         batch_index = torch.arange(flat_location.shape[0], device=runtime_device)
         observation_target = self._observations[batch_index, rows, cols].view(-1, 1)
         self._validate_observation_ids(observation_target)
-        inputs = F.one_hot(observation_target.squeeze(-1), num_classes=self._config.observation_dim).to(
-            torch.float32
-        )
+        inputs = F.one_hot(observation_target.squeeze(-1), num_classes=self._config.observation_dim).to(torch.float32)
         region_id = (
-            self._regions[batch_index, rows, cols].view(-1, 1)
-            if self._regions is not None
-            else torch.zeros_like(observation_target)
+            self._regions[batch_index, rows, cols].view(-1, 1) if self._regions is not None else torch.zeros_like(observation_target)
         )
         landmark_id = (
-            self._landmarks[batch_index, rows, cols].view(-1, 1)
-            if self._landmarks is not None
-            else torch.zeros_like(observation_target)
+            self._landmarks[batch_index, rows, cols].view(-1, 1) if self._landmarks is not None else torch.zeros_like(observation_target)
         )
         valid_action_mask = self._compute_valid_action_mask(rows, cols)
 
@@ -379,16 +367,11 @@ class DungeonWalk(EnvBase):
 
         next_rows = rows.unsqueeze(-1) + self._action_deltas[:, 0]
         next_cols = cols.unsqueeze(-1) + self._action_deltas[:, 1]
-        in_bounds = (
-            (0 <= next_rows) & (next_rows < self._height) & (0 <= next_cols) & (next_cols < self._width)
-        )
+        in_bounds = (0 <= next_rows) & (next_rows < self._height) & (0 <= next_cols) & (next_cols < self._width)
         safe_rows = next_rows.clamp(0, self._height - 1)
         safe_cols = next_cols.clamp(0, self._width - 1)
         batch_index = torch.arange(rows.shape[0], device=rows.device).unsqueeze(-1).expand_as(safe_rows)
-        passable = (
-            self._topology[batch_index, safe_rows, safe_cols]
-            & self._mask_valid[batch_index, safe_rows, safe_cols]
-        )
+        passable = self._topology[batch_index, safe_rows, safe_cols] & self._mask_valid[batch_index, safe_rows, safe_cols]
         return in_bounds & passable
 
     def _flatten_location(self, rows: Tensor, cols: Tensor) -> Tensor:
@@ -405,8 +388,7 @@ class DungeonWalk(EnvBase):
         max_id = int(observation_target.max().item())
         if min_id < 0 or max_id >= self._config.observation_dim:
             raise ValueError(
-                "DungeonWalk observation ids must lie within "
-                f"[0, {self._config.observation_dim - 1}], got min={min_id}, max={max_id}."
+                "DungeonWalk observation ids must lie within " f"[0, {self._config.observation_dim - 1}], got min={min_id}, max={max_id}."
             )
 
     def _require_static_maps(self) -> None:
