@@ -96,9 +96,12 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettings_V1.from_config(config.model_config_path)
         self.model = TEMModelV1(model_settings)
-        self.environment: Environment | None = None  #  Lazy init in setup() to avoid GPU alloc issues
-        self.controller: TEMController | None = None  #  Lazy init in setup() to avoid GPU alloc issues
-        self.step_module: TEMLossHead | None = None  #  Lazy init in setup() to avoid GPU alloc issues
+        self.train_environment: Environment | None = None
+        self.train_controller: TEMController | None = None
+        self.train_step_module: TEMLossHead | None = None
+        self.eval_environment: Environment | None = None
+        self.eval_controller: TEMController | None = None
+        self.eval_step_module: TEMLossHead | None = None
         self._config = config
 
         # Manual optimization: explicit backward + opt step (legacy parity + dual-opt clarity).
@@ -120,6 +123,45 @@ class TrainingModel(L.LightningModule):
         """Return the parsed configuration used by this LightningModule."""
         return self._config
 
+    def _local_batch_size(self) -> int:
+        """Return the per-rank batch size used by train and evaluation runtimes."""
+        trainer = getattr(self, "_trainer", None)
+        world_size = max(getattr(trainer, "world_size", 1), 1)
+        return max(self.config.global_batch_size // world_size, 1)
+
+    def _build_runtime(self, *, batch_size: int) -> tuple[Environment, TEMController, TEMLossHead]:
+        """Construct one phase-local TEM rollout runtime around the shared model."""
+        environment = Environment(self.config.environment, batch_size=batch_size)
+        controller = TEMController(self.model, environment, self.config.controller)
+        step_module = TEMLossHead(controller, self.config.loss)
+        return environment, controller, step_module
+
+    def _ensure_train_runtime(self) -> None:
+        """Initialize the training runtime once per process."""
+        if self.train_environment is not None and self.train_controller is not None and self.train_step_module is not None:
+            return
+        self.train_environment, self.train_controller, self.train_step_module = self._build_runtime(batch_size=self._local_batch_size())
+
+    def _ensure_eval_runtime(self) -> None:
+        """Initialize the evaluation runtime once per process."""
+        if self.eval_environment is not None and self.eval_controller is not None and self.eval_step_module is not None:
+            return
+        self.eval_environment, self.eval_controller, self.eval_step_module = self._build_runtime(batch_size=self._local_batch_size())
+
+    def _require_train_step_module(self) -> TEMLossHead:
+        """Return the training step module, initializing the train runtime if needed."""
+        self._ensure_train_runtime()
+        if self.train_step_module is None:
+            raise RuntimeError("TEM training runtime is not initialized.")
+        return self.train_step_module
+
+    def _require_eval_step_module(self) -> TEMLossHead:
+        """Return the evaluation step module, initializing the eval runtime if needed."""
+        self._ensure_eval_runtime()
+        if self.eval_step_module is None:
+            raise RuntimeError("TEM evaluation runtime is not initialized.")
+        return self.eval_step_module
+
     def _ensure_train_batch_assembler(  # ---------------------------------------------------------
         self, batch: Batch,
     ) -> PartialResetBatchAssembler:  # fmt: skip
@@ -136,14 +178,12 @@ class TrainingModel(L.LightningModule):
     def setup(  # --------------------------------------------------------------------------------
         self, stage: Optional[str] = None,
     ) -> None:  # fmt: skip
-        """Lazy initialization of the environment to avoid GPU allocation issues in DDP."""
-        world_size = max(getattr(self.trainer, "world_size", 1), 1)
-        local_bs = self.config.global_batch_size // world_size
-
-        if self.environment is None:
-            self.environment = Environment(self.config.environment, batch_size=local_bs)
-        self.controller = TEMController(self.model, self.environment, self.config.controller)
-        self.step_module = TEMLossHead(self.controller, self.config.loss)
+        """Initialize phase-local train and evaluation runtimes around the shared model."""
+        if stage in (None, "fit"):
+            self._ensure_train_runtime()
+            self._ensure_eval_runtime()
+        elif stage in ("validate", "test"):
+            self._ensure_eval_runtime()
 
     def configure_optimizers(  # -------------------------------------------------------------------
         self,
@@ -206,11 +246,12 @@ class TrainingModel(L.LightningModule):
         ``training_step``.
         """
         self._apply_runtime(self.global_step, log_values=True)
+        train_step_module = self._require_train_step_module()
         batch_assembler = self._ensure_train_batch_assembler(batch)
 
         # Initialize carry/state on the first batch
         if self._train_carry is None:
-            self._train_carry = self.step_module.initial_carry(batch)
+            self._train_carry = train_step_module.initial_carry(batch)
 
         # Assemble partial-reset step batch
         step_batch = batch_assembler.make_step_batch(
@@ -224,7 +265,7 @@ class TrainingModel(L.LightningModule):
         carry0 = self._train_carry
 
         step = None
-        for _t, step in StepLoop(self.step_module, step_batches, carry0, options=step_options):
+        for _t, step in StepLoop(train_step_module, step_batches, carry0, options=step_options):
             pass  # horizon = 1; loop runs exactly once
         if step is None:
             raise ValueError("StepLoop did not yield any steps.")
@@ -262,9 +303,10 @@ class TrainingModel(L.LightningModule):
         metrics across the rollout, matching the ACT/RL validation pattern.
         """
         self._apply_runtime(self.global_step, log_values=False)
+        eval_step_module = self._require_eval_step_module()
         step_batches = repeat(batch)  # Run until all examples halt
         step_options = {"allow_halt": False, "explore": False}
-        carry0 = self.step_module.initial_carry(batch)
+        carry0 = eval_step_module.initial_carry(batch)
 
         # Initialize carry/state on the first batch
         if self._eval_trace_keys is None:
@@ -273,7 +315,7 @@ class TrainingModel(L.LightningModule):
             trace_specs = build_trace_spec("tem", include_keys=self._eval_trace_keys)
 
         step, collector = None, TraceCollector(TraceTree(), trace_specs)
-        for t, step in StepLoop(self.step_module, step_batches, carry0, options=step_options):
+        for t, step in StepLoop(eval_step_module, step_batches, carry0, options=step_options):
             collector.append(t, step)
             update_metrics_from_step(self.val_metrics, step.outputs.metrics, TEM_EPISODE_ROUTES)
         if step is None:
@@ -292,7 +334,7 @@ def _normalize_loss_for_backward(  # -------------------------------------------
 
 
 # =================================================================================================
-def infer_tem_static_batch_keys(  # ----------------------------------------------------------------
+def infer_tem_static_batch_keys(  # ---------------------------------------------------------------
     batch: Batch,
 ) -> tuple[str, ...]:  # fmt: skip
     """Return the static maze keys that must move together through partial reset."""
