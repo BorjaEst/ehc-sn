@@ -226,11 +226,13 @@ class TEMLossHead(VariationalLossHeadBase[TEMController, TEMLossConfig]):
     def _observation_target(  # -------------------------------------------------------------------
         self, carry: Any,
     ) -> Tensor:  # fmt: skip
-        """Return observation targets from TEM carry data.
+        """Return current-step observation targets from TEM carry data.
 
         The preferred carry-data key is ``observation_target``. A fallback to
         ``labels`` is retained temporarily for compatibility with the current
-        rollout wiring.
+        rollout wiring. ``carry.data`` is expected to be the same payload that
+        produced the current TEM outputs: current observation plus previous
+        action.
         """
         labels = carry.data.get("observation_target", carry.data.get("labels"))
         if labels is None:

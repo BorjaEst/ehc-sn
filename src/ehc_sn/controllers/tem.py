@@ -54,7 +54,17 @@ class TEMRolloutBackbone[ModelState, ModelOutput](RolloutBackbone[ModelState, Mo
 # =================================================================================================
 @dataclass
 class TEMRolloutState[ModelState](RolloutState[ModelState]):
-    """Controller carry/state for TEM rollouts."""
+    """Controller carry/state for TEM rollouts.
+
+    ``data`` stores the payload aligned with the most recent TEM forward pass:
+    current observation, previous action, and derived per-step metadata.
+    Before the first step, it stores the initial current-step payload.
+
+    ``env_td`` stores the mutable environment state that seeds the next TEM
+    iteration. After a controller step it has already advanced to the next
+    current-state payload, but ``data`` remains aligned with the outputs that
+    were just produced.
+    """
 
     env_td: TensorDictBase
     static_data: dict[str, Tensor]
@@ -192,7 +202,13 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         self, state: TEMRolloutState[ModelState], batch: Batch, *,
         allow_halt: bool = True, explore: bool = True, **_: Any,
     ) -> tuple[TEMRolloutState[ModelState], TEMOutput]:  # fmt: skip
-        """Advance the controller by one variational step."""
+        """Advance the controller by one variational step.
+
+        The returned carry keeps ``data`` aligned with the payload used for the
+        forward pass so losses and traces supervise the current step. The
+        environment state is still advanced and stored in ``env_td`` to seed the
+        next controller iteration.
+        """
         static_data, env_td = self._refresh_halted_slots(batch, state)
         data = self._extract_step_data(env_td)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
@@ -241,7 +257,8 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
     ) -> dict[str, Tensor]:  # fmt: skip
         """Extract the current-step model payload from an environment state.
 
-        The model-facing payload keeps raw action ids and adds explicit
+        The model-facing payload exposes the current observation and the action
+        that produced it via ``previous_action``. It also adds explicit
         episode-start metadata derived from the environment step counter.
         """
         keys = (
@@ -324,7 +341,12 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
     def refresh_slot_data(  # ---------------------------------------------------------------------
         self, batch: Batch, state: TEMRolloutState[ModelState]
     ) -> dict[str, Tensor]:  # fmt: skip
-        """Return the current-step payload cached in the controller carry."""
+        """Return the current-step payload cached in the controller carry.
+
+        This payload is aligned with the outputs from the most recent forward
+        pass, not with the already-stepped environment state stored in
+        ``state.env_td``.
+        """
         return state.data
 
 

@@ -179,12 +179,12 @@ def _get_rpe(ctx: StepContext) -> TraceValue:
 
 
 def _get_world_observation_tem(ctx: StepContext) -> TraceValue:
-    """Post-step observation encoding aligned with the current rollout state."""
+    """Current-step observation encoding aligned with this step's TEM outputs."""
     return ctx.carry.data["inputs"].detach()
 
 
 def _get_world_location_ids_tem(ctx: StepContext) -> TraceValue:
-    """Post-step location ids aligned with the current rollout state."""
+    """Current-step location ids aligned with this step's TEM outputs."""
     return ctx.carry.data["location_id"].squeeze(-1).detach()
 
 
