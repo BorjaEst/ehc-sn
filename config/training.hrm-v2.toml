@@ -38,6 +38,9 @@ warmup_steps       = 5000
     warmup_steps = 1000
     min_ratio    = 0.01
 
+[runtime.validation]
+    hard_max_steps = 16
+
 # -- Controller & loss --------------------------------------------------------
 [controller]
     policy.exploration_prob = 0.1

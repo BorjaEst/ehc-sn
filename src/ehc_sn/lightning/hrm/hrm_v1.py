@@ -17,7 +17,6 @@ The batch structure used throughout this file is a plain ``dict[str, Tensor]``
 with keys ``"inputs"`` and ``"labels"``.
 """
 
-from itertools import repeat
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple, TypeAlias
 
@@ -28,7 +27,8 @@ from torch.optim import Optimizer
 
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
 from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
-from ehc_sn.lightning._rollout import evaluate_rollout, observe_evaluated_chunk, update_metric_collection_from_evaluated_chunk
+from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
+from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
@@ -82,6 +82,10 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
             "Learning rate scheduler config. If not set, no learning rate scheduling is applied. "
             "The keys in `scheduler` are passed to the scheduler constructor."
         ),
+    )
+    runtime: RuntimeConfig = Field(
+        default_factory=RuntimeConfig,
+        description="HRM runtime-owned validation safety settings.",
     )
     global_batch_size: int = Field(
         ...,
@@ -252,9 +256,10 @@ class TrainingModel(L.LightningModule):
             controller=self.controller,
             carry=carry0,
             objective=self.objective,
+            hard_max_steps=self.config.runtime.validation.hard_max_steps,
             runner_options=act_options,
             objective_options=act_options,
         )
-        trace = observe_evaluated_chunk(evaluation.evaluated, self.trace_specs)
+        trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, ACT_EPISODE_ROUTES)
         return {"trace": trace}

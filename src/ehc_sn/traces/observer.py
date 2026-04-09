@@ -1,18 +1,25 @@
-"""Trace observers over executed or evaluated rollout data."""
+"""Trace observers over executed rollout data."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, Literal, Mapping, Sequence, TypeAlias, TypeVar
+from typing import Callable, Generic, Literal, Mapping, Protocol, Sequence, TypeAlias, TypeVar
 
 import numpy as np
 import torch
 
-from ehc_sn.rollouts import EvaluatedChunk
 from ehc_sn.traces.trace_tree import TraceTree
 
+
 # =================================================================================================
-Context = TypeVar("Context")
+class IndexedTraceContext(Protocol):
+    """Minimal traced context carrying a stable step index."""
+
+    index: int
+
+
+Context = TypeVar("Context", bound=IndexedTraceContext)
+
 
 TraceLeaf: TypeAlias = int | float | np.ndarray | torch.Tensor
 TraceValue: TypeAlias = TraceLeaf | None | Mapping[str, "TraceValue"] | Sequence["TraceValue"]
@@ -44,7 +51,7 @@ class TraceSpec(Generic[Context]):
 
 # =================================================================================================
 class TraceObserver(Generic[Context]):
-    """Observe rollout or objective contexts into a :class:`TraceTree`."""
+    """Observe indexed execution contexts into a :class:`TraceTree`."""
 
     def __init__(self, tree: TraceTree, spec: TraceSpec[Context]):
         self.tree = tree
@@ -57,11 +64,11 @@ class TraceObserver(Generic[Context]):
         payload.update({field.name: field.get(ctx) for field in self.spec.fields})
         self.tree.append(payload)
 
-    def observe_chunk(self, chunk: EvaluatedChunk) -> None:
-        """Append all scored steps from a chunk in order."""
-        for step in chunk.steps:
-            self.observe(step, step_index=step.index)
+    def observe_records(self, records: Sequence[Context]) -> None:
+        """Append an ordered sequence of execution records."""
+        for record in records:
+            self.observe(record, step_index=record.index)
 
 
 # =================================================================================================
-__all__ = ["TraceField", "TraceObserver", "TraceSpec", "TraceValue"]
+__all__ = ["IndexedTraceContext", "TraceField", "TraceObserver", "TraceSpec", "TraceValue"]

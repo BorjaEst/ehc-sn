@@ -59,6 +59,9 @@ diagnostic_level     = "standard"
 [runtime.sequence]
     tbptt_steps = 25
 
+[runtime.validation]
+    hard_max_steps = 300
+
 # -- Controller & loss --------------------------------------------------------
 [loss]
     observation_loss = "softmax_cross_entropy"

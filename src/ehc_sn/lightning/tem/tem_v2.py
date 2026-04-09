@@ -14,7 +14,12 @@ from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
 from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
-from ehc_sn.lightning._rollout import evaluate_rollout, observe_evaluated_chunk, update_metric_collection_from_evaluated_chunk
+from ehc_sn.lightning._rollout import (
+    evaluate_rollout,
+    evaluate_rollout_streaming,
+    observe_rollout_chunk,
+    update_metric_collection_from_evaluated_chunk,
+)
 from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, resolve_tem_runtime
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_STEP_ROUTES
@@ -269,20 +274,21 @@ class TrainingModel(L.LightningModule):
             self._train_carry = train_controller.initial_state(batch)
 
         source = PartialResetSource(incoming=batch, assembler=batch_assembler, carry0=self._train_carry)
-        evaluation = evaluate_rollout(
+        evaluation = evaluate_rollout_streaming(
             runner=self._train_runner,
             source=source,
             controller=train_controller,
             carry=self._train_carry,
             objective=train_objective,
             max_steps=self._train_chunk_steps(),
+            metric_collection=self.train_metrics,
+            metric_routes=TEM_STEP_ROUTES,
         )
-        update_metric_collection_from_evaluated_chunk(self.train_metrics, evaluation.evaluated, TEM_STEP_ROUTES)
-        self._train_carry = evaluation.chunk.final_carry.detach()
+        self._train_carry = evaluation.execution.final_carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = batch_size_from_static_maze_batch(batch)
-        loss = normalize_loss_for_backward(evaluation.evaluated.loss, local_bs=local_bs)
+        loss = normalize_loss_for_backward(evaluation.loss, local_bs=local_bs)
 
         optimizers = self.optimizers()
         for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
@@ -300,7 +306,7 @@ class TrainingModel(L.LightningModule):
         # Log the accumulated chunk loss to TensorBoard.
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
-        return {"loss": loss.detach(), "signals": evaluation.evaluated.last_step.outputs.signals}
+        return {"loss": loss.detach(), "signals": evaluation.last_step.outputs.signals}
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
@@ -324,9 +330,10 @@ class TrainingModel(L.LightningModule):
             controller=eval_controller,
             carry=carry0,
             objective=eval_objective,
+            hard_max_steps=self.config.runtime.validation.hard_max_steps,
             runner_options=step_options,
         )
-        trace = observe_evaluated_chunk(evaluation.evaluated, trace_specs)
+        trace = observe_rollout_chunk(evaluation.chunk, trace_specs)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES)
         return {"trace": trace}
 

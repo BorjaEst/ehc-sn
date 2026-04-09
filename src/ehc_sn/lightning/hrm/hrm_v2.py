@@ -28,18 +28,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TypeAlias
 
 import lightning as L
-import numpy as np
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor
 from torch.optim import Optimizer
 
 from ehc_sn.controllers.rl import RLController, RLControllerConfig
-from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
-from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.heads.rl import RLLossConfig, RLLossHead
-from ehc_sn.lightning._rollout import evaluate_rollout, observe_evaluated_chunk, update_metric_collection_from_evaluated_chunk
+from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
+from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
@@ -113,6 +110,10 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
             "STR and vmPFC are frozen; allow_halt=False forces full deliberation. "
             "Prevents 'halt immediately' collapse before PFC representations are informative."
         ),
+    )
+    runtime: RuntimeConfig = Field(
+        default_factory=RuntimeConfig,
+        description="HRM runtime-owned validation safety settings.",
     )
 
     # ~~ Extra ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -314,9 +315,10 @@ class TrainingModel(L.LightningModule):
             controller=self.controller,
             carry=carry0,
             objective=self.objective,
+            hard_max_steps=self.config.runtime.validation.hard_max_steps,
             runner_options=rl_options,
             objective_options=rl_options,
         )
-        trace = observe_evaluated_chunk(evaluation.evaluated, self.trace_specs)
+        trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, RL_EPISODE_ROUTES)
         return {"trace": trace}

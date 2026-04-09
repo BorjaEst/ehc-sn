@@ -70,8 +70,18 @@ class SequenceRuntimeConfig(BaseModel, extra="forbid"):
     )
 
 
+class ValidationRuntimeConfig(BaseModel, extra="forbid"):
+    """Runner-owned safety limits for TEM validation rollouts."""
+
+    hard_max_steps: int | None = Field(
+        default=None,
+        ge=1,
+        description="Defensive runner cap for validation rollouts. Separate from semantic model max_steps.",
+    )
+
+
 class RuntimeConfig(BaseModel, extra="forbid"):
-    """Step-based runtime schedules for TEM training dynamics."""
+    """Step-based runtime schedules for TEM training dynamics and validation safety."""
 
     memory: MemoryRuntimeConfig = Field(
         default_factory=MemoryRuntimeConfig,
@@ -84,6 +94,10 @@ class RuntimeConfig(BaseModel, extra="forbid"):
     sequence: SequenceRuntimeConfig = Field(
         default_factory=SequenceRuntimeConfig,
         description="Chunked-TBPTT sequence settings for TEM training.",
+    )
+    validation: ValidationRuntimeConfig = Field(
+        default_factory=ValidationRuntimeConfig,
+        description="Validation-only runner safety settings.",
     )
 
 
@@ -121,5 +135,6 @@ __all__ = [
     "SequenceRuntimeConfig",
     "TEMRuntimeState",
     "UncertaintyRuntimeConfig",
+    "ValidationRuntimeConfig",
     "resolve_tem_runtime",
 ]

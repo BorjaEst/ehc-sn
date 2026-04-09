@@ -16,7 +16,6 @@ Trace keys follow the same namespace hierarchy as diagnostic signals:
 
     act/*      — ACT halting/stepping signals
     pred/*     — model output predictions
-    loss/*     — loss scalars
     value/*    — value / Q-function outputs
     reward/*   — environment reward signals
     policy/*   — policy / action outputs
@@ -25,14 +24,81 @@ Trace keys follow the same namespace hierarchy as diagnostic signals:
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Literal
+from typing import Any, Iterable, Literal, Mapping, Protocol
 
 import torch
 from torch import Tensor
 
 from ehc_sn.data.schema import O_ID
-from ehc_sn.rollouts import ObservedStep
 from ehc_sn.traces import TraceField, TraceSpec, TraceValue
+
+
+# =================================================================================================
+class _CommonTraceCarry(Protocol):
+    """Minimal carry surface shared across executed-step trace fields."""
+
+    halted: Tensor
+    steps: Tensor
+    data: Mapping[str, Any]
+
+
+class _CommonTraceContext(Protocol):
+    """Minimal execution context shared across all trace paradigms."""
+
+    index: int
+    carry: _CommonTraceCarry
+
+
+class _TokenTraceOutputs(Protocol):
+    """Output surface for token-prediction trace fields."""
+
+    lm_logits: Tensor
+
+
+class _TokenTraceContext(_CommonTraceContext, Protocol):
+    """Execution context exposing token logits."""
+
+    outputs: _TokenTraceOutputs
+
+
+class _ACTTraceOutputs(Protocol):
+    """Output surface required by ACT trace fields."""
+
+    q_logits: Tensor
+
+
+class _ACTTraceContext(_CommonTraceContext, Protocol):
+    """Execution context exposing ACT controller outputs."""
+
+    outputs: _ACTTraceOutputs
+
+
+class _RLTraceOutputs(Protocol):
+    """Output surface required by RL trace fields."""
+
+    q_logits: Tensor
+    value_logits: Tensor
+    reward: Tensor
+    action: Tensor
+
+
+class _RLTraceContext(_CommonTraceContext, Protocol):
+    """Execution context exposing RL controller outputs."""
+
+    outputs: _RLTraceOutputs
+
+
+class _TEMTraceCarry(_CommonTraceCarry, Protocol):
+    """Carry surface required by TEM trace fields."""
+
+    static_data: Mapping[str, Any]
+    model_state: Any
+
+
+class _TEMTraceContext(_TokenTraceContext, Protocol):
+    """Execution context exposing TEM carry and token outputs."""
+
+    carry: _TEMTraceCarry
 
 
 # =================================================================================================
@@ -53,45 +119,37 @@ class ReplayableEnvironments:
 
 
 # =================================================================================================
-# Common — usable in any paradigm (ACT and RL share these accessor paths)
+# Common — usable in any executed rollout paradigm
 # =================================================================================================
 
 
-def _get_loss(ctx: ObservedStep) -> TraceValue:
-    return ctx.outputs.loss.detach()
-
-
-def _get_halted(ctx: ObservedStep) -> TraceValue:
+def _get_halted(ctx: _CommonTraceContext) -> TraceValue:
     return ctx.carry.halted.detach()
 
 
-def _get_steps(ctx: ObservedStep) -> TraceValue:
+def _get_steps(ctx: _CommonTraceContext) -> TraceValue:
     return ctx.carry.steps.detach()
 
 
-def _get_solution_overlay(ctx: ObservedStep) -> TraceValue:
+def _get_solution_overlay(ctx: _TokenTraceContext) -> TraceValue:
     """Binary mask: 1 where the model predicts the solution-path token."""
-    logits_lm: Tensor = ctx.outputs.outputs.logits[0]  # (B, S, vocab)
+    logits_lm: Tensor = ctx.outputs.lm_logits  # (B, S, vocab)
     pred = torch.argmax(logits_lm.detach(), dim=-1)  # (B, S)
     return (pred == O_ID).to(torch.uint8)
 
 
-def _get_inputs_meta(ctx: ObservedStep) -> TraceValue:
+def _get_inputs_meta(ctx: _CommonTraceContext) -> TraceValue:
     """Static input batch captured as metadata when figures request it."""
     value = ctx.carry.data.get("inputs")
     return None if value is None else value.detach()
 
 
-def _get_labels_meta(ctx: ObservedStep) -> TraceValue:
+def _get_labels_meta(ctx: _CommonTraceContext) -> TraceValue:
     """Static label batch captured as metadata when figures request it."""
     value = ctx.carry.data.get("labels")
     return None if value is None else value.detach()
 
 
-TRACE_LOSS = TraceField(
-    name="loss/total",
-    get=_get_loss,
-)
 TRACE_HALTED = TraceField(
     name="act/halted",
     get=_get_halted,
@@ -116,7 +174,6 @@ TRACE_LABELS_META = TraceField(
 )
 
 COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
-    TRACE_LOSS,
     TRACE_HALTED,
     TRACE_STEPS,
     TRACE_SOLUTION_OVERLAY,
@@ -130,9 +187,9 @@ COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
 # =================================================================================================
 
 
-def _get_q_logits_act(ctx: ObservedStep) -> TraceValue:
+def _get_q_logits_act(ctx: _ACTTraceContext) -> TraceValue:
     """Q-logits over halt/continue actions from the ACT controller."""
-    logits_q: Tensor = ctx.outputs.outputs.logits[1]  # (B, n_actions)
+    logits_q: Tensor = ctx.outputs.q_logits  # (B, n_actions)
     return logits_q.detach()
 
 
@@ -149,46 +206,46 @@ ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_Q_LOGITS_ACT,)
 # =================================================================================================
 
 
-def _get_q_logits_rl(ctx: ObservedStep) -> TraceValue:
+def _get_q_logits_rl(ctx: _RLTraceContext) -> TraceValue:
     """vmPFC Q-logits over actions from the RL controller."""
-    logits_q: Tensor = ctx.outputs.outputs.logits[1]  # (B, n_actions)
+    logits_q: Tensor = ctx.outputs.q_logits  # (B, n_actions)
     return logits_q.detach()
 
 
-def _get_r_logits_rl(ctx: ObservedStep) -> TraceValue:
+def _get_r_logits_rl(ctx: _RLTraceContext) -> TraceValue:
     """STR value estimates V(s) from the RL critic."""
-    logits_r: Tensor = ctx.outputs.outputs.logits[2]  # (B, 1)
+    logits_r: Tensor = ctx.outputs.value_logits  # (B, 1)
     return logits_r.detach()
 
 
-def _get_reward_env(ctx: ObservedStep) -> TraceValue:
+def _get_reward_env(ctx: _RLTraceContext) -> TraceValue:
     """Scalar environment reward for each batch slot."""
-    return ctx.outputs.outputs.reward.squeeze(-1).detach()
+    return ctx.outputs.reward.squeeze(-1).detach()
 
 
-def _get_action(ctx: ObservedStep) -> TraceValue:
+def _get_action(ctx: _RLTraceContext) -> TraceValue:
     """Selected action index for each batch slot."""
-    return ctx.outputs.outputs.action.detach()
+    return ctx.outputs.action.detach()
 
 
-def _get_rpe(ctx: ObservedStep) -> TraceValue:
+def _get_rpe(ctx: _RLTraceContext) -> TraceValue:
     """Reward prediction error: reward − V(s)."""
-    reward: Tensor = ctx.outputs.outputs.reward.squeeze(-1)
-    value: Tensor = ctx.outputs.outputs.logits[2].squeeze(-1)  # STR critic
+    reward: Tensor = ctx.outputs.reward.squeeze(-1)
+    value: Tensor = ctx.outputs.value_logits.squeeze(-1)  # STR critic
     return (reward - value).detach()
 
 
-def _get_world_observation_tem(ctx: ObservedStep) -> TraceValue:
+def _get_world_observation_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Current-step observation encoding aligned with this step's TEM outputs."""
     return ctx.carry.data["inputs"].detach()
 
 
-def _get_world_location_ids_tem(ctx: ObservedStep) -> TraceValue:
+def _get_world_location_ids_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Current-step location ids aligned with this step's TEM outputs."""
     return ctx.carry.data["location_id"].squeeze(-1).detach()
 
 
-def _get_environments_tem(ctx: ObservedStep) -> TraceValue:
+def _get_environments_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable world metadata derived from the static maze batch."""
     topology = ctx.carry.static_data["topology"]
     mask_valid = ctx.carry.static_data.get("mask_valid")
@@ -200,27 +257,27 @@ def _get_environments_tem(ctx: ObservedStep) -> TraceValue:
     )
 
 
-def _get_diagnostic_lec_cells_tem(ctx: ObservedStep) -> TraceValue:
+def _get_diagnostic_lec_cells_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable LEC activations by frequency for diagnostic figures."""
     return [cell.detach() for cell in ctx.carry.model_state.lec.cells]
 
 
-def _get_diagnostic_lec_filtered_tem(ctx: ObservedStep) -> TraceValue:
+def _get_diagnostic_lec_filtered_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable LEC filtered by frequency for diagnostic figures."""
     return [cell.detach() for cell in ctx.carry.model_state.lec.filtered]
 
 
-def _get_diagnostic_mec_location_mean_tem(ctx: ObservedStep) -> TraceValue:
+def _get_diagnostic_mec_location_mean_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable MEC location codes by frequency for diagnostic figures."""
     return [cell.detach() for cell in ctx.carry.model_state.mec.cells]
 
 
-def _get_diagnostic_hpc_location_mean_tem(ctx: ObservedStep) -> TraceValue:
+def _get_diagnostic_hpc_location_mean_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable HPC grounded-location codes by frequency for diagnostic figures."""
     return [cell.detach() for cell in ctx.carry.model_state.hpc.cells]
 
 
-def _get_diagnostic_hpc_memory_tem(ctx: ObservedStep) -> TraceValue:
+def _get_diagnostic_hpc_memory_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable final-step-compatible HPC memory state for diagnostic figures."""
     memory = ctx.carry.model_state.hpc.memory
     return {
@@ -239,12 +296,12 @@ def _memory_entry_for_trace(memory: TraceValue) -> TraceValue:
     return memory
 
 
-def _get_lec_alpha_sigmoid_tem(ctx: ObservedStep) -> TraceValue:
+def _get_lec_alpha_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Static sigmoid-transformed LEC filter alpha values captured in carry data."""
     return ctx.carry.data["lec_alpha_sigmoid"].detach()
 
 
-def _get_lec_w_f_sigmoid_tem(ctx: ObservedStep) -> TraceValue:
+def _get_lec_w_f_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Static sigmoid-transformed LEC frequency weights captured in carry data."""
     return ctx.carry.data["lec_w_f_sigmoid"].detach()
 
@@ -327,7 +384,6 @@ RL_TRACE_FIELDS: tuple[TraceField, ...] = (
 
 
 TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
-    TRACE_LOSS,
     TRACE_HALTED,
     TRACE_STEPS,
     TRACE_WORLD_OBSERVATION_TEM,
