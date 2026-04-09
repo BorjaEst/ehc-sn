@@ -2,7 +2,7 @@
 
 Mirrors :mod:`ehc_sn.metrics.signals` (scalar diagnostic names) and
 :mod:`ehc_sn.metrics.routes` (metric routing tables) for the temporal rollout
-data path.  All :class:`~ehc_sn.rollouts.collect.TraceField` definitions live
+data path.  All :class:`~ehc_sn.traces.TraceField` definitions live
 here so model files contain *no* trace wiring.
 
 Usage
@@ -31,8 +31,8 @@ import torch
 from torch import Tensor
 
 from ehc_sn.data.schema import O_ID
-from ehc_sn.rollouts.collect import TraceField, TraceSpec, TraceValue
-from ehc_sn.training.step_loop import StepContext
+from ehc_sn.rollouts import ObservedStep
+from ehc_sn.traces import TraceField, TraceSpec, TraceValue
 
 
 # =================================================================================================
@@ -57,32 +57,32 @@ class ReplayableEnvironments:
 # =================================================================================================
 
 
-def _get_loss(ctx: StepContext) -> TraceValue:
+def _get_loss(ctx: ObservedStep) -> TraceValue:
     return ctx.outputs.loss.detach()
 
 
-def _get_halted(ctx: StepContext) -> TraceValue:
+def _get_halted(ctx: ObservedStep) -> TraceValue:
     return ctx.carry.halted.detach()
 
 
-def _get_steps(ctx: StepContext) -> TraceValue:
+def _get_steps(ctx: ObservedStep) -> TraceValue:
     return ctx.carry.steps.detach()
 
 
-def _get_solution_overlay(ctx: StepContext) -> TraceValue:
+def _get_solution_overlay(ctx: ObservedStep) -> TraceValue:
     """Binary mask: 1 where the model predicts the solution-path token."""
     logits_lm: Tensor = ctx.outputs.outputs.logits[0]  # (B, S, vocab)
     pred = torch.argmax(logits_lm.detach(), dim=-1)  # (B, S)
     return (pred == O_ID).to(torch.uint8)
 
 
-def _get_inputs_meta(ctx: StepContext) -> TraceValue:
+def _get_inputs_meta(ctx: ObservedStep) -> TraceValue:
     """Static input batch captured as metadata when figures request it."""
     value = ctx.carry.data.get("inputs")
     return None if value is None else value.detach()
 
 
-def _get_labels_meta(ctx: StepContext) -> TraceValue:
+def _get_labels_meta(ctx: ObservedStep) -> TraceValue:
     """Static label batch captured as metadata when figures request it."""
     value = ctx.carry.data.get("labels")
     return None if value is None else value.detach()
@@ -130,7 +130,7 @@ COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
 # =================================================================================================
 
 
-def _get_q_logits_act(ctx: StepContext) -> TraceValue:
+def _get_q_logits_act(ctx: ObservedStep) -> TraceValue:
     """Q-logits over halt/continue actions from the ACT controller."""
     logits_q: Tensor = ctx.outputs.outputs.logits[1]  # (B, n_actions)
     return logits_q.detach()
@@ -149,46 +149,46 @@ ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_Q_LOGITS_ACT,)
 # =================================================================================================
 
 
-def _get_q_logits_rl(ctx: StepContext) -> TraceValue:
+def _get_q_logits_rl(ctx: ObservedStep) -> TraceValue:
     """vmPFC Q-logits over actions from the RL controller."""
     logits_q: Tensor = ctx.outputs.outputs.logits[1]  # (B, n_actions)
     return logits_q.detach()
 
 
-def _get_r_logits_rl(ctx: StepContext) -> TraceValue:
+def _get_r_logits_rl(ctx: ObservedStep) -> TraceValue:
     """STR value estimates V(s) from the RL critic."""
     logits_r: Tensor = ctx.outputs.outputs.logits[2]  # (B, 1)
     return logits_r.detach()
 
 
-def _get_reward_env(ctx: StepContext) -> TraceValue:
+def _get_reward_env(ctx: ObservedStep) -> TraceValue:
     """Scalar environment reward for each batch slot."""
     return ctx.outputs.outputs.reward.squeeze(-1).detach()
 
 
-def _get_action(ctx: StepContext) -> TraceValue:
+def _get_action(ctx: ObservedStep) -> TraceValue:
     """Selected action index for each batch slot."""
     return ctx.outputs.outputs.action.detach()
 
 
-def _get_rpe(ctx: StepContext) -> TraceValue:
+def _get_rpe(ctx: ObservedStep) -> TraceValue:
     """Reward prediction error: reward − V(s)."""
     reward: Tensor = ctx.outputs.outputs.reward.squeeze(-1)
     value: Tensor = ctx.outputs.outputs.logits[2].squeeze(-1)  # STR critic
     return (reward - value).detach()
 
 
-def _get_world_observation_tem(ctx: StepContext) -> TraceValue:
+def _get_world_observation_tem(ctx: ObservedStep) -> TraceValue:
     """Current-step observation encoding aligned with this step's TEM outputs."""
     return ctx.carry.data["inputs"].detach()
 
 
-def _get_world_location_ids_tem(ctx: StepContext) -> TraceValue:
+def _get_world_location_ids_tem(ctx: ObservedStep) -> TraceValue:
     """Current-step location ids aligned with this step's TEM outputs."""
     return ctx.carry.data["location_id"].squeeze(-1).detach()
 
 
-def _get_environments_tem(ctx: StepContext) -> TraceValue:
+def _get_environments_tem(ctx: ObservedStep) -> TraceValue:
     """Replayable world metadata derived from the static maze batch."""
     topology = ctx.carry.static_data["topology"]
     mask_valid = ctx.carry.static_data.get("mask_valid")
@@ -200,27 +200,27 @@ def _get_environments_tem(ctx: StepContext) -> TraceValue:
     )
 
 
-def _get_diagnostic_lec_cells_tem(ctx: StepContext) -> TraceValue:
+def _get_diagnostic_lec_cells_tem(ctx: ObservedStep) -> TraceValue:
     """Replayable LEC activations by frequency for diagnostic figures."""
     return [cell.detach() for cell in ctx.carry.model_state.lec.cells]
 
 
-def _get_diagnostic_lec_filtered_tem(ctx: StepContext) -> TraceValue:
+def _get_diagnostic_lec_filtered_tem(ctx: ObservedStep) -> TraceValue:
     """Replayable LEC filtered by frequency for diagnostic figures."""
     return [cell.detach() for cell in ctx.carry.model_state.lec.filtered]
 
 
-def _get_diagnostic_mec_location_mean_tem(ctx: StepContext) -> TraceValue:
+def _get_diagnostic_mec_location_mean_tem(ctx: ObservedStep) -> TraceValue:
     """Replayable MEC location codes by frequency for diagnostic figures."""
     return [cell.detach() for cell in ctx.carry.model_state.mec.cells]
 
 
-def _get_diagnostic_hpc_location_mean_tem(ctx: StepContext) -> TraceValue:
+def _get_diagnostic_hpc_location_mean_tem(ctx: ObservedStep) -> TraceValue:
     """Replayable HPC grounded-location codes by frequency for diagnostic figures."""
     return [cell.detach() for cell in ctx.carry.model_state.hpc.cells]
 
 
-def _get_diagnostic_hpc_memory_tem(ctx: StepContext) -> TraceValue:
+def _get_diagnostic_hpc_memory_tem(ctx: ObservedStep) -> TraceValue:
     """Replayable final-step-compatible HPC memory state for diagnostic figures."""
     memory = ctx.carry.model_state.hpc.memory
     return {
@@ -239,16 +239,14 @@ def _memory_entry_for_trace(memory: TraceValue) -> TraceValue:
     return memory
 
 
-def _get_lec_alpha_sigmoid_tem(ctx: StepContext) -> TraceValue:
-    """Static sigmoid-transformed LEC filter alpha values captured as metadata."""
-    backbone = ctx.step_module.controller.backbone
-    return torch.stack([torch.sigmoid(alpha).detach() for alpha in backbone.lec.filter.alpha])
+def _get_lec_alpha_sigmoid_tem(ctx: ObservedStep) -> TraceValue:
+    """Static sigmoid-transformed LEC filter alpha values captured in carry data."""
+    return ctx.carry.data["lec_alpha_sigmoid"].detach()
 
 
-def _get_lec_w_f_sigmoid_tem(ctx: StepContext) -> TraceValue:
-    """Static sigmoid-transformed LEC frequency weights captured as metadata."""
-    backbone = ctx.step_module.controller.backbone
-    return torch.stack([torch.sigmoid(weight).detach() for weight in backbone.lec.w_f])
+def _get_lec_w_f_sigmoid_tem(ctx: ObservedStep) -> TraceValue:
+    """Static sigmoid-transformed LEC frequency weights captured in carry data."""
+    return ctx.carry.data["lec_w_f_sigmoid"].detach()
 
 
 TRACE_Q_LOGITS_RL = TraceField(
@@ -378,11 +376,11 @@ def _select_trace_fields(  # ---------------------------------------------------
 def build_trace_spec(  # --------------------------------------------------------------------------
     paradigm: Literal["act", "rl", "tem"], *, include_keys: Iterable[str] | None = None,
 ) -> TraceSpec:  # fmt: skip
-    """Build a :class:`~ehc_sn.rollouts.collect.TraceSpec` for a training paradigm.
+    """Build a :class:`~ehc_sn.traces.TraceSpec` for a training paradigm.
 
     Returns common fields plus paradigm-specific fields.  Pass the returned
-    spec to :class:`~ehc_sn.rollouts.collect.TraceCollector` instead of
-    constructing :class:`~ehc_sn.rollouts.collect.TraceField` lists in model files.
+    spec to :class:`~ehc_sn.traces.TraceObserver` instead of
+    constructing :class:`~ehc_sn.traces.TraceField` lists in model files.
 
     Args:
         paradigm: ``"act"`` for ACT-based models (hrm_v1) or
@@ -390,7 +388,7 @@ def build_trace_spec(  # -------------------------------------------------------
             ``"tem"`` for TEM-based models (tem_v1).
 
     Returns:
-        A :class:`~ehc_sn.rollouts.collect.TraceSpec` instance.
+        A :class:`~ehc_sn.traces.TraceSpec` instance.
 
     Raises:
         ValueError: If *paradigm* is not ``"act"``, ``"rl"``, or ``"tem"``.

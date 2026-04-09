@@ -9,6 +9,29 @@ from __future__ import annotations
 import os
 
 from lightning.pytorch.strategies import DDPStrategy
+from torch import Tensor
+
+
+# =================================================================================================
+def normalize_loss_for_backward(  # --------------------------------------------------------------
+    total_loss: Tensor, local_bs: int,
+) -> Tensor:  # fmt: skip
+    """Normalize the total loss by the local batch size for distributed training.
+
+    In distributed training (for example DDP), each rank computes gradients on its
+    local mini-batch. Dividing by the local batch size keeps gradient magnitudes
+    consistent before DDP averages gradients across ranks.
+
+    Args:
+        total_loss: Unnormalized scalar loss for the current local mini-batch.
+        local_bs: Effective local batch size on the current rank.
+
+    Returns:
+        Loss scaled for backward().
+    """
+    if local_bs <= 0:
+        raise ValueError(f"local_bs must be positive, got {local_bs}.")
+    return total_loss / float(local_bs)
 
 
 # =================================================================================================
@@ -69,6 +92,7 @@ def resolve_trainer_strategy(  # -----------------------------------------------
 
 # =================================================================================================
 __all__ = [
+    "normalize_loss_for_backward",
     "resolve_effective_world_size",
     "resolve_trainer_strategy",
     "validate_batch_size_divisibility",
