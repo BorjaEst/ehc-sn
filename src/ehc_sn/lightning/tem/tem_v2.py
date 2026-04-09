@@ -289,6 +289,7 @@ class TrainingModel(L.LightningModule):
         # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = batch_size_from_static_maze_batch(batch)
         loss = normalize_loss_for_backward(evaluation.loss, local_bs=local_bs)
+        loss = loss / self._train_chunk_steps()  # Average loss across the chunk for smoother gradients.
 
         optimizers = self.optimizers()
         for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
