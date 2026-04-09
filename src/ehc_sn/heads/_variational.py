@@ -14,9 +14,10 @@ import torch
 from torch import Tensor
 
 import ehc_sn.loss.cross_entropy as cross_entropy_module
-from ehc_sn.heads._base import BaseLossHead, ControllerWithInitialState
+from ehc_sn.heads._base import BaseObjective
 from ehc_sn.loss.consistency import LatentCode, LatentRelation
 from ehc_sn.metrics import signals as S
+from ehc_sn.rollouts import StepRecord
 from ehc_sn.training.types import RatioStat, RolloutAgg, StepMetrics, TokenAgg, TransitionAgg
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
@@ -62,9 +63,7 @@ class VariationalLossStep:
 
 
 # =================================================================================================
-class VariationalLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT](
-    BaseLossHead[ControllerT, ConfigT]
-):  # fmt: skip
+class VariationalLossHeadBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
     """Base class for variational-family rollout heads.
 
     Family-level output contracts should expose named semantic latent relations.
@@ -77,19 +76,19 @@ class VariationalLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT](
         """Return the configured observation loss primitive."""
         return getattr(cross_entropy_module, self.config.observation_loss)
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, batch: Batch, carry: Any, **options: Any,
-    ) -> tuple[Any, Any, bool]:  # fmt: skip
-        """Run one controller step and compute variational-family losses."""
-        carry, outputs = self.controller.step(carry, batch, **options)
+    def evaluate_step(  # ------------------------------------------------------------------------
+        self, record: StepRecord, **options: Any,
+    ) -> Any:  # fmt: skip
+        """Score one executed variational-family step."""
+        carry, outputs = record.carry, record.outputs
         losses = self.compute_losses(outputs, carry, **options)
         metrics = build_variational_step_metrics(
             self._build_metric_ratios(losses, carry=carry, outputs=outputs, batch_size=int(carry.halted.shape[0])),
             batch_size=int(carry.halted.shape[0]),
             like=losses.total.detach(),
         )  # fmt: skip
-        signals = self.compute_signals(batch, carry, outputs, losses)
-        return self._build_step_output(losses, metrics, signals, outputs), carry, bool(carry.halted.all())
+        signals = self.compute_signals(record.batch, carry, outputs, losses)
+        return self._build_step_output(losses, metrics, signals, outputs)
 
     def compute_losses(  # ------------------------------------------------------------------------
         self, outputs: Any, carry: Any, **options: Any,

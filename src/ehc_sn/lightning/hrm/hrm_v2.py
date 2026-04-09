@@ -39,18 +39,17 @@ from ehc_sn.data.schema import CHANNEL_SOLUTION, O_ID
 from ehc_sn.data.transforms import channels_to_grid
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.heads.rl import RLLossConfig, RLLossHead
-from ehc_sn.lightning.hrm.core.runtime import normalize_loss_for_backward
-from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
+from ehc_sn.lightning._rollout import evaluate_rollout, observe_evaluated_chunk, update_metric_collection_from_evaluated_chunk
+from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettings_V2
-from ehc_sn.rollouts.collect import TraceCollector
-from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
 from ehc_sn.training.buffers import FifoBuffer
+from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
-from ehc_sn.training.step_loop import StepLoop
 
 # Token label ignored by supervised loss (padding / non-supervised positions).
 IGNORE_LABEL_ID: int = -100
@@ -145,8 +144,10 @@ class TrainingModel(L.LightningModule):
         self.model = HRModelV2(model_settings)
         self.environment: MazeHardEnv | None = None  # Lazy init in setup() to avoid GPU allocation issues
         self.controller: RLController | None = None  # Initialized in setup() after environment is ready
-        self.step_module: RLLossHead | None = None  # Initialized in setup() after controller is ready
+        self.objective: RLLossHead | None = None  # Initialized in setup() after controller is ready
         self._config = config
+        self._train_runner = SingleStepRunner()
+        self._eval_runner = RecurrentRunner()
 
         # Manual optimization: explicit backward + opt step (legacy parity + dual-opt clarity).
         self.automatic_optimization = False
@@ -183,7 +184,7 @@ class TrainingModel(L.LightningModule):
         if self.environment is None:
             self.environment = MazeHardEnv(self.config.environment, batch_size=local_bs)
         self.controller = RLController(self.model, self.environment, self.config.controller)
-        self.step_module = RLLossHead(self.controller, self.config.loss)
+        self.objective = RLLossHead(self.config.loss)
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
@@ -244,36 +245,32 @@ class TrainingModel(L.LightningModule):
         replaced with fresh examples from the current incoming batch.
 
         Notes:
-            - ``setup()`` must have run so that ``self.step_module`` is available.
+            - ``setup()`` must have run so that ``self.controller`` and ``self.objective`` are available.
             - During warmup (``global_step < warmup_steps``), halting is disabled.
         """
+        if self.controller is None or self.objective is None:
+            raise RuntimeError("HRM v2 runtime is not initialized. Call setup() before training.")
+
         # Initialize carry/state on the first batch
         if self._train_carry is None:
-            self._train_carry = self.step_module.initial_carry(batch)
+            self._train_carry = self.controller.initial_state(batch)
 
-        # Assemble partial-reset step batch
-        step_batch = self._train_batch_assembler.make_step_batch(
-            incoming=batch,
-            reset_mask=self._train_carry.halted,
-        )
-
-        # Horizon=1 step loop: run one step of the controller
-        step_batches = repeat(step_batch, 1)
         is_warmup = self.global_step < self._config.warmup_steps
         rl_options = {"explore": True, "allow_halt": not is_warmup, "is_warmup": is_warmup}
-        carry0 = self._train_carry
-
-        step = None
-        for _t, step in StepLoop(self.step_module, step_batches, carry0, options=rl_options):
-            pass  # horizon = 1; loop runs exactly once
-        if step is None:
-            raise ValueError("StepLoop did not yield any steps.")
-        self._train_carry = step.carry.detach()
+        evaluation = evaluate_rollout(
+            runner=self._train_runner,
+            source=PartialResetSource(incoming=batch, assembler=self._train_batch_assembler, carry0=self._train_carry),
+            controller=self.controller,
+            carry=self._train_carry,
+            objective=self.objective,
+            runner_options=rl_options,
+            objective_options=rl_options,
+        )
+        self._train_carry = evaluation.chunk.final_carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = int(batch["inputs"].shape[0])
-        out = step.outputs
-        loss = normalize_loss_for_backward(out.loss, local_bs)
+        loss = normalize_loss_for_backward(evaluation.evaluated.loss, local_bs)
 
         # Zero gradients before backward so each step uses only the current batch.
         opt_sup, opt_rl, opt_qv = self.optimizers()  # type: ignore[misc]
@@ -290,10 +287,10 @@ class TrainingModel(L.LightningModule):
             opt_qv.step(); sch_qv.step()  # fmt: skip
 
         # Update metrics with unnormalized loss and log to TensorBoard.
-        update_metrics_from_step(self.train_metrics, step.outputs.metrics, RL_STEP_ROUTES)
+        update_metric_collection_from_evaluated_chunk(self.train_metrics, evaluation.evaluated, RL_STEP_ROUTES)
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
-        signals = {**step.outputs.signals, "is_warmup": torch.tensor(float(is_warmup))}
+        signals = {**evaluation.evaluated.last_step.outputs.signals, "is_warmup": torch.tensor(float(is_warmup))}
         return {"loss": loss.detach(), "signals": signals}
 
     # -- Validation -------------------------------------------------------------------------------
@@ -306,16 +303,20 @@ class TrainingModel(L.LightningModule):
         Validation runs the controller to the max horizon (no exploration) and
         collects a trace tree for downstream logging/analysis.
         """
-        step_batches = repeat(batch)  # Run until all examples halt
+        if self.controller is None or self.objective is None:
+            raise RuntimeError("HRM v2 runtime is not initialized. Call setup() before validation.")
+
         rl_options = {"explore": False, "allow_halt": False, "is_warmup": False}
-        carry0 = self.step_module.initial_carry(batch)
-        collector = TraceCollector(TraceTree(), self.trace_specs)
-
-        step = None
-        for t, step in StepLoop(self.step_module, step_batches, carry0, options=rl_options):
-            collector.append(t, step)
-            update_metrics_from_step(self.val_metrics, step.outputs.metrics, RL_EPISODE_ROUTES)
-        if step is None:
-            raise ValueError("Evaluation loop did not yield any steps.")
-
-        return {"trace": collector.tree}
+        carry0 = self.controller.initial_state(batch)
+        evaluation = evaluate_rollout(
+            runner=self._eval_runner,
+            source=RepeatSource(batch),
+            controller=self.controller,
+            carry=carry0,
+            objective=self.objective,
+            runner_options=rl_options,
+            objective_options=rl_options,
+        )
+        trace = observe_evaluated_chunk(evaluation.evaluated, self.trace_specs)
+        update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, RL_EPISODE_ROUTES)
+        return {"trace": trace}

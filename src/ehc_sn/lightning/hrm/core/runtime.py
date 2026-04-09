@@ -5,7 +5,6 @@ import lightning as L
 import numpy as np
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor
 from torch.optim import Optimizer
 
 from ehc_sn.controllers.rl import RLController, RLControllerConfig
@@ -17,37 +16,11 @@ from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metric
 from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettings_V2
-from ehc_sn.rollouts.collect import TraceCollector
-from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
 from ehc_sn.training.step_loop import StepLoop
-
-
-# =================================================================================================
-def normalize_loss_for_backward(  # --------------------------------------------------------------
-    total_loss: Tensor, local_bs: int,
-) -> Tensor:  # fmt: skip
-    """Normalize the total loss by the local batch size for distributed training.
-
-    In distributed training (e.g. DDP), each rank computes gradients on its local mini-batch.
-    To ensure that the overall gradient magnitudes are consistent regardless of the number of
-    devices, we normalize the loss by the local batch size (the number of examples processed
-    by this rank). DDP will then average the gradients across ranks, effectively normalizing by
-    the global batch size.
-
-    Args:
-        total_loss: The unnormalized loss computed for the current mini-batch (scalar tensor).
-        local_bs: The effective batch size for this mini-batch on the current rank (number of examples).
-
-    Returns:
-        The loss normalized by the local batch size, ready for backward().
-    """
-    if local_bs <= 0:
-        raise ValueError(f"local_bs must be positive, got {local_bs}.")
-    return total_loss / float(local_bs)
 
 
 # =================================================================================================

@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.distributions import Categorical
 
-from ehc_sn.controllers.rl import RLController, RLOutput, RLRolloutState
+from ehc_sn.controllers.rl import RLOutput, RLRolloutState
 from ehc_sn.heads._token import AccuracyStats, TokenLossHeadBase
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
@@ -111,25 +111,14 @@ class RLLossStep:
 
 
 # =================================================================================================
-class RLLossHead(TokenLossHeadBase[RLController, RLLossConfig]):
-    """Loss head wrapping :class:`~ehc_sn.controllers.rl.RLController`.
-
-    The loss head is responsible for:
-        - running one controller step
-        - computing supervised + RL losses
-        - producing step metrics and diagnostic signals
-    """
+class RLLossHead(TokenLossHeadBase[RLLossConfig]):
+    """Pure RL objective scored over executed rollout chunks."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, controller: RLController, config: RLLossConfig,
+        self, config: RLLossConfig,
     ) -> None:  # fmt: skip
-        """Create a loss head.
-
-        Args:
-            controller: Controller responsible for forward pass + env stepping.
-            config: Loss configuration.
-        """
-        super().__init__(controller=controller, config=config)
+        """Create an RL objective from its loss configuration."""
+        super().__init__(config=config)
 
     def compute_losses(  # ------------------------------------------------------------------------
         self, outputs: RLOutput, labels: Tensor, stats: AccuracyStats, *,

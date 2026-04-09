@@ -1,68 +1,62 @@
-"""Shared head base abstractions.
+"""Shared objective base abstractions.
 
-This module contains only universal rollout-head wiring that is valid across
-multiple head families. Family-specific logic lives in sibling internal
+This module contains only universal rollout-objective wiring that is valid
+across multiple head families. Family-specific logic lives in sibling internal
 modules such as ``_token.py`` and ``_variational.py``.
 """
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any
 
 from pydantic import BaseModel
-from torch import nn
+from torch import Tensor, nn
 
-from ehc_sn.types import Batch
-
-
-# =================================================================================================
-class ControllerWithInitialState(Protocol):
-    """Controller protocol used by :class:`BaseLossHead`."""
-
-    def initial_state(self, batch_sample: Batch) -> Any:
-        """Build the initial rollout carry for a batch sample."""
+from ehc_sn.rollouts import EvaluatedChunk, ObservedStep, RolloutChunk, StepRecord
 
 
 # =================================================================================================
-class BaseLossHead[ControllerT: ControllerWithInitialState, ConfigT: BaseModel](
-    nn.Module
-): # fmt: skip
-    """Minimal wiring base for all rollout-based loss heads.
+class BaseObjective[ConfigT: BaseModel](nn.Module):
+    """Minimal wiring base for all rollout objectives.
 
-    Owns exactly:
-
-    * **Controller storage** — wraps the controller and exposes it via ``controller``.
-    * **Config storage** — wraps the config and exposes it via ``config``.
-    * **Carry initialization** — delegates to ``controller.initial_state`` via
-      ``initial_carry``.
-
-    Does **not** know about labels, loss functions, logits layout, or metrics.
-    Those concerns belong to family-specific layers or concrete subclasses.
-
-    Output contract:
-        Concrete ``forward`` methods must return
-        ``(step_output, new_carry, all_halted)``.
+    Concrete subclasses score executed :class:`~ehc_sn.rollouts.RolloutChunk`
+    objects and return an :class:`~ehc_sn.rollouts.EvaluatedChunk` containing
+    one scored step result per executed step.
     """
 
-    def __init__(self, controller: ControllerT, config: ConfigT) -> None:
+    def __init__(self, config: ConfigT) -> None:
         super().__init__()
-        self._controller = controller
         self._config = config
 
     @property
-    def controller(self) -> ControllerT:
-        """Return the wrapped controller."""
-        return self._controller
-
-    @property
     def config(self) -> ConfigT:
-        """Return the head configuration."""
+        """Return the objective configuration."""
         return self._config
 
-    def initial_carry(self, batch_sample: Batch) -> Any:
-        """Initialize rollout carry/state from an example batch."""
-        return self.controller.initial_state(batch_sample)
+    def forward(self, chunk: RolloutChunk, **options: Any) -> EvaluatedChunk:
+        """Score an executed rollout chunk and return one observed step per record."""
+        observed_steps: list[ObservedStep] = []
+        total_loss: Tensor | None = None
+
+        for record in chunk.records:
+            step_output = self.evaluate_step(record, **options)
+            observed_steps.append(ObservedStep(index=record.index, batch=record.batch, carry=record.carry, outputs=step_output))
+            total_loss = step_output.loss if total_loss is None else total_loss + step_output.loss
+
+        if total_loss is None:
+            raise ValueError("Objective received an empty rollout chunk.")
+
+        return EvaluatedChunk(
+            steps=tuple(observed_steps),
+            loss=total_loss,
+            final_carry=chunk.final_carry,
+            source_exhausted=chunk.source_exhausted,
+        )
+
+    def evaluate_step(self, record: StepRecord, **options: Any) -> Any:
+        """Score one executed rollout step."""
+        raise NotImplementedError
 
 
 # =================================================================================================
-__all__ = ["BaseLossHead", "ControllerWithInitialState"]
+__all__ = ["BaseObjective"]

@@ -8,26 +8,24 @@ from typing import Any, Dict, Optional
 
 import lightning as L
 from pydantic import BaseModel, Field, model_validator
-from torch import Tensor
 from torch.optim import Optimizer
 
 from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
 from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
+from ehc_sn.lightning._rollout import evaluate_rollout, observe_evaluated_chunk, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, resolve_tem_runtime
-from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
+from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.tem.tem_v2 import Batch, ModelSettings_V2, TEMModelV2
-from ehc_sn.rollouts.collect import TraceCollector
-from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.training.buffers import FifoBuffer
-from ehc_sn.training.collector import PartialResetCollector
+from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
-from ehc_sn.training.step_loop import StepLoop
 
 # Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
 TEM_STATIC_REQUIRED_KEYS = ("topology", "observations", "mask_valid")
@@ -99,11 +97,13 @@ class TrainingModel(L.LightningModule):
         self.model = TEMModelV2(model_settings)
         self.train_environment: Environment | None = None
         self.train_controller: TEMController | None = None
-        self.train_step_module: TEMLossHead | None = None
+        self.train_objective: TEMLossHead | None = None
         self.eval_environment: Environment | None = None
         self.eval_controller: TEMController | None = None
-        self.eval_step_module: TEMLossHead | None = None
+        self.eval_objective: TEMLossHead | None = None
         self._config = config
+        self._train_runner = RecurrentRunner()
+        self._eval_runner = RecurrentRunner()
 
         # Manual optimization: explicit backward + opt step (legacy parity + dual-opt clarity).
         self.automatic_optimization = False
@@ -138,34 +138,48 @@ class TrainingModel(L.LightningModule):
         """Construct one phase-local TEM rollout runtime around the shared model."""
         environment = Environment(self.config.environment, batch_size=batch_size)
         controller = TEMController(self.model, environment, self.config.controller)
-        step_module = TEMLossHead(controller, self.config.loss)
-        return environment, controller, step_module
+        objective = TEMLossHead(self.config.loss)
+        return environment, controller, objective
 
     def _ensure_train_runtime(self) -> None:
         """Initialize the training runtime once per process."""
-        if self.train_environment is not None and self.train_controller is not None and self.train_step_module is not None:
+        if self.train_environment is not None and self.train_controller is not None and self.train_objective is not None:
             return
-        self.train_environment, self.train_controller, self.train_step_module = self._build_runtime(batch_size=self._local_batch_size())
+        self.train_environment, self.train_controller, self.train_objective = self._build_runtime(batch_size=self._local_batch_size())
 
     def _ensure_eval_runtime(self) -> None:
         """Initialize the evaluation runtime once per process."""
-        if self.eval_environment is not None and self.eval_controller is not None and self.eval_step_module is not None:
+        if self.eval_environment is not None and self.eval_controller is not None and self.eval_objective is not None:
             return
-        self.eval_environment, self.eval_controller, self.eval_step_module = self._build_runtime(batch_size=self._local_batch_size())
+        self.eval_environment, self.eval_controller, self.eval_objective = self._build_runtime(batch_size=self._local_batch_size())
 
-    def _require_train_step_module(self) -> TEMLossHead:
-        """Return the training step module, initializing the train runtime if needed."""
+    def _require_train_controller(self) -> TEMController:
+        """Return the training controller, initializing the train runtime if needed."""
         self._ensure_train_runtime()
-        if self.train_step_module is None:
+        if self.train_controller is None:
             raise RuntimeError("TEM training runtime is not initialized.")
-        return self.train_step_module
+        return self.train_controller
 
-    def _require_eval_step_module(self) -> TEMLossHead:
-        """Return the evaluation step module, initializing the eval runtime if needed."""
+    def _require_train_objective(self) -> TEMLossHead:
+        """Return the training objective, initializing the train runtime if needed."""
+        self._ensure_train_runtime()
+        if self.train_objective is None:
+            raise RuntimeError("TEM training runtime is not initialized.")
+        return self.train_objective
+
+    def _require_eval_controller(self) -> TEMController:
+        """Return the evaluation controller, initializing the eval runtime if needed."""
         self._ensure_eval_runtime()
-        if self.eval_step_module is None:
+        if self.eval_controller is None:
             raise RuntimeError("TEM evaluation runtime is not initialized.")
-        return self.eval_step_module
+        return self.eval_controller
+
+    def _require_eval_objective(self) -> TEMLossHead:
+        """Return the evaluation objective, initializing the eval runtime if needed."""
+        self._ensure_eval_runtime()
+        if self.eval_objective is None:
+            raise RuntimeError("TEM evaluation runtime is not initialized.")
+        return self.eval_objective
 
     def _ensure_train_batch_assembler(  # ---------------------------------------------------------
         self, batch: Batch,
@@ -244,40 +258,31 @@ class TrainingModel(L.LightningModule):
     def training_step(  # -------------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
     ) -> Dict[str, object]:  # fmt: skip
-        """Run one TEM chunked-TBPTT optimizer update with manual optimization."""
+        """Run one TEM chunked-TBPTT optimizer update through the recurrent runner."""
         self._apply_runtime(self.global_step, log_values=True)
-        train_step_module = self._require_train_step_module()
+        train_controller = self._require_train_controller()
+        train_objective = self._require_train_objective()
         batch_assembler = self._ensure_train_batch_assembler(batch)
 
         # Initialize carry/state on the first batch
         if self._train_carry is None:
-            self._train_carry = train_step_module.initial_carry(batch)
+            self._train_carry = train_controller.initial_state(batch)
 
-        collector = PartialResetCollector(incoming=batch, assembler=batch_assembler, carry0=self._train_carry)
-        step_options = {}  # FIXME after the HeadLoss and TEMController support options
-        carry = self._train_carry
-        accumulated_loss = None
-        last_step_output = None
-
-        for _t in range(self._train_chunk_steps()):
-            try:
-                step_batch = next(collector)
-            except StopIteration:
-                break
-
-            step_output, carry, _all_halted = train_step_module(step_batch, carry, **step_options)
-            collector.update(carry=carry)
-            accumulated_loss = step_output.loss if accumulated_loss is None else accumulated_loss + step_output.loss
-            update_metrics_from_step(self.train_metrics, step_output.metrics, TEM_STEP_ROUTES)
-            last_step_output = step_output
-
-        if accumulated_loss is None or last_step_output is None:
-            raise ValueError("TEM training chunk did not yield any steps.")
-        self._train_carry = carry.detach()
+        source = PartialResetSource(incoming=batch, assembler=batch_assembler, carry0=self._train_carry)
+        evaluation = evaluate_rollout(
+            runner=self._train_runner,
+            source=source,
+            controller=train_controller,
+            carry=self._train_carry,
+            objective=train_objective,
+            max_steps=self._train_chunk_steps(),
+        )
+        update_metric_collection_from_evaluated_chunk(self.train_metrics, evaluation.evaluated, TEM_STEP_ROUTES)
+        self._train_carry = evaluation.chunk.final_carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = batch_size_from_static_maze_batch(batch)
-        loss = _normalize_loss_for_backward(accumulated_loss, local_bs=local_bs)
+        loss = normalize_loss_for_backward(evaluation.evaluated.loss, local_bs=local_bs)
 
         optimizers = self.optimizers()
         for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
@@ -295,21 +300,17 @@ class TrainingModel(L.LightningModule):
         # Log the accumulated chunk loss to TensorBoard.
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
-        return {"loss": loss.detach(), "signals": last_step_output.signals}
+        return {"loss": loss.detach(), "signals": evaluation.evaluated.last_step.outputs.signals}
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
     ) -> Dict[str, object]:  # fmt: skip
-        """Run a full TEM rollout until all slots reach the configured horizon.
-
-        Validation does not persist carry across batches and accumulates episode
-        metrics across the rollout, matching the ACT/RL validation pattern.
-        """
+        """Run a full TEM rollout through the recurrent runner and trace observer."""
         self._apply_runtime(self.global_step, log_values=False)
-        eval_step_module = self._require_eval_step_module()
-        step_batches = repeat(batch)  # Run until all examples halt
+        eval_controller = self._require_eval_controller()
+        eval_objective = self._require_eval_objective()
         step_options = {"allow_halt": False, "explore": False}
-        carry0 = eval_step_module.initial_carry(batch)
+        carry0 = eval_controller.initial_state(batch)
 
         # Initialize carry/state on the first batch
         if self._eval_trace_keys is None:
@@ -317,23 +318,17 @@ class TrainingModel(L.LightningModule):
         else:
             trace_specs = build_trace_spec("tem", include_keys=self._eval_trace_keys)
 
-        step, collector = None, TraceCollector(TraceTree(), trace_specs)
-        for t, step in StepLoop(eval_step_module, step_batches, carry0, options=step_options):
-            collector.append(t, step)
-            update_metrics_from_step(self.val_metrics, step.outputs.metrics, TEM_EPISODE_ROUTES)
-        if step is None:
-            raise ValueError("Evaluation loop did not yield any steps, cannot log metrics.")
-
-        return {"trace": collector.tree}
-
-
-def _normalize_loss_for_backward(  # --------------------------------------------------------------
-    total_loss: Tensor, local_bs: int,
-) -> Tensor:  # fmt: skip
-    """Normalize the total loss by the local batch size for distributed training."""
-    if local_bs <= 0:
-        raise ValueError(f"local_bs must be positive, got {local_bs}.")
-    return total_loss / float(local_bs)
+        evaluation = evaluate_rollout(
+            runner=self._eval_runner,
+            source=RepeatSource(batch),
+            controller=eval_controller,
+            carry=carry0,
+            objective=eval_objective,
+            runner_options=step_options,
+        )
+        trace = observe_evaluated_chunk(evaluation.evaluated, trace_specs)
+        update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES)
+        return {"trace": trace}
 
 
 # =================================================================================================

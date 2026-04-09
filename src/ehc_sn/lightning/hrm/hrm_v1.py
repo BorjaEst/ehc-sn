@@ -28,18 +28,17 @@ from torch.optim import Optimizer
 
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
 from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
-from ehc_sn.lightning.hrm.core.runtime import normalize_loss_for_backward
-from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
+from ehc_sn.lightning._rollout import evaluate_rollout, observe_evaluated_chunk, update_metric_collection_from_evaluated_chunk
+from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v1 import Batch, HRModelV1, ModelSettings_V1
-from ehc_sn.rollouts.collect import TraceCollector
-from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
 from ehc_sn.training.buffers import FifoBuffer
+from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
-from ehc_sn.training.step_loop import StepLoop
 
 
 # =================================================================================================
@@ -122,8 +121,10 @@ class TrainingModel(L.LightningModule):
         model_settings = ModelSettings_V1.from_config(config.model_config_path)
         self.model = HRModelV1(model_settings)
         self.controller = ACTController(self.model, config.act_controller)
-        self.step_module = ACTLossHead(self.controller, config.loss)
+        self.objective = ACTLossHead(config.loss)
         self._config = config
+        self._train_runner = SingleStepRunner()
+        self._eval_runner = RecurrentRunner()
 
         # Manual optimization: one backward, explicit opt/scheduler steps (legacy parity).
         self.automatic_optimization = False
@@ -198,31 +199,23 @@ class TrainingModel(L.LightningModule):
         """
         # Initialize carry/state on the first batch
         if self._train_carry is None:
-            self._train_carry = self.step_module.initial_carry(batch)
+            self._train_carry = self.controller.initial_state(batch)
 
-        # Assemble a step batch using the previous carry's halted mask.
-        # `reset_mask=True` means "this row is done, replace it with a fresh example".
-        assembler = self._train_batch_assembler
-        step_batch = assembler.make_step_batch(
-            incoming=batch,
-            reset_mask=self._train_carry.halted,  # vectorized done flags
+        act_options = {"allow_halt": True, "explore": True}
+        evaluation = evaluate_rollout(
+            runner=self._train_runner,
+            source=PartialResetSource(incoming=batch, assembler=self._train_batch_assembler, carry0=self._train_carry),
+            controller=self.controller,
+            carry=self._train_carry,
+            objective=self.objective,
+            runner_options=act_options,
+            objective_options=act_options,
         )
-
-        # Horizon=1 matches legacy behavior: exactly one ACT step per mini-batch.
-        step_batches = repeat(step_batch, 1)
-        act_options = {"allow_halt": True, "explore": True}  # Allow halt and exploration in training
-        carry0 = self._train_carry
-
-        step = None
-        for t, step in StepLoop(self.step_module, step_batches, carry0, options=act_options):
-            pass  # TODO: Sum loss across steps if horizon > 1
-        if step is None:
-            raise ValueError("RolloutLoop did not yield any steps, cannot proceed with training step.")
-        self._train_carry = step.carry.detach()
+        self._train_carry = evaluation.chunk.final_carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = int(batch["inputs"].shape[0])
-        loss = normalize_loss_for_backward(step.outputs.loss, local_bs=local_bs)
+        loss = normalize_loss_for_backward(evaluation.evaluated.loss, local_bs=local_bs)
 
         optimizers = self.optimizers()
         for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
@@ -238,10 +231,10 @@ class TrainingModel(L.LightningModule):
             sch.step()  # type: ignore
 
         # Update metrics with unnormalized loss and log to TensorBoard.
-        update_metrics_from_step(self.train_metrics, step.outputs.metrics, ACT_STEP_ROUTES)
+        update_metric_collection_from_evaluated_chunk(self.train_metrics, evaluation.evaluated, ACT_STEP_ROUTES)
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
-        return {"loss": loss.detach(), "signals": step.outputs.signals}
+        return {"loss": loss.detach(), "signals": evaluation.evaluated.last_step.outputs.signals}
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
@@ -251,16 +244,17 @@ class TrainingModel(L.LightningModule):
         Validation uses `EvaluationLoop` (no carry is persisted across batches here) and logs
         normalized metrics.
         """
-        step_batches = repeat(batch)  # Run until all examples halt
         act_options = {"allow_halt": False, "explore": False, "td_target": False}
-        carry0 = self.step_module.initial_carry(batch)
-
-        # Initialize carry/state on the first batch
-        step, collector = None, TraceCollector(TraceTree(), self.trace_specs)
-        for t, step in StepLoop(self.step_module, step_batches, carry0, options=act_options):
-            collector.append(t, step)
-            update_metrics_from_step(self.val_metrics, step.outputs.metrics, ACT_EPISODE_ROUTES)
-        if step is None:
-            raise ValueError("Evaluation loop did not yield any steps, cannot log metrics.")
-
-        return {"trace": collector.tree}
+        carry0 = self.controller.initial_state(batch)
+        evaluation = evaluate_rollout(
+            runner=self._eval_runner,
+            source=RepeatSource(batch),
+            controller=self.controller,
+            carry=carry0,
+            objective=self.objective,
+            runner_options=act_options,
+            objective_options=act_options,
+        )
+        trace = observe_evaluated_chunk(evaluation.evaluated, self.trace_specs)
+        update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, ACT_EPISODE_ROUTES)
+        return {"trace": trace}

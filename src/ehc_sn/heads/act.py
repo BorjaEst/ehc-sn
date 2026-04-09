@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.controllers.act import ACTController, ACTOutput, ACTRolloutState
+from ehc_sn.controllers.act import ACTOutput, ACTRolloutState
 from ehc_sn.heads._token import AccuracyStats, TokenLossHeadBase
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
@@ -84,25 +84,14 @@ class ACTLossStep:
 
 
 # =================================================================================================
-class ACTLossHead(TokenLossHeadBase[ACTController, ACTLossConfig]):
-    """Loss head wrapping :class:`~ehc_sn.controllers.act.ACTController`.
-
-    Responsibilities:
-        - run one controller step
-        - compute supervised + halting losses
-        - produce aggregated metrics and diagnostic signals
-    """
+class ACTLossHead(TokenLossHeadBase[ACTLossConfig]):
+    """Pure ACT objective scored over executed rollout chunks."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, controller: ACTController, config: ACTLossConfig,
+        self, config: ACTLossConfig,
     ) -> None:  # fmt: skip
-        """Create a loss head.
-
-        Args:
-            controller: ACT controller managing halting and state.
-            config: Loss configuration.
-        """
-        super().__init__(controller=controller, config=config)
+        """Create an ACT objective from its loss configuration."""
+        super().__init__(config=config)
 
     def compute_losses(  # -----------------------------------------------------------------------
         self, outputs: ACTOutput, labels: Tensor, stats: AccuracyStats, **_: Any,
@@ -112,7 +101,7 @@ class ACTLossHead(TokenLossHeadBase[ACTController, ACTLossConfig]):
         loss_sum = self.compute_lm_loss(outputs.lm_logits, labels, stats)
 
         # Done-action loss: match Q(done) to sequence correctness.
-        done_action = self.controller.config.done_action
+        done_action = outputs.done_action
         q_done_logits = outputs.q_logits[..., done_action]  # (B,)
         target = stats.seq_is_correct.to(q_done_logits.dtype)
         q_done_loss = F.binary_cross_entropy_with_logits(q_done_logits, target, reduction="sum")

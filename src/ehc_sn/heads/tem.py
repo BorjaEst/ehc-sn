@@ -19,7 +19,6 @@ from ehc_sn.controllers.tem import (
     PLACE_REG_TERM,
     PLACE_SENSORY_RELATION,
     PLACE_TRANSITION_RELATION,
-    TEMController,
     TEMOutput,
 )
 from ehc_sn.heads._variational import VariationalLosses, VariationalLossHeadBase, VariationalLossStep, get_reg_term, require_latent_relation
@@ -109,19 +108,14 @@ class TEMLossStep(VariationalLossStep):
 
 
 # =================================================================================================
-class TEMLossHead(VariationalLossHeadBase[TEMController, TEMLossConfig]):
-    """Loss head wrapping a TEM-compatible controller or output adapter."""
+class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
+    """Pure TEM objective scored over executed rollout chunks."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, controller: TEMController, config: TEMLossConfig,
+        self, config: TEMLossConfig,
     ) -> None:  # fmt: skip
-        """Create a TEM loss head.
-
-        Args:
-            controller: TEM controller managing rollout state.
-            config: Loss configuration.
-        """
-        super().__init__(controller=controller, config=config)
+        """Create a TEM objective from its loss configuration."""
+        super().__init__(config=config)
 
     def compute_losses(  # -----------------------------------------------------------------------
         self, outputs: TEMOutput, carry: Any, **_: Any,

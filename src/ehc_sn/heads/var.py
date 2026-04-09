@@ -9,11 +9,8 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.controllers.var import MAIN_LATENT_RELATION, VARController, VAROutput, VARRolloutState
-from ehc_sn.heads._variational import (
-    VariationalLosses, VariationalLossHeadBase, VariationalLossStep,
-    get_reg_term, require_latent_relation,
-)
+from ehc_sn.controllers.var import MAIN_LATENT_RELATION, VAROutput, VARRolloutState
+from ehc_sn.heads._variational import VariationalLosses, VariationalLossHeadBase, VariationalLossStep, get_reg_term, require_latent_relation
 from ehc_sn.loss.consistency import LatentCode, mean_latent_norm, mse_consistency, sum_latent_terms
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_terms
@@ -77,19 +74,14 @@ class VARLossStep(VariationalLossStep):
 
 
 # =================================================================================================
-class VARLossHead(VariationalLossHeadBase[VARController, VARLossConfig]):
-    """Loss head wrapping :class:`~ehc_sn.controllers.var.VARController`."""
+class VARLossHead(VariationalLossHeadBase[VARLossConfig]):
+    """Pure VAR objective scored over executed rollout chunks."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, controller: VARController, config: VARLossConfig,
+        self, config: VARLossConfig,
     ) -> None:  # fmt: skip
-        """Create a loss head.
-
-        Args:
-            controller: VAR controller managing halting and state.
-            config: Loss configuration.
-        """
-        super().__init__(controller=controller, config=config)
+        """Create a VAR objective from its loss configuration."""
+        super().__init__(config=config)
 
     def compute_losses(  # -----------------------------------------------------------------------
         self, outputs: VAROutput, carry: Any, **_: Any,

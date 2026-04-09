@@ -15,7 +15,8 @@ from pydantic import BaseModel
 from torch import Tensor
 
 import ehc_sn.loss.cross_entropy as cross_entropy_module
-from ehc_sn.heads._base import BaseLossHead, ControllerWithInitialState
+from ehc_sn.heads._base import BaseObjective
+from ehc_sn.rollouts import StepRecord
 from ehc_sn.training.types import RatioStat, RolloutAgg, StepMetrics, TokenAgg, TransitionAgg
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
@@ -54,9 +55,7 @@ class TokenLosses(DetachMixin):
 
 
 # =================================================================================================
-class TokenLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT: BaseModel](
-    BaseLossHead[ControllerT, ConfigT]
-):  # fmt: skip
+class TokenLossHeadBase[ConfigT: BaseModel](BaseObjective[ConfigT]):  # fmt: skip
     """Rollout head specialization for token-supervised loss with generic metrics."""
 
     @property
@@ -64,13 +63,11 @@ class TokenLossHeadBase[ControllerT: ControllerWithInitialState, ConfigT: BaseMo
         """Return the configured token-level loss function."""
         return getattr(cross_entropy_module, self._config.function)
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, batch: Any, carry: Any, **options: Any,
-    ) -> tuple[Any, Any, bool]:  # fmt: skip
-        """Run the controller and apply the token-supervision pipeline."""
-        carry, outputs = self.controller.step(carry, batch, **options)
-        step_output = self._run_token_step(batch, carry, outputs, **options)
-        return step_output, carry, bool(carry.halted.all())
+    def evaluate_step(  # ------------------------------------------------------------------------
+        self, record: StepRecord, **options: Any,
+    ) -> Any:  # fmt: skip
+        """Score one executed token-supervision step."""
+        return self._run_token_step(record.batch, record.carry, record.outputs, **options)
 
     def _run_token_step(  # -----------------------------------------------------------------------
         self, batch: Batch, carry: Any, outputs: Any, **loss_options: Any,
