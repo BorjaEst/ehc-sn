@@ -9,7 +9,7 @@ from ehc_sn.figures.figures.panels import colorbar, panel
 from ehc_sn.figures.plots.rasterplot import plot_activation, plot_observations
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.axes import subdivide_axes
-from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.traces.trace_tree import TraceTree
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> mpl_figure.Figure:
@@ -68,7 +68,9 @@ class LECOverview(BaseFigureTemplate):
         """Plot observations and LEC activations over time."""
         nrows = len(self.freq_idxs)
         options = {"vmin": 0.0, "vmax": 1.0, "cmap": "GnBu"}
-        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.1, squeeze=True)):
+        axes = subdivide_axes(ax, nrows, 1, hspace=0.1, squeeze=True)
+        freq_axes = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
+        for freq_idx, freq_ax in enumerate(freq_axes):
             plot_activation(freq_ax, self.cells[freq_idx], **options)
             freq_ax.set_title(f"Activation timeseries - Freq {freq_idx}", fontsize=7)
             freq_ax.set_yticks([]); freq_ax.set_xticks([])  # fmt: skip

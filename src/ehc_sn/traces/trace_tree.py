@@ -49,9 +49,7 @@ class TraceTree:
     leaf_signatures: list[Optional[tuple[tuple[int, ...], np.dtype]]] = field(default_factory=list)
     dense_leaves: Optional[list[Any]] = None
 
-    def append(  # --------------------------------------------------------------------------------
-        self, state: Any,
-    ) -> None:  # fmt: skip
+    def append(self, state: Any) -> None:
         """Append a state snapshot into the trace tree."""
         leaves, spec, paths = torch_pytree.flatten_with_paths(state)
         if self.spec is None:
@@ -74,15 +72,11 @@ class TraceTree:
         self.length += 1
         self.dense_leaves = None
 
-    def finalize(  # ------------------------------------------------------------------------------
-        self,
-    ) -> None:  # fmt: skip
+    def finalize(self) -> None:
         """Finalize the trace by stacking buffered data into arrays."""
         self.dense_leaves = self._build_dense_leaves(clear=True)
 
-    def slice_time(  # ----------------------------------------------------------------------------
-        self, t0: int, t1: int,
-    ) -> "TraceTree":  # fmt: skip
+    def slice_time(self, t0: int, t1: int) -> "TraceTree":
         """Return a time-sliced copy of the trace."""
         t0 = max(0, t0)
         t1 = min(self.length, t1)
@@ -103,9 +97,7 @@ class TraceTree:
         sliced.dense_leaves = [None if leaf is None else leaf[t0:t1] for leaf in dense_leaves]
         return sliced
 
-    def get(  # -----------------------------------------------------------------------------------
-        self, path: str,
-    ) -> np.ndarray:  # fmt: skip
+    def get(self, path: str) -> np.ndarray:
         """Return a dense array at a slash-delimited path."""
         if not self.path_to_index:
             raise ValueError("TraceTree has no data")
@@ -114,82 +106,55 @@ class TraceTree:
             raise ValueError(f"Dense key '{path}' missing")
         if not self.leaf_is_numeric[idx]:
             raise ValueError(f"Dense key '{path}' refers to metadata leaf")
-        dense_leaves = (
-            self._build_dense_leaves(clear=False) if self.dense_leaves is None else self.dense_leaves
-        )
+        dense_leaves = self._build_dense_leaves(clear=False) if self.dense_leaves is None else self.dense_leaves
         leaf = dense_leaves[idx]
         if leaf is None:
             raise ValueError(f"Dense key '{path}' is missing data")
         return leaf
 
-    def export_dense_tree(  # ---------------------------------------------------------------------
-        self,
-    ) -> Any:  # fmt: skip
+    def export_dense_tree(self) -> Any:
         """Export dense trace data as a nested pytree."""
         if self.spec is None:
             return {}
-        dense_leaves = (
-            self._build_dense_leaves(clear=False) if self.dense_leaves is None else self.dense_leaves
-        )
+        dense_leaves = self._build_dense_leaves(clear=False) if self.dense_leaves is None else self.dense_leaves
         return torch_pytree.tree_unflatten(dense_leaves, self.spec)
 
-    def export_meta_tree(  # ----------------------------------------------------------------------
-        self,
-    ) -> Any:  # fmt: skip
+    def export_meta_tree(self) -> Any:
         """Export static metadata as a nested pytree."""
         if self.spec is None:
             return {}
-        meta_leaves = [
-            None if is_numeric else self.meta_first[idx]
-            for idx, is_numeric in enumerate(self.leaf_is_numeric)
-        ]
+        meta_leaves = [None if is_numeric else self.meta_first[idx] for idx, is_numeric in enumerate(self.leaf_is_numeric)]
         return torch_pytree.tree_unflatten(meta_leaves, self.spec)
 
-    def export(  # --------------------------------------------------------------------------------
-        self, *, flatten: bool = False, sep: str = "/",
-    ) -> Any:  # fmt: skip
+    def export(self, *, flatten: bool = False, sep: str = "/") -> Any:
         """Export dense trace data, optionally flattening to a path map."""
         dense = self.export_dense_tree()
         if not flatten:
             return dense
         return self._flatten_dense_map(sep=sep)
 
-    def get_meta(  # ------------------------------------------------------------------------------
-        self,
-    ) -> dict[str, Any]:  # fmt: skip
+    def get_meta(self) -> dict[str, Any]:
         """Return root metadata dictionary, if available."""
         meta = self._meta_at_path("meta")
         return dict(meta) if isinstance(meta, dict) else {}
 
-    def get_meta_path(  # -------------------------------------------------------------------------
-        self, path: str,
-    ) -> Any:  # fmt: skip
-        """Return the metadata leaf stored at ``path``.
-
-        Raises:
-            ValueError: If the trace has no metadata at the requested path.
-        """
+    def get_meta_path(self, path: str) -> Any:
+        """Return the metadata leaf stored at ``path``."""
         value = self._meta_at_path(path)
         if value is None:
             raise ValueError(f"TraceTree metadata key '{path}' missing")
         return value
 
-    def get_environments(  # ----------------------------------------------------------------------
-        self,
-    ) -> list[Any]:  # fmt: skip
+    def get_environments(self) -> list[Any]:
         """Return environments stored in the trace metadata."""
         envs = self._meta_at_path("environments")
         return list(envs) if envs is not None else []
 
-    def get_visited(  # ---------------------------------------------------------------------------
-        self,
-    ) -> Any:  # fmt: skip
+    def get_visited(self) -> Any:
         """Return visited masks stored in the trace metadata."""
         return self._meta_at_path("visited")
 
-    def get_world(  # -----------------------------------------------------------------------------
-        self, env_idx: int,
-    ) -> Any:  # fmt: skip
+    def get_world(self, env_idx: int) -> Any:
         """Return the World object for a selected environment index."""
         envs = self.get_environments()
         if not envs:
@@ -198,9 +163,7 @@ class TraceTree:
             raise IndexError(f"env_idx {env_idx} out of range [0, {len(envs)})")
         return envs[env_idx]
 
-    def n_freq(  # --------------------------------------------------------------------------------
-        self, base_path: str,
-    ) -> int:  # fmt: skip
+    def n_freq(self, base_path: str) -> int:
         """Return number of indexed children at a multiscale path."""
         if not self.path_strs:
             return 0
@@ -219,27 +182,21 @@ class TraceTree:
                 indices.add(int(next_seg))
         return len(indices)
 
-    def validate_env_idx(  # ----------------------------------------------------------------------
-        self, env_idx: int,
-    ) -> int:  # fmt: skip
+    def validate_env_idx(self, env_idx: int) -> int:
         """Validate and return environment index."""
         batch_size = int(self.batch_size or 0)
         if not (0 <= env_idx < batch_size):
             raise IndexError(f"env_idx {env_idx} out of range [0, {batch_size})")
         return env_idx
 
-    def validate_freq_idx(  # ---------------------------------------------------------------------
-        self, base_path: str, freq_idx: int,
-    ) -> int:  # fmt: skip
+    def validate_freq_idx(self, base_path: str, freq_idx: int) -> int:
         """Validate and return frequency index."""
         n_freq = self.n_freq(base_path)
         if not (0 <= freq_idx < n_freq):
             raise IndexError(f"freq_idx {freq_idx} out of range [0, {n_freq})")
         return freq_idx
 
-    def _init_from_first(  # ----------------------------------------------------------------------
-        self, spec: Any, paths: list[tuple[str, ...]], leaves: list[Any],
-    ) -> None:  # fmt: skip
+    def _init_from_first(self, spec: Any, paths: list[tuple[str, ...]], leaves: list[Any]) -> None:
         self.spec = spec
         self.paths = list(paths)
         self.path_strs = ["/".join(path) for path in self.paths]
@@ -266,9 +223,7 @@ class TraceTree:
                 self.meta_first.append(None)
             self.leaf_signatures.append(None)
 
-    def _append_numeric(  # -----------------------------------------------------------------------
-        self, idx: int, arr: np.ndarray, path: tuple[str, ...],
-    ) -> None:  # fmt: skip
+    def _append_numeric(self, idx: int, arr: np.ndarray, path: tuple[str, ...]) -> None:
         if arr.dtype == object:
             raise ValueError(f"Irregular value at {_path_str(path)}")
         is_global = _is_global_path(path, global_paths=self.config.global_paths)
@@ -280,23 +235,16 @@ class TraceTree:
             raise ValueError(f"Numeric buffer missing at {_path_str(path)}")
         buffer.append(arr)
 
-    def _enforce_batch_axis(  # ------------------------------------------------------------------
-        self, arr: np.ndarray, path: tuple[str, ...],
-    ) -> None:  # fmt: skip
+    def _enforce_batch_axis(self, arr: np.ndarray, path: tuple[str, ...]) -> None:
         if arr.ndim == 0:
             return
         if self.batch_size is None:
             self.batch_size = int(arr.shape[0])
             return
         if int(arr.shape[0]) != self.batch_size:
-            raise ValueError(
-                f"Batch size mismatch at {_path_str(path)}: "
-                f"expected {self.batch_size}, got {arr.shape[0]}"
-            )
+            raise ValueError(f"Batch size mismatch at {_path_str(path)}: expected {self.batch_size}, got {arr.shape[0]}")
 
-    def _enforce_signature(  # -------------------------------------------------------------------
-        self, idx: int, arr: np.ndarray, *, is_global: bool, path: tuple[str, ...],
-    ) -> None:  # fmt: skip
+    def _enforce_signature(self, idx: int, arr: np.ndarray, *, is_global: bool, path: tuple[str, ...]) -> None:
         if is_global:
             shape_sig = tuple(arr.shape)
         elif arr.ndim == 0:
@@ -311,9 +259,7 @@ class TraceTree:
         if prev != sig:
             raise ValueError(f"Shape/dtype mismatch at {_path_str(path)}: expected {prev}, got {sig}")
 
-    def _build_dense_leaves(  # ------------------------------------------------------------------
-        self, *, clear: bool,
-    ) -> list[Any]:  # fmt: skip
+    def _build_dense_leaves(self, *, clear: bool) -> list[Any]:
         if self.spec is None:
             return []
         dense_leaves: list[Any] = [None] * len(self.leaf_is_numeric)
@@ -324,21 +270,14 @@ class TraceTree:
             if buffer is None:
                 raise ValueError("Numeric buffer missing")
             if len(buffer) != self.length:
-                raise ValueError(
-                    f"Incomplete data buffer at {self.path_strs[idx]}: "
-                    f"expected {self.length}, got {len(buffer)}"
-                )
+                raise ValueError(f"Incomplete data buffer at {self.path_strs[idx]}: expected {self.length}, got {len(buffer)}")
             dense_leaves[idx] = np.stack(buffer, axis=0)
             if clear:
                 buffer.clear()
         return dense_leaves
 
-    def _flatten_dense_map(  # -------------------------------------------------------------------
-        self, *, sep: str,
-    ) -> dict[str, np.ndarray]:  # fmt: skip
-        dense_leaves = (
-            self._build_dense_leaves(clear=False) if self.dense_leaves is None else self.dense_leaves
-        )
+    def _flatten_dense_map(self, *, sep: str) -> dict[str, np.ndarray]:
+        dense_leaves = self._build_dense_leaves(clear=False) if self.dense_leaves is None else self.dense_leaves
         flattened: dict[str, np.ndarray] = {}
         for idx, is_numeric in enumerate(self.leaf_is_numeric):
             if not is_numeric:
@@ -351,9 +290,7 @@ class TraceTree:
             flattened[key.replace("/", sep)] = leaf
         return flattened
 
-    def _meta_at_path(  # ------------------------------------------------------------------------
-        self, path: str,
-    ) -> Any:  # fmt: skip
+    def _meta_at_path(self, path: str) -> Any:
         if not self.path_to_index:
             return None
         idx = self.path_to_index.get(path)
@@ -363,9 +300,7 @@ class TraceTree:
 
 
 # =================================================================================================
-def _is_global_path(  # --------------------------------------------------------------------------
-    path: tuple[str, ...], *, global_paths: set[tuple[str, ...]],
-) -> bool:  # fmt: skip
+def _is_global_path(path: tuple[str, ...], *, global_paths: set[tuple[str, ...]]) -> bool:
     """Return True if any prefix of path is marked as global."""
     if not global_paths:
         return False
@@ -376,8 +311,6 @@ def _is_global_path(  # --------------------------------------------------------
 
 
 # =================================================================================================
-def _path_str(  # ---------------------------------------------------------------------------------
-    path: tuple[str, ...],
-) -> str:  # fmt: skip
+def _path_str(path: tuple[str, ...]) -> str:
     """Return a readable path string for error messages."""
     return "/".join(path) or "<root>"

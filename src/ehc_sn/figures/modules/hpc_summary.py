@@ -12,7 +12,7 @@ from ehc_sn.figures.plots.ratemap import plot_ratematx_mosaic
 from ehc_sn.figures.plots.trajectory import plot_time_colored_trajectory
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.axes import mosaic_axes, subdivide_axes
-from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.traces.trace_tree import TraceTree
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
@@ -102,7 +102,9 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
     def spatial_matrices(self, ax: Axes) -> None:
         nrows = len(self.freq_idxs)
         shared_n_items = min(max(int(cells.shape[-1]) for cells in self.cells), self.MAX_SPATIAL_CELLS)
-        for freq_idx, freq_ax in enumerate(subdivide_axes(ax, nrows, 1, hspace=0.05, squeeze=True)):
+        axes = subdivide_axes(ax, nrows, 1, hspace=0.05, squeeze=True)
+        freq_axes = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
+        for freq_idx, freq_ax in enumerate(freq_axes):
             cells = self.cells[freq_idx]
             cell_indices = list(range(min(int(cells.shape[-1]), shared_n_items)))
             axes = mosaic_axes(freq_ax, shared_n_items, wspace=0.01, hspace=0.01)

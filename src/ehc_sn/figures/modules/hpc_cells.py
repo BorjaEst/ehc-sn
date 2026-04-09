@@ -13,7 +13,7 @@ from ehc_sn.figures.plots.ratemap import plot_ratematx_mosaic
 from ehc_sn.figures.plots.trajectory import plot_time_colored_trajectory
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.axes import mosaic_axes
-from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.traces.trace_tree import TraceTree
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> mpl_figure.Figure:

@@ -21,7 +21,7 @@ from ehc_sn.figures.plots.mazehard import plot_maze_with_overlay
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.axes import subdivide_axes
 from ehc_sn.figures.utils.grids import first_halt_index, reshape_grid
-from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.traces.trace_tree import TraceTree
 
 
 # =================================================================================================

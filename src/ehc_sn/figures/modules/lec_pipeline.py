@@ -8,7 +8,7 @@ from ehc_sn.figures.figures.base import BaseFigureTemplate
 from ehc_sn.figures.figures.panels import colorbar, panel
 from ehc_sn.figures.plots.rasterplot import plot_activation, plot_observations
 from ehc_sn.figures.registry import FigureContext
-from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.traces.trace_tree import TraceTree
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> mpl_figure.Figure:

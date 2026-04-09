@@ -12,7 +12,7 @@ from matplotlib.figure import Figure
 from ehc_sn.figures.figures.base import BaseFigureTemplate
 from ehc_sn.figures.figures.panels import colorbar, panel
 from ehc_sn.figures.registry import FigureContext
-from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.traces.trace_tree import TraceTree
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
