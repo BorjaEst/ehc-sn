@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 
 from ehc_sn.figures import register, sinks
 from ehc_sn.figures.registry import REGISTRY, FigureContext
-from ehc_sn.rollouts.trace_tree import TraceTree
+from ehc_sn.traces.trace_tree import TraceTree
 
 
 # =================================================================================================
@@ -293,7 +293,7 @@ class FiguresCallback(pl.Callback):
     def _extract_trace(  # ------------------------------------------------------------------------
         self, outputs: Any,
     ) -> Optional[TraceTree]:  # fmt: skip
-        """Extract a :class:`~ehc_sn.rollouts.trace_tree.TraceTree` from ``outputs``.
+        """Extract a :class:`~ehc_sn.traces.trace_tree.TraceTree` from ``outputs``.
 
         Supports common Lightning return conventions:
             - Directly returning a ``TraceTree``
