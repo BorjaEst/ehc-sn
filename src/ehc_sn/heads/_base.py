@@ -40,7 +40,7 @@ class BaseObjective[ConfigT: BaseModel](nn.Module):
 
         for record in chunk.records:
             step_output = self.evaluate_step(record, **options)
-            observed_steps.append(ObservedStep(index=record.index, batch=record.batch, carry=record.carry, outputs=step_output))
+            observed_steps.append(ObservedStep(index=record.index, batch=record.batch, snapshot=record.snapshot, outputs=step_output))
             total_loss = step_output.loss if total_loss is None else total_loss + step_output.loss
 
         if total_loss is None:

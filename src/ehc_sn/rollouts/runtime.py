@@ -6,9 +6,10 @@ runtime protocols used by learners and observers.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass, replace
 from enum import Enum
-from typing import Generic, Mapping, Optional, Protocol, TypeVar
+from types import SimpleNamespace
+from typing import Any, Generic, Mapping, Optional, Protocol, TypeVar
 
 from torch import Tensor
 
@@ -68,18 +69,42 @@ ScoredOutputT = TypeVar("ScoredOutputT", bound=ObjectiveStepOutput)
 
 # =================================================================================================
 @dataclass(frozen=True)
-class StepRecord(Generic[CarryT, ControllerOutputT]):
+class CarrySnapshot:
+    """Frozen post-step carry view stored in rollout records.
+
+    The snapshot schema is intentionally closed: only the carry fields required
+    by current objectives, traces, and diagnostics are preserved. The live
+    carry object remains available separately via ``RolloutChunk.final_carry``
+    and ``RolloutExecution.final_carry`` for learner persistence.
+    """
+
+    halted: Tensor
+    steps: Tensor | None = None
+    data: dict[str, Any] | None = None
+    static_data: dict[str, Any] | None = None
+    model_state: Any = None
+    env_td: Any = None
+
+
+# =================================================================================================
+@dataclass(frozen=True)
+class StepRecord(Generic[ControllerOutputT]):
     """Executed controller step.
 
-    This record is intentionally minimal and stores only the executed batch,
-    the post-step carry, the controller outputs, and the step index.
+    This record stores the executed batch, a frozen post-step carry snapshot,
+    the controller outputs, and the step index.
     """
 
     index: int
     batch: Batch
-    carry: CarryT
+    snapshot: CarrySnapshot
     outputs: ControllerOutputT
     all_halted: bool
+
+    @property
+    def carry(self) -> CarrySnapshot:
+        """Backward-compatible alias for the frozen post-step snapshot."""
+        return self.snapshot
 
 
 # =================================================================================================
@@ -103,7 +128,7 @@ class RolloutExecution(Generic[CarryT]):
 class RolloutChunk(Generic[CarryT, ControllerOutputT]):
     """Record-bearing executed rollout fragment produced by a runner."""
 
-    records: tuple[StepRecord[CarryT, ControllerOutputT], ...]
+    records: tuple[StepRecord[ControllerOutputT], ...]
     final_carry: CarryT
     executed_steps: int
     source_exhausted: bool = False
@@ -115,7 +140,7 @@ class RolloutChunk(Generic[CarryT, ControllerOutputT]):
         return self.executed_steps
 
     @property
-    def last_record(self) -> StepRecord[CarryT, ControllerOutputT]:
+    def last_record(self) -> StepRecord[ControllerOutputT]:
         """Return the final executed step in the chunk."""
         if not self.records:
             raise ValueError("RolloutChunk has no step records.")
@@ -124,13 +149,18 @@ class RolloutChunk(Generic[CarryT, ControllerOutputT]):
 
 # =================================================================================================
 @dataclass(frozen=True)
-class ObservedStep(Generic[CarryT, ScoredOutputT]):
+class ObservedStep(Generic[ScoredOutputT]):
     """Objective-scored step context consumed by metrics and trace observers."""
 
     index: int
     batch: Batch
-    carry: CarryT
+    snapshot: CarrySnapshot
     outputs: ScoredOutputT
+
+    @property
+    def carry(self) -> CarrySnapshot:
+        """Backward-compatible alias for the frozen post-step snapshot."""
+        return self.snapshot
 
 
 # =================================================================================================
@@ -138,13 +168,13 @@ class ObservedStep(Generic[CarryT, ScoredOutputT]):
 class EvaluatedChunk(Generic[CarryT, ScoredOutputT]):
     """Objective-scored rollout fragment returned by a pure objective."""
 
-    steps: tuple[ObservedStep[CarryT, ScoredOutputT], ...]
+    steps: tuple[ObservedStep[ScoredOutputT], ...]
     loss: Tensor
     final_carry: CarryT
     source_exhausted: bool = False
 
     @property
-    def last_step(self) -> ObservedStep[CarryT, ScoredOutputT]:
+    def last_step(self) -> ObservedStep[ScoredOutputT]:
         """Return the final scored step in the chunk."""
         if not self.steps:
             raise ValueError("EvaluatedChunk has no observed steps.")
@@ -179,10 +209,10 @@ class StepController(Protocol[CarryT, ControllerOutputT]):
 
 
 # =================================================================================================
-class RolloutRecordObserver(Protocol[CarryT, ControllerOutputT]):
+class RolloutRecordObserver(Protocol[ControllerOutputT]):
     """Passive per-step consumer used during runner execution."""
 
-    def __call__(self, record: StepRecord[CarryT, ControllerOutputT]) -> None: ...
+    def __call__(self, record: StepRecord[ControllerOutputT]) -> None: ...
 
 
 # =================================================================================================
@@ -198,9 +228,71 @@ class Runner(Protocol[CarryT, ControllerOutputT]):
         max_steps: Optional[int] = None,
         hard_max_steps: Optional[int] = None,
         options: Optional[Mapping[str, object]] = None,
-        record_observer: RolloutRecordObserver[CarryT, ControllerOutputT] | None = None,
+        record_observer: RolloutRecordObserver[ControllerOutputT] | None = None,
         capture_records: bool = True,
     ) -> RolloutChunk[CarryT, ControllerOutputT] | RolloutExecution[CarryT]: ...
+
+
+# =================================================================================================
+def _snapshot_value(value: Any, *, path: str) -> Any:
+    """Return a structural clone suitable for frozen rollout records.
+
+    The snapshot preserves tensor/device semantics while avoiding generic
+    ``copy.deepcopy`` over autograd-bearing state. Mutable values not covered by
+    this helper should expose an explicit ``clone()`` method or be modeled as
+    dataclasses/containers of supported values. Unsupported mutable values fail
+    fast so new carry fields cannot silently bypass snapshot freezing.
+    """
+    if isinstance(value, Tensor):
+        return value.clone()
+    if value is None or isinstance(value, (bool, int, float, str, bytes, Enum)):
+        return value
+
+    clone = getattr(value, "clone", None)
+    if callable(clone):
+        try:
+            return clone()
+        except TypeError as exc:
+            raise TypeError(
+                f"Unsupported snapshot value at {path}: {type(value).__name__} exposes clone() but it "
+                "cannot be called without arguments."
+            ) from exc
+
+    if isinstance(value, SimpleNamespace):
+        return SimpleNamespace(**{name: _snapshot_value(item, path=f"{path}.{name}") for name, item in vars(value).items()})
+    if isinstance(value, dict):
+        return {name: _snapshot_value(item, path=f"{path}[{name!r}]") for name, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_snapshot_value(item, path=f"{path}[{idx}]") for idx, item in enumerate(value))
+    if isinstance(value, list):
+        return [_snapshot_value(item, path=f"{path}[{idx}]") for idx, item in enumerate(value)]
+    if isinstance(value, set):
+        return {_snapshot_value(item, path=f"{path}[{idx}]") for idx, item in enumerate(value)}
+    if is_dataclass(value):
+        return replace(
+            value,
+            **{
+                field.name: _snapshot_value(getattr(value, field.name), path=f"{path}.{field.name}")
+                for field in fields(value)
+            },
+        )
+    raise TypeError(
+        f"Unsupported snapshot value at {path}: {type(value).__name__}. Snapshot-compatible values "
+        "must be tensors, scalars, dataclasses, SimpleNamespace, standard containers, or expose clone()."
+    )
+
+
+# =================================================================================================
+def _snapshot_carry(carry: HaltedCarry) -> CarrySnapshot:
+    """Return the closed post-step carry snapshot stored in rollout records."""
+    return CarrySnapshot(
+        halted=_snapshot_value(carry.halted, path="carry.halted"),
+        steps=_snapshot_value(getattr(carry, "steps", None), path="carry.steps"),
+        data=_snapshot_value(getattr(carry, "data", None), path="carry.data"),
+        static_data=_snapshot_value(getattr(carry, "static_data", None), path="carry.static_data"),
+        model_state=_snapshot_value(getattr(carry, "model_state", None), path="carry.model_state"),
+        env_td=_snapshot_value(getattr(carry, "env_td", None), path="carry.env_td"),
+    )
 
 
 # =================================================================================================
@@ -231,7 +323,7 @@ class SingleStepRunner:
         max_steps: Optional[int] = None,
         hard_max_steps: Optional[int] = None,
         options: Optional[Mapping[str, object]] = None,
-        record_observer: RolloutRecordObserver[CarryT, ControllerOutputT] | None = None,
+        record_observer: RolloutRecordObserver[ControllerOutputT] | None = None,
         capture_records: bool = True,
     ) -> RolloutChunk[CarryT, ControllerOutputT] | RolloutExecution[CarryT]:
         """Return a one-step rollout chunk."""
@@ -244,13 +336,14 @@ class SingleStepRunner:
             raise ValueError("SingleStepRunner source produced no batch.") from exc
 
         carry, outputs = controller.step(carry, batch, **options_dict)
+        snapshot = _snapshot_carry(carry)
         source.update(carry=carry)
         record = StepRecord(
             index=0,
             batch=batch,
-            carry=carry,
+            snapshot=snapshot,
             outputs=outputs,
-            all_halted=bool(carry.halted.all()),
+            all_halted=bool(snapshot.halted.all()),
         )
         if record_observer is not None:
             record_observer(record)
@@ -284,14 +377,14 @@ class RecurrentRunner:
         max_steps: Optional[int] = None,
         hard_max_steps: Optional[int] = None,
         options: Optional[Mapping[str, object]] = None,
-        record_observer: RolloutRecordObserver[CarryT, ControllerOutputT] | None = None,
+        record_observer: RolloutRecordObserver[ControllerOutputT] | None = None,
         capture_records: bool = True,
     ) -> RolloutChunk[CarryT, ControllerOutputT] | RolloutExecution[CarryT]:
         """Return a rollout chunk terminated by halt, source exhaustion, or step limit."""
         _validate_limit("max_steps", max_steps)
         _validate_limit("hard_max_steps", hard_max_steps)
         options_dict = dict(options or {})
-        records: list[StepRecord[CarryT, ControllerOutputT]] = []
+        records: list[StepRecord[ControllerOutputT]] = []
         source_exhausted = False
         stop_reason = StopReason.STEP_LIMIT_REACHED
         step_idx = 0
@@ -311,13 +404,14 @@ class RecurrentRunner:
                 break
 
             carry, outputs = controller.step(carry, batch, **options_dict)
+            snapshot = _snapshot_carry(carry)
             source.update(carry=carry)
             record = StepRecord(
                 index=step_idx,
                 batch=batch,
-                carry=carry,
+                snapshot=snapshot,
                 outputs=outputs,
-                all_halted=bool(carry.halted.all()),
+                all_halted=bool(snapshot.halted.all()),
             )
             if record_observer is not None:
                 record_observer(record)
@@ -349,6 +443,7 @@ class RecurrentRunner:
 
 # =================================================================================================
 __all__ = [
+    "CarrySnapshot",
     "EvaluatedChunk",
     "ExecutionHaltError",
     "HaltedCarry",

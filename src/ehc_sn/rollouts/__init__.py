@@ -1,6 +1,7 @@
 """Executed rollout runtime surfaces."""
 
 from ehc_sn.rollouts.runtime import (
+    CarrySnapshot,
     EvaluatedChunk,
     ExecutionHaltError,
     HaltedCarry,
@@ -20,6 +21,7 @@ from ehc_sn.rollouts.runtime import (
 from ehc_sn.rollouts.sources import PartialResetSource, RepeatSource
 
 __all__ = [
+    "CarrySnapshot",
     "EvaluatedChunk",
     "ExecutionHaltError",
     "HaltedCarry",
