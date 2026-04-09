@@ -154,7 +154,12 @@ No known dependency declaration mismatches are currently recorded.
 
 All code in `training/` is **model-agnostic**: it must not import from
 `models/`, `modules/`, or `lightning/`. `training/` owns generic optimization,
-step-loop, scheduling, buffer, and loss-support primitives only.
+scheduling, buffer, and loss-support primitives only.
+
+All code in `rollouts/` and `traces/` is also **model-agnostic**: it must not
+import from `models/` or `lightning/`. `rollouts/` owns executed-trajectory
+drivers, step records/chunks, and passive sources. `traces/` owns trace
+observers and trace storage.
 
 All executable model-specific training orchestration lives in
 `lightning/`. This includes Lightning trainers, optimizer assembly, scheduler
@@ -181,10 +186,12 @@ protocols such as B2 frozen-weight exposure/probe rules. These packages remain
 model-agnostic and must not import from `models/` or `lightning/`.
 
 All code in `controllers/` and `heads/` is also **model-agnostic**: it must not
-import from `models/`. Controllers own rollout carry/state and step orchestration;
-heads own step-local loss composition and metric aggregation. Heads may depend on
-`controllers/`, `loss/`, `metrics/`, and `training/` primitives, but `training/`
-must remain usable without importing from `controllers/` or `heads/`.
+import from `models/`. Controllers own rollout carry/state and model-aware
+single-step transition logic; `rollouts/` owns temporal orchestration. Heads own
+pure objective scoring, metric aggregation, and diagnostic signal assembly over
+executed rollout data. Heads may depend on `controllers/`, `rollouts/`, `loss/`,
+`metrics/`, and `training/` primitives, but `training/` and `rollouts/` must
+remain usable without importing from `controllers/` or `heads/`.
 
 All code in `policies/` is **model-agnostic** and **controller-agnostic**:
 it must not import from `models/`, `controllers/`, `heads/`, `training/`, or

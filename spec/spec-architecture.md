@@ -46,7 +46,7 @@ Layer 4: `experiments/`, `scripts/benchmarks/`
 
 Layer 3: `models/`, `benchmarks/`, `lightning/`
 
-Layer 2: `modules/`, `controllers/`, `policies/`, `heads/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `figures/`, `callbacks/`, `logging/`, `data/`, `envs/`
+Layer 2: `modules/`, `controllers/`, `policies/`, `heads/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `traces/`, `figures/`, `callbacks/`, `logging/`, `data/`, `envs/`
 
 Layer 1: `activations/`, `utils/`, `types.py`
 
@@ -190,8 +190,10 @@ outside `models/`.
 #### 4.6.1 Controllers
 
 Controllers own recurrent rollout carry, slot refresh/reset behavior, and the
-algorithm-specific step policy for a model backbone. They are model-agnostic:
-no imports from `models/`, no Lightning code, and no dataset ownership.
+model-aware one-step transition semantics for a backbone. They are
+model-agnostic: no imports from `models/`, no Lightning code, and no dataset
+ownership. Temporal orchestration across timesteps or chunks lives in
+`rollouts/`, not in controllers.
 
 `ACT`: `controllers/act.py`.
 Adaptive Computation Time rollout control: halting policy, recurrent carry, TD bootstrap targets.
@@ -207,9 +209,11 @@ component when they exist only to support these controllers.
 
 #### 4.6.2 Heads
 
-Heads adapt a controller to the `StepModule` contract and assemble per-step
-losses, metrics, and diagnostic signals. They may import from `controllers/`,
-`loss/`, `metrics/`, and `training/`, but not from `models/`.
+Heads are pure objectives over executed rollout data. They score
+`StepRecord` or `RolloutChunk` values into losses, metrics, and diagnostic
+signals. They may import from `controllers/`, `rollouts/`, `loss/`,
+`metrics/`, and `training/`, but not from `models/`. Heads do not step
+controllers or own temporal execution.
 
 `ACT`: `heads/act.py`.
 Supervised ACT losses, halted/token aggregation, and ACT-specific diagnostics.
@@ -258,20 +262,20 @@ Examples:
 #### 4.6.4 Training Primitives
 
 Generic algorithmic building blocks — no model-specific code, no model imports,
-and no executable training surfaces. Lightning trainers and other model-aware
-training surfaces live in `lightning/`.
+and no executable training surfaces. Executed rollout drivers and passive
+sources live in `rollouts/`; Lightning trainers and other model-aware training
+surfaces live in `lightning/`.
 
-| Component         | Path(s)            | Paradigm   | Responsibility                                                                                                |
-| ----------------- | ------------------ | ---------- | ------------------------------------------------------------------------------------------------------------- |
-| **Step-Loop**     | `step_loop.py`     | Generic    | Generic step iteration: `StepLoop`, `StepModule` protocol, `StepContext`.                                     |
-| **Partial-Reset** | `partial_reset.py` | Generic    | Stateful batch assembly: replace completed rows with fresh examples from a buffer.                            |
-| **Collector**     | `collector.py`     | Generic    | Per-step state collection for partial-reset pipelines.                                                        |
-| **Buffers**       | `buffers.py`       | Generic    | Bounded FIFO storage for batch examples.                                                                      |
-| **Optimizers**    | `optim.py`         | Generic    | Typed optimizer configs and wrappers (currently `AdamATan2`).                                                 |
-| **Schedulers**    | `schedules.py`     | Generic    | LR schedules: `CosineAnnealingLRWithWarmup`, `SequentialLR`, `SchedulerConfig`.                               |
-| **Supervised**    | `supervised.py`    | Supervised | Curriculum scheduling, label-smoothing helpers, supervised step patterns.                                     |
-| **RL**            | `rl.py`            | RL         | `compute_gae()`, `policy_gradient_loss()`, advantage estimation, rollout buffer utils, discount calculations. |
-| **ELBO**          | `elbo.py`          | VAE / ELBO | KL divergence utilities, ELBO loss aggregation, reconstruction + KL balancing, annealing schedules.           |
+| Component         | Path(s)            | Paradigm   | Responsibility                                                                                                                |
+| ----------------- | ------------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Step-Loop**     | `step_loop.py`     | Generic    | Legacy step-iteration helper: `StepLoop`, `StepModule` protocol, `StepContext`. Canonical learner/runtime orchestration lives in `rollouts/`. |
+| **Partial-Reset** | `partial_reset.py` | Generic    | Stateful batch assembly: replace completed rows with fresh examples from a buffer.                                            |
+| **Buffers**       | `buffers.py`       | Generic    | Bounded FIFO storage for batch examples.                                                                                      |
+| **Optimizers**    | `optim.py`         | Generic    | Typed optimizer configs and wrappers (currently `AdamATan2`).                                                                 |
+| **Schedulers**    | `schedules.py`     | Generic    | LR schedules: `CosineAnnealingLRWithWarmup`, `SequentialLR`, `SchedulerConfig`.                                               |
+| **Supervised**    | `supervised.py`    | Supervised | Curriculum scheduling, label-smoothing helpers, supervised step patterns.                                                     |
+| **RL**            | `rl.py`            | RL         | `compute_gae()`, `policy_gradient_loss()`, advantage estimation, rollout buffer utils, discount calculations.                 |
+| **ELBO**          | `elbo.py`          | VAE / ELBO | KL divergence utilities, ELBO loss aggregation, reconstruction + KL balancing, annealing schedules.                           |
 
 **Named by function.** Root-level files are named by algorithmic function
 (`buffers.py`). Regime files are named by paradigm
@@ -452,14 +456,15 @@ controllers, not by dataloaders.
 
 ### 4.8 Evaluation
 
-Metrics, trace/rollout collection, and publication-ready visualization.
+Metrics, rollout execution/observation, and publication-ready visualization.
 
 | Component    | Path        | Responsibility                                                                                                                                                                                                        |
 | ------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Lightning** | `lightning/` | Model-aware Lightning training surfaces: `LightningModule` wrappers, optimizer assembly, training hooks, and training-time checkpoint-restore glue. Consumes `models/` and lower reusable layers, but does not own canonical benchmark definitions or benchmark bindings. |
 | **Benchmarks** | `benchmarks/` | Canonical benchmark component. Benchmark semantics live in `b0/`-`b3/`; `_capabilities/` defines narrow evaluator contracts; `_bindings/` adapts pure models to those contracts; `_infra/` owns mechanical benchmark support such as seeding, artifact writing, timing, and result types. Benchmark-semantic packages remain model-agnostic; `_bindings/` is internal and model-aware. |
 | **Metrics**  | `metrics/`  | TorchMetrics-based evaluation (accuracy, loss ratios, halting stats). Adapter pattern for model-output → metric update.                                                                                               |
-| **Rollouts** | `rollouts/` | Trace collection (`TraceCollector`, `TraceSpec`) and tree-structured rollout data (`TraceTree`). Feeds both training diagnostics and figures.                                                                         |
+| **Rollouts** | `rollouts/` | Executed rollout runtime: `StepRecord`, `RolloutChunk`, `SingleStepRunner`, `RecurrentRunner`, and passive sources such as `RepeatSource` / `PartialResetSource`. Owns temporal execution, not scoring or trace storage. |
+| **Traces**   | `traces/`   | Passive trace observation and storage: `TraceObserver`, `TraceSpec`, and `TraceTree`. Feeds diagnostics, callbacks, and figures from executed or evaluated rollout data.                                            |
 | **Figures**  | `figures/`  | Publication-ready plotting. Public API centers on `FigureContext`, `FigureSpec`, `REGISTRY`, built-in registration, figure modules, sinks, and reusable plotting/layout helpers. Uses SciencePlots + pub-ready-plots. |
 
 Repository-root `scripts/benchmarks/` contains canonical benchmark entrypoints and thin CLIs that resolve config and checkpoint paths, construct benchmark bindings, and delegate into `ehc_sn.benchmarks`. Repository-root `experiments/` is reserved for exploratory, paper-specific, or non-canonical research runners and must not become a second home for shared benchmark wrapper logic.
@@ -595,8 +600,10 @@ def forward(self, ..., state: ModelState) -> tuple[ModelState, Logits, Features]
     ...
 ```
 
-The training runtime's `training_step` may iterate over `StepLoop`, yielding
-`(t, step_output)` pairs per timestep.
+Controllers lift this model `forward()` into step-wise execution via
+`controller.step(...)`. Learners drive temporal execution with
+`SingleStepRunner` or `RecurrentRunner`, producing `RolloutChunk` values of
+`StepRecord`s that pure objectives then score into `EvaluatedChunk`s.
 
 ### 5.3 Module Reuse Protocol
 
