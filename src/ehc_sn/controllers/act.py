@@ -80,6 +80,7 @@ class ACTOutput(DetachMixin):
     logits: tuple[Tensor, ...]  # (lm_logits, q_logits, ...); prefer named properties in heads
     theta_cls: Tensor  # (B, D) — theta CLS features
     action: Tensor  # (B,) selected action indices for this step
+    done_action: int  # Action index that terminates deliberation for this controller
     target_q: Tensor | None = None  # TD(0) bootstrap Q-target, shape: (B,). None outside training.
 
     @property
@@ -160,7 +161,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         action, done = self._select_action_and_done(logits, steps, allow_halt, explore)
 
         state = ACTRolloutState(model_state=model_state, steps=steps, halted=done, data=data)
-        output = ACTOutput(logits=logits, theta_cls=theta_cls, action=action)
+        output = ACTOutput(logits=logits, theta_cls=theta_cls, action=action, done_action=self.config.done_action)
 
         # TD(0) bootstrap target for the Q-head.
         if td_target and self._config.max_steps > 1:

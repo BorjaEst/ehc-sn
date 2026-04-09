@@ -267,7 +267,23 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         payload = {key: env_td[key] for key in keys if key in env_td.keys()}
         if "step_count" in payload:
             payload["episode_start"] = payload["step_count"].squeeze(-1).to(torch.int32) == 0
+        payload.update(self._trace_metadata())
         return payload
+
+    def _trace_metadata(  # ----------------------------------------------------------------------
+        self,
+    ) -> dict[str, Tensor]:  # fmt: skip
+        """Return detached static TEM metadata needed by trace observers."""
+        lec = getattr(self.backbone, "lec", None)
+        filter_module = None if lec is None else getattr(lec, "filter", None)
+        alpha = None if filter_module is None else getattr(filter_module, "alpha", None)
+        w_f = None if lec is None else getattr(lec, "w_f", None)
+        if alpha is None or w_f is None:
+            return {}
+        return {
+            "lec_alpha_sigmoid": torch.stack([torch.sigmoid(alpha_item).detach() for alpha_item in alpha]),
+            "lec_w_f_sigmoid": torch.stack([torch.sigmoid(weight).detach() for weight in w_f]),
+        }
 
     def _refresh_halted_slots(  # ---------------------------------------------------------------
         self, batch: Batch, state: TEMRolloutState[ModelState],
