@@ -91,5 +91,7 @@ diagnostic_level     = "standard"
     save_on_train_epoch_end = false
     save_last               = true
 
+# -- Figures & diagnostics ----------------------------------------------------
 [figures]
-    enabled = false
+    enabled = true
+    figures = ["lec_summary", "lec_pipeline"]
