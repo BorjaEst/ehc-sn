@@ -41,10 +41,7 @@ class EnvConfig(BaseModel, extra="forbid"):
     halt_action: int = Field(
         default=0,
         ge=0,
-        description=(
-            "Action index the environment interprets as 'halt' (terminates the episode). "
-            "Must match RLLossConfig.halt_action."
-        ),
+        description=("Action index the environment interprets as 'halt' (terminates the episode). " "Must match RLLossConfig.halt_action."),
     )
 
 
@@ -67,6 +64,7 @@ class MazeHardEnv(EnvBase):
     """
 
     batch_locked = True
+    SPATIAL_GEOMETRY = "maze"
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: EnvConfig, batch_size: int, device: Device | str | None = None,
@@ -79,6 +77,11 @@ class MazeHardEnv(EnvBase):
     def config(self) -> EnvConfig:
         """Return the environment configuration."""
         return self._config
+
+    @property
+    def spatial_geometry(self) -> str:
+        """Return the declared spatial geometry for this environment."""
+        return self.SPATIAL_GEOMETRY
 
     def _make_specs(  # ---------------------------------------------------------------------------
         self,

@@ -2,17 +2,7 @@
 
 from __future__ import annotations
 
-from ehc_sn.figures.modules import (
-    dummy,
-    evolution,
-    hpc_cells,
-    hpc_summary,
-    lec_pipeline,
-    lec_summary,
-    mec_cells,
-    mec_summary,
-    overlay,
-)
+from ehc_sn.figures.modules import dummy, evolution, hpc_cells, hpc_summary, lec_pipeline, lec_summary, mec_cells, mec_summary, overlay
 from ehc_sn.figures.registry import REGISTRY, FigureSpec
 
 
@@ -143,7 +133,7 @@ def register_builtin_figures() -> None:
         REGISTRY.register(
             FigureSpec(
                 name="mec_cells",
-                description="Single-frequency MEC grid-cell spatial maps and autocorrelograms",
+                description="Single-frequency MEC grid-cell spatial maps and spatial autocorr",
                 plot=mec_cells.plot,
                 default_filename="mec_cells",
                 kind="diagnostic",
@@ -160,7 +150,7 @@ def register_builtin_figures() -> None:
         REGISTRY.register(
             FigureSpec(
                 name="hpc_cells",
-                description="Single-frequency HPC place-cell spatial maps and autocorrelograms",
+                description="Single-frequency HPC place-cell spatial maps and spatial autocorr",
                 plot=hpc_cells.plot,
                 default_filename="hpc_cells",
                 kind="diagnostic",

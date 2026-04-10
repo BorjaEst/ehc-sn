@@ -8,7 +8,8 @@ from matplotlib.figure import Figure
 
 from ehc_sn.figures.figures.base import BaseFigureTemplate
 from ehc_sn.figures.figures.panels import colorbar, panel
-from ehc_sn.figures.plots.ratemap import plot_ratematx_mosaic
+from ehc_sn.figures.modules._spatial import spatial_rate_smooth_sigma
+from ehc_sn.figures.plots.ratemap import plot_rate_map_mosaic, prepare_rate_maps
 from ehc_sn.figures.plots.trajectory import plot_time_colored_trajectory
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.axes import mosaic_axes, subdivide_axes
@@ -55,6 +56,15 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         self.world = self.trace.get_world(self.env_idx)
         self.location_ids = self.trace.get("world_step/location_ids")[:, self.env_idx]
         self.cells = [self.trace.get(f"diagnostic/hpc/location_mean/{f}")[:, self.env_idx, :] for f in range(self.n_freq)]  # fmt: skip
+        self._prepared_rate_maps = [
+            prepare_rate_maps(
+                self.world,
+                cells,
+                self.location_ids,
+                smooth_sigma=spatial_rate_smooth_sigma(self.world),
+            )
+            for cells in self.cells
+        ]
         self.memory_g_cued = self.trace.get("diagnostic/hpc/memory/g_cued")[-1, self.env_idx]
         self.memory_x_cued = self.trace.get("diagnostic/hpc/memory/x_cued")[-1, self.env_idx]
 
@@ -105,9 +115,8 @@ class PlaceCellsAutocorr(BaseFigureTemplate):
         axes = subdivide_axes(ax, nrows, 1, hspace=0.05, squeeze=True)
         freq_axes = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
         for freq_idx, freq_ax in enumerate(freq_axes):
-            cells = self.cells[freq_idx]
-            cell_indices = list(range(min(int(cells.shape[-1]), shared_n_items)))
             axes = mosaic_axes(freq_ax, shared_n_items, wspace=0.01, hspace=0.01)
             axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
-            plot_ratematx_mosaic(axes_list, self.world, cells, self.location_ids, cell_indices=cell_indices)
+            prepared_rate_maps = self._prepared_rate_maps[freq_idx][:shared_n_items]
+            plot_rate_map_mosaic(axes_list, prepared_rate_maps)
             freq_ax.set_title(f"Spatial rate maps - Freq {freq_idx}", fontsize=7)

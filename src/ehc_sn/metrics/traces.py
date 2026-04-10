@@ -245,18 +245,6 @@ def _get_world_location_ids_tem(ctx: _TEMTraceContext) -> TraceValue:
     return ctx.carry.data["location_id"].squeeze(-1).detach()
 
 
-def _get_environments_tem(ctx: _TEMTraceContext) -> TraceValue:
-    """Replayable world metadata derived from the static maze batch."""
-    topology = ctx.carry.static_data["topology"]
-    mask_valid = ctx.carry.static_data.get("mask_valid")
-    return ReplayableEnvironments(
-        [
-            _build_environment_metadata(topology[idx], None if mask_valid is None else mask_valid[idx])
-            for idx in range(int(topology.shape[0]))
-        ]
-    )
-
-
 def _get_diagnostic_lec_cells_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable LEC activations by frequency for diagnostic figures."""
     return [cell.detach() for cell in ctx.carry.model_state.lec.cells]
@@ -334,10 +322,6 @@ TRACE_WORLD_LOCATION_IDS_TEM = TraceField(
     name="world_step/location_ids",
     get=_get_world_location_ids_tem,
 )
-TRACE_ENVIRONMENTS_TEM = TraceField(
-    name="environments",
-    get=_get_environments_tem,
-)
 TRACE_DIAGNOSTIC_LEC_CELLS_TEM = TraceField(
     name="diagnostic/lec/cells",
     get=_get_diagnostic_lec_cells_tem,
@@ -388,7 +372,6 @@ TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_STEPS,
     TRACE_WORLD_OBSERVATION_TEM,
     TRACE_WORLD_LOCATION_IDS_TEM,
-    TRACE_ENVIRONMENTS_TEM,
     TRACE_DIAGNOSTIC_LEC_CELLS_TEM,
     TRACE_DIAGNOSTIC_LEC_FILTERED_TEM,
     TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
@@ -397,24 +380,6 @@ TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_LEC_FILTER_ALPHA_SIGMOID_TEM,
     TRACE_LEC_W_F_SIGMOID_TEM,
 )
-
-
-# =================================================================================================
-def _build_environment_metadata(  # ---------------------------------------------------------------
-    topology: Tensor, mask_valid: Tensor | None,
-) -> dict[str, Any]:  # fmt: skip
-    """Build a lightweight world-like mapping for replayable spatial figures."""
-    topology_np = topology.detach().cpu().to(torch.bool).numpy()
-    mask_valid_np = None if mask_valid is None else mask_valid.detach().cpu().to(torch.bool).numpy()
-    height, width = topology_np.shape[-2], topology_np.shape[-1]
-    locations: list[dict[str, float | bool]] = []
-    for row in range(height):
-        for col in range(width):
-            valid = bool(topology_np[row, col])
-            if mask_valid_np is not None:
-                valid = valid and bool(mask_valid_np[row, col])
-            locations.append({"o": float(col), "y": float(row), "valid": valid})
-    return {"locations": locations, "n_locations": len(locations)}
 
 
 # =================================================================================================

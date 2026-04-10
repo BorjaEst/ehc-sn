@@ -23,7 +23,7 @@ from ehc_sn.lightning._rollout import (
 from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, resolve_tem_runtime
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_STEP_ROUTES
-from ehc_sn.metrics.traces import build_trace_spec
+from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
 from ehc_sn.models.tem.tem_v2 import Batch, ModelSettings_V2, TEMModelV2
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.training.buffers import FifoBuffer
@@ -186,6 +186,10 @@ class TrainingModel(L.LightningModule):
             raise RuntimeError("TEM evaluation runtime is not initialized.")
         return self.eval_objective
 
+    def _build_trace_meta(self, controller: TEMController) -> dict[str, object]:
+        """Return out-of-band trace metadata for figure-facing evaluation traces."""
+        return {"environments": ReplayableEnvironments(controller.environment.build_world_descriptors())}
+
     def _ensure_train_batch_assembler(  # ---------------------------------------------------------
         self, batch: Batch,
     ) -> PartialResetBatchAssembler:  # fmt: skip
@@ -318,6 +322,7 @@ class TrainingModel(L.LightningModule):
         eval_objective = self._require_eval_objective()
         step_options = {"allow_halt": False, "explore": False}
         carry0 = eval_controller.initial_state(batch)
+        trace_meta = self._build_trace_meta(eval_controller)
 
         # Initialize carry/state on the first batch
         if self._eval_trace_keys is None:
@@ -334,7 +339,7 @@ class TrainingModel(L.LightningModule):
             hard_max_steps=self.config.runtime.validation.hard_max_steps,
             runner_options=step_options,
         )
-        trace = observe_rollout_chunk(evaluation.chunk, trace_specs)
+        trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES)
         return {"trace": trace}
 

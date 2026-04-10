@@ -32,7 +32,7 @@ TensorDict contract:
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any, Final
 
 import torch
 import torch.nn.functional as F
@@ -88,6 +88,7 @@ class DungeonWalk(EnvBase):
     """
 
     batch_locked = True
+    SPATIAL_GEOMETRY: Final[str] = "maze"
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: EnvConfig, batch_size: int, device: Device | str | None = None,
@@ -110,6 +111,31 @@ class DungeonWalk(EnvBase):
     def config(self) -> EnvConfig:
         """Return the environment configuration."""
         return self._config
+
+    @property
+    def spatial_geometry(self) -> str:
+        """Return the declared spatial geometry for this environment."""
+        return self.SPATIAL_GEOMETRY
+
+    def build_world_descriptors(self) -> list[dict[str, Any]]:
+        """Return frozen per-slot world descriptors for trace metadata.
+
+        The descriptor is batch-aligned and self-contained so figure code can
+        consume it without touching the live environment object.
+        """
+        self._require_static_maps()
+        topology = self._topology
+        mask_valid = self._mask_valid
+        if topology is None:
+            raise RuntimeError("DungeonWalk static maze tensors are not initialized. Call reset() first.")
+        return [
+            _build_world_descriptor(
+                topology[idx],
+                None if mask_valid is None else mask_valid[idx],
+                spatial_geometry=self.spatial_geometry,
+            )
+            for idx in range(int(topology.shape[0]))
+        ]
 
     def _make_specs(self) -> None:
         """Build TorchRL specs for current-state walk payloads."""
@@ -428,6 +454,30 @@ class DungeonWalk(EnvBase):
         if seed is not None:
             self._generator_seed = seed
             self._generator.manual_seed(seed)
+
+
+def _build_world_descriptor(
+    topology: Tensor,
+    mask_valid: Tensor | None,
+    *,
+    spatial_geometry: str,
+) -> dict[str, Any]:
+    """Return one replayable world descriptor from cached maze tensors."""
+    topology_np = topology.detach().cpu().to(torch.bool).numpy()
+    mask_valid_np = None if mask_valid is None else mask_valid.detach().cpu().to(torch.bool).numpy()
+    height, width = topology_np.shape[-2], topology_np.shape[-1]
+    locations: list[dict[str, float | bool]] = []
+    for row in range(height):
+        for col in range(width):
+            valid = bool(topology_np[row, col])
+            if mask_valid_np is not None:
+                valid = valid and bool(mask_valid_np[row, col])
+            locations.append({"o": float(col), "y": float(row), "valid": valid})
+    return {
+        "locations": locations,
+        "n_locations": len(locations),
+        "spatial_geometry": spatial_geometry,
+    }
 
 
 # =================================================================================================

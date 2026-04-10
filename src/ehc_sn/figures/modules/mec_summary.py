@@ -1,4 +1,4 @@
-"""Grid-cell diagnostic figure with spatial maps and autocorrelograms."""
+"""Grid-cell diagnostic figure with geometry-aware spatial diagnostics."""
 
 from __future__ import annotations
 
@@ -8,7 +8,9 @@ from matplotlib.figure import Figure
 
 from ehc_sn.figures.figures.base import BaseFigureTemplate
 from ehc_sn.figures.figures.panels import panel
-from ehc_sn.figures.plots.autocorr import plot_autocorr_mosaic, plot_radial_autocorr_cells
+from ehc_sn.figures.modules._spatial import spatial_rate_smooth_sigma
+from ehc_sn.figures.plots.autocorr import plot_radial_autocorrelogram_profile, plot_spatial_autocorrelogram_mosaic
+from ehc_sn.figures.plots.ratemap import prepare_rate_maps
 from ehc_sn.figures.plots.trajectory import plot_time_colored_trajectory
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.axes import mosaic_axes, subdivide_axes
@@ -55,6 +57,15 @@ class GridCellsAutocorr(BaseFigureTemplate):
         self.world = self.trace.get_world(self.env_idx)
         self.location_ids = self.trace.get("world_step/location_ids")[:, self.env_idx]
         self.cells = [self.trace.get(f"diagnostic/mec/location_mean/{f}")[:, self.env_idx, :] for f in range(self.n_freq)]  # fmt: skip
+        self._prepared_rate_maps = [
+            prepare_rate_maps(
+                self.world,
+                cells,
+                self.location_ids,
+                smooth_sigma=spatial_rate_smooth_sigma(self.world),
+            )
+            for cells in self.cells
+        ]
 
     @panel()
     def map_labels(self, ax: Axes) -> None:
@@ -68,14 +79,14 @@ class GridCellsAutocorr(BaseFigureTemplate):
 
     @panel()
     def matrices_labels(self, ax: Axes) -> None:
-        """Plot radial autocorrelation matrix labels for all cells.
+        """Plot radial spatial-diagnostic summaries for all cells.
 
         Args:
             ax: Axes to draw into.
         """
-        for cells in self.cells:
-            plot_radial_autocorr_cells(ax, self.world, cells, self.location_ids)
-        ax.set_title("Radial autocorr (±1 std)")
+        for prepared_rate_maps in self._prepared_rate_maps:
+            plot_radial_autocorrelogram_profile(ax, prepared_rate_maps)
+        ax.set_title("Radial autocorrelogram (±1 std)")
         ax.yaxis.tick_right()
 
     @panel()
@@ -85,11 +96,10 @@ class GridCellsAutocorr(BaseFigureTemplate):
         axes = subdivide_axes(ax, nrows, 1, hspace=0.05, squeeze=True)
         freq_axes = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
         for freq_idx, freq_ax in enumerate(freq_axes):
-            cells = self.cells[freq_idx]
-            cell_indices = list(range(min(int(cells.shape[-1]), shared_n_items)))
+            prepared_rate_maps = self._prepared_rate_maps[freq_idx][:shared_n_items]
             axes = mosaic_axes(freq_ax, shared_n_items, wspace=0.01, hspace=0.01)
             axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else [axes]
-            plot_autocorr_mosaic(axes_list, self.world, cells, self.location_ids, cell_indices=cell_indices)
+            plot_spatial_autocorrelogram_mosaic(axes_list, prepared_rate_maps, vmin=-1.0, vmax=1.0)
             freq_ax.set_title(f"Spatial autocorr - Freq {freq_idx}", fontsize=7)
 
     @panel()

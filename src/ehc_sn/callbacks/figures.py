@@ -283,12 +283,7 @@ class FiguresCallback(pl.Callback):
         self, trace: TraceTree, path: str,
     ) -> bool:  # fmt: skip
         """Return whether a metadata leaf exists at ``path``."""
-        if not trace.path_to_index:
-            return False
-        idx = trace.path_to_index.get(path)
-        if idx is None:
-            return False
-        return (not trace.leaf_is_numeric[idx]) and (trace.get_meta_path(path) is not None)
+        return trace.has_meta_path(path)
 
     def _extract_trace(  # ------------------------------------------------------------------------
         self, outputs: Any,

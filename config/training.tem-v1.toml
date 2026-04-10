@@ -94,4 +94,4 @@ diagnostic_level     = "standard"
 # -- Figures & diagnostics ----------------------------------------------------
 [figures]
     enabled = true
-    figures = ["lec_summary", "lec_pipeline"]
+    figures = ["lec_summary", "lec_pipeline", "mec_summary"]

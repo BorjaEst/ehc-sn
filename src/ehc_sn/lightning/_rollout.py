@@ -140,11 +140,17 @@ def update_metric_collection_from_evaluated_chunk(
         update_metrics_from_step(collection, step.outputs.metrics, routes)
 
 
-# =================================================================================================
-def observe_rollout_chunk(chunk: RolloutChunk, trace_spec: TraceSpec[Any]) -> TraceTree:
-    """Build a trace tree from the executed steps of a rollout chunk."""
+def observe_rollout_chunk(
+    chunk: RolloutChunk,
+    trace_spec: TraceSpec[Any],
+    *,
+    trace_meta: Mapping[str, Any] | None = None,
+) -> TraceTree:
+    """Build a trace tree from executed steps plus optional out-of-band metadata."""
     observer = TraceObserver(TraceTree(), trace_spec)
     observer.observe_records(chunk.records)
+    if trace_meta is not None:
+        observer.tree.attach_meta(trace_meta)
     return observer.tree
 
 

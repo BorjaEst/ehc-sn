@@ -1,102 +1,66 @@
-"""Spatial autocorrelogram utilities for grid-cell diagnostics."""
+"""Spatial autocorrelogram utilities for diagnostic figures."""
 
 from __future__ import annotations
 
-from typing import Optional, Sequence
+from typing import Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
-from ehc_sn.figures.utils.axes import _environment_n_locations
-from ehc_sn.figures.utils.rasterize import rasterize_locations
-from ehc_sn.rollouts.analysis import aggregate_rate_map
+from ehc_sn.figures.plots.ratemap import PreparedRateMap
+
+DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP = 4
 
 
 def plot_spatial_autocorrelogram(
     ax: Axes,
-    world: object,
-    cells_trace: NDArray,
-    location_ids: Sequence[int] | NDArray,
-    cell_idx: int,
+    prepared_rate_map: PreparedRateMap,
     *,
     vmin: float | None = None,
     vmax: float | None = None,
-    grid_res: float | None = None,
     cmap: str = "coolwarm",
+    min_overlap: int = DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP,
 ) -> Axes:
-    """Plot a 2D spatial autocorrelogram for a selected cell.
-
-    Args:
-        ax: Axes to draw into.
-        world: Environment world with location coordinates.
-        cells_trace: Cell activations (T, B, C) or (T, C).
-        location_ids: Ordered list of visited location indices.
-        cell_idx: Cell index to render.
-        vmin: Optional min value for color scaling.
-        vmax: Optional max value for color scaling.
-        grid_res: Optional grid resolution for rasterization.
-        cmap: Colormap name.
-
-    Returns:
-        The axes with the autocorrelogram rendered.
-    """
-    values = _rate_map_cell_values(cells_trace, location_ids, world, cell_idx)
-    if values.size == 0:
-        ax.text(0.5, 0.5, "No data", ha="center", va="center")
-        ax.axis("off")
-        return ax
-
-    grid, mask, _ = rasterize_locations(world, values, grid_res=grid_res)
-    autocorr = spatial_autocorr_2d(grid, mask)
-    if autocorr.size == 0 or not np.isfinite(autocorr).any():
+    """Plot a 2D spatial autocorrelogram from a prepared rate map."""
+    autocorrelogram = compute_spatial_autocorrelogram(
+        prepared_rate_map.rate_map,
+        prepared_rate_map.valid_mask,
+        min_overlap=min_overlap,
+    )
+    if autocorrelogram.size == 0 or not np.isfinite(autocorrelogram).any():
         ax.text(0.5, 0.5, "No autocorr", ha="center", va="center")
         ax.axis("off")
         return ax
 
-    finite = np.isfinite(autocorr)
     if vmin is None:
-        vmin = float(np.nanmin(autocorr[finite])) if finite.any() else 0.0
+        vmin = -1.0
     if vmax is None:
-        vmax = float(np.nanmax(autocorr[finite])) if finite.any() else 1.0
+        vmax = 1.0
     if vmax <= vmin:
         vmax = vmin + 1e-6
 
-    ax.imshow(autocorr, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax)
+    ax.imshow(autocorrelogram, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_aspect("equal")
     ax.axis("off")
     return ax
 
 
-def plot_radial_autocorr_cells(
+def plot_radial_autocorrelogram_profile(
     ax: Axes,
-    world: object,
-    cells_trace: NDArray,
-    location_ids: Sequence[int] | NDArray,
+    prepared_rate_maps: Sequence[PreparedRateMap],
     *,
-    cell_indices: Optional[Sequence[int]] = None,
-    grid_res: float | None = None,
     n_bins: int = 32,
-    color: Optional[str] = None,
+    color: str | None = None,
+    min_overlap: int = DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP,
 ) -> Axes:
-    """Plot mean radial autocorrelation profile with std across cells.
-
-    Args:
-        ax: Axes to draw into.
-        world: Environment world with location coordinates.
-        cells_trace: Cell activations (T, B, C) or (T, C).
-        location_ids: Ordered list of visited location indices.
-        cell_indices: Optional cell indices to include. If None, use all cells.
-        grid_res: Optional grid resolution for rasterization.
-        n_bins: Number of radial bins.
-        cmap: Colormap name for curve colors.
-
-    Returns:
-        The axes with the mean profile rendered.
-    """
-    options = {"cell_indices": cell_indices, "grid_res": grid_res, "n_bins": n_bins}
-    radii, mean, std, n_profiles = _radial_autocorr_summary(world, cells_trace, location_ids, **options)
+    """Plot the mean radial autocorrelogram profile with std across inputs."""
+    radii, mean, std, n_profiles = _summarize_radial_autocorrelogram_profiles(
+        prepared_rate_maps,
+        n_bins=n_bins,
+        min_overlap=min_overlap,
+    )
     if radii.size == 0 or not np.isfinite(mean).any():
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
         ax.axis("off")
@@ -107,154 +71,133 @@ def plot_radial_autocorr_cells(
     ax.fill_between(radii, mean - std, mean + std, color=color, alpha=0.25)
     ax.set_xlabel("Radius (pixels)")
     ax.set_ylabel("Autocorrelation")
-    ax.set_title("Radial autocorrelation (±1 std)")
+    ax.set_title("Radial autocorrelogram (±1 std)")
     ax.legend(frameon=False, fontsize=6, ncol=2, loc="upper left", handlelength=1.0)
     return ax
 
 
-def _radial_autocorr_summary(
-    world: object,
-    cells_trace: NDArray,
-    location_ids: Sequence[int] | NDArray,
+def _summarize_radial_autocorrelogram_profiles(
+    prepared_rate_maps: Sequence[PreparedRateMap],
     *,
-    cell_indices: Optional[Sequence[int]] = None,
-    grid_res: float | None = None,
+    n_bins: int = 32,
+    min_overlap: int = DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP,
+) -> tuple[NDArray, NDArray, NDArray, int]:
+    autocorrelograms = [
+        compute_spatial_autocorrelogram(prepared_rate_map.rate_map, prepared_rate_map.valid_mask, min_overlap=min_overlap)
+        for prepared_rate_map in prepared_rate_maps
+    ]
+    return _summarize_radial_profiles(autocorrelograms, n_bins=n_bins)
+
+
+def _summarize_radial_profiles(
+    autocorrelograms: Sequence[NDArray],
+    *,
     n_bins: int = 32,
 ) -> tuple[NDArray, NDArray, NDArray, int]:
-    location_ids = np.asarray(location_ids, dtype=int)
-    n_locations = _environment_n_locations(world)
-    rate_map, _ = aggregate_rate_map(cells_trace, location_ids, n_locations)
-    if rate_map.size == 0:
-        empty = np.zeros((0,), dtype=float)
-        return empty, empty, empty, 0
-
-    if cell_indices is None:
-        indices = range(rate_map.shape[0])
-    else:
-        indices = [int(idx) for idx in cell_indices]
-
     profiles: list[NDArray] = []
-    ref_radii: NDArray | None = None
-    for idx in indices:
-        if idx < 0 or idx >= rate_map.shape[0]:
+    reference_radii: NDArray | None = None
+    for autocorrelogram in autocorrelograms:
+        if autocorrelogram.size == 0 or not np.isfinite(autocorrelogram).any():
             continue
-        values = rate_map[idx]
-        if values.size == 0:
-            continue
-        grid, mask, _ = rasterize_locations(world, values, grid_res=grid_res)
-        autocorr = spatial_autocorr_2d(grid, mask)
-        if autocorr.size == 0 or not np.isfinite(autocorr).any():
-            continue
-        radii, profile = radial_profile(autocorr, n_bins=n_bins)
+        radii, profile = radial_profile(autocorrelogram, n_bins=n_bins)
         if radii.size == 0 or profile.size == 0:
             continue
-        if ref_radii is None:
-            ref_radii = radii
-        elif not np.allclose(radii, ref_radii, equal_nan=True):
+        if reference_radii is None:
+            reference_radii = radii
+        elif not np.allclose(radii, reference_radii, equal_nan=True):
             finite = np.isfinite(profile)
             if finite.sum() < 2:
                 continue
-            profile = np.interp(ref_radii, radii[finite], profile[finite], left=np.nan, right=np.nan)
+            profile = np.interp(reference_radii, radii[finite], profile[finite], left=np.nan, right=np.nan)
         profiles.append(profile)
 
-    if not profiles or ref_radii is None:
+    if not profiles or reference_radii is None:
         empty = np.zeros((0,), dtype=float)
         return empty, empty, empty, 0
 
     stack = np.vstack(profiles)
-    mean = np.nanmean(stack, axis=0)
-    std = np.nanstd(stack, axis=0)
-    return ref_radii, mean, std, stack.shape[0]
+    mean = np.full((stack.shape[1],), np.nan, dtype=float)
+    std = np.full((stack.shape[1],), np.nan, dtype=float)
+    for idx in range(stack.shape[1]):
+        column = stack[:, idx]
+        finite = np.isfinite(column)
+        if not finite.any():
+            continue
+        mean[idx] = float(np.mean(column[finite]))
+        std[idx] = float(np.std(column[finite]))
+    return reference_radii, mean, std, stack.shape[0]
 
 
-def build_shared_autocorr_range(
-    world: object,
-    cells_trace: NDArray,
-    location_ids: Sequence[int] | NDArray,
-    cell_indices: Sequence[int],
+def compute_spatial_autocorrelogram(
+    rate_map: NDArray,
+    valid_mask: NDArray,
     *,
-    grid_res: float | None = None,
-) -> tuple[float, float]:
-    """Compute shared color scaling for autocorrelograms.
+    min_overlap: int = DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP,
+) -> NDArray:
+    """Compute a linear Pearson 2D spatial autocorrelogram.
 
     Args:
-        world: Environment world with location coordinates.
-        cells_trace: Cell activations (T, B, C) or (T, C).
-        location_ids: Ordered list of visited location indices.
-        cell_indices: Cell indices to include.
-        grid_res: Optional grid resolution for rasterization.
+        rate_map: Rasterized rate-map values with NaNs for missing pixels.
+        valid_mask: Boolean mask indicating valid pixels.
 
     Returns:
-        Tuple of (vmin, vmax) over the selected autocorrelograms.
+        2D autocorrelogram with shape ``(2H - 1, 2W - 1)`` and center at the
+        array midpoint.
     """
-    values: list[NDArray] = []
-    for idx in cell_indices:
-        rate_values = _rate_map_cell_values(cells_trace, location_ids, world, idx)
-        if rate_values.size == 0:
-            continue
-        grid, mask, _ = rasterize_locations(world, rate_values, grid_res=grid_res)
-        autocorr = spatial_autocorr_2d(grid, mask)
-        if autocorr.size == 0:
-            continue
-        values.append(autocorr)
-
-    if not values:
-        return 0.0, 1.0
-    flat = np.concatenate([v.ravel() for v in values])
-    finite = np.isfinite(flat)
-    if not finite.any():
-        return 0.0, 1.0
-    vmin = float(np.nanmin(flat[finite]))
-    vmax = float(np.nanmax(flat[finite]))
-    if vmax <= vmin:
-        vmax = vmin + 1e-6
-    return vmin, vmax
-
-
-def spatial_autocorr_2d(grid: NDArray, mask: NDArray) -> NDArray:
-    """Compute a 2D spatial autocorrelogram via FFT.
-
-    Args:
-        grid: Rasterized values with NaNs for missing pixels.
-        mask: Boolean mask indicating valid pixels.
-
-    Returns:
-        2D autocorrelogram with center at the grid midpoint.
-    """
-    if grid.size == 0:
+    if rate_map.size == 0:
         return np.zeros((0, 0), dtype=float)
+    if min_overlap < 1:
+        raise ValueError(f"min_overlap must be >= 1, got {min_overlap}.")
 
-    values = np.where(mask, grid, 0.0)
-    mask_f = mask.astype(float)
+    values = np.asarray(rate_map, dtype=float)
+    valid_mask = np.asarray(valid_mask, dtype=bool) & np.isfinite(values)
+    if values.shape != valid_mask.shape:
+        raise ValueError("rate_map and valid_mask must have the same shape")
 
-    fft_vals = np.fft.fft2(values)
-    fft_mask = np.fft.fft2(mask_f)
-    corr = np.fft.ifft2(fft_vals * np.conj(fft_vals)).real
-    norm = np.fft.ifft2(fft_mask * np.conj(fft_mask)).real
+    height, width = values.shape
+    autocorrelogram = np.full((2 * height - 1, 2 * width - 1), np.nan, dtype=float)
 
-    with np.errstate(invalid="ignore", divide="ignore"):
-        corr = np.where(norm > 0, corr / norm, np.nan)
+    for lag_y in range(-(height - 1), height):
+        src_y, dst_y = _overlap_slices(height, lag_y)
+        for lag_x in range(-(width - 1), width):
+            src_x, dst_x = _overlap_slices(width, lag_x)
 
-    return np.fft.fftshift(corr)
+            source = values[src_y, src_x]
+            target = values[dst_y, dst_x]
+            pair_mask = valid_mask[src_y, src_x] & valid_mask[dst_y, dst_x]
+            if np.count_nonzero(pair_mask) < min_overlap:
+                continue
+
+            source_values = source[pair_mask]
+            target_values = target[pair_mask]
+            source_centered = source_values - float(np.mean(source_values))
+            target_centered = target_values - float(np.mean(target_values))
+            denom = float(np.linalg.norm(source_centered) * np.linalg.norm(target_centered))
+            if denom <= 0.0:
+                continue
+
+            autocorrelogram[lag_y + height - 1, lag_x + width - 1] = float(np.dot(source_centered, target_centered) / denom)
+
+    return autocorrelogram
 
 
-def radial_profile(autocorr: NDArray, *, n_bins: int = 32) -> tuple[NDArray, NDArray]:
+def radial_profile(autocorrelogram: NDArray, *, n_bins: int = 32) -> tuple[NDArray, NDArray]:
     """Compute a radial profile from a 2D autocorrelogram.
 
     Args:
-        autocorr: 2D autocorrelogram array.
+        autocorrelogram: 2D autocorrelogram array.
         n_bins: Number of radial bins.
 
     Returns:
         Tuple of (radii, profile) for the autocorrelogram.
     """
-    if autocorr.size == 0:
+    if autocorrelogram.size == 0:
         empty = np.zeros((0,), dtype=float)
         return empty, empty
 
-    yy, xx = np.indices(autocorr.shape)
-    center_y = (autocorr.shape[0] - 1) / 2.0
-    center_x = (autocorr.shape[1] - 1) / 2.0
+    yy, xx = np.indices(autocorrelogram.shape)
+    center_y = (autocorrelogram.shape[0] - 1) / 2.0
+    center_x = (autocorrelogram.shape[1] - 1) / 2.0
     radii = np.sqrt((xx - center_x) ** 2 + (yy - center_y) ** 2)
 
     max_radius = float(np.nanmax(radii)) if radii.size else 0.0
@@ -266,88 +209,52 @@ def radial_profile(autocorr: NDArray, *, n_bins: int = 32) -> tuple[NDArray, NDA
     profile = np.full((n_bins,), np.nan, dtype=float)
     for idx in range(n_bins):
         mask = (radii >= bins[idx]) & (radii < bins[idx + 1])
-        mask &= np.isfinite(autocorr)
+        mask &= np.isfinite(autocorrelogram)
         if mask.any():
-            profile[idx] = float(np.nanmean(autocorr[mask]))
+            profile[idx] = float(np.nanmean(autocorrelogram[mask]))
 
     bin_centers = 0.5 * (bins[:-1] + bins[1:])
     return bin_centers, profile
 
 
-def _rate_map_cell_values(
-    cells_trace: NDArray,
-    location_ids: Sequence[int] | NDArray,
-    world: object,
-    cell_idx: int,
-) -> NDArray:
-    location_ids = np.asarray(location_ids, dtype=int)
-    rate_map, _ = aggregate_rate_map(cells_trace, location_ids, _environment_n_locations(world))
-    if rate_map.size == 0 or cell_idx >= rate_map.shape[0]:
-        return np.zeros((0,), dtype=float)
-    return rate_map[cell_idx]
+def _overlap_slices(size: int, lag: int) -> tuple[slice, slice]:
+    """Return aligned source/target slices for a signed lag."""
+    if lag >= 0:
+        return slice(lag, size), slice(0, size - lag)
+    return slice(0, size + lag), slice(-lag, size)
 
 
-def plot_autocorr_mosaic(
+def plot_spatial_autocorrelogram_mosaic(
     axes: Sequence[Axes] | Axes,
-    world: object,
-    cells_trace: NDArray,
-    location_ids: Sequence[int] | NDArray,
+    prepared_rate_maps: Sequence[PreparedRateMap],
     *,
-    cell_indices: Optional[Sequence[int]] = None,
     vmin: float | None = None,
     vmax: float | None = None,
-    grid_res: float | None = None,
     cmap: str = "coolwarm",
+    min_overlap: int = DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP,
 ) -> Sequence[Axes]:
-    """Render a mosaic of spatial autocorrelograms into provided axes.
-
-    Args:
-        axes: Axes to draw into.
-        world: Environment world with location coordinates.
-        cells_trace: Cell activations (T, B, C) or (T, C).
-        location_ids: Ordered list of visited location indices.
-        cell_indices: Optional cell indices to include.
-        vmin: Optional min value for shared color scaling.
-        vmax: Optional max value for shared color scaling.
-        grid_res: Optional grid resolution for rasterization.
-        cmap: Colormap name.
-
-    Returns:
-        Sequence of axes that were provided.
-    """
-    axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else axes
-    axes_list = [axes] if isinstance(axes, Axes) else list(axes)
+    """Render a mosaic of spatial autocorrelograms from prepared rate maps."""
+    axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else ([axes] if isinstance(axes, Axes) else list(axes))
     if not axes_list:
         return axes_list
 
-    cell_array = np.asarray(cells_trace)
-    if cell_array.ndim < 2 or cell_array.shape[-1] == 0:
+    if not prepared_rate_maps:
         axes_list[0].text(0.5, 0.5, "No data", ha="center", va="center")
         for empty_ax in axes_list:
             empty_ax.axis("off")
         return axes_list
 
-    n_cells_total = int(cell_array.shape[-1])
-    if cell_indices is None:
-        indices = list(range(n_cells_total))
-    else:
-        indices = []
-        for idx in cell_indices:
-            idx_int = int(idx)
-            if 0 <= idx_int < n_cells_total:
-                indices.append(idx_int)
+    for ax, prepared_rate_map in zip(axes_list, prepared_rate_maps):
+        plot_spatial_autocorrelogram(
+            ax,
+            prepared_rate_map,
+            vmin=vmin,
+            vmax=vmax,
+            cmap=cmap,
+            min_overlap=min_overlap,
+        )
 
-    if not indices:
-        axes_list[0].text(0.5, 0.5, "No data", ha="center", va="center")
-        for empty_ax in axes_list:
-            empty_ax.axis("off")
-        return axes_list
-
-    options = {"vmin": vmin, "vmax": vmax, "grid_res": grid_res, "cmap": cmap}
-    for ax, cell_idx in zip(axes_list, indices):
-        plot_spatial_autocorrelogram(ax, world, cells_trace, location_ids, cell_idx, **options)
-
-    for ax in axes_list[len(indices) :]:
+    for ax in axes_list[len(prepared_rate_maps) :]:
         ax.axis("off")
 
     return axes_list

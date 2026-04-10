@@ -7,6 +7,8 @@ PyTorch's pytree TreeSpec (first-observed structure wins).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -46,6 +48,7 @@ class TraceTree:
     leaf_is_numeric: list[bool] = field(default_factory=list)
     buffers: list[Optional[list[np.ndarray]]] = field(default_factory=list)
     meta_first: list[Optional[Any]] = field(default_factory=list)
+    attached_meta: dict[str, Any] = field(default_factory=dict)
     leaf_signatures: list[Optional[tuple[tuple[int, ...], np.dtype]]] = field(default_factory=list)
     dense_leaves: Optional[list[Any]] = None
 
@@ -87,6 +90,7 @@ class TraceTree:
         sliced.path_to_index = dict(self.path_to_index)
         sliced.leaf_is_numeric = list(self.leaf_is_numeric)
         sliced.meta_first = list(self.meta_first)
+        sliced.attached_meta = deepcopy(self.attached_meta)
         sliced.leaf_signatures = list(self.leaf_signatures)
         sliced.batch_size = self.batch_size
         sliced.length = max(0, t1 - t0)
@@ -122,9 +126,28 @@ class TraceTree:
     def export_meta_tree(self) -> Any:
         """Export static metadata as a nested pytree."""
         if self.spec is None:
-            return {}
-        meta_leaves = [None if is_numeric else self.meta_first[idx] for idx, is_numeric in enumerate(self.leaf_is_numeric)]
-        return torch_pytree.tree_unflatten(meta_leaves, self.spec)
+            meta_tree: Any = {}
+        else:
+            meta_leaves = [None if is_numeric else self.meta_first[idx] for idx, is_numeric in enumerate(self.leaf_is_numeric)]
+            meta_tree = torch_pytree.tree_unflatten(meta_leaves, self.spec)
+        if not self.attached_meta:
+            return meta_tree
+        if not isinstance(meta_tree, Mapping):
+            meta_tree = {}
+        merged = deepcopy(dict(meta_tree))
+        _merge_meta_mapping(merged, self.attached_meta, overwrite=True)
+        return merged
+
+    def attach_meta(self, meta: Mapping[str, Any], *, overwrite: bool = False) -> None:
+        """Attach out-of-band metadata that is not part of the observed-step spec.
+
+        Args:
+            meta: Nested metadata mapping keyed by trace-style path segments.
+            overwrite: Whether to replace existing metadata at conflicting paths.
+        """
+        if not isinstance(meta, Mapping):
+            raise TypeError(f"TraceTree.attach_meta expected a mapping, got {type(meta).__name__}.")
+        _merge_meta_mapping(self.attached_meta, meta, overwrite=overwrite)
 
     def export(self, *, flatten: bool = False, sep: str = "/") -> Any:
         """Export dense trace data, optionally flattening to a path map."""
@@ -135,7 +158,7 @@ class TraceTree:
 
     def get_meta(self) -> dict[str, Any]:
         """Return root metadata dictionary, if available."""
-        meta = self._meta_at_path("meta")
+        meta = self.export_meta_tree()
         return dict(meta) if isinstance(meta, dict) else {}
 
     def get_meta_path(self, path: str) -> Any:
@@ -144,6 +167,10 @@ class TraceTree:
         if value is None:
             raise ValueError(f"TraceTree metadata key '{path}' missing")
         return value
+
+    def has_meta_path(self, path: str) -> bool:
+        """Return whether a metadata leaf exists at ``path``."""
+        return self._meta_at_path(path) is not None
 
     def get_environments(self) -> list[Any]:
         """Return environments stored in the trace metadata."""
@@ -291,12 +318,44 @@ class TraceTree:
         return flattened
 
     def _meta_at_path(self, path: str) -> Any:
+        attached = _lookup_meta_path(self.attached_meta, path)
+        if attached is not None:
+            return attached
         if not self.path_to_index:
             return None
         idx = self.path_to_index.get(path)
         if idx is None or self.leaf_is_numeric[idx]:
             return None
         return self.meta_first[idx]
+
+
+def _lookup_meta_path(meta: Mapping[str, Any], path: str) -> Any:
+    """Return the attached metadata value at ``path`` or ``None`` when missing."""
+    if not path:
+        return meta
+    current: Any = meta
+    for segment in path.split("/"):
+        if not isinstance(current, Mapping) or segment not in current:
+            return None
+        current = current[segment]
+    return current
+
+
+def _merge_meta_mapping(destination: dict[str, Any], source: Mapping[str, Any], *, overwrite: bool) -> None:
+    """Merge nested metadata mappings into ``destination``.
+
+    Raises:
+        ValueError: If a source path conflicts with an existing destination path and
+            ``overwrite`` is ``False``.
+    """
+    for key, value in source.items():
+        existing = destination.get(key)
+        if isinstance(existing, dict) and isinstance(value, Mapping):
+            _merge_meta_mapping(existing, value, overwrite=overwrite)
+            continue
+        if key in destination and not overwrite:
+            raise ValueError(f"TraceTree metadata path '{key}' already exists.")
+        destination[key] = deepcopy(value)
 
 
 # =================================================================================================
