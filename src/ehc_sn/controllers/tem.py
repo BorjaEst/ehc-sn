@@ -68,6 +68,7 @@ class TEMRolloutState[ModelState](RolloutState[ModelState]):
 
     env_td: TensorDictBase
     static_data: dict[str, Tensor]
+    visit_counts: Tensor
 
 
 # =================================================================================================
@@ -182,6 +183,19 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         """Return the TorchRL environment used for stepping."""
         return self._env
 
+    def set_evaluation_seed(self, seed: int | None) -> None:
+        """Seed controller-owned stochastic evaluation surfaces.
+
+        TEM evaluation is only reproducible when both the reset sampler and any
+        stochastic scripted policy are explicitly seeded.
+        """
+        if seed is None:
+            raise ValueError("TEM evaluation requires an explicit seed for reproducible sampling.")
+        self.environment._set_seed(int(seed))
+        set_seed = getattr(self._policy, "set_seed", None)
+        if callable(set_seed):
+            set_seed(int(seed))
+
     def initial_state(  # -------------------------------------------------------------------------
         self, batch_sample: Batch
     ) -> TEMRolloutState[ModelState]:  # fmt: skip
@@ -196,6 +210,7 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
             data=self._extract_step_data(env_td),
             env_td=env_td,
             static_data={key: value.clone() for key, value in reset_td.items()},
+            visit_counts=self._new_visit_counts(reset_td, device=env_td.device),
         )
 
     def step(  # ----------------------------------------------------------------------------------
@@ -209,8 +224,8 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         environment state is still advanced and stored in ``env_td`` to seed the
         next controller iteration.
         """
-        static_data, env_td = self._refresh_halted_slots(batch, state)
-        current_data = self._extract_step_data(env_td)
+        static_data, env_td, visit_counts = self._refresh_halted_slots(batch, state)
+        current_data = self._annotate_revisit_state(self._extract_step_data(env_td), env_td, visit_counts)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
         model_state, obs_logits, _, grid, place = self.backbone(current_data, model_state)
 
@@ -227,7 +242,15 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         if allow_halt:
             done = done | (steps >= self.config.max_steps)
 
-        state = TEMRolloutState(model_state=model_state, steps=steps, halted=done, data=current_data, env_td=next_env_td, static_data=static_data)  # fmt: skip
+        state = TEMRolloutState(
+            model_state=model_state,
+            steps=steps,
+            halted=done,
+            data=current_data,
+            env_td=next_env_td,
+            static_data=static_data,
+            visit_counts=self._record_visit(visit_counts, env_td["location_id"]),
+        )  # fmt: skip
         output = TEMOutput(obs_logits=obs_logits, latent_relations=latent_relations, reg_terms=reg_terms)
 
         return state, output
@@ -285,12 +308,24 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
             "lec_w_f_sigmoid": torch.stack([torch.sigmoid(weight).detach() for weight in w_f]),
         }
 
+    def _annotate_revisit_state(
+        self,
+        payload: dict[str, Tensor],
+        env_td: TensorDictBase,
+        visit_counts: Tensor,
+    ) -> dict[str, Tensor]:
+        """Attach revisit eligibility aligned with the current-step payload."""
+        location_id = env_td["location_id"].to(device=visit_counts.device, dtype=torch.int64)
+        prior_counts = visit_counts.gather(dim=1, index=location_id).squeeze(-1)
+        payload["is_revisit"] = prior_counts > 0
+        return payload
+
     def _refresh_halted_slots(  # ---------------------------------------------------------------
         self, batch: Batch, state: TEMRolloutState[ModelState],
-    ) -> tuple[dict[str, Tensor], TensorDictBase]:  # fmt: skip
+    ) -> tuple[dict[str, Tensor], TensorDictBase, Tensor]:  # fmt: skip
         """Reset halted slots from the incoming maze batch and keep active slots unchanged."""
         if not torch.any(state.halted):
-            return state.static_data, state.env_td
+            return state.static_data, state.env_td, state.visit_counts
 
         new_static = self._build_reset_td(batch)
         static_data = {
@@ -299,7 +334,9 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         }  # fmt: skip
         reset_td = TensorDict(static_data, batch_size=state.env_td.batch_size, device=state.env_td.device)
         env_td = self.environment.reset_slots(state.halted, reset_td, state.env_td)
-        return static_data, env_td
+        visit_counts = state.visit_counts.clone()
+        visit_counts[state.halted] = 0
+        return static_data, env_td, visit_counts
 
     def _policy_action(  # -----------------------------------------------------------------------
         self, env_td: TensorDictBase, *, explore: bool,
@@ -328,6 +365,23 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         if dtype == "bool":
             return torch.zeros((batch_size,), dtype=torch.bool, device=device)
         raise ValueError(f"Unsupported zero dtype request: {dtype}.")
+
+    @staticmethod
+    def _new_visit_counts(reset_td: TensorDictBase, *, device: Any) -> Tensor:
+        """Allocate per-slot location visit counters for the current maze shape."""
+        topology = reset_td["topology"]
+        batch_size = int(topology.shape[0])
+        n_locations = int(topology.shape[-2] * topology.shape[-1])
+        return torch.zeros((batch_size, n_locations), dtype=torch.int32, device=device)
+
+    @staticmethod
+    def _record_visit(visit_counts: Tensor, location_id: Tensor) -> Tensor:
+        """Increment visit counters for the current-step locations."""
+        updated = visit_counts.clone()
+        index = location_id.to(device=updated.device, dtype=torch.int64)
+        increments = torch.ones_like(index, dtype=updated.dtype, device=updated.device)
+        updated.scatter_add_(1, index, increments)
+        return updated
 
     def _coerce_latent(  # --------------------------------------------------------------
         self, grid: tuple[Tensor, Tensor], place: tuple[Tensor, Tensor, Tensor],

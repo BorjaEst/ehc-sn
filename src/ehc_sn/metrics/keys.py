@@ -17,13 +17,20 @@ VAR_LOSS_OBS_NLL: str = "loss_obs_nll"
 VAR_LOSS_LATENT: str = "loss_latent"
 VAR_LOSS_REG: str = "loss_reg"
 
-TEM_LOSS_OBS_NLL: str = "loss_obs_nll"
-TEM_LOSS_GRID_KL: str = "loss_grid_kl"
-TEM_LOSS_PLACE_CONSISTENCY: str = "loss_place_consistency"
-TEM_LOSS_REG: str = "loss_reg"
-TEM_ACC_OBS_INFERENCE: str = "accuracy_obs_inference"
-TEM_ACC_OBS_RETRIEVED: str = "accuracy_obs_retrieved"
-TEM_ACC_OBS_ANCESTRAL: str = "accuracy_obs_ancestral"
+TEM_LOSS_OBS_NLL_REVISIT: str = "loss_obs_nll_revisit"
+TEM_LOSS_OBS_NLL_ALL: str = "loss_obs_nll_all"
+TEM_LOSS_GRID_KL_REVISIT: str = "loss_grid_kl_revisit"
+TEM_LOSS_GRID_KL_ALL: str = "loss_grid_kl_all"
+TEM_LOSS_PLACE_CONSISTENCY_REVISIT: str = "loss_place_consistency_revisit"
+TEM_LOSS_PLACE_CONSISTENCY_ALL: str = "loss_place_consistency_all"
+TEM_LOSS_REG_REVISIT: str = "loss_reg_revisit"
+TEM_LOSS_REG_ALL: str = "loss_reg_all"
+TEM_ACC_OBS_INFERENCE_REVISIT: str = "accuracy_obs_inference_revisit"
+TEM_ACC_OBS_INFERENCE_ALL: str = "accuracy_obs_inference_all"
+TEM_ACC_OBS_RETRIEVED_REVISIT: str = "accuracy_obs_retrieved_revisit"
+TEM_ACC_OBS_RETRIEVED_ALL: str = "accuracy_obs_retrieved_all"
+TEM_ACC_OBS_ANCESTRAL_REVISIT: str = "accuracy_obs_ancestral_revisit"
+TEM_ACC_OBS_ANCESTRAL_ALL: str = "accuracy_obs_ancestral_all"
 
 
 # =================================================================================================
@@ -38,8 +45,12 @@ def extra_ratio_paths(  # ------------------------------------------------------
 # =================================================================================================
 __all__ = [
     "ACT_LOSS_Q_CONTINUE", "ACT_LOSS_Q_DONE", "LOSS_LM", "RL_LOSS_ACTOR", "RL_LOSS_CRITIC",
-    "RL_LOSS_ENTROPY", "RL_LOSS_Q_VALUE", "TEM_ACC_OBS_ANCESTRAL", "TEM_ACC_OBS_INFERENCE",
-    "TEM_ACC_OBS_RETRIEVED", "TEM_LOSS_GRID_KL", "TEM_LOSS_OBS_NLL",
-    "TEM_LOSS_PLACE_CONSISTENCY", "TEM_LOSS_REG", "VAR_LOSS_LATENT", "VAR_LOSS_OBS_NLL",
+    "RL_LOSS_ENTROPY", "RL_LOSS_Q_VALUE", "TEM_ACC_OBS_ANCESTRAL_ALL",
+    "TEM_ACC_OBS_ANCESTRAL_REVISIT", "TEM_ACC_OBS_INFERENCE_ALL",
+    "TEM_ACC_OBS_INFERENCE_REVISIT", "TEM_ACC_OBS_RETRIEVED_ALL",
+    "TEM_ACC_OBS_RETRIEVED_REVISIT", "TEM_LOSS_GRID_KL_ALL",
+    "TEM_LOSS_GRID_KL_REVISIT", "TEM_LOSS_OBS_NLL_ALL", "TEM_LOSS_OBS_NLL_REVISIT",
+    "TEM_LOSS_PLACE_CONSISTENCY_ALL", "TEM_LOSS_PLACE_CONSISTENCY_REVISIT",
+    "TEM_LOSS_REG_ALL", "TEM_LOSS_REG_REVISIT", "VAR_LOSS_LATENT", "VAR_LOSS_OBS_NLL",
     "VAR_LOSS_REG", "extra_ratio_paths",
 ]  # fmt: skip

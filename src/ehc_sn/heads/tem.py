@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
@@ -27,13 +28,20 @@ from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_terms
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import (
-    TEM_ACC_OBS_ANCESTRAL,
-    TEM_ACC_OBS_INFERENCE,
-    TEM_ACC_OBS_RETRIEVED,
-    TEM_LOSS_GRID_KL,
-    TEM_LOSS_OBS_NLL,
-    TEM_LOSS_PLACE_CONSISTENCY,
-    TEM_LOSS_REG,
+    TEM_ACC_OBS_ANCESTRAL_ALL,
+    TEM_ACC_OBS_ANCESTRAL_REVISIT,
+    TEM_ACC_OBS_INFERENCE_ALL,
+    TEM_ACC_OBS_INFERENCE_REVISIT,
+    TEM_ACC_OBS_RETRIEVED_ALL,
+    TEM_ACC_OBS_RETRIEVED_REVISIT,
+    TEM_LOSS_GRID_KL_ALL,
+    TEM_LOSS_GRID_KL_REVISIT,
+    TEM_LOSS_OBS_NLL_ALL,
+    TEM_LOSS_OBS_NLL_REVISIT,
+    TEM_LOSS_PLACE_CONSISTENCY_ALL,
+    TEM_LOSS_PLACE_CONSISTENCY_REVISIT,
+    TEM_LOSS_REG_ALL,
+    TEM_LOSS_REG_REVISIT,
 )
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
@@ -122,14 +130,21 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
     ) -> TEMLosses:  # fmt: skip
         """Compute ELBO-style TEM losses for a single step."""
         labels = self._observation_target(carry)
+        protocol_mask = self._protocol_mask(carry)
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
 
-        loss_obs_inference = self.loss_fn(outputs.logits_inference, labels).sum()
-        loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels).sum()
-        loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels).sum()
-        loss_obs_nll_sum = self.config.c_obs * (loss_obs_inference + loss_obs_retrieved + loss_obs_ancestral)
-        loss_grid_kl_sum = self.config.c_grid * sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs).sum()  # fmt: skip
+        loss_obs_inference = self.loss_fn(outputs.logits_inference, labels)
+        loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels)
+        loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels)
+        loss_obs_nll_sum = self.config.c_obs * self._masked_sum(
+            loss_obs_inference + loss_obs_retrieved + loss_obs_ancestral,
+            protocol_mask,
+        )
+        loss_grid_kl_sum = self.config.c_grid * self._masked_sum(
+            sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs),
+            protocol_mask,
+        )  # fmt: skip
 
         place_transition = sum_latent_terms(mse_consistency, place_transition_relation.lhs, place_transition_relation.rhs)  # fmt: skip
         place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
@@ -137,7 +152,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
             place_sensory = sum_latent_terms(mse_consistency, place_sensory_relation.lhs, place_sensory_relation.rhs)  # fmt: skip
         else:
             place_sensory = place_transition.new_zeros(place_transition.shape)
-        loss_place_consistency_sum = self.config.c_place * (place_transition + place_sensory).sum()
+        loss_place_consistency_sum = self.config.c_place * self._masked_sum(place_transition + place_sensory, protocol_mask)
 
         grid_reg_code = get_reg_term(outputs.reg_terms, GRID_REG_TERM)
         if grid_reg_code is None:
@@ -146,9 +161,9 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         place_reg_code = get_reg_term(outputs.reg_terms, PLACE_REG_TERM)
         if place_reg_code is None:
             place_reg_code = place_transition_relation.lhs
-        grid_reg = self._regularization_sum(grid_reg_code, self.config.grid_reg_norm, self.config.c_grid_reg)
-        place_reg = self._regularization_sum(place_reg_code, self.config.place_reg_norm, self.config.c_place_reg)  # fmt: skip
-        loss_reg_sum = grid_reg + place_reg
+        grid_reg = self._regularization_terms(grid_reg_code, self.config.grid_reg_norm, self.config.c_grid_reg)
+        place_reg = self._regularization_terms(place_reg_code, self.config.place_reg_norm, self.config.c_place_reg)  # fmt: skip
+        loss_reg_sum = self._masked_sum(grid_reg + place_reg, protocol_mask)
 
         return TEMLosses(
             loss_obs_nll_sum=loss_obs_nll_sum,
@@ -162,15 +177,34 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
     ) -> dict[str, RatioStat]:  # fmt: skip
         """Build detached TEM ratio metrics for logging."""
         labels = self._observation_target(carry)
+        protocol_mask = self._protocol_mask(carry)
+        protocol_count = protocol_mask.to(dtype=losses.total.dtype).sum()
         batch_count = losses.total.new_tensor(batch_size, dtype=losses.total.dtype)
+        all_loss_sums = self._all_step_loss_sums(outputs, labels)
         return {
-            TEM_ACC_OBS_INFERENCE: RatioStat(_correct_prediction_count(outputs.logits_inference, labels), batch_count),
-            TEM_ACC_OBS_RETRIEVED: RatioStat(_correct_prediction_count(outputs.logits_retrieved, labels), batch_count),
-            TEM_ACC_OBS_ANCESTRAL: RatioStat(_correct_prediction_count(outputs.logits_ancestral, labels), batch_count),
-            TEM_LOSS_OBS_NLL: RatioStat(losses.loss_obs_nll_sum.detach(), batch_count),
-            TEM_LOSS_GRID_KL: RatioStat(losses.loss_grid_kl_sum.detach(), batch_count),
-            TEM_LOSS_PLACE_CONSISTENCY: RatioStat(losses.loss_place_consistency_sum.detach(), batch_count),
-            TEM_LOSS_REG: RatioStat(losses.loss_reg_sum.detach(), batch_count),
+            TEM_ACC_OBS_INFERENCE_REVISIT: RatioStat(
+                _correct_prediction_count(outputs.logits_inference, labels, mask=protocol_mask),
+                protocol_count,
+            ),
+            TEM_ACC_OBS_RETRIEVED_REVISIT: RatioStat(
+                _correct_prediction_count(outputs.logits_retrieved, labels, mask=protocol_mask),
+                protocol_count,
+            ),
+            TEM_ACC_OBS_ANCESTRAL_REVISIT: RatioStat(
+                _correct_prediction_count(outputs.logits_ancestral, labels, mask=protocol_mask),
+                protocol_count,
+            ),
+            TEM_ACC_OBS_INFERENCE_ALL: RatioStat(_correct_prediction_count(outputs.logits_inference, labels), batch_count),
+            TEM_ACC_OBS_RETRIEVED_ALL: RatioStat(_correct_prediction_count(outputs.logits_retrieved, labels), batch_count),
+            TEM_ACC_OBS_ANCESTRAL_ALL: RatioStat(_correct_prediction_count(outputs.logits_ancestral, labels), batch_count),
+            TEM_LOSS_OBS_NLL_REVISIT: RatioStat(losses.loss_obs_nll_sum.detach(), protocol_count),
+            TEM_LOSS_GRID_KL_REVISIT: RatioStat(losses.loss_grid_kl_sum.detach(), protocol_count),
+            TEM_LOSS_PLACE_CONSISTENCY_REVISIT: RatioStat(losses.loss_place_consistency_sum.detach(), protocol_count),
+            TEM_LOSS_REG_REVISIT: RatioStat(losses.loss_reg_sum.detach(), protocol_count),
+            TEM_LOSS_OBS_NLL_ALL: RatioStat(all_loss_sums["loss_obs_nll_sum"], batch_count),
+            TEM_LOSS_GRID_KL_ALL: RatioStat(all_loss_sums["loss_grid_kl_sum"], batch_count),
+            TEM_LOSS_PLACE_CONSISTENCY_ALL: RatioStat(all_loss_sums["loss_place_consistency_sum"], batch_count),
+            TEM_LOSS_REG_ALL: RatioStat(all_loss_sums["loss_reg_sum"], batch_count),
         }  # fmt: skip
 
     def _build_step_output(  # -------------------------------------------------------------------
@@ -238,22 +272,72 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
                 return labels.argmax(dim=-1)
         return labels
 
-    def _regularization_sum(  # ------------------------------------------------------------------
+    def _protocol_mask(self, carry: Any) -> Tensor:
+        """Return the revisit-eligibility mask for protocol supervision."""
+        is_revisit = carry.data.get("is_revisit")
+        if is_revisit is None:
+            raise KeyError("TEM carry data must provide 'is_revisit' for protocol-gated supervision.")
+        return is_revisit.reshape(-1).to(dtype=torch.bool)
+
+    @staticmethod
+    def _masked_sum(values: Tensor, mask: Tensor) -> Tensor:
+        """Return the scalar sum over values selected by a boolean batch mask."""
+        return (values * mask.to(dtype=values.dtype)).sum()
+
+    def _all_step_loss_sums(self, outputs: TEMOutput, labels: Tensor) -> dict[str, Tensor]:
+        """Return detached all-step TEM loss sums for diagnostics and metric logging."""
+        grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
+        place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
+        place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
+
+        loss_obs_inference = self.loss_fn(outputs.logits_inference, labels)
+        loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels)
+        loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels)
+        loss_obs_nll_sum = self.config.c_obs * (loss_obs_inference + loss_obs_retrieved + loss_obs_ancestral).sum()
+
+        place_transition = sum_latent_terms(mse_consistency, place_transition_relation.lhs, place_transition_relation.rhs)  # fmt: skip
+        if place_sensory_relation is not None:
+            place_sensory = sum_latent_terms(mse_consistency, place_sensory_relation.lhs, place_sensory_relation.rhs)  # fmt: skip
+        else:
+            place_sensory = place_transition.new_zeros(place_transition.shape)
+
+        grid_reg_code = get_reg_term(outputs.reg_terms, GRID_REG_TERM)
+        if grid_reg_code is None:
+            grid_reg_code = grid_relation.lhs
+
+        place_reg_code = get_reg_term(outputs.reg_terms, PLACE_REG_TERM)
+        if place_reg_code is None:
+            place_reg_code = place_transition_relation.lhs
+
+        grid_reg = self._regularization_terms(grid_reg_code, self.config.grid_reg_norm, self.config.c_grid_reg)
+        place_reg = self._regularization_terms(place_reg_code, self.config.place_reg_norm, self.config.c_place_reg)  # fmt: skip
+
+        return {
+            "loss_obs_nll_sum": loss_obs_nll_sum.detach(),
+            "loss_grid_kl_sum": (self.config.c_grid * sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs).sum()).detach(),  # fmt: skip
+            "loss_place_consistency_sum": (self.config.c_place * (place_transition + place_sensory).sum()).detach(),
+            "loss_reg_sum": (grid_reg.sum() + place_reg.sum()).detach(),
+        }
+
+    def _regularization_terms(  # ----------------------------------------------------------------
         self, code: LatentCode, norm: RegularizationNorm, coefficient: float,
     ) -> Tensor:  # fmt: skip
-        """Return the weighted regularization sum for one latent group."""
+        """Return weighted per-example regularization for one latent group."""
         if coefficient == 0.0 or norm == "none":
             first_block = code if isinstance(code, Tensor) else next(iter(code))
-            return first_block.new_zeros(())
-        return coefficient * sum_regularization_terms(code, norm).sum()
+            return first_block.new_zeros((first_block.shape[0],))
+        return coefficient * sum_regularization_terms(code, norm)
 
 
 # =================================================================================================
 def _correct_prediction_count(  # -----------------------------------------------------------------
-    logits: Tensor, labels: Tensor, 
+    logits: Tensor, labels: Tensor, mask: Tensor | None = None,
 ) -> Tensor:  # fmt: skip
     """Return the detached count of correct observation predictions for one pathway."""
-    return logits.argmax(dim=-1).eq(labels).sum().to(dtype=logits.dtype).detach()
+    is_correct = logits.argmax(dim=-1).eq(labels)
+    if mask is not None:
+        is_correct = is_correct & mask.to(device=is_correct.device, dtype=torch.bool)
+    return is_correct.sum().to(dtype=logits.dtype).detach()
 
 
 # =================================================================================================
