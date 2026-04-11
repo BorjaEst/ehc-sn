@@ -13,7 +13,7 @@ Key behaviors:
         explicit backward/optimizer/scheduler steps.
     - **Three-optimizer training**: supervised params, RL (STR) params, and vmPFC
         (``pfc.estimator``) params are optimized with separate optimizers.
-    - **Warmup**: for the first ``warmup_steps`` global steps, halting is disabled
+    - **Warmup**: for the first ``supervised_only_warmup_steps`` global steps, halting is disabled
         (``allow_halt=False``) to avoid the degenerate "halt immediately" solution.
     - **Partial reset batching**: halted examples are replaced with fresh rows using
         :class:`~ehc_sn.training.buffers.FifoBuffer` and
@@ -74,7 +74,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
     )
     environment: EnvConfig = Field(
         ...,
-        description="Environment configuration (max_steps, seq_length, vocab_size, halt_action).",
+        description="Environment configuration (max_episode_steps, seq_length, vocab_size, halt_action).",
     )
     controller: RLControllerConfig = Field(
         ...,
@@ -102,7 +102,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
         default_factory=SchedulerConfig,
         description="LR scheduler config applied to both optimizers.",
     )
-    warmup_steps: int = Field(
+    supervised_only_warmup_steps: int = Field(
         default=5000,
         ge=0,
         description=(
@@ -247,7 +247,7 @@ class TrainingModel(L.LightningModule):
 
         Notes:
             - ``setup()`` must have run so that ``self.controller`` and ``self.objective`` are available.
-            - During warmup (``global_step < warmup_steps``), halting is disabled.
+            - During warmup (``global_step < supervised_only_warmup_steps``), halting is disabled.
         """
         if self.controller is None or self.objective is None:
             raise RuntimeError("HRM v2 runtime is not initialized. Call setup() before training.")
@@ -256,7 +256,7 @@ class TrainingModel(L.LightningModule):
         if self._train_carry is None:
             self._train_carry = self.controller.initial_state(batch)
 
-        is_warmup = self.global_step < self._config.warmup_steps
+        is_warmup = self.global_step < self._config.supervised_only_warmup_steps
         rl_options = {"explore": True, "allow_halt": not is_warmup, "is_warmup": is_warmup}
         evaluation = evaluate_rollout(
             runner=self._train_runner,
@@ -315,7 +315,8 @@ class TrainingModel(L.LightningModule):
             controller=self.controller,
             carry=carry0,
             objective=self.objective,
-            hard_max_steps=self.config.runtime.validation.hard_max_steps,
+            max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
+            hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options=rl_options,
             objective_options=rl_options,
         )

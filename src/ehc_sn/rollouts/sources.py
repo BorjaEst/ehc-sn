@@ -11,16 +11,16 @@ from ehc_sn.types import Batch
 class RepeatSource:
     """Yield the same batch repeatedly, optionally with a fixed horizon."""
 
-    def __init__(self, batch: Batch, *, max_steps: int | None = None) -> None:
+    def __init__(self, batch: Batch, *, max_rollout_steps: int | None = None) -> None:
         self._batch = batch
-        self._max_steps = max_steps
+        self._max_rollout_steps = max_rollout_steps
         self._steps = 0
 
     def __iter__(self) -> "RepeatSource":
         return self
 
     def __next__(self) -> Batch:
-        if self._max_steps is not None and self._steps >= self._max_steps:
+        if self._max_rollout_steps is not None and self._steps >= self._max_rollout_steps:
             raise StopIteration
         self._steps += 1
         return self._batch

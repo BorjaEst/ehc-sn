@@ -256,7 +256,8 @@ class TrainingModel(L.LightningModule):
             controller=self.controller,
             carry=carry0,
             objective=self.objective,
-            hard_max_steps=self.config.runtime.validation.hard_max_steps,
+            max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
+            hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options=act_options,
             objective_options=act_options,
         )

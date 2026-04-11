@@ -73,7 +73,12 @@ class SequenceRuntimeConfig(BaseModel, extra="forbid"):
 class ValidationRuntimeConfig(BaseModel, extra="forbid"):
     """Runner-owned safety limits for TEM validation rollouts."""
 
-    hard_max_steps: int | None = Field(
+    max_rollout_steps: int | None = Field(
+        default=None,
+        ge=1,
+        description="Normal runner-owned rollout bound for validation execution.",
+    )
+    hard_max_rollout_steps: int | None = Field(
         default=None,
         ge=1,
         description="Defensive runner cap for validation rollouts. Separate from semantic model max_steps.",

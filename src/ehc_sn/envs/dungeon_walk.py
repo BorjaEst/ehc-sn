@@ -56,10 +56,10 @@ DEFAULT_ACTION_COUNT: Final[int] = 5
 class EnvConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`DungeonWalk`."""
 
-    max_steps: int = Field(
+    max_episode_steps: int = Field(
         default=32,
         ge=1,
-        description="Maximum steps before truncation.",
+        description="Maximum episode steps before truncation.",
     )
     observation_dim: int = Field(
         ...,
@@ -207,7 +207,7 @@ class DungeonWalk(EnvBase):
             step_count=step_count,
         )
 
-        truncated = step_count >= self._config.max_steps
+        truncated = step_count >= self._config.max_episode_steps
         terminated = torch.zeros_like(truncated, dtype=torch.bool)
         done = terminated | truncated
         reward = torch.zeros((*self.batch_size, 1), dtype=torch.float32, device=runtime_device)

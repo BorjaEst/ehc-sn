@@ -35,7 +35,7 @@ IGNORE_LABEL_ID = -100
 class EnvConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`MazeHardEnv`."""
 
-    max_steps: int = Field(default=10, ge=1, description="Maximum steps per episode before truncation.")
+    max_episode_steps: int = Field(default=10, ge=1, description="Maximum steps per episode before truncation.")
     seq_length: int = Field(..., ge=1, description="Length of input and prediction sequences.")
     vocab_size: int = Field(..., ge=1, description="Size of the token vocabulary.")
     halt_action: int = Field(
@@ -135,7 +135,7 @@ class MazeHardEnv(EnvBase):
         """Compute reward, done-flags, and next state from action + current state.
 
         Reward = exp(acc) - exp(prev_acc): smooth, bounded, rewards improvement.
-        Terminated when agent selects halt_action. Truncated at max_steps.
+        Terminated when agent selects halt_action. Truncated at max_episode_steps.
         """
         logits = tensordict["logits"]  # (B, S, V)
         action = tensordict["action"]  # (B, 1)
@@ -149,7 +149,7 @@ class MazeHardEnv(EnvBase):
 
         reward = torch.exp(acc) - torch.exp(prev_accuracy)  # (B, 1)
         terminated = action == self._config.halt_action  # (B, 1)
-        truncated = (step_count + 1) >= self._config.max_steps  # (B, 1)
+        truncated = (step_count + 1) >= self._config.max_episode_steps  # (B, 1)
         done = terminated | truncated  # (B, 1)
 
         return TensorDict(

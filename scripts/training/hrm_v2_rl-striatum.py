@@ -77,7 +77,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     )
     environment: EnvConfig = Field(
         ...,
-        description="Environment configuration (max_steps, seq_length, vocab_size, halt_action).",
+        description="Environment configuration (max_episode_steps, seq_length, vocab_size, halt_action).",
     )
     controller: RLControllerConfig = Field(
         ...,
@@ -105,7 +105,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         default_factory=SchedulerConfig,
         description="LR scheduler config applied to both optimizers.",
     )
-    warmup_steps: int = Field(
+    supervised_only_warmup_steps: int = Field(
         default=5000,
         ge=0,
         description=(
@@ -154,7 +154,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
 
     # ---------------------------------------------------------------------------------------------
     # Training control settings (passed as top-level settings for ease of CLI overrides)
-    epochs: int = Field(
+    max_epochs: int = Field(
         ...,
         description="Total number of epochs to train.",
     )
@@ -309,6 +309,7 @@ if __name__ == "__main__":
         devices=settings.trainer_devices,
         num_nodes=settings.trainer_num_nodes,
         precision=settings.trainer_precision,
+        max_epochs=settings.max_epochs,
         max_steps=settings.max_steps,
         check_val_every_n_epoch=settings.check_val_every_n_epoch,
         val_check_interval=settings.val_check_interval,

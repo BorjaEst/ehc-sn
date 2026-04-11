@@ -292,7 +292,7 @@ class TrainingModel(L.LightningModule):
             controller=train_controller,
             carry=self._train_carry,
             objective=train_objective,
-            max_steps=self._train_chunk_steps(),
+            max_rollout_steps=self._train_chunk_steps(),
             metric_collection=self.train_metrics,
             metric_routes=TEM_STEP_ROUTES,
         )
@@ -345,7 +345,8 @@ class TrainingModel(L.LightningModule):
             controller=eval_controller,
             carry=carry0,
             objective=eval_objective,
-            hard_max_steps=self.config.runtime.validation.hard_max_steps,
+            max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
+            hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options=step_options,
         )
         trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)

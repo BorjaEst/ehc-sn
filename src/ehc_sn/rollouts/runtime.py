@@ -30,9 +30,9 @@ class StopReason(str, Enum):
 class ExecutionHaltError(RuntimeError):
     """Raised when a runner hits a hard execution limit before halting cleanly."""
 
-    def __init__(self, *, hard_max_steps: int, executed_steps: int) -> None:
-        super().__init__(f"Runner exceeded hard step limit {hard_max_steps} after {executed_steps} executed steps.")
-        self.hard_max_steps = hard_max_steps
+    def __init__(self, *, hard_max_rollout_steps: int, executed_steps: int) -> None:
+        super().__init__(f"Runner exceeded hard rollout step limit {hard_max_rollout_steps} after {executed_steps} executed steps.")
+        self.hard_max_rollout_steps = hard_max_rollout_steps
         self.executed_steps = executed_steps
 
 
@@ -225,8 +225,8 @@ class Runner(Protocol[CarryT, ControllerOutputT]):
         source: Source,
         controller: StepController[CarryT, ControllerOutputT],
         carry: CarryT,
-        max_steps: Optional[int] = None,
-        hard_max_steps: Optional[int] = None,
+        max_rollout_steps: Optional[int] = None,
+        hard_max_rollout_steps: Optional[int] = None,
         options: Optional[Mapping[str, object]] = None,
         record_observer: RolloutRecordObserver[ControllerOutputT] | None = None,
         capture_records: bool = True,
@@ -271,10 +271,7 @@ def _snapshot_value(value: Any, *, path: str) -> Any:
     if is_dataclass(value):
         return replace(
             value,
-            **{
-                field.name: _snapshot_value(getattr(value, field.name), path=f"{path}.{field.name}")
-                for field in fields(value)
-            },
+            **{field.name: _snapshot_value(getattr(value, field.name), path=f"{path}.{field.name}") for field in fields(value)},
         )
     raise TypeError(
         f"Unsupported snapshot value at {path}: {type(value).__name__}. Snapshot-compatible values "
@@ -320,15 +317,15 @@ class SingleStepRunner:
         source: Source,
         controller: StepController[CarryT, ControllerOutputT],
         carry: CarryT,
-        max_steps: Optional[int] = None,
-        hard_max_steps: Optional[int] = None,
+        max_rollout_steps: Optional[int] = None,
+        hard_max_rollout_steps: Optional[int] = None,
         options: Optional[Mapping[str, object]] = None,
         record_observer: RolloutRecordObserver[ControllerOutputT] | None = None,
         capture_records: bool = True,
     ) -> RolloutChunk[CarryT, ControllerOutputT] | RolloutExecution[CarryT]:
         """Return a one-step rollout chunk."""
-        _validate_single_step_limit("max_steps", max_steps)
-        _validate_single_step_limit("hard_max_steps", hard_max_steps)
+        _validate_single_step_limit("max_rollout_steps", max_rollout_steps)
+        _validate_single_step_limit("hard_max_rollout_steps", hard_max_rollout_steps)
         options_dict = dict(options or {})
         try:
             batch = next(source)
@@ -374,15 +371,15 @@ class RecurrentRunner:
         source: Source,
         controller: StepController[CarryT, ControllerOutputT],
         carry: CarryT,
-        max_steps: Optional[int] = None,
-        hard_max_steps: Optional[int] = None,
+        max_rollout_steps: Optional[int] = None,
+        hard_max_rollout_steps: Optional[int] = None,
         options: Optional[Mapping[str, object]] = None,
         record_observer: RolloutRecordObserver[ControllerOutputT] | None = None,
         capture_records: bool = True,
     ) -> RolloutChunk[CarryT, ControllerOutputT] | RolloutExecution[CarryT]:
         """Return a rollout chunk terminated by halt, source exhaustion, or step limit."""
-        _validate_limit("max_steps", max_steps)
-        _validate_limit("hard_max_steps", hard_max_steps)
+        _validate_limit("max_rollout_steps", max_rollout_steps)
+        _validate_limit("hard_max_rollout_steps", hard_max_rollout_steps)
         options_dict = dict(options or {})
         records: list[StepRecord[ControllerOutputT]] = []
         source_exhausted = False
@@ -390,9 +387,9 @@ class RecurrentRunner:
         step_idx = 0
 
         while True:
-            if hard_max_steps is not None and step_idx >= hard_max_steps:
-                raise ExecutionHaltError(hard_max_steps=hard_max_steps, executed_steps=step_idx)
-            if max_steps is not None and step_idx >= max_steps:
+            if hard_max_rollout_steps is not None and step_idx >= hard_max_rollout_steps:
+                raise ExecutionHaltError(hard_max_rollout_steps=hard_max_rollout_steps, executed_steps=step_idx)
+            if max_rollout_steps is not None and step_idx >= max_rollout_steps:
                 stop_reason = StopReason.STEP_LIMIT_REACHED
                 break
 
