@@ -213,17 +213,17 @@ class M0Benchmark:
                 f"M0 step for layout {entry.id} references observation_id={observation_id} outside [0, {observation_dim - 1}]."
             )
 
-        inputs = F.one_hot(torch.tensor(observation_id, dtype=torch.int64), num_classes=observation_dim).to(torch.float32)
+        observation = F.one_hot(torch.tensor(observation_id, dtype=torch.int64), num_classes=observation_dim).to(torch.float32)
         location_id = self._flatten_location(row, col, entry.width)
         landmark_id = None
         if CHANNEL_LANDMARKS in sample:
             landmark_id = sample[CHANNEL_LANDMARKS][row, col].to(dtype=torch.int64).view(1, 1)
 
         return EpisodicMemoryStep(
-            inputs=inputs.view(1, -1),
+            observation=observation.view(1, -1),
             previous_action=torch.tensor([int(step.previous_action)], dtype=torch.int64),
             episode_start=torch.tensor([step.step_index == 0], dtype=torch.bool),
-            observation_target=torch.tensor([observation_id], dtype=torch.int64),
+            observation_id=torch.tensor([observation_id], dtype=torch.int64),
             location_id=torch.tensor([location_id], dtype=torch.int64),
             landmark_id=landmark_id,
         )

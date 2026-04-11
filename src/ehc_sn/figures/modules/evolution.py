@@ -43,7 +43,7 @@ class PredictionEvolutionFigure(BaseFigureTemplate):
         self, trace: TraceTree, ctx: FigureContext,
     ) -> None:  # fmt: skip
         super().__init__(trace, ctx)
-        self.inputs, self.labels = _get_required_metadata(trace)
+        self.input_ids, self.labels = _get_required_metadata(trace)
         self.pred_is_o, self.halted = _get_required_trace(trace)
         self.sample_idx = 0
         self.t_halt = first_halt_index(self.halted[:, self.sample_idx])
@@ -54,7 +54,7 @@ class PredictionEvolutionFigure(BaseFigureTemplate):
         self, ax: Axes,
     ) -> None:  # fmt: skip
         """Plot GT overlay for the selected sample."""
-        input_grid = reshape_grid(self.inputs[self.sample_idx])
+        input_grid = reshape_grid(self.input_ids[self.sample_idx])
         gt_overlay = reshape_grid(self.labels[self.sample_idx] == O_ID)
         plot_maze_with_overlay(ax, input_grid, gt_overlay, title="GT")
 
@@ -64,7 +64,7 @@ class PredictionEvolutionFigure(BaseFigureTemplate):
     ) -> None:  # fmt: skip
         """Plot GT + model overlays across selected rollout timesteps."""
         axs = subdivide_axes(ax, nrows=2, ncols=8, wspace=0.02)
-        input_grid = reshape_grid(self.inputs[self.sample_idx])
+        input_grid = reshape_grid(self.input_ids[self.sample_idx])
 
         for ax_i, t in zip(axs.ravel(), self.t_indices):
             overlay = reshape_grid(self.pred_is_o[t, self.sample_idx])
@@ -81,7 +81,7 @@ class PredictionEvolutionFigure(BaseFigureTemplate):
 def _get_required_metadata(  # --------------------------------------------------------------------
     trace: TraceTree,
 ) -> tuple[np.ndarray, np.ndarray]:  # fmt: skip
-    return np.asarray(trace.get_meta_path("inputs")), np.asarray(trace.get_meta_path("labels"))
+    return np.asarray(trace.get_meta_path("input_ids")), np.asarray(trace.get_meta_path("labels"))
 
 
 # =================================================================================================

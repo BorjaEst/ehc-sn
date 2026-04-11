@@ -80,7 +80,7 @@ class TEMEpisodicMemoryAdapter(EpisodicMemoryAgent):
         if location_id is not None:
             self._merge_code(location_codes, location_id, current_code)
 
-        observation_id = self._tensor_scalar(step.observation_target)
+        observation_id = self._tensor_scalar(step.observation_id)
         if observation_id is not None:
             self._merge_code(cue_codes, ("observation", observation_id), current_code)
 
@@ -133,7 +133,7 @@ class TEMEpisodicMemoryAdapter(EpisodicMemoryAgent):
     def _build_model_inputs(self, step: EpisodicMemoryStep) -> dict[str, Tensor]:
         """Move one benchmark step payload onto the wrapped model device."""
         model_inputs = {
-            "inputs": step.inputs.to(device=self.device, dtype=torch.float32),
+            "observation": step.observation.to(device=self.device, dtype=torch.float32),
             "previous_action": step.previous_action.to(device=self.device, dtype=torch.int64),
             "episode_start": step.episode_start.to(device=self.device, dtype=torch.bool),
         }

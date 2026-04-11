@@ -284,7 +284,7 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         episode-start metadata derived from the environment step counter.
         """
         keys = (
-            "inputs", "observation_target", "previous_action", "location_id", "region_id",
+            "observation", "observation_id", "previous_action", "location_id", "region_id",
             "landmark_id", "valid_action_mask", "step_count",
         )  # fmt: skip
         payload = {key: env_td[key] for key in keys if key in env_td.keys()}

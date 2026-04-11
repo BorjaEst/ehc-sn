@@ -14,8 +14,8 @@ TensorDict contract:
             "start"    : (H, W) bool   — preferred reset locations
 
     observation_spec / state_spec:
-        "inputs"            : (O,)   float32 — one-hot observation encoding
-        "observation_target": (1,)   int64   — categorical observation id
+        "observation"       : (O,)   float32 — one-hot current observation encoding
+        "observation_id"    : (1,)   int64   — categorical current observation id
         "previous_action"   : (1,)   int64   — action that produced current state
         "location_id"       : (1,)   int64   — flattened current cell index
         "region_id"         : (1,)   int64   — current region id (0 if absent)
@@ -143,8 +143,8 @@ class DungeonWalk(EnvBase):
         action_count = self._config.action_count
         observation_dim = self._config.observation_dim
         step_spec = Composite(
-            inputs=Unbounded(shape=(*bs, observation_dim), dtype=torch.float32),
-            observation_target=Unbounded(shape=(*bs, 1), dtype=torch.int64),
+            observation=Unbounded(shape=(*bs, observation_dim), dtype=torch.float32),
+            observation_id=Unbounded(shape=(*bs, 1), dtype=torch.int64),
             previous_action=Unbounded(shape=(*bs, 1), dtype=torch.int64),
             location_id=Unbounded(shape=(*bs, 1), dtype=torch.int64),
             region_id=Unbounded(shape=(*bs, 1), dtype=torch.int64),
@@ -360,21 +360,19 @@ class DungeonWalk(EnvBase):
         flat_location = location_id.squeeze(-1)
         rows, cols = self._unflatten_location(flat_location)
         batch_index = torch.arange(flat_location.shape[0], device=runtime_device)
-        observation_target = self._observations[batch_index, rows, cols].view(-1, 1)
-        self._validate_observation_ids(observation_target)
-        inputs = F.one_hot(observation_target.squeeze(-1), num_classes=self._config.observation_dim).to(torch.float32)
-        region_id = (
-            self._regions[batch_index, rows, cols].view(-1, 1) if self._regions is not None else torch.zeros_like(observation_target)
-        )
+        observation_id = self._observations[batch_index, rows, cols].view(-1, 1)
+        self._validate_observation_ids(observation_id)
+        observation = F.one_hot(observation_id.squeeze(-1), num_classes=self._config.observation_dim).to(torch.float32)
+        region_id = self._regions[batch_index, rows, cols].view(-1, 1) if self._regions is not None else torch.zeros_like(observation_id)
         landmark_id = (
-            self._landmarks[batch_index, rows, cols].view(-1, 1) if self._landmarks is not None else torch.zeros_like(observation_target)
+            self._landmarks[batch_index, rows, cols].view(-1, 1) if self._landmarks is not None else torch.zeros_like(observation_id)
         )
         valid_action_mask = self._compute_valid_action_mask(rows, cols)
 
         return TensorDict(
             {
-                "inputs": inputs,
-                "observation_target": observation_target.to(torch.int64),
+                "observation": observation,
+                "observation_id": observation_id.to(torch.int64),
                 "previous_action": previous_action.to(torch.int64),
                 "location_id": location_id.to(torch.int64),
                 "region_id": region_id.to(torch.int64),
@@ -408,10 +406,10 @@ class DungeonWalk(EnvBase):
         """Return grid coordinates from flattened cell indices."""
         return torch.div(location_id, self._width, rounding_mode="floor"), location_id % self._width
 
-    def _validate_observation_ids(self, observation_target: Tensor) -> None:
+    def _validate_observation_ids(self, observation_id: Tensor) -> None:
         """Fail fast if cached observation ids exceed the configured encoding dimension."""
-        min_id = int(observation_target.min().item())
-        max_id = int(observation_target.max().item())
+        min_id = int(observation_id.min().item())
+        max_id = int(observation_id.max().item())
         if min_id < 0 or max_id >= self._config.observation_dim:
             raise ValueError(
                 "DungeonWalk observation ids must lie within " f"[0, {self._config.observation_dim - 1}], got min={min_id}, max={max_id}."

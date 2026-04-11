@@ -138,9 +138,9 @@ def _get_solution_overlay(ctx: _TokenTraceContext) -> TraceValue:
     return (pred == O_ID).to(torch.uint8)
 
 
-def _get_inputs_meta(ctx: _CommonTraceContext) -> TraceValue:
-    """Static input batch captured as metadata when figures request it."""
-    value = ctx.carry.data.get("inputs")
+def _get_input_ids_meta(ctx: _CommonTraceContext) -> TraceValue:
+    """Static token-id batch captured as metadata when figures request it."""
+    value = ctx.carry.data.get("input_ids")
     return None if value is None else value.detach()
 
 
@@ -162,9 +162,9 @@ TRACE_SOLUTION_OVERLAY = TraceField(
     name="pred/solution_overlay",
     get=_get_solution_overlay,
 )
-TRACE_INPUTS_META = TraceField(
-    name="inputs",
-    get=_get_inputs_meta,
+TRACE_INPUT_IDS_META = TraceField(
+    name="input_ids",
+    get=_get_input_ids_meta,
     storage="meta",
 )
 TRACE_LABELS_META = TraceField(
@@ -177,7 +177,7 @@ COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_HALTED,
     TRACE_STEPS,
     TRACE_SOLUTION_OVERLAY,
-    TRACE_INPUTS_META,
+    TRACE_INPUT_IDS_META,
     TRACE_LABELS_META,
 )
 
@@ -237,7 +237,7 @@ def _get_rpe(ctx: _RLTraceContext) -> TraceValue:
 
 def _get_world_observation_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Current-step observation encoding aligned with this step's TEM outputs."""
-    return ctx.carry.data["inputs"].detach()
+    return ctx.carry.data["observation"].detach()
 
 
 def _get_world_location_ids_tem(ctx: _TEMTraceContext) -> TraceValue:

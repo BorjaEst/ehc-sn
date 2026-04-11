@@ -5,7 +5,7 @@ prediction quality and returns improvement-based reward.
 
 TensorDict contract:
     state_spec / observation_spec:
-        "inputs"        : (S,)   int64   — static token sequence
+        "input_ids"     : (S,)   int64   — static token sequence
         "labels"        : (S,)   int64   — ground truth labels
         "prev_accuracy" : ()     float32 — accuracy at previous step
         "step_count"    : ()     int32   — steps taken so far
@@ -55,7 +55,7 @@ class MazeHardEnv(EnvBase):
     Usage::
 
         env = MazeHardEnv(config, batch_size=32, device="cuda")
-        td = env.reset(TensorDict({"inputs": x, "labels": y}, batch_size=[32]))
+        td = env.reset(TensorDict({"input_ids": x, "labels": y}, batch_size=[32]))
         td["action"] = policy(td)
         td = env.step(td)
 
@@ -91,7 +91,7 @@ class MazeHardEnv(EnvBase):
         bs = self.batch_size  # torch.Size([B])
 
         self.observation_spec = Composite(
-            inputs=Unbounded(shape=(*bs, S), dtype=torch.int64),
+            input_ids=Unbounded(shape=(*bs, S), dtype=torch.int64),
             labels=Unbounded(shape=(*bs, S), dtype=torch.int64),
             prev_accuracy=Unbounded(shape=(*bs, 1), dtype=torch.float32),
             step_count=Unbounded(shape=(*bs, 1), dtype=torch.int32),
@@ -110,16 +110,16 @@ class MazeHardEnv(EnvBase):
     ) -> TensorDictBase:  # fmt: skip
         """Initialise episode state from external data.
 
-        The controller injects ``inputs`` and ``labels`` from the dataloader.
+        The controller injects ``input_ids`` and ``labels`` from the dataloader.
         """
         if tensordict is None or tensordict.is_empty():
-            raise ValueError("MazeHardEnv._reset requires tensordict with 'inputs' and 'labels'.")
+            raise ValueError("MazeHardEnv._reset requires tensordict with 'input_ids' and 'labels'.")
 
         B = self.batch_size[0]
         kw = {"device": self.device}
         return TensorDict(
             {
-                "inputs": tensordict["inputs"],
+                "input_ids": tensordict["input_ids"],
                 "labels": tensordict["labels"],
                 "prev_accuracy": torch.zeros(B, 1, dtype=torch.float32, **kw),
                 "step_count": torch.zeros(B, 1, dtype=torch.int32, **kw),
@@ -154,7 +154,7 @@ class MazeHardEnv(EnvBase):
 
         return TensorDict(
             {
-                "inputs": tensordict["inputs"],  # static — carry unchanged
+                "input_ids": tensordict["input_ids"],  # static — carry unchanged
                 "labels": labels,
                 "prev_accuracy": acc,
                 "step_count": step_count + 1,

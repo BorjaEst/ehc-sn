@@ -35,14 +35,26 @@ class RandomWalkPolicy:
         self, *, seed: int | None = None,
     ) -> None:  # fmt: skip
         self._generator = torch.Generator(device="cpu")
-        if seed is not None:
-            self._generator.manual_seed(seed)
+        self._seed: int | None = None
+        self.set_seed(seed)
+
+    @property
+    def seed(self) -> int | None:
+        """Return the current RNG seed, if one has been set explicitly."""
+        return self._seed
+
+    def set_seed(self, seed: int | None) -> None:
+        """Reset policy-local randomness to an explicit seed or clear it."""
+        self._seed = None if seed is None else int(seed)
+        if self._seed is not None:
+            self._generator.manual_seed(self._seed)
 
     def __call__(  # ------------------------------------------------------------------------------
         self, policy_input: PolicyInput, *, explore: bool = True,
     ) -> PolicyDecision:  # fmt: skip
         """Sample one valid action per row from the legal-action mask."""
-        _ = explore
+        if not explore and self._seed is None:
+            raise ValueError("RandomWalkPolicy evaluation requires an explicit seed.")
         valid_action_mask = policy_input.valid_action_mask.to(torch.bool)
         if valid_action_mask.ndim != 2:
             raise ValueError("RandomWalkPolicy expects valid_action_mask with shape (B, A).")

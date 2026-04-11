@@ -139,8 +139,8 @@ class HRModelV1(nn.Module):
         self, batch: Batch, state: Optional[HRMState] = None,
     ) -> tuple[HRMState, tuple[Tensor, Tensor], Tensor]:  # fmt: skip
         """Forward pass through the HRM (``ACTRolloutBackbone`` protocol)."""
-        state = state or self.init_state(batch_size=batch["inputs"].shape[0])
-        x = self.embed_inputs(batch["inputs"])  # (B, S, D) — cell tokens only
+        state = state or self.init_state(batch_size=batch["input_ids"].shape[0])
+        x = self.embed_input_ids(batch["input_ids"])  # (B, S, D) — cell tokens only
 
         state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H is (B, S+1, D)
         logits = self.lm_head(z_H[:, 1:])  # Strip CLS → (B, S, vocab_size)
@@ -149,8 +149,8 @@ class HRModelV1(nn.Module):
         new_state = HRMState(pfc=state_pfc)
         return new_state, (logits, q_logits), theta_cls
 
-    def embed_inputs(  # --------------------------------------------------------------------------
-        self, input: Tensor,
+    def embed_input_ids(  # -----------------------------------------------------------------------
+        self, input_ids: Tensor,
     ) -> Tensor:  # fmt: skip
         """Embed token ids into a scaled representation ready for recurrent reasoning.
 
@@ -164,11 +164,11 @@ class HRModelV1(nn.Module):
             Positional information is injected inside every attention operation via
             Rotary Position Embeddings; no additive position table is needed or used.
         """
-        token_embeddings = self.embed_tokens(input.to(torch.int32))
+        token_embeddings = self.embed_tokens(input_ids.to(torch.int32))
 
         if self.config.pos_encodings == "learned":
             # Learned mode: add positional table, then scale to maintain variance.
-            positions = torch.arange(self.config.seq_length, device=input.device)
+            positions = torch.arange(self.config.seq_length, device=input_ids.device)
             pos_embeddings = self.embed_pos(positions).unsqueeze(0)
             return 0.707106781 * self.config.embedding_scale * (token_embeddings + pos_embeddings)
 

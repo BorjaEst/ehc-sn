@@ -12,7 +12,7 @@ Data requirements
 
 The rollout `TraceTree` metadata must provide:
 
-- ``inputs``: array-like of shape ``[B, N]`` (flattened grid tokens)
+- ``input_ids``: array-like of shape ``[B, N]`` (flattened grid tokens)
 - ``labels``: array-like of shape ``[B, N]`` (flattened target tokens)
 
 The rollout `TraceTree` must provide:
@@ -71,7 +71,7 @@ class OverlayFigure(BaseFigureTemplate):
 
     def __init__(self, trace: TraceTree, ctx: FigureContext) -> None:
         super().__init__(trace, ctx)
-        self.inputs, self.labels = _get_required_metadata(trace)
+        self.input_ids, self.labels = _get_required_metadata(trace)
         self.gt_overlays = _select_gt_overlays(self.labels)
         self.model_overlays = _select_model_overlays(trace)
 
@@ -79,7 +79,7 @@ class OverlayFigure(BaseFigureTemplate):
     def labels_maps(self, ax: Axes) -> None:
         """Plot the top row: ground-truth overlay masks."""
         axs = subdivide_axes(ax, nrows=1, ncols=self.N_PANELS)
-        for ax_i, input_grid, gt_grid in zip(axs[0], self.inputs, self.gt_overlays):
+        for ax_i, input_grid, gt_grid in zip(axs[0], self.input_ids, self.gt_overlays):
             input_grid, gt_grid = reshape_grid(input_grid), reshape_grid(gt_grid)
             plot_maze_with_overlay(ax_i, input_grid, gt_grid)
 
@@ -87,20 +87,20 @@ class OverlayFigure(BaseFigureTemplate):
     def solutions_maps(self, ax: Axes) -> None:
         """Plot the bottom row: model overlay masks at the halt step."""
         axs = subdivide_axes(ax, nrows=1, ncols=self.N_PANELS)
-        for ax_i, input_grid, model_grid in zip(axs[0], self.inputs, self.model_overlays):
+        for ax_i, input_grid, model_grid in zip(axs[0], self.input_ids, self.model_overlays):
             input_grid, model_grid = reshape_grid(input_grid), reshape_grid(model_grid)
             plot_maze_with_overlay(ax_i, input_grid, model_grid)
 
 
 def _get_required_metadata(trace: TraceTree) -> tuple[np.ndarray, np.ndarray]:
-    """Read and validate `inputs` and `labels` from trace metadata.
+    """Read and validate `input_ids` and `labels` from trace metadata.
 
     The figure only needs a small batch for visualization. We cap the returned
     arrays to 10 items to avoid accidentally rendering very wide figures.
     """
-    inputs_arr = np.asarray(trace.get_meta_path("inputs"))
+    input_ids_arr = np.asarray(trace.get_meta_path("input_ids"))
     labels_arr = np.asarray(trace.get_meta_path("labels"))
-    return inputs_arr, labels_arr
+    return input_ids_arr, labels_arr
 
 
 def _select_model_overlays(trace: TraceTree) -> np.ndarray:

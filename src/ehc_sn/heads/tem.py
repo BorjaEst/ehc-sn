@@ -129,7 +129,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         self, outputs: TEMOutput, carry: Any, **_: Any,
     ) -> TEMLosses:  # fmt: skip
         """Compute ELBO-style TEM losses for a single step."""
-        labels = self._observation_target(carry)
+        labels = self._observation_id(carry)
         protocol_mask = self._protocol_mask(carry)
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
@@ -176,7 +176,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         self, losses: TEMLosses, *, carry: Any, outputs: TEMOutput, batch_size: int,
     ) -> dict[str, RatioStat]:  # fmt: skip
         """Build detached TEM ratio metrics for logging."""
-        labels = self._observation_target(carry)
+        labels = self._observation_id(carry)
         protocol_mask = self._protocol_mask(carry)
         protocol_count = protocol_mask.to(dtype=losses.total.dtype).sum()
         batch_count = losses.total.new_tensor(batch_size, dtype=losses.total.dtype)
@@ -217,7 +217,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         self, batch: Batch, carry: Any, outputs: TEMOutput, losses: TEMLosses,
     ) -> Dict[str, Tensor]:  # fmt: skip
         """Compute detached TEM diagnostics and ELBO-style scalar signals."""
-        labels = self._observation_target(carry)
+        labels = self._observation_id(carry)
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
         place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
@@ -251,20 +251,20 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
             signals[S.THETA_CLS_NORM] = outputs.theta_cls.detach().norm(dim=-1).mean()
         return signals
 
-    def _observation_target(  # -------------------------------------------------------------------
+    def _observation_id(  # -----------------------------------------------------------------------
         self, carry: Any,
     ) -> Tensor:  # fmt: skip
-        """Return current-step observation targets from TEM carry data.
+        """Return current-step observation ids from TEM carry data.
 
-        The preferred carry-data key is ``observation_target``. A fallback to
+        The preferred carry-data key is ``observation_id``. A fallback to
         ``labels`` is retained temporarily for compatibility with the current
         rollout wiring. ``carry.data`` is expected to be the same payload that
         produced the current TEM outputs: current observation plus previous
         action.
         """
-        labels = carry.data.get("observation_target", carry.data.get("labels"))
+        labels = carry.data.get("observation_id", carry.data.get("labels"))
         if labels is None:
-            raise KeyError("TEM carry data must provide 'observation_target' or legacy 'labels'.")
+            raise KeyError("TEM carry data must provide 'observation_id' or legacy 'labels'.")
         if labels.ndim > 1:
             if labels.shape[-1] == 1:
                 return labels.squeeze(-1)

@@ -31,12 +31,12 @@ def supervised_maze_tokenize(batch: Mapping[str, Any]) -> dict[str, Tensor]:
     """Convert raw MazeHard channels into flattened input and label tensors."""
     channels = _coerce_numpy_channels(batch)
     grid = channels_to_grid(channels)["grid"]
-    inputs = torch.from_numpy(grid.reshape(-1).astype(np.int64, copy=False))
-    labels = inputs.clone()
+    input_ids = torch.from_numpy(grid.reshape(-1).astype(np.int64, copy=False))
+    labels = input_ids.clone()
     if CHANNEL_SOLUTION in channels:
         solution_mask = torch.from_numpy((channels[CHANNEL_SOLUTION].reshape(-1) > 0).astype(np.bool_, copy=False))
         labels[solution_mask] = O_ID
-    return {"inputs": inputs, "labels": labels}
+    return {"input_ids": input_ids, "labels": labels}
 
 
 __all__ = ["supervised_maze_tokenize"]

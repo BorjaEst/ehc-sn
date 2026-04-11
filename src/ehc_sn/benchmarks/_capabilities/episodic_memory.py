@@ -14,10 +14,10 @@ CueFamily = Literal["observation", "landmark"]
 class EpisodicMemoryStep:
     """One benchmark-owned replay step consumed by an episodic-memory agent."""
 
-    inputs: Tensor
+    observation: Tensor
     previous_action: Tensor
     episode_start: Tensor
-    observation_target: Tensor | None = None
+    observation_id: Tensor | None = None
     location_id: Tensor | None = None
     landmark_id: Tensor | None = None
 

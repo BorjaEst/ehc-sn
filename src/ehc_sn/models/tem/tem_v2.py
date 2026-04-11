@@ -237,21 +237,21 @@ class TEMModelV2(nn.Module):
         rows by the caller. When ``state`` is ``None``, a fresh full-batch state
         is allocated and the normal single-step TEM transition is executed.
         """
-        obs_inputs = inputs["inputs"]
+        observation = inputs["observation"]
         previous_action = inputs["previous_action"]
         episode_start = inputs.get("episode_start")
         landmark_id = inputs.get("landmark_id")
-        obs_embedding = self.autoencoder.encode(obs_inputs)
+        observation_embedding = self.autoencoder.encode(observation)
 
         if state is None:
-            state = self.init_state(int(obs_inputs.shape[0]), memory=None, device=obs_inputs.device)
+            state = self.init_state(int(observation.shape[0]), memory=None, device=observation.device)
 
         # Grid transition prior from action-driven path integration.
         grid_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)
         place_query_from_grid_prior = self.projection_mec(grid_prior)
 
         # Sensory inference: encode observations into LEC features and query place memory from them.
-        lec_features_post, state.lec = self.lec.inference(obs_embedding, state.lec)
+        lec_features_post, state.lec = self.lec.inference(observation_embedding, state.lec)
         place_query_from_obs = self.projection_lec(lec_features_post)
         sensory = self.hpc.read_sensory(
             HPCSensoryRead(

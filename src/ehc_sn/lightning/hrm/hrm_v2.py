@@ -20,7 +20,7 @@ Key behaviors:
         :class:`~ehc_sn.training.partial_reset.PartialResetBatchAssembler`.
 
 The batch structure used throughout this file is a plain ``dict[str, Tensor]``
-with keys ``"inputs"`` and ``"labels"``.
+with keys ``"input_ids"`` and ``"labels"``.
 """
 
 from itertools import repeat
@@ -162,12 +162,12 @@ class TrainingModel(L.LightningModule):
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer = FifoBuffer(
             capacity_rows=4 * config.global_batch_size,  # or local batch size if you prefer
-            keys=("inputs", "labels"),
+            keys=("input_ids", "labels"),
             pin_memory=True,
         )
         self._train_batch_assembler = PartialResetBatchAssembler(
             buffer=self._train_buffer,
-            keys=("inputs", "labels"),
+            keys=("input_ids", "labels"),
         )
 
     @property
@@ -270,7 +270,7 @@ class TrainingModel(L.LightningModule):
         self._train_carry = evaluation.chunk.final_carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
-        local_bs = int(batch["inputs"].shape[0])
+        local_bs = int(batch["input_ids"].shape[0])
         loss = normalize_loss_for_backward(evaluation.evaluated.loss, local_bs)
 
         # Zero gradients before backward so each step uses only the current batch.

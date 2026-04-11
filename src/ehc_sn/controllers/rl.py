@@ -142,18 +142,18 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         This performs an environment reset using the provided batch contents.
 
         Args:
-            batch_sample: Batch dict containing at least ``"inputs"`` and
+            batch_sample: Batch dict containing at least ``"input_ids"`` and
                 ``"labels"`` of shape ``(B, S)``.
 
         Returns:
             Initialized :class:`RLRolloutState` with fresh backbone state and env state.
         """
-        B = batch_sample["inputs"].shape[0]
-        device = batch_sample["inputs"].device
+        B = batch_sample["input_ids"].shape[0]
+        device = batch_sample["input_ids"].device
 
         # Reset env with initial data
         reset_td = TensorDict(
-            {"inputs": batch_sample["inputs"], "labels": batch_sample["labels"]},
+            {"input_ids": batch_sample["input_ids"], "labels": batch_sample["labels"]},
             batch_size=[B], device=device,
         )  # fmt: skip
         env_td = self._env.reset(reset_td)

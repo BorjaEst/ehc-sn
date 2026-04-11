@@ -125,7 +125,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         """Build an initial ACT state from a batch sample.
 
         Args:
-            batch_sample: Batch dict containing at least ``"inputs"`` of shape
+            batch_sample: Batch dict containing at least ``"input_ids"`` of shape
                 ``(B, ...)``.
 
         Returns:

@@ -239,8 +239,8 @@ def main() -> None:
     trace.finalize()
 
     print("Step 3/5: Rollout trace collected.")
-    print(f" - Local batch size: {batch['inputs'].shape[0]}")
-    print(f" - Inputs shape: {tuple(batch['inputs'].shape)}")
+    print(f" - Local batch size: {batch['input_ids'].shape[0]}")
+    print(f" - Input ids shape: {tuple(batch['input_ids'].shape)}")
     print(f" - Labels shape: {tuple(batch['labels'].shape)}")
     print()
 
@@ -249,7 +249,7 @@ def main() -> None:
     # ---------------------------------------------------------------------------------------------
     ctx = FigureContext(
         extras={
-            "inputs": batch["inputs"].cpu().numpy(),
+            "input_ids": batch["input_ids"].cpu().numpy(),
             "labels": batch["labels"].cpu().numpy(),
         }
     )

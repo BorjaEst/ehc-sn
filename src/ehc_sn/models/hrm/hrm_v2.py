@@ -181,7 +181,7 @@ class HRModelV2(nn.Module):
         """Run one model step.
 
         Args:
-            batch: Input batch containing at least ``"inputs"`` of shape ``(B, S)``.
+            batch: Input batch containing at least ``"input_ids"`` of shape ``(B, S)``.
             state: Optional recurrent state to carry across steps. If ``None``, a
                 fresh state is created.
 
@@ -192,8 +192,8 @@ class HRModelV2(nn.Module):
                 - ``r_logits`` is reward / policy output from STR
                 - ``theta_cls`` is ``(B, D)`` CLS summary vector.
         """
-        state = state or self.init_state(batch_size=batch["inputs"].shape[0])
-        x = self.embed_inputs(batch["inputs"])  # (B, S, D)
+        state = state or self.init_state(batch_size=batch["input_ids"].shape[0])
+        x = self.embed_input_ids(batch["input_ids"])  # (B, S, D)
 
         state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H: (B, S+1, D)
         logits = self.lm_head(z_H[:, 1:])  # strip CLS → (B, S, vocab)
@@ -203,18 +203,18 @@ class HRModelV2(nn.Module):
         new_state = HRMState(pfc=state_pfc, str=state_str)
         return new_state, (logits, q_logits, r_logits), theta_cls
 
-    def embed_inputs(  # --------------------------------------------------------------------------
-        self, input: Tensor,
+    def embed_input_ids(  # -----------------------------------------------------------------------
+        self, input_ids: Tensor,
     ) -> Tensor:  # fmt: skip
         """Embed token ids into a scaled representation.
 
         Args:
-            input: Token ids of shape ``(B, S)``.
+            input_ids: Token ids of shape ``(B, S)``.
 
         Returns:
             Embedded inputs of shape ``(B, S, D)`` scaled by ``sqrt(D)``.
         """
-        token_embeddings = self.embed_tokens(input.to(torch.int32))
+        token_embeddings = self.embed_tokens(input_ids.to(torch.int32))
         # Scale embeddings to keep activations in a reasonable range.
         return self.config.embedding_scale * token_embeddings
 

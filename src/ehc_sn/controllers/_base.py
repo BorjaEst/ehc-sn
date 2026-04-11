@@ -13,6 +13,19 @@ from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
 
+def batch_anchor_tensor(batch: Batch) -> Tensor:
+    """Return one representative batch tensor used to infer batch size and device.
+
+    The generic controller layer must not assume a semantic key such as
+    ``"observation"`` or ``"input_ids"``. It only requires a non-empty mapping
+    of tensor-valued batch entries that share the leading batch dimension.
+    """
+    for value in batch.values():
+        if isinstance(value, Tensor):
+            return value
+    raise ValueError("Batch must contain at least one tensor-valued entry.")
+
+
 # =================================================================================================
 class RolloutBackbone[ModelState, ModelOutput](Protocol):
     """Protocol for backbone models driven by rollout controllers.
@@ -56,7 +69,8 @@ class RolloutState[ModelState](DetachMixin):
         halted: Per-slot done/reset flag of shape ``(B,)``; ``True`` means the slot
             halted on the *previous* step and will be refreshed at the start of the
             *next* step.
-        data: Per-slot input/label buffers (e.g. ``"inputs"``, ``"labels"``); each
+        data: Per-slot input/label buffers (for example ``"observation"``,
+            ``"input_ids"``, ``"labels"``); each
             value has shape ``(B, ...)``.  Halted slots receive fresh rows from the
             incoming batch before the backbone forward pass.
     """
@@ -103,8 +117,8 @@ class BaseController[ModelState, ConfigT: BaseModel]:
        ``done`` becomes the ``halted`` field of the new carry.
 
     .. note::
-        ``initial_slots`` assumes the batch sample contains an ``"inputs"`` key
-        of shape ``(B, ...)`` to infer batch size and device.
+        ``initial_slots`` requires at least one tensor-valued batch entry to
+        infer batch size and device.
     """
 
     def __init__(  # ------------------------------------------------------------------------------
@@ -132,11 +146,13 @@ class BaseController[ModelState, ConfigT: BaseModel]:
         ``refresh_slot_data`` call will fill every slot with incoming batch data.
 
         .. warning::
-            Requires ``batch_sample["inputs"]`` to exist with shape ``(B, ...)``.
-            All other keys are allocated as empty buffers with matching dtype/shape.
+            Requires at least one tensor-valued batch entry with shape
+            ``(B, ...)``. All keys are allocated as empty buffers with matching
+            dtype and shape.
         """
-        batch_size = batch_sample["inputs"].shape[0]
-        device = batch_sample["inputs"].device
+        anchor = batch_anchor_tensor(batch_sample)
+        batch_size = int(anchor.shape[0])
+        device = anchor.device
         return RolloutState(
             model_state=self.backbone.init_state(batch_size),
             steps=torch.zeros((batch_size,), dtype=torch.int32, device=device),
@@ -156,10 +172,7 @@ class BaseController[ModelState, ConfigT: BaseModel]:
     ) -> Dict[str, Tensor]:  # fmt: skip
         """Refresh slot buffers for halted rows."""
         batch, halted, data = batch, state.halted, state.data
-        return {
-            key: torch.where(halted.view((-1,) + (1,) * (value.ndim - 1)), value, data[key])
-            for key, value in batch.items()
-        }
+        return {key: torch.where(halted.view((-1,) + (1,) * (value.ndim - 1)), value, data[key]) for key, value in batch.items()}
 
     def advance_steps(  # -------------------------------------------------------------------------
         self, state: RolloutState[ModelState],
@@ -170,4 +183,4 @@ class BaseController[ModelState, ConfigT: BaseModel]:
 
 
 # =================================================================================================
-__all__ = ["BaseController", "RolloutBackbone", "RolloutState"]
+__all__ = ["BaseController", "RolloutBackbone", "RolloutState", "batch_anchor_tensor"]

@@ -38,7 +38,7 @@ def register_builtin_figures() -> None:
                     "act/halted",
                     "pred/solution_overlay",
                 },
-                meta_keys={"inputs", "labels"},
+                meta_keys={"input_ids", "labels"},
             )
         )
 
@@ -55,7 +55,7 @@ def register_builtin_figures() -> None:
                     "act/halted",
                     "pred/solution_overlay",
                 },
-                meta_keys={"inputs", "labels"},
+                meta_keys={"input_ids", "labels"},
             )
         )
 

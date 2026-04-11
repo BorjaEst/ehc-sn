@@ -107,7 +107,7 @@ def _predict_with_controller(
     tokenized = supervised_maze_tokenize(batch)
     device = next(model.parameters()).device
     step_batch = {
-        "inputs": tokenized["inputs"].unsqueeze(0).to(device=device, dtype=torch.int64),
+        "input_ids": tokenized["input_ids"].unsqueeze(0).to(device=device, dtype=torch.int64),
         "labels": tokenized["labels"].unsqueeze(0).to(device=device, dtype=torch.int64),
     }
 
