@@ -22,7 +22,7 @@ from ehc_sn.lightning._rollout import (
 )
 from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, resolve_tem_runtime
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
-from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_STEP_ROUTES
+from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
 from ehc_sn.models.tem.tem_v1 import Batch, ModelSettings_V1, TEMModelV1
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
@@ -117,6 +117,7 @@ class TrainingModel(L.LightningModule):
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(TEM_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(TEM_EPISODE_ROUTES).clone(prefix="val/")
+        self.primary_val_metric_key = f"val/{TEM_PRIMARY_VAL_ROUTE_KEY}"
         self.trace_specs = build_trace_spec("tem")
         self._eval_trace_keys: set[str] | None = None
 
@@ -262,6 +263,13 @@ class TrainingModel(L.LightningModule):
         """Set the semantic trace keys required for evaluation-time figure capture."""
         self._eval_trace_keys = set(keys)
 
+    def _validation_seed(self, batch_idx: int) -> int:
+        """Return the explicit evaluation seed for one validation batch."""
+        seed = self.config.runtime.validation.seed
+        if seed is None:
+            raise ValueError("TEM evaluation requires runtime.validation.seed to be set.")
+        return int(seed) + int(batch_idx)
+
     # -- Training ----------------------------------------------------------------------------------
 
     def training_step(  # -------------------------------------------------------------------------
@@ -320,7 +328,8 @@ class TrainingModel(L.LightningModule):
         self._apply_runtime(self.global_step, log_values=False)
         eval_controller = self._require_eval_controller()
         eval_objective = self._require_eval_objective()
-        step_options = {"allow_halt": False, "explore": False}
+        eval_controller.set_evaluation_seed(self._validation_seed(batch_idx))
+        step_options = {"allow_halt": True, "explore": False}
         carry0 = eval_controller.initial_state(batch)
         trace_meta = self._build_trace_meta(eval_controller)
 

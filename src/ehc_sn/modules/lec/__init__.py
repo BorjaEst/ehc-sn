@@ -90,7 +90,7 @@ class LECState(DetachMixin):
         return replace(self, features=features, filtered_features=filtered_features)
 
     def replace_rows(self, flag: Tensor, fresh: "LECState") -> "LECState":
-        """Return a state where flagged rows are replaced from ``fresh``."""
+        """Merge flagged rows from ``fresh`` for module-owned reset logic."""
         return self.new(
             features=utils.merge_multiscale_rows(flag, self.features, fresh.features),
             filtered_features=utils.merge_multiscale_rows(flag, self.filtered_features, fresh.filtered_features),
@@ -162,12 +162,25 @@ class LECModel(nn.Module):
         return LECState(features=x0, filtered_features=x0)
 
     def reset_state(  # ---------------------------------------------------------------------------
-        self, state: LECState,  # TODO: define based in other modules reset_state
+        self, state: LECState, reset_flag: Tensor,
     ) -> LECState:  # fmt: skip
-        """ """
-        raise NotImplementedError(
-            "LEC reset_state not implemented. Use init_state or implement reset logic here."
-        )
+        """Reset flagged LEC rows to a fresh episode state.
+
+        Args:
+            state: Current LEC state.
+            reset_flag: Boolean / 0-1 tensor of shape ``(B,)`` indicating
+                which rows should be reset.
+
+        Returns:
+            New state with flagged rows replaced by fresh initialization.
+        """
+        device = state.features[0].device
+        reset_flag = reset_flag.to(device=device, dtype=torch.bool).view(-1)
+        if not torch.any(reset_flag):
+            return state
+
+        fresh = self.init_state(int(reset_flag.shape[0]), device=device)
+        return state.replace_rows(reset_flag, fresh)
 
     def set_runtime(  # ---------------------------------------------------------------------------
         self, **_,

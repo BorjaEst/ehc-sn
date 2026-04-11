@@ -78,6 +78,11 @@ class ValidationRuntimeConfig(BaseModel, extra="forbid"):
         ge=1,
         description="Defensive runner cap for validation rollouts. Separate from semantic model max_steps.",
     )
+    seed: int | None = Field(
+        default=None,
+        ge=0,
+        description="Explicit evaluation seed used to make validation rollouts reproducible.",
+    )
 
 
 class RuntimeConfig(BaseModel, extra="forbid"):

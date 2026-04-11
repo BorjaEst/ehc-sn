@@ -33,10 +33,7 @@ class MECSettings(BaseModel, extra="forbid"):
     grid_shape: list[int] = Field(
         ...,
         min_length=1,
-        description=(
-            "Sizes of grid-cell frequency modules. "
-            "The number of frequencies is inferred from the length of this list."
-        ),
+        description=("Sizes of grid-cell frequency modules. " "The number of frequencies is inferred from the length of this list."),
     )
 
     do_sample: bool = Field(
@@ -130,7 +127,7 @@ class MECState(DetachMixin):
     def replace_rows(  # --------------------------------------------------------------------------
         self, flag: Tensor, fresh: "MECState",
     ) -> "MECState":  # fmt: skip
-        """Return a state where flagged rows are replaced from ``fresh``."""
+        """Merge flagged rows from ``fresh`` for module-owned reset logic."""
         uncertainty = None
         if self.uncertainty is not None and fresh.uncertainty is not None:
             uncertainty = utils.merge_multiscale_rows(flag, self.uncertainty, fresh.uncertainty)
@@ -225,6 +222,27 @@ class MECModel(nn.Module):
         transition = LocationBelief(mean=g0, uncertainty=sigma_0)
         return MECState(transition, _n_ovc_modules=self._n_ovc_modules)
 
+    def reset_state(  # ---------------------------------------------------------------------------
+        self, state: MECState, reset_flag: Tensor,
+    ) -> MECState:  # fmt: skip
+        """Reset flagged MEC rows to a fresh episode state.
+
+        Args:
+            state: Current MEC state.
+            reset_flag: Boolean / 0-1 tensor of shape ``(B,)`` indicating
+                which rows should be reset.
+
+        Returns:
+            New state with flagged rows replaced by fresh initialization.
+        """
+        device = state.cells[0].device
+        reset_flag = reset_flag.to(device=device, dtype=torch.bool).view(-1)
+        if not torch.any(reset_flag):
+            return state
+
+        fresh = self.init_state(int(reset_flag.shape[0]), device=device)
+        return state.replace_rows(reset_flag, fresh)
+
     def set_runtime(  # ---------------------------------------------------------------------------
         self, *, p2g_uncertainty_offset: float,
     ) -> None:  # fmt: skip
@@ -260,9 +278,7 @@ class MECModel(nn.Module):
             A tuple `(g_gen, new_state)` where `g_gen` is the generative grid
             code and `new_state` is the updated MEC state.
         """
-        reset_mask = self._normalize_reset_mask(
-            episode_start, batch_size=action.shape[0], device=action.device
-        )
+        reset_mask = self._normalize_reset_mask(episode_start, batch_size=action.shape[0], device=action.device)
         no_direc_mask = None
         if landmark_id is not None:
             no_direc_mask = landmark_id.squeeze(-1).to(torch.int64) != 0
@@ -285,9 +301,7 @@ class MECModel(nn.Module):
             g_gen = self._clamp(transition.mean)
 
         if torch.any(reset_mask):
-            g_gen, next_state = self._preserve_reset_rows(
-                reset_mask, g_gen, state, state.new(cells_next, transition.uncertainty)
-            )
+            g_gen, next_state = self._preserve_reset_rows(reset_mask, g_gen, state, state.new(cells_next, transition.uncertainty))
             return g_gen, next_state
 
         return g_gen, state.new(cells_next, transition.uncertainty)

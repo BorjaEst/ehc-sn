@@ -39,7 +39,13 @@ class TrainingMetricsCallback(pl.Callback):
         pl_module.log_dict(vals, on_step=False, on_epoch=True, logger=True, sync_dist=True)
 
         # Forward the primary accuracy to the progress bar.
-        acc_key = next((k for k in vals if k.endswith("/all/accuracy")), None)
+        acc_key = getattr(pl_module, "primary_val_metric_key", None)
+        if acc_key is not None and acc_key not in vals:
+            raise KeyError(
+                f"primary_val_metric_key '{acc_key}' was not found in computed validation metrics: {sorted(vals)}"
+            )
+        if acc_key is None:
+            acc_key = next((k for k in vals if k.endswith("/all/accuracy")), None)
         if acc_key is not None:
             pl_module.log("val/accuracy", vals[acc_key], prog_bar=True, logger=True, sync_dist=True)
 

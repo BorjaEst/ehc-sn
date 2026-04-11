@@ -123,7 +123,7 @@ class HRModelV2(nn.Module):
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, device=device, dtype=dtype)
         self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)  # Reasoning module with embedded inputs
         self.str = STRModelLinear(config.str, device=device, dtype=dtype)  # Reward estimator
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)  # fmt: skip
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)
         self.reset_parameters()
 
     @property

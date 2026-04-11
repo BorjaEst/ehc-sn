@@ -111,8 +111,8 @@ class HPCState(DetachMixin):
     ) -> "HPCState":  # fmt: skip
         """Return a state where flagged batch rows are replaced from ``fresh``.
 
-        This helper supports partial-reset training loops by row-wise merging
-        grounded-location beliefs and backend-specific memory entries.
+        This owner-internal helper supports module reset logic by row-wise
+        merging grounded-location beliefs and backend-specific memory entries.
         """
         uncertainty = None
         if self.uncertainty is not None and fresh.uncertainty is not None:
@@ -275,6 +275,32 @@ class HPCBase(nn.Module, ABC):
         grounded_belief = LocationBelief(mean=p_init, uncertainty=None)
         memory = memory or self.init_memory(batch_size=batch_size, device=device)
         return HPCState(grounded_belief=grounded_belief, _memory=memory)
+
+    def reset_state(  # ---------------------------------------------------------------------------
+        self, state: HPCState, reset_flag: Tensor,
+    ) -> HPCState:  # fmt: skip
+        """Reset flagged HPC rows to a fresh episode state.
+
+        Args:
+            state: Current HPC state.
+            reset_flag: Boolean / 0-1 tensor of shape ``(B,)`` indicating
+                which rows should be reset.
+
+        Returns:
+            New state with flagged rows replaced by fresh initialization.
+        """
+        device = state.cells[0].device
+        reset_flag = reset_flag.to(device=device, dtype=torch.bool).view(-1)
+        if not torch.any(reset_flag):
+            return state
+
+        fresh = self.init_state(int(reset_flag.shape[0]), device=device, memory=None)
+        return state.replace_rows(
+            reset_flag,
+            fresh,
+            merge_memory_rows=self.merge_memory_rows,
+            common_memory=self.config.common_memory,
+        )
 
     def _flatten_memory_code(  # ------------------------------------------------------------------
         self, code: list[Tensor],

@@ -218,16 +218,10 @@ class TEMModelV1(nn.Module):
         if not torch.any(reset_flag):
             return state
 
-        fresh = self.init_state(int(reset_flag.shape[0]), memory=None, device=reset_flag.device)
         return TEMState(
-            lec=state.lec.replace_rows(reset_flag, fresh.lec),
-            mec=state.mec.replace_rows(reset_flag, fresh.mec),
-            hpc=state.hpc.replace_rows(
-                reset_flag,
-                fresh.hpc,
-                merge_memory_rows=self.hpc.merge_memory_rows,
-                common_memory=self.hpc.config.common_memory,
-            ),
+            lec=self.lec.reset_state(state.lec, reset_flag),
+            mec=self.mec.reset_state(state.mec, reset_flag),
+            hpc=self.hpc.reset_state(state.hpc, reset_flag),
         )
 
     def set_runtime(  # ---------------------------------------------------------------------------
