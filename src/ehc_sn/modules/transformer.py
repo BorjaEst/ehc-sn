@@ -1,5 +1,6 @@
 from typing import Literal, Optional
 
+import torch
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
@@ -116,6 +117,88 @@ class TransformerBlock(nn.Module):
         x = rms_norm(x + attention, variance_epsilon=self.config.rms_norm_eps)
         x = rms_norm(x + self.mlp(x), variance_epsilon=self.config.rms_norm_eps)
         return x
+
+
+class TransformerSequenceSummaryConfig(BaseModel, extra="forbid"):
+    """Configuration for :class:`TransformerSequenceSummary`.
+
+    This config keeps the reusable summary stack separate from any model-local
+    token-id embedding or positional front-end.
+    """
+
+    block: TransformerBlockConfig = Field(
+        ...,
+        description="Base transformer block configuration reused across the summary stack.",
+    )
+    n_layers: int = Field(
+        default=1,
+        ge=1,
+        description="Number of transformer blocks in the summary stack.",
+    )
+
+    @property
+    def hidden_size(self) -> int:
+        """Hidden size consumed and produced by the summary module."""
+        return self.block.hidden_size
+
+    @property
+    def layers(self) -> list[TransformerBlockConfig]:
+        """Concrete block configs used to instantiate the summary stack."""
+        return [self.block for _ in range(self.n_layers)]
+
+
+class TransformerSequenceSummary(nn.Module):
+    """Summarize embedded sequences into one CLS-pooled hidden vector.
+
+    Inputs are already-embedded hidden states of shape ``(B, S, D)``. Any
+    token-id embedding, padding behavior, or positional front-end belongs to
+    the caller rather than the shared transformer layer.
+    """
+
+    def __init__(
+        self,
+        config: TransformerSequenceSummaryConfig,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
+        super().__init__()
+        self._config = config
+        hidden_size = config.hidden_size
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_size, device=device, dtype=dtype))
+        self.blocks = nn.ModuleList([TransformerBlock(layer, device=device, dtype=dtype) for layer in config.layers])
+        self.reset_parameters()
+
+    @property
+    def config(self) -> TransformerSequenceSummaryConfig:
+        """Return the parsed summary-module configuration."""
+        return self._config
+
+    def reset_parameters(self) -> None:
+        """Initialize the CLS summary token."""
+        self.cls_token.data.zero_()
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Return one pooled summary vector per embedded sequence.
+
+        Args:
+            x: Embedded inputs of shape ``(B, S, D)``.
+
+        Returns:
+            Tensor of shape ``(B, D)`` containing the pooled CLS summaries.
+        """
+        if x.ndim != 3:
+            raise ValueError(f"x must have shape (B, S, D), got {tuple(x.shape)}.")
+        if int(x.shape[-1]) != self.config.hidden_size:
+            raise ValueError(
+                "x last dimension must match the summary hidden size, got "
+                f"{int(x.shape[-1])} and {self.config.hidden_size}."
+            )  # fmt: skip
+
+        hidden = torch.cat([self.cls_token.expand(x.shape[0], -1, -1), x], dim=1)
+        for block in self.blocks:
+            hidden = block(hidden)
+        return hidden[:, 0]
 
 
 class TransformerStack(nn.Module):
