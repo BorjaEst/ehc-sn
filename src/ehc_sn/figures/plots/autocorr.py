@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 from ehc_sn.figures.plots.ratemap import PreparedRateMap
 
 DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP = 4
+DEFAULT_SPATIAL_AUTOCORRELOGRAM_DISPLAY_LAG_RADIUS_WORLD = 4.0
 
 
 def plot_spatial_autocorrelogram(
@@ -22,12 +23,24 @@ def plot_spatial_autocorrelogram(
     vmax: float | None = None,
     cmap: str = "coolwarm",
     min_overlap: int = DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP,
+    display_lag_radius_world: float | None = DEFAULT_SPATIAL_AUTOCORRELOGRAM_DISPLAY_LAG_RADIUS_WORLD,
 ) -> Axes:
-    """Plot a 2D spatial autocorrelogram from a prepared rate map."""
+    """Plot a 2D spatial autocorrelogram from a prepared rate map.
+
+    The full lag-space autocorrelogram is always computed first. Rendering may
+    then apply a centered display crop around zero lag so dense figure mosaics
+    emphasize the locally informative structure without changing the underlying
+    statistic.
+    """
     autocorrelogram = compute_spatial_autocorrelogram(
         prepared_rate_map.rate_map,
         prepared_rate_map.valid_mask,
         min_overlap=min_overlap,
+    )
+    autocorrelogram = _crop_spatial_autocorrelogram_for_display(
+        autocorrelogram,
+        prepared_rate_map,
+        display_lag_radius_world=display_lag_radius_world,
     )
     if autocorrelogram.size == 0 or not np.isfinite(autocorrelogram).any():
         ax.text(0.5, 0.5, "No autocorr", ha="center", va="center")
@@ -45,6 +58,90 @@ def plot_spatial_autocorrelogram(
     ax.set_aspect("equal")
     ax.axis("off")
     return ax
+
+
+def _crop_spatial_autocorrelogram_for_display(
+    autocorrelogram: NDArray,
+    prepared_rate_map: PreparedRateMap,
+    *,
+    display_lag_radius_world: float | None,
+) -> NDArray:
+    """Return a centered display crop around zero lag when requested."""
+    crop_slices = _display_autocorrelogram_slices(
+        prepared_rate_map,
+        display_lag_radius_world=display_lag_radius_world,
+    )
+    if crop_slices is None:
+        return autocorrelogram
+    y_slice, x_slice = crop_slices
+    return autocorrelogram[y_slice, x_slice]
+
+
+def _display_autocorrelogram_slices(
+    prepared_rate_map: PreparedRateMap,
+    *,
+    display_lag_radius_world: float | None,
+) -> tuple[slice, slice] | None:
+    """Return centered autocorrelogram slices for a world-unit lag radius."""
+    if display_lag_radius_world is None:
+        return None
+    if display_lag_radius_world <= 0:
+        raise ValueError(f"display_lag_radius_world must be > 0, got {display_lag_radius_world}.")
+
+    pixel_radii = _lag_radius_pixels_from_world(
+        prepared_rate_map,
+        display_lag_radius_world=display_lag_radius_world,
+    )
+    if pixel_radii is None:
+        return None
+
+    pixel_radius_y, pixel_radius_x = pixel_radii
+    max_radius_y = max(int(prepared_rate_map.rate_map.shape[0]) - 1, 0)
+    max_radius_x = max(int(prepared_rate_map.rate_map.shape[1]) - 1, 0)
+    pixel_radius_y = min(pixel_radius_y, max_radius_y)
+    pixel_radius_x = min(pixel_radius_x, max_radius_x)
+
+    if pixel_radius_y >= max_radius_y and pixel_radius_x >= max_radius_x:
+        return None
+
+    center_y = max_radius_y
+    center_x = max_radius_x
+    return (
+        slice(center_y - pixel_radius_y, center_y + pixel_radius_y + 1),
+        slice(center_x - pixel_radius_x, center_x + pixel_radius_x + 1),
+    )
+
+
+def _lag_radius_pixels_from_world(
+    prepared_rate_map: PreparedRateMap,
+    *,
+    display_lag_radius_world: float,
+) -> tuple[int, int] | None:
+    """Convert a symmetric world-unit lag radius into raster-pixel radii."""
+    rate_map = np.asarray(prepared_rate_map.rate_map, dtype=float)
+    if rate_map.ndim != 2 or rate_map.size == 0:
+        return None
+
+    xmin, xmax, ymin, ymax = prepared_rate_map.extent
+    pixel_size_x = _world_units_per_pixel(xmin, xmax, rate_map.shape[1])
+    pixel_size_y = _world_units_per_pixel(ymin, ymax, rate_map.shape[0])
+    if pixel_size_x is None or pixel_size_y is None:
+        return None
+
+    return (
+        max(int(np.ceil(display_lag_radius_world / pixel_size_y)), 0),
+        max(int(np.ceil(display_lag_radius_world / pixel_size_x)), 0),
+    )
+
+
+def _world_units_per_pixel(min_coord: float, max_coord: float, n_pixels: int) -> float | None:
+    """Return the display-world span represented by one raster step."""
+    if n_pixels <= 1:
+        return None
+    span = float(max_coord) - float(min_coord)
+    if not np.isfinite(span) or span <= 0:
+        return None
+    return span / float(n_pixels - 1)
 
 
 def plot_radial_autocorrelogram_profile(
@@ -232,6 +329,7 @@ def plot_spatial_autocorrelogram_mosaic(
     vmax: float | None = None,
     cmap: str = "coolwarm",
     min_overlap: int = DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP,
+    display_lag_radius_world: float | None = DEFAULT_SPATIAL_AUTOCORRELOGRAM_DISPLAY_LAG_RADIUS_WORLD,
 ) -> Sequence[Axes]:
     """Render a mosaic of spatial autocorrelograms from prepared rate maps."""
     axes_list = list(np.ravel(axes)) if isinstance(axes, np.ndarray) else ([axes] if isinstance(axes, Axes) else list(axes))
@@ -252,6 +350,7 @@ def plot_spatial_autocorrelogram_mosaic(
             vmax=vmax,
             cmap=cmap,
             min_overlap=min_overlap,
+            display_lag_radius_world=display_lag_radius_world,
         )
 
     for ax in axes_list[len(prepared_rate_maps) :]:
