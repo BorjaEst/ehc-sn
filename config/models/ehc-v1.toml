@@ -8,6 +8,7 @@ internal_action_count = 4
 external_context_dim  = 1
 sequence_vocab_size   = 6
 sequence_summary_layers = 1
+pfc_hpc_cortical_cue_summary_layers = 1
 enable_sensory_recall = true
 f_initial             = [0.99, 0.3, 0.09, 0.5, 0.4]
 
@@ -42,7 +43,7 @@ f_initial             = [0.99, 0.3, 0.09, 0.5, 0.4]
     clamp_min   = -1.0
     clamp_max   = 1.0
 
-[projection_lec]
+[lec_to_hpc_x_projection]
     mode      = "tiling"
     init      = "identity"
     learnable = false
@@ -54,7 +55,7 @@ f_initial             = [0.99, 0.3, 0.09, 0.5, 0.4]
     clamp_min  = -1.0
     clamp_max  = 1.0
 
-[projection_mec]
+[mec_to_hpc_g_projection]
     mode      = "low_rank"
     init      = "identity"
     learnable = false
