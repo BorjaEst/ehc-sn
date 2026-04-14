@@ -1,19 +1,13 @@
 from __future__ import annotations
 
-import math
-import tomllib
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional, TypeAlias
+from typing import Optional
 
 import torch
 from pydantic import BaseModel
 from torch import Tensor, nn
 
-from ehc_sn.models.ehc.core import EHCContentBankBuilder, EHCV3Codes, EHCV3Content, EHCV3Control, EHCV3Output, EHCWorkspaceWriter
-from ehc_sn.models.ehc.core.ehc_base import *
-from ehc_sn.models.ehc.core.ehc_base import GridCodes, PlaceCodes
-from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
+from ehc_sn.models.ehc.core import *
 from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState, WritePayload
 from ehc_sn.modules.hpc.query_policy import ReadCues, TargetRead
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
@@ -21,19 +15,13 @@ from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
-from ehc_sn.types import Device, Dtype, EHCStepInput, MemoryState, MultiScaleCode
-from ehc_sn.utils import trunc_normal_init_
+from ehc_sn.types import Device, Dtype, MemoryState
 from ehc_sn.utils.detach import DetachMixin
 
 
 # =================================================================================================
 class ModelSettings_V3(BaseModel, extra="forbid", strict=False):
-    """Canonical EHC v3 model settings.
-
-    EHC v3 preserves the staged TEM memory path while adding a fixed semantic
-    cortical workspace, a dedicated cortical sequence summary path, and a
-    target-bank cortical cue pathway.
-    """
+    """Canonical EHC v3 model settings."""
 
 
 # =================================================================================================
@@ -50,7 +38,7 @@ class EHCState(DetachMixin):
 
 # =================================================================================================
 class EHCModelV3(nn.Module):
-    """EHC v3 backbone with a structured step output and no environment stepping."""
+    """Task-agnostic EHC v3 backbone over model-ready latent observations."""
 
     def __init__(  # ------------------------------------------------------------------------------
         self,
@@ -59,23 +47,16 @@ class EHCModelV3(nn.Module):
         device: Optional[Device] = None,
         dtype: Optional[Dtype] = None,
     ) -> None:
-        """Construct the EHC backbone from the resolved EHC v3 model settings.
-
-        The staged TEM memory path is preserved exactly. Cortical context is
-        introduced through a slot-derived cue proposal, a reinstated target-bank
-        cortical trace, and a transient routed control cue that biases replay
-        without being written back into hippocampal memory.
-        """
+        """Construct the EHC backbone from the resolved EHC v3 model settings."""
         super().__init__()
         self._config = config
         n_freq = len(config.hpc.shape)
         transition_action_count = getattr(config, "transition_action_count", getattr(config, "action_count"))
         f_initial = config.f_initial
 
-        # Sensory transducer plus region modules / dynamical cores.
-        self.autoencoder = Autoencoder(config.observation_dim, config.lec.feature_dim, config.autoencoder)
-        self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)  # Reasoning module with embedded inputs
-        self.str = STRModelLinear(config.str, device=device, dtype=dtype)  # Reward estimator
+        # Initialize EHC region modules and inter-region projection modules in one place for clean state management
+        self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)
+        self.str = STRModelLinear(config.str, device=device, dtype=dtype)
         self.hpc = HPCAttention(n_freq, f_initial, config.hpc, device=device, dtype=dtype)
         self.mec = MECModel(transition_action_count, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
@@ -104,13 +85,12 @@ class EHCModelV3(nn.Module):
         *,
         memory: Optional[MemoryState] = None,
         device: Optional[Device] = None,
-        dtype: Optional[Dtype] = None,
     ) -> EHCState:
         """Create an initial recurrent EHC state."""
         memory = memory if memory is not None else self.hpc.init_memory(batch_size=batch_size, device=device)
         return EHCState(
-            pfc=self.pfc.init_state(batch_size),
-            str=self.str.init_state(batch_size),
+            pfc=self.pfc.init_state(batch_size, device=device),
+            str=self.str.init_state(batch_size, device=device),
             lec=self.lec.init_state(batch_size, device=device),
             mec=self.mec.init_state(batch_size, device=device),
             hpc=self.hpc.init_state(batch_size, device=device, memory=memory),
@@ -147,7 +127,7 @@ class EHCModelV3(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self,
-        inputs: EHCStepInput,
+        inputs: EHCV3Input,
         state: Optional[EHCState] = None,
     ) -> tuple[EHCV3Output, EHCState]:
         """Run one forward step of the EHC backbone and return task-agnostic latents."""
@@ -202,24 +182,14 @@ class EHCModelV3(nn.Module):
         state.hpc = self.hpc.update(p_post, payload, state.hpc)
         bank_tokens = self.content_bank(z_H=z_H, p_post=p_post, p_replay_read=p_replay_read)
 
-        # 6. Return the strict task-agnostic output contract.
-        theta_summary = z_H[:, 0]
-        obs_logits = EHCV3ObsLogits(
-            ancestral=self._decode_observation_logits_from_place(p_post),
-            inference=self._decode_observation_logits_from_place(p_replay_read),
-            recall=self._decode_observation_logits_from_place(p_prior_read),
-        )
-        g_codes = GridCodes(post=g_post, prior=g_prior)
-        p_codes = PlaceCodes(post=p_post, prior=p_prior_read, sensory=p_sensory_read, replay=p_replay_read)
-
-        # end. Return the full backbone output
         output = EHCV3Output(
-            control=EHCV3Control(theta_summary=theta_summary, control_logits=control_logits),
-            content=EHCV3Content(bank_tokens=bank_tokens, obs_logits=obs_logits),
-            codes=EHCV3Codes(grid=g_codes, place=p_codes),
+            control=EHCV3Control(theta_summary=z_H[:, 0], control_logits=control_logits),
+            content=EHCV3Content(bank_tokens=bank_tokens),
+            g_codes=GridCodes(post=g_post, prior=g_prior),
+            p_codes=PlaceCodes(post=p_post, prior=p_prior_read, sensory=p_sensory_read, replay=p_replay_read),
         )
         return output, state
 
 
 # =================================================================================================
-__all__ = ["ModelSettings_V3", "EHCState", "EHCModelV3", "EHCV3Output"]
+__all__ = ["ModelSettings_V3", "EHCState", "EHCModelV3", "EHCV3Input", "EHCV3Output"]
