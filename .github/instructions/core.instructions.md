@@ -13,11 +13,19 @@ Before producing any design or code, you MUST:
 
 - `Blocking: missing required specs: <comma-separated list of missing paths>`
 
-When the spec gate passes, treat these as the canonical sources of truth:
+When the spec gate passes:
 
-- `spec/spec-architecture.md` (architecture vocabulary and boundaries)
-- `spec/spec-requirements.md` (repo-level requirements/constraints)
-- `spec/spec-standards.md` (artifact and documentation standards)
+- Read only the files in `required.files` by default.
+- Treat those required files as the canonical always-read sources of truth.
+- Use `spec/spec-manifest.toml [collection.topic_files]` to fetch companion
+	specs only when the task needs them.
+
+Topic routing:
+
+- `data`: processed-data format, pipelines, dataset outputs.
+- `benchmarks`: benchmark definitions, corpus/protocol rules, benchmark-specific reporting.
+- `configuration`: config taxonomy, defaults, and composition patterns.
+- `interfaces`: model state/step surfaces and adapter interface patterns.
 
 If the user request conflicts with canonical specs, surface the conflict and ask for a decision before proceeding.
 

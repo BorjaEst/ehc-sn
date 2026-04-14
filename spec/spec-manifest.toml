@@ -8,6 +8,15 @@ strict = true
         "spec/spec-standards.md",
     ]
 
+[collection]
+    default_scope = "required"
+
+    [collection.topic_files]
+        data = ["spec/spec-data-contracts.md"]
+        benchmarks = ["spec/spec-benchmark-suite.md"]
+        configuration = ["spec/spec-configuration-patterns.md"]
+        interfaces = ["spec/spec-model-interfaces.md"]
+
 [canonical_paths]
     plans_root        = ".copilot-tracking/plans"
     plan_details_root = ".copilot-tracking/details"

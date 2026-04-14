@@ -1,7 +1,7 @@
 # EHC-SN Requirements Specification
 
-> Canonical source of truth for repo-level constraints, gating rules, and
-> dependency contracts.
+> Canonical source of truth for repo-level gating rules, dependency inventory,
+> runtime constraints, and change policy.
 
 ## 1 Spec Gate (Mandatory for Agents)
 
@@ -18,291 +18,170 @@ The only exception is the **Bootstrap Mode** override defined in the
 
 ---
 
-## 2 Namespace Constraint
+## 2 Namespace and Schema Constraints
 
-All new code under `src/ehc_sn/` **MUST** use `ehc_sn` as the sole import
-namespace. Forbidden: `torch_tem`, `hrm_sn`. Legacy code is archived
-under `temp/` (not on the Python path).
-
----
-
-## 3 Schema and Contract Constraints
-
-- **Do not invent** new data schemas, type aliases, or configuration contracts
-  without first checking whether an equivalent exists in:
-  - `ehc_sn/types.py` (type aliases and dataclasses)
-  - Existing Pydantic configs in the owning component
-- **Extend** existing types rather than creating parallel hierarchies.
-- New type aliases in `types.py` must include a docstring with shape conventions
-  (following the existing pattern in that file).
+- All new code under `src/ehc_sn/` **MUST** use `ehc_sn` as the sole import
+  namespace. Forbidden: `torch_tem`, `hrm_sn`.
+- Do not invent new data schemas, type aliases, or configuration contracts
+  without first checking whether an equivalent exists in `ehc_sn/types.py` or
+  in the owning component.
+- Extend existing types rather than creating parallel hierarchies.
+- New type aliases in `ehc_sn/types.py` must include docstrings with shape
+  conventions.
 - New Pydantic configs must use `extra="forbid"` unless there is an explicit,
   documented reason for leniency.
 
-### 3.1 Policy Contracts
+### 2.1 Policy Contracts
 
-- Reusable policy interfaces and policy configuration contracts belong in
-  `ehc_sn/policies/` once they are intended for cross-controller reuse.
-- Policy APIs must consume typed rollout-state views or documented tensor
-  mappings, not arbitrary controller internals.
-- If a canonical model defines an explicit BG or arbitration module, policies
-  must consume that module's declared outputs and must not themselves perform
-  loop-level bundle-score integration or subsume STR/BG responsibilities.
+- Reusable policy interfaces and policy configs belong in `ehc_sn/policies/`.
+- Policy APIs must consume explicit typed inputs rather than arbitrary
+  controller internals.
 - Hard action constraints must be represented explicitly in the policy input.
-  Environment feasibility, logical compatibility, and other admissibility
-  conditions must not be left implicit in downstream losses.
-- When action semantics are structured, prefer typed channel families or
-  documented admissible-bundle mappings over opaque flat encodings.
 - Policy logits used for action selection must remain conceptually distinct
-  from reward-prediction or state-value heads unless a canonical spec documents
-  a deliberate combined head.
-- STR contracts remain narrow by default: reward prediction and optional
-  reward-sensitive bias signals. Full bundle arbitration, admissibility-owned
-  score integration, and generic sampling semantics belong to an explicit BG /
-  arbitration module or to the reusable policy layer according to the canonical
-  architecture spec.
-- Policy objects own policy-local randomness and sampling semantics; controllers
-  may pass mode flags (for example train/eval) but must not duplicate policy
-  sampling logic.
-- Policy configs must use `extra="forbid"` unless there is an explicit,
-  documented compatibility reason.
+  from reward/value heads unless a canonical spec documents a combined head.
+- Policy objects own policy-local randomness and sampling semantics.
 
-### 3.2 Figure Contracts
+### 2.2 Figure Contracts
 
-- The canonical public API of `ehc_sn.figures` is limited to registry/context contracts, built-in registration, sinks, and `ehc_sn`-native figure modules.
-- A public figure module must define one primary figure class derived from `BaseFigureTemplate` and may expose a thin `plot(...)` convenience wrapper.
-- A figure module is public only if it uses the `ehc_sn` namespace exclusively and is exported from the component or registered as a built-in figure.
-- Modules under `src/ehc_sn/figures/` that still import `torch_tem` are migration inventory, not public API.
+- The canonical public API of `ehc_sn.figures` is limited to registry/context
+  contracts, built-in registration, sinks, and `ehc_sn`-native figure modules.
+- A public figure module must define one primary figure class derived from
+  `BaseFigureTemplate` and may expose a thin `plot(...)` wrapper.
+- Modules under `src/ehc_sn/figures/` that still import legacy namespaces are
+  migration inventory, not public API.
+
+---
+
+## 3 Architectural Enforcement Rules
+
+- `models/` must remain task-agnostic.
+- `tasks/` own observation/action/workspace/episode/reward semantics.
+- `adapters/` are the only canonical model-task seam.
+- Model configs define architecture only. Task and adapter configs define task
+  semantics and binding semantics.
+- Lightning training surfaces instantiate `task -> model -> adapter` and must
+  execute through adapter interfaces.
+- Adding a new task or puzzle must require changes only in `tasks/` and
+  optional adapters.
+- Adding a new architecture must require changes only in `models/`, optional
+  adapters, and model-aware training surfaces.
+- Detailed boundary vocabulary lives in `spec/spec-architecture.md`.
+- Detailed model and adapter interface patterns live in
+  `spec/spec-model-interfaces.md`.
 
 ---
 
 ## 4 Dependency Constraints
 
-### 4.1 Runtime Dependencies (declared in `pyproject.toml`)
+### 4.1 Runtime Dependencies
 
-| Dependency           | Role                    | Notes                                   |
-| -------------------- | ----------------------- | --------------------------------------- |
-| `torch`              | Core tensor computation | Pin-free (user-managed CUDA compat)     |
-| `torchrl`            | TorchRL environments    | Controller-owned environment stepping   |
-| `lightning`          | Training orchestration  | LightningModule, Trainer, Callbacks     |
-| `gymnasium`          | Environment interface   | Maze environments                       |
-| `pydantic`           | Configuration schema    | `BaseModel(extra="forbid")` pattern     |
-| `pydantic_settings`  | CLI settings            | `BaseSettings(cli_parse_args=True)`     |
-| `scipy`              | Scientific computing    | Combinatorics, special functions        |
-| `matplotlib`         | Visualization (base)    | Figure rendering                        |
-| `SciencePlots`       | Visualization (styles)  | Publication-ready plot styles           |
-| `pub-ready-plots`    | Visualization (layout)  | Publication-ready plot utilities        |
-| `tensorboard`        | Logging                 | Metric/scalar/image logging             |
-| `rich`               | Terminal output         | Progress bars, formatted console output |
-| `huggingface_hub`    | Dataset download        | Raw/source dataset retrieval            |
-| `maze-nd`            | Maze generation         | Generator dependency used by scripts    |
-| `dungeongen`         | Dungeon generation      | Generator dependency used by scripts    |
-| `typer`              | Script CLIs             | Data-generation command-line interface  |
-| `adam-atan2-pytorch` | Optimizer               | AdamAtan2 for HRM training              |
-| `setuptools`         | Build backend           | Package build and version management    |
+| Dependency           | Role                    | Notes                                     |
+| -------------------- | ----------------------- | ----------------------------------------- |
+| `torch`              | Core tensor computation | Pin-free user-managed CUDA compatibility. |
+| `torchrl`            | TorchRL environments    | Runtime environment stepping.             |
+| `lightning`          | Training orchestration  | `LightningModule`, `Trainer`, callbacks.  |
+| `gymnasium`          | Environment interface   | Maze and navigation environments.         |
+| `pydantic`           | Configuration schema    | `BaseModel(extra="forbid")` pattern.      |
+| `pydantic_settings`  | CLI settings            | `BaseSettings(cli_parse_args=True)`.      |
+| `scipy`              | Scientific computing    | Combinatorics and special functions.      |
+| `matplotlib`         | Visualization           | Base figure rendering.                    |
+| `SciencePlots`       | Visualization           | Publication plotting styles.              |
+| `pub-ready-plots`    | Visualization           | Publication layout helpers.               |
+| `tensorboard`        | Logging                 | Scalars, metrics, and images.             |
+| `rich`               | Terminal output         | Progress and formatted console output.    |
+| `huggingface_hub`    | Dataset download        | Raw/source dataset retrieval.             |
+| `maze-nd`            | Maze generation         | Generator dependency used by scripts.     |
+| `dungeongen`         | Dungeon generation      | Generator dependency used by scripts.     |
+| `typer`              | Script CLIs             | Data-generation command-line interface.   |
+| `adam-atan2-pytorch` | Optimizer               | AdamAtan2 for HRM training.               |
+| `setuptools`         | Build backend           | Package build and version management.     |
 
-### 4.2 Audit Candidates
+### 4.2 Dev and Script Dependencies
 
-- `networkx`: Declared in `pyproject.toml` but currently has zero imports in `src/`. Audit before next release and remove if it remains unused.
-- `maze-nd`: Declared as a runtime dependency but currently used in `scripts/data-gen/` only. Review whether it should move to a script-only optional dependency.
-- `dungeongen`: Declared as a runtime dependency but currently used in `scripts/data-gen/` only. Review whether it should move to a script-only optional dependency.
-- `huggingface_hub`: Declared as a runtime dependency but currently used in `scripts/data-gen/` only. Review whether it should move to a script-only optional dependency.
-- `typer`: Declared as a runtime dependency but currently used in `scripts/data-gen/` only. Review whether it should move to a script-only optional dependency.
+- `pytest` for testing.
+- `black` for formatting.
+- `flake` for linting.
+- `mypy` for type checking.
 
-### 4.3 Known Dependency Bugs
+### 4.3 New Dependency Policy
 
-No known dependency declaration mismatches are currently recorded.
-
-### 4.4 Dev / Script-Only Dependencies
-
-- `pytest`: Testing, used in `tests/`.
-- `black`: Formatting, used in dev tooling.
-- `flake`: Linting, used in dev tooling.
-- `mypy`: Type checking, used in dev tooling.
-
-### 4.5 New Dependency Policy
-
-- New runtime dependencies require justification (why existing deps cannot
-  serve the need).
-- New dependencies must be added to `pyproject.toml` in the appropriate section.
-- Prefer pure-Python or well-maintained packages with compatible licenses.
+- New runtime dependencies require justification.
+- Dependency declaration changes must update `pyproject.toml` and the runtime
+  dependency inventory in this file in the same change.
+- Prefer well-maintained packages with compatible licenses and supported Python
+  versions.
 
 ---
 
-## 5 Data Handling Constraints
+## 5 Runtime and Execution Constraints
 
-- **Pipeline**: `data/raw/` → `data/interim/` → `data/processed/`.
-  DataModules consume only `processed` data.
-- Raw data is **not** committed to version control.
+### 5.1 Python and Package Baseline
+
+- Python version: `>= 3.12`.
+- Build backend: `setuptools`.
+- Package layout: `src/` layout.
+- Active first-party package: `ehc_sn` only.
+- Single-source version: `src/ehc_sn/VERSION`.
+
+### 5.2 Ownership Matrix
+
+| Component                       | Constraint                                                                                                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `training/`                     | Must remain model-agnostic and task-agnostic. No imports from `models/`, `modules/`, `tasks/`, `adapters/`, or `lightning/`.                                                   |
+| `tasks/`                        | Must remain model-agnostic. No imports from `models/`, `modules/`, `adapters/`, or `lightning/`.                                                                               |
+| `adapters/`                     | Canonical model-task seam. May import `models/`, `tasks/`, and lower reusable layers, but must not own benchmark semantics, CLI orchestration, or generic training primitives. |
+| `rollouts/`, `traces/`          | Must remain model-agnostic. No imports from `models/` or `lightning/`.                                                                                                         |
+| `controllers/`, `heads/`        | Must remain model-agnostic and task-agnostic. No imports from `models/`, `tasks/`, or `adapters/`.                                                                             |
+| `policies/`                     | Must remain model-agnostic and controller-agnostic. No imports from `models/`, `tasks/`, `adapters/`, `controllers/`, `heads/`, `training/`, or `modules/`.                    |
+| `benchmarks/` semantic packages | Must remain model-agnostic. No imports from `models/` or `lightning/`.                                                                                                         |
+| `benchmarks/_bindings/`         | Only model-aware benchmark subarea. May import `models/`, `tasks/`, `adapters/`, and lower reusable layers, but must not own benchmark semantics.                              |
+| `lightning/`                    | Owns executable training orchestration. Must execute through adapters rather than task-shaped model payloads.                                                                  |
+| `scripts/benchmarks/`           | Thin wrappers only. Shared benchmark logic belongs in `ehc_sn.benchmarks`.                                                                                                     |
+| `experiments/`                  | Exploratory or paper-specific entry points only. Must not duplicate shared benchmark or training infrastructure.                                                               |
+
+---
+
+## 6 Data and Path Constraints
+
+- Canonical data pipeline: `data/raw/` → `data/interim/` → `data/processed/`.
+- DataModules consume only `processed` data.
+- Raw data is not committed to version control.
 - Processing scripts live in `scripts/data-gen/`.
 - `data/interim/` is optional scratch space; `data/external/` is for
   third-party datasets.
-- No hard-coded absolute paths. Use Pydantic settings or CLI args.
+- No hard-coded absolute paths. Use config or CLI inputs.
+- Detailed processed-data format and dataset output contracts live in
+  `spec/spec-data-contracts.md`.
 
 ---
 
-## 6 Python and Runtime
+## 7 Benchmark and Reporting Constraints
 
-- **Python**: ≥ 3.12 (as declared in `pyproject.toml`).
-- **Build backend**: `setuptools` with `pyproject.toml`-based configuration.
-- **Package layout**: `src/` layout (`tool.setuptools.package-dir = {"" = "src"}`).
-- **Packages**: `ehc_sn` is the only active first-party package.
-- **Version**: Single-source in `src/ehc_sn/VERSION`.
-
----
-
-## 7 Training Infrastructure Constraints
-
-All code in `training/` is **model-agnostic**: it must not import from
-`models/`, `modules/`, or `lightning/`. `training/` owns generic optimization,
-scheduling, buffer, and loss-support primitives only.
-
-All code in `rollouts/` and `traces/` is also **model-agnostic**: it must not
-import from `models/` or `lightning/`. `rollouts/` owns executed-trajectory
-drivers, step records/chunks, and passive sources. `traces/` owns trace
-observers and trace storage.
-
-All executable model-specific training orchestration lives in
-`lightning/`. This includes Lightning trainers, optimizer assembly, scheduler
-assembly, trainer-local checkpoint restore logic, and training/validation
-hooks.
-
-All reusable benchmark code lives in `benchmarks/`.
-
-Within `benchmarks/`, `_capabilities/` and `_infra/` remain
-**model-agnostic**. They own only benchmark capability contracts and
-mechanical benchmark support such as artifact writing, seeding, timing, and
-shared result types. These subareas must not import from `models/` or
-`lightning/`.
-
-Within `benchmarks/`, `_bindings/` is the only model-aware benchmark subarea.
-It may import from `models/` and lower reusable layers to adapt pure models to
-benchmark capability protocols, perform observation-to-tensor conversion, and
-hydrate resolved checkpoint payloads. `_bindings/` must not own benchmark
-semantics, evaluator loops, or benchmark-specific metrics.
-
-Benchmark-semantic packages under `benchmarks/` (for example `b0/`-`b3/`)
-own evaluator loops, manifests, metric interpretation, and benchmark-specific
-protocols such as B2 frozen-weight exposure/probe rules. These packages remain
-model-agnostic and must not import from `models/` or `lightning/`.
-
-All code in `controllers/` and `heads/` is also **model-agnostic**: it must not
-import from `models/`. Controllers own rollout carry/state and model-aware
-single-step transition logic; `rollouts/` owns temporal orchestration. Heads own
-pure objective scoring, metric aggregation, and diagnostic signal assembly over
-executed rollout data. Heads may depend on `controllers/`, `rollouts/`, `loss/`,
-`metrics/`, and `training/` primitives, but `training/` and `rollouts/` must
-remain usable without importing from `controllers/` or `heads/`.
-
-All code in `policies/` is **model-agnostic** and **controller-agnostic**:
-it must not import from `models/`, `controllers/`, `heads/`, `training/`, or
-`modules/`. Policies may depend on external tensor/runtime libraries and on
-lightweight shared contracts such as `ehc_sn.types` and `ehc_sn.utils`.
-
-Policies own reusable action-selection behavior over explicit rollout-state
-views. Controllers remain responsible for rollout lifecycle and environment
-stepping; environments remain responsible for transition dynamics and action
-validation.
+- Canonical benchmark definitions, corpus contracts, frozen-weight rules, claim
+  semantics, and benchmark-specific reporting rules live in
+  `spec/spec-benchmark-suite.md` and are normative.
+- Canonical benchmark entry points belong under `scripts/benchmarks/` as thin
+  wrappers around `ehc_sn.benchmarks`.
+- Benchmark-like code under `experiments/` is non-canonical and must not
+  duplicate shared benchmark orchestration or artifact writing.
+- Repository-level reporting and documentation standards remain governed by
+  `spec/spec-standards.md`.
 
 ---
 
-## 8 Evaluation Protocol Constraints
+## 8 Cross-Component Change Policy
 
-The canonical EHC benchmark contract is defined by the benchmark suite in
-`spec/spec-architecture.md`, which is divided into bridge benchmarks (`B0`,
-`M0`) and primary navigation benchmarks (`B1`-`B3`).
+Cross-component changes require a tracked plan in `.copilot-tracking/plans/`
+before implementation begins. This includes:
 
-- Claims about preserving **HRM-style deliberative capability** may cite the
-  B0 HRM Deliberation Bridge as supporting evidence.
-- Claims about preserving **TEM-style episodic-memory capability** may cite the
-  M0 Episodic Memory Bridge as supporting evidence.
-- Claims about **within-episode navigation reasoning** for EHC must be
-  supported by the B1 Dungeon Navigation Reasoning benchmark. Bridge benchmark
-  results do not replace B1 for navigation-centered claims.
-- Claims about **one-shot adaptation** must be supported by the B2 One-Shot
-  Goal Relocation benchmark.
-- Claims that the EHC decomposition reduces interference or improves controlled
-  memory routing must be supported by the B3 Interference and Control
-  benchmark.
-- B1 uses the processed dungeon split as the in-distribution corpus
-  (`800/100/100` train/val/test layouts) plus four OOD generated corpora of
-  `100` layouts each: `medium/classic`, `large/classic`, `small/temple`, and
-  `small/cavern`.
-- B2 and B3 must precompute, for each layout, a six-goal / three-start
-  contract from the largest connected component: canonical start `1` plus
-  probe starts `2-3`. Goal selection must enforce
-  shortest-path distance at least `8` from the canonical start and at least `6`
-  between selected goals. Probe starts must be reachable and have shortest-path
-  distance at least `6` from every selected goal.
-- B2 training uses goals `1-4`. Held-out one-shot evaluation uses goals `5-6`.
-  The one-shot protocol is: one rewarded exposure episode from start `1`, then
-  immediate probe episodes from starts `2-3`.
-- M0 reuses the B1 processed dungeon split and OOD corpora together with the
-  B2/B3 six-goal / three-start contract.
-- Canonical M0 evaluation uses benchmark-owned shortest-path exposure traces
-  from start `1` to held-out goals `5-6`, followed by fixed probe traces from
-  starts `2-3`.
-- M0 reports current-location localization, held-out-goal recall,
-  write/read consistency from exposure to probe, and interference under
-  sequential held-out-goal exposures.
-- Any model family evaluated on B1-B3 must expose benchmark-time action
-  selection either through a native policy/action head or through an explicit
-  attached policy layer satisfying the rollout contract. Memory or world-model
-  backbones that only update latent state do not qualify as standalone
-  navigation agents.
-- For B1, B2, and B3 specifically, the reported rollout contract may compose a
-  recurrent backbone/state updater with a separate policy layer, but
-  benchmark-facing docs and reports must state explicitly which layer owns
-  action selection.
-- M0 is a bridge benchmark over benchmark-owned trajectory or exposure/probe
-  contracts. It measures memory/state capability rather than full navigation
-  competence and must not be reported as a substitute for B1-B3.
-- During M0 evaluation, no benchmark-time action selection, optimizer step,
-  gradient update, or learned-weight mutation is allowed. Only online
-  fast-memory state and other explicitly declared recurrent state may change.
-- If a benchmark adapter or readout for M0 is learned, it must be fit only on
-  training layouts and goals `1-4`; held-out evaluation on goals `5-6` must
-  remain frozen.
-- During B2 and B3 evaluation, **no optimizer step, gradient update, or weight
-  mutation is allowed**. Only online fast-memory state and other explicitly
-  declared ephemeral rollout state may change.
-- All canonical benchmark reports must use `5` independent training seeds and
-  report mean, `95%` confidence interval, and per-seed scatter.
-- Canonical benchmark reports must include fixed internal-compute budgets of
-  `4`, `8`, and `16` micro-steps or recurrent cycles when the model exposes
-  adaptive internal computation.
-- Any paper or report claiming strong ML / RL performance for EHC must include
-  at least the following baseline pack on the relevant benchmark: one HRM-style
-  recurrent baseline, one memory-disabled or `no-HPC-write` ablation, one
-  pooled-cue or fused-retrieval ablation, and one generic RL baseline when the
-  claim is framed as broad RL competence.
-- Benchmark orchestration code intended for reuse across B0, M0, and B1-B3 belongs in
-  `ehc_sn.benchmarks`.
-- Model-aware benchmark bindings, observation-to-tensor conversion, and
-  benchmark-time checkpoint hydration belong in `ehc_sn.benchmarks._bindings`.
-- Benchmark-semantic packages under `ehc_sn.benchmarks` must not dispatch on
-  `model_kind`, instantiate concrete training models, or load checkpoints
-  directly.
-- Canonical benchmark entrypoints belong under `scripts/benchmarks/` as thin
-  wrappers that parse user input, resolve checkpoint paths and binding
-  selection, and delegate to evaluators in `ehc_sn.benchmarks`.
-- Scripts under experiments/ are exploratory or paper-specific and must not 
-  duplicate shared benchmark job planning, runtime resolution, or
-  artifact-writing logic.
+- adding a new top-level package under `ehc_sn/`;
+- moving code between components;
+- changing a public API used across components;
+- adding or removing a runtime dependency.
 
----
+For new top-level packages, the same change must update
+`spec/spec-architecture.md` so the component taxonomy remains complete and the
+dependency boundaries remain explicit.
 
-## 9 Cross-Component Change Policy
-
-Code changes that cross component boundaries require a tracked plan in
-`.copilot-tracking/plans/` **before** implementation begins. This includes:
-
-- Adding a new top-level package under `ehc_sn/`.
-- Moving code between components.
-- Changing the public API of a component that other components depend on.
-- Adding or removing a runtime dependency.
-
-For new top-level packages, the plan must also update `spec/spec-architecture.md`
-so the component taxonomy remains complete and dependency boundaries are explicit.
-
-Single-component changes (bug fixes, internal refactors, new private helpers)
-do not require a plan unless they alter the component's public contract.
+Single-component changes do not require a tracked plan unless they alter the
+component's public contract.

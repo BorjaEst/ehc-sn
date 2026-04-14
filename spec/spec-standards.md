@@ -116,6 +116,13 @@ or consumed.
 
 - Canonical specs (`spec/*.md`) are living documents. They must be updated
   when the architecture, requirements, or standards change.
+- Only the files listed in `spec/spec-manifest.toml [required.files]` are the
+  always-read core spec set for agents. Keep that set small and hot.
+- Low-frequency reference material belongs in companion specs that are linked
+  from the core specs rather than copied into them.
+- Core specs should stay short, direct, and low-duplication. If a rule already
+  lives in one required spec, other required specs should reference it rather
+  than restating its narrative explanation.
 - Specs are not duplicated into `docs/`. If the MkDocs site needs to reference
   specs, it should link to the `spec/` files.
 - Changes to top-level packages under `src/ehc_sn/` must update the component
