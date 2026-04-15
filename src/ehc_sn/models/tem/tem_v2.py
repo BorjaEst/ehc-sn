@@ -1,11 +1,11 @@
-""" """
+"""TEM v2 backbone."""
 
 from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, TypeAlias
+from typing import Optional, TypeAlias, cast
 
 import torch
 from pydantic import BaseModel, Field, computed_field, model_validator
@@ -18,15 +18,29 @@ from ehc_sn.modules.hpc import SensoryRead as HPCSensoryRead
 from ehc_sn.modules.hpc.query_policy import ReadCues, TargetRead
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
-from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
+from ehc_sn.modules.projection import ProjectionBundle, ProjectionModule, ProjectionSettings
 from ehc_sn.types import Device, Dtype, MemoryState
 from ehc_sn.utils.detach import DetachMixin
 
 # Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
-Batch: TypeAlias = Dict[str, Tensor]
+Batch: TypeAlias = dict[str, Tensor]
 ObsLogits = tuple[Tensor, Tensor, Tensor]  # (inference, retrieved, ancestral)
 GridCodes = tuple[Tensor, Tensor]  # (posterior, prior)
 PlaceCodes = tuple[Tensor, Tensor, Optional[Tensor]]  # (posterior, prior, sensory-cued retrieval)
+
+
+# =================================================================================================
+class TEMProjectionSettings(BaseModel, extra="forbid", strict=False):
+    """Inter-region projection settings for TEM backbones."""
+
+    lec_to_hpc_x: ProjectionSettings = Field(
+        default_factory=lambda: ProjectionSettings(mode="tiling", learnable=False),
+        description="Projection settings mapping LEC features into hippocampal query space.",
+    )
+    mec_to_hpc_g: ProjectionSettings = Field(
+        default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False, rank=[10, 10, 8, 6, 6]),
+        description="Projection settings mapping MEC codes into hippocampal query space.",
+    )
 
 
 # =================================================================================================
@@ -108,21 +122,9 @@ class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
         ...,
         description="Settings for the autoencoder module used for observation compression.",
     )
-
-    projection_lec: ProjectionSettings = Field(
-        default_factory=lambda: ProjectionSettings(mode="tiling", learnable=False),
-        description=(
-            "Settings for the projection module between LEC and HPC. "
-            "This module projects LEC features into the format expected by HPC memory."
-        ),
-    )
-    projection_mec: ProjectionSettings = Field(
-        default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False, rank=[10, 10, 8, 6, 6]),
-        # default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False),
-        description=(
-            "Settings for the projection module between MEC and HPC. "
-            "This module projects MEC abstract location codes into the format expected by HPC memory."
-        ),
+    projections: TEMProjectionSettings = Field(
+        default_factory=TEMProjectionSettings,
+        description="Inter-region projection settings grouped by named edge.",
     )
 
     @computed_field
@@ -188,13 +190,25 @@ class TEMModelV2(nn.Module):
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
         # Projection modules
-        self.projection_mec = ProjectionModule(self.mec, self.hpc, config.projection_mec)
-        self.projection_lec = ProjectionModule(self.lec, self.hpc, config.projection_lec)
+        self.projections = ProjectionBundle.from_modules(
+            mec_to_hpc_g=(self.mec, self.hpc, config.projections.mec_to_hpc_g),
+            lec_to_hpc_x=(self.lec, self.hpc, config.projections.lec_to_hpc_x),
+        )
 
     @property
     def config(self) -> ModelSettings_V2:
         """Return the parsed TEM v2 model settings."""
         return self._config
+
+    @property
+    def mec_to_hpc_g(self) -> ProjectionModule:
+        """Return the MEC-to-HPC projection edge."""
+        return cast(ProjectionModule, self.projections["mec_to_hpc_g"])
+
+    @property
+    def lec_to_hpc_x(self) -> ProjectionModule:
+        """Return the LEC-to-HPC projection edge."""
+        return cast(ProjectionModule, self.projections["lec_to_hpc_x"])
 
     def init_state(  # ----------------------------------------------------------------------------
         self, batch_size: int, *, memory: Optional[MemoryState] = None,
@@ -230,7 +244,7 @@ class TEMModelV2(nn.Module):
 
     def forward(  # -------------------------------------------------------------------------------
         self, inputs: Batch, state: Optional[TEMState] = None,
-    ) -> tuple[TEMState, ObsLogits, Any, GridCodes, PlaceCodes]:  # fmt: skip
+    ) -> tuple[TEMState, ObsLogits, None, GridCodes, PlaceCodes]:  # fmt: skip
         """Run one TEM step from the current payload and recurrent state.
 
         ``state`` is assumed to have already been reset for any fresh episode
@@ -248,11 +262,11 @@ class TEMModelV2(nn.Module):
 
         # Grid transition prior from action-driven path integration.
         grid_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)
-        place_query_from_grid_prior = self.projection_mec(grid_prior)
+        place_query_from_grid_prior = self.mec_to_hpc_g(grid_prior)
 
         # Sensory inference: encode observations into LEC features and query place memory from them.
         lec_features_post, state.lec = self.lec.inference(observation_embedding, state.lec)
-        place_query_from_obs = self.projection_lec(lec_features_post)
+        place_query_from_obs = self.lec_to_hpc_x(lec_features_post)
         sensory = self.hpc.read_sensory(
             HPCSensoryRead(
                 state=state.hpc,
@@ -264,7 +278,7 @@ class TEMModelV2(nn.Module):
 
         # Grid posterior after correcting the prior with recalled place evidence.
         grid_post, state.mec = self.mec.inference(sensory.recall, landmark_id=landmark_id, state=state.mec)  # fmt: skip
-        place_query_from_grid_post = self.projection_mec(grid_post)
+        place_query_from_grid_post = self.mec_to_hpc_g(grid_post)
         transition = TEMTransitionPlan(
             sensory=sensory,
             grid_prior=grid_prior,
@@ -276,23 +290,21 @@ class TEMModelV2(nn.Module):
 
         step = self.hpc.transition(transition.to_hpc_transition(state.hpc))
         place_sensory = step.sensory.recall
-        place_recall_from_grid_prior = step.grid_prior_recall
-        place_recall_from_grid_post = step.grid_posterior_recall
         place_prior = step.place_prior
         place_retrieved = step.place_retrieved
         place_post = step.place_post
         state.hpc = step.state
 
         # Decode observation logits for the three TEM pathways.
-        lec_features_from_place_post = self.projection_lec.inverse(place_post)
+        lec_features_from_place_post = self.lec_to_hpc_x.inverse(place_post)
         obs_features_inference = self.lec.generative(lec_features_from_place_post)
         logits_inference = self.autoencoder.decode(obs_features_inference)
 
-        lec_features_from_place_retrieved = self.projection_lec.inverse(place_retrieved)
+        lec_features_from_place_retrieved = self.lec_to_hpc_x.inverse(place_retrieved)
         obs_features_retrieved = self.lec.generative(lec_features_from_place_retrieved)
         logits_retrieved = self.autoencoder.decode(obs_features_retrieved)
 
-        lec_features_from_place_prior = self.projection_lec.inverse(place_prior)
+        lec_features_from_place_prior = self.lec_to_hpc_x.inverse(place_prior)
         obs_features_ancestral = self.lec.generative(lec_features_from_place_prior)
         logits_ancestral = self.autoencoder.decode(obs_features_ancestral)
 
