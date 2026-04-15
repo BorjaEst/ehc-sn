@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from itertools import repeat
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import lightning as L
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
+from ehc_sn.adapters.navigation import NavigationTEMV2BridgeAdapter
 from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
@@ -100,6 +100,7 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettings_V2.from_config(config.model_config_path)
         self.model = TEMModelV2(model_settings)
+        self.bridge_adapter = NavigationTEMV2BridgeAdapter(self.model)
         self.train_environment: Environment | None = None
         self.train_controller: TEMController | None = None
         self.train_objective: TEMLossHead | None = None
@@ -143,7 +144,7 @@ class TrainingModel(L.LightningModule):
     def _build_runtime(self, *, batch_size: int) -> tuple[Environment, TEMController, TEMLossHead]:
         """Construct one phase-local TEM rollout runtime around the shared model."""
         environment = Environment(self.config.environment, batch_size=batch_size)
-        controller = TEMController(self.model, environment, self.config.controller)
+        controller = TEMController(self.bridge_adapter, environment, self.config.controller)
         objective = TEMLossHead(self.config.loss)
         return environment, controller, objective
 
@@ -274,7 +275,7 @@ class TrainingModel(L.LightningModule):
 
     def training_step(  # -------------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
-    ) -> Dict[str, object]:  # fmt: skip
+    ) -> dict[str, object]:  # fmt: skip
         """Run one TEM chunked-TBPTT optimizer update through the recurrent runner."""
         self._apply_runtime(self.global_step, log_values=True)
         train_controller = self._require_train_controller()
@@ -323,7 +324,7 @@ class TrainingModel(L.LightningModule):
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
-    ) -> Dict[str, object]:  # fmt: skip
+    ) -> dict[str, object]:  # fmt: skip
         """Run a full TEM rollout through the recurrent runner and trace observer."""
         self._apply_runtime(self.global_step, log_values=False)
         eval_controller = self._require_eval_controller()
