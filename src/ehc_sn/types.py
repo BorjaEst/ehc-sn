@@ -792,7 +792,10 @@ class Prediction:
 
 # TODO
 Activation = Literal["leaky_relu", "sigmoid", "none"]
-ProjectionMode = Literal["identity", "tiling", "low_rank", "random"]
+ProjectionKind = Literal["identity", "linear", "tiling", "low_rank"]
+ProjectionBridge = Literal["auto", "aligned", "broadcast"]
+ProjectionEndpointKind = Literal["flat", "multiscale", "token_sequence"]
+ProjectionMode: TypeAlias = ProjectionKind
 InitStrategy = Literal["identity", "random"]
 
 
