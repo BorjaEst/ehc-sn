@@ -194,13 +194,14 @@ class PFCModel(nn.Module):
         return PFCState(memory=memory)
 
     def forward(  # -------------------------------------------------------------------------------
-        self, x: Tensor, state: Optional[PFCState] = None,
+        self, x: Tensor, state: Optional[PFCState] = None, prefix_bias: Optional[Tensor] = None,
     ) -> tuple[PFCState, Tensor, Tensor]:  # fmt: skip
         """Run recurrent reasoning and compute auxiliary value estimates.
 
         Args:
             x: Embedded inputs of shape ``(B, S, D)`` (cell tokens only; no CLS).
             state: Optional carry state. If ``None``, a fresh state is created.
+            prefix_bias:
 
         Returns:
             ``(new_state, z_H, q_estimation)`` where:
@@ -213,7 +214,10 @@ class PFCModel(nn.Module):
 
         # Prepend CLS to cell embeddings: (B, S, D) → (B, S+1, D).
         # Reasoning modules are CLS-agnostic; they see a uniform sequence.
-        x = torch.cat([self.cls_token.expand(x.shape[0], -1, -1), x], dim=1)
+        cls_token = self.cls_token.expand(x.shape[0], -1, -1)
+        if prefix_bias is not None:
+            cls_token = cls_token + prefix_bias.unsqueeze(1).to(dtype=cls_token.dtype)
+        x = torch.cat([cls_token, x], dim=1)
 
         # Forward iterations without grad for memory efficiency.
         # The final update at each level is executed with gradients below.
