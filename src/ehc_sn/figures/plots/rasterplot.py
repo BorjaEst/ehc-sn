@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -14,7 +14,7 @@ def plot_observations(
     observations: np.ndarray,
     *,
     cmap: str = "GnBu",
-    **options: Dict[str, Any],
+    **options: dict[str, Any],
 ) -> ScalarMappable:
     """Plot the observation raster panel."""
     return ax.imshow(
@@ -33,7 +33,7 @@ def plot_activation(
     activation: np.ndarray,
     *,
     cmap: str = "GnBu",
-    **options: Dict[str, Any],
+    **options: dict[str, Any],
 ) -> ScalarMappable | None:
     """Plot a single activation heatmap panel."""
     return ax.imshow(
