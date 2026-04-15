@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import torch
 from torch import Tensor
@@ -12,6 +11,7 @@ from torch import dtype as Dtype
 from torch import nn
 
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
+from ehc_sn.tasks.navigation import NavigationTaskOutput
 from ehc_sn.types import Batch
 
 
@@ -21,41 +21,23 @@ class NavigationAdapter(nn.Module):
 
     def __init__(  # ----------------------------------------------------------
         self,
-        hidden_size: int,
+        observation_dim: int,
+        feature_dim: int,
         action_count: int,
+        autoencoder_settings: AutoencoderSettings,
     ) -> None:
         """Initialize the navigation adapter head with a simple MLP over the backbone summary."""
         super().__init__()
-        self.task_action_head = nn.Linear(hidden_size, action_count)
-        self.autoencoder = Autoencoder(observation_dim, feature_dim, autoencoder)
-
-    def build_backbone_input(  # ----------------------------------------------
-        self,
-        batch: Batch,
-    ):  # TODO:
-        """Encode raw observations and pack the task-agnostic input."""
-        return
-
-    def decode_obs_logits(  # -------------------------------------------------
-        self,
-        # TODO: add arguments for the backbone output needed to decode obs logits
-    ):  # TODO:
-        """Decode raw observation logits from backbone place codes."""
-        return
-
-    def decode_from_place(  # ------------------------------------------------
-        self,
-        # TODO: add arguments for the backbone output needed to decode obs logits
-    ) -> Tensor:
-        """Decode one place-like code back into raw observation logits."""
-        return
+        self.task_action_head = nn.LazyLinear(action_count)
+        self.autoencoder = Autoencoder(observation_dim, feature_dim, autoencoder_settings)
 
     def forward(  # -----------------------------------------------------------
         self,
+        input: NavigationTaskInput,
         # TODO: add arguments for the backbone output needed to decode obs logits
-    ):  # TODO: who defines the output?
-        """Return task-owned navigation ...???."""
-        return
+    ) -> NavigationTaskOutput:
+        """Return task-owned navigation outputs decoded from one backbone step."""
+        raise NotImplementedError("NavigationAdapter.forward is signature-only for now.")
 
 
 # =============================================================================
@@ -71,5 +53,6 @@ class NavigationTEMV2BridgeAdapter(nn.Module):
 # =============================================================================
 __all__ = [
     "NavigationAdapter",
-    "NavigationAdapterHead",
+    "NavigationTEMV1BridgeAdapter",
+    "NavigationTEMV2BridgeAdapter",
 ]

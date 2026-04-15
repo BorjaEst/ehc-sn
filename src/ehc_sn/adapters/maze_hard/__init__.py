@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 from torch import Tensor, nn
 
-from ehc_sn.models.hrm.hrm_v1 import HRMBatchV1, HRModelV1, HRMStateV1
-from ehc_sn.models.hrm.hrm_v2 import HRMBatchV2, HRModelV2, HRMStateV2
+from ehc_sn.models.hrm.core import HRMOutput
+from ehc_sn.models.hrm.hrm_v1 import Batch as HRMBatchV1
+from ehc_sn.models.hrm.hrm_v1 import HRModelV1
+from ehc_sn.models.hrm.hrm_v1 import HRMState as HRMStateV1
+from ehc_sn.models.hrm.hrm_v2 import Batch as HRMBatchV2
+from ehc_sn.models.hrm.hrm_v2 import HRModelV2
+from ehc_sn.models.hrm.hrm_v2 import HRMState as HRMStateV2
+from ehc_sn.modules.pfc import NamedWorkspace
+from ehc_sn.tasks.maze_hard import MazeHardTaskOutput
 from ehc_sn.types import Batch
 
 
@@ -21,7 +30,7 @@ class MazeHardTokenAdapter(nn.Module):
         hidden_size: int,
         *,
         num_heads: int = 1,
-    ):
+    ) -> None:
         """Initialize the MazeHard token adapter with query embeddings and projection head."""
         super().__init__()
         self.query_embed = nn.Embedding(seq_length, hidden_size)
@@ -48,7 +57,7 @@ class MazeHardTokenAdapter(nn.Module):
     def decode_content_bank(  # -----------------------------------------------
         self,
         queries: Tensor,
-        content_bank: Workspace,
+        content_bank: NamedWorkspace,
     ) -> Tensor:
         """Decode token-position queries against the decoder-ready content bank."""
         bank_tokens = content_bank.tokens
@@ -65,7 +74,7 @@ class MazeHardTokenAdapter(nn.Module):
     def forward(  # -----------------------------------------------------------
         self,
         batch: Batch,
-        content_bank: Workspace,
+        content_bank: NamedWorkspace,
         *,
         device: torch.device | None = None,
     ) -> Tensor:
@@ -78,20 +87,66 @@ class MazeHardTokenAdapter(nn.Module):
 
 
 # =============================================================================
+@dataclass(frozen=True)
+class MazeHardHRMV1ControlOutput:
+    """Control payload emitted by the MazeHard+HRM v1 bridge."""
+
+    theta_summary: Tensor
+    q_logits: Tensor
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class MazeHardHRMV1BridgeOutput:
+    """Concrete task+model output emitted by the MazeHard+HRM v1 bridge."""
+
+    task: MazeHardTaskOutput
+    control: MazeHardHRMV1ControlOutput
+    raw_model_output: HRMOutput
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class MazeHardHRMV2ControlOutput:
+    """Control payload emitted by the MazeHard+HRM v2 bridge."""
+
+    theta_summary: Tensor
+    q_logits: Tensor
+    value_logits: Tensor
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class MazeHardHRMV2BridgeOutput:
+    """Concrete task+model output emitted by the MazeHard+HRM v2 bridge."""
+
+    task: MazeHardTaskOutput
+    control: MazeHardHRMV2ControlOutput
+    raw_model_output: HRMOutput
+
+
+# =============================================================================
 class MazeHardHRMV1BridgeAdapter(nn.Module):
-    """MazeHard bridge that preserves the ACT controller contract over canonical HRM v1."""
+    """MazeHard+HRM v1 model-task binding over the canonical HRM core."""
 
     def __init__(  # ----------------------------------------------------------
         self,
         model: HRModelV1,
+        task_adapter: MazeHardTokenAdapter | None = None,
     ) -> None:
         super().__init__()
         self._model = model
+        self._task_adapter = task_adapter
 
     @property
     def model(self) -> HRModelV1:
         """Return the wrapped canonical HRM v1 model."""
         return self._model
+
+    @property
+    def task_adapter(self) -> MazeHardTokenAdapter | None:
+        """Return the optional task-side decoder owned by this bridge."""
+        return self._task_adapter
 
     def init_state(  # --------------------------------------------------------
         self,
@@ -112,34 +167,49 @@ class MazeHardHRMV1BridgeAdapter(nn.Module):
         self,
         batch: HRMBatchV1,
         state: HRMStateV1 | None = None,
-    ):  # TODO: the output is defined by the
-        """Encode MazeHard tokens, run canonical HRM v1, and decode task logits."""
+    ) -> tuple[HRMStateV1, MazeHardHRMV1BridgeOutput]:
+        """Encode MazeHard tokens, run canonical HRM v1, and return task+control outputs."""
         next_state, output = self.model.step(
             self.model.build_input_workspace(batch["input_ids"]),
             state=state,
         )
-        logits = self.model.decode_content_bank(
-            output.content.content_bank.tokens,
+        if self.task_adapter is None:
+            logits = self.model.decode_content_bank(output.content.content_bank.tokens)
+        else:
+            logits = self.task_adapter(batch, output.content.content_bank)
+        return next_state.detach(), MazeHardHRMV1BridgeOutput(
+            task=MazeHardTaskOutput(task_logits=logits),
+            control=MazeHardHRMV1ControlOutput(
+                theta_summary=output.control.theta_summary,
+                q_logits=output.control.q_logits,
+            ),
+            raw_model_output=output,
         )
-        return
 
 
 # =============================================================================
 class MazeHardHRMV2BridgeAdapter(nn.Module):
-    """MazeHard bridge that preserves the RL controller contract over canonical HRM v2."""
+    """MazeHard+HRM v2 model-task binding over the canonical HRM core."""
 
     def __init__(  # ----------------------------------------------------------
         self,
         model: HRModelV2,
+        task_adapter: MazeHardTokenAdapter | None = None,
     ) -> None:
         """Initialize the MazeHard HRM v2 bridge adapter with the wrapped canonical model."""
         super().__init__()
         self._model = model
+        self._task_adapter = task_adapter
 
     @property
     def model(self) -> HRModelV2:
         """Return the wrapped canonical HRM v2 model."""
         return self._model
+
+    @property
+    def task_adapter(self) -> MazeHardTokenAdapter | None:
+        """Return the optional task-side decoder owned by this bridge."""
+        return self._task_adapter
 
     def init_state(  # --------------------------------------------------------
         self,
@@ -160,23 +230,39 @@ class MazeHardHRMV2BridgeAdapter(nn.Module):
         self,
         batch: HRMBatchV2,
         state: HRMStateV2 | None = None,
-    ):  # TODO: the output is defined by the
-        """Encode MazeHard tokens, run canonical HRM v2, and decode task logits."""
+    ) -> tuple[HRMStateV2, MazeHardHRMV2BridgeOutput]:
+        """Encode MazeHard tokens, run canonical HRM v2, and return task+control outputs."""
         next_state, output = self.model.step(
             self.model.build_input_workspace(batch["input_ids"]),
             state=state,
         )
-        logits = self.model.decode_content_bank(output.content.content_bank.tokens)
+        if self.task_adapter is None:
+            logits = self.model.decode_content_bank(output.content.content_bank.tokens)
+        else:
+            logits = self.task_adapter(batch, output.content.content_bank)
         reward_logits = output.control.reward_logits
         if reward_logits is None:
             raise RuntimeError("HRM v2 bridge expected reward logits from the canonical HRM core.")
 
-        return
+        return next_state.detach(), MazeHardHRMV2BridgeOutput(
+            task=MazeHardTaskOutput(task_logits=logits),
+            control=MazeHardHRMV2ControlOutput(
+                theta_summary=output.control.theta_summary,
+                q_logits=output.control.q_logits,
+                value_logits=reward_logits,
+            ),
+            raw_model_output=output,
+        )
 
 
 # =============================================================================
 __all__ = [
     "MazeHardHRMV1BridgeAdapter",
+    "MazeHardHRMV1BridgeOutput",
+    "MazeHardHRMV1ControlOutput",
     "MazeHardHRMV2BridgeAdapter",
+    "MazeHardHRMV2BridgeOutput",
+    "MazeHardHRMV2ControlOutput",
+    "MazeHardTaskOutput",
     "MazeHardTokenAdapter",
 ]
