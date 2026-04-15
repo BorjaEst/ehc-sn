@@ -8,7 +8,7 @@ TEM-specific pathway detail remains in detached diagnostics and metric extras.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 from pydantic import BaseModel, Field
@@ -112,7 +112,7 @@ class TEMLossStep(VariationalLossStep):
     losses: TEMLosses
     metrics: StepMetrics
     outputs: Optional[TEMOutput] = None
-    signals: Dict[str, Any] | None = None
+    signals: dict[str, Any] | None = None
 
 
 # =================================================================================================
@@ -208,14 +208,14 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         }  # fmt: skip
 
     def _build_step_output(  # -------------------------------------------------------------------
-        self, losses: TEMLosses, metrics: StepMetrics, signals: Dict[str, Any], outputs: Any,
+        self, losses: TEMLosses, metrics: StepMetrics, signals: dict[str, Any], outputs: Any,
     ) -> TEMLossStep:  # fmt: skip
         """Wrap losses, metrics, and signals into a :class:`TEMLossStep`."""
         return TEMLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
     def compute_signals(  # -----------------------------------------------------------------------
         self, batch: Batch, carry: Any, outputs: TEMOutput, losses: TEMLosses,
-    ) -> Dict[str, Tensor]:  # fmt: skip
+    ) -> dict[str, Tensor]:  # fmt: skip
         """Compute detached TEM diagnostics and ELBO-style scalar signals."""
         labels = self._observation_id(carry)
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)

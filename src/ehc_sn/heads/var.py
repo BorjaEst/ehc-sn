@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 from pydantic import BaseModel, Field
@@ -70,7 +70,7 @@ class VARLossStep(VariationalLossStep):
     losses: VARLosses  # Combined losses for this step, kept live for backward()
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
     outputs: Optional[VAROutput] = None  # Raw controller outputs
-    signals: Dict[str, Any] | None = None  # Diagnostic signals (T2/T3); plain dict
+    signals: dict[str, Any] | None = None  # Diagnostic signals (T2/T3); plain dict
 
 
 # =================================================================================================
@@ -108,7 +108,7 @@ class VARLossHead(VariationalLossHeadBase[VARLossConfig]):
         )
 
     def _build_step_output(  # --------------------------------------------------------------------
-        self, losses: VARLosses, metrics: StepMetrics, signals: Dict[str, Any], outputs: VAROutput,
+        self, losses: VARLosses, metrics: StepMetrics, signals: dict[str, Any], outputs: VAROutput,
     ) -> VARLossStep:  # fmt: skip
         """Wrap losses, metrics, and signals into a :class:`VARLossStep`."""
         return VARLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
@@ -126,7 +126,7 @@ class VARLossHead(VariationalLossHeadBase[VARLossConfig]):
 
     def compute_signals(  # -----------------------------------------------------------------------
         self, batch: Batch, state: VARRolloutState, outputs: VAROutput, losses: VARLosses,
-    ) -> Dict[str, Tensor]:  # fmt: skip
+    ) -> dict[str, Tensor]:  # fmt: skip
         """Compute lightweight diagnostic signals for logging."""
         main_relation = require_latent_relation(outputs.latent_relations, MAIN_LATENT_RELATION)
         signals = super().compute_signals(batch, state, outputs, losses)

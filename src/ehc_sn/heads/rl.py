@@ -15,7 +15,7 @@ backprop), aggregated metrics, and diagnostic signals.
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
@@ -98,7 +98,7 @@ class RLLossStep:
     losses: Losses  # Combined losses for this step, kept live for backward()
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
     outputs: Optional[RLOutput] = None  # Raw controller outputs
-    signals: Dict[str, Tensor] = None  # Diagnostic signals (T2/T3); plain dict, no schema commitment
+    signals: dict[str, Tensor] = None  # Diagnostic signals (T2/T3); plain dict, no schema commitment
 
     def __post_init__(self) -> None:
         if self.signals is None:
@@ -173,14 +173,14 @@ class RLLossHead(TokenLossHeadBase[RLLossConfig]):
         }
 
     def _build_step_output(  # -------------------------------------------------------------------
-        self, losses: Losses, metrics: Any, signals: Dict[str, Tensor], outputs: RLOutput,
+        self, losses: Losses, metrics: Any, signals: dict[str, Tensor], outputs: RLOutput,
     ) -> RLLossStep:  # fmt: skip
         """Wrap losses, metrics, and signals into an :class:`RLLossStep`."""
         return RLLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
     def compute_signals(  # -----------------------------------------------------------------------
         self, batch: Batch, state: RLRolloutState, outputs: RLOutput, losses: Losses,
-    ) -> Dict[str, Tensor]:  # fmt: skip
+    ) -> dict[str, Tensor]:  # fmt: skip
         """Compute lightweight diagnostic signals.
 
         Signals are intended for TensorBoard-style scalar logging.

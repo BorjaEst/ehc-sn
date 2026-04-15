@@ -14,7 +14,7 @@ metrics, and diagnostic signals.
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
@@ -71,7 +71,7 @@ class ACTLossStep:
     losses: Losses  # Combined losses for this step, kept live for backward()
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
     outputs: Optional[ACTOutput] = None  # Raw controller outputs
-    signals: Dict[str, Any] | None = None  # Diagnostic signals (T2/T3); plain dict
+    signals: dict[str, Any] | None = None  # Diagnostic signals (T2/T3); plain dict
 
     def __post_init__(self) -> None:
         if self.signals is None:
@@ -121,7 +121,7 @@ class ACTLossHead(TokenLossHeadBase[ACTLossConfig]):
         return Losses(loss_sum, q_done_loss, q_continue_loss)
 
     def _build_step_output(  # -------------------------------------------------------------------
-        self, losses: Losses, metrics: Any, signals: Dict[str, Any], outputs: ACTOutput,
+        self, losses: Losses, metrics: Any, signals: dict[str, Any], outputs: ACTOutput,
     ) -> ACTLossStep:  # fmt: skip
         """Wrap losses, metrics, and signals into an :class:`ACTLossStep`."""
         return ACTLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
@@ -143,9 +143,9 @@ class ACTLossHead(TokenLossHeadBase[ACTLossConfig]):
 
     def compute_signals(  # -----------------------------------------------------------------------
         self, batch: Batch, state: ACTRolloutState, outputs: ACTOutput, losses: Losses,
-    ) -> Dict[str, Tensor]:  # fmt: skip
+    ) -> dict[str, Tensor]:  # fmt: skip
         """Compute lightweight diagnostic signals for logging."""
-        sig: Dict[str, Tensor] = {
+        sig: dict[str, Tensor] = {
             S.STEPS_MEAN:     state.steps.float().mean().detach(),
             S.THETA_CLS_NORM: outputs.theta_cls.detach().norm(dim=-1).mean(),
             S.LOSS_Q_DONE:    losses.loss_q_done_sum.detach(),

@@ -8,7 +8,7 @@ optional regularization.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
 from torch import Tensor
@@ -50,7 +50,7 @@ class VariationalLossStep:
     losses: VariationalLosses
     metrics: StepMetrics
     outputs: Optional[Any] = None
-    signals: Dict[str, Any] | None = None
+    signals: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.signals is None:
@@ -103,14 +103,14 @@ class VariationalLossHeadBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
         raise NotImplementedError
 
     def _build_step_output(  # --------------------------------------------------------------------
-        self, losses: VariationalLosses, metrics: StepMetrics, signals: Dict[str, Any], outputs: Any,
+        self, losses: VariationalLosses, metrics: StepMetrics, signals: dict[str, Any], outputs: Any,
     ) -> Any:  # fmt: skip
         """Wrap losses, metrics, and signals into the concrete step-output type."""
         raise NotImplementedError
 
     def compute_signals(  # -----------------------------------------------------------------------
         self, batch: Batch, carry: Any, outputs: Any, losses: VariationalLosses,
-    ) -> Dict[str, Tensor]:  # fmt: skip
+    ) -> dict[str, Tensor]:  # fmt: skip
         """Return detached generic variational-family diagnostic signals."""
         return {
             S.STEPS_MEAN: carry.steps.float().mean().detach(),
@@ -122,7 +122,7 @@ class VariationalLossHeadBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
 
 # =================================================================================================
 def build_variational_step_metrics(  # -----------------------------------------------------------
-    extras: Dict[str, RatioStat], *, batch_size: int, like: Tensor,
+    extras: dict[str, RatioStat], *, batch_size: int, like: Tensor,
 ) -> StepMetrics:  # fmt: skip
     """Build generic metrics for a variational step.
 
