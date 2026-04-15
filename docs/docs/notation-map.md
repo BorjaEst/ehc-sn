@@ -24,57 +24,57 @@ cue names, and manuscript symbols.
 
 ### Manuscript To Code
 
-| Concept | Manuscript | Current code surface | Reading rule |
-|---|---|---|---|
-| Current percept payload | $o_t$ | `observation` | Step-local raw percept only. |
-| Encoded sensory content | $x_t$ | `place_query_from_obs`, `sensory.recall`, `place_sensory` | Encoded sensory cue, not the raw observation. |
-| Structural state | $g_t$ | `grid_prior`, `grid_post` | Code exposes prior and posterior structural states separately. |
-| Hippocampal memory | $M_t$, $\mathcal{M}_t$ | `state.hpc.memory` | Bank `c` exists only in EHC. |
-| Cortical workspace | $S_t$ | `state.pfc.memory.z_H`, `state.pfc.memory.z_L` | Implementation state backing the workspace. |
-| Task context | $\xi_t$ | prose-only in v1; nearest code inputs are `external_context` and `input_ids -> sequence_summary` | Not a standalone runtime object in v1. |
-| Cortical cue | $c_t$ | `c_prop` | PFC-derived cue proposal read from workspace. |
-| Reinstated contextual evidence | $\hat c_t^{retr}$ | `c_mem` | Grounded target-bank read from HPC bank `c`. |
-| Routed cue | $c_{t,m}$ | `c_use` | Transient routed cue used for replay bias and control. |
-| Retrieval query set | $\mathcal{Q}_t$ | `ReadCues({"x", "g"})` in TEM, `ReadCues({"x", "g", "c"})` in EHC | Family-indexed retrieval cue set. |
-| Control summary | $\bar z_{t,m}$ | `theta_cls` in HRM, `theta_summary` in EHC | Summary bottleneck, not the canonical cortical cue. |
-| Internal control logits | $\ell_{t,m}^{int}$ | `q_logits` in HRM, `internal_control_logits` in EHC | Distinct from motor action logits. |
-| Reward prediction | $\hat r_{t,m}$ | `r_logits` in HRM v2, `reward_logits` in EHC | Narrow STR-side reward output. |
-| Motor action logits | overt action factors | `motor_logits` | Overt action scores only; currently EHC-specific. |
+| Concept                        | Manuscript             | Current code surface                                                                             | Reading rule                                                   |
+| ------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| Current percept payload        | $o_t$                  | `observation`                                                                                    | Step-local raw percept only.                                   |
+| Encoded sensory content        | $x_t$                  | `place_query_from_obs`, `sensory.recall`, `place_sensory`                                        | Encoded sensory cue, not the raw observation.                  |
+| Structural state               | $g_t$                  | `grid_prior`, `grid_post`                                                                        | Code exposes prior and posterior structural states separately. |
+| Hippocampal memory             | $M_t$, $\mathcal{M}_t$ | `state.hpc.memory`                                                                               | Bank `c` exists only in EHC.                                   |
+| Cortical workspace             | $S_t$                  | `state.pfc.memory.z_H`, `state.pfc.memory.z_L`                                                   | Implementation state backing the workspace.                    |
+| Task context                   | $\xi_t$                | prose-only in v1; nearest code inputs are `external_context` and `input_ids -> sequence_summary` | Not a standalone runtime object in v1.                         |
+| Cortical cue                   | $c_t$                  | `c_prop`                                                                                         | PFC-derived cue proposal read from workspace.                  |
+| Reinstated contextual evidence | $\hat c_t^{retr}$      | `c_mem`                                                                                          | Grounded target-bank read from HPC bank `c`.                   |
+| Routed cue                     | $c_{t,m}$              | `c_use`                                                                                          | Transient routed cue used for replay bias and control.         |
+| Retrieval query set            | $\mathcal{Q}_t$        | `ReadCues({"x", "g"})` in TEM, `ReadCues({"x", "g", "c"})` in EHC                                | Family-indexed retrieval cue set.                              |
+| Control summary                | $\bar z_{t,m}$         | `theta_cls` in HRM, `theta_summary` in EHC                                                       | Summary bottleneck, not the canonical cortical cue.            |
+| Internal control logits        | $\ell_{t,m}^{int}$     | `q_logits` in HRM, `control_logits` in EHC                                                       | Distinct from motor action logits.                             |
+| Reward prediction              | $\hat r_{t,m}$         | `r_logits` in HRM v2, `reward_logits` in EHC                                                     | Narrow STR-side reward output.                                 |
+| Motor action logits            | overt action factors   | `motor_logits`                                                                                   | Overt action scores only; currently EHC-specific.              |
 
 ### Forward Surfaces
 
-| Surface | Required step-local keys | Optional or static keys | Recurrent state | Public output | Notes |
-|---|---|---|---|---|---|
-| `DungeonWalk` | `observation`, `observation_id`, `previous_action`, `location_id`, `region_id`, `valid_action_mask`, `step_count` | `landmark_id`; maze tensors are provided on reset | Environment TensorDict | next TensorDict | Spatial step payload used by TEM and EHC rollouts. |
-| `MazeHardEnv` | `input_ids`, `labels`, `prev_accuracy`, `step_count` | none | Environment TensorDict | next TensorDict | Static token-tape environment used by HRM-style rollouts. |
-| `TEMModelV1` | `observation`, `previous_action` | `episode_start`, `landmark_id` | `TEMState(lec, mec, hpc)` | `(state, obs_logits, None, grid_codes, place_codes)` | Pure memory model; no direct control head. |
-| `TEMModelV2` | `observation`, `previous_action` | `episode_start`, `landmark_id` | `TEMState(lec, mec, hpc)` | `(state, obs_logits, None, grid_codes, place_codes)` | Same public step contract as TEM v1. |
-| `HRModelV1` | `input_ids` | none | `HRMState(pfc)` | `(new_state, (logits, q_logits), theta_cls)` | Token-only reasoning surface. |
-| `HRModelV2` | `input_ids` | none | `HRMState(pfc, str)` | `(new_state, (logits, q_logits, r_logits), theta_cls)` | Adds STR reward output. |
-| `EHCModelV1` | `observation`, `previous_action` | `episode_start`, `landmark_id`, `external_context`, `input_ids` | `EHCState(pfc, str, lec, mec, hpc)` | `EHCOutput(state, obs_logits, memory, control)` | Structured model step only; no environment stepping. |
-| `EHCController` current payload | `observation`, `observation_id`, `previous_action`, `location_id`, `region_id`, `valid_action_mask`, `step_count` | `landmark_id` plus static `input_ids` and `external_context` | `EHCRolloutState(model_state, data, env_td, conditioning_data)` | `EHCControllerOutput(model_output, internal_action, commit_mask, motor_action, reward, cycle_count)` | `input_ids` and `external_context` live in `conditioning_data`, not in `env_td`. |
+| Surface                         | Required step-local keys                                                                                          | Optional or static keys                                         | Recurrent state                                                 | Public output                                                                                        | Notes                                                                            |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `DungeonWalk`                   | `observation`, `observation_id`, `previous_action`, `location_id`, `region_id`, `valid_action_mask`, `step_count` | `landmark_id`; maze tensors are provided on reset               | Environment TensorDict                                          | next TensorDict                                                                                      | Spatial step payload used by TEM and EHC rollouts.                               |
+| `MazeHardEnv`                   | `input_ids`, `labels`, `prev_accuracy`, `step_count`                                                              | none                                                            | Environment TensorDict                                          | next TensorDict                                                                                      | Static token-tape environment used by HRM-style rollouts.                        |
+| `TEMModelV1`                    | `observation`, `previous_action`                                                                                  | `episode_start`, `landmark_id`                                  | `TEMState(lec, mec, hpc)`                                       | `(state, obs_logits, None, grid_codes, place_codes)`                                                 | Pure memory model; no direct control head.                                       |
+| `TEMModelV2`                    | `observation`, `previous_action`                                                                                  | `episode_start`, `landmark_id`                                  | `TEMState(lec, mec, hpc)`                                       | `(state, obs_logits, None, grid_codes, place_codes)`                                                 | Same public step contract as TEM v1.                                             |
+| `HRModelV1`                     | `input_ids`                                                                                                       | none                                                            | `HRMState(pfc)`                                                 | `(new_state, (logits, q_logits), theta_cls)`                                                         | Token-only reasoning surface.                                                    |
+| `HRModelV2`                     | `input_ids`                                                                                                       | none                                                            | `HRMState(pfc, str)`                                            | `(new_state, (logits, q_logits, r_logits), theta_cls)`                                               | Adds STR reward output.                                                          |
+| `EHCModelV1`                    | `observation`, `previous_action`                                                                                  | `episode_start`, `landmark_id`, `external_context`, `input_ids` | `EHCState(pfc, str, lec, mec, hpc)`                             | `EHCOutput(state, obs_logits, memory, control)`                                                      | Structured model step only; no environment stepping.                             |
+| `EHCController` current payload | `observation`, `observation_id`, `previous_action`, `location_id`, `region_id`, `valid_action_mask`, `step_count` | `landmark_id` plus static `input_ids` and `external_context`    | `EHCRolloutState(model_state, data, env_td, conditioning_data)` | `EHCControllerOutput(model_output, internal_action, commit_mask, motor_action, reward, cycle_count)` | `input_ids` and `external_context` live in `conditioning_data`, not in `env_td`. |
 
 ### Naming Freeze
 
-| Name | Freeze to | Status |
-|---|---|---|
-| `observation` | current step-local percept payload | use |
-| `observation_id` | current-step categorical percept id | use |
-| `input_ids` | serialized discrete tape | use |
-| `external_context` | exogenous continuous conditioning input | use |
-| `sequence_summary` | encoded summary of `input_ids` inside EHC | use locally; do not equate with $\xi_t$ by itself |
-| `c_prop` | cortical cue proposal derived from workspace | use |
-| `c_mem` | reinstated contextual evidence read from bank `c` | use |
-| `c_use` | transient routed cue used to bias replay and control | use |
-| `theta_cls` | HRM control-summary token | use |
-| `theta_summary` | EHC control-summary token | use |
-| `internal_control_logits` | internal policy scores | use |
-| `motor_logits` | overt action scores | use |
-| `inputs` | split into `observation` or `input_ids` | avoid |
-| `context` | split into `external_context` or manuscript $\xi_t$ | avoid |
-| `context_summary` | implies a first-class $\xi_t$ object that v1 does not expose | avoid in v1 |
-| `context_slots` | conflates $\xi_t$ with workspace slots $S_t$ | avoid in v1 |
-| `TaskContext` | reserved future public type name for a typed $\xi_t$ contract | reserve |
+| Name               | Freeze to                                                     | Status                                            |
+| ------------------ | ------------------------------------------------------------- | ------------------------------------------------- |
+| `observation`      | current step-local percept payload                            | use                                               |
+| `observation_id`   | current-step categorical percept id                           | use                                               |
+| `input_ids`        | serialized discrete tape                                      | use                                               |
+| `external_context` | exogenous continuous conditioning input                       | use                                               |
+| `sequence_summary` | encoded summary of `input_ids` inside EHC                     | use locally; do not equate with $\xi_t$ by itself |
+| `c_prop`           | cortical cue proposal derived from workspace                  | use                                               |
+| `c_mem`            | reinstated contextual evidence read from bank `c`             | use                                               |
+| `c_use`            | transient routed cue used to bias replay and control          | use                                               |
+| `theta_cls`        | HRM control-summary token                                     | use                                               |
+| `theta_summary`    | EHC control-summary token                                     | use                                               |
+| `control_logits`   | internal policy scores                                        | use                                               |
+| `motor_logits`     | overt action scores                                           | use                                               |
+| `inputs`           | split into `observation` or `input_ids`                       | avoid                                             |
+| `context`          | split into `external_context` or manuscript $\xi_t$           | avoid                                             |
+| `context_summary`  | implies a first-class $\xi_t$ object that v1 does not expose  | avoid in v1                                       |
+| `context_slots`    | conflates $\xi_t$ with workspace slots $S_t$                  | avoid in v1                                       |
+| `TaskContext`      | reserved future public type name for a typed $\xi_t$ contract | reserve                                           |
 
 ### Canonical Reading Rule
 
