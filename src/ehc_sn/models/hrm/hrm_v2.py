@@ -1,23 +1,23 @@
-""" """
+"""HRM v2 with a canonical named-workspace core and a legacy batch bridge."""
 
 import math
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, TypeAlias
+from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field, field_validator
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
-from ehc_sn.types import Device, Dtype
+from ehc_sn.types import Batch
 from ehc_sn.utils import trunc_normal_init_
 from ehc_sn.utils.detach import DetachMixin
-
-# Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
-Batch: TypeAlias = Dict[str, Tensor]
 
 
 # =================================================================================================

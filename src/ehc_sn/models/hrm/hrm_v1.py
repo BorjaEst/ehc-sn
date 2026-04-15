@@ -1,22 +1,22 @@
-""" """
+"""HRM v1 with a canonical named-workspace core and a legacy batch bridge."""
 
 import math
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple, TypeAlias
+from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
-from ehc_sn.types import Device, Dtype
+from ehc_sn.types import Batch
 from ehc_sn.utils import trunc_normal_init_
 from ehc_sn.utils.detach import DetachMixin
-
-# Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
-Batch: TypeAlias = Dict[str, Tensor]
 
 
 # =================================================================================================
@@ -76,7 +76,7 @@ class HRMState(DetachMixin):
 
 # =================================================================================================
 class HRModelV1(nn.Module):
-    """ """
+    """Pure HRM v1 architecture with a legacy batch-compatible wrapper."""
 
     def __init__(  # ------------------------------------------------------------------------------
         self, config: ModelSettings_V1, *,
@@ -94,6 +94,7 @@ class HRModelV1(nn.Module):
 
         self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)  # fmt: skip
+
         self.reset_parameters()
 
     @property
@@ -121,6 +122,7 @@ class HRModelV1(nn.Module):
         if self.embed_pos is not None:
             trunc_normal_init_(self.embed_pos.weight, std=init_std)
         trunc_normal_init_(self.lm_head.weight, std=init_std)
+
         # self.pfc.reset_parameters()  # Already done when pfc is initialized
 
     def init_state(  # ---------------------------------------------------------------------------
