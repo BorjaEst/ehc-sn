@@ -18,13 +18,13 @@ with keys ``"input_ids"`` and ``"labels"``.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple, TypeAlias
 
 import lightning as L
 from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 from pydantic import BaseModel, Field
 from torch.optim import Optimizer
 
+from ehc_sn.adapters.maze_hard import MazeHardHRMV1BridgeAdapter
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
 from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
@@ -124,7 +124,8 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettings_V1.from_config(config.model_config_path)
         self.model = HRModelV1(model_settings)
-        self.controller = ACTController(self.model, config.act_controller)
+        self.bridge_adapter = MazeHardHRMV1BridgeAdapter(self.model)
+        self.controller = ACTController(self.bridge_adapter, config.act_controller)
         self.objective = ACTLossHead(config.loss)
         self._config = config
         self._train_runner = SingleStepRunner()
@@ -192,7 +193,7 @@ class TrainingModel(L.LightningModule):
 
     def training_step(  # -------------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
-    ) -> Dict[str, object]:  # fmt: skip
+    ) -> dict[str, object]:  # fmt: skip
         """Run one training step with manual optimization.
 
         The training logic uses partial reset to replace halted slots with fresh examples.
@@ -242,7 +243,7 @@ class TrainingModel(L.LightningModule):
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
-    ) -> Dict[str, object]:  # fmt: skip
+    ) -> dict[str, object]:  # fmt: skip
         """Run a full ACT rollout so halted-only metrics are meaningful.
 
         Validation uses `EvaluationLoop` (no carry is persisted across batches here) and logs

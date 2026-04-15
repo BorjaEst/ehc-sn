@@ -23,15 +23,15 @@ The batch structure used throughout this file is a plain ``dict[str, Tensor]``
 with keys ``"input_ids"`` and ``"labels"``.
 """
 
-from itertools import repeat
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, TypeAlias
+from typing import Any, Optional
 
 import lightning as L
 import torch
 from pydantic import BaseModel, Field
 from torch.optim import Optimizer
 
+from ehc_sn.adapters.maze_hard import MazeHardHRMV2BridgeAdapter
 from ehc_sn.controllers.rl import RLController, RLControllerConfig
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.heads.rl import RLLossConfig, RLLossHead
@@ -143,6 +143,7 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettings_V2.from_config(config.model_config_path)
         self.model = HRModelV2(model_settings)
+        self.bridge_adapter = MazeHardHRMV2BridgeAdapter(self.model)
         self.environment: MazeHardEnv | None = None  # Lazy init in setup() to avoid GPU allocation issues
         self.controller: RLController | None = None  # Initialized in setup() after environment is ready
         self.objective: RLLossHead | None = None  # Initialized in setup() after controller is ready
@@ -184,7 +185,7 @@ class TrainingModel(L.LightningModule):
 
         if self.environment is None:
             self.environment = MazeHardEnv(self.config.environment, batch_size=local_bs)
-        self.controller = RLController(self.model, self.environment, self.config.controller)
+        self.controller = RLController(self.bridge_adapter, self.environment, self.config.controller)
         self.objective = RLLossHead(self.config.loss)
 
     def configure_optimizers(  # ------------------------------------------------------------------
@@ -238,7 +239,7 @@ class TrainingModel(L.LightningModule):
 
     def training_step(  # -------------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
-    ) -> Dict[str, Any]:  # fmt: skip
+    ) -> dict[str, Any]:  # fmt: skip
         """Run one training step (horizon = 1) with manual optimization.
 
         Training uses a carry object produced by :class:`~ehc_sn.training.rl_head.RLLossHead`
@@ -298,7 +299,7 @@ class TrainingModel(L.LightningModule):
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
-    ) -> Dict[str, Any]:  # fmt: skip
+    ) -> dict[str, Any]:  # fmt: skip
         """Run a full rollout until all slots halt, collecting traces for logging/analysis.
 
         Validation runs the controller to the max horizon (no exploration) and
