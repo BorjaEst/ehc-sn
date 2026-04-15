@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything

@@ -61,9 +61,7 @@ def resolve_dataset_split(  # --------------------------------------------------
     splits = {entry.split for entry in entries}
     if len(splits) != 1:
         available = ", ".join(sorted(splits))
-        raise SystemExit(
-            "Visualization requires exactly one split. " f"Pass --split with one of: {available}."
-        )
+        raise SystemExit(f"Visualization requires exactly one split. Pass --split with one of: {available}.")
 
     resolved_split = next(iter(splits))
     return entries, dataset_path / resolved_split, resolved_split
