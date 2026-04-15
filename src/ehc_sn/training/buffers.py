@@ -7,10 +7,12 @@ pinned) so they can be used to refill halted slots later.
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Dict, Optional, Sequence
+from typing import Deque, Sequence
 
 import torch
 from torch import Tensor
+
+from ehc_sn.types import Batch
 
 
 # =================================================================================================
@@ -22,7 +24,7 @@ class _Chunk:
     tracking how many rows have already been consumed.
     """
 
-    rows: Dict[str, Tensor]  # CPU tensors, leading dim = n_rows
+    rows: dict[str, Tensor]  # CPU tensors, leading dim = n_rows
     start: int = 0  # how many rows already consumed
 
 
@@ -64,7 +66,7 @@ class FifoBuffer:
         self._size_rows = 0
 
     def push_rows(  # -----------------------------------------------------------------------------
-        self, batch: Dict[str, Tensor], row_indices: Tensor,
+        self, batch: Batch, row_indices: Tensor,
     ) -> None:  # fmt: skip
         """Takes rows from (likely GPU) batch, stores them on CPU as one chunk."""
         if row_indices.numel() == 0:
@@ -86,10 +88,10 @@ class FifoBuffer:
 
     def pop(  # -----------------------------------------------------------------------------------
         self, n: int,
-    ) -> Dict[str, Tensor]:  # fmt: skip
+    ) -> dict[str, Tensor]:  # fmt: skip
         """Pop up to n rows (CPU tensors)."""
         n = min(n, self._size_rows)
-        out: Dict[str, list[Tensor]] = {k: [] for k in self.keys}
+        out: dict[str, list[Tensor]] = {k: [] for k in self.keys}
 
         remaining = n
         while remaining > 0:

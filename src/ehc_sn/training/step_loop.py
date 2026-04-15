@@ -1,14 +1,14 @@
+""" """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import islice
-from typing import Any, Dict, Iterator, Mapping, Optional, Protocol, Tuple
+from typing import Any, Iterator, Mapping, Optional, Protocol
 
 from torch import Tensor
 
-# TODO: We need to move this to typing module
-Batch = Dict[str, Tensor]
-StepBatchSource = Iterator[Batch]
+from ehc_sn.types import Batch, StepBatchSource
 
 
 # =================================================================================================
