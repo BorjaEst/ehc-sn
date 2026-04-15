@@ -8,6 +8,7 @@ from typing import Any
 
 import torch
 
+from ehc_sn.adapters.maze_hard import MazeHardHRMV1BridgeAdapter, MazeHardHRMV2BridgeAdapter
 from ehc_sn.benchmarks._bindings.hrm.load import load_hrm_v1_model, load_hrm_v2_model
 from ehc_sn.benchmarks._bindings.hrm.preprocess import supervised_maze_tokenize
 from ehc_sn.benchmarks._capabilities.batch_prediction import BatchPrediction, BatchPredicts
@@ -22,7 +23,7 @@ class HRMV1BatchPredictionAdapter(BatchPredicts):
     def __init__(self, model: HRModelV1, *, compute_budget: int, done_action: int = 0) -> None:
         self._model = model.eval()
         self._controller = ACTController(
-            model,
+            MazeHardHRMV1BridgeAdapter(self._model),
             ACTControllerConfig(exploration_prob=0.0, max_steps=compute_budget, done_action=done_action),
         )
 
@@ -42,7 +43,7 @@ class HRMV2BatchPredictionAdapter(BatchPredicts):
     def __init__(self, model: HRModelV2, *, compute_budget: int, done_action: int = 0) -> None:
         self._model = model.eval()
         self._controller = ACTController(
-            model,
+            MazeHardHRMV2BridgeAdapter(self._model),
             ACTControllerConfig(exploration_prob=0.0, max_steps=compute_budget, done_action=done_action),
         )
 
