@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn.models.ehc.core import *
@@ -20,8 +20,67 @@ from ehc_sn.utils.detach import DetachMixin
 
 
 # =================================================================================================
+class EHCV3ProjectionSettings(BaseModel, extra="forbid", strict=False):
+    """Inter-region projection settings for the task-agnostic EHC v3 backbone."""
+
+    lec_to_hpc_x: ProjectionSettings = Field(
+        default_factory=lambda: ProjectionSettings(kind="tiling", learnable=False),
+        description="Projection settings mapping encoded observations into hippocampal x-cue space.",
+    )
+    mec_to_hpc_g: ProjectionSettings = Field(
+        default_factory=lambda: ProjectionSettings(kind="low_rank", learnable=False),
+        description="Projection settings mapping MEC structural codes into hippocampal g-cue space.",
+    )
+    pfc_to_hpc_c: ProjectionSettings = Field(
+        default_factory=lambda: ProjectionSettings(kind="linear", bridge="broadcast", init="random", learnable=True),
+        description="Projection settings mapping the previous PFC summary token into hippocampal c-cue space.",
+    )
+
+
+# =================================================================================================
 class ModelSettings_V3(BaseModel, extra="forbid", strict=False):
     """Canonical EHC v3 model settings."""
+
+    transition_action_count: int = Field(
+        ...,
+        ge=1,
+        description="Number of transition actions consumed by MEC path integration and state-slot action embeddings.",
+    )
+    internal_action_count: int = Field(
+        ...,
+        ge=1,
+        description="Number of internal control actions scored by the PFC and STR control path.",
+    )
+    external_context_dim: int = Field(
+        default=1,
+        ge=1,
+        description="Width of the optional external context payload consumed by the fixed task slot.",
+    )
+    f_initial: list[float] = Field(
+        default_factory=lambda: [0.99, 0.3, 0.09, 0.5, 0.4],
+        min_length=1,
+        description="Initial feature frequencies resolved across MEC and HPC modules.",
+    )
+
+    hpc: HPCAttentionSettings = Field(..., description="Settings for the attention-based hippocampal memory.")
+    lec: LECSettings = Field(..., description="Settings for the LEC sensory pathway.")
+    mec: MECSettings = Field(..., description="Settings for the MEC structural dynamics.")
+    pfc: PFCSettings = Field(..., description="Settings for the tensor-first PFC reasoning module.")
+    str: STRSettings = Field(..., description="Settings for the STR reward/value head.")
+    projections: EHCV3ProjectionSettings = Field(
+        default_factory=EHCV3ProjectionSettings,
+        description="Inter-region projection settings grouped by named edge.",
+    )
+
+    @property
+    def hidden_size(self) -> int:
+        """Return the hidden size shared by the control workspace and content bank."""
+        return self.pfc.hidden_size
+
+    @property
+    def hpc_flat_dim(self) -> int:
+        """Return the flattened hippocampal width across all bands."""
+        return sum(self.hpc.shape)
 
 
 # =================================================================================================
@@ -51,15 +110,13 @@ class EHCModelV3(nn.Module):
         super().__init__()
         self._config = config
         n_freq = len(config.hpc.shape)
-        transition_action_count = getattr(config, "transition_action_count", getattr(config, "action_count"))
-        f_initial = config.f_initial
 
-        # Initialize EHC region modules and inter-region projection modules in one place for clean state management
+        # Initialize core EHC modules
         self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)
         self.str = STRModelLinear(config.str, device=device, dtype=dtype)
-        self.hpc = HPCAttention(n_freq, f_initial, config.hpc, device=device, dtype=dtype)
-        self.mec = MECModel(transition_action_count, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
-        self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
+        self.hpc = HPCAttention(n_freq, config.f_initial, config.hpc, device=device, dtype=dtype)
+        self.mec = MECModel(config.transition_action_count, config.hpc.shape, config.f_initial, config.mec, device=device, dtype=dtype)
+        self.lec = LECModel(config.f_initial, config.lec, device=device, dtype=dtype)
 
         # Projections between regions
         self.projections = ProjectionBundle.from_modules(
@@ -146,7 +203,7 @@ class EHCModelV3(nn.Module):
 
         # 1. Unpack working memory and episodic memory for ease of use in the step.
         theta_cls = state.pfc.memory.z_H[:, 0]  # [B, D] summary token from PFC memory for cue proposal
-        c_query = [proj(theta_cls) for proj in self.pfc_to_hpc_c]
+        c_query = self.projections.pfc_to_hpc_c(theta_cls)
 
         # 2. Pure TEM sensory loop.
         x_post, state.lec = self.lec.inference(inputs.obs_embedding, state.lec)
@@ -180,8 +237,8 @@ class EHCModelV3(nn.Module):
         p_post, state.hpc = self.hpc.inference(p_query_from_obs, p_query_from_g_post, state.hpc)
 
         # 4. Build the explicit 3-slot workspace and run PFC reasoning.
-        workspace_tokens = self.workspace(inputs, p_post, p_replay_read)
-        state.pfc, z_H, control_logits = self.pfc(workspace_tokens, state.pfc)
+        workspace = self.workspace(inputs, p_post, p_replay_read)
+        state.pfc, z_H, control_logits = self.pfc(workspace.tokens, state.pfc)
 
         # 5. Commit the HPC write and build the content bank.
         payload = WritePayload(generative=p_replay_read, inference=p_sensory_read)
