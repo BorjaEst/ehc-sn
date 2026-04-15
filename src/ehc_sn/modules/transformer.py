@@ -110,10 +110,10 @@ class TransformerBlock(nn.Module):
         return self._config
 
     def forward(  # -------------------------------------------------------------------------------
-        self, x: Tensor,
+        self, x: Tensor, *, attn_mask: Optional[Tensor] = None,
     ) -> Tensor:  # fmt: skip
         """Apply self-attention and MLP sublayers with post-norm residuals."""
-        attention = self.self_attn(x)
+        attention = self.self_attn(x, attn_mask=attn_mask)
         x = rms_norm(x + attention, variance_epsilon=self.config.rms_norm_eps)
         x = rms_norm(x + self.mlp(x), variance_epsilon=self.config.rms_norm_eps)
         return x
@@ -178,11 +178,24 @@ class TransformerSequenceSummary(nn.Module):
         """Initialize the CLS summary token."""
         self.cls_token.data.zero_()
 
-    def forward(self, x: Tensor) -> Tensor:
+    @staticmethod
+    def _prepare_attn_mask(attn_mask: Optional[Tensor], *, batch_size: int, seq_len: int, device: torch.device) -> Optional[Tensor]:
+        """Convert a token mask for non-CLS inputs into an SDPA-ready mask."""
+        if attn_mask is None:
+            return None
+        if attn_mask.shape != (batch_size, seq_len):
+            raise ValueError(f"attn_mask must have shape ({batch_size}, {seq_len}), got {tuple(attn_mask.shape)}.")
+        attn_mask = attn_mask.to(device=device, dtype=torch.bool)
+        cls_mask = torch.ones((batch_size, 1), dtype=torch.bool, device=device)
+        return torch.cat([cls_mask, attn_mask], dim=1).unsqueeze(1).unsqueeze(1)
+
+    def forward(self, x: Tensor, *, attn_mask: Optional[Tensor] = None) -> Tensor:
         """Return one pooled summary vector per embedded sequence.
 
         Args:
             x: Embedded inputs of shape ``(B, S, D)``.
+            attn_mask: Optional boolean token mask with shape ``(B, S)`` for
+                the non-CLS inputs. ``True`` marks tokens visible to attention.
 
         Returns:
             Tensor of shape ``(B, D)`` containing the pooled CLS summaries.
@@ -195,9 +208,10 @@ class TransformerSequenceSummary(nn.Module):
                 f"{int(x.shape[-1])} and {self.config.hidden_size}."
             )  # fmt: skip
 
+        prepared_mask = self._prepare_attn_mask(attn_mask, batch_size=int(x.shape[0]), seq_len=int(x.shape[1]), device=x.device)
         hidden = torch.cat([self.cls_token.expand(x.shape[0], -1, -1), x], dim=1)
         for block in self.blocks:
-            hidden = block(hidden)
+            hidden = block(hidden, attn_mask=prepared_mask)
         return hidden[:, 0]
 
 
