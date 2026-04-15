@@ -6,14 +6,7 @@ produced by :class:`~ehc_sn.heads.rl.RLLossHead`.
 """
 
 from ehc_sn.metrics.adapter import Route
-from ehc_sn.metrics.keys import (
-    LOSS_LM,
-    RL_LOSS_ACTOR,
-    RL_LOSS_CRITIC,
-    RL_LOSS_ENTROPY,
-    RL_LOSS_Q_VALUE,
-    extra_ratio_paths,
-)
+from ehc_sn.metrics.keys import LOSS_LM, RL_LOSS_ACTOR, RL_LOSS_CRITIC, RL_LOSS_ENTROPY, RL_LOSS_Q_VALUE, extra_ratio_paths
 
 
 def _with_namespace(namespace: str, routes: tuple[Route, ...]) -> tuple[Route, ...]:
