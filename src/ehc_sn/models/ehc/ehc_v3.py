@@ -13,7 +13,7 @@ from ehc_sn.modules.hpc.query_policy import ReadCues, TargetRead
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
-from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
+from ehc_sn.modules.projection import ProjectionBundle, ProjectionSettings
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
 from ehc_sn.types import Device, Dtype, MemoryState
 from ehc_sn.utils.detach import DetachMixin
@@ -61,8 +61,14 @@ class EHCModelV3(nn.Module):
         self.mec = MECModel(transition_action_count, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
-        # Model-local grouped owners for projections, pathways, workspace packing, and heads.
-        self.projections = ProjectionBundle(self.modules, self.projections_map, config=config)
+        # Projections between regions
+        self.projections = ProjectionBundle.from_modules(
+            lec_to_hpc_x=(self.lec, self.hpc, self.config.projections.lec_to_hpc_x),
+            mec_to_hpc_g=(self.mec, self.hpc, self.config.projections.mec_to_hpc_g),
+            pfc_to_hpc_c=(self.pfc, self.hpc, self.config.projections.pfc_to_hpc_c),
+        )
+
+        #
         self.workspace = WorkspaceBundle(...)
         self.content_bank = ContentBankBuilder(...)
 
@@ -78,15 +84,6 @@ class EHCModelV3(nn.Module):
         self.projections.reset_parameters()
         self.workspace.reset_parameters()
         self.content_bank.reset_parameters()
-
-    @property
-    def projections_map(self) -> dict[str, ProjectionModule]:
-        """Expose the grouped projection modules for clean access in adapters."""
-        return {
-            "lec_to_hpc_x": (self.lec, self.hpc, self.config.projections.lec_to_hpc_x),
-            "mec_to_hpc_g": (self.mec, self.hpc, self.config.projections.mec_to_hpc_g),
-            "pfc_to_hpc_c": (self.pfc, self.hpc, self.config.projections.pfc_to_hpc_c),
-        }
 
     def init_state(  # ----------------------------------------------------------------------------
         self,
