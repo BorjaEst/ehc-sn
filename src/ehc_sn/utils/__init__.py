@@ -16,12 +16,20 @@ from torch import Tensor, nn
 from ehc_sn.types import Device, LocationBelief, Matrix, Reduction, Vector
 
 
-def _find_multiple(n: int, k: int) -> int:
+def _find_multiple(
+    n: int,
+    k: int,
+) -> int:
     """Round ``n`` up to the nearest multiple of ``k``."""
     return n if n % k == 0 else n + k - (n % k)
 
 
-def trunc_normal_init_(tensor: Tensor, std: float = 1.0, lower: float = -2.0, upper: float = 2.0):
+def trunc_normal_init_(
+    tensor: Tensor,
+    std: float = 1.0,
+    lower: float = -2.0,
+    upper: float = 2.0,
+) -> Tensor:
     # NOTE: PyTorch nn.init.trunc_normal_ is not mathematically correct, the std dev is not actually the std dev of initialized tensor
     # This function is a PyTorch version of jax truncated normal init (default init method in flax)
     # https://github.com/jax-ml/jax/blob/main/jax/_src/random.py#L807-L848
@@ -49,7 +57,11 @@ def trunc_normal_init_(tensor: Tensor, std: float = 1.0, lower: float = -2.0, up
     return tensor
 
 
-def sample_diag_gaussian(transition: LocationBelief, *, scale: float = 1.0) -> list[Tensor]:
+def sample_diag_gaussian(
+    transition: LocationBelief,
+    *,
+    scale: float = 1.0,
+) -> list[Tensor]:
     """Sample a diagonal Gaussian distribution.
 
     Args:
@@ -63,22 +75,37 @@ def sample_diag_gaussian(transition: LocationBelief, *, scale: float = 1.0) -> l
     return [mu_f + float(scale) * sigma_f * torch.randn_like(mu_f) for mu_f, sigma_f in zip(mu, sigma)]
 
 
-def expand_row_mask(flag: Tensor, ref: Tensor) -> Tensor:
+def expand_row_mask(
+    flag: Tensor,
+    ref: Tensor,
+) -> Tensor:
     """Expand a boolean row mask to match a batched tensor."""
     return flag.view((-1,) + (1,) * (ref.ndim - 1))
 
 
-def merge_rows(flag: Tensor, current: Tensor, fresh: Tensor) -> Tensor:
+def merge_rows(
+    flag: Tensor,
+    current: Tensor,
+    fresh: Tensor,
+) -> Tensor:
     """Select fresh rows where ``flag`` is true and keep current rows otherwise."""
     return torch.where(expand_row_mask(flag, current), fresh, current)
 
 
-def merge_multiscale_rows(flag: Tensor, current: Sequence[Tensor], fresh: Sequence[Tensor]) -> list[Tensor]:
+def merge_multiscale_rows(
+    flag: Tensor,
+    current: Sequence[Tensor],
+    fresh: Sequence[Tensor],
+) -> list[Tensor]:
     """Apply row-wise replacement over a multiscale latent code."""
     return [merge_rows(flag, current_f, fresh_f) for current_f, fresh_f in zip(current, fresh, strict=True)]
 
 
-def merge_tree_rows(flag: Tensor, current: Any, fresh: Any) -> Any:
+def merge_tree_rows(
+    flag: Tensor,
+    current: Any,
+    fresh: Any,
+) -> Any:
     """Recursively apply row-wise replacement to tensor-bearing structures.
 
     Supported inputs are tensors, dataclass instances, dictionaries, and
@@ -89,17 +116,13 @@ def merge_tree_rows(flag: Tensor, current: Any, fresh: Any) -> Any:
         return merge_rows(flag, current, fresh)
 
     if type(current) is not type(fresh):
-        raise TypeError(
-            f"merge_tree_rows requires matching types, got {type(current).__name__} and {type(fresh).__name__}"
-        )
+        raise TypeError(f"merge_tree_rows requires matching types, got {type(current).__name__} and {type(fresh).__name__}")
 
     if isinstance(current, list):
         return [merge_tree_rows(flag, current_v, fresh_v) for current_v, fresh_v in zip(current, fresh, strict=True)]
 
     if isinstance(current, tuple):
-        return tuple(
-            merge_tree_rows(flag, current_v, fresh_v) for current_v, fresh_v in zip(current, fresh, strict=True)
-        )
+        return tuple(merge_tree_rows(flag, current_v, fresh_v) for current_v, fresh_v in zip(current, fresh, strict=True))
 
     if isinstance(current, dict):
         if current.keys() != fresh.keys():
@@ -107,17 +130,17 @@ def merge_tree_rows(flag: Tensor, current: Any, fresh: Any) -> Any:
         return {key: merge_tree_rows(flag, current[key], fresh[key]) for key in current}
 
     if is_dataclass(current) and is_dataclass(fresh):
-        updates = {
-            field.name: merge_tree_rows(flag, getattr(current, field.name), getattr(fresh, field.name))
-            for field in fields(current)
-        }
+        updates = {field.name: merge_tree_rows(flag, getattr(current, field.name), getattr(fresh, field.name)) for field in fields(current)}
         return replace(current, **updates)
 
     raise TypeError(f"Unsupported merge_tree_rows input type: {type(current).__name__}")
 
 
 def inv_var_trans(
-    base: LocationBelief, corr: LocationBelief, mask: Optional[Tensor] = None, freqs: Optional[range] = None
+    base: LocationBelief,
+    corr: LocationBelief,
+    mask: Optional[Tensor] = None,
+    freqs: Optional[range] = None,
 ) -> LocationBelief:
     """Fuse correction into base using inverse-variance weighting.
 
@@ -130,9 +153,7 @@ def inv_var_trans(
 
     for i, f in enumerate(freqs):
         mu_f, sigma_f = base.mean[f].clone(), base.uncertainty[f].clone()
-        mu_f[idx], sigma_f[idx] = inv_var_weight(
-            [base.mean[f][idx], corr.mean[i]], [base.uncertainty[f][idx], corr.uncertainty[i]]
-        )
+        mu_f[idx], sigma_f[idx] = inv_var_weight([base.mean[f][idx], corr.mean[i]], [base.uncertainty[f][idx], corr.uncertainty[i]])
         mu_out[f], sigma_out[f] = mu_f, sigma_f
 
     return LocationBelief(mean=mu_out, uncertainty=sigma_out)
@@ -218,10 +239,7 @@ def squared_error(value, target):
     """
     # Return torch MSE loss
     if type(value) is list:
-        loss = [
-            0.5 * torch.sum(torch.nn.MSELoss(reduction="none")(value[i], target[i]), dim=-1)
-            for i in range(len(value))
-        ]
+        loss = [0.5 * torch.sum(torch.nn.MSELoss(reduction="none")(value[i], target[i]), dim=-1) for i in range(len(value))]
     else:
         loss = 0.5 * torch.sum(torch.nn.MSELoss(reduction="none")(value, target), dim=-1)
     return loss
@@ -282,11 +300,7 @@ def make_directories():
         envs_path = script_path + "/envs"
         run += 1
         # And once a path doesn't exist yet: create new folders
-        if (
-            not os.path.exists(train_path)
-            and not os.path.exists(model_path)
-            and not os.path.exists(save_path)
-        ):
+        if not os.path.exists(train_path) and not os.path.exists(model_path) and not os.path.exists(save_path):
             os.makedirs(train_path)
             os.makedirs(model_path)
             os.makedirs(save_path)
@@ -335,13 +349,17 @@ def make_logger(run_path):
     return logger
 
 
-def as_dir_str(path: Path) -> str:
+def as_dir_str(
+    path: Path,
+) -> str:
     """Return a directory path as a string with trailing separator for legacy utils."""
     s = str(path)
     return s if s.endswith(os.sep) else s + os.sep
 
 
-def resolve_envs_path(run_path: Path) -> Path:
+def resolve_envs_path(
+    run_path: Path,
+) -> Path:
     """Find envs directory for a run (prefer script/envs, fall back to envs)."""
     candidate = run_path / "script" / "envs"
     if candidate.exists():
@@ -350,7 +368,9 @@ def resolve_envs_path(run_path: Path) -> Path:
     return candidate
 
 
-def parse_iter_from_stem(stem: str) -> Optional[int]:
+def parse_iter_from_stem(
+    stem: str,
+) -> Optional[int]:
     """Parse iteration number from checkpoint stem like 'tem_4000' or 'params_4000'"""
     parts = stem.split("_")
     if len(parts) < 2:
@@ -361,7 +381,10 @@ def parse_iter_from_stem(stem: str) -> Optional[int]:
         return None
 
 
-def apply_overrides(params: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+def apply_overrides(
+    params: dict[str, Any],
+    override: dict[str, Any],
+) -> dict[str, Any]:
     """Return params with override applied (shallow merge)."""
     if not override:
         return params
@@ -370,13 +393,19 @@ def apply_overrides(params: dict[str, Any], override: dict[str, Any]) -> dict[st
     return params
 
 
-def require_exists(path: Path, what: str) -> None:
+def require_exists(
+    path: Path,
+    what: str,
+) -> None:
     """Raise friendly error if path doesn't exist."""
     if not path.exists():
         raise FileNotFoundError(f"{what} not found: {path}")
 
 
-def reduce_per_env(loss_per_env: Tensor, reduction: Reduction) -> Tensor:
+def reduce_per_env(
+    loss_per_env: Tensor,
+    reduction: Reduction,
+) -> Tensor:
     """Reduce a per-environment loss vector according to `reduction`."""
     if reduction == "sum":
         return loss_per_env.sum()
@@ -387,7 +416,10 @@ def reduce_per_env(loss_per_env: Tensor, reduction: Reduction) -> Tensor:
     raise ValueError(f"Unknown reduction: {reduction}")
 
 
-def create_downsample_matrix(n: list[int], n_subsampled: list[int]) -> list[Matrix]:
+def create_downsample_matrix(
+    n: list[int],
+    n_subsampled: list[int],
+) -> list[Matrix]:
     """Create downsampling matrices.
 
     Downsampling matrix to go from cells to compressed cells for
@@ -413,7 +445,10 @@ def create_downsample_matrix(n: list[int], n_subsampled: list[int]) -> list[Matr
     ]
 
 
-def create_repeat_matrices(n_subsampled: list[int], n: list[int]) -> list[Matrix]:
+def create_repeat_matrices(
+    n_subsampled: list[int],
+    n: list[int],
+) -> list[Matrix]:
     """Create repeat matrices.
 
     Matrix for repeating cells information using element wise product
@@ -435,7 +470,10 @@ def create_repeat_matrices(n_subsampled: list[int], n: list[int]) -> list[Matrix
     ]
 
 
-def create_tiling_matrices(n_in: list[int], n_out: list[int]) -> list[Matrix]:
+def create_tiling_matrices(
+    n_in: list[int],
+    n_out: list[int],
+) -> list[Matrix]:
     """Create tile matrices.
 
     Tiling matrix to project from one cortical region to another by repeating
@@ -457,14 +495,14 @@ def create_tiling_matrices(n_in: list[int], n_out: list[int]) -> list[Matrix]:
     if any(out % inp != 0 for out, inp in zip(n_out, n_in)):
         raise ValueError(f"n_out must be divisible by n_in. Got n_out={n_out}, n_in={n_in}")
 
-    return [
-        torch.tensor(np.kron(np.ones((1, out // inp)), np.eye(inp)), dtype=torch.float)
-        for inp, out in zip(n_in, n_out)
-    ]
+    return [torch.tensor(np.kron(np.ones((1, out // inp)), np.eye(inp)), dtype=torch.float) for inp, out in zip(n_in, n_out)]
 
 
 def create_random_projection(
-    n_in: list[int], n_out: list[int], sparsity: float = 1.0, seed: Optional[int] = None
+    n_in: list[int],
+    n_out: list[int],
+    sparsity: float = 1.0,
+    seed: Optional[int] = None,
 ) -> list[Matrix]:
     """Create random fixed projection matrices.
 
@@ -521,7 +559,11 @@ def create_random_projection(
     return matrices
 
 
-def create_encoding_table(n_in: int, n_out: int, n_hot: int = 2) -> list[Vector]:
+def create_encoding_table(
+    n_in: int,
+    n_out: int,
+    n_hot: int = 2,
+) -> list[Vector]:
     """Create n-hot encoding lookup table.
 
     Generates a lookup table for converting one-hot observations to n-hot
@@ -585,7 +627,10 @@ def create_encoding_table(n_in: int, n_out: int, n_hot: int = 2) -> list[Vector]
     return torch.stack(encoding_table, dim=0)
 
 
-def uncat_to_list(x: Tensor, dims: list[int]) -> list[Tensor]:
+def uncat_to_list(
+    x: Tensor,
+    dims: list[int],
+) -> list[Tensor]:
     """Split a concatenated tensor into a list of tensors with given last-dim sizes.
 
     Args:
@@ -599,7 +644,9 @@ def uncat_to_list(x: Tensor, dims: list[int]) -> list[Tensor]:
 
 
 def one_hot_with_zero(
-    action: list[int | None], num_actions: int, device: Device | None = None
+    action: list[int | None],
+    num_actions: int,
+    device: Device | None = None,
 ) -> torch.Tensor:
     """
     Convert actions to one-hot encoding where action 0/None = all-zeros (static action).
@@ -617,7 +664,9 @@ def one_hot_with_zero(
     return out
 
 
-def connections(f_grid: list[float]) -> list[list[bool]]:
+def connections(
+    f_grid: list[float],
+) -> list[list[bool]]:
     """Compute hierarchical connection matrix from frequency list.
 
     Entry [f_to][f_from] is True if f_from connects to f_to.
@@ -633,7 +682,10 @@ def connections(f_grid: list[float]) -> list[list[bool]]:
     return [[f_grid[f1] <= f_grid[f2] for f1 in range(n)] for f2 in range(n)]
 
 
-def resolve_ovc_slice(n_freq_total: int, n_freq_ovc: Optional[int]) -> tuple[int, int]:
+def resolve_ovc_slice(
+    n_freq_total: int,
+    n_freq_ovc: Optional[int],
+) -> tuple[int, int]:
     """Determine which MEC modules are OVC (receive shiny landmark correction).
 
     Args:
@@ -670,7 +722,11 @@ def resolve_ovc_slice(n_freq_total: int, n_freq_ovc: Optional[int]) -> tuple[int
     return n_freq_total - n_freq_ovc, n_freq_ovc
 
 
-def update_to_masks(shape: list[int], *, update: torch.Tensor) -> torch.Tensor:
+def update_to_masks(
+    shape: list[int],
+    *,
+    update: torch.Tensor,
+) -> torch.Tensor:
     """Expand a stage×freq update matrix to a stage×sum(shape) mask tensor.
 
     Args:
@@ -689,7 +745,12 @@ def update_to_masks(shape: list[int], *, update: torch.Tensor) -> torch.Tensor:
     return masks
 
 
-def make_update_full(n_stages: int, n_freq: int, *, device=None) -> torch.Tensor:
+def make_update_full(
+    n_stages: int,
+    n_freq: int,
+    *,
+    device=None,
+) -> torch.Tensor:
     """Full update matrix (all True).
 
     Args:
@@ -703,7 +764,11 @@ def make_update_full(n_stages: int, n_freq: int, *, device=None) -> torch.Tensor
 
 
 def make_update_hierarchical(
-    n_stages: int, n_freq: int, *, ramp_len: int | None = None, device=None
+    n_stages: int,
+    n_freq: int,
+    *,
+    ramp_len: int | None = None,
+    device=None,
 ) -> torch.Tensor:
     """Hierarchical update matrix.
 
@@ -727,7 +792,11 @@ def make_update_hierarchical(
     return update_ramp
 
 
-def make_hebbian_write_mask(n_stages: int, shape: list[int], f_initial: list[float]) -> torch.Tensor:
+def make_hebbian_write_mask(
+    n_stages: int,
+    shape: list[int],
+    f_initial: list[float],
+) -> torch.Tensor:
     """Create a Hebbian write-connectivity mask for a block-structured memory matrix.
 
     This mask gates which synapses in the hippocampal memory matrix are allowed
