@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Protocol
+from typing import Protocol
 
 import torch
 from pydantic import BaseModel
@@ -78,7 +78,7 @@ class RolloutState[ModelState](DetachMixin):
     model_state: ModelState
     steps: Tensor
     halted: Tensor
-    data: Dict[str, Tensor]
+    data: dict[str, Tensor]
 
 
 # =================================================================================================
@@ -163,13 +163,13 @@ class BaseController[ModelState, ConfigT: BaseModel]:
     @staticmethod
     def make_empty_slot_data(  # ----------------------------------------------------------------------
         batch_sample: Batch,
-    ) -> Dict[str, Tensor]:  # fmt: skip
+    ) -> dict[str, Tensor]:  # fmt: skip
         """Allocate per-slot buffers matching an example batch."""
         return {key: torch.empty_like(value) for key, value in batch_sample.items()}
 
     def refresh_slot_data(  # ---------------------------------------------------------------------
         self, batch: Batch, state: RolloutState[ModelState],
-    ) -> Dict[str, Tensor]:  # fmt: skip
+    ) -> dict[str, Tensor]:  # fmt: skip
         """Refresh slot buffers for halted rows."""
         batch, halted, data = batch, state.halted, state.data
         return {key: torch.where(halted.view((-1,) + (1,) * (value.ndim - 1)), value, data[key]) for key, value in batch.items()}
