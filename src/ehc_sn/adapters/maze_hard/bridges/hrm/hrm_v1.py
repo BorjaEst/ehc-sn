@@ -14,6 +14,8 @@ from ehc_sn.adapters.maze_hard.decoders import MazeHardDecoder
 from ehc_sn.adapters.maze_hard.encoders import MazeHardEncoder
 from ehc_sn.models.hrm.hrm_v1 import HRMInputV1, HRModelV1, HRMOutputV1, HRMStateV1
 from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskInput, MazeHardTaskOutput
+from ehc_sn.tasks.maze_hard.runtime import extract_maze_hard_task_input
+from ehc_sn.types import Batch
 
 
 # =============================================================================
@@ -24,7 +26,6 @@ class MazeHardHRMV1AdapterSettings(BaseModel, extra="forbid"):
         default="learned",
         description="Positional front-end used by the MazeHard token encoder.",
     )
-
     vocab_size: int = Field(
         ...,
         ge=1,
@@ -111,7 +112,7 @@ def _build_encoder(  # ----------------------------------------------------
     config: MazeHardHRMV1AdapterSettings,
 ) -> MazeHardTokenEncoder:
     """Construct the token encoder front-end for the bridge adapter based on config."""
-    match config.config.encoder_kind:
+    match config.encoder_kind:
         case "learned":
             encoder_cls = MazeHardLearnedEncoder
         case "rope":
@@ -121,7 +122,7 @@ def _build_encoder(  # ----------------------------------------------------
 
     # Build the encoder with the appropriate config parameters and device/dtype
     return encoder_cls(
-        seq_length=model.config.seq_length,
+        seq_length=model.config.num_schema_slots,
         vocab_size=config.vocab_size,
         hidden_size=model.config.pfc.hidden_size,
         device=next(model.parameters()).device,
@@ -195,10 +196,11 @@ class MazeHardHRMV1BridgeAdapter(nn.Module):
 
     def prepare_inputs(  # ----------------------------------------------------
         self,
-        batch: MazeHardTaskInput,
+        batch: Batch,
     ) -> HRMInputV1:
-        """Prepare the HRM-core payload from the generic task batch."""
-        return self.encoder(batch)
+        """Prepare the HRM-core payload from one generic rollout batch."""
+        task_input = extract_maze_hard_task_input(batch)
+        return self.encoder(task_input)
 
     def prepare_outputs(  # ---------------------------------------------------
         self,
@@ -209,7 +211,7 @@ class MazeHardHRMV1BridgeAdapter(nn.Module):
 
     def forward(  # -----------------------------------------------------------
         self,
-        batch: MazeHardTaskInput,
+        batch: Batch,
         state: HRMStateV1 | None = None,
     ) -> tuple[HRMStateV1, MazeHardTaskOutput]:
         """Run a forward pass of the HRM v1 bridge adapter on a MazeHard task batch."""
