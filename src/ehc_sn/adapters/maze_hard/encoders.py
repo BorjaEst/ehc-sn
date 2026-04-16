@@ -10,7 +10,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.types import Batch
+from ehc_sn.tasks.maze_hard import MazeHardTaskBatch
 
 
 # =============================================================================
@@ -20,7 +20,7 @@ class MazeHardTokenEncoder(ABC):
     @abstractmethod
     def forward(  # -----------------------------------------------------------
         self,
-        batch: Batch,
+        batch: MazeHardTaskBatch,
         *,
         device: Device | None = None,
     ):  # TODO: specify return type
@@ -48,7 +48,7 @@ class MazeHardLearnedEncoder(nn.Module):
 
     def forward(  # -----------------------------------------------------------
         self,
-        batch: Batch,
+        batch: MazeHardTaskBatch,
         *,
         device: Device | None = None,
     ):  # TODO: specify return type
@@ -84,7 +84,7 @@ class MazeHardRoPEEncoder(nn.Module):
 
     def forward(  # -----------------------------------------------------------
         self,
-        batch: Batch,
+        batch: MazeHardTaskBatch,
         *,
         device: Device | None = None,
     ):  # TODO: specify return type

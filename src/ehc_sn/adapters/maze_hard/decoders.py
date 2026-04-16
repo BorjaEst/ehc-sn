@@ -8,7 +8,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.types import Batch
+from ehc_sn.tasks.maze_hard import MazeHardTaskOutput
 
 
 # =============================================================================
@@ -32,10 +32,10 @@ class MazeHardTokenDecoder(nn.Module):
         outputs,  # TODO: specify type
         *,
         device: Device | None = None,
-    ):  # TODO: specify return type
+    ) -> MazeHardTaskOutput:
         """ """
         logits = self.lm_head(z_H[:, 1:])  # Strip CLS → (B, S, vocab_size)
-        return new_state, (logits, q_logits), theta_cls
+        return
 
 
 # =============================================================================
