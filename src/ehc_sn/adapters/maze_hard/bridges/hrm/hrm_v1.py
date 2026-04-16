@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol, TypeAlias
 
 import torch
@@ -13,7 +12,7 @@ from torch import nn
 
 from ehc_sn.adapters.maze_hard.decoders import MazeHardDecoder
 from ehc_sn.adapters.maze_hard.encoders import MazeHardEncoder
-from ehc_sn.models.hrm.hrm_v1_new import HRMInputV1, HRModelV1, HRMOutputV1, HRMStateV1
+from ehc_sn.models.hrm.hrm_v1 import HRMInputV1, HRModelV1, HRMOutputV1, HRMStateV1
 from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskInput, MazeHardTaskOutput
 
 
