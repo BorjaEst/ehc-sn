@@ -1,9 +1,8 @@
-"""HRM v1 core contracts over a named working-memory substrate."""
+"""HRM v1 core contracts over a task-agnostic PFC working-memory substrate."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
 
 from pydantic import BaseModel, Field
 from torch import Tensor
@@ -11,7 +10,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.modules.pfc import PFCSettings, PFCState, WorkspaceSpec
+from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState, WorkspaceSpec
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -27,26 +26,11 @@ class ModelSettingsV1(BaseModel, extra="forbid"):
         ...,
         description="Settings for the recurrent PFC core.",
     )
-    controller_slot_name: str = Field(
-        default="controller",
-        min_length=1,
-        description="Public slot name used when exposing the explicit controller slot.",
-    )
-    schema_slot_prefix: str = Field(
-        default="schema",
-        min_length=1,
-        description="Prefix used for the exchangeable schema slots.",
-    )
 
     @property
     def num_schema_slots(self) -> int:
         """Return the number of schema slots owned by the HRM core."""
         return self.pfc.seq_length
-
-    @property
-    def schema_slot_names(self) -> tuple[str, ...]:
-        """Return the canonical exchangeable schema slot names."""
-        return tuple(f"{self.schema_slot_prefix}_{index}" for index in range(self.num_schema_slots))
 
     @property
     def workspace_spec(self) -> WorkspaceSpec:
@@ -97,14 +81,14 @@ class HRMOutputV1:
     """Architecture-native HRM output.
 
     Attributes:
-        theta_summary: Controller summary vector with shape ``(B, D)``.
-        someother_logits: Placeholder for other core outputs with shape ``(B, ...)``.
-        q_logits: Control logits consumed by ACT-style controllers.
+        controller_summary: Controller summary vector with shape ``(B, D)``.
+        schema_slots: Schema-slot bank with shape ``(B, N, D)``.
+        q_values: Control/value logits consumed by ACT-style controllers.
     """
 
-    theta_summary: Tensor  # working-memory z_H[:, 0] from dlPFC
-    someother_logits: Tensor  # working-memory z_h[:, 1:] from dlPFC
-    q_logits: Tensor  # Control logits from  vmPFC
+    controller_summary: Tensor
+    schema_slots: Tensor
+    q_values: Tensor
 
 
 # =============================================================================
@@ -118,9 +102,10 @@ class HRModelV1(nn.Module):
         device: Device | None = None,
         dtype: Dtype | None = None,
     ) -> None:
-        """Store core settings for later construction by a concrete implementation."""
+        """Construct the HRM v1 core around the reusable PFC reasoning module."""
         super().__init__()
         self._config = config
+        self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)
 
     @property
     def config(self) -> ModelSettingsV1:
@@ -130,15 +115,17 @@ class HRModelV1(nn.Module):
     def reset_parameters(  # --------------------------------------------------
         self,
     ) -> None:
-        """Reset local parameters for concrete subclasses when they are added."""
-        return None
+        """Reset the reusable PFC core surfaces owned by HRM v1."""
+        self.pfc.reset_parameters()
 
     def init_state(  # --------------------------------------------------------
         self,
         batch_size: int,
     ) -> HRMStateV1:
         """Create a fresh recurrent state for one batch."""
-        raise NotImplementedError("HRModelV1.init_state is signature-only until the core is implemented.")
+        return HRMStateV1(
+            pfc=self.pfc.init_state(batch_size, self.config.workspace_spec),
+        )
 
     def reset_state(  # -------------------------------------------------------
         self,
@@ -146,7 +133,42 @@ class HRModelV1(nn.Module):
         state: HRMStateV1,
     ) -> HRMStateV1:
         """Selectively reset rows of the recurrent state."""
-        raise NotImplementedError("HRModelV1.reset_state is signature-only until the core is implemented.")
+        return HRMStateV1(
+            pfc=self.pfc.reset_state(state.pfc, reset_flag),
+        )
+
+    def step(  # --------------------------------------------------------------
+        self,
+        payload: HRMInputV1,
+        state: HRMStateV1 | None = None,
+    ) -> tuple[HRMStateV1, HRMOutputV1]:
+        """Run one HRM core step over schema-slot tokens and return state plus readouts.
+
+        Args:
+            payload: Task-agnostic schema-slot payload with shape ``(B, N, D)``.
+            state: Optional recurrent carry from the previous step.
+
+        Returns:
+            ``(next_state, output)`` where ``next_state`` owns the recurrent slot
+            substrate and ``output`` exposes the architecture-native readouts for
+            the current step.
+        """
+        self._validate_payload(payload)
+        pfc_state = None if state is None else state.pfc
+        pfc_output = self.pfc.step_tokens(
+            payload.schema_tokens,
+            state=pfc_state,
+            workspace_spec=self.config.workspace_spec,
+            prefix_bias=payload.prefix_bias,
+        )
+        next_state = HRMStateV1(pfc=pfc_output.state)
+        output = HRMOutputV1(
+            controller_summary=pfc_output.controller_summary,
+            schema_slots=pfc_output.workspace.tokens,
+            q_values=pfc_output.q_values,
+        )
+
+        return next_state, output
 
     def forward(  # -----------------------------------------------------------
         self,
