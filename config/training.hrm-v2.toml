@@ -5,9 +5,6 @@
 # -- Model architecture -------------------------------------------------------
 model_config_path = "config/models/hrm-v2.toml"
 
-[adapter]
-    encoder_kind = "rope"  # "learned" or "rope"
-    vocab_size = 6  # 5 canonical SEM IDs + O_ID (solution-path token)
 
 
 # -- Dataset & training -------------------------------------------------------
@@ -18,6 +15,11 @@ seed               = 42
 augment            = true
 val_check_interval = 1000
 supervised_only_warmup_steps = 5000
+
+# -- Adapter settings ---------------------------------------------------------
+[adapter]
+    encoder_kind = "rope"  # "learned" or "rope"
+    vocab_size = 6  # 5 canonical SEM IDs + O_ID (solution-path token)
 
 # -- Environment --------------------------------------------------------------
 [environment]
