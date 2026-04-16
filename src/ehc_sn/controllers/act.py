@@ -17,7 +17,7 @@ The semantics of the actions are minimal:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, Tuple
+from typing import Any, Protocol, cast
 
 import torch
 from pydantic import BaseModel, Field
@@ -28,7 +28,7 @@ from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
 
-# ==================================================================================================
+# =============================================================================
 class ACTControllerConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`ACTController`.
 
@@ -56,8 +56,23 @@ class ACTControllerConfig(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
-class ACTRolloutBackbone[ModelState, ModelOutput](RolloutBackbone[ModelState, ModelOutput], Protocol):
+# =============================================================================
+class ACTControlOutput(Protocol):
+    """Control payload emitted by one controller-consumable ACT step."""
+
+    q_logits: Tensor
+
+
+# =============================================================================
+class ACTBackboneOutput(Protocol):
+    """Named backbone output consumed by :class:`ACTController`."""
+
+    task: Any  # Task-owned prediction logits (e.g., for LM head)
+    control: ACTControlOutput
+
+
+# =============================================================================
+class ACTRolloutBackbone[ModelState](RolloutBackbone[ModelState, ACTBackboneOutput], Protocol):
     """Backbone protocol expected by :class:`ACTController`."""
 
 
@@ -77,24 +92,33 @@ class ACTOutput(DetachMixin):
     deprecated in head code and will be removed once all heads are migrated.
     """
 
-    logits: tuple[Tensor, ...]  # (lm_logits, q_logits, ...); prefer named properties in heads
-    theta_cls: Tensor  # (B, D) — theta CLS features
+    backbone_output: ACTBackboneOutput
     action: Tensor  # (B,) selected action indices for this step
     done_action: int  # Action index that terminates deliberation for this controller
     target_q: Tensor | None = None  # TD(0) bootstrap Q-target, shape: (B,). None outside training.
 
     @property
+    def task_logits(self) -> Tensor:
+        """Task-owned prediction logits returned by the backbone."""
+        return self.backbone_output.task.task_logits
+
+    @property
     def lm_logits(self) -> Tensor:
         """LM head logits, shape ``(B, S, V)``."""
-        return self.logits[0]
+        return self.task_logits
 
     @property
     def q_logits(self) -> Tensor:
         """Q-value logits (halt/continue policy), shape ``(B, A)``."""
-        return self.logits[1]
+        return self.backbone_output.control.q_logits
+
+    @property
+    def logits(self) -> tuple[Tensor, Tensor]:
+        """Backward-compatible tuple view over the named bridge outputs."""
+        return self.lm_logits, self.q_logits
 
 
-# =================================================================================================
+# =============================================================================
 class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig]):
     """ACT controller for supervised HRM v1 deliberation.
 
@@ -108,20 +132,28 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
     other actions are treated as generic continue steps.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: ACTRolloutBackbone,  config: ACTControllerConfig,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        backbone: ACTRolloutBackbone[ModelState],
+        config: ACTControllerConfig,
+    ) -> None:
         """Create a controller.
 
         Args:
             backbone: Model implementing :class:`ACTRolloutBackbone`.
             config: Controller configuration.
         """
-        super().__init__(backbone=backbone, config=config)
+        super().__init__(backbone=cast(Any, backbone), config=config)
 
-    def initial_state(  # -------------------------------------------------------------------------
-        self, batch_sample: Batch
-    ) -> ACTRolloutState[ModelState]:  # fmt: skip
+    @property
+    def backbone(self) -> ACTRolloutBackbone[ModelState]:
+        """Return the wrapped ACT backbone typed to the local protocol."""
+        return cast(ACTRolloutBackbone[ModelState], super().backbone)
+
+    def initial_state(  # -----------------------------------------------------
+        self,
+        batch_sample: Batch,
+    ) -> ACTRolloutState[ModelState]:
         """Build an initial ACT state from a batch sample.
 
         Args:
@@ -133,14 +165,21 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         """
         slots = self.initial_slots(batch_sample)
         return ACTRolloutState(
-            model_state=slots.model_state, steps=slots.steps, halted=slots.halted,
+            model_state=slots.model_state,
+            steps=slots.steps,
+            halted=slots.halted,
             data=slots.data,
-        )  # fmt: skip
+        )
 
-    def step(  # ----------------------------------------------------------------------------------
-        self, state: ACTRolloutState[ModelState], batch: Batch,
-        allow_halt: bool = True, explore: bool = True, td_target: bool = True, **_: Any,
-    ) -> tuple[ACTRolloutState[ModelState], ACTOutput]:  # fmt: skip
+    def step(  # --------------------------------------------------------------
+        self,
+        state: ACTRolloutState[ModelState],
+        batch: Batch,
+        allow_halt: bool = True,
+        explore: bool = True,
+        td_target: bool = True,
+        **_: Any,
+    ) -> tuple[ACTRolloutState[ModelState], ACTOutput]:
         """Advance the controller by one step.
 
         Args:
@@ -155,13 +194,13 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, logits, theta_cls = self.backbone(data, model_state)
+        model_state, backbone_output = self.backbone(data, model_state)
 
         steps = self.advance_steps(state)
-        action, done = self._select_action_and_done(logits, steps, allow_halt, explore)
+        action, done = self._select_action_and_done(backbone_output, steps, allow_halt, explore)
 
         state = ACTRolloutState(model_state=model_state, steps=steps, halted=done, data=data)
-        output = ACTOutput(logits=logits, theta_cls=theta_cls, action=action, done_action=self.config.done_action)
+        output = ACTOutput(backbone_output=backbone_output, action=action, done_action=self.config.done_action)
 
         # TD(0) bootstrap target for the Q-head.
         if td_target and self._config.max_steps > 1:
@@ -169,9 +208,12 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
 
         return state, output
 
-    def compute_td_target(  # ---------------------------------------------------------------------
-        self, data: dict[str, Tensor], model_state: Any, steps: Tensor,
-    ) -> Tensor:  # fmt: skip
+    def compute_td_target(  # -------------------------------------------------
+        self,
+        data: dict[str, Tensor],
+        model_state: Any,
+        steps: Tensor,
+    ) -> Tensor:
         """Compute TD(0) bootstrap targets for the Q head.
 
         At the last allowed step, the target becomes the predicted Q for the done
@@ -186,8 +228,8 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
             Sigmoid-normalized TD target of shape ``(B,)``.
         """
         with torch.no_grad():
-            _, logits, _ = self.backbone(data, model_state)
-            next_q = logits[1]
+            _, backbone_output = self.backbone(data, model_state)
+            next_q = backbone_output.control.q_logits
         is_last_step = steps >= self.config.max_steps
 
         # At last step: forced done → target is Q(done_action). Otherwise: max over all actions.
@@ -196,11 +238,15 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
 
         return torch.sigmoid(target)
 
-    def _select_action_and_done(  # ---------------------------------------------------------------
-        self, logits: list[Tensor], steps: Tensor, allow_halt: bool, explore: bool,
-    ) -> tuple[Tensor, Tensor]:  # fmt: skip
+    def _select_action_and_done(  # -------------------------------------------
+        self,
+        backbone_output: ACTBackboneOutput,
+        steps: Tensor,
+        allow_halt: bool,
+        explore: bool,
+    ) -> tuple[Tensor, Tensor]:
         """Select action and determine done flags for this step."""
-        _logits_lm, logits_q, *_ = logits  # Unpack list of logits multiple heads
+        logits_q = backbone_output.control.q_logits
         config = self.config
         action = logits_q.detach().argmax(dim=-1)  # greedy over all actions (B,)
         done = steps >= config.max_steps
@@ -216,5 +262,14 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         return action, done
 
 
-# =================================================================================================
-__all__ = ["ACTRolloutBackbone", "ACTControllerConfig", "ACTController", "ACTRolloutState", "ACTOutput"]
+# =============================================================================
+__all__ = [
+    "ACTBackboneOutput",
+    "ACTControlOutput",
+    "ACTController",
+    "ACTControllerConfig",
+    "ACTOutput",
+    "ACTRolloutBackbone",
+    "ACTRolloutState",
+    "ACTTaskOutput",
+]
