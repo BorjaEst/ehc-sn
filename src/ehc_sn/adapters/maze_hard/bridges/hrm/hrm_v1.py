@@ -1,11 +1,11 @@
-"""MazeHard plus HRM v1 bridge structural wiring."""
+"""MazeHard plus HRM v1 bridge and shared composition helpers."""
 
 from __future__ import annotations
 
-from typing import Protocol, TypeAlias
+from typing import Literal, TypeAlias
 
 import torch
-from torch import Tensor
+from pydantic import BaseModel, Field
 from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
@@ -14,6 +14,22 @@ from ehc_sn.adapters.maze_hard.decoders import MazeHardDecoder
 from ehc_sn.adapters.maze_hard.encoders import MazeHardEncoder
 from ehc_sn.models.hrm.hrm_v1 import HRMInputV1, HRModelV1, HRMOutputV1, HRMStateV1
 from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskInput, MazeHardTaskOutput
+
+
+# =============================================================================
+class MazeHardHRMV1AdapterSettings(BaseModel, extra="forbid"):
+    """Task-side MazeHard settings required to bind the HRM v1 core."""
+
+    encoder_kind: Literal["learned", "rope"] = Field(
+        default="learned",
+        description="Positional front-end used by the MazeHard token encoder.",
+    )
+
+    vocab_size: int = Field(
+        ...,
+        ge=1,
+        description="MazeHard token vocabulary size used by encoder and decoder heads.",
+    )
 
 
 # =============================================================================
@@ -39,13 +55,14 @@ class MazeHardLearnedEncoder(nn.Module, MazeHardEncoder):
         self,
         batch: MazeHardTaskInput,
     ) -> HRMInputV1:
-        """Encode a MazeHard task batch into token embeddings with learned positional encodings."""
-        token_embeddings = self.embed_tokens(batch.input_ids.to(torch.int32))
+        """Encode MazeHard tokens with learned positional embeddings."""
+        token_embeddings = self.embed_tokens(batch.input_ids.to(dtype=torch.int32))
 
-        # Learned mode: add positional table, then scale to maintain variance.
-        positions = torch.arange(self.config.seq_length, device=batch.input_ids.device)
+        # Learned mode: positional embeddings are added to token embeddings
+        positions = torch.arange(self.embed_pos.num_embeddings, device=batch.input_ids.device)
         pos_embeddings = self.embed_pos(positions).unsqueeze(0)
 
+        # Scale the combined embeddings to maintain variance, then return the HRM input bundle.
         return HRMInputV1(
             schema_tokens=self.embedding_scale * (token_embeddings + pos_embeddings),
             prefix_bias=None,
@@ -54,7 +71,7 @@ class MazeHardLearnedEncoder(nn.Module, MazeHardEncoder):
 
 # =============================================================================
 class MazeHardRoPEEncoder(nn.Module, MazeHardEncoder):
-    """Encoder for MazeHard token inputs using RoPE positional encodings."""
+    """Encoder for MazeHard token inputs using a RoPE-compatible front-end."""
 
     def __init__(  # ----------------------------------------------------------
         self,
@@ -69,16 +86,16 @@ class MazeHardRoPEEncoder(nn.Module, MazeHardEncoder):
         super().__init__()
         self.embed_tokens = nn.Embedding(vocab_size, hidden_size, device=device, dtype=dtype)
         self.embed_pos = None  # Not used in RoPE mode
-        self.embedding_scale = 1 * (hidden_size**0.5)  # Scale factor for RoPE mode (no positional table)
+        self.embedding_scale = hidden_size**0.5  # Scale factor for RoPE mode
 
     def forward(  # -----------------------------------------------------------
         self,
         batch: MazeHardTaskInput,
     ) -> HRMInputV1:
-        """Encode a MazeHard task batch into token embeddings with RoPE positional encodings."""
-        token_embeddings = self.embed_tokens(batch.input_ids.to(torch.int32))
+        """Encode MazeHard tokens without a learned positional table."""
+        token_embeddings = self.embed_tokens(batch.input_ids.to(dtype=torch.int32))
 
-        # RoPE mode: positions are encoded in QK rotation — scale by sqrt(d) only.
+        # RoPE mode: positions are encoded in QK rotation - scale by sqrt only.
         return HRMInputV1(
             schema_tokens=self.embedding_scale * token_embeddings,
             prefix_bias=None,
@@ -89,9 +106,32 @@ class MazeHardRoPEEncoder(nn.Module, MazeHardEncoder):
 MazeHardTokenEncoder: TypeAlias = MazeHardLearnedEncoder | MazeHardRoPEEncoder
 
 
+def _build_encoder(  # ----------------------------------------------------
+    model: HRModelV1,
+    config: MazeHardHRMV1AdapterSettings,
+) -> MazeHardTokenEncoder:
+    """Construct the token encoder front-end for the bridge adapter based on config."""
+    match config.config.encoder_kind:
+        case "learned":
+            encoder_cls = MazeHardLearnedEncoder
+        case "rope":
+            encoder_cls = MazeHardRoPEEncoder
+        case _:
+            raise ValueError(f"Unsupported encoder kind: {config.encoder_kind}")
+
+    # Build the encoder with the appropriate config parameters and device/dtype
+    return encoder_cls(
+        seq_length=model.config.seq_length,
+        vocab_size=config.vocab_size,
+        hidden_size=model.config.pfc.hidden_size,
+        device=next(model.parameters()).device,
+        dtype=next(model.parameters()).dtype,
+    )
+
+
 # =============================================================================
-class MazeHardTokenDecoder(nn.Module, MazeHardDecoder):
-    """Decoder for MazeHard task outputs from HRM core outputs using a simple linear head."""
+class MazeHardMLPDecoder(nn.Module, MazeHardDecoder):
+    """Decoder mapping HRM schema-slot features to MazeHard task logits."""
 
     def __init__(  # ----------------------------------------------------------
         self,
@@ -109,10 +149,27 @@ class MazeHardTokenDecoder(nn.Module, MazeHardDecoder):
         self,
         outputs: HRMOutputV1,
     ) -> MazeHardTaskOutput:
-        """Decode HRM outputs into a MazeHard task output by applying the linear head."""
+        """Decode schema-slot activations into MazeHard token logits."""
         return MazeHardTaskOutput(
-            task_logits=self.lm_head(outputs.someother_logits),  # Strip CLS from WM
+            task_logits=self.lm_head(outputs.schema_slots),
         )
+
+
+# =============================================================================
+MazeHardTokenDecoder: TypeAlias = MazeHardMLPDecoder
+
+
+def _build_decoder(  # --------------------------------------------------------
+    model: HRModelV1,
+    config: MazeHardHRMV1AdapterSettings,
+) -> MazeHardTokenDecoder:
+    """Construct the token decoder head for the bridge adapter."""
+    return MazeHardTokenDecoder(
+        hidden_size=model.config.pfc.hidden_size,
+        vocab_size=config.vocab_size,
+        device=next(model.parameters()).device,
+        dtype=next(model.parameters()).dtype,
+    )
 
 
 # =============================================================================
@@ -122,27 +179,32 @@ class MazeHardHRMV1BridgeAdapter(nn.Module):
     def __init__(  # ----------------------------------------------------------
         self,
         model: HRModelV1,
-        encoder: MazeHardLearnedEncoder | MazeHardRoPEEncoder,
-        decoder: MazeHardTokenDecoder,
+        config: MazeHardHRMV1AdapterSettings,
     ) -> None:
         """Initialize the HRM v1 bridge adapter with its component modules."""
         super().__init__()
+        self._config = config
         self.model = model
-        self.encoder = encoder
-        self.decoder = decoder
+        self.encoder = _build_encoder(model, config)
+        self.decoder = _build_decoder(model, config)
+
+    @property
+    def config(self) -> MazeHardHRMV1AdapterSettings:
+        """Return the immutable adapter settings used to configure the bridge."""
+        return self._config
 
     def prepare_inputs(  # ----------------------------------------------------
         self,
         batch: MazeHardTaskInput,
     ) -> HRMInputV1:
-        """Prepare the model-facing core payload and task-side decoder context."""
+        """Prepare the HRM-core payload from the generic task batch."""
         return self.encoder(batch)
 
     def prepare_outputs(  # ---------------------------------------------------
         self,
         logits: HRMOutputV1,
     ) -> MazeHardTaskOutput:
-        """Decode one task-owned MazeHard output from one HRM core output."""
+        """Split one HRM step output into task bridge heads."""
         return self.decoder(logits)
 
     def forward(  # -----------------------------------------------------------
@@ -153,15 +215,17 @@ class MazeHardHRMV1BridgeAdapter(nn.Module):
         """Run a forward pass of the HRM v1 bridge adapter on a MazeHard task batch."""
         inputs = self.prepare_inputs(batch)
         next_state, logits = self.model(inputs, state=state)
-        outputs = self.decode(logits)
+        outputs = self.prepare_outputs(logits)
         return next_state, outputs
 
 
 # =============================================================================
 __all__ = [
+    "MazeHardHRMV1AdapterSettings",
     "MazeHardLearnedEncoder",
     "MazeHardRoPEEncoder",
     "MazeHardTokenEncoder",
+    "MazeHardMLPDecoder",
     "MazeHardTokenDecoder",
     "MazeHardHRMV1BridgeAdapter",
 ]

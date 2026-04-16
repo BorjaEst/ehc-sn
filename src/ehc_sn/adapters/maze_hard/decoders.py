@@ -31,10 +31,10 @@ class MazeHardDecoder(ABC):
     @abstractmethod
     def forward(  # -----------------------------------------------------------
         self,
-        outputs: Any,
+        logits: Any,
     ) -> MazeHardTaskOutput:
-        """Decode HRM outputs into a MazeHard task output."""
+        """Decode model output into a MazeHard task output."""
 
 
 # =============================================================================
-__all__ = ["MazeHardTokenDecoder"]
+__all__ = ["MazeHardDecoder"]
