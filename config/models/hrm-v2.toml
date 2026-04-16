@@ -2,8 +2,6 @@
 # HRM v2 Architecture
 # =============================================================================
 
-vocab_size = 6 # 5 canonical SEM IDs + O_ID (solution-path token)
-
 [pfc]
     seq_length             = 900 # 30 x 30 for mazehard puzzle
     value_head.hidden_size = 512 # Matches the PFC reasoning embedding_dim

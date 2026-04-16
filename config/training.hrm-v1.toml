@@ -7,6 +7,10 @@
 # -- Model architecture -------------------------------------------------------
 model_config_path = "config/models/hrm-v1.toml"
 
+[adapter]
+    encoder_kind = rope  # "learned" or "rope"
+    vocab_size = 6  # 5 canonical SEM IDs + O_ID (solution-path token)
+
 # -- Dataset & training -------------------------------------------------------
 dataset_path      = "data/processed/maze-30x30-hard-1k"
 global_batch_size = 16
