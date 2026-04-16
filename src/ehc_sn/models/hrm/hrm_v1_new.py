@@ -26,6 +26,11 @@ class ModelSettingsV1(BaseModel, extra="forbid"):
         ...,
         description="Settings for the recurrent PFC core.",
     )
+    schema_slot_prefix: str = Field(
+        default="schema",
+        min_length=1,
+        description="Prefix used for the internal schema-slot ontology.",
+    )
 
     @property
     def num_schema_slots(self) -> int:
@@ -33,9 +38,14 @@ class ModelSettingsV1(BaseModel, extra="forbid"):
         return self.pfc.seq_length
 
     @property
+    def schema_slot_names(self) -> tuple[str, ...]:
+        """Return the canonical schema-slot names for the recurrent substrate."""
+        return tuple(f"{self.schema_slot_prefix}_{index}" for index in range(self.num_schema_slots))
+
+    @property
     def workspace_spec(self) -> WorkspaceSpec:
         """Return the schema-only workspace layout consumed by the core."""
-        return WorkspaceSpec(self.schema_slot_names)
+        return WorkspaceSpec(names=self.schema_slot_names)
 
 
 # =============================================================================
@@ -81,14 +91,14 @@ class HRMOutputV1:
     """Architecture-native HRM output.
 
     Attributes:
-        controller_summary: Controller summary vector with shape ``(B, D)``.
+        theta_summary: Controller summary vector with shape ``(B, D)``.
         schema_slots: Schema-slot bank with shape ``(B, N, D)``.
-        q_values: Control/value logits consumed by ACT-style controllers.
+        q_logits: Control logits consumed by ACT-style controllers.
     """
 
-    controller_summary: Tensor
+    theta_summary: Tensor
     schema_slots: Tensor
-    q_values: Tensor
+    q_logits: Tensor
 
 
 # =============================================================================
@@ -153,7 +163,6 @@ class HRModelV1(nn.Module):
             substrate and ``output`` exposes the architecture-native readouts for
             the current step.
         """
-        self._validate_payload(payload)
         pfc_state = None if state is None else state.pfc
         pfc_output = self.pfc.step_tokens(
             payload.schema_tokens,
@@ -163,9 +172,9 @@ class HRModelV1(nn.Module):
         )
         next_state = HRMStateV1(pfc=pfc_output.state)
         output = HRMOutputV1(
-            controller_summary=pfc_output.controller_summary,
+            theta_summary=pfc_output.summary,
             schema_slots=pfc_output.workspace.tokens,
-            q_values=pfc_output.q_values,
+            q_logits=pfc_output.q_values,
         )
 
         return next_state, output
