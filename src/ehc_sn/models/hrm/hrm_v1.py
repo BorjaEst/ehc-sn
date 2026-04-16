@@ -1,187 +1,201 @@
-"""HRM v1 with a canonical named-workspace core and a legacy batch bridge."""
+"""HRM v1 core contracts over a task-agnostic PFC working-memory substrate."""
 
-import math
+from __future__ import annotations
+
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
-import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
-from ehc_sn.types import Batch
-from ehc_sn.utils import trunc_normal_init_
+from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState, WorkspaceSpec
 from ehc_sn.utils.detach import DetachMixin
 
 
-# =================================================================================================
-class ModelSettings_V1(BaseModel, extra="forbid"):
-    """Model-level settings composing a PFC module with embedding/LM-head parameters."""
+# =============================================================================
+class ModelSettingsV1(BaseModel, extra="forbid"):
+    """HRM v1 core settings.
+
+    No task vocabulary, token embedding, positional encoding, or LM head fields
+    belong here. Those remain adapter-owned.
+    """
+
+    @classmethod
+    def from_config(cls, path: str | Path) -> "ModelSettingsV1":
+        """Load HRM v1 model settings from a TOML file."""
+        config_map = tomllib.load(Path(path).open("rb"))
+        return cls.model_validate(config_map)
 
     pfc: PFCSettings = Field(
         ...,
-        description="Settings for the core PFC model architecture.",
+        description="Settings for the recurrent PFC core.",
     )
-
-    vocab_size: int = Field(
-        ...,
-        ge=1,
-        description="Vocabulary size for token embeddings and LM head.",
+    schema_slot_prefix: str = Field(
+        default="schema",
+        min_length=1,
+        description="Prefix used for the internal schema-slot ontology.",
     )
 
     @property
-    def seq_length(self) -> int:
-        """Convenience property to access sequence length from the PFC settings."""
+    def num_schema_slots(self) -> int:
+        """Return the number of schema slots owned by the HRM core."""
         return self.pfc.seq_length
 
     @property
+    def schema_slot_names(self) -> tuple[str, ...]:
+        """Return the canonical schema-slot names for the recurrent substrate."""
+        return tuple(f"{self.schema_slot_prefix}_{index}" for index in range(self.num_schema_slots))
+
+    @property
+    def workspace_spec(self) -> WorkspaceSpec:
+        """Return the schema-only workspace layout consumed by the core."""
+        return WorkspaceSpec(names=self.schema_slot_names)
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class HRMInputV1:
+    """Task-agnostic schema payload consumed by the HRM core.
+
+    Attributes:
+        schema_tokens: Schema slot tokens with shape ``(B, N, D)``.
+        prefix_bias: Optional controller-prefix bias with shape ``(B, D)``.
+    """
+
+    schema_tokens: Tensor
+    prefix_bias: Tensor | None = None
+
+    @property
+    def batch_size(self) -> int:
+        """Return the leading batch size."""
+        return int(self.schema_tokens.shape[0])
+
+    @property
+    def num_schema_slots(self) -> int:
+        """Return the declared number of schema slots."""
+        return int(self.schema_tokens.shape[1])
+
+    @property
     def hidden_size(self) -> int:
-        """Convenience property to access hidden size from the PFC settings."""
-        return self.pfc.reasoning_h.cortex.embedding_dim
-
-    @property
-    def embedding_scale(self) -> float:
-        """Base embedding scale applied to token embeddings."""
-        return math.sqrt(self.hidden_size)
-
-    @property
-    def init_std(self) -> float:
-        """Convenience property for standard deviation of truncated normal initialization."""
-        return 1.0 / math.sqrt(self.hidden_size)
-
-    @property
-    def pos_encodings(self) -> str:
-        """Positional encoding mode shared by both H and L reasoning modules."""
-        return self.pfc.reasoning_h.cortex.pos_encodings
-
-    @classmethod
-    def from_config(cls, path: Path) -> "ModelSettings_V1":
-        """Load model settings from a TOML configuration file."""
-        config_map = tomllib.load(Path(path).open("rb"))
-        return ModelSettings_V1.model_validate(config_map)
+        """Return the shared schema-token width."""
+        return int(self.schema_tokens.shape[2])
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
-class HRMState(DetachMixin):
-    """Container for the full recurrent HRM state."""
+class HRMStateV1(DetachMixin):
+    """Recurrent carry owned by the HRM core."""
 
     pfc: PFCState
 
 
-# =================================================================================================
-class HRModelV1(nn.Module):
-    """Pure HRM v1 architecture with a legacy batch-compatible wrapper."""
+# =============================================================================
+@dataclass(frozen=True)
+class HRMOutputV1:
+    """Architecture-native HRM output.
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: ModelSettings_V1, *,
-        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
-    ) -> None:  # fmt: skip
-        """ """
+    Attributes:
+        theta_summary: Controller summary vector with shape ``(B, D)``.
+        schema_slots: Schema-slot bank with shape ``(B, N, D)``.
+        q_logits: Control logits consumed by ACT-style controllers.
+    """
+
+    theta_summary: Tensor
+    schema_slots: Tensor
+    q_logits: Tensor
+
+
+# =============================================================================
+class HRModelV1(nn.Module):
+    """Signature-only HRM v1 shell over the canonical recurrent core contract."""
+
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: ModelSettingsV1,
+        *,
+        device: Device | None = None,
+        dtype: Dtype | None = None,
+    ) -> None:
+        """Construct the HRM v1 core around the reusable PFC reasoning module."""
         super().__init__()
         self._config = config
-
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, device=device, dtype=dtype)
-        if config.pos_encodings == "learned":
-            self.embed_pos = nn.Embedding(config.seq_length, config.hidden_size, device=device, dtype=dtype)
-        else:
-            self.embed_pos = None  # Not used in RoPE mode
-
         self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)  # fmt: skip
-
-        self.reset_parameters()
 
     @property
-    def config(self) -> ModelSettings_V1:
-        """ """
+    def config(self) -> ModelSettingsV1:
+        """Return the immutable model settings used to parameterize the core."""
         return self._config
 
-    def reset_parameters(  # ----------------------------------------------------------------------
+    def reset_parameters(  # --------------------------------------------------
         self,
-    ) -> None:  # fmt: skip
-        """Initialize parameters and buffers.
+    ) -> None:
+        """Reset the reusable PFC core surfaces owned by HRM v1."""
+        self.pfc.reset_parameters()
 
-        Matches legacy ``CastedEmbedding`` / ``CastedLinear`` initialization so that
-        the input embedding magnitude ``||x||`` and recurrent state magnitude ``||z_H||``
-        are comparable (~1:1 ratio at init), which is required for multi-step reasoning
-        dynamics to emerge during training.
+    def init_state(  # --------------------------------------------------------
+        self,
+        batch_size: int,
+    ) -> HRMStateV1:
+        """Create a fresh recurrent state for one batch."""
+        return HRMStateV1(
+            pfc=self.pfc.init_state(batch_size, self.config.workspace_spec),
+        )
 
-        Std formulas (truncated normal, legacy parity):
-            - Embeddings: ``std = 1 / sqrt(hidden_size)``  (= ``config.init_std``)
-            - lm_head:    ``std = 1 / sqrt(hidden_size)``  (fan_in = hidden_size)
-            - Reset vecs: ``std = 1``
+    def reset_state(  # -------------------------------------------------------
+        self,
+        reset_flag: Tensor,
+        state: HRMStateV1,
+    ) -> HRMStateV1:
+        """Selectively reset rows of the recurrent state."""
+        return HRMStateV1(
+            pfc=self.pfc.reset_state(state.pfc, reset_flag),
+        )
+
+    def step(  # --------------------------------------------------------------
+        self,
+        payload: HRMInputV1,
+        state: HRMStateV1 | None = None,
+    ) -> tuple[HRMStateV1, HRMOutputV1]:
+        """Run one HRM core step over schema-slot tokens and return state plus readouts.
+
+        Args:
+            payload: Task-agnostic schema-slot payload with shape ``(B, N, D)``.
+            state: Optional recurrent carry from the previous step.
+
+        Returns:
+            ``(next_state, output)`` where ``next_state`` owns the recurrent slot
+            substrate and ``output`` exposes the architecture-native readouts for
+            the current step.
         """
-        init_std = self.config.init_std  # 1 / sqrt(hidden_size)
-        trunc_normal_init_(self.embed_tokens.weight, std=init_std)
-        if self.embed_pos is not None:
-            trunc_normal_init_(self.embed_pos.weight, std=init_std)
-        trunc_normal_init_(self.lm_head.weight, std=init_std)
+        pfc_state = None if state is None else state.pfc
+        # TODO: fix to `next_state, output = self.pfc(..., state=state)`
+        pfc_output = self.pfc.step_tokens(
+            payload.schema_tokens,
+            state=pfc_state,
+            workspace_spec=self.config.workspace_spec,
+            prefix_bias=payload.prefix_bias,
+        )
+        next_state = HRMStateV1(pfc=pfc_output.state)
+        output = HRMOutputV1(
+            theta_summary=pfc_output.summary,
+            schema_slots=pfc_output.workspace.tokens,
+            q_logits=pfc_output.q_values,
+        )
 
-        # self.pfc.reset_parameters()  # Already done when pfc is initialized
+        return next_state, output
 
-    def init_state(  # ---------------------------------------------------------------------------
-        self, batch_size: int,
-    ) -> HRMState:  # fmt: skip
-        """Create a fresh recurrent state (``ACTRolloutBackbone`` protocol)."""
-        return HRMState(pfc=self.pfc.init_state(batch_size))
-
-    def reset_state(  # --------------------------------------------------------------------------
-        self, reset_flag: Tensor, state: HRMState,
-    ) -> HRMState:  # fmt: skip
-        """Selectively reset rows of the recurrent state (``ACTRolloutBackbone`` protocol)."""
-        return HRMState(pfc=self.pfc.reset_state(state.pfc, reset_flag))
-
-    def forward(  # -------------------------------------------------------------------------------
-        self, batch: Batch, state: Optional[HRMState] = None,
-    ) -> tuple[HRMState, tuple[Tensor, Tensor], Tensor]:  # fmt: skip
-        """Forward pass through the HRM (``ACTRolloutBackbone`` protocol)."""
-        state = state or self.init_state(batch_size=batch["input_ids"].shape[0])
-        x = self.embed_input_ids(batch["input_ids"])  # (B, S, D) — cell tokens only
-
-        state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H is (B, S+1, D)
-        logits = self.lm_head(z_H[:, 1:])  # Strip CLS → (B, S, vocab_size)
-        theta_cls = z_H[:, 0]  # (B, D) — CLS features used for ACT control and tracing
-
-        new_state = HRMState(pfc=state_pfc)
-        return new_state, (logits, q_logits), theta_cls
-
-    def embed_input_ids(  # -----------------------------------------------------------------------
-        self, input_ids: Tensor,
-    ) -> Tensor:  # fmt: skip
-        """Embed token ids into a scaled representation ready for recurrent reasoning.
-
-        Two modes (controlled by ``config.pos_encodings``):
-
-        **learned**: token + additive learned position embeddings, scaled by
-            ``(1/\u221a2) * sqrt(d)`` to preserve unit variance at the residual stream
-            (the factor compensates for summing two independently-initialized
-            embeddings, each with per-dim variance \u2248 1/d).
-        **rope** (legacy parity): token embeddings only, scaled by ``sqrt(d)``.
-            Positional information is injected inside every attention operation via
-            Rotary Position Embeddings; no additive position table is needed or used.
-        """
-        token_embeddings = self.embed_tokens(input_ids.to(torch.int32))
-
-        if self.config.pos_encodings == "learned":
-            # Learned mode: add positional table, then scale to maintain variance.
-            positions = torch.arange(self.config.seq_length, device=input_ids.device)
-            pos_embeddings = self.embed_pos(positions).unsqueeze(0)
-            return 0.707106781 * self.config.embedding_scale * (token_embeddings + pos_embeddings)
-
-        if self.config.pos_encodings == "rope":
-            # RoPE mode: positions are encoded in QK rotation — scale by sqrt(d) only.
-            return self.config.embedding_scale * token_embeddings
-
-        raise ValueError(f"Unsupported pos_encodings mode: {self.config.pos_encodings}")
+    def forward(  # -----------------------------------------------------------
+        self,
+        payload: HRMInputV1,
+        state: HRMStateV1 | None = None,
+    ) -> tuple[HRMStateV1, HRMOutputV1]:
+        """Compatibility wrapper over :meth:`step` for module-call users."""
+        return self.step(payload, state=state)
 
 
-# =================================================================================================
-__all__ = [
-    "HRModelV1", "HRMState", "ModelSettings_V1", "Batch",
-]  # fmt: skip
+# =============================================================================
+__all__ = ["ModelSettingsV1", "HRMInputV1", "HRMOutputV1", "HRMStateV1", "HRModelV1"]
