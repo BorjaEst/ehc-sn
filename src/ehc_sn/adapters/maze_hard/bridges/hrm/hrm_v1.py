@@ -23,7 +23,7 @@ class MazeHardHRMV1AdapterSettings(BaseModel, extra="forbid"):
     """Task-side MazeHard settings required to bind the HRM v1 core."""
 
     encoder_kind: Literal["learned", "rope"] = Field(
-        default="learned",
+        default="rope",
         description="Positional front-end used by the MazeHard token encoder.",
     )
     vocab_size: int = Field(
