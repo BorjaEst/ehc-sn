@@ -11,7 +11,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.tasks.maze_hard import MazeHardTaskBatch
+from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskInput
 
 
 # =============================================================================
@@ -33,9 +33,7 @@ class MazeHardEncoder(ABC):
     @abstractmethod
     def forward(  # -----------------------------------------------------------
         self,
-        batch: MazeHardTaskBatch,
-        *,
-        device: Device | None = None,
+        batch: MazeHardTaskInput,
     ) -> Any:
         """Encode a MazeHard task batch into token embeddings suitable for HRM input."""
 

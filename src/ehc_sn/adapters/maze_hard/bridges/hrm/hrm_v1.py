@@ -14,12 +14,12 @@ from torch import nn
 from ehc_sn.adapters.maze_hard.decoders import MazeHardDecoder
 from ehc_sn.adapters.maze_hard.encoders import MazeHardEncoder
 from ehc_sn.models.hrm.hrm_v1_new import HRMInputV1, HRModelV1, HRMOutputV1, HRMStateV1
-from ehc_sn.tasks.maze_hard import MazeHardTaskBatch, MazeHardTaskOutput
+from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskInput, MazeHardTaskOutput
 
 
 # =============================================================================
 class MazeHardLearnedEncoder(nn.Module, MazeHardEncoder):
-    """ """
+    """Encoder for MazeHard token inputs using learned positional embeddings."""
 
     def __init__(  # ----------------------------------------------------------
         self,
@@ -30,7 +30,7 @@ class MazeHardLearnedEncoder(nn.Module, MazeHardEncoder):
         device: Device | None = None,
         dtype: Dtype | None = None,
     ) -> None:
-        """ """
+        """Construct the learned encoder with token and positional embedding tables."""
         super().__init__()
         self.embed_tokens = nn.Embedding(vocab_size, hidden_size, device=device, dtype=dtype)
         self.embed_pos = nn.Embedding(seq_length, hidden_size, device=device, dtype=dtype)
@@ -38,24 +38,24 @@ class MazeHardLearnedEncoder(nn.Module, MazeHardEncoder):
 
     def forward(  # -----------------------------------------------------------
         self,
-        batch: MazeHardTaskBatch,
-        *,
-        device: Device | None = None,
-    ):  # TODO: specify return type
-        """ """
-        token_embeddings = self.embed_tokens(input_ids.to(torch.int32))
+        batch: MazeHardTaskInput,
+    ) -> HRMInputV1:
+        """Encode a MazeHard task batch into token embeddings with learned positional encodings."""
+        token_embeddings = self.embed_tokens(batch.input_ids.to(torch.int32))
 
         # Learned mode: add positional table, then scale to maintain variance.
-        positions = torch.arange(self.config.seq_length, device=input_ids.device)
+        positions = torch.arange(self.config.seq_length, device=batch.input_ids.device)
         pos_embeddings = self.embed_pos(positions).unsqueeze(0)
-        token_embeddings = self.embedding_scale * (token_embeddings + pos_embeddings)
 
-        return inputs
+        return HRMInputV1(
+            schema_tokens=self.embedding_scale * (token_embeddings + pos_embeddings),
+            prefix_bias=None,
+        )
 
 
 # =============================================================================
 class MazeHardRoPEEncoder(nn.Module, MazeHardEncoder):
-    """ """
+    """Encoder for MazeHard token inputs using RoPE positional encodings."""
 
     def __init__(  # ----------------------------------------------------------
         self,
@@ -66,7 +66,7 @@ class MazeHardRoPEEncoder(nn.Module, MazeHardEncoder):
         device: Device | None = None,
         dtype: Dtype | None = None,
     ) -> None:
-        """ """
+        """Construct the RoPE encoder with token embedding table only."""
         super().__init__()
         self.embed_tokens = nn.Embedding(vocab_size, hidden_size, device=device, dtype=dtype)
         self.embed_pos = None  # Not used in RoPE mode
@@ -74,17 +74,16 @@ class MazeHardRoPEEncoder(nn.Module, MazeHardEncoder):
 
     def forward(  # -----------------------------------------------------------
         self,
-        batch: MazeHardTaskBatch,
-        *,
-        device: Device | None = None,
-    ):  # TODO: specify return type
-        """ """
-        token_embeddings = self.embed_tokens(input_ids.to(torch.int32))
+        batch: MazeHardTaskInput,
+    ) -> HRMInputV1:
+        """Encode a MazeHard task batch into token embeddings with RoPE positional encodings."""
+        token_embeddings = self.embed_tokens(batch.input_ids.to(torch.int32))
 
         # RoPE mode: positions are encoded in QK rotation — scale by sqrt(d) only.
-        token_embeddings = self.embedding_scale * token_embeddings
-
-        return inputs
+        return HRMInputV1(
+            schema_tokens=self.embedding_scale * token_embeddings,
+            prefix_bias=None,
+        )
 
 
 # =============================================================================
@@ -93,7 +92,7 @@ MazeHardTokenEncoder: TypeAlias = MazeHardLearnedEncoder | MazeHardRoPEEncoder
 
 # =============================================================================
 class MazeHardTokenDecoder(nn.Module, MazeHardDecoder):
-    """ """
+    """Decoder for MazeHard task outputs from HRM core outputs using a simple linear head."""
 
     def __init__(  # ----------------------------------------------------------
         self,
@@ -103,19 +102,18 @@ class MazeHardTokenDecoder(nn.Module, MazeHardDecoder):
         device: Device | None = None,
         dtype: Dtype | None = None,
     ) -> None:
-        """ """
+        """Construct the token decoder with a linear head mapping to MazeHard vocab size."""
         super().__init__()
         self.lm_head = nn.Linear(hidden_size, vocab_size, bias=False, device=device, dtype=dtype)
 
     def forward(  # -----------------------------------------------------------
         self,
         outputs: HRMOutputV1,
-        *,
-        device: Device | None = None,
     ) -> MazeHardTaskOutput:
-        """ """
-        logits = self.lm_head(outputs.someother_logits)  # Strip CLS → (B, S, vocab_size)
-        return logits
+        """Decode HRM outputs into a MazeHard task output by applying the linear head."""
+        return MazeHardTaskOutput(
+            task_logits=self.lm_head(outputs.someother_logits),  # Strip CLS from WM
+        )
 
 
 # =============================================================================
@@ -136,7 +134,7 @@ class MazeHardHRMV1BridgeAdapter(nn.Module):
 
     def prepare_inputs(  # ----------------------------------------------------
         self,
-        batch: MazeHardTaskBatch,
+        batch: MazeHardTaskInput,
     ) -> HRMInputV1:
         """Prepare the model-facing core payload and task-side decoder context."""
         return self.encoder(batch)
@@ -150,7 +148,7 @@ class MazeHardHRMV1BridgeAdapter(nn.Module):
 
     def forward(  # -----------------------------------------------------------
         self,
-        batch: MazeHardTaskBatch,
+        batch: MazeHardTaskInput,
         state: HRMStateV1 | None = None,
     ) -> tuple[HRMStateV1, MazeHardTaskOutput]:
         """Run a forward pass of the HRM v1 bridge adapter on a MazeHard task batch."""

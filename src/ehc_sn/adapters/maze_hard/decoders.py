@@ -10,7 +10,7 @@ from torch import Tensor
 from torch import device as Device
 from torch import dtype as Dtype
 
-from ehc_sn.tasks.maze_hard import MazeHardTaskOutput
+from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskOutput
 
 
 # =============================================================================
@@ -32,8 +32,6 @@ class MazeHardDecoder(ABC):
     def forward(  # -----------------------------------------------------------
         self,
         outputs: Any,
-        *,
-        device: Device | None = None,
     ) -> MazeHardTaskOutput:
         """Decode HRM outputs into a MazeHard task output."""
 
