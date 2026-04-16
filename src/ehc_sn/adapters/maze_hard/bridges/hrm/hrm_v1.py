@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
 import torch
 from pydantic import BaseModel, Field
+from torch import Tensor
 from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
@@ -31,6 +33,23 @@ class MazeHardHRMV1AdapterSettings(BaseModel, extra="forbid"):
         ge=1,
         description="MazeHard token vocabulary size used by encoder and decoder heads.",
     )
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class MazeHardHRMV1ControlOutput:
+    """ACT-compatible control readouts emitted by the MazeHard HRM v1 bridge."""
+
+    q_logits: Tensor
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class MazeHardHRMV1BridgeOutput:
+    """Controller-consumable MazeHard HRM v1 bridge output bundle."""
+
+    task: MazeHardTaskOutput
+    control: MazeHardHRMV1ControlOutput
 
 
 # =============================================================================
@@ -204,26 +223,31 @@ class MazeHardHRMV1BridgeAdapter(nn.Module):
 
     def prepare_outputs(  # ---------------------------------------------------
         self,
-        logits: HRMOutputV1,
-    ) -> MazeHardTaskOutput:
-        """Split one HRM step output into task bridge heads."""
-        return self.decoder(logits)
+        outputs: HRMOutputV1,
+    ) -> MazeHardHRMV1BridgeOutput:
+        """Split one HRM step output into controller-consumable task and control heads."""
+        return MazeHardHRMV1BridgeOutput(
+            task=self.decoder(outputs),
+            control=MazeHardHRMV1ControlOutput(q_logits=outputs.q_logits),
+        )
 
     def forward(  # -----------------------------------------------------------
         self,
         batch: Batch,
         state: HRMStateV1 | None = None,
-    ) -> tuple[HRMStateV1, MazeHardTaskOutput]:
+    ) -> tuple[HRMStateV1, MazeHardHRMV1BridgeOutput]:
         """Run a forward pass of the HRM v1 bridge adapter on a MazeHard task batch."""
         inputs = self.prepare_inputs(batch)
-        next_state, logits = self.model(inputs, state=state)
-        outputs = self.prepare_outputs(logits)
+        next_state, outputs = self.model(inputs, state=state)
+        outputs = self.prepare_outputs(outputs)
         return next_state, outputs
 
 
 # =============================================================================
 __all__ = [
     "MazeHardHRMV1AdapterSettings",
+    "MazeHardHRMV1BridgeOutput",
+    "MazeHardHRMV1ControlOutput",
     "MazeHardLearnedEncoder",
     "MazeHardRoPEEncoder",
     "MazeHardTokenEncoder",
