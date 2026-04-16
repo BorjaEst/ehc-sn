@@ -24,7 +24,7 @@ from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 from pydantic import BaseModel, Field
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.maze_hard import MazeHardHRMV1BridgeAdapter
+from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v1 import MazeHardHRMV1AdapterSettings, MazeHardHRMV1BridgeAdapter
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
 from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
@@ -32,8 +32,9 @@ from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
-from ehc_sn.models.hrm.hrm_v1 import Batch, HRModelV1, ModelSettings_V1
+from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
+from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskInput, MazeHardTaskOutput
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
@@ -58,6 +59,11 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
         ...,
         description="Path to the model configuration TOML file that specifies the HRM v1 architecture.",
     )
+    adapter: MazeHardHRMV1AdapterSettings = Field(
+        default_factory=MazeHardHRMV1AdapterSettings,
+        description="Settings for the MazeHard bridge adapter that binds the HRM core to task inputs/outputs.",
+    )
+
     act_controller: ACTControllerConfig = Field(
         ...,
         description=(
@@ -122,9 +128,9 @@ class TrainingModel(L.LightningModule):
             - `_train_carry` is initialized lazily from the first batch via `step_module`.
         """
         super().__init__()
-        model_settings = ModelSettings_V1.from_config(config.model_config_path)
+        model_settings = ModelSettingsV1.from_config(config.model_config_path)
         self.model = HRModelV1(model_settings)
-        self.bridge_adapter = MazeHardHRMV1BridgeAdapter(self.model)
+        self.bridge_adapter = MazeHardHRMV1BridgeAdapter(self.model, config.adapter)
         self.controller = ACTController(self.bridge_adapter, config.act_controller)
         self.objective = ACTLossHead(config.loss)
         self._config = config
@@ -167,7 +173,7 @@ class TrainingModel(L.LightningModule):
         total_steps = int(self.trainer.estimated_stepping_batches)
 
         # Optimizer for the main model parameters
-        sup_params = [p for p in self.model.parameters() if p.requires_grad]
+        sup_params = [p for p in self.bridge_adapter.parameters() if p.requires_grad]
         opt_sup = AdamATan2(sup_params, self._config.optimizer)
         sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, self.config.scheduler)
 
