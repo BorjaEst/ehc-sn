@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+from typing import Any
+
 import torch
 from torch import Tensor
 from torch import device as Device
 from torch import dtype as Dtype
-from torch import nn
 
 from ehc_sn.tasks.maze_hard import MazeHardTaskOutput
 
 
 # =============================================================================
-class MazeHardTokenDecoder(nn.Module):
-    """ """
+class MazeHardDecoder(ABC):
+    """Abstract base class for MazeHard token decoders."""
 
+    @abstractmethod
     def __init__(  # ----------------------------------------------------------
         self,
         hidden_size: int,
@@ -23,19 +26,16 @@ class MazeHardTokenDecoder(nn.Module):
         device: Device | None = None,
         dtype: Dtype | None = None,
     ) -> None:
-        """ """
-        super().__init__()
-        self.lm_head = nn.Linear(hidden_size, vocab_size, bias=False, device=device, dtype=dtype)
+        """Standard constructor signature for MazeHard decoders."""
 
+    @abstractmethod
     def forward(  # -----------------------------------------------------------
         self,
-        outputs,  # TODO: specify type
+        outputs: Any,
         *,
         device: Device | None = None,
     ) -> MazeHardTaskOutput:
-        """ """
-        logits = self.lm_head(z_H[:, 1:])  # Strip CLS → (B, S, vocab_size)
-        return
+        """Decode HRM outputs into a MazeHard task output."""
 
 
 # =============================================================================
