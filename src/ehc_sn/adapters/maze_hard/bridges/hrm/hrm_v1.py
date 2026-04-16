@@ -213,6 +213,21 @@ class MazeHardHRMV1BridgeAdapter(nn.Module):
         """Return the immutable adapter settings used to configure the bridge."""
         return self._config
 
+    def init_state(  # --------------------------------------------------------
+        self,
+        batch_size: int,
+    ) -> HRMStateV1:
+        """Create a fresh HRM recurrent state for one rollout batch."""
+        return self.model.init_state(batch_size)
+
+    def reset_state(  # --------------------------------------------------------
+        self,
+        reset_flag: torch.Tensor,
+        state: HRMStateV1,
+    ) -> HRMStateV1:
+        """Reset halted rows of the HRM recurrent state."""
+        return self.model.reset_state(reset_flag, state)
+
     def prepare_inputs(  # ----------------------------------------------------
         self,
         batch: Batch,
