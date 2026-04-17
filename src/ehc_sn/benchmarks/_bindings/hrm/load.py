@@ -10,7 +10,7 @@ import torch
 
 from ehc_sn.adapters.maze_hard import MazeHardHRMV1AdapterSettings, MazeHardHRMV1BridgeAdapter
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
-from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettings_V2
+from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
 
 
 def _resolve_checkpoint_state_dict(  # ------------------------------------------------------------
@@ -103,7 +103,7 @@ def load_hrm_v2_model(  # ------------------------------------------------------
 ) -> HRModelV2:
     """Instantiate HRM v2 and optionally hydrate it from a checkpoint."""
     resolved_model_config = Path(model_config_path)
-    config = ModelSettings_V2.model_validate(tomllib.load(resolved_model_config.open("rb")))
+    config = ModelSettingsV2.model_validate(tomllib.load(resolved_model_config.open("rb")))
     model = HRModelV2(config)
 
     if checkpoint_path is not None:

@@ -8,8 +8,8 @@ from typing import Any
 
 import torch
 
-from ehc_sn.models.tem.tem_v1 import ModelSettings_V1, TEMModelV1
-from ehc_sn.models.tem.tem_v2 import ModelSettings_V2, TEMModelV2
+from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
+from ehc_sn.models.tem.tem_v2 import ModelSettingsV2, TEMModelV2
 
 
 def _resolve_checkpoint_state_dict(checkpoint_path: Path) -> dict[str, Any]:
@@ -36,7 +36,7 @@ def load_tem_v1_model(
 ) -> TEMModelV1:
     """Instantiate TEM v1 and optionally hydrate it from a checkpoint."""
     resolved_model_config = Path(model_config_path)
-    config = ModelSettings_V1.model_validate(tomllib.load(resolved_model_config.open("rb")))
+    config = ModelSettingsV1.model_validate(tomllib.load(resolved_model_config.open("rb")))
     model = TEMModelV1(config)
 
     if checkpoint_path is not None:
@@ -61,7 +61,7 @@ def load_tem_v2_model(
 ) -> TEMModelV2:
     """Instantiate TEM v2 and optionally hydrate it from a checkpoint."""
     resolved_model_config = Path(model_config_path)
-    config = ModelSettings_V2.model_validate(tomllib.load(resolved_model_config.open("rb")))
+    config = ModelSettingsV2.model_validate(tomllib.load(resolved_model_config.open("rb")))
     model = TEMModelV2(config)
 
     if checkpoint_path is not None:
