@@ -12,6 +12,7 @@ from lightning.pytorch import Trainer, seed_everything
 from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
+from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v2 import MazeHardHRMV2AdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
@@ -19,10 +20,11 @@ from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.controllers.rl import RLControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.envs.mazehard import EnvConfig
-from ehc_sn.heads.rl import RLLossConfig
-from ehc_sn.lightning.hrm.core.runtime import supervised_maze_tokenize
+from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v2 import ModelConfig_HRM_V2, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
+from ehc_sn.objectives.rl import RLLossConfig
+from ehc_sn.tasks.maze_hard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
@@ -75,6 +77,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Path to the model configuration TOML file that specifies the HRM v2 architecture.",
     )
+    adapter: MazeHardHRMV2AdapterSettings = Field(
+        default_factory=MazeHardHRMV2AdapterSettings,
+        description="Adapter settings for the MazeHard environment and HRM v2 model.",
+    )
     environment: EnvConfig = Field(
         ...,
         description="Environment configuration (max_episode_steps, seq_length, vocab_size, halt_action).",
@@ -113,6 +119,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
             "STR and vmPFC are frozen; allow_halt=False forces full deliberation. "
             "Prevents 'halt immediately' collapse before PFC representations are informative."
         ),
+    )
+    runtime: RuntimeConfig = Field(
+        default_factory=RuntimeConfig,
+        description="HRM runtime-owned validation safety settings.",
     )
 
     # ---------------------------------------------------------------------------------------------
@@ -325,7 +335,7 @@ if __name__ == "__main__":
         # Lightning module: training step, optimizer and schedule setup.
         model=TrainingModel(settings.hrm_config),
         # Data module: dataset + DataLoader construction.
-        datamodule=Datamodule(settings.datamodule, transform=supervised_maze_tokenize),
+        datamodule=Datamodule(settings.datamodule, transform=coerce_maze_hard_batch),
         # Optional: resume training from a checkpoint.
         ckpt_path=settings.checkpoint_path,
     )
