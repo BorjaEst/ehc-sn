@@ -17,15 +17,18 @@ from typing import Optional, cast
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn.models.tem.core.tem_base import GridCodes, ObsLogits, PlaceCodes, TEMProjectionSettings
+from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, TEMProjectionSettings
 from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCState, WritePayload
 from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionBundle, ProjectionModule
-from ehc_sn.types import Batch, Device, Dtype, MemoryState
+from ehc_sn.types import MemoryState
 from ehc_sn.utils.detach import DetachMixin
 
 
