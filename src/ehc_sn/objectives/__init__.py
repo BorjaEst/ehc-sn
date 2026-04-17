@@ -1,11 +1,8 @@
-"""Compatibility shim for ``ehc_sn.heads``.
+"""Canonical public surface for rollout-scoring objective modules.
 
 All objective-scoring implementations reside in the submodules of this package.
-The canonical public import surface is ``ehc_sn.objectives``. This package
-re-exports the same names so existing imports continue to work during the
-transition window.
-
-Prefer ``from ehc_sn.objectives import ...`` for new code.
+``ehc_sn.heads`` is a deprecated compatibility alias that re-exports from here;
+prefer ``from ehc_sn.objectives import ...`` for all new code.
 """
 
 from ehc_sn.objectives._base import BaseObjective

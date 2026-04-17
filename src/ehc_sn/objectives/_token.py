@@ -4,7 +4,7 @@ This module defines the :class:`TokenSupervisionBinding` protocol and the
 :class:`TokenLossHeadBase` family layer.  Every concrete head must supply an
 explicit binding; there is no generic default because generic code cannot know
 what a task payload looks like.  Bind task-specific extraction in the objective
-layer (e.g. :class:`~ehc_sn.heads.act.ACTLossHead`) or in an adapter.
+layer (e.g. :class:`~ehc_sn.objectives.act.ACTLossHead`) or in an adapter.
 """
 
 from __future__ import annotations
