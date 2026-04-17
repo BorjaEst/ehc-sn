@@ -9,7 +9,7 @@ from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v1 import MazeHardHRMV1AdapterSettings
@@ -22,7 +22,7 @@ from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v1 import ModelConfig_HRM_V1, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.objectives.act import ACTLossConfig
+from ehc_sn.objectives import ACTObjectiveConfig
 from ehc_sn.tasks.maze_hard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
@@ -88,10 +88,11 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
             "The keys in `act_controller` are passed to the ACTController constructor."
         ),
     )
-    loss: ACTLossConfig = Field(
+    objective: ACTObjectiveConfig = Field(
         ...,
-        description="Loss config. The keys in `loss` are passed to the loss head constructor.",
+        description="Objective config. The keys in `objective` are passed to the ACT objective constructor.",
     )
+
     optimizer: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
         description=(

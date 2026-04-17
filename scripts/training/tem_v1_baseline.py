@@ -9,7 +9,7 @@ from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
@@ -21,7 +21,7 @@ from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.envs.dungeon_walk import EnvConfig
 from ehc_sn.lightning.tem.tem_v1 import ModelConfig_TEM_V1, RuntimeConfig, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.objectives.tem import TEMLossConfig
+from ehc_sn.objectives import TEMObjectiveConfig
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamConfig
 from ehc_sn.training.schedules import SchedulerConfig
@@ -82,9 +82,9 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="TEM controller configuration (exploration probability).",
     )
-    loss: TEMLossConfig = Field(
+    objective: TEMObjectiveConfig = Field(
         ...,
-        description="TEM loss head configuration (observation, latent, regularization",
+        description="TEM objective configuration (observation, latent, regularization).",
     )
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

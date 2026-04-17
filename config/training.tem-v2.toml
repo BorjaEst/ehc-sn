@@ -63,8 +63,8 @@ diagnostic_level     = "standard"
     hard_max_rollout_steps = 300
     seed = 42
 
-# -- Controller & loss --------------------------------------------------------
-[loss]
+# -- Controller & objective ---------------------------------------------------
+[objective]
     observation_loss = "softmax_cross_entropy"
     c_obs            = 1.0
     c_grid           = 1.0

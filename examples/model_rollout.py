@@ -29,7 +29,7 @@ from typing import Tuple
 import matplotlib.pyplot as plt
 import torch
 from matplotlib.figure import Figure
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn import figures
@@ -37,9 +37,9 @@ from ehc_sn.controllers.act import ACTControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.sinks import save_pdf
-from ehc_sn.heads.act import ACTLossConfig
 from ehc_sn.models.hrm.hrm_v1 import Model, ModelConfig_HRM_V1, supervised_maze_tokenize
 from ehc_sn.modules.pfc import PFCSettings
+from ehc_sn.objectives import ACTObjectiveConfig
 from ehc_sn.rollouts.collect import TraceCollector
 from ehc_sn.rollouts.trace_tree import TraceTree
 from ehc_sn.training.optim import AdamATan2Config
@@ -104,10 +104,11 @@ class ExampleArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="ACT controller config for the HRM model.",
     )
-    loss: ACTLossConfig = Field(
+    objective: ACTObjectiveConfig = Field(
         ...,
-        description="Loss config for the HRM model.",
+        description="Objective config for the HRM model.",
     )
+
     optimizer: AdamATan2Config = Field(
         ...,
         description="Optimizer config for the HRM model.",

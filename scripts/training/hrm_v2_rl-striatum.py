@@ -9,7 +9,7 @@ from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v2 import MazeHardHRMV2AdapterSettings
@@ -23,7 +23,7 @@ from ehc_sn.envs.mazehard import EnvConfig
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v2 import ModelConfig_HRM_V2, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.objectives.rl import RLLossConfig
+from ehc_sn.objectives import RLObjectiveConfig
 from ehc_sn.tasks.maze_hard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
@@ -89,9 +89,9 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="RL controller configuration (exploration probability).",
     )
-    loss: RLLossConfig = Field(
+    objective: RLObjectiveConfig = Field(
         ...,
-        description="RL loss head configuration (gamma, halt_action, max_steps, coefficients).",
+        description="RL objective configuration (gamma, halt_action, max_steps, coefficients).",
     )
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

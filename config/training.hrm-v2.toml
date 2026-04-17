@@ -48,11 +48,11 @@ supervised_only_warmup_steps = 5000
 [runtime.validation]
     hard_max_rollout_steps = 16
 
-# -- Controller & loss --------------------------------------------------------
+# -- Controller & objective ---------------------------------------------------
 [controller]
     policy.exploration_prob = 0.1
 
-[loss]
+[objective]
     function  = "stablemax_cross_entropy"
     c_actor   = 1.0
     c_critic  = 0.5
