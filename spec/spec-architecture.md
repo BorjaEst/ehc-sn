@@ -75,14 +75,11 @@ never upward.
 - `adapters/` may import from `models/`, `tasks/`, and lower reusable layers.
   They must not own canonical benchmark semantics, generic training primitives,
   or CLI orchestration.
-- `controllers/`, `heads/`, and `policies/` are reusable lower-layer runtime
-  primitives. Controllers own rollout-state transitions, heads own objective
-  scoring, and policies own action selection. They must remain model-agnostic
-  and task-agnostic.
-- `objectives/` is the canonical public surface for objective modules from the
-  rename-wave-1 phase onward. For this transition window `heads/` continues to
-  hold all implementations; `objectives/` re-exports them. `heads/` remains a
-  compatibility shim until implementations are physically migrated.
+- `controllers/`, `objectives/`, and `policies/` are reusable lower-layer
+  runtime primitives. Controllers own rollout-state transitions, objectives own
+  rollout scoring, and policies own action selection. They must remain
+  model-agnostic and task-agnostic.
+- `objectives/` is the sole canonical public surface for objective modules.
 - `training/`, `rollouts/`, and `traces/` are reusable lower-layer execution
   primitives. They must remain model-agnostic.
 - `data/` and `envs/` are reusable infrastructure. They must not import from

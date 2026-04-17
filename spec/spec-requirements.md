@@ -64,7 +64,7 @@ The only exception is the **Bootstrap Mode** override defined in the
   semantics and binding semantics.
 - Lightning training surfaces instantiate `task -> model -> adapter` and must
   execute through adapter interfaces.
-- Reusable objective scoring belongs in `heads/`; Lightning remains the
+- Reusable objective scoring belongs in `objectives/`; Lightning remains the
   executable training orchestration surface.
 - Adding a new task or puzzle must require changes only in `tasks/` and
   optional adapters.
@@ -130,19 +130,19 @@ The only exception is the **Bootstrap Mode** override defined in the
 
 ### 5.2 Ownership Matrix
 
-| Component                       | Constraint                                                                                                                                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `training/`                     | Must remain model-agnostic and task-agnostic. No imports from `models/`, `modules/`, `tasks/`, `adapters/`, or `lightning/`.                                                                |
-| `tasks/`                        | Must remain model-agnostic. No imports from `models/`, `modules/`, `adapters/`, or `lightning/`.                                                                                            |
-| `adapters/`                     | Canonical model-task seam. May import `models/`, `tasks/`, and lower reusable layers, but must not own benchmark semantics, CLI orchestration, or generic training primitives.              |
-| `rollouts/`, `traces/`          | Must remain model-agnostic. No imports from `models/` or `lightning/`.                                                                                                                      |
-| `controllers/`, `heads/`        | Controllers own rollout-state transitions and heads own reusable objective scoring. Both must remain model-agnostic and task-agnostic. No imports from `models/`, `tasks/`, or `adapters/`. |
-| `policies/`                     | Own action selection only. Must remain model-agnostic and controller-agnostic. No imports from `models/`, `tasks/`, `adapters/`, `controllers/`, `heads/`, `training/`, or `modules/`.      |
-| `benchmarks/` semantic packages | Must remain model-agnostic. No imports from `models/` or `lightning/`.                                                                                                                      |
-| `benchmarks/_bindings/`         | Only model-aware benchmark subarea. May import `models/`, `tasks/`, `adapters/`, and lower reusable layers, but must not own benchmark semantics.                                           |
-| `lightning/`                    | Owns executable training orchestration. Reusable objective scoring remains in `heads/`. Must execute through adapters rather than task-shaped model payloads.                               |
-| `scripts/benchmarks/`           | Thin wrappers only. Shared benchmark logic belongs in `ehc_sn.benchmarks`.                                                                                                                  |
-| `experiments/`                  | Exploratory or paper-specific entry points only. Must not duplicate shared benchmark or training infrastructure.                                                                            |
+| Component                       | Constraint                                                                                                                                                                                     |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `training/`                     | Must remain model-agnostic and task-agnostic. No imports from `models/`, `modules/`, `tasks/`, `adapters/`, or `lightning/`.                                                                   |
+| `tasks/`                        | Must remain model-agnostic. No imports from `models/`, `modules/`, `adapters/`, or `lightning/`.                                                                                               |
+| `adapters/`                     | Canonical model-task seam. May import `models/`, `tasks/`, and lower reusable layers, but must not own benchmark semantics, CLI orchestration, or generic training primitives.                 |
+| `rollouts/`, `traces/`          | Must remain model-agnostic. No imports from `models/` or `lightning/`.                                                                                                                         |
+| `controllers/`, `objectives/`   | Controllers own rollout-state transitions and objectives own reusable rollout scoring. Both must remain model-agnostic and task-agnostic. No imports from `models/`, `tasks/`, or `adapters/`. |
+| `policies/`                     | Own action selection only. Must remain model-agnostic and controller-agnostic. No imports from `models/`, `tasks/`, `adapters/`, `controllers/`, `objectives/`, `training/`, or `modules/`.    |
+| `benchmarks/` semantic packages | Must remain model-agnostic. No imports from `models/` or `lightning/`.                                                                                                                         |
+| `benchmarks/_bindings/`         | Only model-aware benchmark subarea. May import `models/`, `tasks/`, `adapters/`, and lower reusable layers, but must not own benchmark semantics.                                              |
+| `lightning/`                    | Owns executable training orchestration. Reusable objective scoring lives in `objectives/`. Must execute through adapters rather than task-shaped model payloads.                               |
+| `scripts/benchmarks/`           | Thin wrappers only. Shared benchmark logic belongs in `ehc_sn.benchmarks`.                                                                                                                     |
+| `experiments/`                  | Exploratory or paper-specific entry points only. Must not duplicate shared benchmark or training infrastructure.                                                                               |
 
 ---
 

@@ -42,7 +42,7 @@ Rules:
   selection head.
 - Goal-directed action selection may live above the model in controllers,
   policies, adapters, or other attached execution layers.
-- Rollout controllers and objective heads live above the model step surface and
+- Rollout controllers and objectives live above the model step surface and
   are not part of the model-native public API.
 - `init_state()` and `reset_state()` are part of the stable public surface when
   the model is recurrent.
