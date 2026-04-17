@@ -1,18 +1,4 @@
-"""ACT controller: halting decisions and recurrent state management.
-
-This module implements the controller used by HRM v1 training.
-
-The controller is responsible for:
-    - refreshing per-slot buffers for halted slots (partial reset semantics)
-    - resetting backbone recurrent state for halted slots
-    - running the backbone forward pass
-    - selecting a halt/continue action based on Q logits
-    - optionally computing a TD(0) bootstrap target to supervise non-halt actions
-
-The semantics of the actions are minimal:
-    - ``done_action`` indicates the action index that terminates deliberation.
-    - all other actions are treated as "continue" (potentially multiple).
-"""
+""" """
 
 from __future__ import annotations
 
@@ -30,19 +16,13 @@ from ehc_sn.utils.detach import DetachMixin
 
 # =============================================================================
 class ACTControllerConfig(BaseModel, extra="forbid"):
-    """Configuration for :class:`ACTController`.
-
-    Attributes:
-        exploration_prob: Probability of suppressing early halting during training.
-        max_steps: Hard cap on steps before forced termination.
-        done_action: Action index that signals termination when selected.
-    """
+    """Configuration for :class:`ACTController`."""
 
     exploration_prob: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="Exploration probability for deliberation.",
+        description="Probability of flipping the greedy halt decision during exploration.",
     )
     max_steps: int = Field(
         ...,
@@ -58,7 +38,7 @@ class ACTControllerConfig(BaseModel, extra="forbid"):
 
 # =============================================================================
 class ACTControlOutput(Protocol):
-    """Control payload emitted by one controller-consumable ACT step."""
+    """Control payload emitted by one ACT-consumable backbone step."""
 
     q_logits: Tensor
 
@@ -67,7 +47,7 @@ class ACTControlOutput(Protocol):
 class ACTBackboneOutput(Protocol):
     """Named backbone output consumed by :class:`ACTController`."""
 
-    task: Any  # Task-owned prediction logits (e.g., for LM head)
+    task: object
     control: ACTControlOutput
 
 
@@ -76,73 +56,102 @@ class ACTRolloutBackbone[ModelState](RolloutBackbone[ModelState, ACTBackboneOutp
     """Backbone protocol expected by :class:`ACTController`."""
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
 class ACTRolloutState[ModelState](RolloutState[ModelState]):
     """Controller carry/state for ACT rollouts."""
 
 
-# =================================================================================================
-@dataclass
-class ACTOutput(DetachMixin):
-    """Outputs produced by a controller step.
+# =============================================================================
+@dataclass(frozen=True)
+class ACTHaltContinueScores:
+    """Collapsed halt vs continue logits derived from q_logits.
 
-    Named property accessors (``lm_logits``, ``q_logits``) are the preferred
-    read path for heads.  Direct positional reads via ``logits[N]`` are
-    deprecated in head code and will be removed once all heads are migrated.
+    ``halt_logit``    = q_logits[..., done_action]
+    ``continue_logit`` = max over all non-done action indices
+    ``greedy_halt``   = halt_logit > continue_logit  (strict; ties continue)
     """
 
+    halt_logit: Tensor
+    continue_logit: Tensor
+
+    @property
+    def greedy_halt(self) -> Tensor:
+        """Return bool tensor; True only when halt strictly beats every alternative."""
+        return self.halt_logit > self.continue_logit
+
+
+# =============================================================================
+def collapse_act_halt_continue_logits(  # -------------------------------------
+    q_logits: Tensor,
+    *,
+    done_action: int,
+) -> ACTHaltContinueScores:
+    """Collapse q_logits into halt vs continue scores.
+
+    Args:
+            q_logits: Shape ``(B, A)`` with ``A >= 2``.
+            done_action: Index of the halt action; must be in ``[0, A)``.
+
+    Returns:
+            :class:`ACTHaltContinueScores` with ``halt_logit`` and ``continue_logit``.
+    """
+    if q_logits.ndim != 2:
+        raise ValueError(f"collapse_act_halt_continue_logits expects shape (B, A), got {tuple(q_logits.shape)}.")
+    n_actions = q_logits.shape[-1]
+    if n_actions < 2:
+        raise ValueError(f"collapse_act_halt_continue_logits requires at least 2 actions, got {n_actions}.")
+    if done_action < 0 or done_action >= n_actions:
+        raise ValueError(f"done_action={done_action} is out of range for {n_actions} actions.")
+
+    non_done = [i for i in range(n_actions) if i != done_action]
+    halt_logit = q_logits[..., done_action]
+    continue_logit = q_logits[..., non_done].max(dim=-1).values
+    return ACTHaltContinueScores(halt_logit=halt_logit, continue_logit=continue_logit)
+
+
+# =============================================================================
+def maybe_flip_halt_decision(  # ----------------------------------------------
+    greedy_halt: Tensor,
+    *,
+    explore: bool,
+    exploration_prob: float,
+) -> Tensor:
+    """Optionally flip the halt boolean with probability ``exploration_prob``.
+
+    Args:
+            greedy_halt: Bool tensor of shape ``(B,)``.
+            explore: Whether exploration is active.
+            exploration_prob: Per-slot probability of flipping the halt decision.
+
+    Returns:
+            Bool tensor of shape ``(B,)`` with some decisions flipped.
+    """
+    if not explore or exploration_prob <= 0.0:
+        return greedy_halt
+
+    flip = torch.rand(greedy_halt.shape, device=greedy_halt.device) < exploration_prob
+    return greedy_halt ^ flip
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class ACTStepOutput(DetachMixin):
+    """Raw execution output produced by a single ACT controller step."""
+
     backbone_output: ACTBackboneOutput
-    action: Tensor  # (B,) selected action indices for this step
-    done_action: int  # Action index that terminates deliberation for this controller
-    target_q: Tensor | None = None  # TD(0) bootstrap Q-target, shape: (B,). None outside training.
-
-    @property
-    def task_logits(self) -> Tensor:
-        """Task-owned prediction logits returned by the backbone."""
-        return self.backbone_output.task.task_logits
-
-    @property
-    def lm_logits(self) -> Tensor:
-        """LM head logits, shape ``(B, S, V)``."""
-        return self.task_logits
-
-    @property
-    def q_logits(self) -> Tensor:
-        """Q-value logits (halt/continue policy), shape ``(B, A)``."""
-        return self.backbone_output.control.q_logits
-
-    @property
-    def logits(self) -> tuple[Tensor, Tensor]:
-        """Backward-compatible tuple view over the named bridge outputs."""
-        return self.lm_logits, self.q_logits
 
 
 # =============================================================================
 class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig]):
-    """ACT controller for supervised HRM v1 deliberation.
-
-    The controller:
-        - runs the backbone forward pass each step
-        - selects a halt/continue action via greedy argmax over Q-logits
-        - applies probabilistic exploration gating to suppress premature halting
-        - optionally computes a TD(0) bootstrap target to supervise continue actions
-
-    Action semantics are minimal: ``done_action`` terminates deliberation; all
-    other actions are treated as generic continue steps.
-    """
+    """One-step masked recurrent transition primitive for ACT rollouts."""
 
     def __init__(  # ----------------------------------------------------------
         self,
         backbone: ACTRolloutBackbone[ModelState],
         config: ACTControllerConfig,
     ) -> None:
-        """Create a controller.
-
-        Args:
-            backbone: Model implementing :class:`ACTRolloutBackbone`.
-            config: Controller configuration.
-        """
+        """Create an ACT controller."""
         super().__init__(backbone=cast(Any, backbone), config=config)
 
     @property
@@ -154,15 +163,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         self,
         batch_sample: Batch,
     ) -> ACTRolloutState[ModelState]:
-        """Build an initial ACT state from a batch sample.
-
-        Args:
-            batch_sample: Batch dict containing at least ``"input_ids"`` of shape
-                ``(B, ...)``.
-
-        Returns:
-            Initialized :class:`ACTRolloutState`.
-        """
+        """Build an initial ACT state from a batch sample."""
         slots = self.initial_slots(batch_sample)
         return ACTRolloutState(
             model_state=slots.model_state,
@@ -171,95 +172,43 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
             data=slots.data,
         )
 
-    def step(  # --------------------------------------------------------------
+    def step(  # ---------------------------------------------------------------
         self,
         state: ACTRolloutState[ModelState],
         batch: Batch,
-        allow_halt: bool = True,
         explore: bool = True,
-        td_target: bool = True,
-        **_: Any,
-    ) -> tuple[ACTRolloutState[ModelState], ACTOutput]:
-        """Advance the controller by one step.
-
-        Args:
-            state: Current rollout state.
-            batch: Incoming batch used to refresh halted slots.
-            allow_halt: If False, disables done-action halting.
-            explore: If True, probabilistically suppresses early halting.
-            td_target: If True, computes TD bootstrap targets (when applicable).
-
-        Returns:
-            ``(new_state, output)``.
-        """
+        **options: Any,
+    ) -> tuple[ACTRolloutState[ModelState], ACTStepOutput]:
+        """Advance the controller by one recurrent step."""
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
         model_state, backbone_output = self.backbone(data, model_state)
 
         steps = self.advance_steps(state)
-        action, done = self._select_action_and_done(backbone_output, steps, allow_halt, explore)
+        done = self._compute_done(backbone_output, steps, explore=explore)
 
-        state = ACTRolloutState(model_state=model_state, steps=steps, halted=done, data=data)
-        output = ACTOutput(backbone_output=backbone_output, action=action, done_action=self.config.done_action)
+        next_state = ACTRolloutState(model_state=model_state, steps=steps, halted=done, data=data)
+        output = ACTStepOutput(backbone_output=backbone_output)
+        return next_state, output
 
-        # TD(0) bootstrap target for the Q-head.
-        if td_target and self._config.max_steps > 1:
-            output.target_q = self.compute_td_target(data, model_state, steps)
-
-        return state, output
-
-    def compute_td_target(  # -------------------------------------------------
-        self,
-        data: dict[str, Tensor],
-        model_state: Any,
-        steps: Tensor,
-    ) -> Tensor:
-        """Compute TD(0) bootstrap targets for the Q head.
-
-        At the last allowed step, the target becomes the predicted Q for the done
-        action; otherwise it is the max Q over actions.
-
-        Args:
-            data: Per-slot batch buffers; the full batch mapping is fed to the backbone.
-            model_state: Current backbone recurrent state (used for next-step preview).
-            steps: Per-slot step counters of shape ``(B,)``.
-
-        Returns:
-            Sigmoid-normalized TD target of shape ``(B,)``.
-        """
-        with torch.no_grad():
-            _, backbone_output = self.backbone(data, model_state)
-            next_q = backbone_output.control.q_logits
-        is_last_step = steps >= self.config.max_steps
-
-        # At last step: forced done → target is Q(done_action). Otherwise: max over all actions.
-        done_action = self._config.done_action
-        target = torch.where(is_last_step, next_q[..., done_action], next_q.max(dim=-1).values)
-
-        return torch.sigmoid(target)
-
-    def _select_action_and_done(  # -------------------------------------------
+    def _compute_done(  # -----------------------------------------------------
         self,
         backbone_output: ACTBackboneOutput,
         steps: Tensor,
-        allow_halt: bool,
+        *,
         explore: bool,
-    ) -> tuple[Tensor, Tensor]:
-        """Select action and determine done flags for this step."""
-        logits_q = backbone_output.control.q_logits
-        config = self.config
-        action = logits_q.detach().argmax(dim=-1)  # greedy over all actions (B,)
-        done = steps >= config.max_steps
+    ) -> Tensor:
+        """Derive the halted mask from q_logits using the shared collapse contract."""
+        q_logits = backbone_output.control.q_logits.detach()
+        scores = collapse_act_halt_continue_logits(q_logits, done_action=self.config.done_action)
 
-        if allow_halt:
-            done = done | (action == config.done_action)
+        halt = maybe_flip_halt_decision(
+            scores.greedy_halt,
+            explore=explore,
+            exploration_prob=self.config.exploration_prob,
+        )
 
-        if explore and (config.max_steps > 1):
-            exploration_flag = torch.rand(steps.shape, device=steps.device) < config.exploration_prob
-            min_steps = exploration_flag * torch.randint_like(steps, low=2, high=config.max_steps + 1)
-            done = done & (steps >= min_steps)
-
-        return action, done
+        return (halt | (steps >= self.config.max_steps)).to(dtype=torch.bool)
 
 
 # =============================================================================
@@ -268,8 +217,10 @@ __all__ = [
     "ACTControlOutput",
     "ACTController",
     "ACTControllerConfig",
-    "ACTOutput",
+    "ACTHaltContinueScores",
+    "ACTStepOutput",
     "ACTRolloutBackbone",
     "ACTRolloutState",
-    "ACTTaskOutput",
+    "collapse_act_halt_continue_logits",
+    "maybe_flip_halt_decision",
 ]
