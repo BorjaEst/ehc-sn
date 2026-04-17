@@ -8,7 +8,7 @@ TEM-specific pathway detail remains in detached diagnostics and metric extras.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 import torch
 from pydantic import BaseModel, Field
@@ -20,9 +20,8 @@ from ehc_sn.controllers.tem import (
     PLACE_REG_TERM,
     PLACE_SENSORY_RELATION,
     PLACE_TRANSITION_RELATION,
-    TEMOutput,
+    TEMStepOutput,
 )
-from ehc_sn.heads._variational import VariationalLosses, VariationalLossHeadBase, VariationalLossStep, get_reg_term, require_latent_relation
 from ehc_sn.loss.consistency import LatentCode, mean_latent_norm, mse_consistency, sum_latent_terms
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_terms
@@ -43,8 +42,39 @@ from ehc_sn.metrics.keys import (
     TEM_LOSS_REG_ALL,
     TEM_LOSS_REG_REVISIT,
 )
+from ehc_sn.objectives._variational import (
+    VariationalLosses,
+    VariationalLossHeadBase,
+    VariationalLossStep,
+    get_reg_term,
+    require_latent_relation,
+)
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
+
+
+# =================================================================================================
+class TEMSupervisionBinding(Protocol):
+    """TEM-local protocol for extracting supervision targets from rollout carry.
+
+    Implemented in the adapter layer so that :class:`TEMLossHead` stays
+    task-agnostic.  Both methods receive the full (batch, carry, step_output)
+    triple for uniformity with sibling binding protocols in the codebase.
+    """
+
+    def extract_observation_id(
+        self,
+        batch: Batch,
+        carry: Any,
+        step_output: Any,
+    ) -> Tensor: ...
+
+    def extract_protocol_mask(
+        self,
+        batch: Batch,
+        carry: Any,
+        step_output: Any,
+    ) -> Tensor: ...
 
 
 # =================================================================================================
@@ -111,7 +141,7 @@ class TEMLossStep(VariationalLossStep):
 
     losses: TEMLosses
     metrics: StepMetrics
-    outputs: Optional[TEMOutput] = None
+    outputs: Optional[TEMStepOutput] = None
     signals: dict[str, Any] | None = None
 
 
@@ -120,17 +150,25 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
     """Pure TEM objective scored over executed rollout chunks."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: TEMLossConfig,
+        self, config: TEMLossConfig, *, task_binding: TEMSupervisionBinding,
     ) -> None:  # fmt: skip
-        """Create a TEM objective from its loss configuration."""
+        """Create a TEM objective from its loss configuration.
+
+        Args:
+            config: TEM loss configuration.
+            task_binding: Explicit binding for extracting observation ids and
+                protocol masks from rollout carry.  Use the task-owned adapter
+                (e.g. ``NavigationTEMTaskBinding``); no implicit default exists.
+        """
         super().__init__(config=config)
+        self._task_binding = task_binding
 
     def compute_losses(  # -----------------------------------------------------------------------
-        self, outputs: TEMOutput, carry: Any, **_: Any,
+        self, outputs: TEMStepOutput, carry: Any, batch: Any = None, step_output: Any = None, **_: Any,
     ) -> TEMLosses:  # fmt: skip
         """Compute ELBO-style TEM losses for a single step."""
-        labels = self._observation_id(carry)
-        protocol_mask = self._protocol_mask(carry)
+        labels = self._task_binding.extract_observation_id(batch, carry, step_output)
+        protocol_mask = self._task_binding.extract_protocol_mask(batch, carry, step_output)
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
 
@@ -173,11 +211,12 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         )
 
     def _build_metric_ratios(  # -----------------------------------------------------------------
-        self, losses: TEMLosses, *, carry: Any, outputs: TEMOutput, batch_size: int,
+        self, losses: TEMLosses, *, carry: Any, outputs: TEMStepOutput, batch_size: int,
+        batch: Any = None, step_output: Any = None, **_: Any,
     ) -> dict[str, RatioStat]:  # fmt: skip
         """Build detached TEM ratio metrics for logging."""
-        labels = self._observation_id(carry)
-        protocol_mask = self._protocol_mask(carry)
+        labels = self._task_binding.extract_observation_id(batch, carry, step_output)
+        protocol_mask = self._task_binding.extract_protocol_mask(batch, carry, step_output)
         protocol_count = protocol_mask.to(dtype=losses.total.dtype).sum()
         batch_count = losses.total.new_tensor(batch_size, dtype=losses.total.dtype)
         all_loss_sums = self._all_step_loss_sums(outputs, labels)
@@ -214,10 +253,11 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         return TEMLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, batch: Batch, carry: Any, outputs: TEMOutput, losses: TEMLosses,
+        self, batch: Batch, carry: Any, outputs: TEMStepOutput, losses: TEMLosses,
+        step_output: Any = None, **_: Any,
     ) -> dict[str, Tensor]:  # fmt: skip
         """Compute detached TEM diagnostics and ELBO-style scalar signals."""
-        labels = self._observation_id(carry)
+        labels = self._task_binding.extract_observation_id(batch, carry, step_output)
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
         place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
@@ -251,40 +291,12 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
             signals[S.THETA_CLS_NORM] = outputs.theta_cls.detach().norm(dim=-1).mean()
         return signals
 
-    def _observation_id(  # -----------------------------------------------------------------------
-        self, carry: Any,
-    ) -> Tensor:  # fmt: skip
-        """Return current-step observation ids from TEM carry data.
-
-        The preferred carry-data key is ``observation_id``. A fallback to
-        ``labels`` is retained temporarily for compatibility with the current
-        rollout wiring. ``carry.data`` is expected to be the same payload that
-        produced the current TEM outputs: current observation plus previous
-        action.
-        """
-        labels = carry.data.get("observation_id", carry.data.get("labels"))
-        if labels is None:
-            raise KeyError("TEM carry data must provide 'observation_id' or legacy 'labels'.")
-        if labels.ndim > 1:
-            if labels.shape[-1] == 1:
-                return labels.squeeze(-1)
-            if labels.is_floating_point():
-                return labels.argmax(dim=-1)
-        return labels
-
-    def _protocol_mask(self, carry: Any) -> Tensor:
-        """Return the revisit-eligibility mask for protocol supervision."""
-        is_revisit = carry.data.get("is_revisit")
-        if is_revisit is None:
-            raise KeyError("TEM carry data must provide 'is_revisit' for protocol-gated supervision.")
-        return is_revisit.reshape(-1).to(dtype=torch.bool)
-
     @staticmethod
     def _masked_sum(values: Tensor, mask: Tensor) -> Tensor:
         """Return the scalar sum over values selected by a boolean batch mask."""
         return (values * mask.to(dtype=values.dtype)).sum()
 
-    def _all_step_loss_sums(self, outputs: TEMOutput, labels: Tensor) -> dict[str, Tensor]:
+    def _all_step_loss_sums(self, outputs: TEMStepOutput, labels: Tensor) -> dict[str, Tensor]:
         """Return detached all-step TEM loss sums for diagnostics and metric logging."""
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
@@ -341,4 +353,4 @@ def _correct_prediction_count(  # ----------------------------------------------
 
 
 # =================================================================================================
-__all__ = ["TEMLossConfig", "TEMLossHead", "TEMLosses", "TEMLossStep"]
+__all__ = ["TEMLossConfig", "TEMLossHead", "TEMLosses", "TEMLossStep", "TEMSupervisionBinding"]

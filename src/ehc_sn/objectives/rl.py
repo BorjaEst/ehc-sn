@@ -16,10 +16,10 @@ from torch import Tensor
 from torch.distributions import Categorical
 
 from ehc_sn.controllers.rl import RLRolloutState, RLStepOutput
-from ehc_sn.heads._token import AccuracyStats, TokenLossHeadBase, TokenSupervisionBinding
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import LOSS_LM, RL_LOSS_ACTOR, RL_LOSS_CRITIC, RL_LOSS_ENTROPY, RL_LOSS_Q_VALUE
+from ehc_sn.objectives._token import AccuracyStats, TokenLossHeadBase, TokenSupervisionBinding
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin

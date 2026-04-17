@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from torch import Tensor
 
 import ehc_sn.loss.cross_entropy as cross_entropy_module
-from ehc_sn.heads._base import BaseObjective
+from ehc_sn.objectives._base import BaseObjective
 from ehc_sn.rollouts import StepRecord
 from ehc_sn.training.types import RatioStat, RolloutAgg, StepMetrics, TokenAgg, TransitionAgg
 from ehc_sn.types import Batch

@@ -9,13 +9,19 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.controllers.var import MAIN_LATENT_RELATION, VAROutput, VARRolloutState
-from ehc_sn.heads._variational import VariationalLosses, VariationalLossHeadBase, VariationalLossStep, get_reg_term, require_latent_relation
+from ehc_sn.controllers.var import MAIN_LATENT_RELATION, VARRolloutState, VARStepOutput
 from ehc_sn.loss.consistency import LatentCode, mean_latent_norm, mse_consistency, sum_latent_terms
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_terms
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import VAR_LOSS_LATENT, VAR_LOSS_OBS_NLL, VAR_LOSS_REG
+from ehc_sn.objectives._variational import (
+    VariationalLosses,
+    VariationalLossHeadBase,
+    VariationalLossStep,
+    get_reg_term,
+    require_latent_relation,
+)
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
 
@@ -69,7 +75,7 @@ class VARLossStep(VariationalLossStep):
 
     losses: VARLosses  # Combined losses for this step, kept live for backward()
     metrics: StepMetrics  # Aggregated metrics for this step, used for logging
-    outputs: Optional[VAROutput] = None  # Raw controller outputs
+    outputs: Optional[VARStepOutput] = None  # Raw controller outputs
     signals: dict[str, Any] | None = None  # Diagnostic signals (T2/T3); plain dict
 
 
@@ -84,7 +90,7 @@ class VARLossHead(VariationalLossHeadBase[VARLossConfig]):
         super().__init__(config=config)
 
     def compute_losses(  # -----------------------------------------------------------------------
-        self, outputs: VAROutput, carry: Any, **_: Any,
+        self, outputs: VARStepOutput, carry: Any, **_: Any,
     ) -> VARLosses:  # fmt: skip
         """Compute aggregate observation, latent-consistency, and regularization losses."""
         labels = carry.data["labels"]
@@ -108,7 +114,7 @@ class VARLossHead(VariationalLossHeadBase[VARLossConfig]):
         )
 
     def _build_step_output(  # --------------------------------------------------------------------
-        self, losses: VARLosses, metrics: StepMetrics, signals: dict[str, Any], outputs: VAROutput,
+        self, losses: VARLosses, metrics: StepMetrics, signals: dict[str, Any], outputs: VARStepOutput,
     ) -> VARLossStep:  # fmt: skip
         """Wrap losses, metrics, and signals into a :class:`VARLossStep`."""
         return VARLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
@@ -125,7 +131,7 @@ class VARLossHead(VariationalLossHeadBase[VARLossConfig]):
         }
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, batch: Batch, state: VARRolloutState, outputs: VAROutput, losses: VARLosses,
+        self, batch: Batch, state: VARRolloutState, outputs: VARStepOutput, losses: VARLosses,
     ) -> dict[str, Tensor]:  # fmt: skip
         """Compute lightweight diagnostic signals for logging."""
         main_relation = require_latent_relation(outputs.latent_relations, MAIN_LATENT_RELATION)
