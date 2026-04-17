@@ -11,8 +11,8 @@ from typing import Any
 
 from torch import Tensor
 
-from ehc_sn.heads._token import AccuracyStats, TokenSupervisionBinding, compute_accuracy_stats
-from ehc_sn.heads.rl import RLObjectiveBinding
+from ehc_sn.objectives._token import AccuracyStats, TokenSupervisionBinding, compute_accuracy_stats
+from ehc_sn.objectives.rl import RLObjectiveBinding
 from ehc_sn.tasks.maze_hard.contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets
 from ehc_sn.types import Batch
 
@@ -75,7 +75,7 @@ class MazeHardACTTaskBinding(TokenSupervisionBinding[MazeHardTargets]):
             targets: :class:`~ehc_sn.tasks.maze_hard.contracts.MazeHardTargets`.
 
         Returns:
-            :class:`~ehc_sn.heads._token.AccuracyStats`.
+            :class:`~ehc_sn.objectives._token.AccuracyStats`.
         """
         return compute_accuracy_stats(
             logits,
