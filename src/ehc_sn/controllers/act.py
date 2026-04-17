@@ -176,16 +176,25 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         self,
         state: ACTRolloutState[ModelState],
         batch: Batch,
+        allow_halt: bool = True,
         explore: bool = True,
         **options: Any,
     ) -> tuple[ACTRolloutState[ModelState], ACTStepOutput]:
-        """Advance the controller by one recurrent step."""
+        """Advance the controller by one recurrent step.
+
+        ``allow_halt=False`` disables learned halting for this step while still
+        enforcing the hard ``config.max_steps`` budget. This is useful for
+        fixed-budget evaluation over repeated sources, where early-halting rows
+        would otherwise be refreshed immediately and never converge to a single
+        batch-aligned stop event.
+        """
+        _ = options
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
         model_state, backbone_output = self.backbone(data, model_state)
 
         steps = self.advance_steps(state)
-        done = self._compute_done(backbone_output, steps, explore=explore)
+        done = self._compute_done(backbone_output, steps, allow_halt=allow_halt, explore=explore)
 
         next_state = ACTRolloutState(model_state=model_state, steps=steps, halted=done, data=data)
         output = ACTStepOutput(backbone_output=backbone_output)
@@ -196,17 +205,21 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         backbone_output: ACTBackboneOutput,
         steps: Tensor,
         *,
+        allow_halt: bool,
         explore: bool,
     ) -> Tensor:
         """Derive the halted mask from q_logits using the shared collapse contract."""
         q_logits = backbone_output.control.q_logits.detach()
         scores = collapse_act_halt_continue_logits(q_logits, done_action=self.config.done_action)
 
-        halt = maybe_flip_halt_decision(
-            scores.greedy_halt,
-            explore=explore,
-            exploration_prob=self.config.exploration_prob,
-        )
+        if allow_halt:
+            halt = maybe_flip_halt_decision(
+                scores.greedy_halt,
+                explore=explore,
+                exploration_prob=self.config.exploration_prob,
+            )
+        else:
+            halt = torch.zeros_like(scores.greedy_halt, dtype=torch.bool)
 
         return (halt | (steps >= self.config.max_steps)).to(dtype=torch.bool)
 

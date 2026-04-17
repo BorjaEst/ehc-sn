@@ -21,10 +21,12 @@ from pathlib import Path
 
 import lightning as L
 from adam_atan2_pytorch import AdamAtan2 as AdamATan2
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
 from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v1 import MazeHardHRMV1AdapterSettings, MazeHardHRMV1BridgeAdapter
+from ehc_sn.adapters.maze_hard.objectives import MazeHardACTTaskBinding
+from ehc_sn.adapters.maze_hard.traces import MAZE_HARD_ACT_TRACE_FIELDS
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
 from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
@@ -34,12 +36,12 @@ from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
-from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskInput, MazeHardTaskOutput
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
+from ehc_sn.types import Batch
 
 
 # =================================================================================================
@@ -132,7 +134,7 @@ class TrainingModel(L.LightningModule):
         self.model = HRModelV1(model_settings)
         self.bridge_adapter = MazeHardHRMV1BridgeAdapter(self.model, config.adapter)
         self.controller = ACTController(self.bridge_adapter, config.act_controller)
-        self.objective = ACTLossHead(config.loss)
+        self.objective = ACTLossHead(config.loss, task_binding=MazeHardACTTaskBinding())
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()
@@ -144,7 +146,7 @@ class TrainingModel(L.LightningModule):
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(ACT_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(ACT_EPISODE_ROUTES).clone(prefix="val/")
-        self.trace_specs = build_trace_spec("act")
+        self.trace_specs = build_trace_spec("act", extra_fields=MAZE_HARD_ACT_TRACE_FIELDS)
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer = FifoBuffer(
@@ -212,15 +214,14 @@ class TrainingModel(L.LightningModule):
         if self._train_carry is None:
             self._train_carry = self.controller.initial_state(batch)
 
-        act_options = {"allow_halt": True, "explore": True}
         evaluation = evaluate_rollout(
             runner=self._train_runner,
             source=PartialResetSource(incoming=batch, assembler=self._train_batch_assembler, carry0=self._train_carry),
             controller=self.controller,
             carry=self._train_carry,
             objective=self.objective,
-            runner_options=act_options,
-            objective_options=act_options,
+            runner_options={"allow_halt": True, "explore": True},
+            objective_options={"controller": self.controller, "td_target": True},
         )
         self._train_carry = evaluation.chunk.final_carry.detach()
 
@@ -250,12 +251,13 @@ class TrainingModel(L.LightningModule):
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
     ) -> dict[str, object]:  # fmt: skip
-        """Run a full ACT rollout so halted-only metrics are meaningful.
+        """Run a deterministic fixed-budget ACT rollout for validation.
 
-        Validation uses `EvaluationLoop` (no carry is persisted across batches here) and logs
-        normalized metrics.
+        Validation uses a repeated source, so learned early halting would
+        immediately refresh completed rows onto the same sample. ``allow_halt``
+        is therefore disabled here and the controller runs to its configured
+        budget without exploration.
         """
-        act_options = {"allow_halt": False, "explore": False, "td_target": False}
         carry0 = self.controller.initial_state(batch)
         evaluation = evaluate_rollout(
             runner=self._eval_runner,
@@ -265,8 +267,8 @@ class TrainingModel(L.LightningModule):
             objective=self.objective,
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
-            runner_options=act_options,
-            objective_options=act_options,
+            runner_options={"allow_halt": False, "explore": False},
+            objective_options={"controller": self.controller, "td_target": False},
         )
         trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, ACT_EPISODE_ROUTES)
