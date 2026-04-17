@@ -11,10 +11,10 @@ from pydantic import BaseModel, Field, model_validator
 from torch.optim import Adam, Optimizer
 
 from ehc_sn.adapters.navigation import NavigationTEMV1BridgeAdapter
+from ehc_sn.adapters.navigation.objectives import NavigationTEMTaskBinding
 from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
-from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.lightning._rollout import (
     evaluate_rollout,
     evaluate_rollout_streaming,
@@ -25,8 +25,10 @@ from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, re
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
-from ehc_sn.models.tem.tem_v1 import Batch, ModelSettings_V1, TEMModelV1
+from ehc_sn.models.tem.tem_v1 import Batch, ModelSettingsV1, TEMModelV1
+from ehc_sn.objectives.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
+from ehc_sn.tasks.navigation import NavigationControllerRuntime
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
@@ -55,9 +57,9 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
         ...,
         description="",
     )
-    loss: TEMLossConfig = Field(
+    objective: TEMLossConfig = Field(
         ...,
-        description="",
+        description="TEM objective configuration.",
     )
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -82,7 +84,7 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
 
     @model_validator(mode="after")
     def validate_environment_contract(self) -> "ModelConfig_TEM_V1":
-        model_settings = ModelSettings_V1.from_config(self.model_config_path)
+        model_settings = ModelSettingsV1.from_config(self.model_config_path)
         if self.environment.observation_dim != model_settings.observation_dim:
             raise ValueError("environment.observation_dim must match model.observation_dim.")
         if self.environment.action_count != model_settings.action_count:
@@ -99,9 +101,10 @@ class TrainingModel(L.LightningModule):
     ) -> None:  # fmt: skip
         """ """
         super().__init__()
-        model_settings = ModelSettings_V1.from_config(config.model_config_path)
+        model_settings = ModelSettingsV1.from_config(config.model_config_path)
         self.model = TEMModelV1(model_settings)
         self.bridge_adapter = NavigationTEMV1BridgeAdapter(self.model)
+        self._controller_runtime = NavigationControllerRuntime()
         self.train_environment: Environment | None = None
         self.train_controller: TEMController | None = None
         self.train_objective: TEMLossHead | None = None
@@ -145,8 +148,8 @@ class TrainingModel(L.LightningModule):
     def _build_runtime(self, *, batch_size: int) -> tuple[Environment, TEMController, TEMLossHead]:
         """Construct one phase-local TEM rollout runtime around the shared model."""
         environment = Environment(self.config.environment, batch_size=batch_size)
-        controller = TEMController(self.bridge_adapter, environment, self.config.controller)
-        objective = TEMLossHead(self.config.loss)
+        controller = TEMController(self.bridge_adapter, environment, self.config.controller, self._controller_runtime)
+        objective = TEMLossHead(self.config.objective, task_binding=NavigationTEMTaskBinding())
         return environment, controller, objective
 
     def _ensure_train_runtime(self) -> None:
