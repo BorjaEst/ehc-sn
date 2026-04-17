@@ -12,6 +12,7 @@ from lightning.pytorch import Trainer, seed_everything
 from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
+from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v1 import MazeHardHRMV1AdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
@@ -19,10 +20,10 @@ from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.controllers.act import ACTControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.heads.act import ACTLossConfig
-from ehc_sn.lightning.hrm.core.runtime import normalize_loss_for_backward, supervised_maze_tokenize
+from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v1 import ModelConfig_HRM_V1, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.models.hrm import hrm_v1
+from ehc_sn.tasks.maze_hard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
@@ -75,6 +76,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Path to the model configuration TOML file that specifies the HRM v1 architecture.",
     )
+    adapter: MazeHardHRMV1AdapterSettings = Field(
+        ...,
+        description="Settings for the MazeHard bridge adapter that binds the HRM core to task inputs/outputs.",
+    )
     act_controller: ACTControllerConfig = Field(
         ...,
         description=(
@@ -99,6 +104,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
             "Learning rate scheduler config. If not set, no learning rate scheduling is applied. "
             "The keys in `scheduler` are passed to the scheduler constructor."
         ),
+    )
+    runtime: RuntimeConfig = Field(
+        default_factory=RuntimeConfig,
+        description="HRM runtime-owned validation safety settings.",
     )
 
     # ---------------------------------------------------------------------------------------------
@@ -311,7 +320,7 @@ if __name__ == "__main__":
         # Lightning module: training step, optimizer and schedule setup.
         model=TrainingModel(settings.hrm_config),
         # Data module: dataset + DataLoader construction.
-        datamodule=Datamodule(settings.datamodule, transform=supervised_maze_tokenize),
+        datamodule=Datamodule(settings.datamodule, transform=coerce_maze_hard_batch),
         # Optional: resume training from a checkpoint.
         ckpt_path=settings.checkpoint_path,
     )
