@@ -2,7 +2,7 @@
 
 ## Description
 
-Entorhinal-Hippocampal Circuit (EHC) Spatial Navigation library
+Entorhinal-Hippocampal Circuit (EHC) spatial cognition and navigation library
 
 ## Reference
 

@@ -28,6 +28,8 @@ Rules:
 - Architectural dimensions use `frozen=True` when they must not change after
   construction.
 - Model configs describe architecture only.
+- Task configs may describe navigation-grounded predictive or exploratory
+  tasks as well as goal-directed navigation tasks.
 - Task and adapter configs hold task semantics and binding semantics.
 
 ---

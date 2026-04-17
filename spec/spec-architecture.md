@@ -6,7 +6,7 @@
 ## 1 Project Identity
 
 **EHC-SN** (_Entorhinal-Hippocampal Circuit — Spatial Navigation_) is a
-research library for biologically-inspired spatial navigation models built on
+research library for biologically-inspired spatial cognition and navigation models built on
 PyTorch.
 
 The canonical architecture is **multi-task** and **multi-model**:
@@ -27,21 +27,24 @@ Legacy namespaces (`torch_tem`, `hrm_sn`) are retired and archived under
 
 ## 3 Public Vocabulary
 
-| Term                           | Meaning                                                                                                                                                 | Canonical owner                       |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| **Module**                     | Pure reusable `nn.Module` building block with no task semantics.                                                                                        | `modules/`                            |
-| **Model**                      | Pure architecture composed from modules. Owns recurrent state and architecture-native outputs, not task semantics.                                      | `models/`                             |
-| **Task**                       | Problem contract: observation/action protocol, workspace geometry, masking, episode semantics, reward or supervision semantics, and evaluation metrics. | `tasks/`                              |
-| **Adapter**                    | Explicit binding between one model and one task.                                                                                                        | `adapters/`                           |
-| **Controller**                 | Reusable rollout-state transition primitive.                                                                                                            | `controllers/`                        |
-| **Head**                       | Reusable objective-scoring primitive over executed rollout data.                                                                                        | `heads/`                              |
-| **Policy**                     | Reusable action-selection primitive.                                                                                                                    | `policies/`                           |
-| **Lightning surface**          | Executable training surface wiring `task -> model -> adapter`.                                                                                          | `lightning/`                          |
-| **Benchmark semantic package** | Canonical benchmark definition and evaluator logic.                                                                                                     | `benchmarks/`                         |
-| **Benchmark binding**          | Internal benchmark-specific adapter family.                                                                                                             | `benchmarks/_bindings/`               |
-| **Data contract**              | Persisted processed-data format and static loading contract.                                                                                            | `data/`                               |
-| **Environment kernel**         | Reusable runtime environment implementation.                                                                                                            | `envs/`                               |
-| **Entry point**                | Thin CLI or experiment runner.                                                                                                                          | `experiments/`, `scripts/benchmarks/` |
+| Term                               | Meaning                                                                                                                                                 | Canonical owner                                        |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| **Module**                         | Pure reusable `nn.Module` building block with no task semantics.                                                                                        | `modules/`                                             |
+| **Model**                          | Pure architecture composed from modules. Owns recurrent state and architecture-native outputs, not task semantics.                                      | `models/`                                              |
+| **Task**                           | Problem contract: observation/action protocol, workspace geometry, masking, episode semantics, reward or supervision semantics, and evaluation metrics. | `tasks/`                                               |
+| **Adapter**                        | Explicit binding between one model and one task.                                                                                                        | `adapters/`                                            |
+| **Predictive cognitive-map model** | Model family that learns action-conditioned spatial prediction or memory structure without by itself owning goal selection or overt action policy.      | `models/`                                              |
+| **Navigation-grounded task**       | Spatial task defined by trajectory, action, transition, and episode semantics; it may be exploratory or predictive rather than goal-directed.           | `tasks/`                                               |
+| **Navigation agent**               | Full executable stack that exposes action selection for a goal-directed navigation task.                                                                | `adapters/`, `controllers/`, `policies/`, `lightning/` |
+| **Controller**                     | Reusable rollout-state transition primitive distinct from policies, which own action selection.                                                         | `controllers/`                                         |
+| **Objective Module (Head)**        | Reusable objective-scoring primitive over executed rollout data.                                                                                        | `heads/`                                               |
+| **Policy**                         | Reusable action-selection primitive.                                                                                                                    | `policies/`                                            |
+| **Training Surface (Lightning)**   | Executable training surface wiring `task -> model -> adapter`.                                                                                          | `lightning/`                                           |
+| **Benchmark semantic package**     | Canonical benchmark definition and evaluator logic.                                                                                                     | `benchmarks/`                                          |
+| **Benchmark binding**              | Internal benchmark-specific adapter family.                                                                                                             | `benchmarks/_bindings/`                                |
+| **Data contract**                  | Persisted processed-data format and static loading contract.                                                                                            | `data/`                                                |
+| **Environment kernel**             | Reusable runtime environment implementation.                                                                                                            | `envs/`                                                |
+| **Entry point**                    | Thin CLI or experiment runner.                                                                                                                          | `experiments/`, `scripts/benchmarks/`                  |
 
 ---
 
@@ -73,7 +76,9 @@ never upward.
   They must not own canonical benchmark semantics, generic training primitives,
   or CLI orchestration.
 - `controllers/`, `heads/`, and `policies/` are reusable lower-layer runtime
-  primitives. They must remain model-agnostic and task-agnostic.
+  primitives. Controllers own rollout-state transitions, heads own objective
+  scoring, and policies own action selection. They must remain model-agnostic
+  and task-agnostic.
 - `training/`, `rollouts/`, and `traces/` are reusable lower-layer execution
   primitives. They must remain model-agnostic.
 - `data/` and `envs/` are reusable infrastructure. They must not import from
@@ -92,12 +97,21 @@ never upward.
 - **Models are task-agnostic.** No reward logic, dataset logic, environment
   stepping, puzzle semantics, or task-visible observation/action schemas belong
   in `models/`.
+- **Predictive models are not navigation agents by default.** A model trained
+  on spatial trajectories may remain a predictive cognitive-map model when it
+  does not itself own goal selection or overt action choice.
 - **Tasks own semantics.** Observation formats, action ontology, workspace slot
   geometry, episode structure, reward or supervision rules, and evaluation
   semantics belong in `tasks/`.
+- **Navigation grounding lives in tasks.** Spatial transitions, revisit
+  structure, action ontology, and episode organization belong to the task even
+  when the bound model family is purely predictive.
 - **Adapters are the only canonical seam.** Observation normalization,
   tokenization, workspace packing, model input assembly, output decoding, loss
   construction, reward shaping, and rollout binding belong in `adapters/`.
+- **Goal-directed navigation claims require action selection above the task.**
+  A complete navigation agent exposes action selection through a native action-
+  selection head or an explicit attached policy/controller layer.
 - **Lightning executes through adapters.** Training surfaces instantiate
   `task -> model -> adapter -> optimizer/scheduler`.
 - **Benchmarks own evaluation semantics.** Benchmark-semantic packages define
@@ -128,30 +142,30 @@ change.
 
 ### 5.2 Top-Level Packages
 
-| Path           | Responsibility                                                     |
-| -------------- | ------------------------------------------------------------------ |
-| `activations/` | Reusable activation functions.                                     |
-| `adapters/`    | Explicit model-task bindings.                                      |
-| `benchmarks/`  | Canonical benchmark semantics and internal benchmark bindings.     |
-| `callbacks/`   | Training-time framework callbacks.                                 |
-| `controllers/` | Reusable rollout transition primitives.                            |
-| `data/`        | Persisted processed-data contracts and static loading.             |
-| `envs/`        | Reusable runtime environment kernels.                              |
-| `figures/`     | Visualization and figure authoring.                                |
-| `heads/`       | Reusable objective-scoring primitives.                             |
-| `lightning/`   | Executable training surfaces built on tasks, models, and adapters. |
-| `logging/`     | Logging wrappers and logger setup.                                 |
-| `loss/`        | Reusable loss primitives.                                          |
-| `metrics/`     | Reusable evaluation metrics and signal keys.                       |
-| `models/`      | Pure architectures such as TEM, HRM, and EHC families.             |
-| `modules/`     | Pure reusable neural-network building blocks.                      |
-| `policies/`    | Reusable action-selection logic.                                   |
-| `rollouts/`    | Temporal execution drivers and rollout records.                    |
-| `tasks/`       | Canonical task semantics and task-local contracts.                 |
-| `traces/`      | Passive trace observation and storage.                             |
-| `training/`    | Generic training primitives with no model or task semantics.       |
-| `utils/`       | Generic helpers with no `ehc_sn` imports.                          |
-| `types.py`     | Lightweight shared types and aliases.                              |
+| Path           | Responsibility                                                                         |
+| -------------- | -------------------------------------------------------------------------------------- |
+| `activations/` | Reusable activation functions.                                                         |
+| `adapters/`    | Explicit model-task bindings.                                                          |
+| `benchmarks/`  | Canonical benchmark semantics and internal benchmark bindings.                         |
+| `callbacks/`   | Training-time framework callbacks.                                                     |
+| `controllers/` | Reusable rollout-state transition primitives.                                          |
+| `data/`        | Persisted processed-data contracts and static loading.                                 |
+| `envs/`        | Reusable runtime environment kernels.                                                  |
+| `figures/`     | Visualization and figure authoring.                                                    |
+| `heads/`       | Reusable objective modules and scoring primitives.                                     |
+| `lightning/`   | Executable training surfaces (Lightning modules) built on tasks, models, and adapters. |
+| `logging/`     | Logging wrappers and logger setup.                                                     |
+| `loss/`        | Reusable loss primitives.                                                              |
+| `metrics/`     | Reusable evaluation metrics and signal keys.                                           |
+| `models/`      | Pure architectures such as TEM, HRM, and EHC families.                                 |
+| `modules/`     | Pure reusable neural-network building blocks.                                          |
+| `policies/`    | Reusable action-selection logic only.                                                  |
+| `rollouts/`    | Temporal execution drivers and rollout records.                                        |
+| `tasks/`       | Canonical task semantics and task-local contracts.                                     |
+| `traces/`      | Passive trace observation and storage.                                                 |
+| `training/`    | Generic training primitives with no model or task semantics.                           |
+| `utils/`       | Generic helpers with no `ehc_sn` imports.                                              |
+| `types.py`     | Lightweight shared types and aliases.                                                  |
 
 ---
 

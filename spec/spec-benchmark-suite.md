@@ -14,18 +14,19 @@ claims for EHC-SN. Core benchmark ownership rules remain in
 ## 2 Canonical Benchmark Family
 
 The canonical benchmark family is divided into two bridge benchmarks and three
-primary navigation benchmarks.
+primary goal-directed navigation benchmarks.
 
 | Benchmark                           | Purpose                                                                                                                                                | Canonical split / protocol                                                                                                                                              | Current implementation status                                                                        |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | **B0 HRM Deliberation Bridge**      | Bridge benchmark for HRM-style deliberative batch prediction over full-maze token targets.                                                             | Use the processed `maze-30x30-hard-1k` split: `1000/1000/1000` train/val/test 30x30 mazes. Report full test plus a preregistered hard subset derived from `difficulty`. | Partially scaffolded by `envs/mazehard.py`, HRM entry points, and `scripts/benchmarks/b0_bridge.py`. |
 | **M0 Episodic Memory Bridge**       | Bridge benchmark for TEM-style structural memory, sensory binding, episodic write/read, and one-shot memory behavior under fixed trajectory contracts. | Reuse the B1 processed dungeon split and OOD corpora together with the B2/B3 six-goal / three-start contract.                                                           | Not yet implemented.                                                                                 |
-| **B1 Dungeon Navigation Reasoning** | Main within-episode reasoning benchmark for navigation.                                                                                                | Train on the processed dungeon split: `800/100/100` train/val/test layouts, then evaluate in-distribution and on OOD generated corpora.                                 | Requires a goal-reaching reward/binding layer on top of the dungeon processed-data contract.         |
+| **B1 Dungeon Navigation Reasoning** | Main within-episode reasoning benchmark for goal-directed navigation.                                                                                  | Train on the processed dungeon split: `800/100/100` train/val/test layouts, then evaluate in-distribution and on OOD generated corpora.                                 | Requires a goal-reaching reward/binding layer on top of the dungeon processed-data contract.         |
 | **B2 One-Shot Goal Relocation**     | Main across-episode one-shot adaptation benchmark.                                                                                                     | Reuse B1 layouts with a six-goal / three-start contract. Train on goals `1-4`, evaluate held-out goals `5-6`.                                                           | Requires explicit frozen-weight one-shot evaluation support.                                         |
 | **B3 Interference and Control**     | Main mechanism benchmark for complementary-memory claims.                                                                                              | Reuse B1 layouts with the same six-goal / three-start contract and blocked vs interleaved schedules.                                                                    | Requires retrieval/control diagnostics on top of rollout traces.                                     |
 
-Bridge benchmarks validate inherited capabilities in isolation. Primary
-benchmarks evaluate complete navigation agents.
+Bridge benchmarks validate inherited predictive or memory capabilities in
+isolation. Primary benchmarks evaluate complete goal-directed navigation
+agents.
 
 ---
 
@@ -79,6 +80,8 @@ connected component:
   supported by B3.
 - Bridge benchmark results do not substitute for B1-B3 when the claim is about
   navigation.
+- Bridge benchmark results on navigation-grounded predictive models do not by
+  themselves classify a model family as a navigation agent.
 - Any model family evaluated on B1-B3 must expose benchmark-time action
   selection either through a native policy/action head or through an explicit
   attached policy layer satisfying the rollout contract.
