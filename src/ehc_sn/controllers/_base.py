@@ -28,19 +28,7 @@ def batch_anchor_tensor(batch: Batch) -> Tensor:
 
 # =================================================================================================
 class RolloutBackbone[ModelState, ModelOutput](Protocol):
-    """Protocol for backbone models driven by rollout controllers.
-
-    The backbone owns the recurrent state and the neural forward pass.
-    All three methods must be implemented:
-
-    - ``init_state``: allocate a fresh recurrent state for a given batch size.
-    - ``reset_state``: selectively reset individual slots (partial-reset semantics);
-      only slots where ``reset_flag`` is ``True`` are reset.
-    - ``__call__``: run one forward step; returns
-      ``(next_state, logits_tuple, cls_features)`` where ``cls_features`` is a
-      ``(B, D)`` summary vector and each tensor in ``logits_tuple`` has shape
-      ``(B, S, V)`` or ``(B, A)`` as defined by the model contract.
-    """
+    """ """
 
     def init_state(  # ----------------------------------------------------------------------------
         self, batch_size: int,

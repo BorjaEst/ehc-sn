@@ -31,7 +31,8 @@ import torch
 from pydantic import BaseModel, Field
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.maze_hard import MazeHardHRMV2BridgeAdapter
+from ehc_sn.adapters.maze_hard import MazeHardHRMV2AdapterSettings, MazeHardHRMV2BridgeAdapter
+from ehc_sn.adapters.maze_hard.objectives import MazeHardRLTaskBinding
 from ehc_sn.controllers.rl import RLController, RLControllerConfig
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.heads.rl import RLLossConfig, RLLossHead
@@ -42,6 +43,7 @@ from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettings_V2
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
+from ehc_sn.tasks.maze_hard import MazeHardControllerRuntime
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
@@ -71,6 +73,10 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
     model_config_path: Path = Field(
         ...,
         description="Path to the model configuration TOML file that specifies the HRM v2 architecture.",
+    )
+    adapter: MazeHardHRMV2AdapterSettings = Field(
+        default_factory=MazeHardHRMV2AdapterSettings,
+        description="Settings for the MazeHard bridge adapter that binds the HRM v2 core to task inputs/outputs.",
     )
     environment: EnvConfig = Field(
         ...,
@@ -143,7 +149,8 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettings_V2.from_config(config.model_config_path)
         self.model = HRModelV2(model_settings)
-        self.bridge_adapter = MazeHardHRMV2BridgeAdapter(self.model)
+        self.bridge_adapter = MazeHardHRMV2BridgeAdapter(self.model, config.adapter)
+        self._controller_runtime = MazeHardControllerRuntime()
         self.environment: MazeHardEnv | None = None  # Lazy init in setup() to avoid GPU allocation issues
         self.controller: RLController | None = None  # Initialized in setup() after environment is ready
         self.objective: RLLossHead | None = None  # Initialized in setup() after controller is ready
@@ -185,8 +192,8 @@ class TrainingModel(L.LightningModule):
 
         if self.environment is None:
             self.environment = MazeHardEnv(self.config.environment, batch_size=local_bs)
-        self.controller = RLController(self.bridge_adapter, self.environment, self.config.controller)
-        self.objective = RLLossHead(self.config.loss)
+        self.controller = RLController(self.bridge_adapter, self.environment, self.config.controller, self._controller_runtime)
+        self.objective = RLLossHead(self.config.loss, task_binding=MazeHardRLTaskBinding())
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
@@ -206,7 +213,7 @@ class TrainingModel(L.LightningModule):
         vmPFC_ids = {id(p) for p in self.model.pfc.estimator.parameters()}
         str_ids = {id(p) for p in self.model.str.parameters()}
         excluded_ids = vmPFC_ids | str_ids
-        sup_params = [p for p in self.model.parameters() if id(p) not in excluded_ids]
+        sup_params = [p for p in self.bridge_adapter.parameters() if id(p) not in excluded_ids]
         opt_sup = AdamATan2(sup_params, self.config.optimizer_supervised)
         # Optimizer B: RL — STR actor-critic only (strictly isolated)
         opt_rl = AdamATan2(list(self.model.str.parameters()), self.config.optimizer_rl)

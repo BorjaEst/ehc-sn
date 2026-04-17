@@ -37,10 +37,19 @@ class MazeHardHRMV2AdapterSettings(BaseModel, extra="forbid"):
 
 # =============================================================================
 @dataclass(frozen=True)
-class MazeHardHRMV2ControlOutput:
-    """ACT-compatible control readouts emitted by the MazeHard HRM v2 bridge."""
+class MazeHardHRMV2PolicyOutput:
+    """Policy readouts emitted by the MazeHard HRM v2 bridge."""
 
     q_logits: Tensor
+    valid_action_mask: Tensor | None = None
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class MazeHardHRMV2CriticOutput:
+    """Critic readouts emitted by the MazeHard HRM v2 bridge."""
+
+    state_value: Tensor
 
 
 # =============================================================================
@@ -49,7 +58,8 @@ class MazeHardHRMV2BridgeOutput:
     """Controller-consumable MazeHard HRM v2 bridge output bundle."""
 
     task: MazeHardTaskOutput
-    control: MazeHardHRMV2ControlOutput
+    policy: MazeHardHRMV2PolicyOutput
+    critic: MazeHardHRMV2CriticOutput
 
 
 # =============================================================================
@@ -199,14 +209,14 @@ class MazeHardHRMV2BridgeAdapter(nn.Module):
     def __init__(  # ----------------------------------------------------------
         self,
         model: HRModelV2,
-        config: MazeHardHRMV2AdapterSettings,
+        config: MazeHardHRMV2AdapterSettings | None = None,
     ) -> None:
         """Initialize the HRM v2 bridge adapter with its component modules."""
         super().__init__()
-        self._config = config
+        self._config = config or MazeHardHRMV2AdapterSettings()
         self.model = model
-        self.encoder = _build_encoder(model, config)
-        self.decoder = _build_decoder(model, config)
+        self.encoder = _build_encoder(model, self._config)
+        self.decoder = _build_decoder(model, self._config)
 
     @property
     def config(self) -> MazeHardHRMV2AdapterSettings:
@@ -240,10 +250,11 @@ class MazeHardHRMV2BridgeAdapter(nn.Module):
         self,
         outputs: HRMOutputV2,
     ) -> MazeHardHRMV2BridgeOutput:
-        """Split one HRM step output into controller-consumable task and control heads."""
+        """Split one HRM step output into task, policy, and critic surfaces."""
         return MazeHardHRMV2BridgeOutput(
             task=self.decoder(outputs),
-            control=MazeHardHRMV2ControlOutput(q_logits=outputs.q_logits),
+            policy=MazeHardHRMV2PolicyOutput(q_logits=outputs.q_logits),
+            critic=MazeHardHRMV2CriticOutput(state_value=outputs.state_value),
         )
 
     def forward(  # -----------------------------------------------------------
@@ -262,8 +273,9 @@ class MazeHardHRMV2BridgeAdapter(nn.Module):
 __all__ = [
     "MazeHardHRMV2AdapterSettings",
     "MazeHardHRMV2BridgeOutput",
-    "MazeHardHRMV2ControlOutput",
+    "MazeHardHRMV2CriticOutput",
     "MazeHardLearnedEncoder",
+    "MazeHardHRMV2PolicyOutput",
     "MazeHardRoPEEncoder",
     "MazeHardTokenEncoder",
     "MazeHardMLPDecoder",

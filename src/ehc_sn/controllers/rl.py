@@ -1,42 +1,28 @@
-"""RL controller: agent forward pass, action sampling, and recurrent state management.
+"""RL rollout controller contracts and execution step wiring.
 
-The controller is action-semantic-agnostic: it samples an action from the STR
-policy but does not interpret what the action means.  Termination, truncation,
-and reward are decided by the environment (inline in the loss head).
-
-Responsibilities:
-    - Refresh per-slot data for halted slots (data[i] ← batch[i] when halted[i]).
-    - Reset backbone state for halted slots.
-    - Run the model forward pass: backbone → STR (detached theta).
-    - Sample action from Categorical(policy_logits).
-    - Track per-slot step counters.
-
-What this module does NOT do:
-    - Decide termination / truncation (env / loss head does this).
-    - Compute reward (env does this).
-    - Bootstrap V(s') or max Q(s') (loss head does this).
-    - Apply exploration overrides on done (loss head does this).
-    - Own γ (STR does this).
+The RL controller owns rollout-state transitions, policy-driven action
+selection, and environment stepping. Objective-layer code scores executed
+steps later through explicit policy and critic readouts.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, Tuple
+from typing import Any, Optional, Protocol, cast
 
 import torch
 from pydantic import BaseModel, Field
-from tensordict import TensorDict, TensorDictBase
+from tensordict import TensorDictBase
 from torch import Tensor
 from torchrl.envs import EnvBase
 
 from ehc_sn.controllers._base import BaseController, RolloutBackbone, RolloutState
 from ehc_sn.policies.categorical import CategoricalPolicy, CategoricalPolicyConfig, PolicyInput
-from ehc_sn.types import Batch, Device
+from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
 
-# =================================================================================================
+# =============================================================================
 class RLControllerConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`RLController`.
 
@@ -57,12 +43,49 @@ class RLControllerConfig(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
-class RLRolloutBackbone[ModelState, ModelOutput](RolloutBackbone[ModelState, ModelOutput], Protocol):
+class RLPolicyOutput(Protocol):
+    """Policy payload consumed by the controller and actor-side objectives."""
+
+    q_logits: Tensor
+    valid_action_mask: Tensor | None
+
+
+class RLCriticOutput(Protocol):
+    """Critic payload consumed by objective heads and traces."""
+
+    state_value: Tensor  # (B, 1), not "logits"
+
+
+class RLBackboneOutput(Protocol):
+    """Named RL backbone output split into task, policy, and critic surfaces."""
+
+    task: object
+    policy: RLPolicyOutput
+    critic: RLCriticOutput | None
+
+
+# =============================================================================
+class RLRolloutBackbone[ModelState](RolloutBackbone[ModelState, RLBackboneOutput], Protocol):
     """Backbone protocol expected by :class:`RLController`."""
 
 
-# =================================================================================================
+# =============================================================================
+class RLTaskRuntime(Protocol):
+    """Task-owned environment TensorDict shaping used by :class:`RLController`."""
+
+    def build_reset_td(self, batch: Batch) -> TensorDictBase: ...
+
+    def build_env_step_td(
+        self,
+        env_td: TensorDictBase,
+        *,
+        action: Tensor,
+        task_output: object,
+        data: Batch,
+    ) -> TensorDictBase: ...
+
+
+# =============================================================================
 @dataclass
 class RLRolloutState[ModelState](RolloutState[ModelState]):
     """Controller carry/state for RL rollouts."""
@@ -72,33 +95,20 @@ class RLRolloutState[ModelState](RolloutState[ModelState]):
 
 # =================================================================================================
 @dataclass
-class RLOutput(DetachMixin):
-    """Outputs produced by one controller step.
+class RLStepOutput(DetachMixin):
+    """Outputs produced by one RL controller step.
 
-    Named property accessors (``lm_logits``, ``q_logits``, ``value_logits``) are
-    the preferred read path for heads.  Direct positional reads via ``logits[N]``
-    are deprecated in head code and will be removed once all heads are migrated.
+    ``backbone_output`` carries all model-produced data; ``action`` and ``reward``
+    are the only controller- and environment-produced facts added by the RL step.
+
+    Consumers must read model data through ``backbone_output.task.*``,
+    ``backbone_output.policy.*``, and ``backbone_output.critic.*`` rather than
+    through flat accessors on this class.
     """
 
-    logits: tuple[Tensor, ...]  # (lm_logits, q_logits, value_logits, ...); prefer named properties in heads
-    theta_cls: Tensor  # (B, D) — theta CLS features
+    backbone_output: RLBackboneOutput
     action: Tensor  # (B,) selected action indices for this step
     reward: Tensor  # (B, 1) reward from the environment for this step
-
-    @property
-    def lm_logits(self) -> Tensor:
-        """LM head logits, shape ``(B, S, V)``."""
-        return self.logits[0]
-
-    @property
-    def q_logits(self) -> Tensor:
-        """Action policy logits (STR), shape ``(B, A)``."""
-        return self.logits[1]
-
-    @property
-    def value_logits(self) -> Tensor:
-        """Value / reward-prediction logits, shape ``(B, 1)``."""
-        return self.logits[2]
 
 
 # =================================================================================================
@@ -116,7 +126,11 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: RLRolloutBackbone, env: EnvBase, config: RLControllerConfig,
+        self,
+        backbone: RLRolloutBackbone[ModelState],
+        env: EnvBase,
+        config: RLControllerConfig,
+        runtime: RLTaskRuntime,
     ) -> None:  # fmt: skip
         """Create a controller.
 
@@ -124,15 +138,27 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
             backbone: Model implementing :class:`RLRolloutBackbone`.
             env: TorchRL environment used to compute rewards/termination.
             config: Controller-specific configuration.
+            runtime: Task-owned environment TensorDict runtime.
         """
-        super().__init__(backbone=backbone, config=config)
+        super().__init__(backbone=cast(Any, backbone), config=config)
         self._env = env
         self._policy = CategoricalPolicy(config.policy)
+        self._runtime = runtime
+
+    @property
+    def backbone(self) -> RLRolloutBackbone[ModelState]:
+        """Return the wrapped RL backbone typed to the local protocol."""
+        return cast(RLRolloutBackbone[ModelState], super().backbone)
 
     @property
     def environment(self) -> EnvBase:
         """Return the TorchRL environment used for stepping."""
         return self._env
+
+    @property
+    def runtime(self) -> RLTaskRuntime:
+        """Return the task-owned environment TensorDict runtime."""
+        return self._runtime
 
     def initial_state(  # -------------------------------------------------------------------------
         self, batch_sample: Batch,
@@ -148,14 +174,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         Returns:
             Initialized :class:`RLRolloutState` with fresh backbone state and env state.
         """
-        B = batch_sample["input_ids"].shape[0]
-        device = batch_sample["input_ids"].device
-
-        # Reset env with initial data
-        reset_td = TensorDict(
-            {"input_ids": batch_sample["input_ids"], "labels": batch_sample["labels"]},
-            batch_size=[B], device=device,
-        )  # fmt: skip
+        reset_td = self.runtime.build_reset_td(batch_sample)
         env_td = self._env.reset(reset_td)
 
         slots = self.initial_slots(batch_sample)
@@ -167,7 +186,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
     def step(  # ----------------------------------------------------------------------------------
         self, state: RLRolloutState[ModelState], batch: Batch, *,
         allow_halt: bool = True, explore: bool = True, **_: Any,
-    ) -> tuple[RLRolloutState[ModelState], RLOutput]:  # fmt: skip
+    ) -> tuple[RLRolloutState[ModelState], RLStepOutput]:  # fmt: skip
         """Advance the controller by one step.
 
         The step:
@@ -187,44 +206,50 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, logits, theta_cls = self.backbone(data, model_state)
+        model_state, backbone_output = self.backbone(data, model_state)
 
         steps = self.advance_steps(state)
-        action, done, env_td = self._select_action_and_done(logits, steps, data, state.env_td, allow_halt, explore)  # fmt: skip
+        action, done, env_td = self._select_action_and_done(backbone_output, steps, data, state.env_td, allow_halt, explore)  # fmt: skip
         reward = env_td["reward"]
 
         state = RLRolloutState(model_state=model_state, steps=steps, halted=done, data=data, env_td=env_td)
-        output = RLOutput(logits=logits, theta_cls=theta_cls, action=action, reward=reward)
+        output = RLStepOutput(backbone_output=backbone_output, action=action, reward=reward)
 
         return state, output
 
-    def _select_action_and_done(  # ---------------------------------------------------------------
-        self, logits: list[Tensor], steps: Tensor, data: Batch, env_td: TensorDictBase, 
-        allow_halt: bool, explore: bool,
-    ) -> tuple[Tensor, Tensor, TensorDictBase]:  # fmt: skip
-        """Sample action, step env, and apply exploration gating."""
-        logits_lm, logits_q, logits_r, *_ = logits  # Unpack list of logits multiple heads
+    def _select_action_and_done(
+        self,
+        backbone_output: RLBackboneOutput,
+        steps: Tensor,
+        data: Batch,
+        env_td: TensorDictBase,
+        allow_halt: bool,
+        explore: bool,
+    ) -> tuple[Tensor, Tensor, TensorDictBase]:
+        policy = backbone_output.policy
+        logits_q = policy.q_logits
+        valid_action_mask = policy.valid_action_mask
+        if valid_action_mask is None:
+            valid_action_mask = torch.ones_like(logits_q, dtype=torch.bool)
 
-        # 1. Sample action from STR policy logits
         policy_input = PolicyInput(
-            valid_action_mask=torch.ones_like(logits_q, dtype=torch.bool),
+            valid_action_mask=valid_action_mask,
             step_count=env_td.get("step_count"),
             logits=logits_q,
         )
-        action = self._policy(policy_input, explore=explore).action.to(dtype=torch.int64)  # (B,)
+        action = self._policy(policy_input, explore=explore).action.to(torch.int64)
 
-        # 2. Step the environment — env owns reward + termination semantics
-        env_td = env_td.clone()
-        env_td["action"] = action.unsqueeze(-1)  # (B, 1)
-        env_td["logits"] = logits_lm.detach().to(torch.float32)  # (B, S, V)
-        env_td["labels"] = data["labels"]  # (B, S)
-        env_td = self._env.step(env_td)["next"]  # TorchRL convention
+        env_td = self.runtime.build_env_step_td(
+            env_td,
+            action=action,
+            task_output=backbone_output.task,
+            data=data,
+        )
+        env_td = self._env.step(env_td)["next"]
 
-        terminated = env_td["terminated"].squeeze(-1)  # (B,)
-        truncated = env_td["truncated"].squeeze(-1)  # (B,)
-        done = terminated | truncated  # (B,)
-
-        # 3. Auxiliary control over termination by controller max_steps
+        terminated = env_td["terminated"].squeeze(-1)
+        truncated = env_td["truncated"].squeeze(-1)
+        done = terminated | truncated
         if self.config.max_steps is not None and allow_halt:
             done = done | (steps >= self.config.max_steps)
 
@@ -232,4 +257,14 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
 
 
 # =================================================================================================
-__all__ = ["RLController", "RLRolloutState", "RLOutput", "RLRolloutBackbone", "RLControllerConfig"]
+__all__ = [
+    "RLController",
+    "RLControllerConfig",
+    "RLTaskRuntime",
+    "RLStepOutput",
+    "RLBackboneOutput",
+    "RLPolicyOutput",
+    "RLCriticOutput",
+    "RLRolloutBackbone",
+    "RLRolloutState",
+]

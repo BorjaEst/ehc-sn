@@ -388,7 +388,10 @@ class RecurrentRunner:
 
         while True:
             if hard_max_rollout_steps is not None and step_idx >= hard_max_rollout_steps:
-                raise ExecutionHaltError(hard_max_rollout_steps=hard_max_rollout_steps, executed_steps=step_idx)
+                raise ExecutionHaltError(
+                    hard_max_rollout_steps=hard_max_rollout_steps,
+                    executed_steps=step_idx,
+                )
             if max_rollout_steps is not None and step_idx >= max_rollout_steps:
                 stop_reason = StopReason.STEP_LIMIT_REACHED
                 break
