@@ -9,23 +9,23 @@ from typing import Any
 import torch
 
 from ehc_sn.adapters.maze_hard import MazeHardHRMV1BridgeAdapter, MazeHardHRMV2BridgeAdapter
-from ehc_sn.benchmarks._bindings.hrm.load import load_hrm_v1_model, load_hrm_v2_model
-from ehc_sn.benchmarks._bindings.hrm.preprocess import supervised_maze_tokenize
+from ehc_sn.adapters.maze_hard.objectives import MazeHardACTTaskBinding
+from ehc_sn.benchmarks._bindings.hrm.load import load_hrm_v1_bridge_adapter, load_hrm_v2_model
 from ehc_sn.benchmarks._capabilities.batch_prediction import BatchPrediction, BatchPredicts
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2
+from ehc_sn.tasks.maze_hard.runtime import coerce_maze_hard_batch
 
 
 class HRMV1BatchPredictionAdapter(BatchPredicts):
     """Benchmark-time HRM v1 adapter for MazeHard batch prediction."""
 
-    def __init__(self, model: HRModelV1, *, compute_budget: int, done_action: int = 0) -> None:
-        self._model = model.eval()
-        self._controller = ACTController(
-            MazeHardHRMV1BridgeAdapter(self._model),
-            ACTControllerConfig(exploration_prob=0.0, max_steps=compute_budget, done_action=done_action),
-        )
+    def __init__(self, bridge_adapter: MazeHardHRMV1BridgeAdapter, *, compute_budget: int, done_action: int = 0) -> None:
+        self._bridge_adapter = bridge_adapter.eval()
+        self._model = self._bridge_adapter.model
+        controller_config = ACTControllerConfig(exploration_prob=0.0, max_steps=compute_budget, done_action=done_action)
+        self._controller = ACTController(self._bridge_adapter, controller_config)
 
     @property
     def model(self) -> HRModelV1:
@@ -42,10 +42,8 @@ class HRMV2BatchPredictionAdapter(BatchPredicts):
 
     def __init__(self, model: HRModelV2, *, compute_budget: int, done_action: int = 0) -> None:
         self._model = model.eval()
-        self._controller = ACTController(
-            MazeHardHRMV2BridgeAdapter(self._model),
-            ACTControllerConfig(exploration_prob=0.0, max_steps=compute_budget, done_action=done_action),
-        )
+        controller_config = ACTControllerConfig(exploration_prob=0.0, max_steps=compute_budget, done_action=done_action)
+        self._controller = ACTController(MazeHardHRMV2BridgeAdapter(self._model), controller_config)
 
     @property
     def model(self) -> HRModelV2:
@@ -66,13 +64,13 @@ def build_hrm_v1_batch_prediction(
     done_action: int = 0,
 ) -> HRMV1BatchPredictionAdapter:
     """Build the benchmark-time HRM v1 batch-prediction adapter."""
-    model = load_hrm_v1_model(
+    bridge_adapter = load_hrm_v1_bridge_adapter(
         model_config_path=model_config_path,
         checkpoint_path=checkpoint_path,
         device=device,
     )
     return HRMV1BatchPredictionAdapter(
-        model,
+        bridge_adapter,
         compute_budget=compute_budget,
         done_action=done_action,
     )
@@ -105,28 +103,35 @@ def _predict_with_controller(
     batch: Mapping[str, Any],
 ) -> BatchPrediction:
     """Run one benchmark batch through the shared ACT-driven prediction path."""
-    tokenized = supervised_maze_tokenize(batch)
+    canonical_batch = batch if {"input_ids", "labels"}.issubset(batch.keys()) else coerce_maze_hard_batch(batch)
     device = next(model.parameters()).device
-    step_batch = {
-        "input_ids": tokenized["input_ids"].unsqueeze(0).to(device=device, dtype=torch.int64),
-        "labels": tokenized["labels"].unsqueeze(0).to(device=device, dtype=torch.int64),
-    }
+    input_ids = canonical_batch["input_ids"].to(device=device, dtype=torch.int64)
+    labels = canonical_batch["labels"].to(device=device, dtype=torch.int64)
+    if input_ids.ndim == 1:
+        input_ids = input_ids.unsqueeze(0)
+    if labels.ndim == 1:
+        labels = labels.unsqueeze(0)
+    step_batch = {"input_ids": input_ids, "labels": labels}
 
     state = controller.initial_state(step_batch)
     outputs = None
     with torch.no_grad():
         while True:
-            state, outputs = controller.step(state, step_batch, allow_halt=True, explore=False, td_target=False)  # fmt: skip
+            state, outputs = controller.step(state, step_batch, explore=False)
             if bool(state.halted.all().item()):
                 break
 
     if outputs is None:
         raise RuntimeError("ACTController produced no outputs during benchmark prediction.")
 
+    task_binding = MazeHardACTTaskBinding()
+    logits = task_binding.extract_logits(step_batch, state, outputs)  # (B, S, vocab)
+    targets = task_binding.extract_targets(step_batch, state, outputs).labels  # (B, S)
+
     return BatchPrediction(
-        predictions=outputs.lm_logits.argmax(dim=-1).squeeze(0).detach().cpu(),
-        targets=step_batch["labels"].squeeze(0).detach().cpu(),
-        logits=outputs.lm_logits.squeeze(0).detach().cpu(),
+        predictions=logits.argmax(dim=-1).squeeze(0).detach().cpu(),
+        targets=targets.squeeze(0).detach().cpu(),
+        logits=logits.squeeze(0).detach().cpu(),
         steps=int(state.steps.max().item()),
         halted=bool(state.halted.all().item()),
     )
