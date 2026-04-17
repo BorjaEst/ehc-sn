@@ -5,8 +5,8 @@ around the HRM v2 architecture (:class:`HRModelV2`) and its training loop.
 
 Compared to HRM v1 (ACT-supervised), HRM v2 couples a PFC-style recurrent reasoning
 core with an STR actor-critic head and trains with reinforcement-learning losses
-computed by :class:`~ehc_sn.training.rl_head.RLLossHead` via a
-:class:`~ehc_sn.training.controller.RLController`.
+computed by :class:`~ehc_sn.objectives.rl.RLLossHead` via a
+:class:`~ehc_sn.controllers.rl.RLController`.
 
 Key behaviors:
     - **Manual optimization**: sets ``automatic_optimization = False`` and performs
@@ -27,25 +27,23 @@ from pathlib import Path
 from typing import Any, Optional
 
 import lightning as L
-import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.maze_hard import MazeHardHRMV2AdapterSettings, MazeHardHRMV2BridgeAdapter
+from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v2 import MazeHardHRMV2AdapterSettings, MazeHardHRMV2BridgeAdapter
 from ehc_sn.adapters.maze_hard.objectives import MazeHardRLTaskBinding
 from ehc_sn.controllers.rl import RLController, RLControllerConfig
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
-from ehc_sn.heads.rl import RLLossConfig, RLLossHead
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
-from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettings_V2
-from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
+from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettingsV2
+from ehc_sn.objectives.rl import RLLossConfig, RLLossHead
+from ehc_sn.rollouts import RecurrentRunner, RepeatSource
 from ehc_sn.tasks.maze_hard import MazeHardControllerRuntime
 from ehc_sn.training.buffers import FifoBuffer
-from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
@@ -59,9 +57,9 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
     """Configuration for the HRM v2 Lightning module.
 
     This config wires together:
-        - model settings (:class:`ModelSettings_V2`)
+        - model settings (:class:`ModelSettingsV2`)
         - environment settings (:class:`~ehc_sn.envs.mazehard.EnvConfig`)
-        - RL controller and loss head configs
+        - RL controller and objective configs
         - optimizer and scheduler settings
 
     Notes:
@@ -86,9 +84,9 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
         ...,
         description="Configuration for the RL controller, which defines the forward pass and computes RL losses.",
     )
-    loss: RLLossConfig = Field(
+    objective: RLLossConfig = Field(
         ...,
-        description="Configuration for the RL loss head, which computes losses based on the controller outputs.",
+        description="Configuration for the RL objective scorer.",
     )
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -137,8 +135,8 @@ class TrainingModel(L.LightningModule):
 
     This wrapper manages:
         - lazy initialization of :class:`~ehc_sn.envs.mazehard.MazeHardEnv`
-        - wiring :class:`~ehc_sn.training.controller.RLController` and
-          :class:`~ehc_sn.training.rl_head.RLLossHead`
+        - wiring :class:`~ehc_sn.controllers.rl.RLController` and
+          :class:`~ehc_sn.objectives.rl.RLLossHead`
         - partial-reset batching via FIFO buffering
         - manual optimization with three optimizers
     """
@@ -147,7 +145,7 @@ class TrainingModel(L.LightningModule):
         self, config: ModelConfig_HRM_V2,
     ) -> None:  # fmt: skip
         super().__init__()
-        model_settings = ModelSettings_V2.from_config(config.model_config_path)
+        model_settings = ModelSettingsV2.from_config(config.model_config_path)
         self.model = HRModelV2(model_settings)
         self.bridge_adapter = MazeHardHRMV2BridgeAdapter(self.model, config.adapter)
         self._controller_runtime = MazeHardControllerRuntime()
@@ -177,6 +175,11 @@ class TrainingModel(L.LightningModule):
             buffer=self._train_buffer,
             keys=("input_ids", "labels"),
         )
+        self._learner = HRMV2RLLearner(
+            warmup_steps=config.supervised_only_warmup_steps,
+            runner=self._train_runner,
+            assembler=self._train_batch_assembler,
+        )
 
     @property
     def config(self) -> ModelConfig_HRM_V2:
@@ -193,7 +196,7 @@ class TrainingModel(L.LightningModule):
         if self.environment is None:
             self.environment = MazeHardEnv(self.config.environment, batch_size=local_bs)
         self.controller = RLController(self.bridge_adapter, self.environment, self.config.controller, self._controller_runtime)
-        self.objective = RLLossHead(self.config.loss, task_binding=MazeHardRLTaskBinding())
+        self.objective = RLLossHead(self.config.objective, task_binding=MazeHardRLTaskBinding())
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
@@ -211,12 +214,12 @@ class TrainingModel(L.LightningModule):
 
         # Optimizer A: supervised — backbone + LM params only.
         vmPFC_ids = {id(p) for p in self.model.pfc.estimator.parameters()}
-        str_ids = {id(p) for p in self.model.str.parameters()}
+        str_ids = {id(p) for p in self.model.striatum.parameters()}
         excluded_ids = vmPFC_ids | str_ids
         sup_params = [p for p in self.bridge_adapter.parameters() if id(p) not in excluded_ids]
         opt_sup = AdamATan2(sup_params, self.config.optimizer_supervised)
         # Optimizer B: RL — STR actor-critic only (strictly isolated)
-        opt_rl = AdamATan2(list(self.model.str.parameters()), self.config.optimizer_rl)
+        opt_rl = AdamATan2(list(self.model.striatum.parameters()), self.config.optimizer_rl)
         # Optimizer C: vmPFC — pfc.estimator only (auxiliary Q-predictor)
         opt_qv = AdamATan2(list(self.model.pfc.estimator.parameters()), self.config.optimizer_qv)
 
@@ -249,7 +252,7 @@ class TrainingModel(L.LightningModule):
     ) -> dict[str, Any]:  # fmt: skip
         """Run one training step (horizon = 1) with manual optimization.
 
-        Training uses a carry object produced by :class:`~ehc_sn.training.rl_head.RLLossHead`
+        Training uses a carry object produced by :class:`~ehc_sn.objectives.rl.RLLossHead`
         to support partial resets: rows that halted in the previous step are
         replaced with fresh examples from the current incoming batch.
 
@@ -260,47 +263,32 @@ class TrainingModel(L.LightningModule):
         if self.controller is None or self.objective is None:
             raise RuntimeError("HRM v2 runtime is not initialized. Call setup() before training.")
 
-        # Initialize carry/state on the first batch
+        # Initialize carry/state on the first batch.
         if self._train_carry is None:
             self._train_carry = self.controller.initial_state(batch)
 
-        is_warmup = self.global_step < self._config.supervised_only_warmup_steps
-        rl_options = {"explore": True, "allow_halt": not is_warmup, "is_warmup": is_warmup}
-        evaluation = evaluate_rollout(
-            runner=self._train_runner,
-            source=PartialResetSource(incoming=batch, assembler=self._train_batch_assembler, carry0=self._train_carry),
-            controller=self.controller,
-            carry=self._train_carry,
-            objective=self.objective,
-            runner_options=rl_options,
-            objective_options=rl_options,
-        )
-        self._train_carry = evaluation.chunk.final_carry.detach()
-
-        # Normalize by local batch size; DDP averages gradients across ranks.
         local_bs = int(batch["input_ids"].shape[0])
-        loss = normalize_loss_for_backward(evaluation.evaluated.loss, local_bs)
-
-        # Zero gradients before backward so each step uses only the current batch.
         opt_sup, opt_rl, opt_qv = self.optimizers()  # type: ignore[misc]
         sch_sup, sch_rl, sch_qv = self.lr_schedulers()  # type: ignore[misc]
-        opt_sup.zero_grad(set_to_none=True)
-        opt_rl.zero_grad(set_to_none=True)
-        opt_qv.zero_grad(set_to_none=True)
 
-        self.manual_backward(loss)
+        output = self._learner.step(
+            batch=batch,
+            carry=self._train_carry,
+            global_step=self.global_step,
+            controller=self.controller,
+            objective=self.objective,
+            local_batch_size=local_bs,
+            optimizers=(opt_sup, opt_rl, opt_qv),
+            schedulers=(sch_sup, sch_rl, sch_qv),
+            manual_backward=self.manual_backward,
+        )
+        self._train_carry = output.evaluation.chunk.final_carry.detach()
 
-        opt_sup.step(); sch_sup.step()  # fmt: skip
-        if not is_warmup:
-            opt_rl.step(); sch_rl.step()  # fmt: skip
-            opt_qv.step(); sch_qv.step()  # fmt: skip
+        # Update metrics and log.
+        update_metric_collection_from_evaluated_chunk(self.train_metrics, output.evaluation.evaluated, RL_STEP_ROUTES)
+        self.log("train/loss", output.loss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
-        # Update metrics with unnormalized loss and log to TensorBoard.
-        update_metric_collection_from_evaluated_chunk(self.train_metrics, evaluation.evaluated, RL_STEP_ROUTES)
-        self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
-
-        signals = {**evaluation.evaluated.last_step.outputs.signals, "is_warmup": torch.tensor(float(is_warmup))}
-        return {"loss": loss.detach(), "signals": signals}
+        return {"loss": output.loss, "signals": output.signals}
 
     # -- Validation -------------------------------------------------------------------------------
 

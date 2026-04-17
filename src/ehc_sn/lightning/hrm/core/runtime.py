@@ -21,7 +21,7 @@ class ValidationRuntimeConfig(BaseModel, extra="forbid"):
 
 
 class RuntimeConfig(BaseModel, extra="forbid"):
-    """HRM runtime settings owned by the learner surface."""
+    """ """
 
     validation: ValidationRuntimeConfig = Field(
         default_factory=ValidationRuntimeConfig,

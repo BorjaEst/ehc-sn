@@ -18,6 +18,7 @@ with keys ``"input_ids"`` and ``"labels"``.
 """
 
 from pathlib import Path
+from typing import Any
 
 import lightning as L
 from adam_atan2_pytorch import AdamAtan2 as AdamATan2
@@ -28,13 +29,13 @@ from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v1 import MazeHardHRMV1AdapterSet
 from ehc_sn.adapters.maze_hard.objectives import MazeHardACTTaskBinding
 from ehc_sn.adapters.maze_hard.traces import MAZE_HARD_ACT_TRACE_FIELDS
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
-from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
+from ehc_sn.objectives.act import ACTLossConfig, ACTLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
@@ -49,7 +50,7 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
     """Configuration for the HRM v1 Lightning module.
 
     This config is intentionally "spec-first": it wires together the HRM core model,
-    the ACT controller (adaptive computation time / halting logic), the loss head, and
+    the ACT controller (adaptive computation time / halting logic), the rollout objective, and
     the optimizer/scheduler settings used during training.
 
     Notes:
@@ -74,9 +75,9 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
             "The keys in `act_controller` are passed to the ACTController constructor."
         ),
     )
-    loss: ACTLossConfig = Field(
+    objective: ACTLossConfig = Field(
         ...,
-        description="Loss config. The keys in `loss` are passed to the loss head constructor.",
+        description="Objective config for the ACT rollout scorer.",
     )
     optimizer: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
@@ -134,7 +135,7 @@ class TrainingModel(L.LightningModule):
         self.model = HRModelV1(model_settings)
         self.bridge_adapter = MazeHardHRMV1BridgeAdapter(self.model, config.adapter)
         self.controller = ACTController(self.bridge_adapter, config.act_controller)
-        self.objective = ACTLossHead(config.loss, task_binding=MazeHardACTTaskBinding())
+        self.objective = ACTLossHead(config.objective, task_binding=MazeHardACTTaskBinding())
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()
