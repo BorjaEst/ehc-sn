@@ -1,8 +1,10 @@
 """Canonical public surface for rollout-scoring objective modules.
 
 All objective-scoring implementations reside in the submodules of this package.
-``ehc_sn.heads`` is a deprecated compatibility alias that re-exports from here;
-prefer ``from ehc_sn.objectives import ...`` for all new code.
+The canonical names follow the ``*Objective*`` vocabulary; the legacy ``*LossHead*``
+names are preserved as backward-compatible aliases.
+
+Prefer ``from ehc_sn.objectives import ...`` over any sub-module import.
 """
 
 from ehc_sn.objectives._base import BaseObjective
@@ -26,13 +28,49 @@ from ehc_sn.objectives._variational import (
 )
 from ehc_sn.objectives.act import ACTLossConfig, ACTLossHead, ACTLossStep, ACTTaskBinding
 from ehc_sn.objectives.rl import RLLossConfig, RLLossHead, RLLossStep, RLObjectiveBinding
-from ehc_sn.objectives.tem import TEMLossConfig, TEMLosses, TEMLossHead, TEMLossStep, TEMSupervisionBinding
-from ehc_sn.objectives.var import LatentCode, VARLossConfig, VARLosses, VARLossHead, VARLossStep
+from ehc_sn.objectives.tem import (
+    TEMLossConfig,
+    TEMLossHead,
+    TEMLosses,
+    TEMLossStep,
+    TEMObjectiveBinding,
+    TEMObjectiveConfig,
+    TEMObjective,
+    TEMObjectiveStep,
+    TEMSupervisionBinding,
+)
+from ehc_sn.objectives.var import (
+    LatentCode,
+    VARLossConfig,
+    VARLossHead,
+    VARLosses,
+    VARLossStep,
+    VARObjectiveBinding,
+    VARObjectiveConfig,
+    VARObjective,
+    VARObjectiveStep,
+)
+
+# ── Canonical objective aliases (preferred) ──────────────────────────────────
+# ACT
+ACTObjectiveConfig = ACTLossConfig
+ACTObjective = ACTLossHead
+ACTObjectiveStep = ACTLossStep
+ACTObjectiveBinding = ACTTaskBinding
+# RL
+RLObjectiveConfig = RLLossConfig
+RLObjective = RLLossHead
+RLObjectiveStep = RLLossStep
+# Base families
+TokenObjectiveBase = TokenLossHeadBase
+VariationalObjectiveBase = VariationalLossHeadBase
 
 __all__ = [
     # base
     "BaseObjective",
-    # token family
+    # token family — canonical
+    "TokenObjectiveBase",
+    # token family — implementation / compat
     "IGNORE_LABEL_ID",
     "AccuracyStats",
     "TokenLossHeadBase",
@@ -41,30 +79,51 @@ __all__ = [
     "build_token_step_metrics",
     "compute_accuracy_stats",
     "compute_lm_loss_sum",
-    # variational family
+    # variational family — canonical
+    "VariationalObjectiveBase",
+    # variational family — implementation / compat
     "VariationalLossHeadBase",
     "VariationalLosses",
     "VariationalLossStep",
     "build_variational_step_metrics",
     "get_reg_term",
     "require_latent_relation",
-    # act
+    # act — canonical
+    "ACTObjectiveConfig",
+    "ACTObjective",
+    "ACTObjectiveStep",
+    "ACTObjectiveBinding",
+    # act — compat
     "ACTLossConfig",
     "ACTLossHead",
     "ACTLossStep",
     "ACTTaskBinding",
-    # rl
+    # rl — canonical
+    "RLObjectiveConfig",
+    "RLObjective",
+    "RLObjectiveStep",
+    # rl — compat / binding
     "RLLossConfig",
     "RLLossHead",
     "RLLossStep",
     "RLObjectiveBinding",
-    # tem
+    # tem — canonical
+    "TEMObjectiveBinding",
+    "TEMObjectiveConfig",
+    "TEMObjective",
+    "TEMObjectiveStep",
+    # tem — compat
+    "TEMSupervisionBinding",
     "TEMLossConfig",
     "TEMLossHead",
     "TEMLosses",
     "TEMLossStep",
-    "TEMSupervisionBinding",
-    # var
+    # var — canonical
+    "VARObjectiveBinding",
+    "VARObjectiveConfig",
+    "VARObjective",
+    "VARObjectiveStep",
+    # var — compat
     "LatentCode",
     "VARLossConfig",
     "VARLossHead",

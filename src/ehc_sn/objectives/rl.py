@@ -1,4 +1,4 @@
-"""RL loss head over executed rollout steps.
+"""RL objective over executed rollout steps.
 
 The RL objective keeps task-supervision extraction generic via the token
 binding seam while keeping actor and critic extraction local to the RL path.

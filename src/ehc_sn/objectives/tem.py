@@ -1,8 +1,13 @@
-"""TEM variational loss head.
+"""TEM variational objective.
 
-This module adapts the legacy TEM loss decomposition to the variational-family
-head contract. The public API exposes ELBO-style top-level losses, while
-TEM-specific pathway detail remains in detached diagnostics and metric extras.
+This module implements the ELBO-style TEM rollout-scoring objective. The
+canonical public surface is :class:`TEMObjectiveBinding` (protocol),
+:class:`TEMLossHead` (implementation, also exported as ``TEMObjective``), and
+:class:`TEMLossConfig` (also exported as ``TEMObjectiveConfig``).
+
+Task-specific supervision extraction and correctness evaluation are fully
+delegated to the injected :class:`TEMObjectiveBinding`, so this module remains
+task-agnostic.
 """
 
 from __future__ import annotations
@@ -10,7 +15,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
-import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
@@ -27,12 +31,6 @@ from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_terms
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import (
-    TEM_ACC_OBS_ANCESTRAL_ALL,
-    TEM_ACC_OBS_ANCESTRAL_REVISIT,
-    TEM_ACC_OBS_INFERENCE_ALL,
-    TEM_ACC_OBS_INFERENCE_REVISIT,
-    TEM_ACC_OBS_RETRIEVED_ALL,
-    TEM_ACC_OBS_RETRIEVED_REVISIT,
     TEM_LOSS_GRID_KL_ALL,
     TEM_LOSS_GRID_KL_REVISIT,
     TEM_LOSS_OBS_NLL_ALL,
@@ -54,27 +52,44 @@ from ehc_sn.types import Batch
 
 
 # =================================================================================================
-class TEMSupervisionBinding(Protocol):
-    """TEM-local protocol for extracting supervision targets from rollout carry.
+class TEMObjectiveBinding[TargetsT](Protocol):
+    """Canonical task-binding protocol for the TEM objective.
 
     Implemented in the adapter layer so that :class:`TEMLossHead` stays
-    task-agnostic.  Both methods receive the full (batch, carry, step_output)
-    triple for uniformity with sibling binding protocols in the codebase.
+    task-agnostic.  The binding owns all task-specific target extraction and
+    observation-correctness evaluation; the objective owns only loss math and
+    metric assembly.
+
+    Type parameter ``TargetsT`` is the task-owned supervision-target dataclass
+    (e.g. :class:`~ehc_sn.tasks.navigation.contracts.NavigationTargets`).
     """
 
-    def extract_observation_id(
-        self,
-        batch: Batch,
-        carry: Any,
-        step_output: Any,
-    ) -> Tensor: ...
+    def extract_targets(self, batch: Batch, carry: Any, step_output: Any) -> TargetsT:
+        """Return the task-owned supervision targets for the current step."""
+        ...
 
-    def extract_protocol_mask(
-        self,
-        batch: Batch,
-        carry: Any,
-        step_output: Any,
-    ) -> Tensor: ...
+    def extract_observation_id(self, targets: TargetsT) -> Tensor:
+        """Return the integer observation-id tensor ``(B,)`` from ``targets``."""
+        ...
+
+    def extract_protocol_mask(self, targets: TargetsT) -> Tensor:
+        """Return the boolean protocol-eligibility mask ``(B,)`` from ``targets``."""
+        ...
+
+    def evaluate_observation_metrics(
+        self, step_output: Any, targets: TargetsT
+    ) -> dict[str, RatioStat]:
+        """Return task-owned count-bearing accuracy metrics for one step.
+
+        The values are :class:`~ehc_sn.training.types.RatioStat` numerator/
+        denominator pairs (counts, not yet reduced to ratios).  Keys must align
+        with the TEM metric-key constants in :mod:`ehc_sn.metrics.keys`.
+        """
+        ...
+
+
+# Backward-compatible alias — prefer TEMObjectiveBinding in new code.
+TEMSupervisionBinding = TEMObjectiveBinding
 
 
 # =================================================================================================
@@ -147,17 +162,22 @@ class TEMLossStep(VariationalLossStep):
 
 # =================================================================================================
 class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
-    """Pure TEM objective scored over executed rollout chunks."""
+    """TEM objective scored over executed rollout chunks.
+
+    Loss math (ELBO decomposition) lives here. Task-specific target extraction
+    and correctness evaluation are fully delegated to the injected
+    :class:`TEMObjectiveBinding`.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: TEMLossConfig, *, task_binding: TEMSupervisionBinding,
+        self, config: TEMLossConfig, *, task_binding: TEMObjectiveBinding[Any],
     ) -> None:  # fmt: skip
         """Create a TEM objective from its loss configuration.
 
         Args:
-            config: TEM loss configuration.
-            task_binding: Explicit binding for extracting observation ids and
-                protocol masks from rollout carry.  Use the task-owned adapter
+            config: TEM objective configuration.
+            task_binding: Explicit binding for extracting supervision targets and
+                evaluating observation correctness.  Use the task-owned adapter
                 (e.g. ``NavigationTEMTaskBinding``); no implicit default exists.
         """
         super().__init__(config=config)
@@ -167,8 +187,9 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         self, outputs: TEMStepOutput, carry: Any, batch: Any = None, step_output: Any = None, **_: Any,
     ) -> TEMLosses:  # fmt: skip
         """Compute ELBO-style TEM losses for a single step."""
-        labels = self._task_binding.extract_observation_id(batch, carry, step_output)
-        protocol_mask = self._task_binding.extract_protocol_mask(batch, carry, step_output)
+        targets = self._task_binding.extract_targets(batch, carry, step_output)
+        labels = self._task_binding.extract_observation_id(targets)
+        protocol_mask = self._task_binding.extract_protocol_mask(targets)
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
 
@@ -214,28 +235,22 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         self, losses: TEMLosses, *, carry: Any, outputs: TEMStepOutput, batch_size: int,
         batch: Any = None, step_output: Any = None, **_: Any,
     ) -> dict[str, RatioStat]:  # fmt: skip
-        """Build detached TEM ratio metrics for logging."""
-        labels = self._task_binding.extract_observation_id(batch, carry, step_output)
-        protocol_mask = self._task_binding.extract_protocol_mask(batch, carry, step_output)
+        """Build detached TEM ratio metrics for logging.
+
+        Accuracy metrics come from the task-owned binding so this objective
+        does not recompute argmax correctness locally.  Loss ratio metrics are
+        assembled here from the loss bundle computed in :meth:`compute_losses`.
+        """
+        targets = self._task_binding.extract_targets(batch, carry, step_output)
+        labels = self._task_binding.extract_observation_id(targets)
+        protocol_mask = self._task_binding.extract_protocol_mask(targets)
         protocol_count = protocol_mask.to(dtype=losses.total.dtype).sum()
         batch_count = losses.total.new_tensor(batch_size, dtype=losses.total.dtype)
         all_loss_sums = self._all_step_loss_sums(outputs, labels)
+        # Accuracy metrics are owned by the task; the binding delegates to the task evaluator.
+        acc_metrics = self._task_binding.evaluate_observation_metrics(outputs, targets)
         return {
-            TEM_ACC_OBS_INFERENCE_REVISIT: RatioStat(
-                _correct_prediction_count(outputs.logits_inference, labels, mask=protocol_mask),
-                protocol_count,
-            ),
-            TEM_ACC_OBS_RETRIEVED_REVISIT: RatioStat(
-                _correct_prediction_count(outputs.logits_retrieved, labels, mask=protocol_mask),
-                protocol_count,
-            ),
-            TEM_ACC_OBS_ANCESTRAL_REVISIT: RatioStat(
-                _correct_prediction_count(outputs.logits_ancestral, labels, mask=protocol_mask),
-                protocol_count,
-            ),
-            TEM_ACC_OBS_INFERENCE_ALL: RatioStat(_correct_prediction_count(outputs.logits_inference, labels), batch_count),
-            TEM_ACC_OBS_RETRIEVED_ALL: RatioStat(_correct_prediction_count(outputs.logits_retrieved, labels), batch_count),
-            TEM_ACC_OBS_ANCESTRAL_ALL: RatioStat(_correct_prediction_count(outputs.logits_ancestral, labels), batch_count),
+            **acc_metrics,
             TEM_LOSS_OBS_NLL_REVISIT: RatioStat(losses.loss_obs_nll_sum.detach(), protocol_count),
             TEM_LOSS_GRID_KL_REVISIT: RatioStat(losses.loss_grid_kl_sum.detach(), protocol_count),
             TEM_LOSS_PLACE_CONSISTENCY_REVISIT: RatioStat(losses.loss_place_consistency_sum.detach(), protocol_count),
@@ -257,7 +272,8 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         step_output: Any = None, **_: Any,
     ) -> dict[str, Tensor]:  # fmt: skip
         """Compute detached TEM diagnostics and ELBO-style scalar signals."""
-        labels = self._task_binding.extract_observation_id(batch, carry, step_output)
+        targets = self._task_binding.extract_targets(batch, carry, step_output)
+        labels = self._task_binding.extract_observation_id(targets)
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
         place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
@@ -341,16 +357,23 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         return coefficient * sum_regularization_terms(code, norm)
 
 
-# =================================================================================================
-def _correct_prediction_count(  # -----------------------------------------------------------------
-    logits: Tensor, labels: Tensor, mask: Tensor | None = None,
-) -> Tensor:  # fmt: skip
-    """Return the detached count of correct observation predictions for one pathway."""
-    is_correct = logits.argmax(dim=-1).eq(labels)
-    if mask is not None:
-        is_correct = is_correct & mask.to(device=is_correct.device, dtype=torch.bool)
-    return is_correct.sum().to(dtype=logits.dtype).detach()
-
 
 # =================================================================================================
-__all__ = ["TEMLossConfig", "TEMLossHead", "TEMLosses", "TEMLossStep", "TEMSupervisionBinding"]
+# Canonical aliases — preferred over the LossHead-style names in new code.
+TEMObjectiveConfig = TEMLossConfig
+TEMObjective = TEMLossHead
+TEMObjectiveStep = TEMLossStep
+
+__all__ = [
+    # canonical names
+    "TEMObjectiveBinding",
+    "TEMObjectiveConfig",
+    "TEMObjective",
+    "TEMObjectiveStep",
+    # backward-compatible aliases
+    "TEMSupervisionBinding",
+    "TEMLossConfig",
+    "TEMLossHead",
+    "TEMLosses",
+    "TEMLossStep",
+]

@@ -1,9 +1,17 @@
-"""Concrete aggregate latent-consistency loss head."""
+"""Concrete aggregate latent-consistency objective (VAR).
+
+The canonical public surface is :class:`VARObjectiveBinding` (protocol),
+:class:`VARLossHead` (implementation, also exported as ``VARObjective``), and
+:class:`VARLossConfig` (also exported as ``VARObjectiveConfig``).
+
+Task-specific label extraction is fully delegated to the injected
+:class:`VARObjectiveBinding`, so this module remains task-agnostic.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 import torch
 from pydantic import BaseModel, Field
@@ -24,6 +32,26 @@ from ehc_sn.objectives._variational import (
 )
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
+
+
+# =================================================================================================
+class VARObjectiveBinding[TargetsT](Protocol):
+    """Canonical task-binding protocol for the VAR objective.
+
+    Implemented in the adapter layer so that :class:`VARLossHead` stays
+    task-agnostic.  The binding owns task-specific label extraction; the
+    objective owns latent-consistency loss math and metric assembly.
+
+    Type parameter ``TargetsT`` is the task-owned supervision-target dataclass.
+    """
+
+    def extract_targets(self, batch: Batch, carry: Any, step_output: Any) -> TargetsT:
+        """Return task-owned supervision targets for the current step."""
+        ...
+
+    def extract_observation_id(self, targets: TargetsT) -> Tensor:
+        """Return the integer or one-hot observation-id tensor from ``targets``."""
+        ...
 
 
 # =================================================================================================
@@ -81,19 +109,31 @@ class VARLossStep(VariationalLossStep):
 
 # =================================================================================================
 class VARLossHead(VariationalLossHeadBase[VARLossConfig]):
-    """Pure VAR objective scored over executed rollout chunks."""
+    """VAR objective scored over executed rollout chunks.
+
+    Latent-consistency loss math lives here.  Task-specific label extraction is
+    fully delegated to the injected :class:`VARObjectiveBinding`.
+    """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: VARLossConfig,
+        self, config: VARLossConfig, *, task_binding: VARObjectiveBinding[Any],
     ) -> None:  # fmt: skip
-        """Create a VAR objective from its loss configuration."""
+        """Create a VAR objective from its loss configuration and task binding.
+
+        Args:
+            config: VAR objective configuration.
+            task_binding: Explicit binding for extracting observation labels from
+                rollout state.  No implicit default exists.
+        """
         super().__init__(config=config)
+        self._task_binding = task_binding
 
     def compute_losses(  # -----------------------------------------------------------------------
-        self, outputs: VARStepOutput, carry: Any, **_: Any,
+        self, outputs: VARStepOutput, carry: Any, batch: Any = None, step_output: Any = None, **_: Any,
     ) -> VARLosses:  # fmt: skip
         """Compute aggregate observation, latent-consistency, and regularization losses."""
-        labels = carry.data["labels"]
+        targets = self._task_binding.extract_targets(batch, carry, outputs)
+        labels = self._task_binding.extract_observation_id(targets)
         main_relation = require_latent_relation(outputs.latent_relations, MAIN_LATENT_RELATION)
         if labels.ndim == outputs.obs_logits.ndim:
             labels = torch.argmax(labels, dim=-1)
@@ -148,4 +188,21 @@ class VARLossHead(VariationalLossHeadBase[VARLossConfig]):
 
 
 # =================================================================================================
-__all__ = ["LatentCode", "VARLossConfig", "VARLossHead", "VARLosses", "VARLossStep"]
+# Canonical aliases — preferred over the LossHead-style names in new code.
+VARObjectiveConfig = VARLossConfig
+VARObjective = VARLossHead
+VARObjectiveStep = VARLossStep
+
+__all__ = [
+    # canonical names
+    "VARObjectiveBinding",
+    "VARObjectiveConfig",
+    "VARObjective",
+    "VARObjectiveStep",
+    # backward-compatible aliases
+    "LatentCode",
+    "VARLossConfig",
+    "VARLossHead",
+    "VARLosses",
+    "VARLossStep",
+]

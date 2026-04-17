@@ -1,6 +1,6 @@
-"""Shared variational-family head abstractions.
+"""Shared variational-family objective abstractions.
 
-This module defines the family layer used by heads whose main public loss
+This module defines the family layer used by objectives whose main public loss
 contract is observation likelihood plus one or more named latent relations and
 optional regularization.
 """

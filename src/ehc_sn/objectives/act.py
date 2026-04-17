@@ -1,4 +1,4 @@
-"""ACT loss head for HRM v1.
+"""ACT objective for HRM v1.
 
 This module defines :class:`ACTLossHead`, which scores raw ACT execution steps
 through an injected task binding. The objective computes token-level
