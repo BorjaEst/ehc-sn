@@ -13,7 +13,7 @@ from scipy.ndimage import gaussian_filter
 
 from ehc_sn.figures.utils.axes import _environment_n_locations
 from ehc_sn.figures.utils.rasterize import rasterize_locations_additive
-from ehc_sn.rollouts.analysis import aggregate_rate_map
+from ehc_sn.figures.utils.spatial import aggregate_rate_map
 
 DEFAULT_RATE_MAP_MIN_BIN_OCCUPANCY = 1.0
 
