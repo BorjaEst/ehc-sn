@@ -1,46 +1,34 @@
+"""Core definitions for TEM backbones and related modules."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from typing import Optional
 
+from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.modules.hpc import HPCState, HPCTransition, SensoryReadResult
-from ehc_sn.modules.hpc.query_policy import CueRead, MemoryRead
+from ehc_sn.modules.projection import ProjectionSettings
+
+# =============================================================================
+# Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
+ObsLogits = tuple[Tensor, Tensor, Tensor]  # (inference, retrieved, ancestral)
+GridCodes = tuple[Tensor, Tensor]  # (posterior, prior)
+PlaceCodes = tuple[Tensor, Tensor, Optional[Tensor]]  # (posterior, prior, sensory-cued retrieval)
 
 
-@dataclass(frozen=True)
-class TEMTransitionPlan:
-    """Named MEC-to-HPC handoff for one TEM transition.
+# =============================================================================
+class TEMProjectionSettings(BaseModel, extra="forbid", strict=False):
+    """Inter-region projection settings for TEM backbones."""
 
-    TEM computes the observation-cued sensory phase first, then MEC resolves
-    the prior and posterior grid codes, and only then can HPC complete its
-    retrieval/generative/write phase. This object keeps that handoff explicit
-    and named at the model layer.
-    """
-
-    sensory: SensoryReadResult
-    grid_prior: list[Tensor]
-    grid_query_prior: list[Tensor]
-    grid_post: list[Tensor]
-    grid_query_posterior: list[Tensor]
-    sensory_family: str = "x"
-    generative_family: str = "g"
-    generative_read: MemoryRead = field(default_factory=lambda: CueRead(kind="cue", cue="g"))
-    named_writes: dict[str, list[Tensor]] = field(default_factory=dict)
-
-    def to_hpc_transition(self, state: HPCState) -> HPCTransition:
-        """Convert the resolved MEC/HPC handoff into phase-2 HPC inputs."""
-        return HPCTransition(
-            state=state,
-            sensory=self.sensory,
-            prior_read_cues=self.sensory.read_cues.with_family(self.generative_family, self.grid_query_prior),
-            prior_read=self.generative_read,
-            posterior_read_cues=self.sensory.read_cues.with_family(self.generative_family, self.grid_query_posterior),
-            posterior_read=self.generative_read,
-            inference_sensory_query=self.sensory.read_cues.require(self.sensory_family),
-            inference_structural_query=self.grid_query_posterior,
-            named_writes=self.named_writes,
-        )
+    lec_to_hpc: ProjectionSettings = Field(
+        default_factory=lambda: ProjectionSettings(mode="tiling", learnable=False),
+        description="Projection settings mapping LEC features into hippocampal query space.",
+    )
+    mec_to_hpc: ProjectionSettings = Field(
+        default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False, rank=[10, 10, 8, 6, 6]),
+        description="Projection settings mapping MEC codes into hippocampal query space.",
+    )
 
 
-__all__ = ["TEMTransitionPlan"]
+# =============================================================================
+__all__ = ["TEMProjectionSettings", "ObsLogits", "GridCodes", "PlaceCodes"]
