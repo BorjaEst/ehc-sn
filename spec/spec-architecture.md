@@ -37,7 +37,7 @@ Legacy namespaces (`torch_tem`, `hrm_sn`) are retired and archived under
 | **Navigation-grounded task**       | Spatial task defined by trajectory, action, transition, and episode semantics; it may be exploratory or predictive rather than goal-directed.           | `tasks/`                                               |
 | **Navigation agent**               | Full executable stack that exposes action selection for a goal-directed navigation task.                                                                | `adapters/`, `controllers/`, `policies/`, `lightning/` |
 | **Controller**                     | Reusable rollout-state transition primitive distinct from policies, which own action selection.                                                         | `controllers/`                                         |
-| **Objective Module (Head)**        | Reusable objective-scoring primitive over executed rollout data.                                                                                        | `heads/`                                               |
+| **Objective**                      | Reusable objective-scoring primitive over executed rollout data.                                                                                        | `objectives/` (canonical)                              |
 | **Policy**                         | Reusable action-selection primitive.                                                                                                                    | `policies/`                                            |
 | **Training Surface (Lightning)**   | Executable training surface wiring `task -> model -> adapter`.                                                                                          | `lightning/`                                           |
 | **Benchmark semantic package**     | Canonical benchmark definition and evaluator logic.                                                                                                     | `benchmarks/`                                          |
@@ -53,12 +53,12 @@ Legacy namespaces (`torch_tem`, `hrm_sn`) are retired and archived under
 Internal imports follow a top-down DAG: import from your own layer or below,
 never upward.
 
-| Layer | Components                                                                                                                                                          |
-| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **4** | `experiments/`, `scripts/benchmarks/`                                                                                                                               |
-| **3** | `models/`, `tasks/`, `adapters/`, `benchmarks/`, `lightning/`                                                                                                       |
-| **2** | `modules/`, `controllers/`, `heads/`, `policies/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `traces/`, `figures/`, `callbacks/`, `logging/`, `data/`, `envs/` |
-| **1** | `activations/`, `utils/`, `types.py`                                                                                                                                |
+| Layer | Components                                                                                                                                                               |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **4** | `experiments/`, `scripts/benchmarks/`                                                                                                                                    |
+| **3** | `models/`, `tasks/`, `adapters/`, `benchmarks/`, `lightning/`                                                                                                            |
+| **2** | `modules/`, `controllers/`, `objectives/`, `policies/`, `training/`, `loss/`, `metrics/`, `rollouts/`, `traces/`, `figures/`, `callbacks/`, `logging/`, `data/`, `envs/` |
+| **1** | `activations/`, `utils/`, `types.py`                                                                                                                                     |
 
 ### 4.1 Boundary Rules
 
@@ -79,6 +79,10 @@ never upward.
   primitives. Controllers own rollout-state transitions, heads own objective
   scoring, and policies own action selection. They must remain model-agnostic
   and task-agnostic.
+- `objectives/` is the canonical public surface for objective modules from the
+  rename-wave-1 phase onward. For this transition window `heads/` continues to
+  hold all implementations; `objectives/` re-exports them. `heads/` remains a
+  compatibility shim until implementations are physically migrated.
 - `training/`, `rollouts/`, and `traces/` are reusable lower-layer execution
   primitives. They must remain model-agnostic.
 - `data/` and `envs/` are reusable infrastructure. They must not import from
@@ -152,13 +156,13 @@ change.
 | `data/`        | Persisted processed-data contracts and static loading.                                 |
 | `envs/`        | Reusable runtime environment kernels.                                                  |
 | `figures/`     | Visualization and figure authoring.                                                    |
-| `heads/`       | Reusable objective modules and scoring primitives.                                     |
 | `lightning/`   | Executable training surfaces (Lightning modules) built on tasks, models, and adapters. |
 | `logging/`     | Logging wrappers and logger setup.                                                     |
 | `loss/`        | Reusable loss primitives.                                                              |
 | `metrics/`     | Reusable evaluation metrics and signal keys.                                           |
 | `models/`      | Pure architectures such as TEM, HRM, and EHC families.                                 |
 | `modules/`     | Pure reusable neural-network building blocks.                                          |
+| `objectives/`  | Canonical public objective API.                                                        |
 | `policies/`    | Reusable action-selection logic only.                                                  |
 | `rollouts/`    | Temporal execution drivers and rollout records.                                        |
 | `tasks/`       | Canonical task semantics and task-local contracts.                                     |
