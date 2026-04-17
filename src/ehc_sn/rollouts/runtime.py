@@ -70,13 +70,7 @@ ScoredOutputT = TypeVar("ScoredOutputT", bound=ObjectiveStepOutput)
 # =================================================================================================
 @dataclass(frozen=True)
 class CarrySnapshot:
-    """Frozen post-step carry view stored in rollout records.
-
-    The snapshot schema is intentionally closed: only the carry fields required
-    by current objectives, traces, and diagnostics are preserved. The live
-    carry object remains available separately via ``RolloutChunk.final_carry``
-    and ``RolloutExecution.final_carry`` for learner persistence.
-    """
+    """ """
 
     halted: Tensor
     steps: Tensor | None = None

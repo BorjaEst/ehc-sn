@@ -26,7 +26,7 @@ class ModelSettingsV1(BaseModel, extra="forbid"):
 
     @classmethod
     def from_config(cls, path: str | Path) -> "ModelSettingsV1":
-        """Load HRM v1 model settings from a TOML file."""
+        """Load model settings from a TOML configuration file."""
         config_map = tomllib.load(Path(path).open("rb"))
         return cls.model_validate(config_map)
 
@@ -124,6 +124,7 @@ class HRModelV1(nn.Module):
         super().__init__()
         self._config = config
         self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)
+        self.reset_parameters()
 
     @property
     def config(self) -> ModelSettingsV1:

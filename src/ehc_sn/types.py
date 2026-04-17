@@ -14,7 +14,7 @@ Longer background notes live in `docs/foundations.md`.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Literal, Optional, Sequence, TypeAlias
+from typing import Any, Iterator, Literal, Mapping, Optional, Sequence, TypeAlias
 
 import numpy as np
 import torch
@@ -798,7 +798,7 @@ ProjectionEndpointKind = Literal["flat", "multiscale", "token_sequence"]
 ProjectionMode: TypeAlias = ProjectionKind
 InitStrategy = Literal["identity", "random"]
 Channels: TypeAlias = dict[str, np.ndarray]
-Batch: TypeAlias = dict[str, Tensor]  # Generic batch type, can be specialized as needed
+Batch: TypeAlias = Mapping[str, Tensor]
 StepBatchSource = Iterator[Batch]
 
 RetrievalRole = Literal["generative", "inference"]
