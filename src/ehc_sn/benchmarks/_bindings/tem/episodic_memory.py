@@ -20,11 +20,32 @@ from ehc_sn.benchmarks._capabilities.episodic_memory import (
 )
 from ehc_sn.models.tem.tem_v1 import TEMInputV1, TEMModelV1, TEMStateV1
 from ehc_sn.models.tem.tem_v2 import TEMInputV2, TEMModelV2, TEMStateV2
+from ehc_sn.modules.autoencoder import TwoHotEncoder
+from ehc_sn.types import MultiScaleCode
 
 CueKey: TypeAlias = tuple[CueFamily, int]
 TEMModel: TypeAlias = TEMModelV1 | TEMModelV2
 TEMRolloutState: TypeAlias = TEMStateV1 | TEMStateV2
 _TEMInput: TypeAlias = Union[TEMInputV1, TEMInputV2]
+
+
+class _TwoHotReplicatedEncoder:
+    """Adapter-side TwoHot encoder that produces a replicated MultiScaleCode.
+
+    Encodes a flat observation tensor into a list of ``n_freq`` identical
+    per-band tensors of shape ``(B, feature_dim)``.  This mirrors the default
+    navigation bridge encoder strategy (``kind="two_hot"``,
+    ``layout="replicated"``).
+    """
+
+    def __init__(self, observation_dim: int, feature_dim: int, n_freq: int, device: torch.device) -> None:
+        self._encoder = TwoHotEncoder(observation_dim, feature_dim).to(device)
+        self._n_freq = n_freq
+
+    def encode(self, obs: Tensor) -> MultiScaleCode:
+        """Return ``n_freq`` distinct encoded bands from a flat observation."""
+        code = self._encoder(obs)
+        return [code.clone() for _ in range(self._n_freq)]
 
 
 @dataclass
@@ -47,6 +68,7 @@ class TEMEpisodicMemoryAdapter(EpisodicMemoryAgent):
 
     def __init__(self, model: TEMModel) -> None:
         self._model = model.eval()
+        self._sensory_encoder: _TwoHotReplicatedEncoder | None = None
 
     @property
     def model(self) -> TEMModel:
@@ -131,32 +153,40 @@ class TEMEpisodicMemoryAdapter(EpisodicMemoryAgent):
     def _build_tem_input(self, step: EpisodicMemoryStep) -> _TEMInput:
         """Build a model-native TEMInput from one benchmark step.
 
-        The raw ``step.observation`` tensor is used directly as ``obs_embedding``.
-        For benchmark evaluation purposes the observation is treated as a
-        pre-computed feature vector; no task-specific encoder is needed.
+        The observation is encoded into multiscale sensory codes using the
+        adapter-owned TwoHot replicated encoder. The encoder is initialized
+        lazily on first call, inferring ``observation_dim`` from the step.
         """
-        obs_embedding = step.observation.to(device=self.device, dtype=torch.float32)
+        obs = step.observation.to(device=self.device, dtype=torch.float32)
+        if self._sensory_encoder is None:
+            self._sensory_encoder = _TwoHotReplicatedEncoder(
+                observation_dim=obs.shape[-1],
+                feature_dim=self._model.config.lec.feature_dim,
+                n_freq=self._model.lec.n_freq,
+                device=self.device,
+            )
+        sensory_codes: MultiScaleCode = self._sensory_encoder.encode(obs)
         previous_action = step.previous_action.to(device=self.device, dtype=torch.int64)
         episode_start = step.episode_start.to(device=self.device, dtype=torch.bool)
         landmark_id = step.landmark_id.to(device=self.device, dtype=torch.int64) if step.landmark_id is not None else None
         if isinstance(self._model, TEMModelV1):
             return TEMInputV1(
-                obs_embedding=obs_embedding,
+                sensory_codes=sensory_codes,
                 previous_action=previous_action,
                 episode_start=episode_start,
                 landmark_id=landmark_id,
             )
         return TEMInputV2(
-            obs_embedding=obs_embedding,
+            sensory_codes=sensory_codes,
             previous_action=previous_action,
             episode_start=episode_start,
             landmark_id=landmark_id,
         )
 
     @staticmethod
-    def _extract_place_code(code: Tensor) -> Tensor:
-        """Return one CPU-resident flattened TEM place code from a single pathway tensor."""
-        return code.detach().to(device="cpu", dtype=torch.float32).reshape(-1)
+    def _extract_place_code(code: MultiScaleCode) -> Tensor:
+        """Return one CPU-resident flattened TEM place code from a multiscale pathway."""
+        return torch.cat(code, dim=-1).detach().to(device="cpu", dtype=torch.float32).reshape(-1)
 
     @staticmethod
     def _merge_code(bank: dict[int | CueKey, Tensor], key: int | CueKey, code: Tensor) -> None:
@@ -194,7 +224,16 @@ def build_tem_v1_episodic_memory(
     checkpoint_path: str | Path | None = None,
     device: str = "cpu",
 ) -> TEMEpisodicMemoryAdapter:
-    """Build the benchmark-time TEM v1 episodic-memory adapter."""
+    """Build the benchmark-time TEM v1 episodic-memory adapter.
+
+    The sensory encoder is initialized lazily on the first ``ingest_step`` call,
+    inferring ``observation_dim`` from the first benchmark observation.
+
+    Args:
+        model_config_path: Path to the TEM v1 model TOML config.
+        checkpoint_path: Optional checkpoint to hydrate the model.
+        device: Target device string.
+    """
     model = load_tem_v1_model(
         model_config_path=model_config_path,
         checkpoint_path=checkpoint_path,
@@ -209,7 +248,16 @@ def build_tem_v2_episodic_memory(
     checkpoint_path: str | Path | None = None,
     device: str = "cpu",
 ) -> TEMEpisodicMemoryAdapter:
-    """Build the benchmark-time TEM v2 episodic-memory adapter."""
+    """Build the benchmark-time TEM v2 episodic-memory adapter.
+
+    The sensory encoder is initialized lazily on the first ``ingest_step`` call,
+    inferring ``observation_dim`` from the first benchmark observation.
+
+    Args:
+        model_config_path: Path to the TEM v2 model TOML config.
+        checkpoint_path: Optional checkpoint to hydrate the model.
+        device: Target device string.
+    """
     model = load_tem_v2_model(
         model_config_path=model_config_path,
         checkpoint_path=checkpoint_path,

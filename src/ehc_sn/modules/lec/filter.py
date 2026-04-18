@@ -60,19 +60,19 @@ class FrequencyFilter(nn.Module):
         return self._n_freq
 
     def forward(  # -------------------------------------------------------------------------------
-        self, c: Tensor, x_prev: list[Tensor],
+        self, c: list[Tensor], x_prev: list[Tensor],
     ) -> list[Tensor]:  # fmt: skip
         """Apply temporal filtering.
 
         Args:
-            c: Current sensory input.
+            c: Per-frequency sensory input bands (MultiScaleCode).
             x_prev: Previous filtered features per frequency.
 
         Returns:
             Updated filtered features per frequency.
         """
         alpha = [torch.sigmoid(self.alpha[f]) for f in range(self.n_freq)]
-        return [(1 - alpha[f]) * x_prev[f] + alpha[f] * c for f in range(self.n_freq)]
+        return [(1 - alpha[f]) * x_prev[f] + alpha[f] * c[f] for f in range(self.n_freq)]
 
 
 # =================================================================================================

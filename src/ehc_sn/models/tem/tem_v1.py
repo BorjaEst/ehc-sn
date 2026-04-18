@@ -28,7 +28,7 @@ from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionBundle, ProjectionModule
-from ehc_sn.types import MemoryState
+from ehc_sn.types import MemoryState, MultiScaleCode
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -77,7 +77,7 @@ class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
 class TEMInputV1(DetachMixin):
     """Task-agnostic input payload for TEM v1 forward steps."""
 
-    obs_embedding: Tensor
+    sensory_codes: MultiScaleCode
     previous_action: Tensor
     episode_start: Optional[Tensor] = None
     landmark_id: Optional[Tensor] = None
@@ -207,12 +207,12 @@ class TEMModelV1(nn.Module):
         rows by the caller. When ``state`` is ``None``, a fresh full-batch state
         is allocated and the normal single-step TEM transition is executed.
         """
-        obs_embedding = inputs.obs_embedding
+        sensory_codes = inputs.sensory_codes
         previous_action = inputs.previous_action
         episode_start = inputs.episode_start
         landmark_id = inputs.landmark_id
-        batch_size = int(obs_embedding.shape[0])
-        device = obs_embedding.device
+        batch_size = int(sensory_codes[0].shape[0])
+        device = sensory_codes[0].device
 
         # 0. Prepare the state, ensuring batch-alignment and extracting memories.
         if state is None:  # Init state if not provided
@@ -225,7 +225,7 @@ class TEMModelV1(nn.Module):
         g_query_prior = self.mec_to_hpc(g_prior)
 
         # 2. Read sensory-cued place from the previous memory state.
-        x_, state.lec = self.lec.inference(obs_embedding, state.lec)
+        x_, state.lec = self.lec.inference(sensory_codes, state.lec)
         x_query = self.lec_to_hpc(x_)
         p_sensory_read = None
         if self.config.enable_sensory_recall:

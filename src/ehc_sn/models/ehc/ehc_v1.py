@@ -18,6 +18,7 @@ from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.projection import ProjectionBundle, ProjectionSettings
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
+from ehc_sn.types import MultiScaleCode
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -90,7 +91,7 @@ class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
 class EHCInputV1(DetachMixin):
     """Task-agnostic input payload for EHC v1 forward steps."""
 
-    obs_embedding: Tensor  # [B, D_obs] latent embedding of the current observation
+    sensory_codes: MultiScaleCode  # [n_freq x (B, feature_dim)] multiscale sensory codes
     previous_action: Tensor  # [B] indices of the previous transition action taken
     episode_start: Optional[Tensor] = None  # [B] binary flags indicating episode starts
     landmark_id: Optional[Tensor] = None  # [B] indices of the current landmark, if applicable
@@ -227,7 +228,7 @@ class EHCModelV1(nn.Module):
         c_query = self.projections.pfc_to_hpc(theta_cls)
 
         # 2. Pure TEM sensory loop.
-        x_post, state.lec = self.lec.inference(inputs.obs_embedding, state.lec)
+        x_post, state.lec = self.lec.inference(inputs.sensory_codes, state.lec)
         p_query_from_obs = self.projections.lec_to_hpc(x_post)
 
         g_prior, state.mec = self.mec.generative(inputs.previous_action, inputs.episode_start, inputs.landmark_id, state.mec)

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 
 import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes
@@ -15,8 +15,69 @@ from ehc_sn.models.tem.tem_v2 import TEMInputV2, TEMModelV2, TEMOutputV2, TEMSta
 from ehc_sn.modules.autoencoder import MLPDecoder, TwoHotEncoder
 from ehc_sn.tasks.navigation.contracts import NavigationTaskOutput
 from ehc_sn.tasks.navigation.runtime import coerce_navigation_step_input
-from ehc_sn.types import Batch
+from ehc_sn.types import Batch, MultiScaleCode
 from ehc_sn.utils.detach import DetachMixin
+
+
+# =============================================================================
+class NavigationEncoderConfig(BaseModel, extra="forbid"):
+    """Encoder strategy config for the navigation-to-TEM sensory pathway.
+
+    The adapter owns observation packing; LEC owns model-native multiscale dynamics.
+
+    Attributes:
+        kind: Encoder family.
+            ``"two_hot"`` uses a fixed two-hot lookup table (default, no learnable
+            parameters). ``"mlp"`` and ``"identity"`` are reserved for future use
+            and currently raise ``ValueError`` at construction time.
+        layout: Band-packing strategy.
+            ``"replicated"`` (default) passes the same encoded vector to every
+            frequency band. ``"per_band"`` is reserved; with ``"two_hot"`` it
+            would produce identical output to ``"replicated"`` and is therefore
+            not supported \u2014 raises ``ValueError`` at construction time.
+    """
+
+    kind: Literal["two_hot", "mlp", "identity"] = Field(
+        default="two_hot",
+        description="Observation encoder family.",
+    )
+    layout: Literal["replicated", "per_band"] = Field(
+        default="replicated",
+        description="Band-packing strategy: 'replicated' or 'per_band'.",
+    )
+
+
+# =============================================================================
+class NavigationDecoderConfig(BaseModel, extra="forbid"):
+    """Decoder strategy config for the TEM-to-navigation output pathway.
+
+    Attributes:
+        kind: Decoder family.
+            ``"single_scale"`` (default) reads one HPC frequency band selected by
+            ``prediction_freq``.
+            ``"concat_all_scales"`` concatenates all HPC bands before decoding.
+        prediction_freq: HPC band index for ``"single_scale"`` decoding.
+            Must be ``0`` (and is ignored) when ``kind="concat_all_scales"``.
+    """
+
+    kind: Literal["single_scale", "concat_all_scales"] = Field(
+        default="single_scale",
+        description="Decoder input policy.",
+    )
+    prediction_freq: int = Field(
+        default=0,
+        ge=0,
+        description="HPC band index for single_scale decoding. Must be 0 when kind='concat_all_scales'.",
+    )
+
+    @model_validator(mode="after")
+    def _check_concat_has_no_freq(self) -> "NavigationDecoderConfig":
+        if self.kind == "concat_all_scales" and self.prediction_freq != 0:
+            raise ValueError(
+                "NavigationDecoderConfig: prediction_freq must be 0 (unused) when "
+                f"kind='concat_all_scales', got prediction_freq={self.prediction_freq}."
+            )
+        return self
 
 
 # =============================================================================
@@ -32,14 +93,13 @@ class NavigationTEMV2AdapterSettings(BaseModel, extra="forbid"):
         ge=1,
         description="Number of discrete actions (must match environment.action_count).",
     )
-    decoder_kind: Literal["single_scale", "concat_all_scales"] = Field(
-        default="single_scale",
-        description="Decoder input policy. 'single_scale' uses one HPC frequency band (paper-fidelity); 'concat_all_scales' concatenates all bands.",
+    encoder: NavigationEncoderConfig = Field(
+        default_factory=NavigationEncoderConfig,
+        description="Observation encoder strategy. Adapter-owned; not part of LEC or TEM model config.",
     )
-    prediction_freq: int = Field(
-        default=0,
-        ge=0,
-        description="HPC band index used by the single_scale decoder (paper-fidelity stream 1 / prediction_freq=0). Ignored when decoder_kind='concat_all_scales'.",
+    decoder: NavigationDecoderConfig = Field(
+        default_factory=NavigationDecoderConfig,
+        description="Observation decoder strategy. Adapter-owned; not part of HPC or TEM model config.",
     )
 
 
@@ -81,15 +141,36 @@ class NavigationTEMV2BridgeOutput(DetachMixin):
 
 # =============================================================================
 class NavigationInputsEncoder(nn.Module):
-    """Encodes navigation step data into a :class:`TEMInputV2` payload."""
+    """Encodes navigation step data into a :class:`TEMInputV2` payload.
+
+    Produces a :class:`MultiScaleCode` sensory payload so the flat/multiscale
+    boundary lives in the adapter, not inside LEC.
+
+    Only ``kind="two_hot"`` with ``layout="replicated"`` is currently
+    implemented. Other combinations raise ``ValueError`` at construction time.
+    """
 
     def __init__(  # ----------------------------------------------------------
         self,
         observation_dim: int,
         feature_dim: int,
+        n_freq: int,
+        encoder_config: NavigationEncoderConfig,
     ) -> None:
         super().__init__()
+        if encoder_config.kind != "two_hot":
+            raise ValueError(
+                f"NavigationInputsEncoder: encoder kind {encoder_config.kind!r} is not yet "
+                "implemented. Only 'two_hot' is supported in this release."
+            )
+        if encoder_config.layout != "replicated":
+            raise ValueError(
+                f"NavigationInputsEncoder: layout {encoder_config.layout!r} is not supported "
+                "with kind='two_hot'. The two-hot table is a fixed lookup and cannot produce "
+                "per-band distinct content. Use layout='replicated'."
+            )
         self.encoder = TwoHotEncoder(observation_dim, feature_dim)
+        self._n_freq = n_freq
 
     def forward(  # -----------------------------------------------------------
         self,
@@ -97,8 +178,10 @@ class NavigationInputsEncoder(nn.Module):
     ) -> TEMInputV2:
         """Encode pre-extracted navigation step data into a TEM v2 input payload."""
         task_input = coerce_navigation_step_input(batch)
+        code = self.encoder(task_input.observation)
+        sensory_codes: MultiScaleCode = [code.clone() for _ in range(self._n_freq)]
         return TEMInputV2(
-            obs_embedding=self.encoder(task_input.observation),
+            sensory_codes=sensory_codes,
             previous_action=task_input.previous_action,
             episode_start=task_input.episode_start,
             landmark_id=task_input.landmark_id,
@@ -222,6 +305,8 @@ def _build_encoder(  # --------------------------------------------------------
     return NavigationInputsEncoder(
         observation_dim=config.observation_dim,
         feature_dim=model.config.lec.feature_dim,
+        n_freq=model.lec.n_freq,
+        encoder_config=config.encoder,
     )
 
 
@@ -236,8 +321,8 @@ def _build_decoder(  # --------------------------------------------------------
     """
     hpc_shape = model.config.hpc.shape
     n_freq = len(hpc_shape)
-    if config.decoder_kind == "single_scale":
-        freq = config.prediction_freq
+    if config.decoder.kind == "single_scale":
+        freq = config.decoder.prediction_freq
         if not (0 <= freq < n_freq):
             raise ValueError(f"prediction_freq={freq} is out of range for hpc.shape with {n_freq} bands (valid: 0..{n_freq - 1}).")
         return NavigationOutputsDecoder(
@@ -282,6 +367,8 @@ def _select_code(  # ----------------------------------------------------------
 
 # =============================================================================
 __all__ = [
+    "NavigationDecoderConfig",
+    "NavigationEncoderConfig",
     "NavigationInputsEncoder",
     "NavigationOutputsDecoder",
     "NavigationTEMV2Diagnostics",

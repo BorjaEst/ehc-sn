@@ -214,17 +214,19 @@ class LECModel(nn.Module):
         return self.reconstruct(x)
 
     def inference(  # -----------------------------------------------------------------------------
-        self, c: Tensor, state: LECState,
+        self, c: MultiScaleCode, state: LECState,
     ) -> tuple[list[Tensor], LECState]:  # fmt: skip
         """Run the LEC inference update.
 
         Args:
-            c: Sensory input tensor.
+            c: Multiscale sensory codes — one tensor per frequency band, each
+               of shape ``(B, feature_dim)``. Must match ``len(self.shape)``
+               bands and ``self.shape[f]`` width per band.
             state: Current LEC state.
 
         Returns:
-            A tuple `(x_inf, new_state)` where `x_inf` are the inferred
-            per-frequency features and `new_state` is the updated LEC state.
+            A tuple ``(x_inf, new_state)`` where ``x_inf`` are the inferred
+            per-frequency features and ``new_state`` is the updated LEC state.
         """
         filtered = self.filter(c, state.filtered_features)
         normalized = self.norm(filtered)
