@@ -24,7 +24,6 @@ class NavigationEncoder(ABC):
         self,
         observation_dim: int,
         feature_dim: int,
-        action_count: int,
         *,
         device: Device | None = None,
         dtype: Dtype | None = None,

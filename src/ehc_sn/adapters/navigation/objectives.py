@@ -21,7 +21,7 @@ from ehc_sn.metrics.keys import (
     TEM_ACC_OBS_RETRIEVED_REVISIT,
 )
 from ehc_sn.tasks.navigation.contracts import NavigationTargets
-from ehc_sn.tasks.navigation.evaluation import evaluate_navigation_observation_logits
+from ehc_sn.tasks.navigation.evaluation import evaluate_observation_logits
 from ehc_sn.training.types import RatioStat
 from ehc_sn.types import Batch
 
@@ -32,9 +32,9 @@ class NavigationTEMTaskBinding:
 
     Implements :class:`~ehc_sn.objectives.tem.TEMObjectiveBinding`
     ``[NavigationTargets]``.  Extracts supervised observation ids and protocol
-    masks from the controller carry, and delegates observation-correctness
-    evaluation to the task-owned
-    :func:`~ehc_sn.tasks.navigation.evaluation.evaluate_navigation_observation_logits`.
+    masks from the controller carry, and fans out single-pathway observation
+    evaluation (from the task layer) across the three TEM pathways, mapping
+    results to the established TEM metric keys.
 
     Mirrors the pattern used by
     :class:`~ehc_sn.adapters.maze_hard.objectives.MazeHardACTTaskBinding`
@@ -114,11 +114,12 @@ class NavigationTEMTaskBinding:
         step_output: Any,
         targets: NavigationTargets,
     ) -> dict[str, RatioStat]:
-        """Return task-owned count-bearing accuracy metrics for one step.
+        """Return TEM-pathway count-bearing accuracy metrics for one step.
 
-        Delegates to
-        :func:`~ehc_sn.tasks.navigation.evaluation.evaluate_navigation_observation_logits`
-        so all argmax correctness counting remains in the task layer.
+        Fans out the task-generic single-pathway evaluator across the three TEM
+        observation pathways (inference, retrieved, ancestral) and maps results
+        to the established TEM metric keys.  The fan-out is TEM-specific and
+        lives here, not in the task layer.
 
         Args:
             step_output: TEM controller step output exposing
@@ -132,17 +133,18 @@ class NavigationTEMTaskBinding:
             TEM metric-key constants.  Values are raw counts (not reduced
             ratios) so the objective can accumulate them correctly.
         """
-        obs_logits = (step_output.logits_inference, step_output.logits_retrieved, step_output.logits_ancestral)
-        m = evaluate_navigation_observation_logits(obs_logits, targets)
-        protocol_count = m.inference.count_revisit  # same for all pathways
-        batch_count = m.inference.count_all  # same for all pathways
+        m_inf = evaluate_observation_logits(step_output.logits_inference, targets)
+        m_ret = evaluate_observation_logits(step_output.logits_retrieved, targets)
+        m_anc = evaluate_observation_logits(step_output.logits_ancestral, targets)
+        protocol_count = m_inf.count_revisit  # same for all pathways
+        batch_count = m_inf.count_all  # same for all pathways
         return {
-            TEM_ACC_OBS_INFERENCE_REVISIT: RatioStat(m.inference.correct_revisit, protocol_count),
-            TEM_ACC_OBS_RETRIEVED_REVISIT: RatioStat(m.retrieved.correct_revisit, protocol_count),
-            TEM_ACC_OBS_ANCESTRAL_REVISIT: RatioStat(m.ancestral.correct_revisit, protocol_count),
-            TEM_ACC_OBS_INFERENCE_ALL: RatioStat(m.inference.correct_all, batch_count),
-            TEM_ACC_OBS_RETRIEVED_ALL: RatioStat(m.retrieved.correct_all, batch_count),
-            TEM_ACC_OBS_ANCESTRAL_ALL: RatioStat(m.ancestral.correct_all, batch_count),
+            TEM_ACC_OBS_INFERENCE_REVISIT: RatioStat(m_inf.correct_revisit, protocol_count),
+            TEM_ACC_OBS_RETRIEVED_REVISIT: RatioStat(m_ret.correct_revisit, protocol_count),
+            TEM_ACC_OBS_ANCESTRAL_REVISIT: RatioStat(m_anc.correct_revisit, protocol_count),
+            TEM_ACC_OBS_INFERENCE_ALL: RatioStat(m_inf.correct_all, batch_count),
+            TEM_ACC_OBS_RETRIEVED_ALL: RatioStat(m_ret.correct_all, batch_count),
+            TEM_ACC_OBS_ANCESTRAL_ALL: RatioStat(m_anc.correct_all, batch_count),
         }
 
 

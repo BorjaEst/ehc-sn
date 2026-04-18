@@ -2,129 +2,212 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Optional
+
 import torch
+from pydantic import BaseModel, Field
 from torch import Tensor
-from torch import device as Device
-from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.adapters.navigation.decoders import NavigationDecoder
-from ehc_sn.adapters.navigation.encoders import NavigationEncoder
+from ehc_sn.models.tem.core.tem_base import GridCodes, TEMPlaceCodes
 from ehc_sn.models.tem.tem_v2 import TEMInputV2, TEMModelV2, TEMOutputV2, TEMStateV2
 from ehc_sn.modules.autoencoder import MLPDecoder, TwoHotEncoder
-from ehc_sn.tasks.navigation.contracts import NavigationTaskInput, NavigationTaskOutput
+from ehc_sn.adapters.navigation.bridges.tem.tem_v1 import NavigationTEMDiagnostics
+from ehc_sn.tasks.navigation.contracts import NavigationTaskOutput
+from ehc_sn.types import Batch
+from ehc_sn.utils.detach import DetachMixin
 
 
 # =============================================================================
-class NavigationInputsEncoder(nn.Module, NavigationEncoder):
+class NavigationTEMV2AdapterSettings(BaseModel, extra="forbid"):
+    """Task-side Navigation settings required to bind the TEM v2 core."""
+
+    observation_dim: int = Field(
+        ...,
+        description="Dimensionality of the navigation task observations (must match environment.observation_dim).",
+    )
+    action_count: int = Field(
+        ...,
+        ge=1,
+        description="Number of discrete actions (must match environment.action_count).",
+    )
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class NavigationTEMV2BridgeOutput(DetachMixin):
+    """Split bridge output: canonical task surface plus TEM-family diagnostics.
+
+    Attributes:
+        task: Canonical :class:`~ehc_sn.tasks.navigation.contracts.NavigationTaskOutput`
+            carrying the inference-pathway observation logits.
+        tem: TEM-family diagnostic bundle consumed by the controller/objective.
+    """
+
+    task: NavigationTaskOutput
+    tem: NavigationTEMDiagnostics
+
+
+# =============================================================================
+class NavigationInputsEncoder(nn.Module):
+    """Encodes navigation step data into a :class:`TEMInputV2` payload."""
 
     def __init__(  # ----------------------------------------------------------
         self,
         observation_dim: int,
         feature_dim: int,
-        action_count: int,
-        *,
-        device: Device | None = None,
-        dtype: Dtype | None = None,
     ) -> None:
-        """Initialize the navigation decoder heads over model-facing features."""
         super().__init__()
-
-        # The action logits are computed directly from the encoded features.
-        self.task_action_head = nn.LazyLinear(action_count)
-        self.encoder = TwoHotEncoder(observation_dim, feature_dim, device=device, dtype=dtype)
+        self.encoder = TwoHotEncoder(observation_dim, feature_dim)
 
     def forward(  # -----------------------------------------------------------
         self,
-        batch: NavigationTaskInput,
+        batch: dict[str, Tensor],
     ) -> TEMInputV2:
-        """Encode the navigation task input into a TEM batch."""
-
-        # Encode the observations into model-facing features, then compute action logits.
-        features = self.encoder(batch.observations)
-        action_logits = self.task_action_head(features)
-
+        """Encode pre-extracted navigation step data into a TEM v2 input payload."""
+        obs_embedding = self.encoder(batch["observation"])
         return TEMInputV2(
-            features=features,
-            action_logits=action_logits,
+            obs_embedding=obs_embedding,
+            previous_action=batch["previous_action"],
+            episode_start=batch.get("episode_start"),
+            landmark_id=batch.get("landmark_id"),
         )
 
 
 # =============================================================================
-class NavigationOutputsDecoder(nn.Module, NavigationDecoder):
+class NavigationOutputsDecoder(nn.Module):
+    """Decodes a :class:`TEMOutputV2` into a :class:`NavigationTEMV2BridgeOutput`."""
 
     def __init__(  # ----------------------------------------------------------
         self,
         observation_dim: int,
         latent_dim: int,
-        *,
-        device: Device | None = None,
-        dtype: Dtype | None = None,
     ) -> None:
-        """Initialize the navigation decoder heads over model-facing features."""
         super().__init__()
-
-        # The predicted observations are decoded from the model-facing features via an MLP.
-        self.decoder = MLPDecoder(latent_dim, observation_dim, device=device, dtype=dtype)
+        self.decoder = MLPDecoder(latent_dim, observation_dim)
+        self._obs_dim = observation_dim
 
     def forward(  # -----------------------------------------------------------
         self,
         model_output: TEMOutputV2,
-    ) -> NavigationTaskOutput:
-        """Decode the TEM batch output into a navigation task output."""
+    ) -> NavigationTEMV2BridgeOutput:
+        """Decode all three place pathways and return the split task + TEM surfaces."""
+        pc = model_output.place_codes
+        obs_inference = self.decoder(pc.inference)
+        obs_retrieved = self.decoder(pc.retrieved) if pc.retrieved is not None else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)
+        obs_ancestral = self.decoder(pc.ancestral)
 
-        # Decode the predicted observations from the model-facing features.
-        return NavigationTaskOutput(
-            predicted_observations=self.decoder(model_output.features),
-            action_logits=model_output.action_logits,
+        task = NavigationTaskOutput(obs_logits=obs_inference)
+        tem = NavigationTEMDiagnostics(
+            obs_logits=(obs_inference, obs_retrieved, obs_ancestral),
+            grid_codes=model_output.grid_codes,
+            place_codes=pc,
         )
+        return NavigationTEMV2BridgeOutput(task=task, tem=tem)
 
 
 # =============================================================================
 class NavigationTEMV2BridgeAdapter(nn.Module):
-    """Thin navigation plus TEM v2 binding that preserves the TEM rollout surface."""
+    """Navigation plus TEM v2 bridge adapter.
+
+    Explicit task-to-model transformations follow the adapter-interface spec:
+    :meth:`prepare_inputs` encodes a navigation step batch into a model-native
+    payload; :meth:`prepare_outputs` decodes a model output into the split
+    task + TEM surfaces.
+    """
 
     def __init__(  # ----------------------------------------------------------
         self,
         model: TEMModelV2,
-        encoder: NavigationEncoder,
-        decoder: NavigationDecoder,
+        config: NavigationTEMV2AdapterSettings,
     ) -> None:
-        """Initialize the navigation plus TEM v2 bridge adapter with its component modules."""
+        """Initialize the navigation plus TEM v2 bridge adapter."""
         super().__init__()
-        self._model = model
-        self.encoder = encoder
-        self.decoder = decoder
+        self._config = config
+        self.model = model
+        self.encoder = _build_encoder(model, config)
+        self.decoder = _build_decoder(model, config)
+
+    @property
+    def config(self) -> NavigationTEMV2AdapterSettings:
+        """The navigation plus TEM v2 bridge adapter settings."""
+        return self._config
+
+    def init_state(  # --------------------------------------------------------
+        self,
+        batch_size: int,
+        *,
+        device: Optional[torch.device] = None,
+    ) -> TEMStateV2:
+        """Create a fresh TEM recurrent state for one rollout batch."""
+        return self.model.init_state(batch_size, device=device)
+
+    def reset_state(  # -------------------------------------------------------
+        self,
+        reset_flag: Tensor,
+        state: TEMStateV2,
+    ) -> TEMStateV2:
+        """Reset halted rows of the TEM recurrent state."""
+        return self.model.reset_state(reset_flag, state)
 
     def prepare_inputs(  # ----------------------------------------------------
         self,
-        batch: NavigationTaskInput,
+        batch: dict[str, Tensor],
     ) -> TEMInputV2:
-        """Prepare the model-facing core payload and task-side decoder context."""
+        """Encode a pre-extracted navigation step dict into a model-native :class:`TEMInputV2`."""
         return self.encoder(batch)
 
     def prepare_outputs(  # ---------------------------------------------------
         self,
-        logits: TEMOutputV2,
-    ) -> NavigationTaskOutput:
-        """Decode one task-owned Navigation output from one TEM core output."""
-        return self.decoder(logits)
+        model_output: TEMOutputV2,
+    ) -> NavigationTEMV2BridgeOutput:
+        """Decode a TEM model output into the split task + TEM bridge surfaces."""
+        return self.decoder(model_output)
 
     def forward(  # -----------------------------------------------------------
         self,
-        batch: NavigationTaskInput,
+        batch: Batch,
         state: TEMStateV2 | None = None,
-    ) -> tuple[TEMStateV2, NavigationTaskOutput]:
+    ) -> tuple[TEMStateV2, NavigationTEMV2BridgeOutput]:
         """Run a forward pass of the TEM v2 bridge adapter on a Navigation task batch."""
         inputs = self.prepare_inputs(batch)
-        next_state, logits = self.model(inputs, state=state)
-        outputs = self.decode(logits)
-        return next_state, outputs
+        model_output, next_state = self.model(inputs, state=state)
+        bridge_output = self.prepare_outputs(model_output)
+        return next_state, bridge_output
+
+
+# =============================================================================
+def _build_encoder(
+    model: TEMModelV2,
+    config: NavigationTEMV2AdapterSettings,
+) -> NavigationInputsEncoder:
+    """Construct the observation encoder front-end for the v2 bridge."""
+    n_freq = len(model.config.hpc.shape)
+    feature_dim = n_freq * model.config.lec.feature_dim
+    return NavigationInputsEncoder(
+        observation_dim=config.observation_dim,
+        feature_dim=feature_dim,
+    )
+
+
+def _build_decoder(
+    model: TEMModelV2,
+    config: NavigationTEMV2AdapterSettings,
+) -> NavigationOutputsDecoder:
+    """Construct the observation decoder back-end for the v2 bridge."""
+    latent_dim = sum(model.config.hpc.shape)
+    return NavigationOutputsDecoder(
+        observation_dim=config.observation_dim,
+        latent_dim=latent_dim,
+    )
 
 
 # =============================================================================
 __all__ = [
     "NavigationInputsEncoder",
     "NavigationOutputsDecoder",
+    "NavigationTEMV2AdapterSettings",
     "NavigationTEMV2BridgeAdapter",
+    "NavigationTEMV2BridgeOutput",
 ]
