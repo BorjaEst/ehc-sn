@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 from pydantic import BaseModel, Field
-from torch import Tensor
 
 from ehc_sn.modules.projection import ProjectionSettings
+from ehc_sn.types import AbstractLocation, GroundedLocation
 
 
 # =============================================================================
@@ -23,13 +23,13 @@ class GridCodes:
             the previous step's grid code.
 
     Shape conventions:
-        Each tensor has shape ``(batch, grid_dim)`` where ``grid_dim`` is the sum of MEC grid code
-        sizes across all frequency scales.
+        Each code is a multi-scale bundle with length ``n_freq``. Every tensor in the bundle has
+        shape ``(batch, grid_dim_f)`` for its frequency-specific MEC grid width.
 
     """
 
-    post: Tensor
-    prior: Tensor
+    post: AbstractLocation
+    prior: AbstractLocation
 
 
 # =============================================================================
@@ -46,14 +46,14 @@ class PlaceCodes:
             ``PLACE_SENSORY_RELATION`` target. ``None`` when ``enable_sensory_recall=False``.
 
     Shape conventions:
-        Each non-None tensor has shape ``(batch, place_dim)`` where ``place_dim`` is the sum
-        of HPC attractor pattern sizes across all frequency scales.
+        Each non-None code is a multi-scale bundle with length ``n_freq``. Every tensor in the
+        bundle has shape ``(batch, place_dim_f)`` for its frequency-specific hippocampal width.
     """
 
-    inference: Tensor
-    ancestral: Tensor
-    retrieved: Optional[Tensor] = None
-    sensory: Optional[Tensor] = None
+    inference: GroundedLocation
+    ancestral: GroundedLocation
+    retrieved: Optional[GroundedLocation] = None
+    sensory: Optional[GroundedLocation] = None
 
 
 # =============================================================================

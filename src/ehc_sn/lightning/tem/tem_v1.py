@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from itertools import repeat
 from pathlib import Path
 from typing import Any, Optional
 
 import lightning as L
 from pydantic import BaseModel, Field, model_validator
-from torch.optim import Adam, Optimizer
+from torch.optim import Optimizer
 
-from ehc_sn.adapters.navigation.bridges.tem.tem_v1 import NavigationTEMV1BridgeAdapter
+from ehc_sn.adapters.navigation.bridges.tem.tem_v1 import NavigationTEMV1AdapterSettings, NavigationTEMV1BridgeAdapter
 from ehc_sn.adapters.navigation.objectives import NavigationTEMTaskBinding
 from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
@@ -50,6 +49,10 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
         ...,
         description="Path to the model configuration TOML file that specifies the TEM v1 architecture.",
     )
+    adapter: NavigationTEMV1AdapterSettings = Field(
+        ...,
+        description="Settings for the navigation bridge adapter that binds TEM v1 to task inputs/outputs.",
+    )
     environment: EnvironmentConfig = Field(
         ...,
         description="",
@@ -86,10 +89,12 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
     @model_validator(mode="after")
     def validate_environment_contract(self) -> "ModelConfig_TEM_V1":
         model_settings = ModelSettingsV1.from_config(self.model_config_path)
-        if self.environment.observation_dim != model_settings.observation_dim:
-            raise ValueError("environment.observation_dim must match model.observation_dim.")
-        if self.environment.action_count != model_settings.action_count:
-            raise ValueError("environment.action_count must match model.action_count.")
+        if self.environment.action_count != model_settings.transition_action_count:
+            raise ValueError("environment.action_count must match model.transition_action_count.")
+        if self.adapter.observation_dim != self.environment.observation_dim:
+            raise ValueError("adapter.observation_dim must match environment.observation_dim.")
+        if self.adapter.action_count != self.environment.action_count:
+            raise ValueError("adapter.action_count must match environment.action_count.")
         return self
 
 
@@ -104,7 +109,7 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettingsV1.from_config(config.model_config_path)
         self.model = TEMModelV1(model_settings)
-        self.bridge_adapter = NavigationTEMV1BridgeAdapter(self.model)
+        self.bridge_adapter = NavigationTEMV1BridgeAdapter(self.model, config.adapter)
         self._controller_runtime = NavigationControllerRuntime()
         self.train_environment: Environment | None = None
         self.train_controller: TEMController | None = None
@@ -226,8 +231,8 @@ class TrainingModel(L.LightningModule):
         """Build the optimizer and learning-rate scheduler."""
         total_steps = int(self.trainer.estimated_stepping_batches)
 
-        # Optimizer for the main model parameters
-        sup_params = [p for p in self.model.parameters() if p.requires_grad]
+        # Optimizer for the full bridge surface, including observation decoding.
+        sup_params = [p for p in self.bridge_adapter.parameters() if p.requires_grad]
         opt_sup = Adam(sup_params, self.config.optimizer)
         sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, self.config.scheduler)
         # sch_sup = ExponentialLR(opt_sup, total_steps, self.config.scheduler)
