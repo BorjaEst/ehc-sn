@@ -21,7 +21,8 @@ from ehc_sn.metrics.keys import (
     TEM_ACC_OBS_RETRIEVED_REVISIT,
 )
 from ehc_sn.tasks.navigation.contracts import NavigationTargets
-from ehc_sn.tasks.navigation.evaluation import evaluate_observation_logits
+from ehc_sn.tasks.navigation.evaluation import coerce_observation_ids, coerce_revisit_mask, evaluate_observation_logits
+from ehc_sn.tasks.navigation.runtime import coerce_navigation_targets
 from ehc_sn.training.types import RatioStat
 from ehc_sn.types import Batch
 
@@ -49,20 +50,20 @@ class NavigationTEMTaskBinding:
     ) -> NavigationTargets:
         """Build a :class:`NavigationTargets` from carry data.
 
-        Uses ``observation_id`` when present; falls back to ``labels`` only if
-        ``observation_id`` is absent.  ``is_revisit`` is forwarded unchanged.
+        Delegates to the task-owned :func:`~ehc_sn.tasks.navigation.runtime.coerce_navigation_targets`
+        helper.  ``observation_id`` must be present in ``carry.data``;
+        there is no ``labels`` fallback.
 
         Args:
             batch: Generic batch mapping; unused here.
             carry: Controller carry state.
             step_output: Controller step output; unused here.
+
+        Raises:
+            KeyError: If ``observation_id`` is absent from ``carry.data``.
         """
         _ = batch, step_output
-        raw: Tensor | None = carry.data.get("observation_id")
-        if raw is None:
-            raw = carry.data["labels"]
-        is_revisit: Tensor | None = carry.data.get("is_revisit")
-        return NavigationTargets(observation_id=raw, is_revisit=is_revisit)
+        return coerce_navigation_targets(carry.data)
 
     def extract_observation_id(  # -------------------------------------------
         self,
@@ -70,8 +71,8 @@ class NavigationTEMTaskBinding:
     ) -> Tensor:
         """Return the current-step observation id tensor from ``targets``.
 
-        Applies squeeze/argmax normalisation to guarantee a 1-D integer target
-        tensor of shape ``(B,)``.
+        Delegates to the task-owned :func:`~ehc_sn.tasks.navigation.evaluation.coerce_observation_ids`
+        to guarantee a 1-D integer tensor of shape ``(B,)``.
 
         Args:
             targets: Navigation supervision targets produced by
@@ -80,19 +81,15 @@ class NavigationTEMTaskBinding:
         Returns:
             Integer observation-id tensor of shape ``(B,)``.
         """
-        raw = targets.observation_id
-        if raw.ndim > 1:
-            if raw.shape[-1] == 1:
-                return raw.squeeze(-1)
-            if raw.is_floating_point():
-                return raw.argmax(dim=-1)
-        return raw
+        return coerce_observation_ids(targets.observation_id)
 
     def extract_protocol_mask(  # --------------------------------------------
         self,
         targets: NavigationTargets,
     ) -> Tensor:
         """Return the revisit-eligibility mask for protocol supervision.
+
+        Delegates to the task-owned :func:`~ehc_sn.tasks.navigation.evaluation.coerce_revisit_mask`.
 
         Args:
             targets: Navigation supervision targets produced by
@@ -107,7 +104,8 @@ class NavigationTEMTaskBinding:
         is_revisit = targets.is_revisit
         if is_revisit is None:
             raise KeyError("Navigation carry data must provide 'is_revisit' for protocol-gated TEM supervision.")
-        return is_revisit.reshape(-1).to(dtype=torch.bool)
+        result = coerce_revisit_mask(is_revisit, device=is_revisit.device)
+        return result.to(dtype=torch.bool)  # type: ignore[union-attr]
 
     def evaluate_observation_metrics(  # -------------------------------------
         self,

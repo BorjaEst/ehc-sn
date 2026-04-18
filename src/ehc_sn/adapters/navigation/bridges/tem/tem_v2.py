@@ -15,6 +15,7 @@ from ehc_sn.models.tem.tem_v2 import TEMInputV2, TEMModelV2, TEMOutputV2, TEMSta
 from ehc_sn.modules.autoencoder import MLPDecoder, TwoHotEncoder
 from ehc_sn.adapters.navigation.bridges.tem.tem_v1 import NavigationTEMDiagnostics
 from ehc_sn.tasks.navigation.contracts import NavigationTaskOutput
+from ehc_sn.tasks.navigation.runtime import coerce_navigation_step_input
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
@@ -63,15 +64,15 @@ class NavigationInputsEncoder(nn.Module):
 
     def forward(  # -----------------------------------------------------------
         self,
-        batch: dict[str, Tensor],
+        batch: Batch,
     ) -> TEMInputV2:
         """Encode pre-extracted navigation step data into a TEM v2 input payload."""
-        obs_embedding = self.encoder(batch["observation"])
+        task_input = coerce_navigation_step_input(batch)
         return TEMInputV2(
-            obs_embedding=obs_embedding,
-            previous_action=batch["previous_action"],
-            episode_start=batch.get("episode_start"),
-            landmark_id=batch.get("landmark_id"),
+            obs_embedding=self.encoder(task_input.observation),
+            previous_action=task_input.previous_action,
+            episode_start=task_input.episode_start,
+            landmark_id=task_input.landmark_id,
         )
 
 
@@ -94,16 +95,15 @@ class NavigationOutputsDecoder(nn.Module):
     ) -> NavigationTEMV2BridgeOutput:
         """Decode all three place pathways and return the split task + TEM surfaces."""
         pc = model_output.place_codes
+        gc = model_output.grid_codes
+
         obs_inference = self.decoder(pc.inference)
-        obs_retrieved = self.decoder(pc.retrieved) if pc.retrieved is not None else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)
+        obs_retrieved = self.decoder(pc.retrieved) if pc.retrieved is not None else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)  # fmt: skip
         obs_ancestral = self.decoder(pc.ancestral)
+        ol = (obs_inference, obs_retrieved, obs_ancestral)
 
         task = NavigationTaskOutput(obs_logits=obs_inference)
-        tem = NavigationTEMDiagnostics(
-            obs_logits=(obs_inference, obs_retrieved, obs_ancestral),
-            grid_codes=model_output.grid_codes,
-            place_codes=pc,
-        )
+        tem = NavigationTEMDiagnostics(obs_logits=ol, grid_codes=gc, place_codes=pc)
         return NavigationTEMV2BridgeOutput(task=task, tem=tem)
 
 
