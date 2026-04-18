@@ -1,3 +1,5 @@
+""" """
+
 from __future__ import annotations
 
 import math
@@ -7,10 +9,13 @@ from typing import Annotated, Literal, Optional, Protocol, TypeAlias
 
 import torch
 from pydantic import AliasChoices, BaseModel, Field, model_validator
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
 from ehc_sn import utils
-from ehc_sn.types import Device, Dtype, InitStrategy, ProjectionBridge, ProjectionKind
+from ehc_sn.types import InitStrategy, ProjectionBridge, ProjectionKind
 
 
 # =================================================================================================

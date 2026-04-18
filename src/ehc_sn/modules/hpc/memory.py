@@ -11,10 +11,13 @@ from typing import Optional, Protocol
 
 import torch
 from pydantic import BaseModel, Field, field_validator
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as DType
+from torch import nn
 
 from ehc_sn.modules.hpc.update import HebbianLayout, HebbianWriteRule
-from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, DenseMemoryStore, Device, FactorMemoryStore, FactorSlotBank, MemoryEntry
+from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, DenseMemoryStore, FactorMemoryStore, FactorSlotBank, MemoryEntry
 
 
 # =================================================================================================

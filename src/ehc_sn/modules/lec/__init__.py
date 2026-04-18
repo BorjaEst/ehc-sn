@@ -17,13 +17,16 @@ from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
 from ehc_sn import utils
 from ehc_sn.modules.lec.filter import FreqFilterSettings, FrequencyFilter
 from ehc_sn.modules.lec.norm import FeatureNorm, FeatureNormSettings
 from ehc_sn.modules.lec.reconstruction import Reconstruction, ReconstructionSettings
-from ehc_sn.types import Device, Dtype, MultiScaleCode
+from ehc_sn.types import MultiScaleCode
 from ehc_sn.utils.detach import DetachMixin
 
 

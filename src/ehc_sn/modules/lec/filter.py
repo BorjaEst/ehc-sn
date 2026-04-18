@@ -11,9 +11,10 @@ from typing import List, Literal, Optional, Tuple
 import numpy as np
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
-
-from ehc_sn.types import Device, Dtype
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
 
 # =================================================================================================

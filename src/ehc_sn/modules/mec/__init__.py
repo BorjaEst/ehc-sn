@@ -15,14 +15,17 @@ from typing import Optional
 import torch
 from pydantic import BaseModel, Field
 from scipy.stats import truncnorm
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
 from ehc_sn import utils
 from ehc_sn.modules.mec.layout import MECLayout, resolve_mec_layout
 from ehc_sn.modules.mec.ovc import OVCCorrection, OVCSettings
 from ehc_sn.modules.mec.p2g import P2GMemory, P2GMemSettings
 from ehc_sn.modules.mec.path import PathIntegrator, PathSettings
-from ehc_sn.types import AbstractLocation, Device, Dtype, GroundedLocation, LocationBelief
+from ehc_sn.types import AbstractLocation, GroundedLocation, LocationBelief
 from ehc_sn.utils.detach import DetachMixin
 
 

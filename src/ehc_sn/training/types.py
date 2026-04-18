@@ -1,4 +1,4 @@
-"""Generic step-metrics types for rollout-based loss heads.
+"""Generic step-metrics types for rollout-based objectives.
 
 The shared layer exposes three pieces of structure:
 

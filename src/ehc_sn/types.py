@@ -791,15 +791,15 @@ class Prediction:
 
 
 # TODO
-Activation = Literal["leaky_relu", "sigmoid", "none"]
-ProjectionKind = Literal["identity", "linear", "tiling", "low_rank"]
-ProjectionBridge = Literal["auto", "aligned", "broadcast"]
-ProjectionEndpointKind = Literal["flat", "multiscale", "token_sequence"]
+Activation: TypeAlias = Literal["leaky_relu", "sigmoid", "none"]
+ProjectionKind: TypeAlias = Literal["identity", "linear", "tiling", "low_rank"]
+ProjectionBridge: TypeAlias = Literal["auto", "aligned", "broadcast"]
+ProjectionEndpointKind: TypeAlias = Literal["flat", "multiscale", "token_sequence"]
 ProjectionMode: TypeAlias = ProjectionKind
-InitStrategy = Literal["identity", "random"]
+InitStrategy: TypeAlias = Literal["identity", "random"]
 Channels: TypeAlias = dict[str, np.ndarray]
 Batch: TypeAlias = Mapping[str, Tensor]
 StepBatchSource = Iterator[Batch]
 
-RetrievalRole = Literal["generative", "inference"]
+RetrievalRole: TypeAlias = Literal["generative", "inference"]
 """Semantic role used to select the cue-indexed HPC retrieval path."""

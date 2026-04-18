@@ -10,12 +10,14 @@ from typing import Literal, Optional
 
 import torch
 from pydantic import BaseModel, Field, model_validator
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import nn
 
 from ehc_sn import utils
 from ehc_sn.modules.mec.layout import MECLayout, validate_ovc_shape_policy
 from ehc_sn.modules.mlp import MLP
-from ehc_sn.types import Device, LocationBelief
+from ehc_sn.types import LocationBelief
 
 
 # =================================================================================================
@@ -150,9 +152,7 @@ class OVCCorrection(nn.Module):
         """
         if landmark_id is None:
             raise ValueError("landmark_id is required when shiny_mask selects OVC-corrected rows.")
-        shiny_tensor = (
-            landmark_id.squeeze(-1)[shiny_mask].to(device=device, dtype=torch.float32).unsqueeze(-1)
-        )
+        shiny_tensor = landmark_id.squeeze(-1)[shiny_mask].to(device=device, dtype=torch.float32).unsqueeze(-1)
         return [shiny_tensor] * self.n_freq
 
     def _predict_correction(  # -------------------------------------------------------------------

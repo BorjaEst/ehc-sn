@@ -27,9 +27,11 @@ from typing import Optional, Tuple
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn.types import Device, Dtype
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -117,7 +119,7 @@ class STRModelLinear(nn.Module):
             state: STR state.
 
         Returns:
-            ``(new_state, reward_hat)`` where ``reward_hat`` has shape ``(B,)``.
+            ``(new_state, state_value)`` where ``state_value`` has shape ``(B,)``.
         """
         x = torch.cat([features.to(torch.float32), q_values.to(torch.float32)], dim=-1)
         reward_hat = self.reward_head(x).squeeze(-1)  # (B,)

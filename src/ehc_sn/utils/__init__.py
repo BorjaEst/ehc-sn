@@ -11,9 +11,12 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.special import comb
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn.types import Device, LocationBelief, Matrix, Reduction, Vector
+from ehc_sn.types import LocationBelief, Matrix, Reduction, Vector
 
 
 def _find_multiple(

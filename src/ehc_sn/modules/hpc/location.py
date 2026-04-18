@@ -17,11 +17,14 @@ from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
 from ehc_sn import utils
 from ehc_sn.modules.mlp import MLP
-from ehc_sn.types import Activation, Device, Dtype, LocationBelief
+from ehc_sn.types import Activation, LocationBelief
 
 
 # =================================================================================================

@@ -19,9 +19,10 @@ from typing import Literal, Optional
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
-
-from ehc_sn.types import Device, Dtype
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
 
 # =================================================================================================
@@ -65,10 +66,7 @@ class QEstimatorSettings(BaseModel, extra="forbid"):
     )
     init_bias: float = Field(
         default=-5.0,
-        description=(
-            "Initial bias for all Q-value outputs. "
-            "Negative values → conservative init: σ(-5) ≈ 0.007 at init."
-        ),
+        description=("Initial bias for all Q-value outputs. " "Negative values → conservative init: σ(-5) ≈ 0.007 at init."),
     )
 
 

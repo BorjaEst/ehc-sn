@@ -12,9 +12,12 @@ from typing import Literal, Optional, Protocol
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, Device, Dtype, FactorMemoryStore, FactorSlotBank
+from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, FactorMemoryStore, FactorSlotBank
 
 
 # =================================================================================================

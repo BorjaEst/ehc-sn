@@ -5,9 +5,11 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn.types import Device, Dtype
 from ehc_sn.utils import _find_multiple, trunc_normal_init_
 
 
@@ -110,8 +112,13 @@ class MLP(torch.nn.Module):
         code should generally prefer :class:`SwiGLU` or a purpose-built module.
     """
 
-    def __init__(
-        self, in_dim, out_dim, activation=(torch.nn.functional.elu, None), hidden_dim=None, bias=(True, True)
+    def __init__(  # ----------------------------------------------------------
+        self,
+        in_dim,
+        out_dim,
+        activation=(torch.nn.functional.elu, None),
+        hidden_dim=None,
+        bias=(True, True),
     ):
         """Create the MLP.
 
