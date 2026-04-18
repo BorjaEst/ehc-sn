@@ -12,11 +12,11 @@ from lightning.pytorch import Trainer, seed_everything
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
+from ehc_sn.adapters.navigation.bridges.tem.tem_v1 import NavigationTEMV1AdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
-from ehc_sn.adapters.navigation.bridges.tem.tem_v1 import NavigationTEMV1AdapterSettings
 from ehc_sn.controllers.tem import TEMControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.envs.dungeon_walk import EnvConfig
