@@ -23,6 +23,7 @@ from torch import nn
 from ehc_sn import utils
 from ehc_sn.modules.hpc.location import PlaceInference, PlaceInferenceSettings
 from ehc_sn.modules.hpc.query_policy import MemoryRead, PreparedCueRead, PreparedRead, ReadCues, build_read_composer
+from ehc_sn.types import LocationBelief, MemoryEntry, MemoryState, RetrievalRole
 from ehc_sn.utils.detach import DetachMixin
 
 
