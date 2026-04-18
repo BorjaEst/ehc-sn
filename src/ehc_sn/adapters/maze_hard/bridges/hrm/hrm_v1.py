@@ -222,7 +222,7 @@ class MazeHardHRMV1BridgeAdapter(nn.Module):
 
     def reset_state(  # --------------------------------------------------------
         self,
-        reset_flag: torch.Tensor,
+        reset_flag: Tensor,
         state: HRMStateV1,
     ) -> HRMStateV1:
         """Reset halted rows of the HRM recurrent state."""
