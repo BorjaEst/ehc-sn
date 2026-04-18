@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypeAlias
+from typing import TypeAlias, Union
 
 import torch
 import torch.nn.functional as F
@@ -18,14 +18,13 @@ from ehc_sn.benchmarks._capabilities.episodic_memory import (
     EpisodicMemoryReadout,
     EpisodicMemoryStep,
 )
-from ehc_sn.models.tem.tem_v1 import TEMModelV1
-from ehc_sn.models.tem.tem_v1 import TEMState as TEMStateV1
-from ehc_sn.models.tem.tem_v2 import TEMModelV2
-from ehc_sn.models.tem.tem_v2 import TEMState as TEMStateV2
+from ehc_sn.models.tem.tem_v1 import TEMInputV1, TEMModelV1, TEMStateV1
+from ehc_sn.models.tem.tem_v2 import TEMInputV2, TEMModelV2, TEMStateV2
 
 CueKey: TypeAlias = tuple[CueFamily, int]
 TEMModel: TypeAlias = TEMModelV1 | TEMModelV2
 TEMRolloutState: TypeAlias = TEMStateV1 | TEMStateV2
+_TEMInput: TypeAlias = Union[TEMInputV1, TEMInputV2]
 
 
 @dataclass
@@ -66,13 +65,12 @@ class TEMEpisodicMemoryAdapter(EpisodicMemoryAgent):
     def ingest_step(self, step: EpisodicMemoryStep, state: TEMEpisodicMemoryState) -> TEMEpisodicMemoryState:
         """Advance the TEM state and refresh the latent readout banks."""
         model_state = self._prepare_tem_state(step, state.tem_state)
-        model_inputs = self._build_model_inputs(step)
+        tem_input = self._build_tem_input(step)
 
         with torch.no_grad():
-            model_state, _, _, _, place = self._model(model_inputs, model_state)
+            output, model_state = self._model(tem_input, model_state)
 
-        place_post, _, _ = place
-        current_code = self._flatten_multiscale_code(place_post)
+        current_code = self._extract_place_code(output.place_codes.inference)
         location_codes = dict(state.location_codes)
         cue_codes = dict(state.cue_codes)
 
@@ -130,22 +128,35 @@ class TEMEpisodicMemoryAdapter(EpisodicMemoryAgent):
 
         return self._model.init_state(batch_size=1, memory=state.hpc.memory, device=self.device)
 
-    def _build_model_inputs(self, step: EpisodicMemoryStep) -> dict[str, Tensor]:
-        """Move one benchmark step payload onto the wrapped model device."""
-        model_inputs = {
-            "observation": step.observation.to(device=self.device, dtype=torch.float32),
-            "previous_action": step.previous_action.to(device=self.device, dtype=torch.int64),
-            "episode_start": step.episode_start.to(device=self.device, dtype=torch.bool),
-        }
-        if step.landmark_id is not None:
-            model_inputs["landmark_id"] = step.landmark_id.to(device=self.device, dtype=torch.int64)
-        return model_inputs
+    def _build_tem_input(self, step: EpisodicMemoryStep) -> _TEMInput:
+        """Build a model-native TEMInput from one benchmark step.
+
+        The raw ``step.observation`` tensor is used directly as ``obs_embedding``.
+        For benchmark evaluation purposes the observation is treated as a
+        pre-computed feature vector; no task-specific encoder is needed.
+        """
+        obs_embedding = step.observation.to(device=self.device, dtype=torch.float32)
+        previous_action = step.previous_action.to(device=self.device, dtype=torch.int64)
+        episode_start = step.episode_start.to(device=self.device, dtype=torch.bool)
+        landmark_id = step.landmark_id.to(device=self.device, dtype=torch.int64) if step.landmark_id is not None else None
+        if isinstance(self._model, TEMModelV1):
+            return TEMInputV1(
+                obs_embedding=obs_embedding,
+                previous_action=previous_action,
+                episode_start=episode_start,
+                landmark_id=landmark_id,
+            )
+        return TEMInputV2(
+            obs_embedding=obs_embedding,
+            previous_action=previous_action,
+            episode_start=episode_start,
+            landmark_id=landmark_id,
+        )
 
     @staticmethod
-    def _flatten_multiscale_code(code: list[Tensor]) -> Tensor:
-        """Return one CPU resident flattened TEM place code."""
-        flat = [part.detach().to(device="cpu", dtype=torch.float32).reshape(1, -1) for part in code]
-        return torch.cat(flat, dim=-1).squeeze(0)
+    def _extract_place_code(code: Tensor) -> Tensor:
+        """Return one CPU-resident flattened TEM place code from a single pathway tensor."""
+        return code.detach().to(device="cpu", dtype=torch.float32).reshape(-1)
 
     @staticmethod
     def _merge_code(bank: dict[int | CueKey, Tensor], key: int | CueKey, code: Tensor) -> None:
