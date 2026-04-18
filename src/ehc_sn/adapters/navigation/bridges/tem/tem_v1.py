@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Optional
 
@@ -116,9 +117,9 @@ class NavigationOutputsDecoder(nn.Module):
         gc = model_output.grid_codes
         pc = model_output.place_codes
 
-        obs_inference = self.decoder(pc.inference)
-        obs_retrieved = self.decoder(pc.retrieved) if pc.retrieved is not None else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)  # fmt: skip
-        obs_ancestral = self.decoder(pc.ancestral)
+        obs_inference = self.decoder(_flatten_tem_code(pc.inference))
+        obs_retrieved = self.decoder(_flatten_tem_code(pc.retrieved)) if pc.retrieved is not None else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)  # fmt: skip
+        obs_ancestral = self.decoder(_flatten_tem_code(pc.ancestral))
         ol = (obs_inference, obs_retrieved, obs_ancestral)
 
         task = NavigationTaskOutput(obs_logits=obs_inference)
@@ -197,20 +198,19 @@ class NavigationTEMV1BridgeAdapter(nn.Module):
 
 
 # =============================================================================
-def _build_encoder(
+def _build_encoder(  # --------------------------------------------------------
     model: TEMModelV1,
     config: NavigationTEMV1AdapterSettings,
 ) -> NavigationInputsEncoder:
     """Construct the observation encoder front-end for the v1 bridge."""
     n_freq = len(model.config.hpc.shape)
-    feature_dim = n_freq * model.config.lec.feature_dim
     return NavigationInputsEncoder(
         observation_dim=config.observation_dim,
-        feature_dim=feature_dim,
+        feature_dim=model.config.lec.feature_dim,
     )
 
 
-def _build_decoder(
+def _build_decoder(  # --------------------------------------------------------
     model: TEMModelV1,
     config: NavigationTEMV1AdapterSettings,
 ) -> NavigationOutputsDecoder:
@@ -220,6 +220,17 @@ def _build_decoder(
         observation_dim=config.observation_dim,
         latent_dim=latent_dim,
     )
+
+
+def _flatten_tem_code(  # -----------------------------------------------------
+    code: Tensor | Sequence[Tensor],
+) -> Tensor:
+    """Return a flat `(B, D)` view of one TEM latent code for decoder use."""
+    if isinstance(code, Tensor):
+        return code
+    if len(code) == 0:
+        raise ValueError("TEM latent code sequences must not be empty.")
+    return torch.cat(tuple(code), dim=1)
 
 
 # =============================================================================
