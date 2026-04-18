@@ -7,13 +7,11 @@ from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 
 from ehc_sn.models.tem.core.tem_base import GridCodes, TEMPlaceCodes
 from ehc_sn.models.tem.tem_v2 import TEMInputV2, TEMModelV2, TEMOutputV2, TEMStateV2
 from ehc_sn.modules.autoencoder import MLPDecoder, TwoHotEncoder
-from ehc_sn.adapters.navigation.bridges.tem.tem_v1 import NavigationTEMDiagnostics
 from ehc_sn.tasks.navigation.contracts import NavigationTaskOutput
 from ehc_sn.tasks.navigation.runtime import coerce_navigation_step_input
 from ehc_sn.types import Batch
@@ -37,6 +35,27 @@ class NavigationTEMV2AdapterSettings(BaseModel, extra="forbid"):
 
 # =============================================================================
 @dataclass(frozen=True)
+class NavigationTEMV2Diagnostics(DetachMixin):
+    """TEM-family diagnostic surface for controller and objective consumption.
+
+    Carries all three observation-logit pathways and the raw latent bundles
+    needed by the TEM objective. Kept separate from the canonical task surface
+    so the controller can remain model-agnostic.
+
+    Attributes:
+        obs_logits: Three observation-logit tensors ``(inference, retrieved, ancestral)``,
+            each of shape ``(B, obs_dim)``.
+        grid_codes: MEC grid codes ``(g_post, g_prior)`` for grid-transition latent loss.
+        place_codes: Full named TEM place-code bundle for latent-relation assembly.
+    """
+
+    obs_logits: tuple[Tensor, Tensor, Tensor]
+    grid_codes: GridCodes
+    place_codes: TEMPlaceCodes
+
+
+# =============================================================================
+@dataclass(frozen=True)
 class NavigationTEMV2BridgeOutput(DetachMixin):
     """Split bridge output: canonical task surface plus TEM-family diagnostics.
 
@@ -47,7 +66,7 @@ class NavigationTEMV2BridgeOutput(DetachMixin):
     """
 
     task: NavigationTaskOutput
-    tem: NavigationTEMDiagnostics
+    tem: NavigationTEMV2Diagnostics
 
 
 # =============================================================================
@@ -103,7 +122,7 @@ class NavigationOutputsDecoder(nn.Module):
         ol = (obs_inference, obs_retrieved, obs_ancestral)
 
         task = NavigationTaskOutput(obs_logits=obs_inference)
-        tem = NavigationTEMDiagnostics(obs_logits=ol, grid_codes=gc, place_codes=pc)
+        tem = NavigationTEMV2Diagnostics(obs_logits=ol, grid_codes=gc, place_codes=pc)
         return NavigationTEMV2BridgeOutput(task=task, tem=tem)
 
 
@@ -207,6 +226,7 @@ def _build_decoder(
 __all__ = [
     "NavigationInputsEncoder",
     "NavigationOutputsDecoder",
+    "NavigationTEMV2Diagnostics",
     "NavigationTEMV2AdapterSettings",
     "NavigationTEMV2BridgeAdapter",
     "NavigationTEMV2BridgeOutput",

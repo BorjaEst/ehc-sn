@@ -35,7 +35,7 @@ class NavigationTEMV1AdapterSettings(BaseModel, extra="forbid"):
 
 # =============================================================================
 @dataclass(frozen=True)
-class NavigationTEMDiagnostics(DetachMixin):
+class NavigationTEMV1Diagnostics(DetachMixin):
     """TEM-family diagnostic surface for controller and objective consumption.
 
     Carries all three observation-logit pathways and the raw latent bundles
@@ -66,7 +66,7 @@ class NavigationTEMV1BridgeOutput(DetachMixin):
     """
 
     task: NavigationTaskOutput
-    tem: NavigationTEMDiagnostics
+    tem: NavigationTEMV1Diagnostics
 
 
 # =============================================================================
@@ -122,7 +122,7 @@ class NavigationOutputsDecoder(nn.Module):
         ol = (obs_inference, obs_retrieved, obs_ancestral)
 
         task = NavigationTaskOutput(obs_logits=obs_inference)
-        tem = NavigationTEMDiagnostics(obs_logits=ol, grid_codes=gc, place_codes=pc)
+        tem = NavigationTEMV1Diagnostics(obs_logits=ol, grid_codes=gc, place_codes=pc)
         return NavigationTEMV1BridgeOutput(task=task, tem=tem)
 
 
@@ -226,7 +226,7 @@ def _build_decoder(
 __all__ = [
     "NavigationInputsEncoder",
     "NavigationOutputsDecoder",
-    "NavigationTEMDiagnostics",
+    "NavigationTEMV1Diagnostics",
     "NavigationTEMV1AdapterSettings",
     "NavigationTEMV1BridgeAdapter",
     "NavigationTEMV1BridgeOutput",
