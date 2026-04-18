@@ -355,7 +355,7 @@ class FactorMemoryStore:
             values=self.values,
             valid_mask=self.valid_mask,
             coefficients=self.coefficients,
-            banks={name: bank.clone() for name, bank in self.banks.items()},
+            banks=dict(self.banks),
         )
 
     def default_bank(self) -> FactorSlotBank:

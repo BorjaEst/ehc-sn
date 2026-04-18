@@ -9,7 +9,7 @@ import lightning as L
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.navigation import NavigationTEMV2BridgeAdapter
+from ehc_sn.adapters.navigation.bridges.tem.tem_v2 import NavigationTEMV2AdapterSettings, NavigationTEMV2BridgeAdapter
 from ehc_sn.adapters.navigation.objectives import NavigationTEMTaskBinding
 from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
@@ -24,7 +24,7 @@ from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, re
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
-from ehc_sn.models.tem.tem_v2 import Batch, ModelSettingsV2, TEMModelV2
+from ehc_sn.models.tem.tem_v2 import ModelSettingsV2, TEMModelV2
 from ehc_sn.objectives.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.navigation import NavigationControllerRuntime
@@ -33,6 +33,7 @@ from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
+from ehc_sn.types import Batch
 
 # Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
 TEM_STATIC_REQUIRED_KEYS = ("topology", "observations", "mask_valid")
@@ -51,6 +52,10 @@ class ModelConfig_TEM_V2(BaseModel, extra="forbid"):
     environment: EnvironmentConfig = Field(
         ...,
         description="Dungeon-walk environment configuration.",
+    )
+    adapter: NavigationTEMV2AdapterSettings = Field(
+        ...,
+        description="Navigation-to-TEM v2 adapter configuration.",
     )
     controller: TEMControllerConfig = Field(
         ...,
@@ -84,10 +89,12 @@ class ModelConfig_TEM_V2(BaseModel, extra="forbid"):
     @model_validator(mode="after")
     def validate_environment_contract(self) -> "ModelConfig_TEM_V2":
         model_settings = ModelSettingsV2.from_config(self.model_config_path)
-        if self.environment.observation_dim != model_settings.observation_dim:
-            raise ValueError("environment.observation_dim must match model.observation_dim.")
-        if self.environment.action_count != model_settings.action_count:
-            raise ValueError("environment.action_count must match model.action_count.")
+        if self.environment.action_count != model_settings.transition_action_count:
+            raise ValueError("environment.action_count must match model.transition_action_count.")
+        if self.adapter.observation_dim != self.environment.observation_dim:
+            raise ValueError("adapter.observation_dim must match environment.observation_dim.")
+        if self.adapter.action_count != self.environment.action_count:
+            raise ValueError("adapter.action_count must match environment.action_count.")
         return self
 
 
@@ -102,7 +109,7 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettingsV2.from_config(config.model_config_path)
         self.model = TEMModelV2(model_settings)
-        self.bridge_adapter = NavigationTEMV2BridgeAdapter(self.model)
+        self.bridge_adapter = NavigationTEMV2BridgeAdapter(self.model, config.adapter)
         self._controller_runtime = NavigationControllerRuntime()
         self.train_environment: Environment | None = None
         self.train_controller: TEMController | None = None
@@ -225,7 +232,7 @@ class TrainingModel(L.LightningModule):
         total_steps = int(self.trainer.estimated_stepping_batches)
 
         # Optimizer for the main model parameters
-        sup_params = [p for p in self.model.parameters() if p.requires_grad]
+        sup_params = [p for p in self.bridge_adapter.parameters() if p.requires_grad]
         opt_sup = Adam(sup_params, self.config.optimizer)
         sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, self.config.scheduler)
         # sch_sup = ExponentialLR(opt_sup, total_steps, self.config.scheduler)

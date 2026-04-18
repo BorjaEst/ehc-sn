@@ -12,6 +12,7 @@ from lightning.pytorch import Trainer, seed_everything
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
+from ehc_sn.adapters.navigation.bridges.tem.tem_v2 import NavigationTEMV2AdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
@@ -73,6 +74,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     model_config_path: Path = Field(
         ...,
         description="Path to the model configuration TOML file that specifies the TEM v2 architecture.",
+    )
+    adapter: NavigationTEMV2AdapterSettings = Field(
+        ...,
+        description="Navigation-to-TEM v2 adapter configuration.",
     )
     environment: EnvConfig = Field(
         ...,
