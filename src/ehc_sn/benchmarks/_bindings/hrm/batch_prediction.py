@@ -8,7 +8,8 @@ from typing import Any
 
 import torch
 
-from ehc_sn.adapters.maze_hard import MazeHardHRMV1BridgeAdapter, MazeHardHRMV2BridgeAdapter
+from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v1 import MazeHardHRMV1BridgeAdapter
+from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v2 import MazeHardHRMV2BridgeAdapter
 from ehc_sn.adapters.maze_hard.objectives import MazeHardACTTaskBinding
 from ehc_sn.benchmarks._bindings.hrm.load import load_hrm_v1_bridge_adapter, load_hrm_v2_model
 from ehc_sn.benchmarks._capabilities.batch_prediction import BatchPrediction, BatchPredicts
@@ -18,44 +19,81 @@ from ehc_sn.models.hrm.hrm_v2 import HRModelV2
 from ehc_sn.tasks.maze_hard.runtime import coerce_maze_hard_batch
 
 
+# =============================================================================
 class HRMV1BatchPredictionAdapter(BatchPredicts):
     """Benchmark-time HRM v1 adapter for MazeHard batch prediction."""
 
-    def __init__(self, bridge_adapter: MazeHardHRMV1BridgeAdapter, *, compute_budget: int, done_action: int = 0) -> None:
+    def __init__(  # ----------------------------------------------------------
+        self,
+        bridge_adapter: MazeHardHRMV1BridgeAdapter,
+        *,
+        compute_budget: int,
+        done_action: int = 0,
+    ) -> None:
+        """Initialize the HRM v1 batch-prediction adapter with a bridge adapter."""
         self._bridge_adapter = bridge_adapter.eval()
         self._model = self._bridge_adapter.model
-        controller_config = ACTControllerConfig(exploration_prob=0.0, max_steps=compute_budget, done_action=done_action)
-        self._controller = ACTController(self._bridge_adapter, controller_config)
+        controller_config = ACTControllerConfig(
+            exploration_prob=0.0,
+            max_steps=compute_budget,
+            done_action=done_action,
+        )
+        self._controller = ACTController(
+            self._bridge_adapter,
+            controller_config,
+        )
 
     @property
     def model(self) -> HRModelV1:
         """Return the wrapped pure HRM model."""
         return self._model
 
-    def predict_batch(self, batch: Mapping[str, Any]) -> BatchPrediction:
+    def predict_batch(  # -----------------------------------------------------
+        self,
+        batch: Mapping[str, Any],
+    ) -> BatchPrediction:
         """Run HRM deliberation until halt or the configured compute budget."""
         return _predict_with_controller(self._model, self._controller, batch)
 
 
+# =============================================================================
 class HRMV2BatchPredictionAdapter(BatchPredicts):
     """Benchmark-time HRM v2 adapter for MazeHard batch prediction."""
 
-    def __init__(self, model: HRModelV2, *, compute_budget: int, done_action: int = 0) -> None:
+    def __init__(  # ----------------------------------------------------------
+        self,
+        model: HRModelV2,
+        *,
+        compute_budget: int,
+        done_action: int = 0,
+    ) -> None:
+        """Initialize the HRM v2 batch-prediction adapter with a bridge adapter."""
         self._model = model.eval()
-        controller_config = ACTControllerConfig(exploration_prob=0.0, max_steps=compute_budget, done_action=done_action)
-        self._controller = ACTController(MazeHardHRMV2BridgeAdapter(self._model), controller_config)
+        controller_config = ACTControllerConfig(
+            exploration_prob=0.0,
+            max_steps=compute_budget,
+            done_action=done_action,
+        )
+        self._controller = ACTController(
+            MazeHardHRMV2BridgeAdapter(self._model),
+            controller_config,
+        )
 
     @property
     def model(self) -> HRModelV2:
         """Return the wrapped pure HRM model."""
         return self._model
 
-    def predict_batch(self, batch: Mapping[str, Any]) -> BatchPrediction:
+    def predict_batch(  # -----------------------------------------------------
+        self,
+        batch: Mapping[str, Any],
+    ) -> BatchPrediction:
         """Run HRM v2 deliberation until halt or the configured compute budget."""
         return _predict_with_controller(self._model, self._controller, batch)
 
 
-def build_hrm_v1_batch_prediction(
+# =============================================================================
+def build_hrm_v1_batch_prediction(  # -----------------------------------------
     *,
     model_config_path: str | Path,
     checkpoint_path: str | Path | None = None,
@@ -76,7 +114,8 @@ def build_hrm_v1_batch_prediction(
     )
 
 
-def build_hrm_v2_batch_prediction(
+# =============================================================================
+def build_hrm_v2_batch_prediction(  # -----------------------------------------
     *,
     model_config_path: str | Path,
     checkpoint_path: str | Path | None = None,
@@ -97,7 +136,8 @@ def build_hrm_v2_batch_prediction(
     )
 
 
-def _predict_with_controller(
+# =============================================================================
+def _predict_with_controller(  # ----------------------------------------------
     model: HRModelV1 | HRModelV2,
     controller: ACTController,
     batch: Mapping[str, Any],
@@ -137,6 +177,7 @@ def _predict_with_controller(
     )
 
 
+# =============================================================================
 __all__ = [
     "HRMV1BatchPredictionAdapter",
     "HRMV2BatchPredictionAdapter",
