@@ -29,7 +29,6 @@ from typing import Any, Iterable, Literal, Mapping, Protocol
 import torch
 from torch import Tensor
 
-from ehc_sn.data.schema import O_ID
 from ehc_sn.traces import TraceField, TraceSpec, TraceValue
 
 
@@ -49,26 +48,20 @@ class _CommonTraceContext(Protocol):
     carry: _CommonTraceCarry
 
 
-class _TokenTraceOutputs(Protocol):
-    """Output surface for token-prediction trace fields."""
-
-    lm_logits: Tensor
-
-
-class _TokenTraceContext(_CommonTraceContext, Protocol):
-    """Execution context exposing token logits."""
-
-    outputs: _TokenTraceOutputs
-
-
 class _ACTTraceOutputs(Protocol):
-    """Output surface required by ACT trace fields."""
+    """Raw ACTStepOutput surface accessed by ACT trace fields."""
 
-    q_logits: Tensor
+    class _Control(Protocol):
+        q_logits: Tensor
+
+    class _Backbone(Protocol):
+        control: "_ACTTraceOutputs._Control"
+
+    backbone_output: _Backbone
 
 
 class _ACTTraceContext(_CommonTraceContext, Protocol):
-    """Execution context exposing ACT controller outputs."""
+    """Execution context exposing raw ACT controller outputs."""
 
     outputs: _ACTTraceOutputs
 
@@ -76,8 +69,17 @@ class _ACTTraceContext(_CommonTraceContext, Protocol):
 class _RLTraceOutputs(Protocol):
     """Output surface required by RL trace fields."""
 
-    q_logits: Tensor
-    value_logits: Tensor
+    class _Policy(Protocol):
+        q_logits: Tensor
+
+    class _Critic(Protocol):
+        state_value: Tensor
+
+    class _Backbone(Protocol):
+        policy: "_RLTraceOutputs._Policy"
+        critic: "_RLTraceOutputs._Critic | None"
+
+    backbone_output: _Backbone
     reward: Tensor
     action: Tensor
 
@@ -95,8 +97,8 @@ class _TEMTraceCarry(_CommonTraceCarry, Protocol):
     model_state: Any
 
 
-class _TEMTraceContext(_TokenTraceContext, Protocol):
-    """Execution context exposing TEM carry and token outputs."""
+class _TEMTraceContext(_CommonTraceContext, Protocol):
+    """Execution context exposing TEM carry."""
 
     carry: _TEMTraceCarry
 
@@ -131,13 +133,6 @@ def _get_steps(ctx: _CommonTraceContext) -> TraceValue:
     return ctx.carry.steps.detach()
 
 
-def _get_solution_overlay(ctx: _TokenTraceContext) -> TraceValue:
-    """Binary mask: 1 where the model predicts the solution-path token."""
-    logits_lm: Tensor = ctx.outputs.lm_logits  # (B, S, vocab)
-    pred = torch.argmax(logits_lm.detach(), dim=-1)  # (B, S)
-    return (pred == O_ID).to(torch.uint8)
-
-
 def _get_input_ids_meta(ctx: _CommonTraceContext) -> TraceValue:
     """Static token-id batch captured as metadata when figures request it."""
     value = ctx.carry.data.get("input_ids")
@@ -158,10 +153,6 @@ TRACE_STEPS = TraceField(
     name="act/steps",
     get=_get_steps,
 )
-TRACE_SOLUTION_OVERLAY = TraceField(
-    name="pred/solution_overlay",
-    get=_get_solution_overlay,
-)
 TRACE_INPUT_IDS_META = TraceField(
     name="input_ids",
     get=_get_input_ids_meta,
@@ -176,7 +167,6 @@ TRACE_LABELS_META = TraceField(
 COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_HALTED,
     TRACE_STEPS,
-    TRACE_SOLUTION_OVERLAY,
     TRACE_INPUT_IDS_META,
     TRACE_LABELS_META,
 )
@@ -188,8 +178,8 @@ COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
 
 
 def _get_q_logits_act(ctx: _ACTTraceContext) -> TraceValue:
-    """Q-logits over halt/continue actions from the ACT controller."""
-    logits_q: Tensor = ctx.outputs.q_logits  # (B, n_actions)
+    """Q-logits over halt/continue actions from the raw ACT controller step."""
+    logits_q: Tensor = ctx.outputs.backbone_output.control.q_logits  # (B, n_actions)
     return logits_q.detach()
 
 
@@ -208,14 +198,22 @@ ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_Q_LOGITS_ACT,)
 
 def _get_q_logits_rl(ctx: _RLTraceContext) -> TraceValue:
     """vmPFC Q-logits over actions from the RL controller."""
-    logits_q: Tensor = ctx.outputs.q_logits  # (B, n_actions)
+    logits_q: Tensor = ctx.outputs.backbone_output.policy.q_logits  # (B, n_actions)
     return logits_q.detach()
 
 
-def _get_r_logits_rl(ctx: _RLTraceContext) -> TraceValue:
-    """STR value estimates V(s) from the RL critic."""
-    logits_r: Tensor = ctx.outputs.value_logits  # (B, 1)
-    return logits_r.detach()
+def _require_state_value(ctx: _RLTraceContext) -> Tensor:
+    """Return the RL critic state value, raising if the critic surface is absent."""
+    critic = ctx.outputs.backbone_output.critic
+    if critic is None:
+        raise ValueError("RL trace fields require a critic output with state_value.")
+    return critic.state_value
+
+
+def _get_state_value_rl(ctx: _RLTraceContext) -> TraceValue:
+    """STR state-value estimates V(s) from the RL critic."""
+    state_value: Tensor = _require_state_value(ctx)  # (B, 1)
+    return state_value.detach()
 
 
 def _get_reward_env(ctx: _RLTraceContext) -> TraceValue:
@@ -231,7 +229,7 @@ def _get_action(ctx: _RLTraceContext) -> TraceValue:
 def _get_rpe(ctx: _RLTraceContext) -> TraceValue:
     """Reward prediction error: reward − V(s)."""
     reward: Tensor = ctx.outputs.reward.squeeze(-1)
-    value: Tensor = ctx.outputs.value_logits.squeeze(-1)  # STR critic
+    value: Tensor = _require_state_value(ctx).squeeze(-1)  # STR critic
     return (reward - value).detach()
 
 
@@ -298,9 +296,9 @@ TRACE_Q_LOGITS_RL = TraceField(
     name="value/q_logits",
     get=_get_q_logits_rl,
 )
-TRACE_R_LOGITS_RL = TraceField(
-    name="value/r_logits",
-    get=_get_r_logits_rl,
+TRACE_STATE_VALUE_RL = TraceField(
+    name="value/state_value",
+    get=_get_state_value_rl,
 )
 TRACE_REWARD_ENV = TraceField(
     name="reward/env",
@@ -355,7 +353,7 @@ TRACE_LEC_W_F_SIGMOID_TEM = TraceField(
 
 RL_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_Q_LOGITS_RL,
-    TRACE_R_LOGITS_RL,
+    TRACE_STATE_VALUE_RL,
     TRACE_REWARD_ENV,
     TRACE_ACTION,
     TRACE_RPE,
@@ -395,7 +393,10 @@ def _select_trace_fields(  # ---------------------------------------------------
 
 # =================================================================================================
 def build_trace_spec(  # --------------------------------------------------------------------------
-    paradigm: Literal["act", "rl", "tem"], *, include_keys: Iterable[str] | None = None,
+    paradigm: Literal["act", "rl", "tem"],
+    *,
+    include_keys: Iterable[str] | None = None,
+    extra_fields: Iterable[TraceField] | None = None,
 ) -> TraceSpec:  # fmt: skip
     """Build a :class:`~ehc_sn.traces.TraceSpec` for a training paradigm.
 
@@ -422,6 +423,8 @@ def build_trace_spec(  # -------------------------------------------------------
         fields = _select_trace_fields(TEM_TRACE_FIELDS, include_keys)
     else:
         raise ValueError(f"Unknown paradigm: {paradigm!r}. Expected 'act', 'rl', or 'tem'.")
+    if extra_fields is not None:
+        fields = fields + tuple(extra_fields)
     return TraceSpec(fields=list(fields))
 
 

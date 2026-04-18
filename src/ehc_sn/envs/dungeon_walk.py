@@ -39,10 +39,9 @@ import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from tensordict import TensorDict, TensorDictBase
 from torch import Tensor
+from torch import device as Device
 from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
-
-from ehc_sn.types import Device
 
 ACTION_STAY: Final[int] = 0
 ACTION_UP: Final[int] = 1

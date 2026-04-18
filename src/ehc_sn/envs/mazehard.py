@@ -23,10 +23,9 @@ TensorDict contract:
 import torch
 from pydantic import BaseModel, Field
 from tensordict import TensorDict, TensorDictBase
+from torch import device as Device
 from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
-
-from ehc_sn.types import Device
 
 IGNORE_LABEL_ID = -100
 

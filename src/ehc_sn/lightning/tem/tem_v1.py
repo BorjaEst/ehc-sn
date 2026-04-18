@@ -10,7 +10,7 @@ import lightning as L
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Adam, Optimizer
 
-from ehc_sn.adapters.navigation import NavigationTEMV1BridgeAdapter
+from ehc_sn.adapters.navigation.bridges.tem.tem_v1 import NavigationTEMV1BridgeAdapter
 from ehc_sn.adapters.navigation.objectives import NavigationTEMTaskBinding
 from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
@@ -25,7 +25,7 @@ from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, re
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
-from ehc_sn.models.tem.tem_v1 import Batch, ModelSettingsV1, TEMModelV1
+from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
 from ehc_sn.objectives.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.navigation import NavigationControllerRuntime
@@ -34,6 +34,7 @@ from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
+from ehc_sn.types import Batch
 
 # Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
 TEM_STATIC_REQUIRED_KEYS = ("topology", "observations", "mask_valid")

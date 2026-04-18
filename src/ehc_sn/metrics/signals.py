@@ -1,8 +1,8 @@
 """Canonical signal vocabulary for diagnostic and research logging.
 
-All signal producers (:meth:`~ehc_sn.heads.act.ACTLossHead.compute_signals`,
-:meth:`~ehc_sn.heads.rl.RLLossHead.compute_signals`,
-:meth:`~ehc_sn.heads.var.VARLossHead.compute_signals`) and consumers
+All signal producers (:meth:`~ehc_sn.objectives.act.ACTLossHead.compute_signals`,
+:meth:`~ehc_sn.objectives.rl.RLLossHead.compute_signals`,
+:meth:`~ehc_sn.objectives.var.VARLossHead.compute_signals`) and consumers
 (:class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback`) import from this
 module rather than using string literals. This ensures that renaming a signal
 requires a single edit, and mismatches between producers and consumers fail
@@ -15,16 +15,16 @@ Structure
     in figure specs or callbacks that must work across models.
 
 ``ACT_SIGNALS``
-    Signals specific to ACT (Adaptive Computation Time) training heads.
+    Signals specific to ACT (Adaptive Computation Time) training objectives.
 
 ``RL_SIGNALS``
-    Signals specific to RL (Reinforcement Learning) training heads.
+    Signals specific to RL (Reinforcement Learning) training objectives.
 
 ``VAR_SIGNALS``
-    Signals specific to VAR (variational latent-consistency) training heads.
+    Signals specific to VAR (variational latent-consistency) training objectives.
 
 ``TEM_SIGNALS``
-    Signals specific to TEM variational training heads.
+    Signals specific to TEM variational training objectives.
 
 ``STANDARD_SIGNALS``
     The union of cross-paradigm + paradigm-specific signals that are stable
@@ -101,7 +101,7 @@ RL_SIGNALS: frozenset[str] = frozenset(
 
 
 # =================================================================================================
-# VAR-specific — produced by VARLossHead.compute_signals()
+# VAR-specific — produced by VARLossHead.compute_signals() (canonical: VARObjective)
 # =================================================================================================
 
 LOSS_TOTAL: str = "loss_total"
@@ -122,13 +122,11 @@ LATENT_POST_NORM: str = "latent_post_norm"
 LATENT_PRIOR_NORM: str = "latent_prior_norm"
 """Mean activation norm of prior latent block(s)."""
 
-VAR_SIGNALS: frozenset[str] = frozenset(
-    {LOSS_TOTAL, LOSS_OBS_NLL, LOSS_LATENT, LOSS_REG, LATENT_POST_NORM, LATENT_PRIOR_NORM}
-)
+VAR_SIGNALS: frozenset[str] = frozenset({LOSS_TOTAL, LOSS_OBS_NLL, LOSS_LATENT, LOSS_REG, LATENT_POST_NORM, LATENT_PRIOR_NORM})
 
 
 # =================================================================================================
-# TEM-specific — produced by TEMLossHead.compute_signals()
+# TEM-specific — produced by TEMLossHead.compute_signals() (canonical: TEMObjective)
 # =================================================================================================
 
 LOSS_GRID_KL: str = "loss_grid_kl"
@@ -177,9 +175,7 @@ TEM_SIGNALS: frozenset[str] = VAR_SIGNALS | frozenset(
 # T2 standard set — re-used by DiagnosticsCallback
 # =================================================================================================
 
-STANDARD_SIGNALS: frozenset[str] = (
-    CROSS_PARADIGM_SIGNALS | ACT_SIGNALS | RL_SIGNALS | VAR_SIGNALS | TEM_SIGNALS
-)
+STANDARD_SIGNALS: frozenset[str] = CROSS_PARADIGM_SIGNALS | ACT_SIGNALS | RL_SIGNALS | VAR_SIGNALS | TEM_SIGNALS
 """All signals that are logged at the ``"standard"`` diagnostic tier.
 
 A :class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback` configured with

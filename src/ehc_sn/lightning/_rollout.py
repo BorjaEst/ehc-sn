@@ -1,9 +1,4 @@
-"""Lightning-local helpers for rollout execution and scoring.
-
-These helpers keep learner modules focused on optimizer and scheduler control
-while centralizing the repeated runner/objective/observer wiring shared across
-Lightning training surfaces.
-"""
+""" """
 
 from __future__ import annotations
 

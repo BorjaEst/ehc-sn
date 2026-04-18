@@ -1,4 +1,4 @@
-"""Routing tables for TEM variational loss heads."""
+"""Routing tables for TEM variational objectives."""
 
 from ehc_sn.metrics.adapter import Route
 from ehc_sn.metrics.keys import (

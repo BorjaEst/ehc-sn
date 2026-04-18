@@ -2,7 +2,7 @@
 
 These routes map metric keys to dotted attribute paths on
 :class:`~ehc_sn.training.types.StepMetrics`, which is the step-metrics object
-produced by :class:`~ehc_sn.heads.rl.RLLossHead`.
+produced by :class:`~ehc_sn.objectives.rl.RLLossHead`.
 """
 
 from ehc_sn.metrics.adapter import Route

@@ -47,7 +47,7 @@ def update_metrics_from_step(  # -----------------------------------------------
     Args:
         collection: A :class:`~torchmetrics.MetricCollection` (optionally cloned
             with a ``prefix`` such as ``"train/"`` or ``"val/"``).
-        step: Aggregated per-step metrics produced by a loss head.  Attribute
+        step: Aggregated per-step metrics produced by a rollout objective.  Attribute
             paths declared in *routes* must be resolvable on this object.
         routes: Paradigm-specific routing table mapping metric keys to
             numerator/denominator attribute paths on *step*.
