@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 from pydantic import BaseModel, Field
@@ -31,6 +31,15 @@ class NavigationTEMV1AdapterSettings(BaseModel, extra="forbid"):
         ...,
         ge=1,
         description="Number of discrete actions (must match environment.action_count).",
+    )
+    decoder_kind: Literal["single_scale", "concat_all_scales"] = Field(
+        default="single_scale",
+        description="Decoder input policy. 'single_scale' uses one HPC frequency band (paper-fidelity); 'concat_all_scales' concatenates all bands.",
+    )
+    prediction_freq: int = Field(
+        default=0,
+        ge=0,
+        description="HPC band index used by the single_scale decoder (paper-fidelity stream 1 / prediction_freq=0). Ignored when decoder_kind='concat_all_scales'.",
     )
 
 
@@ -98,16 +107,23 @@ class NavigationInputsEncoder(nn.Module):
 
 # =============================================================================
 class NavigationOutputsDecoder(nn.Module):
-    """Decodes a :class:`TEMOutputV1` into a :class:`NavigationTEMV1BridgeOutput`."""
+    """Decodes a :class:`TEMOutputV1` into a :class:`NavigationTEMV1BridgeOutput`.
+
+    When ``single_freq`` is an int, uses only that HPC band (paper-fidelity
+    single-scale decoder). When ``None``, concatenates all bands.
+    """
 
     def __init__(  # ----------------------------------------------------------
         self,
         observation_dim: int,
         latent_dim: int,
+        *,
+        single_freq: int | None = None,
     ) -> None:
         super().__init__()
         self.decoder = MLPDecoder(latent_dim, observation_dim)
         self._obs_dim = observation_dim
+        self._single_freq = single_freq
 
     def forward(  # -----------------------------------------------------------
         self,
@@ -117,9 +133,9 @@ class NavigationOutputsDecoder(nn.Module):
         gc = model_output.grid_codes
         pc = model_output.place_codes
 
-        obs_inference = self.decoder(_flatten_tem_code(pc.inference))
-        obs_retrieved = self.decoder(_flatten_tem_code(pc.retrieved)) if pc.retrieved is not None else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)  # fmt: skip
-        obs_ancestral = self.decoder(_flatten_tem_code(pc.ancestral))
+        obs_inference = self.decoder(_select_code(pc.inference, self._single_freq))
+        obs_retrieved = self.decoder(_select_code(pc.retrieved, self._single_freq)) if pc.retrieved is not None else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)  # fmt: skip
+        obs_ancestral = self.decoder(_select_code(pc.ancestral, self._single_freq))
         ol = (obs_inference, obs_retrieved, obs_ancestral)
 
         task = NavigationTaskOutput(obs_logits=obs_inference)
@@ -214,23 +230,52 @@ def _build_decoder(  # --------------------------------------------------------
     model: TEMModelV1,
     config: NavigationTEMV1AdapterSettings,
 ) -> NavigationOutputsDecoder:
-    """Construct the observation decoder back-end for the v1 bridge."""
-    latent_dim = sum(model.config.hpc.shape)
+    """Construct the observation decoder back-end for the v1 bridge.
+
+    Policy is adapter-owned: ``single_scale`` uses one HPC band (paper-fidelity
+    stream 1 / prediction_freq=0); ``concat_all_scales`` concatenates all bands.
+    """
+    hpc_shape = model.config.hpc.shape
+    n_freq = len(hpc_shape)
+    if config.decoder_kind == "single_scale":
+        freq = config.prediction_freq
+        if not (0 <= freq < n_freq):
+            raise ValueError(f"prediction_freq={freq} is out of range for hpc.shape with {n_freq} bands (valid: 0..{n_freq - 1}).")
+        return NavigationOutputsDecoder(
+            observation_dim=config.observation_dim,
+            latent_dim=hpc_shape[freq],
+            single_freq=freq,
+        )
+    # concat_all_scales
     return NavigationOutputsDecoder(
         observation_dim=config.observation_dim,
-        latent_dim=latent_dim,
+        latent_dim=sum(hpc_shape),
     )
+
+
+def _select_code(  # ----------------------------------------------------------
+    code: Tensor | Sequence[Tensor],
+    single_freq: int | None,
+) -> Tensor:
+    """Return a flat ``(B, D)`` tensor for decoder use.
+
+    When ``single_freq`` is an int, returns the single band at that index
+    (paper-fidelity single-scale decoder). When ``None``, concatenates all bands.
+    """
+    if isinstance(code, Tensor):
+        return code if single_freq is None else code  # scalar fallback
+    if len(code) == 0:
+        raise ValueError("TEM latent code sequences must not be empty.")
+    if single_freq is not None:
+        return code[single_freq]
+    return torch.cat(tuple(code), dim=1)
 
 
 def _flatten_tem_code(  # -----------------------------------------------------
     code: Tensor | Sequence[Tensor],
 ) -> Tensor:
     """Return a flat `(B, D)` view of one TEM latent code for decoder use."""
-    if isinstance(code, Tensor):
-        return code
-    if len(code) == 0:
-        raise ValueError("TEM latent code sequences must not be empty.")
-    return torch.cat(tuple(code), dim=1)
+    return _select_code(code, single_freq=None)
 
 
 # =============================================================================

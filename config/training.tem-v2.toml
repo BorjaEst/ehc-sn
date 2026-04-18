@@ -31,6 +31,8 @@ diagnostic_level     = "standard"
 [adapter]
     observation_dim = 45
     action_count    = 5
+    decoder_kind    = "single_scale"
+    prediction_freq = 0
 
 # -- Environment --------------------------------------------------------------
 [environment]
