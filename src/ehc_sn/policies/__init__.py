@@ -1,17 +1,28 @@
-"""Reusable action-selection policies."""
+"""Reusable action-selection policy public export surface."""
 
-from typing import TypeAlias
+from typing import Annotated
 
-from ehc_sn.policies._base import ActionPolicy, PolicyDecision, PolicyInput
-from ehc_sn.policies.categorical import CategoricalPolicy, CategoricalPolicyConfig
-from ehc_sn.policies.random_walk import RandomWalkPolicy, RandomWalkPolicyConfig
-from ehc_sn.policies.stay import StayPolicy, StayPolicyConfig
+from pydantic import Field
+from typing_extensions import TypeAlias
 
-ScriptedPolicyConfig: TypeAlias = StayPolicyConfig | RandomWalkPolicyConfig
+from ._base import ActionPolicy, PolicyDecision, PolicyInput
+from .random_walk import RandomWalkPolicy, RandomWalkPolicyConfig
+from .stay import StayPolicy, StayPolicyConfig
 
-# =================================================================================================
+# Discriminated union of all scripted (non-learned) policy configs.
+# Pydantic selects the concrete type by matching the ``kind`` field.
+ScriptedPolicyConfig: TypeAlias = Annotated[
+    StayPolicyConfig | RandomWalkPolicyConfig,
+    Field(discriminator="kind"),
+]
+
 __all__ = [
-    "ActionPolicy", "CategoricalPolicy", "CategoricalPolicyConfig", "PolicyDecision", "PolicyInput",
-    "RandomWalkPolicy", "RandomWalkPolicyConfig", "ScriptedPolicyConfig", "StayPolicy",
+    "ActionPolicy",
+    "PolicyDecision",
+    "PolicyInput",
+    "RandomWalkPolicy",
+    "RandomWalkPolicyConfig",
+    "ScriptedPolicyConfig",
+    "StayPolicy",
     "StayPolicyConfig",
-]  # fmt: skip
+]
