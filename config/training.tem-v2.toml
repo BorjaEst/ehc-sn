@@ -27,6 +27,11 @@ trainer_num_nodes    = 1
 trainer_precision    = "16-mixed"
 diagnostic_level     = "standard"
 
+# -- Adapter ------------------------------------------------------------------
+[adapter]
+    observation_dim = 45
+    action_count    = 5
+
 # -- Environment --------------------------------------------------------------
 [environment]
     max_episode_steps = 300
