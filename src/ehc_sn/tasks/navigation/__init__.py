@@ -1,23 +1,65 @@
-""" """
+"""Navigation task public export surface."""
 
-from __future__ import annotations
+from .contracts import (
+    NAVIGATION_ACTION_COUNT,
+    NavigationAction,
+    NavigationObservation,
+    NavigationTargets,
+    NavigationTaskInput,
+    NavigationTaskOutput,
+)
+from .evaluation import (
+    NavigationEpisodeSemantics,
+    NavigationPathwayMetrics,
+    coerce_observation_ids,
+    coerce_revisit_mask,
+    evaluate_observation_logits,
+    extract_navigation_episode_semantics,
+)
+from .runtime import (
+    NAVIGATION_RESET_OPTIONAL_KEYS,
+    NAVIGATION_RESET_REQUIRED_KEYS,
+    NAVIGATION_STEP_KEYS,
+    NavigationControllerRuntime,
+    annotate_navigation_revisit_state,
+    batch_size_from_navigation_batch,
+    build_navigation_reset_td,
+    coerce_navigation_step_input,
+    coerce_navigation_targets,
+    extract_navigation_task_input,
+    infer_navigation_static_batch_keys,
+    make_navigation_policy_input,
+    new_navigation_visit_counts,
+    record_navigation_visit,
+    refresh_navigation_halted_slots,
+)
 
-from dataclasses import dataclass
-
-import torch
-from torch import Tensor
-from torch import device as Device
-from torch import dtype as Dtype
-from torch import nn
-
-from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
-from ehc_sn.types import Batch
-
-
-# =============================================================================
-@dataclass(frozen=True)
-class NavigationTaskOutput:
-    """ """
-
-    task_action_logits: Tensor
-    obs_logits: Tensor
+__all__ = [
+    "NAVIGATION_ACTION_COUNT",
+    "NAVIGATION_RESET_OPTIONAL_KEYS",
+    "NAVIGATION_RESET_REQUIRED_KEYS",
+    "NAVIGATION_STEP_KEYS",
+    "NavigationAction",
+    "NavigationControllerRuntime",
+    "NavigationEpisodeSemantics",
+    "NavigationObservation",
+    "NavigationPathwayMetrics",
+    "NavigationTargets",
+    "NavigationTaskInput",
+    "NavigationTaskOutput",
+    "annotate_navigation_revisit_state",
+    "batch_size_from_navigation_batch",
+    "build_navigation_reset_td",
+    "coerce_navigation_step_input",
+    "coerce_navigation_targets",
+    "coerce_observation_ids",
+    "coerce_revisit_mask",
+    "evaluate_observation_logits",
+    "extract_navigation_episode_semantics",
+    "extract_navigation_task_input",
+    "infer_navigation_static_batch_keys",
+    "make_navigation_policy_input",
+    "new_navigation_visit_counts",
+    "record_navigation_visit",
+    "refresh_navigation_halted_slots",
+]
