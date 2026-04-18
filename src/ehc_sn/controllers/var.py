@@ -1,10 +1,4 @@
-"""Generic rollout controller for latent-consistency models.
-
-This controller owns rollout state and step cadence for models whose training
-loss is expressed as observation likelihood plus named latent relations.
-Unlike ACT and RL controllers, it does not interpret action logits or TD
-targets. Termination is controlled only by ``max_steps``.
-"""
+""" """
 
 from __future__ import annotations
 
@@ -47,7 +41,7 @@ class VARRolloutState[ModelState](RolloutState[ModelState]):
 
 # =================================================================================================
 @dataclass
-class VAROutput(DetachMixin):
+class VARStepOutput(DetachMixin):
     """Semantic output contract for latent-consistency heads.
 
     Each semantic objective term stays explicit at the model/controller
@@ -60,11 +54,6 @@ class VAROutput(DetachMixin):
     latent_relations: dict[str, LatentRelation]  # Named latent comparison terms for the objective
     reg_terms: dict[str, LatentCode] | None = None  # Optional named regularization targets
     theta_cls: Tensor | None = None  # Optional (B, D) features for auxiliary classification losses
-
-
-# =================================================================================================
-class VARRolloutBackbone(RolloutBackbone[VARRolloutState, VAROutput], Protocol):
-    """Backbone protocol expected by :class:`VARController`."""
 
 
 # =================================================================================================
@@ -106,7 +95,7 @@ class VARController[ModelState](BaseController[ModelState, VARControllerConfig])
     def step(  # ----------------------------------------------------------------------------------
         self, state: VARRolloutState[ModelState], batch: Batch, *,
         allow_halt: bool = True, explore: bool = True, **_: Any,
-    ) -> tuple[VARRolloutState[ModelState], VAROutput]:  # fmt: skip
+    ) -> tuple[VARRolloutState[ModelState], VARStepOutput]:  # fmt: skip
         """Advance the controller by one variational step."""
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
@@ -122,5 +111,5 @@ class VARController[ModelState](BaseController[ModelState, VARControllerConfig])
 # =================================================================================================
 __all__ = [
     "LatentCode", "MAIN_LATENT_RELATION", 
-    "VARRolloutBackbone", "VARController", "VARControllerConfig", "VAROutput", "VARRolloutState",
+    "VARRolloutBackbone", "VARController", "VARControllerConfig", "VARStepOutput", "VARRolloutState",
 ]  # fmt: skip
