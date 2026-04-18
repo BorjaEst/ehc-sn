@@ -9,7 +9,7 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
-from ehc_sn.models.tem.core.tem_base import GridCodes, TEMPlaceCodes
+from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes
 from ehc_sn.models.tem.tem_v1 import TEMInputV1, TEMModelV1, TEMOutputV1, TEMStateV1
 from ehc_sn.modules.autoencoder import MLPDecoder, TwoHotEncoder
 from ehc_sn.tasks.navigation.contracts import NavigationTaskOutput
@@ -51,7 +51,7 @@ class NavigationTEMV1Diagnostics(DetachMixin):
 
     obs_logits: tuple[Tensor, Tensor, Tensor]
     grid_codes: GridCodes
-    place_codes: TEMPlaceCodes
+    place_codes: PlaceCodes
 
 
 # =============================================================================
