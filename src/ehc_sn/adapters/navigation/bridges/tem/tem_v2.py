@@ -219,7 +219,6 @@ def _build_encoder(  # --------------------------------------------------------
     config: NavigationTEMV2AdapterSettings,
 ) -> NavigationInputsEncoder:
     """Construct the observation encoder front-end for the v2 bridge."""
-    n_freq = len(model.config.hpc.shape)
     return NavigationInputsEncoder(
         observation_dim=config.observation_dim,
         feature_dim=model.config.lec.feature_dim,
@@ -257,25 +256,28 @@ def _select_code(  # ----------------------------------------------------------
     code: Tensor | Sequence[Tensor],
     single_freq: int | None,
 ) -> Tensor:
-    """Return a flat ``(B, D)`` tensor for decoder use.
+    """Return a ``(B, D)`` tensor for decoder use.
 
     When ``single_freq`` is an int, returns the single band at that index
-    (paper-fidelity single-scale decoder). When ``None``, concatenates all bands.
+    (paper-fidelity stream 1 / prediction_freq=0 decoder). When ``None``,
+    concatenates all bands.
+
+    Raises ``ValueError`` if ``single_freq`` is set but ``code`` is already a
+    flat ``Tensor``; band selection on a pre-concatenated tensor is ambiguous.
     """
     if isinstance(code, Tensor):
-        return code if single_freq is None else code  # scalar fallback
+        if single_freq is not None:
+            raise ValueError(
+                "single_scale decoder received a pre-concatenated flat Tensor; "
+                "expected a sequence of per-band tensors so that band "
+                f"prediction_freq={single_freq} can be selected unambiguously."
+            )
+        return code
     if len(code) == 0:
         raise ValueError("TEM latent code sequences must not be empty.")
     if single_freq is not None:
         return code[single_freq]
     return torch.cat(tuple(code), dim=1)
-
-
-def _flatten_tem_code(  #  ----------------------------------------------------
-    code: Tensor | Sequence[Tensor],
-) -> Tensor:
-    """Return a flat `(B, D)` view of one TEM latent code for decoder use."""
-    return _select_code(code, single_freq=None)
 
 
 # =============================================================================
