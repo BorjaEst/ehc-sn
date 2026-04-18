@@ -28,7 +28,7 @@ from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionBundle, ProjectionModule
-from ehc_sn.types import Batch, MemoryState
+from ehc_sn.types import MemoryState
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -165,9 +165,9 @@ class TEMModelV2(nn.Module):
         """Create an initial recurrent TEM state."""
         memory = memory if memory is not None else self.hpc.init_memory(batch_size, device=device)
         return TEMStateV2(
-            lec_state=self.lec.init_state(batch_size, device=device),
-            state_mec=self.mec.init_state(batch_size, device=device),
-            hpc_state=self.hpc.init_state(batch_size, device=device, memory=memory),
+            lec=self.lec.init_state(batch_size, device=device),
+            mec=self.mec.init_state(batch_size, device=device),
+            hpc=self.hpc.init_state(batch_size, device=device, memory=memory),
         )
 
     def reset_state(  # -------------------------------------------------------
@@ -198,15 +198,9 @@ class TEMModelV2(nn.Module):
 
     def forward(  # -----------------------------------------------------------
         self,
-        inputs: Batch,
+        inputs: TEMInputV2,
         state: Optional[TEMStateV2] = None,
     ) -> tuple[TEMOutputV2, TEMStateV2]:
-        """Run one TEM step from the current payload and recurrent state.
-
-        ``state`` is assumed to have already been reset for any fresh episode
-        rows by the caller. When ``state`` is ``None``, a fresh full-batch state
-        is allocated and the normal single-step TEM transition is executed.
-        """
         """Run one TEM step from the current payload and recurrent state.
 
         ``state`` is assumed to have already been reset for any fresh episode
@@ -274,10 +268,10 @@ class TEMModelV2(nn.Module):
         state.hpc = self.hpc.update(p_post, payload, state=state.hpc)
 
         # 9. Package controller-compatible latent outputs and return the new state.
-        grid_codes = (g_post, g_prior)
-        place_codes = (p_post, p_prior, p_sensory_read)
+        grid_codes = GridCodes(prior=g_prior, post=g_post)
+        place_codes = PlaceCodes(inference=p_post, ancestral=p_prior, retrieved=p_retrieved, sensory=p_sensory_read)
         return TEMOutputV2(grid_codes=grid_codes, place_codes=place_codes), state
 
 
 # =============================================================================
-__all__ = ["ModelSettingsV2", "TEMInputV2", "TEMOutputV2", "TEMStateV2", "TEMModelV2"]
+__all__ = ["ModelSettingsV2", "TEMInputV2", "TEMOutputV2", "PlaceCodes", "TEMStateV2", "TEMModelV2"]

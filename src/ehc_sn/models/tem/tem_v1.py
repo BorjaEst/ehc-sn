@@ -268,10 +268,10 @@ class TEMModelV1(nn.Module):
         state.hpc = self.hpc.update(p_post, payload, state=state.hpc)
 
         # 9. Package controller-compatible latent outputs and return the new state.
-        grid_codes = (g_post, g_prior)
-        place_codes = (p_post, p_prior, p_sensory_read)
+        grid_codes = GridCodes(prior=g_prior, post=g_post)
+        place_codes = PlaceCodes(inference=p_post, ancestral=p_prior, retrieved=p_retrieved, sensory=p_sensory_read)
         return TEMOutputV1(grid_codes=grid_codes, place_codes=place_codes), state
 
 
 # =============================================================================
-__all__ = ["ModelSettingsV1", "TEMInputV1", "TEMOutputV1", "TEMStateV1", "TEMModelV1"]
+__all__ = ["ModelSettingsV1", "TEMInputV1", "TEMOutputV1", "PlaceCodes", "TEMStateV1", "TEMModelV1"]
