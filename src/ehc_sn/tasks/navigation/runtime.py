@@ -250,12 +250,10 @@ def refresh_navigation_halted_slots(  # ---------------------------------------
     environment: TEMEnvironment,
 ) -> tuple[dict[str, Tensor], TensorDictBase, Tensor]:
     """Reset halted navigation slots from the next incoming static maze batch."""
-    if not torch.any(halted):
-        return static_data, env_td, visit_counts
-
     new_static = build_navigation_reset_td(batch)
     new_keys = frozenset(new_static.keys())
-    frozen_keys = frozenset(static_data.keys())
+    frozen_static = {key: static_data[key] for key in new_static.keys() if key in static_data}
+    frozen_keys = frozenset(frozen_static.keys())
     if new_keys != frozen_keys:
         added = sorted(new_keys - frozen_keys)
         removed = sorted(frozen_keys - new_keys)
@@ -265,8 +263,11 @@ def refresh_navigation_halted_slots(  # ---------------------------------------
         if removed:
             parts.append(f"missing previously present keys: {removed}")
         raise KeyError(f"Navigation partial-reset schema drift detected — {'; '.join(parts)}.")
+    if not torch.any(halted):
+        return frozen_static, env_td, visit_counts
+
     next_static = {
-        key: torch.where(halted.view((-1,) + (1,) * (value.ndim - 1)), value, static_data[key]) for key, value in new_static.items()
+        key: torch.where(halted.view((-1,) + (1,) * (value.ndim - 1)), value, frozen_static[key]) for key, value in new_static.items()
     }
     reset_td = TensorDict(next_static, batch_size=env_td.batch_size, device=env_td.device)
     next_env_td = environment.reset_slots(halted, reset_td, env_td)
