@@ -5,7 +5,7 @@ from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field, model_validator
-from torch import MemoryState, Tensor
+from torch import Tensor
 from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn

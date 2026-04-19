@@ -13,7 +13,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.modules.pfc import PFCModel, PFCOutput, PFCSettings, PFCState
+from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.pfc.workspace import FixedSlot, SlotFamily, WorkspaceLayout, WorkspaceSchema
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
 from ehc_sn.types import Batch

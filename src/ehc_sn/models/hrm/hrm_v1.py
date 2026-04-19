@@ -12,8 +12,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.modules.pfc import FixedSlot, PFCModel, PFCOutput, PFCSettings, PFCState, SlotFamily, WorkspaceLayout, WorkspaceSchema
-from ehc_sn.modules.pfc.workspace import FixedSlot, SlotFamily, WorkspaceLayout, WorkspaceSchema
+from ehc_sn.modules.pfc import FixedSlot, PFCModel, PFCSettings, PFCState, SlotFamily, WorkspaceLayout, WorkspaceSchema
 from ehc_sn.utils.detach import DetachMixin
 
 
