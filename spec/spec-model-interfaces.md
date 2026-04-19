@@ -30,7 +30,7 @@ Rules:
 The preferred model-native public step surface is:
 
 ```python
-def step(self, payload: ModelInput, state: ModelState) -> tuple[ModelState, ModelOutput]:
+def step(self, payload: ModelInput, state: ModelState) -> tuple[ModelOutput, ModelState]:
     ...
 ```
 
@@ -46,6 +46,8 @@ Rules:
   are not part of the model-native public API.
 - `init_state()` and `reset_state()` are part of the stable public surface when
   the model is recurrent.
+- Backbone `__call__` and bridge `forward` surfaces return `(output, next_state)`
+  — output first, state second. This is the canonical backbone seam ordering.
 
 ---
 
