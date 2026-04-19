@@ -1,4 +1,9 @@
-""" """
+"""Typed projection endpoints and edge builders.
+
+This module separates endpoint structure from projection behavior. A projection
+endpoint may be flat, multiscale, token-sequence shaped, or a workspace-shaped
+structured tensor bank.
+"""
 
 from __future__ import annotations
 
@@ -68,6 +73,11 @@ class TEMComponent(Protocol):
 
 
 # =================================================================================================
+class StructuredEndpointSpec(BaseModel, extra="forbid"):
+    """Base class for non-flat endpoints with internal structure."""
+
+
+# =================================================================================================
 class FlatEndpointSpec(BaseModel, extra="forbid"):
     """One flat feature-vector endpoint."""
 
@@ -75,23 +85,57 @@ class FlatEndpointSpec(BaseModel, extra="forbid"):
     width: int = Field(..., ge=1)
 
 
-class MultiScaleEndpointSpec(BaseModel, extra="forbid"):
+class MultiScaleEndpointSpec(StructuredEndpointSpec):
     """One multiscale endpoint exposing one width per band."""
 
     kind: Literal["multiscale"] = "multiscale"
     shape: list[int] = Field(..., min_length=1)
 
 
-class TokenSequenceEndpointSpec(BaseModel, extra="forbid"):
-    """One token-sequence endpoint with a fixed hidden width."""
+class TokenSequenceEndpointSpec(StructuredEndpointSpec):
+    """One homogeneous token-sequence endpoint with a fixed hidden width."""
 
     kind: Literal["token_sequence"] = "token_sequence"
     width: int = Field(..., ge=1)
     seq_len: Optional[int] = Field(default=None, ge=1)
 
 
+class WorkspaceFamilySpec(BaseModel, extra="forbid"):
+    """One named repeated family within a workspace-shaped endpoint."""
+
+    name: str = Field(..., min_length=1)
+    size: int = Field(..., ge=1)
+
+
+class WorkspaceEndpointSpec(StructuredEndpointSpec):
+    """One workspace-shaped endpoint with fixed slots and repeated families.
+
+    Unlike :class:`TokenSequenceEndpointSpec`, a workspace endpoint preserves
+    structural meaning for named fixed roles and exchangeable slot families.
+    """
+
+    kind: Literal["workspace"] = "workspace"
+    width: int = Field(..., ge=1)
+    fixed: tuple[str, ...] = Field(default_factory=tuple)
+    families: tuple[WorkspaceFamilySpec, ...] = Field(default_factory=tuple)
+
+    @model_validator(mode="after")
+    def validate_workspace(self) -> "WorkspaceEndpointSpec":
+        names = [*self.fixed, *(family.name for family in self.families)]
+        if any(not name for name in self.fixed):
+            raise ValueError("workspace fixed-slot names must be non-empty.")
+        if len(set(names)) != len(names):
+            raise ValueError(f"workspace endpoint names must be unique, got {names!r}.")
+        return self
+
+    @property
+    def size(self) -> int:
+        """Total slot count: len(fixed) + sum(family sizes)."""
+        return len(self.fixed) + sum(family.size for family in self.families)
+
+
 ProjectionEndpointSpec: TypeAlias = Annotated[
-    FlatEndpointSpec | MultiScaleEndpointSpec | TokenSequenceEndpointSpec,
+    FlatEndpointSpec | MultiScaleEndpointSpec | TokenSequenceEndpointSpec | WorkspaceEndpointSpec,
     Field(discriminator="kind"),
 ]
 ProjectionEndpointValue: TypeAlias = TEMComponent | Sequence[int] | ProjectionEndpointSpec
@@ -112,6 +156,24 @@ def multiscale_endpoint(component_or_shape: TEMComponent | Sequence[int]) -> Mul
 def token_sequence_endpoint(width: int, *, seq_len: Optional[int] = None) -> TokenSequenceEndpointSpec:
     """Return a typed token-sequence endpoint descriptor."""
     return TokenSequenceEndpointSpec(width=int(width), seq_len=seq_len)
+
+
+def workspace_endpoint(
+    width: int,
+    *,
+    fixed: Sequence[str] = (),
+    families: Mapping[str, int] | Sequence[tuple[str, int]] = (),
+) -> WorkspaceEndpointSpec:
+    """Return a typed workspace endpoint descriptor."""
+    if isinstance(families, Mapping):
+        family_items = families.items()
+    else:
+        family_items = families
+    return WorkspaceEndpointSpec(
+        width=int(width),
+        fixed=tuple(str(name) for name in fixed),
+        families=tuple(WorkspaceFamilySpec(name=str(name), size=int(size)) for name, size in family_items),
+    )
 
 
 # =================================================================================================
@@ -634,7 +696,7 @@ def _coerce_shape(component_or_shape: TEMComponent | Sequence[int]) -> list[int]
 
 def _coerce_endpoint_spec(value: ProjectionEndpointValue) -> ProjectionEndpointSpec:
     """Normalize one endpoint value into an explicit endpoint spec."""
-    if isinstance(value, (FlatEndpointSpec, MultiScaleEndpointSpec, TokenSequenceEndpointSpec)):
+    if isinstance(value, (FlatEndpointSpec, MultiScaleEndpointSpec, TokenSequenceEndpointSpec, WorkspaceEndpointSpec)):
         return value
     return multiscale_endpoint(value)
 
@@ -674,6 +736,11 @@ def _resolve_bridge(
     """Resolve the bridge used to reconcile one source-target endpoint pair."""
     if override != "auto":
         return override
+    if source.kind == "workspace" or target.kind == "workspace":
+        raise ValueError(
+            "workspace endpoints are structural descriptors only; no automatic bridge is defined yet. "
+            "Use explicit role-specific projectors or token_sequence endpoints."
+        )
     if source.kind == target.kind and source.kind in {"flat", "multiscale", "token_sequence"}:
         return "aligned"
     if source.kind == "flat" and target.kind == "multiscale":
@@ -710,10 +777,14 @@ __all__ = [
     "ProjectionEndpointSpec",
     "ProjectionModule",
     "ProjectionSettings",
+    "StructuredEndpointSpec",
     "TEMComponent",
     "TokenSequenceEndpointSpec",
+    "WorkspaceEndpointSpec",
+    "WorkspaceFamilySpec",
     "build_projection_edge",
     "flat_endpoint",
     "multiscale_endpoint",
     "token_sequence_endpoint",
+    "workspace_endpoint",
 ]
