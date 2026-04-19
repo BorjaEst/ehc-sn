@@ -26,8 +26,8 @@ The repository separates three things that are easy to conflate.
 
 | Layer                    | What it owns                                | Current surface                      |
 | ------------------------ | ------------------------------------------- | ------------------------------------ |
-| Slot layout              | Concrete slot names and order               | `WorkspaceSpec`                      |
-| Named slot bank          | One instantiated bank of slot vectors       | `NamedWorkspace`                     |
+| Slot layout              | Concrete slot names and order               | `WorkspaceSchema`, `WorkspaceLayout` |
+| Named slot bank          | One instantiated bank of slot vectors       | `Workspace`                          |
 | Recurrent working memory | Fast and slow latent dynamics               | `WorkingMemory` over $z_H$ and $z_L$ |
 | Public semantic state    | Named workspace, summary, and scratch carry | `PFCState`                           |
 
@@ -36,45 +36,22 @@ working-memory dynamics. It defines the addressing scheme over the slot bank.
 
 ### What The Workspace Layer Really Means
 
-`WorkspaceSpec` is a flat ordered list of concrete slot names. It is best read
-as a compiled layout, not as a complete ontology.
+`WorkspaceSchema` declares fixed slots and named families; `WorkspaceLayout`
+compiles those declarations into slot offsets. Together they form the addressing
+scheme over the slot bank.
 
-For example, a conceptual family such as $\mathrm{schema}[n]$ is currently compiled into
-concrete names like `schema_0`, `schema_1`, and `schema_2`. That is practical,
-but it means slot families are represented by naming convention rather than a
-first-class type.
-
-This is why the current abstraction can feel slightly weak:
-
-- every slot must have a concrete unique name;
-- groups are implicit in prefixes such as `schema_`;
-- exchangeability is not represented directly in the type system.
-
-That does not make the module wrong. It means the current workspace layer is a
-layout contract, not a full theory of slot families.
-
-`NamedWorkspace` then pairs that layout with a tensor of shape `(B, S, D)`.
-The tensor holds slot values; the spec tells the rest of the system how to read
-those values by role.
+A family such as $\mathrm{schema}[n]$ is now a first-class `SlotFamily` object
+rather than a naming convention, so slot groups are directly addressable via
+`workspace.family("schema")` without relying on name prefixes.
 
 ### Prefix Slots Versus Body Slots
 
 The current implementation also separates the controller-like prefix slot from
 the body slots.
 
-The public named workspace corresponds to the body of the slot bank, while the
-full public working memory is reconstructed later by prepending the summary or
-controller slot inside `PFCState.working_memory(...)`.
-
-This matters for interpretation:
-
-- the named workspace is not the entire recurrent state;
-- it is the role-addressable body of that state;
-- the summary or controller token is handled separately.
-
-`workspace_from_prefixed_tokens(...)` should be read with that in mind. It does
-not infer rich semantics. It slices a prefix-plus-body sequence, discards the
-prefix block, and attaches the declared slot names to the remaining body.
+The public named workspace (`PFCState.workspace`) is the full z_H surface and
+includes both the controller slot at position 0 and all caller-declared body
+slots after it. There is no separate reconstruction step.
 
 ### Mathematical View Of The Current PFC
 
