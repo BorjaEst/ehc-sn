@@ -13,7 +13,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState, WorkspaceSpec
+from ehc_sn.modules.pfc import FixedSlot, PFCModel, PFCSettings, PFCState, SlotFamily, WorkspaceLayout, WorkspaceSchema
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
@@ -47,11 +47,6 @@ class ModelSettingsV2(BaseModel, extra="forbid"):
         ...,
         description="Settings for the STR actor-critic architecture.",
     )
-    schema_slot_prefix: str = Field(
-        default="schema",
-        min_length=1,
-        description="Prefix used for the internal schema-slot ontology.",
-    )
 
     @property
     def num_schema_slots(self) -> int:
@@ -59,14 +54,19 @@ class ModelSettingsV2(BaseModel, extra="forbid"):
         return self.pfc.seq_length
 
     @property
-    def schema_slot_names(self) -> tuple[str, ...]:
-        """Return the canonical schema-slot names for the recurrent substrate."""
-        return tuple(f"{self.schema_slot_prefix}_{index}" for index in range(self.num_schema_slots))
+    def schema_layout(self) -> WorkspaceLayout:
+        """Return the body-only schema layout (no controller) for use with :meth:`WorkspaceLayout.bind`."""
+        return WorkspaceLayout.from_schema(WorkspaceSchema(fixed=(), families=(SlotFamily("schema", self.num_schema_slots),)))
 
     @property
-    def workspace_spec(self) -> WorkspaceSpec:
-        """Return the schema-only workspace layout consumed by the core."""
-        return WorkspaceSpec(names=self.schema_slot_names)
+    def workspace_layout(self) -> WorkspaceLayout:
+        """Return the full workspace layout (controller at position 0 + schema family) for :meth:`~ehc_sn.modules.pfc.PFCModel.init_state`."""
+        return WorkspaceLayout.from_schema(
+            WorkspaceSchema(
+                fixed=(FixedSlot("controller"),),
+                families=(SlotFamily("schema", self.num_schema_slots),),
+            )
+        )
 
 
 # =================================================================================================
@@ -152,7 +152,7 @@ class HRModelV2(nn.Module):
     ) -> HRMStateV2:
         """Allocate a fresh recurrent state for the given batch size."""
         return HRMStateV2(
-            pfc=self.pfc.init_state(batch_size, self.config.workspace_spec),
+            pfc=self.pfc.init_state(batch_size, workspace_layout=self.config.workspace_layout),
             str=self.str.init_state(batch_size),
         )
 
@@ -171,7 +171,7 @@ class HRModelV2(nn.Module):
         self,
         payload: HRMInputV2,
         state: Optional[HRMStateV2] = None,
-    ) -> tuple[HRMStateV2, HRMOutputV2]:
+    ) -> tuple[HRMOutputV2, HRMStateV2]:
         """Run one model step over task-agnostic schema tokens.
 
         Args:
@@ -183,38 +183,39 @@ class HRModelV2(nn.Module):
             ``(next_state, output)`` where ``output`` exposes controller-facing
             architecture-native readouts for the current step.
         """
-
         if state is None:
-            state = self.init_state(batch_size=int(payload.schema_tokens.shape[0]))
+            state = self.init_state(payload.batch_size)
         else:
-            state = state.clone()
+            state = state.detach()
 
-        # TODO: fix to `next_state.pfc, ... = self.pfc(..., state=state)`
-        pfc_output = self.pfc.step_tokens(
-            payload.schema_tokens,
+        # Step the PFC core with the schema tokens bound to the workspace layout
+        state.pfc, q_values = self.pfc.step(
+            self.config.schema_layout.bind(payload.schema_tokens),
             state=state.pfc,
-            workspace_spec=self.config.workspace_spec,
             prefix_bias=payload.prefix_bias,
         )
-        state.pfc = pfc_output.state
-        state.str, state_value = self.str(
-            pfc_output.summary.detach(),
-            pfc_output.q_values,
+
+        # Step the STR actor-critic module with the PFC summary and Q values as input
+        state.str, state_values = self.str(
+            state.pfc.workspace.slot("controller"),
+            q_values,
             state=state.str,
         )
+
+        # Extract architecture-native readouts for the current step
         output = HRMOutputV2(
-            theta_summary=pfc_output.summary,
-            schema_slots=pfc_output.workspace.tokens,
-            q_logits=pfc_output.q_values,
+            theta_summary=state.pfc.workspace.slot("controller"),
+            schema_slots=state.pfc.workspace.family("schema"),
+            q_logits=q_values
             state_value=state_value.unsqueeze(-1),
         )
-        return state, output
+        return output, state
 
     def forward(  # -------------------------------------------------------------------------------
         self,
         payload: HRMInputV2,
         state: Optional[HRMStateV2] = None,
-    ) -> tuple[HRMStateV2, HRMOutputV2]:
+    ) -> tuple[HRMOutputV2, HRMStateV2]:
         """Compatibility wrapper over :meth:`step` for module-call users."""
         return self.step(payload, state=state)
 
