@@ -206,7 +206,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, backbone_output = self.backbone(data, model_state)
+        backbone_output, model_state = self.backbone(data, model_state)
 
         steps = self.advance_steps(state)
         action, done, env_td = self._select_action_and_done(backbone_output, steps, data, state.env_td, allow_halt, explore)  # fmt: skip

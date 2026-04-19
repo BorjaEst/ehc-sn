@@ -191,7 +191,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         _ = options
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, backbone_output = self.backbone(data, model_state)
+        backbone_output, model_state = self.backbone(data, model_state)
 
         steps = self.advance_steps(state)
         done = self._compute_done(backbone_output, steps, allow_halt=allow_halt, explore=explore)

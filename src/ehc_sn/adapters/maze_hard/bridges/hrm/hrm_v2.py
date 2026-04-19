@@ -261,12 +261,12 @@ class MazeHardHRMV2BridgeAdapter(nn.Module):
         self,
         batch: Batch,
         state: HRMStateV2 | None = None,
-    ) -> tuple[HRMStateV2, MazeHardHRMV2BridgeOutput]:
+    ) -> tuple[MazeHardHRMV2BridgeOutput, HRMStateV2]:
         """Run a forward pass of the HRM v2 bridge adapter on a MazeHard task batch."""
         inputs = self.prepare_inputs(batch)
-        next_state, outputs = self.model(inputs, state=state)
+        outputs, next_state = self.model(inputs, state=state)
         outputs = self.prepare_outputs(outputs)
-        return next_state, outputs
+        return outputs, next_state
 
 
 # =============================================================================
