@@ -99,7 +99,7 @@ class VARController[ModelState](BaseController[ModelState, VARControllerConfig])
         """Advance the controller by one variational step."""
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, outputs = self.backbone(data, model_state)
+        outputs, model_state = self.backbone(data, model_state)
 
         steps = self.advance_steps(state)
         done = steps >= self.config.max_steps

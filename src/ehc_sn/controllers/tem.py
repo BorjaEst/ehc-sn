@@ -104,7 +104,7 @@ class TEMRolloutBackbone[ModelState](RolloutBackbone[ModelState, _TEMBridgeOutpu
         self,
         batch: Batch,
         state: ModelState | None = None,
-    ) -> tuple[ModelState, _TEMBridgeOutputProtocol]: ...
+    ) -> tuple[_TEMBridgeOutputProtocol, ModelState]: ...
 
 
 # =================================================================================================
@@ -337,7 +337,7 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         static_data, env_td, visit_counts = self._refresh_halted_slots(batch, state)
         current_data = self._annotate_revisit_state(self._extract_step_data(env_td), env_td, visit_counts)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        model_state, bridge_output = self.backbone(current_data, model_state)
+        bridge_output, model_state = self.backbone(current_data, model_state)
 
         latent_relations = self._coerce_latent(bridge_output)
         reg_terms = self._coerce_regularization(bridge_output)

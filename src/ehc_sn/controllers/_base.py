@@ -42,7 +42,7 @@ class RolloutBackbone[ModelState, ModelOutput](Protocol):
 
     def __call__(  # ------------------------------------------------------------------------------
         self, batch: Batch, state: ModelState | None = None,
-    ) -> tuple[ModelState, ModelOutput]:  # fmt: skip
+    ) -> tuple[ModelOutput, ModelState]:  # fmt: skip
         ...  # fmt: skip
 
 
@@ -98,7 +98,8 @@ class BaseController[ModelState, ConfigT: BaseModel]:
 
     1. Call ``self.refresh_slot_data(batch, state)`` to overwrite halted slots.
     2. Call ``self.backbone.reset_state(state.halted, state.model_state)``.
-    3. Call ``self.backbone(data, model_state)`` for the forward pass.
+    3. Call ``self.backbone(data, model_state)`` for the forward pass; it returns
+       ``(output, model_state)`` — output first, state second.
     4. Call ``self.advance_steps(state)`` to update per-slot counters.
     5. Call ``self._select_action_and_done(...)`` — the single algorithm hook;
        it must return at minimum ``(action: Tensor, done: Tensor[bool])``;

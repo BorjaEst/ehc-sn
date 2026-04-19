@@ -168,7 +168,7 @@ class HRModelV1(nn.Module):
             state: Optional recurrent carry from the previous step.
 
         Returns:
-            ``(next_state, output)`` where ``next_state`` owns the recurrent slot
+            ``(output, next_state)`` where ``next_state`` owns the recurrent slot
             substrate and ``output`` exposes the architecture-native readouts for
             the current step.
         """

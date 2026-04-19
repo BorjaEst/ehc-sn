@@ -288,12 +288,12 @@ class NavigationTEMV2BridgeAdapter(nn.Module):
         self,
         batch: Batch,
         state: TEMStateV2 | None = None,
-    ) -> tuple[TEMStateV2, NavigationTEMV2BridgeOutput]:
+    ) -> tuple[NavigationTEMV2BridgeOutput, TEMStateV2]:
         """Run a forward pass of the TEM v2 bridge adapter on a Navigation task batch."""
         inputs = self.prepare_inputs(batch)
         model_output, next_state = self.model(inputs, state=state)
         bridge_output = self.prepare_outputs(model_output)
-        return next_state, bridge_output
+        return bridge_output, next_state
 
 
 # =============================================================================

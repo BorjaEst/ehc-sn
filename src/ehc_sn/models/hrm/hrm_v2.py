@@ -106,8 +106,8 @@ class HRModelV2(nn.Module):
         - STR actor-critic module consuming the CLS summary and PFC Q logits
 
     The forward pass returns:
-        - updated recurrent state
         - architecture-native output bundle with schema slots, policy logits, and value
+        - updated recurrent state
     """
 
     def __init__(  # ----------------------------------------------------------
@@ -169,7 +169,7 @@ class HRModelV2(nn.Module):
                 fresh state is created.
 
         Returns:
-            ``(next_state, output)`` where ``output`` exposes controller-facing
+            ``(output, next_state)`` where ``output`` exposes controller-facing
             architecture-native readouts for the current step.
         """
         if state is None:
