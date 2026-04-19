@@ -19,7 +19,7 @@ from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
 
-# =================================================================================================
+# =============================================================================
 class ModelSettingsV2(BaseModel, extra="forbid"):
     """Model-level settings for HRM v2.
 
@@ -39,14 +39,8 @@ class ModelSettingsV2(BaseModel, extra="forbid"):
         config_map = tomllib.load(Path(path).open("rb"))
         return cls.model_validate(config_map)
 
-    pfc: PFCSettings = Field(
-        ...,
-        description="Settings for the core PFC model architecture.",
-    )
-    str: STRSettings = Field(
-        ...,
-        description="Settings for the STR actor-critic architecture.",
-    )
+    pfc: PFCSettings = Field(..., description="Settings for the core PFC model architecture.")
+    str: STRSettings = Field(..., description="Settings for the STR actor-critic architecture.")
 
     @property
     def num_schema_slots(self) -> int:
@@ -55,12 +49,12 @@ class ModelSettingsV2(BaseModel, extra="forbid"):
 
     @property
     def schema_layout(self) -> WorkspaceLayout:
-        """Return the body-only schema layout (no controller) for use with :meth:`WorkspaceLayout.bind`."""
+        """Return the body-only schema layout."""
         return WorkspaceLayout.from_schema(WorkspaceSchema(fixed=(), families=(SlotFamily("schema", self.num_schema_slots),)))
 
     @property
     def workspace_layout(self) -> WorkspaceLayout:
-        """Return the full workspace layout (controller at position 0 + schema family) for :meth:`~ehc_sn.modules.pfc.PFCModel.init_state`."""
+        """Return the full workspace layout."""
         return WorkspaceLayout.from_schema(
             WorkspaceSchema(
                 fixed=(FixedSlot("controller"),),
@@ -69,7 +63,7 @@ class ModelSettingsV2(BaseModel, extra="forbid"):
         )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class HRMInputV2:
     """Task-agnostic schema payload consumed by the HRM v2 core."""
@@ -78,21 +72,16 @@ class HRMInputV2:
     prefix_bias: Tensor | None = None
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
 class HRMStateV2(DetachMixin):
-    """Recurrent state carried across steps for HRM v2.
+    """Recurrent state carried across steps for HRM v2."""
 
-    Attributes:
-        pfc: PFC recurrent state.
-        str: STR recurrent state.
-    """
-
-    pfc: PFCState  # Prefrontal Cortex state, containing working memory and reasoning module states.
-    str: STRState  # STR actor-critic state, containing any recurrent state for the STR module (if needed).
+    pfc: PFCState  # Prefrontal Cortex state
+    str: STRState  # STR actor-critic state
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class HRMOutputV2:
     """Architecture-native HRM v2 output."""
@@ -108,7 +97,7 @@ class HRMOutputV2:
         return self.state_value
 
 
-# =================================================================================================
+# =============================================================================
 class HRModelV2(nn.Module):
     """Core HRM v2 model.
 
@@ -121,7 +110,7 @@ class HRModelV2(nn.Module):
         - architecture-native output bundle with schema slots, policy logits, and value
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
+    def __init__(  # ----------------------------------------------------------
         self,
         config: ModelSettingsV2,
         *,
@@ -139,14 +128,14 @@ class HRModelV2(nn.Module):
         """Return the parsed model settings used to build this module."""
         return self._config
 
-    def reset_parameters(  # ----------------------------------------------------------------------
+    def reset_parameters(  # --------------------------------------------------
         self,
     ) -> None:
         """Reset all learnable parameters owned by the core."""
         self.pfc.reset_parameters()
-        self.str.reset_parameters()
+        # self.str.reset_parameters()
 
-    def init_state(  # ---------------------------------------------------------------------------
+    def init_state(  # --------------------------------------------------------
         self,
         batch_size: int,
     ) -> HRMStateV2:
@@ -156,7 +145,7 @@ class HRModelV2(nn.Module):
             str=self.str.init_state(batch_size),
         )
 
-    def reset_state(  # --------------------------------------------------------------------------
+    def reset_state(  # -------------------------------------------------------
         self,
         reset_flag: Tensor,
         state: HRMStateV2,
@@ -167,7 +156,7 @@ class HRModelV2(nn.Module):
             str=self.str.reset_state(state.str, reset_flag),
         )
 
-    def step(  # ----------------------------------------------------------------------------------
+    def step(  # --------------------------------------------------------------
         self,
         payload: HRMInputV2,
         state: Optional[HRMStateV2] = None,
@@ -211,7 +200,7 @@ class HRModelV2(nn.Module):
         )
         return output, state
 
-    def forward(  # -------------------------------------------------------------------------------
+    def forward(  # -----------------------------------------------------------
         self,
         payload: HRMInputV2,
         state: Optional[HRMStateV2] = None,
@@ -220,5 +209,5 @@ class HRModelV2(nn.Module):
         return self.step(payload, state=state)
 
 
-# =================================================================================================
-__all__ = ["Batch", "HRMInputV2", "HRMOutputV2", "HRMStateV2", "HRModelV2", "ModelSettingsV2"]
+# =============================================================================
+__all__ = ["ModelSettingsV2", "HRMInputV2", "HRMOutputV2", "HRMStateV2", "HRModelV2"]
