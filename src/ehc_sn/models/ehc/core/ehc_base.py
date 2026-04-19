@@ -23,15 +23,16 @@ FAMILY_CONTENT: str = "content"
 
 # ===========================================================================
 class EHCProjectionSettingsV2(BaseModel, extra="forbid", strict=False):
-    """Inter-region multiscale projection settings for EHC v2.
+    """Inter-region projection settings for EHC v2.
 
-    Only the LEC→HPC and MEC→HPC edges are expressed here because both are
-    multiscale-to-multiscale and fit the shared ``ProjectionBundle`` contract.
+    ``lec_to_hpc`` and ``mec_to_hpc`` are multiscale-to-multiscale edges.
+    ``pfc_to_hpc`` is a flat-to-multiscale broadcast edge that maps the
+    previous-step public PFC summary into the hippocampal contextual cue
+    family ``c``.
 
-    The PFC↔HPC flat projectors (pfc_to_hpc_c and hpc_to_pfc_*) are
-    constructed directly in ``EHCModelV2.__init__`` as plain ``nn.Linear``
-    modules; they do not belong here because the projection framework only
-    understands aligned multiscale endpoints.
+    The reverse HPC→PFC slot projectors remain direct ``nn.Linear`` surfaces
+    in ``EHCModelV2`` because they are role-specific interface heads rather
+    than generic inter-region edges.
     """
 
     lec_to_hpc: ProjectionSettings = Field(
@@ -43,7 +44,8 @@ class EHCProjectionSettingsV2(BaseModel, extra="forbid", strict=False):
         description="Projection settings mapping MEC codes into hippocampal query space.",
     )
     pfc_to_hpc: ProjectionSettings = Field(
-        ...,  # TODO: complete
+        default_factory=lambda: ProjectionSettings(mode="linear", bridge="broadcast", init="random", learnable=True),
+        description="Projection settings mapping the previous PFC summary into the hippocampal c-cue family.",
     )
 
 

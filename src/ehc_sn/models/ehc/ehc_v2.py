@@ -15,8 +15,8 @@ Bank-c semantics:
     shares the hippocampal write key with the default bank.  Three variables
     make the routing explicit:
 
-    - ``c_prop``: cortical cue proposal — previous-step PFC summary projected
-      to HPC flat space via ``pfc_to_hpc_c``, then unflattened.
+        - ``c_prop``: cortical cue proposal — previous-step PFC summary projected
+            into the hippocampal multi-frequency cue family via ``pfc_to_hpc``.
     - ``c_mem``:  reinstated contextual evidence from bank ``c`` (deferred in
       V2; set to ``None``).
     - ``c_use``:  the routed cue used for replay bias and bank-c writes.
@@ -50,9 +50,9 @@ from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState, Wri
 from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues, TargetRead
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
-from ehc_sn.modules.pfc import PFCModel, PFCOutput, PFCSettings, PFCState
+from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.pfc.workspace import FixedSlot, SlotFamily, WorkspaceLayout, WorkspaceSchema
-from ehc_sn.modules.projection import ProjectionBundle, ProjectionModule
+from ehc_sn.modules.projection import ProjectionBundle, ProjectionModule, flat_endpoint
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
 from ehc_sn.types import MemoryState, MultiScaleCode
 from ehc_sn.utils.detach import DetachMixin
@@ -269,8 +269,9 @@ class EHCModelV2(nn.Module):
     Projections registered as ``nn.Module`` children:
         Multiscale (ProjectionBundle):
             ``lec_to_hpc``, ``mec_to_hpc`` - aligned band-by-band projections.
+        Broadcast flat->multiscale (ProjectionBundle):
+            ``pfc_to_hpc``        PFC hidden -> HPC cue family ``c``.
         Flat (nn.Linear, EHC-local):
-            ``pfc_to_hpc_c``      PFC hidden -> HPC flat  (c_prop edge, V2 cue).
             ``hpc_to_pfc_state``  HPC flat   -> PFC hidden (state interface slot).
             ``hpc_to_pfc_replay`` HPC flat   -> PFC hidden (replay interface slot).
             ``hpc_to_pfc_cue``    HPC flat   -> PFC hidden (cue interface slot).
@@ -298,18 +299,15 @@ class EHCModelV2(nn.Module):
         self.lec = LECModel(config.f_initial, config.lec, device=device, dtype=dtype)
 
         # ---- Multiscale projections (LEC->HPC, MEC->HPC) -------------------
-        # These are aligned band-by-band projections compatible with ProjectionBundle.
-        # PFC is NOT included here because it exposes a flat summary, not a multiscale code.
+        # LEC/MEC expose aligned multiscale codes and PFC exposes a flat public
+        # summary; the bundle normalizes each edge to the appropriate bridge.
         self.projections = ProjectionBundle.from_modules(
             lec_to_hpc=(self.lec, self.hpc, config.projections.lec_to_hpc),
             mec_to_hpc=(self.mec, self.hpc, config.projections.mec_to_hpc),
+            pfc_to_hpc=(flat_endpoint(hidden_size), self.hpc, config.projections.pfc_to_hpc),
         )
 
-        # ---- Flat projectors: PFC <-> HPC interface ------------------------
-        # pfc_to_hpc_c: previous-step PFC summary -> HPC flat space.
-        #   Produces c_prop (the V2 cortical cue proposal).
-        self.pfc_to_hpc_c = nn.Linear(hidden_size, hpc_flat, bias=False, device=device, dtype=dtype)
-
+        # ---- Flat projectors: HPC -> PFC interface -------------------------
         # hpc_to_pfc_{state,replay,cue}: HPC flat -> PFC hidden.
         #   Three separate projectors for the three fixed body interface slots.
         #   Distinct learned surfaces preserve role-specific representations.
@@ -334,11 +332,15 @@ class EHCModelV2(nn.Module):
         """LEC-to-HPC projection edge."""
         return cast(ProjectionModule, self.projections["lec_to_hpc"])
 
+    @property
+    def pfc_to_hpc(self) -> nn.Module:
+        """PFC-summary-to-HPC contextual cue projection edge."""
+        return self.projections["pfc_to_hpc"]
+
     def reset_parameters(self) -> None:
         """Reset all projection parameters owned directly by EHC."""
         self.projections.reset_parameters()
         for lin in (
-            self.pfc_to_hpc_c,
             self.hpc_to_pfc_state,
             self.hpc_to_pfc_replay,
             self.hpc_to_pfc_cue,
@@ -410,17 +412,6 @@ class EHCModelV2(nn.Module):
         self.mec.set_runtime(p2g_uncertainty_offset=p2g_uncertainty_offset)
         self.hpc.set_runtime(eta=eta, hebbian_decay=hebbian_decay)
 
-    def _unflatten_hpc(self, flat: Tensor) -> list[Tensor]:
-        """Split a flat ``(B, hpc_flat_dim)`` tensor into a per-band multiscale list.
-
-        Args:
-            flat: Tensor of shape ``(B, sum(hpc.shape))``.
-
-        Returns:
-            List of ``n_freq`` tensors each of shape ``(B, hpc.shape[f])``.
-        """
-        return list(torch.split(flat, list(self.config.hpc.shape), dim=1))
-
     def forward(  # --------------------------------------------------------------
         self,
         inputs: EHCInputV2,
@@ -463,13 +454,11 @@ class EHCModelV2(nn.Module):
             state = state.detach()
 
         # --- V2 cue: previous-step PFC summary (before this step's PFC run) --
-        # c_prop: project previous-step PFC summary into HPC flat space and
-        #         split into a per-band multiscale list.
+        # c_prop: project previous-step PFC summary into the hippocampal multi-frequency cue family.
         # c_mem:  reinstated contextual evidence from bank c — deferred in V2.
         # c_use:  routed cue for replay bias and bank-c writes; equals c_prop in V2.
         prev_pfc_summary: Tensor = state.pfc.summary  # (B, D)
-        c_prop_flat: Tensor = self.pfc_to_hpc_c(prev_pfc_summary)  # (B, hpc_flat)
-        c_prop: list[Tensor] = self._unflatten_hpc(c_prop_flat)
+        c_prop: list[Tensor] = cast(list[Tensor], self.pfc_to_hpc(prev_pfc_summary))
         c_mem: Optional[list[Tensor]] = None  # deferred: bank-c reinstatement not implemented
         c_use: list[Tensor] = c_prop  # V2: use cortical cue proposal directly
 
