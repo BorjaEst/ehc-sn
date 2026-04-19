@@ -196,7 +196,7 @@ class HRModelV2(nn.Module):
         )
 
         # Step the STR actor-critic module with the PFC summary and Q values as input
-        state.str, state_values = self.str(
+        state.str, state_value = self.str(
             state.pfc.workspace.slot("controller"),
             q_values,
             state=state.str,
@@ -206,7 +206,7 @@ class HRModelV2(nn.Module):
         output = HRMOutputV2(
             theta_summary=state.pfc.workspace.slot("controller"),
             schema_slots=state.pfc.workspace.family("schema"),
-            q_logits=q_values
+            q_logits=q_values,
             state_value=state_value.unsqueeze(-1),
         )
         return output, state
