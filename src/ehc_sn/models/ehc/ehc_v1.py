@@ -15,7 +15,8 @@ from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState, Wri
 from ehc_sn.modules.hpc.query_policy import ReadCues, TargetRead
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
-from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
+from ehc_sn.modules.pfc import PFCModel, PFCOutput, PFCSettings, PFCState
+from ehc_sn.modules.pfc.workspace import FixedSlot, SlotFamily, WorkspaceLayout, WorkspaceSchema
 from ehc_sn.modules.projection import ProjectionBundle, ProjectionSettings
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
 from ehc_sn.types import MultiScaleCode
@@ -224,7 +225,7 @@ class EHCModelV1(nn.Module):
             state = ...  # TODO: state.clone(device=inputs.device)
 
         # 1. Unpack working memory and episodic memory for ease of use in the step.
-        theta_cls = state.pfc.memory.z_H[:, 0]  # [B, D] summary token from PFC memory for cue proposal
+        theta_cls = state.pfc.summary  # [B, D] summary token from the PFC public state
         c_query = self.projections.pfc_to_hpc(theta_cls)
 
         # 2. Pure TEM sensory loop.
@@ -260,18 +261,21 @@ class EHCModelV1(nn.Module):
 
         # 4. Build the explicit 3-slot workspace and run PFC reasoning.
         workspace = self.workspace(inputs, p_post, p_replay_read)
-        state.pfc, z_H, control_logits = self.pfc(workspace.tokens, state.pfc)
+        pfc_out, state.pfc = self.pfc.step(workspace, state.pfc)
 
         # 5. Commit the HPC write and build the content bank.
         payload = WritePayload(generative=p_replay_read, inference=p_sensory_read)
         state.hpc = self.hpc.update(p_post, payload, state.hpc)
-        bank_tokens = self.content_bank(z_H=z_H, p_post=p_post, p_replay_read=p_replay_read)
+
+        # 6. Run the STR over the PFC summary and HPC query read for control outputs.
+        state.str, state_value = self.str(
+            features=pfc_out.summary,
+            q_values=pfc_out.q_values,
+            state=state.str,
+        )
 
         output = EHCOutputV1(
-            control=EHCControlV1(theta_summary=z_H[:, 0], control_logits=control_logits),
-            content=EHCContentV1(bank_tokens=bank_tokens),
-            g_codes=GridCodesV1(post=g_post, prior=g_prior),
-            p_codes=PlaceCodesV1(post=p_post, prior=p_prior_read, sensory=p_sensory_read, replay=p_replay_read),
+            ...,
         )
         return output, state
 

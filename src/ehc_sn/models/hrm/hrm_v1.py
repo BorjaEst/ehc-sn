@@ -12,7 +12,8 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.modules.pfc import FixedSlot, PFCModel, PFCSettings, PFCState, SlotFamily, WorkspaceLayout, WorkspaceSchema
+from ehc_sn.modules.pfc import FixedSlot, PFCModel, PFCOutput, PFCSettings, PFCState, SlotFamily, WorkspaceLayout, WorkspaceSchema
+from ehc_sn.modules.pfc.workspace import FixedSlot, SlotFamily, WorkspaceLayout, WorkspaceSchema
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -178,7 +179,7 @@ class HRModelV1(nn.Module):
             state = state.detach()
 
         # Step the PFC core with the schema tokens bound to the workspace layout
-        state.pfc, q_values = self.pfc.step(
+        pfc_out, state.pfc = self.pfc.step(
             self.config.schema_layout.bind(payload.schema_tokens),
             state=state.pfc,
             prefix_bias=payload.prefix_bias,
@@ -186,9 +187,9 @@ class HRModelV1(nn.Module):
 
         # Extract architecture-native readouts for the current step
         output = HRMOutputV1(
-            theta_summary=state.pfc.workspace.slot("controller"),
-            schema_slots=state.pfc.workspace.family("schema"),
-            q_logits=q_values,
+            theta_summary=pfc_out.summary,
+            schema_slots=pfc_out.workspace.family("schema"),
+            q_logits=pfc_out.q_values,
         )
 
         return output, state

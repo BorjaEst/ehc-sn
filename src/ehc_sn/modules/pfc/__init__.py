@@ -156,6 +156,30 @@ class PFCState:
 
 
 # =============================================================================
+@dataclass(frozen=True)
+class PFCOutput:
+    """Output of one :class:`PFCModel` step.
+
+    Attributes:
+        workspace: Full public workspace view over z_H (controller + body).
+        q_values: Auxiliary Q-value estimates from the value head. Shape ``(B, n_actions)``.
+    """
+
+    workspace: Workspace
+    q_values: Tensor
+
+    @property
+    def summary(self) -> Tensor:
+        """Controller summary token (alias for ``workspace.slot('controller')``)."""
+        return self.workspace.slot(_CONTROLLER)
+
+    @property
+    def tokens(self) -> Tensor:
+        """Full token tensor from the workspace. Shape ``(B, S+1, D)``."""
+        return self.workspace.tokens
+
+
+# =============================================================================
 class PFCModel(nn.Module):
     """Prefrontal Cortex (PFC) reasoning module.
 
@@ -182,7 +206,7 @@ class PFCModel(nn.Module):
         self.cls_token = nn.Parameter(torch.zeros(1, 1, config.hidden_size, device=device, dtype=dtype))
 
         # Default schema layout (body-only) used by step_tokens() and forward().
-        self._default_schema_layout = WorkspaceLayout.from_schema(WorkspaceSchema(fixed=(), families=(SlotFamily("body", config.seq_length))))  # fmt: skip
+        self._default_schema_layout = WorkspaceLayout.from_schema(WorkspaceSchema(fixed=(), families=(SlotFamily("body", config.seq_length),)))  # fmt: skip
         # Default full workspace layout used when callers omit workspace_layout in init_state().
         self._default_workspace_layout = _body_to_full_layout(self._default_schema_layout)
 
@@ -252,7 +276,7 @@ class PFCModel(nn.Module):
         workspace: Workspace,
         state: Optional[PFCState] = None,
         prefix_bias: Optional[Tensor] = None,
-    ) -> tuple[Tensor, PFCState]:  # fmt: skip
+    ) -> tuple[PFCOutput, PFCState]:
         """Run one PFC step over a body workspace.
 
         The ``workspace`` carries body/schema tokens only — the ``controller`` slot is
@@ -270,8 +294,9 @@ class PFCModel(nn.Module):
             prefix_bias: Optional additive bias applied to the internal CLS token.
 
         Returns:
-            ``(q_values, state)`` where ``state`` is the post-reasoning :class:`PFCState` and
-            ``q_values`` are the auxiliary value head outputs for the current step.
+            ``(output, next_state)`` — output first, state second (canonical backbone
+            seam ordering).  ``output.workspace`` and ``next_state.workspace`` expose
+            the same public z_H surface; ``output.q_values`` carries auxiliary Q logits.
         """
         if workspace.layout.size != self.config.seq_length:
             raise ValueError(f"workspace size must equal seq_length {self.config.seq_length}, " f"got {workspace.layout.size}.")
@@ -304,7 +329,8 @@ class PFCModel(nn.Module):
         q_values = self.estimator(memory.z_H, memory.z_L)
 
         new_state = _build_state_from_memory(memory, full_layout, detach=False)
-        return q_values, new_state
+        output = PFCOutput(workspace=new_state.workspace, q_values=q_values)
+        return output, new_state
 
     def forward(  # -----------------------------------------------------------
         self,
@@ -312,8 +338,8 @@ class PFCModel(nn.Module):
         state: Optional[PFCState] = None,
         schema_layout: Optional[WorkspaceLayout] = None,
         prefix_bias: Optional[Tensor] = None,
-    ) -> tuple[PFCState, Tensor]:
-        """Compatibility tensor path — prefer :meth:`step` with ``layout.bind(tokens)``.
+    ) -> tuple[PFCOutput, PFCState]:
+        """Tensor path — prefer :meth:`step` with ``layout.bind(tokens)``.
 
         Args:
             x: Body token inputs of shape ``(B, seq_length, D)``.
@@ -323,7 +349,7 @@ class PFCModel(nn.Module):
             prefix_bias: Optional additive bias for the internal CLS token.
 
         Returns:
-            :class:`PFCOutput` identical to calling ``step(schema_layout.bind(x), ...)``.
+            ``(output, next_state)`` — output first, state second.
         """
         if x.ndim != 3:
             raise ValueError(f"PFC token inputs must have shape (B, S, D), got {tuple(x.shape)}.")

@@ -13,7 +13,8 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.modules.pfc import FixedSlot, PFCModel, PFCSettings, PFCState, SlotFamily, WorkspaceLayout, WorkspaceSchema
+from ehc_sn.modules.pfc import PFCModel, PFCOutput, PFCSettings, PFCState
+from ehc_sn.modules.pfc.workspace import FixedSlot, SlotFamily, WorkspaceLayout, WorkspaceSchema
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
@@ -70,6 +71,11 @@ class HRMInputV2:
 
     schema_tokens: Tensor
     prefix_bias: Tensor | None = None
+
+    @property
+    def batch_size(self) -> int:
+        """Return the leading batch size."""
+        return int(self.schema_tokens.shape[0])
 
 
 # =============================================================================
@@ -178,7 +184,7 @@ class HRModelV2(nn.Module):
             state = state.detach()
 
         # Step the PFC core with the schema tokens bound to the workspace layout
-        state.pfc, q_values = self.pfc.step(
+        pfc_out, state.pfc = self.pfc.step(
             self.config.schema_layout.bind(payload.schema_tokens),
             state=state.pfc,
             prefix_bias=payload.prefix_bias,
@@ -186,16 +192,16 @@ class HRModelV2(nn.Module):
 
         # Step the STR actor-critic module with the PFC summary and Q values as input
         state.str, state_value = self.str(
-            state.pfc.workspace.slot("controller"),
-            q_values,
+            features=pfc_out.summary,
+            q_values=pfc_out.q_values,
             state=state.str,
         )
 
         # Extract architecture-native readouts for the current step
         output = HRMOutputV2(
-            theta_summary=state.pfc.workspace.slot("controller"),
-            schema_slots=state.pfc.workspace.family("schema"),
-            q_logits=q_values,
+            theta_summary=pfc_out.summary,
+            schema_slots=pfc_out.workspace.family("schema"),
+            q_logits=pfc_out.q_values,
             state_value=state_value.unsqueeze(-1),
         )
         return output, state
