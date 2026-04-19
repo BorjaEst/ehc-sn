@@ -1,196 +1,210 @@
+"""Workspace schema, compiled layout, and runtime slot-bank view for the PFC module.
+
+Three layers of abstraction:
+
+1. :class:`WorkspaceSchema` — declarative structure: named fixed slots and exchangeable
+   slot families.  No tensor involvement.
+
+2. :class:`WorkspaceLayout` — compiled view of the schema: maps each fixed slot and
+   family name to a concrete position or slice within a z_H tensor.
+
+3. :class:`Workspace` — runtime view: a :class:`WorkspaceLayout` paired with one live
+   z_H token tensor.  Exposes object-based ``slot()`` and ``family()`` accessors.
+
+Ownership rule: this module owns only the addressing scheme over a slot bank.
+It does not define working-memory dynamics (``reasoning.py`` owns those).
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Generic, Mapping, Sequence, TypeVar
 
 import torch
-from torch import Tensor, nn
-
-from ehc_sn.utils import trunc_normal_init_
-
-WorkspaceContextT = TypeVar("WorkspaceContextT")
+from torch import Tensor
 
 
+# =============================================================================
 @dataclass(frozen=True)
-class WorkspaceSpec:
-    """Declare a fixed ordered set of workspace slot names."""
+class FixedSlot:
+    """Declaration of a singleton named slot in a workspace schema.
 
-    names: tuple[str, ...]
+    Attributes:
+        name: Unique semantic role name (non-empty).
+    """
+
+    name: str
 
     def __post_init__(self) -> None:
-        if not self.names:
-            raise ValueError("WorkspaceSpec requires at least one slot name.")
-        if any(not name for name in self.names):
-            raise ValueError("WorkspaceSpec slot names must be non-empty.")
-        if len(set(self.names)) != len(self.names):
-            raise ValueError(f"WorkspaceSpec slot names must be unique, got {self.names!r}.")
+        if not self.name:
+            raise ValueError("FixedSlot name must be non-empty.")
 
-    @classmethod
-    def from_names(cls, names: Sequence[str]) -> "WorkspaceSpec":
-        """Build a spec from any ordered sequence of slot names."""
-        return cls(tuple(str(name) for name in names))
+
+# =============================================================================
+@dataclass(frozen=True)
+class SlotFamily:
+    """Declaration of a named, exchangeable repeated-slot family.
+
+    All slots within a family are semantically interchangeable (e.g. schema
+    hypothesis slots).  Runtime access is via :meth:`Workspace.family`.
+
+    Attributes:
+        name: Unique family name (non-empty).
+        size: Number of slots in the family (>= 1).
+    """
+
+    name: str
+    size: int
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("SlotFamily name must be non-empty.")
+        if self.size < 1:
+            raise ValueError(f"SlotFamily size must be at least 1, got {self.size}.")
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class WorkspaceSchema:
+    """Declarative workspace structure: ordered fixed slots then ordered families.
+
+    All names across ``fixed`` and ``families`` must be unique.
+
+    Attributes:
+        fixed: Ordered singleton slot declarations.
+        families: Ordered repeating slot-family declarations.
+    """
+
+    fixed: tuple[FixedSlot, ...]
+    families: tuple[SlotFamily, ...]
+
+    def __post_init__(self) -> None:
+        names = [s.name for s in self.fixed] + [f.name for f in self.families]
+        if len(set(names)) != len(names):
+            raise ValueError(f"WorkspaceSchema names must be unique, got {names!r}.")
 
     @property
     def size(self) -> int:
-        """Return the declared number of slots."""
-        return len(self.names)
+        """Total slot count: len(fixed) + sum of family sizes."""
+        return len(self.fixed) + sum(f.size for f in self.families)
 
-    def index(self, name: str) -> int:
-        """Return the slot index for a named slot."""
+
+# =============================================================================
+class WorkspaceLayout:
+    """Compiled slot and family offsets derived from a :class:`WorkspaceSchema`.
+
+    Fixed slots are placed first (in declaration order), then each family's
+    slots are placed contiguously (in family declaration order).
+
+    Use :meth:`from_schema` to construct.
+
+    Attributes:
+        schema: The originating declarative schema.
+    """
+
+    def __init__(self, schema: WorkspaceSchema) -> None:
+        self.schema = schema
+        offset = 0
+        self._slot_offsets: dict[str, int] = {}
+        self._family_slices: dict[str, slice] = {}
+        for fixed in schema.fixed:
+            self._slot_offsets[fixed.name] = offset
+            offset += 1
+        for family in schema.families:
+            self._family_slices[family.name] = slice(offset, offset + family.size)
+            offset += family.size
+        self._size = offset
+
+    @classmethod
+    def from_schema(cls, schema: WorkspaceSchema) -> "WorkspaceLayout":
+        """Compile a layout from a declarative schema."""
+        return cls(schema)
+
+    @property
+    def size(self) -> int:
+        """Total number of slots in this layout."""
+        return self._size
+
+    def slot(self, name: str) -> int:
+        """Return the integer position of a named fixed slot.
+
+        Raises:
+            KeyError: If ``name`` is not a declared fixed slot.
+        """
         try:
-            return self.names.index(name)
-        except ValueError as exc:
-            raise KeyError(f"Unknown workspace slot: {name!r}.") from exc
+            return self._slot_offsets[name]
+        except KeyError:
+            raise KeyError(f"Unknown fixed slot: {name!r}.") from None
 
-    def compose(self, *others: "WorkspaceSpec") -> "WorkspaceSpec":
-        """Concatenate multiple specs while preserving declared order."""
-        names = list(self.names)
-        for other in others:
-            names.extend(other.names)
-        return WorkspaceSpec(tuple(names))
+    def family(self, name: str) -> slice:
+        """Return the contiguous slice for a named slot family.
+
+        Raises:
+            KeyError: If ``name`` is not a declared slot family.
+        """
+        try:
+            return self._family_slices[name]
+        except KeyError:
+            raise KeyError(f"Unknown slot family: {name!r}.") from None
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, WorkspaceLayout):
+            return NotImplemented
+        return self.schema == other.schema
+
+    def __hash__(self) -> int:
+        return hash(self.schema)
+
+    def __repr__(self) -> str:
+        return f"WorkspaceLayout(schema={self.schema!r})"
 
 
+# =============================================================================
 @dataclass(frozen=True)
-class NamedWorkspace:
-    """Tensor-backed workspace with named and indexed slot access."""
+class Workspace:
+    """Runtime-bound view: a :class:`WorkspaceLayout` over one z_H token tensor.
 
-    spec: WorkspaceSpec
+    Attributes:
+        layout: Compiled slot/family layout.
+        tokens: Token tensor of shape ``(B, layout.size, D)``.
+    """
+
+    layout: WorkspaceLayout
     tokens: Tensor
 
     def __post_init__(self) -> None:
         if self.tokens.ndim != 3:
-            raise ValueError(f"workspace tokens must have shape (B, S, D), got {tuple(self.tokens.shape)}.")
-        if int(self.tokens.shape[1]) != self.spec.size:
-            raise ValueError(f"workspace token count must match spec size {self.spec.size}, got {tuple(self.tokens.shape)}.")
+            raise ValueError(f"Workspace tokens must have shape (B, S, D), got {tuple(self.tokens.shape)}.")
+        if int(self.tokens.shape[1]) != self.layout.size:
+            raise ValueError(f"Workspace token count must match layout size {self.layout.size}, " f"got {tuple(self.tokens.shape)}.")
 
-    @property
-    def names(self) -> tuple[str, ...]:
-        """Return the declared slot names."""
-        return self.spec.names
+    def slot(self, name: str) -> Tensor:
+        """Return one fixed-slot tensor.
 
-    def __len__(self) -> int:
-        return self.spec.size
+        Args:
+            name: Declared fixed-slot name.
 
-    def index(self, name: str) -> int:
-        """Return the integer position of a named slot."""
-        return self.spec.index(name)
+        Returns:
+            Tensor of shape ``(B, D)``.
+        """
+        return self.tokens[:, self.layout.slot(name)]
 
-    def __getitem__(self, key: int | str) -> Tensor:
-        """Return one workspace slot by integer index or slot name."""
-        if isinstance(key, int):
-            return self.tokens[:, key]
-        return self.tokens[:, self.spec.index(key)]
+    def family(self, name: str) -> Tensor:
+        """Return all slot tensors for a named family.
 
-    def select(self, names: Sequence[str]) -> Tensor:
-        """Return a stacked token view following the requested slot order."""
-        indices = [self.spec.index(name) for name in names]
-        return self.tokens[:, indices]
+        Args:
+            name: Declared slot-family name.
 
-    def compose(self, *others: "NamedWorkspace") -> "NamedWorkspace":
-        """Concatenate multiple named workspaces along the slot axis."""
-        if not others:
-            return self
-
-        batch_size = int(self.tokens.shape[0])
-        hidden_size = int(self.tokens.shape[2])
-        for other in others:
-            if int(other.tokens.shape[0]) != batch_size or int(other.tokens.shape[2]) != hidden_size:
-                raise ValueError("All composed workspaces must share batch size and hidden size.")
-
-        return NamedWorkspace(
-            spec=self.spec.compose(*(other.spec for other in others)),
-            tokens=torch.cat([self.tokens, *(other.tokens for other in others)], dim=1),
-        )
+        Returns:
+            Tensor of shape ``(B, family_size, D)``.
+        """
+        return self.tokens[:, self.layout.family(name)]
 
 
-class WorkspaceSlotWriter(nn.Module, Generic[WorkspaceContextT]):
-    """Base class for modules that produce one workspace slot token."""
-
-    def forward(self, context: WorkspaceContextT) -> Tensor:
-        raise NotImplementedError
-
-
-class ComposedWorkspaceWriter(nn.Module, Generic[WorkspaceContextT]):
-    """Compose named slot writers into one ordered workspace tensor."""
-
-    def __init__(
-        self,
-        *,
-        spec: WorkspaceSpec,
-        writers: Mapping[str, WorkspaceSlotWriter[WorkspaceContextT]],
-        hidden_size: int,
-        use_slot_ids: bool = True,
-    ) -> None:
-        super().__init__()
-        writer_names = set(writers)
-        spec_names = set(spec.names)
-        if writer_names != spec_names:
-            missing = [name for name in spec.names if name not in writers]
-            extra = [name for name in writers if name not in spec_names]
-            raise ValueError(f"writer names must match spec names; missing={missing}, extra={extra}.")
-
-        self._spec = spec
-        self._hidden_size = int(hidden_size)
-        self.writers = nn.ModuleDict({name: writers[name] for name in spec.names})
-        self.slot_id = nn.Embedding(spec.size, hidden_size) if use_slot_ids else None
-        self.reset_parameters()
-
-    @property
-    def spec(self) -> WorkspaceSpec:
-        """Return the declared output workspace spec."""
-        return self._spec
-
-    @property
-    def hidden_size(self) -> int:
-        """Return the output hidden size per slot."""
-        return self._hidden_size
-
-    def reset_parameters(self) -> None:
-        """Reset slot ids and delegate resets to child slot writers when available."""
-        if self.slot_id is not None:
-            trunc_normal_init_(self.slot_id.weight, std=0.02)
-        for writer in self.writers.values():
-            if hasattr(writer, "reset_parameters"):
-                writer.reset_parameters()
-
-    def forward(self, context: WorkspaceContextT) -> NamedWorkspace:
-        tokens: list[Tensor] = []
-        for name in self.spec.names:
-            token = self.writers[name](context)
-            if token.ndim != 2 or int(token.shape[1]) != self.hidden_size:
-                raise ValueError(f"slot writer {name!r} must return shape (B, {self.hidden_size}), got {tuple(token.shape)}.")
-            tokens.append(token)
-
-        workspace_tokens = torch.stack(tokens, dim=1)
-        if self.slot_id is not None:
-            slot_ids = torch.arange(self.spec.size, device=workspace_tokens.device)
-            workspace_tokens = workspace_tokens + self.slot_id(slot_ids).unsqueeze(0)
-        return NamedWorkspace(spec=self.spec, tokens=workspace_tokens)
-
-
-def workspace_from_prefixed_tokens(
-    tokens: Tensor,
-    spec: WorkspaceSpec,
-    *,
-    prefix_tokens: int = 1,
-) -> NamedWorkspace:
-    """Recover a named workspace from a prefixed PFC token sequence."""
-    if tokens.ndim != 3:
-        raise ValueError(f"tokens must have shape (B, S, D), got {tuple(tokens.shape)}.")
-    if prefix_tokens < 0:
-        raise ValueError(f"prefix_tokens must be non-negative, got {prefix_tokens}.")
-
-    start = int(prefix_tokens)
-    stop = start + spec.size
-    if int(tokens.shape[1]) < stop:
-        raise ValueError(f"tokens sequence length must be at least {stop} to recover {spec.size} workspace slots.")
-    return NamedWorkspace(spec=spec, tokens=tokens[:, start:stop])
-
-
+# =============================================================================
 __all__ = [
-    "ComposedWorkspaceWriter",
-    "NamedWorkspace",
-    "WorkspaceSlotWriter",
-    "WorkspaceSpec",
-    "workspace_from_prefixed_tokens",
+    "FixedSlot",
+    "SlotFamily",
+    "Workspace",
+    "WorkspaceLayout",
+    "WorkspaceSchema",
 ]
