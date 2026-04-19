@@ -150,38 +150,9 @@ class PFCState:
     def detach(self) -> "PFCState":
         """Return a detached copy of the public state."""
         return PFCState(
-            workspace=Workspace(layout=self.workspace.layout, tokens=self.workspace.tokens.detach()),
+            workspace=self.workspace.layout.bind(self.workspace.tokens.detach()),
             scratch=self.scratch.detach(),
         )
-
-
-# =============================================================================
-@dataclass(frozen=True)
-class PFCOutput:
-    """Structured post-reasoning PFC output.
-
-    ``state`` is the post-reasoning state for the current step.
-    Callers that want a bounded recurrent carry should explicitly store
-    ``state.detach()``.
-    """
-
-    state: PFCState
-    q_values: Tensor
-
-    @property
-    def tokens(self) -> Tensor:
-        """Full token view of the post-reasoning state (shape ``(B, S+1, D)``)."""
-        return self.state.tokens
-
-    @property
-    def workspace(self) -> Workspace:
-        """Full post-reasoning workspace (controller at slot 0 + body)."""
-        return self.state.workspace
-
-    @property
-    def summary(self) -> Tensor:
-        """Controller summary token (compatibility alias for ``workspace.slot('controller')``)."""
-        return self.state.summary
 
 
 # =============================================================================
@@ -281,7 +252,7 @@ class PFCModel(nn.Module):
         workspace: Workspace,
         state: Optional[PFCState] = None,
         prefix_bias: Optional[Tensor] = None,
-    ) -> tuple[Tensor, PFCOutput]:  # fmt: skip
+    ) -> tuple[Tensor, PFCState]:  # fmt: skip
         """Run one PFC step over a body workspace.
 
         The ``workspace`` carries body/schema tokens only — the ``controller`` slot is
@@ -289,8 +260,7 @@ class PFCModel(nn.Module):
         exposes the full public workspace (controller at position 0 plus all
         caller-declared body slots).
 
-        Build the input workspace with ``schema_layout.bind(tokens)`` or via
-        :class:`~ehc_sn.models.ehc.core.WorkspaceBundle`.
+        Build the input workspace with ``schema_layout.bind(tokens)``.
 
         Args:
             workspace: Body workspace of shape ``(B, seq_length, D)``.
@@ -312,35 +282,33 @@ class PFCModel(nn.Module):
                 "Ensure init_state and step are called with consistent layouts."
             )
 
-        total_steps = self.config.reasoning_h.n_cycles * (self.config.reasoning_l.n_cycles + 1)
-        state = state or self.init_state(int(workspace.tokens.shape[0]), workspace_layout=full_layout)
+        if state is None:
+            state = self.init_state(int(workspace.tokens.shape[0]), workspace_layout=full_layout)
 
-        # Prepend CLS (controller) to body tokens: (B, S, D) → (B, S+1, D).
-        cls_token = self.cls_token.expand(x.shape[0], -1, -1)
+        # Prepend CLS (controller) to body tokens: (B, seq_length, D) → (B, seq_length+1, D).
+        batch_size = int(workspace.tokens.shape[0])
+        cls_token = self.cls_token.expand(batch_size, -1, -1)
         if prefix_bias is not None:
             cls_token = cls_token + prefix_bias.unsqueeze(1).to(dtype=cls_token.dtype)
-        x = torch.cat([cls_token, x], dim=1)
+        x = torch.cat([cls_token, workspace.tokens], dim=1)
 
-        # Run the internal tensor-first reasoning core.
+        # Run the internal tensor-first reasoning core.  The last two steps run
+        # with gradient tracking for value estimation; all prior steps are detached.
+        total_steps = self.config.reasoning_h.n_cycles * (self.config.reasoning_l.n_cycles + 1)
         memory_gen = r.reasoning_gen(x, state.scratch.memory, self.high_level, self.low_level)
         with torch.no_grad():
             for _ in range(total_steps - 2):
                 memory = next(memory_gen)
-
-        # Last two steps with gradients for value estimation
-        memory = next(memory_gen)  # N-2 step: low-level with gradients
-        memory = next(memory_gen)  # N-1 step: high-level with gradients
+        memory = next(memory_gen)  # step N-2: with gradients
+        memory = next(memory_gen)  # step N-1: with gradients
         q_values = self.estimator(memory.z_H, memory.z_L)
 
-        # Bind the final memory to a full workspace layout and return
-        memory, q_values = self._run_reasoning(workspace.tokens, state, prefix_bias=prefix_bias)
         new_state = _build_state_from_memory(memory, full_layout, detach=False)
         return q_values, new_state
 
     def forward(  # -----------------------------------------------------------
         self,
         x: Tensor,
-        *,
         state: Optional[PFCState] = None,
         schema_layout: Optional[WorkspaceLayout] = None,
         prefix_bias: Optional[Tensor] = None,
