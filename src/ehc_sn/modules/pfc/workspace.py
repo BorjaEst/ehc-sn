@@ -154,6 +154,21 @@ class WorkspaceLayout:
     def __hash__(self) -> int:
         return hash(self.schema)
 
+    def bind(self, tokens: Tensor) -> "Workspace":
+        """Bind a live token tensor to this layout, returning a runtime :class:`Workspace`.
+
+        This is the canonical way to create a :class:`Workspace` from a tensor; prefer
+        ``layout.bind(tokens)`` over direct ``Workspace(layout=layout, tokens=tokens)``
+        construction.
+
+        Args:
+            tokens: Token tensor of shape ``(B, self.size, D)``.
+
+        Returns:
+            :class:`Workspace` bound to this layout and the supplied tokens.
+        """
+        return Workspace(layout=self, tokens=tokens)
+
     def __repr__(self) -> str:
         return f"WorkspaceLayout(schema={self.schema!r})"
 
@@ -201,10 +216,4 @@ class Workspace:
 
 
 # =============================================================================
-__all__ = [
-    "FixedSlot",
-    "SlotFamily",
-    "Workspace",
-    "WorkspaceLayout",
-    "WorkspaceSchema",
-]
+__all__ = ["FixedSlot", "SlotFamily", "Workspace", "WorkspaceLayout", "WorkspaceSchema"]
