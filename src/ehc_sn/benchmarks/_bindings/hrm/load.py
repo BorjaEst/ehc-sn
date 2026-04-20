@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 
-from ehc_sn.adapters.maze_hard import MazeHardHRMV1AdapterSettings, MazeHardHRMV1BridgeAdapter
+from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v1 import MazeHardHRMV1AdapterSettings, MazeHardHRMV1BridgeAdapter
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
 
