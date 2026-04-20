@@ -11,7 +11,6 @@ from tensordict import TensorDict, TensorDictBase
 from torch import Tensor
 
 from ehc_sn.controllers._base import BaseController, RolloutBackbone, RolloutState
-from ehc_sn.envs.dungeon_walk import ACTION_STAY
 from ehc_sn.loss.consistency import LatentCode, LatentRelation
 from ehc_sn.policies import ActionPolicy, PolicyInput, ScriptedPolicyConfig
 from ehc_sn.policies.random_walk import RandomWalkPolicy, RandomWalkPolicyConfig
@@ -272,7 +271,7 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         self._env = env
         self._runtime = runtime
         if isinstance(config.policy, StayPolicyConfig):
-            self._policy: ActionPolicy = StayPolicy(action=ACTION_STAY)
+            self._policy: ActionPolicy = StayPolicy(action=config.policy.stay_action)
         elif isinstance(config.policy, RandomWalkPolicyConfig):
             self._policy = RandomWalkPolicy(seed=config.policy.seed)
         else:

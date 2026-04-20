@@ -14,7 +14,15 @@ from ehc_sn.policies._base import PolicyDecision, PolicyInput
 class StayPolicyConfig(BaseModel, extra="forbid"):
     """Configuration for deterministic stay / no-op policies."""
 
-    kind: Literal["stay"] = Field(default="stay", description="Select the environment no-op action.")
+    kind: Literal["stay"] = Field(
+        default="stay",
+        description="Select the environment no-op action.",
+    )
+    stay_action: int = Field(
+        default=0,
+        ge=0,
+        description="Action index emitted by this policy. Defaults to 0 (STAY in canonical navigation ontology).",
+    )
 
 
 # =================================================================================================
