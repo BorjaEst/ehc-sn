@@ -233,6 +233,9 @@ class PFCModel(nn.Module):
         self,
         batch_size: int,
         body_schema: Optional[WorkspaceSchema] = None,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
     ) -> PFCState:
         """Create a fresh PFC recurrent state.
 

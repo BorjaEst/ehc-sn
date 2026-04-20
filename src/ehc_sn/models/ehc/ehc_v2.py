@@ -1,26 +1,43 @@
 """EHC v2 backbone model, settings, state, and forward I/O.
 
-EHC v2 (Entorhinal-Hippocampal Circuit, version 2) extends the base TEM
-circuit with a Prefrontal Cortex (PFC) reasoning module and a Striatum (STR)
-reward-prediction head.
+EHC v2 (Entorhinal-Hippocampal Circuit, version 3) extends EHC v2 with a
+Zheng-style current-step cortical cue path.  It is otherwise identical to v2.
 
-Cue-timing contract (V2):
-    The cortical cue that biases replay retrieval is derived from the
-    *previous*-step public PFC summary (``state.pfc.summary``).  This is the
-    defining V2 property; V3 will use the current-step PFC output instead.
-    This distinction must not be hidden in shared helpers.
+Cue-timing contract (V2 — explicit difference from V2):
+    V2 derives the cortical cue from *previous*-step ``state.pfc.summary``.
+    V2 derives the cortical cue from the *current*-step PFC output via an
+    explicit two-stage within-step schedule:
 
-Bank-c semantics:
+        Stage 1 — Cue generation pass:
+            Run the full TEM-style bottom-up pipeline (g_prior, x_query,
+            p_sensory_read, g_post, p_prior, p_retrieved, p_post) to ground
+            the hippocampal state.  Build a provisional PFC body workspace
+            using p_post as state, p_retrieved as a non-contextual replay
+            baseline, and a projected zero vector as the cue.  Run one PFC
+            step to obtain the current-step cortical summary.
+            Set c_prop = pfc_to_hpc(first-pass summary), c_use = c_prop.
+
+        Stage 2 — Cue-conditioned pass:
+            Use c_use in the contextual replay read (TargetRead, sources g and c,
+            target x) to obtain p_replay_read.  Build the final PFC body workspace
+            with p_post as state, p_replay_read as replay, and c_use as cue.
+            Run a second PFC step STARTING FROM the first-pass recurrent PFC state
+            so the final cortical state reflects cue-conditioned replay.
+
+    This file is intentionally self-contained.  The cue-timing difference is
+    implemented locally and must not be hidden in shared helpers or in ehc_base.py.
+
+Bank-c semantics (unchanged from V2):
     HPCAttention bank ``c`` is a place-keyed contextual auxiliary bank that
-    shares the hippocampal write key with the default bank.  Three variables
-    make the routing explicit:
+    shares the hippocampal write key with the default bank.
 
-        - ``c_prop``: cortical cue proposal — previous-step PFC summary projected
-            into the hippocampal multi-frequency cue family via ``pfc_to_hpc``.
-    - ``c_mem``:  reinstated contextual evidence from bank ``c`` (deferred in
-      V2; set to ``None``).
-    - ``c_use``:  the routed cue used for replay bias and bank-c writes.
-      In V2: ``c_use = c_prop``.
+        - ``c_prop``: cortical cue proposal — current-step PFC summary (stage 1)
+            projected into the hippocampal multi-frequency cue family via
+            ``pfc_to_hpc``.  (Contrast V2: ``c_prop`` = previous-step summary.)
+        - ``c_mem``:  reinstated contextual evidence from bank ``c`` (deferred in
+            V2; set to ``None``).
+        - ``c_use``:  the routed cue used for replay bias and bank-c writes.
+            In V2: ``c_use = c_prop``.
 
 PFC body workspace layout (size = ``pfc.seq_length``):
     Fixed slot 0 - ``state``   : projected current grounded-place (p_post).
@@ -86,8 +103,8 @@ class EHCControlV2:
 class EHCContentV2:
     """Content-pathway outputs from the PFC body workspace.
 
-    These tensors are taken from the post-reasoning PFC workspace and reflect
-    the working memory state after the current-step reasoning pass.
+    These tensors are taken from the post-reasoning PFC workspace (second pass)
+    and reflect the working memory state after cue-conditioned replay.
 
     Attributes:
         state_slot:    PFC body ``state`` slot.  Shape ``(B, D)``.
@@ -245,6 +262,10 @@ class ModelSettingsV2(BaseModel, extra="forbid", strict=False):
 class EHCModelV2(nn.Module):
     """EHC v2 backbone: TEM circuit with PFC reasoning and STR control.
 
+    Identical to EHC v2 in region modules, projection edges, and output surface.
+    The only architectural difference is the cue-timing contract (see module
+    docstring).
+
     Region modules:
         - LEC  sensory-feature pathway (lateral entorhinal cortex).
         - MEC  grid path-integration pathway (medial entorhinal cortex).
@@ -399,13 +420,17 @@ class EHCModelV2(nn.Module):
     ) -> tuple[EHCOutputV2, EHCStateV2]:
         """Run one EHC v2 step and return architecture-native latents.
 
-        Cue-timing (V2 contract):
-            ``c_prop`` is derived from *previous*-step ``state.pfc.summary``.
-            ``c_mem = None`` (contextual reinstatement from bank c deferred).
-            ``c_use = c_prop``.
+        Cue-timing (V2 contract — explicit delta from V2):
+            V2 derives ``c_prop`` from *previous*-step ``state.pfc.summary``.
+            V2 derives ``c_prop`` from a first PFC pass on the current step,
+            implemented via an explicit two-stage within-step schedule (see
+            module docstring).  ``state.pfc.summary`` is NOT used as the cue
+            source in V2.
 
-        All HPC recall calls are placed before the generative/inference updates
-        so they read the prior memory state (same ordering as TEM v2).
+        All HPC recall calls in stage 1 are placed before the generative/inference
+        updates so they read the prior memory state (same as TEM v2 / EHC v2).
+        The contextual replay read in stage 2 reads from the post-update state
+        because it requires c_use, which is only available after the first PFC pass.
 
         Args:
             inputs: Task-agnostic EHC v2 input payload.
@@ -433,14 +458,9 @@ class EHCModelV2(nn.Module):
             # Detach to preserve the immutable recurrent-state contract (TBPTT).
             state = state.detach()
 
-        # --- V2 cue: previous-step PFC summary (before this step's PFC run) --
-        # c_prop: project previous-step PFC summary into the hippocampal multi-frequency cue family.
-        # c_mem:  reinstated contextual evidence from bank c — deferred in V2.
-        # c_use:  routed cue for replay bias and bank-c writes; equals c_prop in V2.
-        prev_pfc_summary: Tensor = state.pfc.summary  # (B, D)
-        c_prop: list[Tensor] = cast(list[Tensor], self.pfc_to_hpc(prev_pfc_summary))
-        c_mem: Optional[list[Tensor]] = None  # deferred: bank-c reinstatement not implemented
-        c_use: list[Tensor] = c_prop  # V2: use cortical cue proposal directly
+        # --- V2 uses current-step PFC output as the cue source (not previous-step) ---
+        # c_prop, c_mem, c_use are set after the first PFC pass (stage 1 below).
+        # Do NOT use state.pfc.summary as the cue source here (contrast V2).
 
         # 1. Path integration: grid prior -------------------------------------
         g_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state=state.mec)
@@ -478,10 +498,62 @@ class EHCModelV2(nn.Module):
             read=CueRead(kind="cue", cue="g"),
         )
 
-        # 7. Contextual replay retrieval (read-only) --------------------------
-        # Use both grid (g) and cortical cue (c_use) as source cues; retrieve
-        # from the x-bank (sensory/inference memory target).
-        # c_use carries previous-step cortical context (V2 cue-timing contract).
+        # 7. Form place beliefs and update HPC grounded-belief state ----------
+        # (In V2 this is step 8; in V2 it precedes the provisional PFC pass so
+        # p_post and p_retrieved are available for building the cue-generation
+        # workspace.)
+        p_prior, state.hpc = self.hpc.generative(p_grid_prior_read, state=state.hpc)
+        p_retrieved, state.hpc = self.hpc.generative(p_grid_post_read, state=state.hpc)
+        p_post, state.hpc = self.hpc.inference(x_query, g_query_post, state=state.hpc)
+
+        # =====================================================================
+        # Stage 1 — Cue-generation PFC pass (V2 explicit delta).
+        # Build a provisional workspace with:
+        #   state  = projected p_post
+        #   replay = projected p_retrieved (non-contextual current-step baseline)
+        #   cue    = projected zero (HPC flat, then through hpc_to_pfc)
+        #   content = previous-step content family (unchanged external contract)
+        # =====================================================================
+        p_post_flat: Tensor = torch.cat(p_post, dim=-1)  # (B, hpc_flat)
+        p_retrieved_flat: Tensor = torch.cat(p_retrieved, dim=-1)  # (B, hpc_flat)
+        zero_c_flat: Tensor = torch.zeros(batch_size, self._config.hpc_flat_dim, device=device, dtype=p_post_flat.dtype)
+
+        # Stack into (B, 3, hpc_flat) and project through the workspace edge.
+        hpc_slots_prov: Tensor = torch.stack([p_post_flat, p_retrieved_flat, zero_c_flat], dim=1)
+        hpc_slots_prov_out: Tensor = self.hpc_to_pfc(hpc_slots_prov)  # (B, 3, hidden_size)
+
+        state_token_prov: Tensor = hpc_slots_prov_out[:, 0:1, :]  # (B, 1, D)
+        replay_token_prov: Tensor = hpc_slots_prov_out[:, 1:2, :]  # (B, 1, D)
+        cue_token_prov: Tensor = hpc_slots_prov_out[:, 2:3, :]  # (B, 1, D)
+
+        # Previous-step content family provides the cortical substrate.
+        prev_content: Tensor = state.pfc.workspace.family(FAMILY_CONTENT)  # (B, content_size, D)
+
+        body_tokens_prov: Tensor = torch.cat([state_token_prov, replay_token_prov, cue_token_prov, prev_content], dim=1)
+        body_layout = WorkspaceLayout.from_schema(self.config.body_schema)
+        body_workspace_prov = body_layout.bind(body_tokens_prov)
+
+        # First PFC pass: produces the current-step cortical summary for cue generation.
+        pfc_out_cue, state_pfc_1 = self.pfc.step(body_workspace_prov, state=state.pfc)
+
+        # --- V2 cue: current-step PFC summary (first pass) -------------------
+        # c_prop: project current-step (first-pass) PFC summary into the
+        #         hippocampal multi-frequency cue family via pfc_to_hpc.
+        # c_mem:  reinstated contextual evidence from bank c — deferred in V2.
+        # c_use:  routed cue for replay bias and bank-c writes; equals c_prop in V2.
+        # NOTE: state.pfc.summary is NOT used here (contrast V2's cue source).
+        c_prop: list[Tensor] = cast(list[Tensor], self.pfc_to_hpc(pfc_out_cue.summary))
+        c_mem: Optional[list[Tensor]] = None  # deferred: bank-c reinstatement not implemented
+        c_use: list[Tensor] = c_prop  # V2: use current-step cortical cue proposal
+
+        # =====================================================================
+        # Stage 2 — Contextual replay and cue-conditioned PFC pass.
+        # =====================================================================
+
+        # 8. Contextual replay retrieval (using current-step c_use) -----------
+        # Both grid (g) and cortical cue (c_use) source the replay read.
+        # This read happens on the post-update HPC state because it requires
+        # c_use, which was only available after the stage-1 PFC pass.
         p_replay_read = self.hpc.recall(
             read_cues=ReadCues(families={"g": g_query_post, "c": c_use}),
             state=state.hpc,
@@ -489,51 +561,36 @@ class EHCModelV2(nn.Module):
             read=TargetRead(kind="target", sources=("g", "c"), target="x"),
         )
 
-        # 8. Form place beliefs and update HPC grounded-belief state ----------
-        p_prior, state.hpc = self.hpc.generative(p_grid_prior_read, state=state.hpc)
-        p_retrieved, state.hpc = self.hpc.generative(p_grid_post_read, state=state.hpc)
-        p_post, state.hpc = self.hpc.inference(x_query, g_query_post, state=state.hpc)
-
-        # 9. Build PFC body workspace tokens ----------------------------------
-        # Stack HPC flat codes into a 3-slot workspace-aligned tensor (state/replay/cue),
-        # project once through hpc_to_pfc (independent parameter block per role), then
-        # unpack the projected tokens for the body assembly below.
-        p_post_flat: Tensor = torch.cat(p_post, dim=-1)  # (B, hpc_flat)
+        # 9. Build final PFC body workspace tokens ----------------------------
+        # Replay slot now carries the cue-conditioned contextual read.
+        # Cue slot carries c_use (current-step cortical cue).
+        # Content family is unchanged (previous-step substrate).
         p_replay_flat: Tensor = torch.cat(p_replay_read, dim=-1)  # (B, hpc_flat)
         c_use_flat: Tensor = torch.cat(c_use, dim=-1)  # (B, hpc_flat)
 
-        hpc_slots_in: Tensor = torch.stack([p_post_flat, p_replay_flat, c_use_flat], dim=1)  # (B, 3, hpc_flat)
-        hpc_slots_out: Tensor = self.hpc_to_pfc(hpc_slots_in)  # (B, 3, hidden_size)
+        hpc_slots_final: Tensor = torch.stack([p_post_flat, p_replay_flat, c_use_flat], dim=1)
+        hpc_slots_final_out: Tensor = self.hpc_to_pfc(hpc_slots_final)  # (B, 3, hidden_size)
 
-        state_token: Tensor = hpc_slots_out[:, 0:1, :]  # (B, 1, D)
-        replay_token: Tensor = hpc_slots_out[:, 1:2, :]  # (B, 1, D)
-        cue_token: Tensor = hpc_slots_out[:, 2:3, :]  # (B, 1, D)
+        state_token_final: Tensor = hpc_slots_final_out[:, 0:1, :]
+        replay_token_final: Tensor = hpc_slots_final_out[:, 1:2, :]
+        cue_token_final: Tensor = hpc_slots_final_out[:, 2:3, :]
 
-        # Content family: previous-step cortical substrate from the public workspace.
-        prev_content: Tensor = state.pfc.workspace.family(FAMILY_CONTENT)  # (B, content_size, D)
+        body_tokens_final: Tensor = torch.cat([state_token_final, replay_token_final, cue_token_final, prev_content], dim=1)
+        body_workspace_final = body_layout.bind(body_tokens_final)
 
-        # Assemble body in slot order (state, replay, cue, content).
-        # Total tokens = 3 fixed + content_size = pfc.seq_length.
-        body_tokens: Tensor = torch.cat([state_token, replay_token, cue_token, prev_content], dim=1)
-
-        # 10. PFC reasoning step ----------------------------------------------
-        # PFCModel.step validates workspace.layout.size == pfc.seq_length and
-        # that the derived full layout matches state.pfc.workspace.layout.
-        body_layout = WorkspaceLayout.from_schema(self.config.body_schema)
-        body_workspace = body_layout.bind(body_tokens)
-        pfc_out, state.pfc = self.pfc.step(body_workspace, state=state.pfc)
-        control_logits: Tensor = pfc_out.q_values
+        # 10. Second PFC pass — starting from the first-pass recurrent state --
+        # This ensures the final cortical state reflects cue-conditioned replay.
+        # The public control output, theta_summary, control_logits, and content
+        # slots all come from this second (final) pass.
+        pfc_out_final, state.pfc = self.pfc.step(body_workspace_final, state=state_pfc_1)
+        control_logits: Tensor = pfc_out_final.q_values
 
         # 11. STR reward prediction -------------------------------------------
-        # STR receives the detached PFC summary (theta_summary) and Q-value logits.
-        # Detaching prevents value gradients from propagating into PFC reasoning.
         theta_summary: Tensor = state.pfc.summary.detach()  # (B, D)
         state.str, reward_prediction = self.str(theta_summary, control_logits, state.str)
 
         # 12. HPC memory write ------------------------------------------------
-        # generative = p_retrieved (corrected-grid replay value).
-        # inference  = p_sensory_read (sensory-cued recall value).
-        # named_writes["c"] = c_use (contextual cue written into bank c).
+        # Bank-c write contract: c_use (current-step cue) is written under key c.
         write_payload = WritePayload(
             generative=p_retrieved,
             inference=p_sensory_read,
@@ -550,17 +607,17 @@ class EHCModelV2(nn.Module):
             sensory=p_sensory_read,
         )
 
-        # EHCContentV2 exposes post-reasoning PFC workspace slots.
+        # EHCContentV2 exposes post-reasoning PFC workspace slots (second pass).
         content = EHCContentV2(
-            state_slot=state.pfc.workspace.slot(SLOT_STATE),  # (B, D)
-            replay_slot=state.pfc.workspace.slot(SLOT_REPLAY),  # (B, D)
-            cue_slot=state.pfc.workspace.slot(SLOT_CUE),  # (B, D)
-            content_slots=state.pfc.workspace.family(FAMILY_CONTENT),  # (B, content_size, D)
+            state_slot=state.pfc.workspace.slot(SLOT_STATE),
+            replay_slot=state.pfc.workspace.slot(SLOT_REPLAY),
+            cue_slot=state.pfc.workspace.slot(SLOT_CUE),
+            content_slots=state.pfc.workspace.family(FAMILY_CONTENT),
         )
         control = EHCControlV2(
             theta_summary=state.pfc.summary,  # (B, D) — gradient-attached summary
-            control_logits=control_logits,  # (B, n_actions)
-            reward_prediction=reward_prediction,  # (B,)
+            control_logits=control_logits,
+            reward_prediction=reward_prediction,
         )
         return EHCOutputV2(control=control, content=content, grid_codes=grid_codes, place_codes=place_codes), state
 
