@@ -205,10 +205,13 @@ class PFCModel(nn.Module):
         self.estimator = QValueEstimator(config.value_head, device=device, dtype=dtype)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, config.hidden_size, device=device, dtype=dtype))
 
-        # Default schema layout (body-only) used by step_tokens() and forward().
-        self._default_schema_layout = WorkspaceLayout.from_schema(WorkspaceSchema(fixed=(), families=(SlotFamily("body", config.seq_length),)))  # fmt: skip
-        # Default full workspace layout used when callers omit workspace_layout in init_state().
-        self._default_workspace_layout = _body_to_full_layout(self._default_schema_layout)
+        # Default schema layout (body-only) used by forward().
+        self._default_schema_layout = WorkspaceLayout.from_schema(
+            WorkspaceSchema(
+                fixed=(),
+                families=(SlotFamily("body", config.seq_length),),
+            )
+        )
 
         self.optimizer = None  # Placeholder for future dACC reward-based updates
         self.reset_parameters()
@@ -289,7 +292,7 @@ class PFCModel(nn.Module):
         exposes the full public workspace (controller at position 0 plus all
         caller-declared body slots).
 
-        Build the input workspace with ``schema_layout.bind(tokens)``.
+        Build the input workspace with ``layout.bind(tokens)``.
 
         Args:
             workspace: Body workspace of shape ``(B, seq_length, D)``.

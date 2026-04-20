@@ -47,7 +47,7 @@ class ModelSettingsV1(BaseModel, extra="forbid"):
         return WorkspaceLayout.from_schema(
             WorkspaceSchema(
                 fixed=(),
-                families=(SlotFamily("schema", self.num_schema_slots)),
+                families=(SlotFamily("schema", self.num_schema_slots),),
             )
         )
 

@@ -44,7 +44,7 @@ A family such as $\mathrm{schema}[n]$ is now a first-class `SlotFamily` object
 rather than a naming convention, so slot groups are directly addressable via
 `workspace.family("schema")` without relying on name prefixes.
 
-### Prefix Slots Versus Body Slots
+### Controller Slot And Body Slots
 
 The current implementation also separates the controller-like prefix slot from
 the body slots.
@@ -213,7 +213,7 @@ stable address space. But it also explains the current smell around indexed
 families: the abstraction stops at concrete names.
 
 If the repository later needs first-class slot families, that should likely be
-added above `WorkspaceSpec`, not forced into its current flat naming contract.
+added above `WorkspaceSchema`, not forced into its current flat naming contract.
 
 ### Testable Predictions
 
