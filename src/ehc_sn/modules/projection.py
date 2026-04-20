@@ -611,6 +611,87 @@ class _TokenSequenceProjectionEdge(nn.Module):
         return x.view(batch_size, seq_len, self._width_from)
 
 
+class _WorkspaceProjectionEdge(nn.Module):
+    """Apply an aligned projection to each fixed slot in a workspace-shaped tensor.
+
+    **Private — not part of the public projection API.**  Callers should use
+    :func:`build_projection_edge` with two :class:`WorkspaceEndpointSpec` values.
+
+    Each fixed role gets its own independent :class:`ProjectionModule`, so
+    gradients and weight updates are fully isolated across slots by default.
+    Weight tying across roles is deliberately not supported in this version;
+    shared weights would collapse the role-specific projection surfaces that the
+    fixed-slot contract requires.  If a tying ablation is ever needed, it should
+    be expressed as an explicit opt-in option rather than changing the default.
+
+    Scope: fixed-slot-only workspace endpoints.  Workspace families are not
+    yet supported — both source and target must have an empty ``families``
+    tuple.
+
+    Constraints:
+        - Both source and target must have no families.
+        - Fixed slot names must match in order (same names, same positions).
+        - At least one fixed slot is required.
+
+    Args:
+        source:   Source workspace endpoint descriptor.
+        target:   Target workspace endpoint descriptor.
+        settings: Projection settings applied to every per-slot projector.
+    """
+
+    def __init__(
+        self,
+        source: WorkspaceEndpointSpec,
+        target: WorkspaceEndpointSpec,
+        settings: ProjectionSettings,
+    ) -> None:
+        super().__init__()
+        if source.families:
+            raise ValueError(
+                f"workspace->workspace projection does not support source families yet; "
+                f"source has families {[f.name for f in source.families]!r}."
+            )
+        if target.families:
+            raise ValueError(
+                f"workspace->workspace projection does not support target families yet; "
+                f"target has families {[f.name for f in target.families]!r}."
+            )
+        if source.fixed != target.fixed:
+            raise ValueError(
+                f"workspace->workspace projection requires fixed slot names to match in order. "
+                f"source fixed: {list(source.fixed)!r}, target fixed: {list(target.fixed)!r}."
+            )
+        if not source.fixed:
+            raise ValueError("workspace->workspace projection requires at least one fixed slot.")
+        self._source = source
+        self._target = target
+        self._settings = settings
+        # One independent ProjectionModule per fixed slot — distinct parameter block per role.
+        self.projectors = nn.ModuleList([ProjectionModule([source.width], [target.width], settings) for _ in source.fixed])
+
+    def reset_parameters(self) -> None:
+        """Reset all per-slot projection parameters."""
+        for proj in self.projectors:
+            proj.reset_parameters()
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Project each fixed slot independently.
+
+        Args:
+            x: Workspace tensor of shape ``(B, S, W_from)`` where
+               ``S == len(source.fixed)`` and ``W_from == source.width``.
+
+        Returns:
+            Projected tensor of shape ``(B, S, W_to)`` where ``W_to == target.width``.
+        """
+        n_slots = len(self._source.fixed)
+        w_from = self._source.width
+        if x.ndim != 3 or int(x.shape[1]) != n_slots or int(x.shape[2]) != w_from:
+            raise ValueError(f"x must have shape (B, {n_slots}, {w_from}), got {tuple(x.shape)}.")
+        slots = [self.projectors[i]([x[:, i, :]])[0] for i in range(n_slots)]
+        return torch.stack(slots, dim=1)  # (B, S, W_to)
+
+
 class _BroadcastProjectionEdge(nn.Module):
     """Broadcast one flat feature vector across multiscale target bands."""
 
@@ -648,6 +729,8 @@ def build_projection_edge(
             return _FlatProjectionEdge(source.width, target.width, settings)
         if source.kind == "token_sequence" and target.kind == "token_sequence":
             return _TokenSequenceProjectionEdge(source.width, target.width, settings)
+        if source.kind == "workspace" and target.kind == "workspace":
+            return _WorkspaceProjectionEdge(source, target, settings)  # type: ignore[arg-type]
         raise ValueError(f"aligned bridge requires matching endpoint kinds, got {source.kind!r} -> {target.kind!r}.")
 
     if bridge == "broadcast":
@@ -736,10 +819,12 @@ def _resolve_bridge(
     """Resolve the bridge used to reconcile one source-target endpoint pair."""
     if override != "auto":
         return override
+    if source.kind == "workspace" and target.kind == "workspace":
+        return "aligned"
     if source.kind == "workspace" or target.kind == "workspace":
         raise ValueError(
-            "workspace endpoints are structural descriptors only; no automatic bridge is defined yet. "
-            "Use explicit role-specific projectors or token_sequence endpoints."
+            "mixed workspace/non-workspace projection is not supported. "
+            "Use aligned workspace->workspace edges or explicit role-specific projectors."
         )
     if source.kind == target.kind and source.kind in {"flat", "multiscale", "token_sequence"}:
         return "aligned"

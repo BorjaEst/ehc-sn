@@ -52,7 +52,7 @@ from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
 from ehc_sn.modules.pfc.workspace import FixedSlot, SlotFamily, WorkspaceLayout, WorkspaceSchema
-from ehc_sn.modules.projection import ProjectionBundle, ProjectionModule, flat_endpoint
+from ehc_sn.modules.projection import ProjectionBundle, ProjectionModule, flat_endpoint, workspace_endpoint
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
 from ehc_sn.types import MemoryState, MultiScaleCode
 from ehc_sn.utils.detach import DetachMixin
@@ -256,11 +256,10 @@ class EHCModelV2(nn.Module):
         Multiscale (ProjectionBundle):
             ``lec_to_hpc``, ``mec_to_hpc`` - aligned band-by-band projections.
         Broadcast flat->multiscale (ProjectionBundle):
-            ``pfc_to_hpc``        PFC hidden -> HPC cue family ``c``.
-        Flat (nn.Linear, EHC-local):
-            ``hpc_to_pfc_state``  HPC flat   -> PFC hidden (state interface slot).
-            ``hpc_to_pfc_replay`` HPC flat   -> PFC hidden (replay interface slot).
-            ``hpc_to_pfc_cue``    HPC flat   -> PFC hidden (cue interface slot).
+            ``pfc_to_hpc``  PFC hidden -> HPC cue family ``c``.
+        Workspace-aligned (ProjectionBundle):
+            ``hpc_to_pfc``  HPC flat workspace (state/replay/cue) -> PFC hidden;
+                            one independent parameter block per fixed role.
     """
 
     def __init__(  # ------------------------------------------------------------------
@@ -284,22 +283,18 @@ class EHCModelV2(nn.Module):
         self.mec = MECModel(config.transition_action_count, config.hpc.shape, config.f_initial, config.mec, device=device, dtype=dtype)
         self.lec = LECModel(config.f_initial, config.lec, device=device, dtype=dtype)
 
-        # ---- Multiscale projections (LEC->HPC, MEC->HPC) -------------------
-        # LEC/MEC expose aligned multiscale codes and PFC exposes a flat public
-        # summary; the bundle normalizes each edge to the appropriate bridge.
+        # ---- Inter-region projections (LEC->HPC, MEC->HPC, PFC->HPC, HPC->PFC) ----
+        # LEC/MEC expose aligned multiscale codes; PFC exposes a flat public summary;
+        # the HPC->PFC reverse edge uses a workspace-aligned edge with one independent
+        # parameter block per fixed role (state, replay, cue).
+        _hpc_ws_from = workspace_endpoint(hpc_flat, fixed=[SLOT_STATE, SLOT_REPLAY, SLOT_CUE])
+        _hpc_ws_to = workspace_endpoint(hidden_size, fixed=[SLOT_STATE, SLOT_REPLAY, SLOT_CUE])
         self.projections = ProjectionBundle.from_modules(
             lec_to_hpc=(self.lec, self.hpc, config.projections.lec_to_hpc),
             mec_to_hpc=(self.mec, self.hpc, config.projections.mec_to_hpc),
             pfc_to_hpc=(flat_endpoint(hidden_size), self.hpc, config.projections.pfc_to_hpc),
+            hpc_to_pfc=(_hpc_ws_from, _hpc_ws_to, config.projections.hpc_to_pfc),
         )
-
-        # ---- Flat projectors: HPC -> PFC interface -------------------------
-        # hpc_to_pfc_{state,replay,cue}: HPC flat -> PFC hidden.
-        #   Three separate projectors for the three fixed body interface slots.
-        #   Distinct learned surfaces preserve role-specific representations.
-        self.hpc_to_pfc_state = nn.Linear(hpc_flat, hidden_size, bias=False, device=device, dtype=dtype)
-        self.hpc_to_pfc_replay = nn.Linear(hpc_flat, hidden_size, bias=False, device=device, dtype=dtype)
-        self.hpc_to_pfc_cue = nn.Linear(hpc_flat, hidden_size, bias=False, device=device, dtype=dtype)
 
         self.reset_parameters()
 
@@ -323,15 +318,14 @@ class EHCModelV2(nn.Module):
         """PFC-summary-to-HPC contextual cue projection edge."""
         return self.projections["pfc_to_hpc"]
 
+    @property
+    def hpc_to_pfc(self) -> nn.Module:
+        """HPC workspace-to-PFC projection edge (one parameter block per fixed role)."""
+        return self.projections["hpc_to_pfc"]
+
     def reset_parameters(self) -> None:
         """Reset all projection parameters owned directly by EHC."""
         self.projections.reset_parameters()
-        for lin in (
-            self.hpc_to_pfc_state,
-            self.hpc_to_pfc_replay,
-            self.hpc_to_pfc_cue,
-        ):
-            nn.init.trunc_normal_(lin.weight, std=0.02)
 
     def init_state(  # -----------------------------------------------------------
         self,
@@ -501,14 +495,17 @@ class EHCModelV2(nn.Module):
         p_post, state.hpc = self.hpc.inference(x_query, g_query_post, state=state.hpc)
 
         # 9. Build PFC body workspace tokens ----------------------------------
-        # Project HPC flat codes to PFC hidden size for the three interface slots.
+        # Stack HPC flat codes into a 3-slot workspace tensor, project once through
         p_post_flat: Tensor = torch.cat(p_post, dim=-1)  # (B, hpc_flat)
         p_replay_flat: Tensor = torch.cat(p_replay_read, dim=-1)  # (B, hpc_flat)
         c_use_flat: Tensor = torch.cat(c_use, dim=-1)  # (B, hpc_flat)
 
-        state_token: Tensor = self.hpc_to_pfc_state(p_post_flat).unsqueeze(1)  # (B, 1, D)
-        replay_token: Tensor = self.hpc_to_pfc_replay(p_replay_flat).unsqueeze(1)  # (B, 1, D)
-        cue_token: Tensor = self.hpc_to_pfc_cue(c_use_flat).unsqueeze(1)  # (B, 1, D)
+        hpc_slots_in: Tensor = torch.stack([p_post_flat, p_replay_flat, c_use_flat], dim=1)  # (B, 3, hpc_flat)
+        hpc_slots_out: Tensor = self.hpc_to_pfc(hpc_slots_in)  # (B, 3, hidden_size)
+
+        state_token: Tensor = hpc_slots_out[:, 0:1, :]  # (B, 1, D)
+        replay_token: Tensor = hpc_slots_out[:, 1:2, :]  # (B, 1, D)
+        cue_token: Tensor = hpc_slots_out[:, 2:3, :]  # (B, 1, D)
 
         # Content family: previous-step cortical substrate from the public workspace.
         prev_content: Tensor = state.pfc.workspace.family(FAMILY_CONTENT)  # (B, content_size, D)

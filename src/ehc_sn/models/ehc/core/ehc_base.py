@@ -30,9 +30,10 @@ class EHCProjectionSettingsV2(BaseModel, extra="forbid", strict=False):
     previous-step public PFC summary into the hippocampal contextual cue
     family ``c``.
 
-    The reverse HPC→PFC slot projectors remain direct ``nn.Linear`` surfaces
-    in ``EHCModelV2`` because they are role-specific interface heads rather
-    than generic inter-region edges.
+    ``hpc_to_pfc`` is a workspace-to-workspace edge that projects the three
+    fixed HPC interface slots (state, replay, cue) from the flattened HPC
+    dimension into PFC hidden size.  Each fixed role gets an independent
+    parameter block via :class:`~ehc_sn.modules.projection._WorkspaceProjectionEdge`.
     """
 
     lec_to_hpc: ProjectionSettings = Field(
@@ -46,6 +47,13 @@ class EHCProjectionSettingsV2(BaseModel, extra="forbid", strict=False):
     pfc_to_hpc: ProjectionSettings = Field(
         default_factory=lambda: ProjectionSettings(mode="linear", bridge="broadcast", init="random", learnable=True),
         description="Projection settings mapping the previous PFC summary into the hippocampal c-cue family.",
+    )
+    hpc_to_pfc: ProjectionSettings = Field(
+        default_factory=lambda: ProjectionSettings(mode="linear", init="random", learnable=True),
+        description=(
+            "Projection settings for the workspace-aligned HPC->PFC reverse edge. "
+            "Maps flattened HPC codes into PFC hidden size with one parameter block per fixed role."
+        ),
     )
 
 
