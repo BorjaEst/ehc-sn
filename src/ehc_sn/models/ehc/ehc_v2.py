@@ -495,7 +495,9 @@ class EHCModelV2(nn.Module):
         p_post, state.hpc = self.hpc.inference(x_query, g_query_post, state=state.hpc)
 
         # 9. Build PFC body workspace tokens ----------------------------------
-        # Stack HPC flat codes into a 3-slot workspace tensor, project once through
+        # Stack HPC flat codes into a 3-slot workspace-aligned tensor (state/replay/cue),
+        # project once through hpc_to_pfc (independent parameter block per role), then
+        # unpack the projected tokens for the body assembly below.
         p_post_flat: Tensor = torch.cat(p_post, dim=-1)  # (B, hpc_flat)
         p_replay_flat: Tensor = torch.cat(p_replay_read, dim=-1)  # (B, hpc_flat)
         c_use_flat: Tensor = torch.cat(c_use, dim=-1)  # (B, hpc_flat)

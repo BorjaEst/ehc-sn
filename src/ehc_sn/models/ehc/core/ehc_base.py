@@ -29,11 +29,10 @@ class EHCProjectionSettingsV2(BaseModel, extra="forbid", strict=False):
     ``pfc_to_hpc`` is a flat-to-multiscale broadcast edge that maps the
     previous-step public PFC summary into the hippocampal contextual cue
     family ``c``.
-
-    ``hpc_to_pfc`` is a workspace-to-workspace edge that projects the three
-    fixed HPC interface slots (state, replay, cue) from the flattened HPC
-    dimension into PFC hidden size.  Each fixed role gets an independent
-    parameter block via :class:`~ehc_sn.modules.projection._WorkspaceProjectionEdge`.
+    ``hpc_to_pfc`` is an aligned workspace-to-workspace edge that projects the
+    three fixed HPC interface slots (state, replay, cue) from the flattened HPC
+    dimension into PFC hidden size.  Each fixed role gets its own independent
+    parameter block; weights are not shared across roles by default.
     """
 
     lec_to_hpc: ProjectionSettings = Field(
