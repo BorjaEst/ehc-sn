@@ -12,7 +12,8 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.modules.pfc import FixedSlot, PFCModel, PFCSettings, PFCState, SlotFamily, WorkspaceLayout, WorkspaceSchema
+from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
+from ehc_sn.modules.pfc.workspace import SlotFamily, WorkspaceLayout, WorkspaceSchema
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -42,18 +43,18 @@ class ModelSettingsV1(BaseModel, extra="forbid"):
 
     @property
     def schema_layout(self) -> WorkspaceLayout:
-        """Return the body-only schema layout (no controller) for use with :meth:`WorkspaceLayout.bind`."""
-        return WorkspaceLayout.from_schema(WorkspaceSchema(fixed=(), families=(SlotFamily("schema", self.num_schema_slots),)))
-
-    @property
-    def workspace_layout(self) -> WorkspaceLayout:
-        """Return the full workspace layout (controller at position 0 + schema family) for :meth:`~ehc_sn.modules.pfc.PFCModel.init_state`."""
+        """Return the body-only schema layout (no controller)."""
         return WorkspaceLayout.from_schema(
             WorkspaceSchema(
-                fixed=(FixedSlot("controller"),),
-                families=(SlotFamily("schema", self.num_schema_slots),),
+                fixed=(),
+                families=(SlotFamily("schema", self.num_schema_slots)),
             )
         )
+
+    @property
+    def body_schema(self) -> WorkspaceSchema:
+        """Return the body-only schema (no controller)."""
+        return self.schema_layout.schema
 
 
 # =============================================================================
@@ -143,7 +144,7 @@ class HRModelV1(nn.Module):
     ) -> HRMStateV1:
         """Create a fresh recurrent state for one batch."""
         return HRMStateV1(
-            pfc=self.pfc.init_state(batch_size, workspace_layout=self.config.workspace_layout),
+            pfc=self.pfc.init_state(batch_size, body_schema=self.config.body_schema),
         )
 
     def reset_state(  # -------------------------------------------------------

@@ -221,7 +221,7 @@ class ModelSettingsV2(BaseModel, extra="forbid", strict=False):
         return sum(self.hpc.shape)
 
     @property
-    def workspace_spec(self) -> WorkspaceSchema:
+    def body_schema(self) -> WorkspaceSchema:
         """Body workspace schema for the PFC module (size = pfc.seq_length).
 
         Fixed slots (indices 0-2 in the body):
@@ -239,20 +239,6 @@ class ModelSettingsV2(BaseModel, extra="forbid", strict=False):
             fixed=(FixedSlot(SLOT_STATE), FixedSlot(SLOT_REPLAY), FixedSlot(SLOT_CUE)),
             families=(SlotFamily(FAMILY_CONTENT, content_size),),
         )
-
-    @property
-    def workspace_layout(self) -> WorkspaceLayout:
-        """Full workspace layout: controller at position 0 + body spec.
-
-        Size = pfc.seq_length + 1.  Pass this to ``pfc.init_state`` so the PFC
-        module allocates the correct z_H / z_L dimensions.
-        """
-        body_spec = self.workspace_spec
-        full_schema = WorkspaceSchema(
-            fixed=(FixedSlot("controller"), *body_spec.fixed),
-            families=body_spec.families,
-        )
-        return WorkspaceLayout.from_schema(full_schema)
 
 
 # =============================================================================
@@ -368,7 +354,7 @@ class EHCModelV2(nn.Module):
         memory = memory if memory is not None else self.hpc.init_memory(batch_size=batch_size, device=device)
         return EHCStateV2(
             # NOTE: PFCModel.init_state does NOT accept a device kwarg.
-            pfc=self.pfc.init_state(batch_size, workspace_layout=self.config.workspace_layout),
+            pfc=self.pfc.init_state(batch_size, body_schema=self.config.body_schema),
             str=self.str.init_state(batch_size, device=device),
             lec=self.lec.init_state(batch_size, device=device),
             mec=self.mec.init_state(batch_size, device=device),
@@ -534,7 +520,7 @@ class EHCModelV2(nn.Module):
         # 10. PFC reasoning step ----------------------------------------------
         # PFCModel.step validates workspace.layout.size == pfc.seq_length and
         # that the derived full layout matches state.pfc.workspace.layout.
-        body_layout = WorkspaceLayout.from_schema(self.config.workspace_spec)
+        body_layout = WorkspaceLayout.from_schema(self.config.body_schema)
         body_workspace = body_layout.bind(body_tokens)
         pfc_out, state.pfc = self.pfc.step(body_workspace, state=state.pfc)
         control_logits: Tensor = pfc_out.q_values

@@ -229,38 +229,43 @@ class PFCModel(nn.Module):
     def init_state(  # --------------------------------------------------------
         self,
         batch_size: int,
-        workspace_layout: Optional[WorkspaceLayout] = None,
+        body_schema: Optional[WorkspaceSchema] = None,
     ) -> PFCState:
         """Create a fresh PFC recurrent state.
 
+        The caller supplies only the body schema it owns.  The controller fixed
+        slot is prepended internally by :class:`PFCModel`; callers must not
+        include it.
+
         Args:
             batch_size: Number of parallel sequences.
-            workspace_layout: Optional *full* workspace layout that must include the
-                ``controller`` fixed slot at position 0.  When omitted, the default
-                layout with a ``body`` family is used.
+            body_schema: Body-only :class:`WorkspaceSchema` (no ``controller``
+                slot).  When ``None`` the default ``body`` family schema is used.
 
         Returns:
-            Initialized :class:`PFCState`.
+            Initialized :class:`PFCState` whose workspace exposes the full
+            z_H surface: controller at position 0 followed by all body slots.
         """
-        layout = workspace_layout if workspace_layout is not None else self._default_workspace_layout
-        self._validate_workspace_layout(layout)
-        memory = r.init_memory(batch_size, layout.size, self.high_level, self.low_level)
-        return _build_state_from_memory(memory, layout, detach=False)
+        schema = body_schema if body_schema is not None else self._default_schema_layout.schema
+        full_layout = _body_to_full_layout(WorkspaceLayout.from_schema(schema))
+        self._validate_full_layout(full_layout)
+        memory = r.init_memory(batch_size, full_layout.size, self.high_level, self.low_level)
+        return _build_state_from_memory(memory, full_layout, detach=False)
 
-    def _validate_workspace_layout(  # ----------------------------------------
+    def _validate_full_layout(  # ---------------------------------------------
         self,
         layout: WorkspaceLayout,
     ) -> None:
-        """Validate that *layout* is compatible with this PFC configuration."""
+        """Validate that *layout* (controller + body) is compatible with this PFC configuration."""
         expected_size = self.config.seq_length + 1
         if layout.size != expected_size:
-            raise ValueError(f"workspace_layout size must be seq_length + 1 = {expected_size}, got {layout.size}.")
+            raise ValueError(f"Full workspace layout size must be seq_length + 1 = {expected_size}, got {layout.size}.")
         try:
             ctrl_pos = layout.slot(_CONTROLLER)
         except KeyError:
-            raise ValueError(f"workspace_layout must declare a '{_CONTROLLER}' fixed slot at position 0.") from None
+            raise ValueError(f"Full workspace layout must declare a '{_CONTROLLER}' fixed slot at position 0.") from None
         if ctrl_pos != 0:
-            raise ValueError(f"workspace_layout '{_CONTROLLER}' fixed slot must be at position 0, got {ctrl_pos}.")
+            raise ValueError(f"Full workspace layout '{_CONTROLLER}' fixed slot must be at position 0, got {ctrl_pos}.")
 
     def reset_state(  # -------------------------------------------------------
         self,
@@ -308,7 +313,7 @@ class PFCModel(nn.Module):
             )
 
         if state is None:
-            state = self.init_state(int(workspace.tokens.shape[0]), workspace_layout=full_layout)
+            state = self.init_state(int(workspace.tokens.shape[0]), body_schema=workspace.layout.schema)
 
         # Prepend CLS (controller) to body tokens: (B, seq_length, D) → (B, seq_length+1, D).
         batch_size = int(workspace.tokens.shape[0])
@@ -386,15 +391,4 @@ def _body_to_full_layout(  # --------------------------------------------------
 
 
 # =============================================================================
-__all__ = [
-    "FixedSlot",
-    "PFCModel",
-    "PFCOutput",
-    "PFCScratchState",
-    "PFCSettings",
-    "PFCState",
-    "SlotFamily",
-    "Workspace",
-    "WorkspaceLayout",
-    "WorkspaceSchema",
-]
+__all__ = ["PFCModel", "PFCOutput", "PFCScratchState", "PFCSettings", "PFCState"]

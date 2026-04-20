@@ -14,7 +14,7 @@ from torch import dtype as Dtype
 from torch import nn
 
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
-from ehc_sn.modules.pfc.workspace import FixedSlot, SlotFamily, WorkspaceLayout, WorkspaceSchema
+from ehc_sn.modules.pfc.workspace import SlotFamily, WorkspaceLayout, WorkspaceSchema
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
@@ -51,17 +51,17 @@ class ModelSettingsV2(BaseModel, extra="forbid"):
     @property
     def schema_layout(self) -> WorkspaceLayout:
         """Return the body-only schema layout."""
-        return WorkspaceLayout.from_schema(WorkspaceSchema(fixed=(), families=(SlotFamily("schema", self.num_schema_slots),)))
-
-    @property
-    def workspace_layout(self) -> WorkspaceLayout:
-        """Return the full workspace layout."""
         return WorkspaceLayout.from_schema(
             WorkspaceSchema(
-                fixed=(FixedSlot("controller"),),
-                families=(SlotFamily("schema", self.num_schema_slots),),
+                fixed=(),
+                families=(SlotFamily("schema", self.num_schema_slots)),
             )
         )
+
+    @property
+    def body_schema(self) -> WorkspaceSchema:
+        """Return the body-only schema (no controller)."""
+        return self.schema_layout.schema
 
 
 # =============================================================================
@@ -147,7 +147,7 @@ class HRModelV2(nn.Module):
     ) -> HRMStateV2:
         """Allocate a fresh recurrent state for the given batch size."""
         return HRMStateV2(
-            pfc=self.pfc.init_state(batch_size, workspace_layout=self.config.workspace_layout),
+            pfc=self.pfc.init_state(batch_size, body_schema=self.config.body_schema),
             str=self.str.init_state(batch_size),
         )
 
