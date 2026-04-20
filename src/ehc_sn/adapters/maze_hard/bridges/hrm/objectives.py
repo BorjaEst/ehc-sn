@@ -1,8 +1,13 @@
-"""MazeHard ACT task binding for the ACT objective.
+"""MazeHard HRM-family task bindings for ACT and RL objectives.
 
-This module provides :class:`MazeHardACTTaskBinding`, which wires controller
-loss head to the MazeHard task surface.  It is the sole place in the codebase
-that knows both the objective API and the MazeHard output shape.
+These bindings live here — in the shared MazeHard+HRM bridge namespace — because
+they read from HRM-family-specific output surfaces (``backbone_output.task``,
+``backbone_output.policy``, ``backbone_output.critic``), making them HRM-specific
+model-task bindings rather than generic MazeHard adapter logic.
+
+Mirrors the pattern used by
+:class:`~ehc_sn.adapters.navigation.bridges.tem.objectives.NavigationTEMTaskBinding`
+for the Navigation+TEM family.
 """
 
 from __future__ import annotations
@@ -18,8 +23,8 @@ from ehc_sn.types import Batch
 
 
 # =============================================================================
-class MazeHardACTTaskBinding(TokenSupervisionBinding[MazeHardTargets]):
-    """ACT task binding for MazeHard token prediction.
+class MazeHardHRMACTTaskBinding(TokenSupervisionBinding[MazeHardTargets]):
+    """ACT task binding for MazeHard token prediction via the HRM family.
 
     Extracts supervised logits from ``step_output.backbone_output.task.task_logits``
     and constructs targets from the canonical MazeHard batch ``"labels"`` key.
@@ -85,8 +90,8 @@ class MazeHardACTTaskBinding(TokenSupervisionBinding[MazeHardTargets]):
 
 
 # =============================================================================
-class MazeHardRLTaskBinding(RLObjectiveBinding[MazeHardTargets]):
-    """RL task binding for MazeHard token prediction plus actor-critic readouts."""
+class MazeHardHRMRLTaskBinding(RLObjectiveBinding[MazeHardTargets]):
+    """RL task binding for MazeHard token prediction plus actor-critic readouts via the HRM family."""
 
     def extract_logits(  # ----------------------------------------------------
         self,
@@ -139,4 +144,4 @@ class MazeHardRLTaskBinding(RLObjectiveBinding[MazeHardTargets]):
 
 
 # =============================================================================
-__all__ = ["MazeHardACTTaskBinding", "MazeHardRLTaskBinding"]
+__all__ = ["MazeHardHRMACTTaskBinding", "MazeHardHRMRLTaskBinding"]

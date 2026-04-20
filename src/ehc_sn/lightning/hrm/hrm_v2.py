@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
 from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v2 import MazeHardHRMV2AdapterSettings, MazeHardHRMV2BridgeAdapter
-from ehc_sn.adapters.maze_hard.objectives import MazeHardRLTaskBinding
+from ehc_sn.adapters.maze_hard.bridges.hrm.objectives import MazeHardHRMRLTaskBinding
 from ehc_sn.controllers.rl import RLController, RLControllerConfig
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
@@ -196,7 +196,7 @@ class TrainingModel(L.LightningModule):
         if self.environment is None:
             self.environment = MazeHardEnv(self.config.environment, batch_size=local_bs)
         self.controller = RLController(self.bridge_adapter, self.environment, self.config.controller, self._controller_runtime)
-        self.objective = RLLossHead(self.config.objective, task_binding=MazeHardRLTaskBinding())
+        self.objective = RLLossHead(self.config.objective, task_binding=MazeHardHRMRLTaskBinding())
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,

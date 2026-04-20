@@ -9,8 +9,9 @@ import lightning as L
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
+from ehc_sn.adapters.navigation.bridges.tem.objectives import NavigationTEMTaskBinding
 from ehc_sn.adapters.navigation.bridges.tem.tem_v2 import NavigationTEMV2AdapterSettings, NavigationTEMV2BridgeAdapter
-from ehc_sn.adapters.navigation.objectives import NavigationTEMTaskBinding
+from ehc_sn.adapters.navigation.bridges.tem.traces import NAVIGATION_TEM_TRACE_FIELDS, select_navigation_tem_trace_fields
 from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
@@ -129,7 +130,7 @@ class TrainingModel(L.LightningModule):
         self.train_metrics = build_train_metrics(TEM_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(TEM_EPISODE_ROUTES).clone(prefix="val/")
         self.primary_val_metric_key = f"val/{TEM_PRIMARY_VAL_ROUTE_KEY}"
-        self.trace_specs = build_trace_spec("tem")
+        self.trace_specs = build_trace_spec("tem", extra_fields=NAVIGATION_TEM_TRACE_FIELDS)
         self._eval_trace_keys: set[str] | None = None
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
@@ -348,7 +349,8 @@ class TrainingModel(L.LightningModule):
         if self._eval_trace_keys is None:
             trace_specs = self.trace_specs
         else:
-            trace_specs = build_trace_spec("tem", include_keys=self._eval_trace_keys)
+            nav_extra = select_navigation_tem_trace_fields(self._eval_trace_keys)
+            trace_specs = build_trace_spec("tem", include_keys=self._eval_trace_keys, extra_fields=nav_extra)
 
         evaluation = evaluate_rollout(
             runner=self._eval_runner,

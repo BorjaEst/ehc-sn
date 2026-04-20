@@ -1,8 +1,10 @@
-"""Navigation TEM task binding for the TEM objective.
+"""Navigation-TEM task binding for the TEM objective.
 
 This module provides :class:`NavigationTEMTaskBinding`, which wires the TEM
-objective to the navigation task surface.  It is the sole place in the
-codebase that knows both the TEM objective API and the navigation carry shape.
+objective to the navigation task surface.  It lives here — in the shared
+Navigation+TEM bridge namespace — because it knows both the TEM objective API
+and the navigation carry shape, making it a TEM-specific model-task binding
+rather than generic Navigation adapter logic.
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ class NavigationTEMTaskBinding:
     results to the established TEM metric keys.
 
     Mirrors the pattern used by
-    :class:`~ehc_sn.adapters.maze_hard.objectives.MazeHardACTTaskBinding`
+    :class:`~ehc_sn.adapters.maze_hard.bridges.hrm.objectives.MazeHardHRMACTTaskBinding`
     for the ACT objective path.
     """
 

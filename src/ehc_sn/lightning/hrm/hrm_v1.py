@@ -26,8 +26,8 @@ from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
 from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v1 import MazeHardHRMV1AdapterSettings, MazeHardHRMV1BridgeAdapter
-from ehc_sn.adapters.maze_hard.objectives import MazeHardACTTaskBinding
-from ehc_sn.adapters.maze_hard.traces import MAZE_HARD_ACT_TRACE_FIELDS
+from ehc_sn.adapters.maze_hard.bridges.hrm.objectives import MazeHardHRMACTTaskBinding
+from ehc_sn.adapters.maze_hard.bridges.hrm.traces import MAZE_HARD_HRM_ACT_TRACE_FIELDS
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
@@ -135,7 +135,7 @@ class TrainingModel(L.LightningModule):
         self.model = HRModelV1(model_settings)
         self.bridge_adapter = MazeHardHRMV1BridgeAdapter(self.model, config.adapter)
         self.controller = ACTController(self.bridge_adapter, config.act_controller)
-        self.objective = ACTLossHead(config.objective, task_binding=MazeHardACTTaskBinding())
+        self.objective = ACTLossHead(config.objective, task_binding=MazeHardHRMACTTaskBinding())
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()
@@ -147,7 +147,7 @@ class TrainingModel(L.LightningModule):
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(ACT_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(ACT_EPISODE_ROUTES).clone(prefix="val/")
-        self.trace_specs = build_trace_spec("act", extra_fields=MAZE_HARD_ACT_TRACE_FIELDS)
+        self.trace_specs = build_trace_spec("act", extra_fields=MAZE_HARD_HRM_ACT_TRACE_FIELDS)
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer = FifoBuffer(

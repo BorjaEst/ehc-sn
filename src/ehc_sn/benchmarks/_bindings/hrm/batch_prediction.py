@@ -10,7 +10,7 @@ import torch
 
 from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v1 import MazeHardHRMV1BridgeAdapter
 from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v2 import MazeHardHRMV2BridgeAdapter
-from ehc_sn.adapters.maze_hard.objectives import MazeHardACTTaskBinding
+from ehc_sn.adapters.maze_hard.bridges.hrm.objectives import MazeHardHRMACTTaskBinding
 from ehc_sn.benchmarks._bindings.hrm.load import load_hrm_v1_bridge_adapter, load_hrm_v2_model
 from ehc_sn.benchmarks._capabilities.batch_prediction import BatchPrediction, BatchPredicts
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
@@ -164,7 +164,7 @@ def _predict_with_controller(  # ----------------------------------------------
     if outputs is None:
         raise RuntimeError("ACTController produced no outputs during benchmark prediction.")
 
-    task_binding = MazeHardACTTaskBinding()
+    task_binding = MazeHardHRMACTTaskBinding()
     logits = task_binding.extract_logits(step_batch, state, outputs)  # (B, S, vocab)
     targets = task_binding.extract_targets(step_batch, state, outputs).labels  # (B, S)
 
