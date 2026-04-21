@@ -173,4 +173,3 @@ class MazeHardEnv(EnvBase):
 
 # =================================================================================================
 __all__ = ["EnvConfig", "MazeHardEnv"]
-__all__ = ["EnvConfig", "MazeHardEnv"]
