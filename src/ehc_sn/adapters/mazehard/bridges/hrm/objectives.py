@@ -18,7 +18,7 @@ from torch import Tensor
 
 from ehc_sn.objectives._token import AccuracyStats, TokenSupervisionBinding, compute_accuracy_stats
 from ehc_sn.objectives.hybrid_rl import HybridRLObjectiveBinding
-from ehc_sn.tasks.maze_hard.contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets
+from ehc_sn.tasks.mazehard.contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets
 from ehc_sn.types import Batch
 
 

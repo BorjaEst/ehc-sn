@@ -11,7 +11,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskInput
+from ehc_sn.tasks.mazehard.contracts import MazeHardTaskInput
 
 
 # =============================================================================

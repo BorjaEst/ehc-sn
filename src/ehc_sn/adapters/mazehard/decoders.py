@@ -10,7 +10,7 @@ from torch import Tensor
 from torch import device as Device
 from torch import dtype as Dtype
 
-from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskOutput
+from ehc_sn.tasks.mazehard.contracts import MazeHardTaskOutput
 
 
 # =============================================================================

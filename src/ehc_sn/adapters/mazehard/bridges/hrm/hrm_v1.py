@@ -15,8 +15,8 @@ from torch import nn
 from ehc_sn.adapters.mazehard.decoders import MazeHardDecoder
 from ehc_sn.adapters.mazehard.encoders import MazeHardEncoder
 from ehc_sn.models.hrm.hrm_v1 import HRMInputV1, HRModelV1, HRMOutputV1, HRMStateV1
-from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskInput, MazeHardTaskOutput
-from ehc_sn.tasks.maze_hard.runtime import extract_maze_hard_task_input
+from ehc_sn.tasks.mazehard.contracts import MazeHardTaskInput, MazeHardTaskOutput
+from ehc_sn.tasks.mazehard.runtime import extract_maze_hard_task_input
 from ehc_sn.types import Batch
 
 
