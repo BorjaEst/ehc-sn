@@ -27,27 +27,28 @@ from ehc_sn.objectives._variational import (
     require_latent_relation,
 )
 from ehc_sn.objectives.act import ACTLossConfig, ACTLossHead, ACTLossStep, ACTTaskBinding
-from ehc_sn.objectives.rl import RLLossConfig, RLLossHead, RLLossStep, RLObjectiveBinding
+from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLosses, HybridRLLossHead, HybridRLLossStep, HybridRLObjectiveBinding
+from ehc_sn.objectives.rl import RewardBearingStep, RLLossConfig, RLLosses, RLLossHead, RLLossStep, RLObjectiveBinding
 from ehc_sn.objectives.tem import (
     TEMLossConfig,
-    TEMLossHead,
     TEMLosses,
+    TEMLossHead,
     TEMLossStep,
+    TEMObjective,
     TEMObjectiveBinding,
     TEMObjectiveConfig,
-    TEMObjective,
     TEMObjectiveStep,
     TEMSupervisionBinding,
 )
 from ehc_sn.objectives.var import (
     LatentCode,
     VARLossConfig,
-    VARLossHead,
     VARLosses,
+    VARLossHead,
     VARLossStep,
+    VARObjective,
     VARObjectiveBinding,
     VARObjectiveConfig,
-    VARObjective,
     VARObjectiveStep,
 )
 
@@ -57,10 +58,14 @@ ACTObjectiveConfig = ACTLossConfig
 ACTObjective = ACTLossHead
 ACTObjectiveStep = ACTLossStep
 ACTObjectiveBinding = ACTTaskBinding
-# RL
+# RL — pure reward-first family (canonical names)
 RLObjectiveConfig = RLLossConfig
 RLObjective = RLLossHead
 RLObjectiveStep = RLLossStep
+# RL — hybrid token-supervised + actor-critic family (canonical names)
+HybridRLObjectiveConfig = HybridRLLossConfig
+HybridRLObjective = HybridRLLossHead
+HybridRLObjectiveStep = HybridRLLossStep
 # Base families
 TokenObjectiveBase = TokenLossHeadBase
 VariationalObjectiveBase = VariationalLossHeadBase
@@ -98,15 +103,27 @@ __all__ = [
     "ACTLossHead",
     "ACTLossStep",
     "ACTTaskBinding",
-    # rl — canonical
+    # rl — canonical (pure reward-first)
     "RLObjectiveConfig",
     "RLObjective",
     "RLObjectiveStep",
     # rl — compat / binding
+    "RewardBearingStep",
     "RLLossConfig",
     "RLLossHead",
+    "RLLosses",
     "RLLossStep",
     "RLObjectiveBinding",
+    # hybrid rl — canonical
+    "HybridRLObjectiveConfig",
+    "HybridRLObjective",
+    "HybridRLObjectiveStep",
+    # hybrid rl — compat
+    "HybridRLLossConfig",
+    "HybridRLLossHead",
+    "HybridRLLosses",
+    "HybridRLLossStep",
+    "HybridRLObjectiveBinding",
     # tem — canonical
     "TEMObjectiveBinding",
     "TEMObjectiveConfig",

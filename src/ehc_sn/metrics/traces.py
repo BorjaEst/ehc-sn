@@ -67,21 +67,12 @@ class _ACTTraceContext(_CommonTraceContext, Protocol):
 
 
 class _RLTraceOutputs(Protocol):
-    """Output surface required by RL trace fields."""
+    """Output surface required by RL trace fields (matches InteractionRecord)."""
 
-    class _Policy(Protocol):
-        q_logits: Tensor
-
-    class _Critic(Protocol):
-        state_value: Tensor
-
-    class _Backbone(Protocol):
-        policy: "_RLTraceOutputs._Policy"
-        critic: "_RLTraceOutputs._Critic | None"
-
-    backbone_output: _Backbone
+    policy_logits: Tensor
+    value_estimate: Tensor
     reward: Tensor
-    action: Tensor
+    sampled_action: Tensor
 
 
 class _RLTraceContext(_CommonTraceContext, Protocol):
@@ -197,23 +188,18 @@ ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_Q_LOGITS_ACT,)
 
 
 def _get_q_logits_rl(ctx: _RLTraceContext) -> TraceValue:
-    """vmPFC Q-logits over actions from the RL controller."""
-    logits_q: Tensor = ctx.outputs.backbone_output.policy.q_logits  # (B, n_actions)
-    return logits_q.detach()
+    """Actor policy logits over actions from the RL controller."""
+    return ctx.outputs.policy_logits.detach()
 
 
 def _require_state_value(ctx: _RLTraceContext) -> Tensor:
-    """Return the RL critic state value, raising if the critic surface is absent."""
-    critic = ctx.outputs.backbone_output.critic
-    if critic is None:
-        raise ValueError("RL trace fields require a critic output with state_value.")
-    return critic.state_value
+    """Return the critic state value from the interaction record."""
+    return ctx.outputs.value_estimate
 
 
 def _get_state_value_rl(ctx: _RLTraceContext) -> TraceValue:
-    """STR state-value estimates V(s) from the RL critic."""
-    state_value: Tensor = _require_state_value(ctx)  # (B, 1)
-    return state_value.detach()
+    """Critic state-value estimates V(s) from the actor-critic head."""
+    return ctx.outputs.value_estimate.detach()
 
 
 def _get_reward_env(ctx: _RLTraceContext) -> TraceValue:
@@ -223,13 +209,13 @@ def _get_reward_env(ctx: _RLTraceContext) -> TraceValue:
 
 def _get_action(ctx: _RLTraceContext) -> TraceValue:
     """Selected action index for each batch slot."""
-    return ctx.outputs.action.detach()
+    return ctx.outputs.sampled_action.detach()
 
 
 def _get_rpe(ctx: _RLTraceContext) -> TraceValue:
     """Reward prediction error: reward − V(s)."""
     reward: Tensor = ctx.outputs.reward.squeeze(-1)
-    value: Tensor = _require_state_value(ctx).squeeze(-1)  # STR critic
+    value: Tensor = ctx.outputs.value_estimate.squeeze(-1)
     return (reward - value).detach()
 
 
@@ -293,7 +279,7 @@ def _get_lec_w_f_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
 
 
 TRACE_Q_LOGITS_RL = TraceField(
-    name="value/q_logits",
+    name="value/policy_logits",
     get=_get_q_logits_rl,
 )
 TRACE_STATE_VALUE_RL = TraceField(
