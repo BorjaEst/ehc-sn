@@ -63,14 +63,17 @@ class CategoricalPolicy:
             masked_logits = masked_logits.clone()
             masked_logits[empty_rows, self._config.fallback_action] = 0.0
 
-        action = Categorical(logits=masked_logits).sample()
+        dist = Categorical(logits=masked_logits)
+        action = dist.sample()
         if self._config.exploration_prob is not None and explore:
             explore_flag = torch.rand(action.shape, generator=self._generator, device="cpu")
             explore_flag = explore_flag.to(action.device) < self._config.exploration_prob
             random_action = self._sample_uniform_valid(valid_action_mask)
             action = torch.where(explore_flag, random_action, action)
 
-        return PolicyDecision(action=action)
+        log_prob = dist.log_prob(action)
+        entropy = dist.entropy()
+        return PolicyDecision(action=action, log_prob=log_prob, entropy=entropy)
 
     def _sample_uniform_valid(  # -----------------------------------------------------------------
         self, valid_action_mask: Tensor,

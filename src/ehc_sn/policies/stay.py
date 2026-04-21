@@ -21,7 +21,7 @@ class StayPolicyConfig(BaseModel, extra="forbid"):
     stay_action: int = Field(
         default=0,
         ge=0,
-        description="Action index emitted by this policy. Defaults to 0 (STAY in canonical navigation ontology).",
+        description="Action index emitted by this policy. Defaults to 0 (STAY in canonical movement ontology).",
     )
 
 
