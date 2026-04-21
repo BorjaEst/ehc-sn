@@ -40,7 +40,7 @@ class MazeHardHRMV2AdapterSettings(BaseModel, extra="forbid"):
 class MazeHardHRMV2PolicyOutput:
     """Policy readouts emitted by the MazeHard HRM v2 bridge."""
 
-    q_logits: Tensor
+    policy_logits: Tensor
     valid_action_mask: Tensor | None = None
 
 
@@ -253,7 +253,7 @@ class MazeHardHRMV2BridgeAdapter(nn.Module):
         """Split one HRM step output into task, policy, and critic surfaces."""
         return MazeHardHRMV2BridgeOutput(
             task=self.decoder(outputs),
-            policy=MazeHardHRMV2PolicyOutput(q_logits=outputs.q_logits),
+            policy=MazeHardHRMV2PolicyOutput(policy_logits=outputs.policy_logits),
             critic=MazeHardHRMV2CriticOutput(state_value=outputs.state_value),
         )
 

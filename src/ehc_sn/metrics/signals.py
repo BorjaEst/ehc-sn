@@ -74,10 +74,10 @@ REWARD_STD: str = "reward_std"
 """Standard deviation of environment reward across the batch."""
 
 Q_MEAN: str = "q_mean"
-"""Mean Q-logit (vmPFC value estimate) across the batch."""
+"""Mean policy-logit value across the batch (actor head)."""
 
 Q_STD: str = "q_std"
-"""Standard deviation of Q-logits across the batch."""
+"""Standard deviation of policy-logit values across the batch (actor head)."""
 
 RPE_MAGNITUDE: str = "rpe_magnitude"
 """Mean absolute reward prediction error (|reward - V(s)|)."""
