@@ -30,8 +30,8 @@ import lightning as L
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v2 import MazeHardHRMV2AdapterSettings, MazeHardHRMV2BridgeAdapter
-from ehc_sn.adapters.maze_hard.bridges.hrm.objectives import MazeHardHRMRLTaskBinding
+from ehc_sn.adapters.mazehard.bridges.hrm.hrm_v2 import MazeHardHRMV2AdapterSettings, MazeHardHRMV2BridgeAdapter
+from ehc_sn.adapters.mazehard.bridges.hrm.objectives import MazeHardHRMHybridRLTaskBinding
 from ehc_sn.controllers.rl import RLController, RLControllerConfig
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
