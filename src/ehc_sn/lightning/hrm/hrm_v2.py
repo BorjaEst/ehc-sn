@@ -1,11 +1,11 @@
-"""HRM v2 Lightning module (RL + warmup).
+"""HRM v2 Lightning module (hybrid RL + warmup).
 
 This module defines a PyTorch Lightning :class:`~lightning.LightningModule` wrapper
 around the HRM v2 architecture (:class:`HRModelV2`) and its training loop.
 
 Compared to HRM v1 (ACT-supervised), HRM v2 couples a PFC-style recurrent reasoning
-core with an STR actor-critic head and trains with reinforcement-learning losses
-computed by :class:`~ehc_sn.objectives.rl.RLLossHead` via a
+core with an STR actor-critic head and trains with actor-critic RL losses
+computed by :class:`~ehc_sn.objectives.hybrid_rl.HybridRLLossHead` via a
 :class:`~ehc_sn.controllers.rl.RLController`.
 
 Key behaviors:
@@ -27,29 +27,29 @@ from pathlib import Path
 from typing import Any, Optional
 
 import lightning as L
+import torch
 from pydantic import BaseModel, Field, model_validator
+from torch import Tensor
 from torch.optim import Optimizer
 
 from ehc_sn.adapters.mazehard.bridges.hrm.hrm_v2 import MazeHardHRMV2AdapterSettings, MazeHardHRMV2BridgeAdapter
 from ehc_sn.adapters.mazehard.bridges.hrm.objectives import MazeHardHRMHybridRLTaskBinding
-from ehc_sn.controllers.rl import RLController, RLControllerConfig
+from ehc_sn.controllers.rl import InteractionRecord, RLController, RLControllerConfig
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
-from ehc_sn.metrics import build_train_metrics, build_val_metrics
+from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
-from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettingsV2
-from ehc_sn.objectives.rl import RLLossConfig, RLLossHead
-from ehc_sn.rollouts import RecurrentRunner, RepeatSource
-from ehc_sn.tasks.maze_hard import MazeHardControllerRuntime
+from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
+from ehc_sn.objectives.hybrid_rl import HybridActorCriticBatch, HybridRLLossConfig, HybridRLLossHead, HybridRLLossStep
+from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
+from ehc_sn.tasks.mazehard import MazeHardControllerRuntime
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
-
-# Token label ignored by supervised loss (padding / non-supervised positions).
-IGNORE_LABEL_ID: int = -100
+from ehc_sn.types import Batch
 
 
 # =================================================================================================
@@ -82,11 +82,11 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
     )
     controller: RLControllerConfig = Field(
         ...,
-        description="Configuration for the RL controller, which defines the forward pass and computes RL losses.",
+        description="Configuration for the RL controller, which manages rollout-state transitions and emits InteractionRecords.",
     )
-    objective: RLLossConfig = Field(
+    objective: HybridRLLossConfig = Field(
         ...,
-        description="Configuration for the RL objective scorer.",
+        description="Configuration for the hybrid RL objective scorer.",
     )
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -136,7 +136,7 @@ class TrainingModel(L.LightningModule):
     This wrapper manages:
         - lazy initialization of :class:`~ehc_sn.envs.mazehard.MazeHardEnv`
         - wiring :class:`~ehc_sn.controllers.rl.RLController` and
-          :class:`~ehc_sn.objectives.rl.RLLossHead`
+          :class:`~ehc_sn.objectives.hybrid_rl.HybridRLLossHead`
         - partial-reset batching via FIFO buffering
         - manual optimization with three optimizers
     """
@@ -148,10 +148,9 @@ class TrainingModel(L.LightningModule):
         model_settings = ModelSettingsV2.from_config(config.model_config_path)
         self.model = HRModelV2(model_settings)
         self.bridge_adapter = MazeHardHRMV2BridgeAdapter(self.model, config.adapter)
-        self._controller_runtime = MazeHardControllerRuntime()
         self.environment: MazeHardEnv | None = None  # Lazy init in setup() to avoid GPU allocation issues
         self.controller: RLController | None = None  # Initialized in setup() after environment is ready
-        self.objective: RLLossHead | None = None  # Initialized in setup() after controller is ready
+        self.objective: HybridRLLossHead | None = None  # Initialized in setup() after controller is ready
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()
@@ -175,11 +174,6 @@ class TrainingModel(L.LightningModule):
             buffer=self._train_buffer,
             keys=("input_ids", "labels"),
         )
-        self._learner = HRMV2RLLearner(
-            warmup_steps=config.supervised_only_warmup_steps,
-            runner=self._train_runner,
-            assembler=self._train_batch_assembler,
-        )
 
     @property
     def config(self) -> ModelConfig_HRM_V2:
@@ -192,11 +186,12 @@ class TrainingModel(L.LightningModule):
         """Lazy initialization of the environment to avoid GPU allocation issues in DDP."""
         world_size = max(getattr(self.trainer, "world_size", 1), 1)
         local_bs = self.config.global_batch_size // world_size
+        controller_runtime = MazeHardControllerRuntime()
 
         if self.environment is None:
             self.environment = MazeHardEnv(self.config.environment, batch_size=local_bs)
-        self.controller = RLController(self.bridge_adapter, self.environment, self.config.controller, self._controller_runtime)
-        self.objective = RLLossHead(self.config.objective, task_binding=MazeHardHRMRLTaskBinding())
+        self.controller = RLController(self.bridge_adapter, self.environment, self.config.controller, controller_runtime)
+        self.objective = HybridRLLossHead(self.config.objective, task_binding=MazeHardHRMHybridRLTaskBinding())
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
@@ -214,13 +209,15 @@ class TrainingModel(L.LightningModule):
 
         # Optimizer A: supervised — backbone + LM params only.
         vmPFC_ids = {id(p) for p in self.model.pfc.estimator.parameters()}
-        str_ids = {id(p) for p in self.model.striatum.parameters()}
+        str_ids = {id(p) for p in self.model.str.parameters()}
         excluded_ids = vmPFC_ids | str_ids
         sup_params = [p for p in self.bridge_adapter.parameters() if id(p) not in excluded_ids]
+
+        # Optimizer A: supervised — backbone + LM params only ().
         opt_sup = AdamATan2(sup_params, self.config.optimizer_supervised)
         # Optimizer B: RL — STR actor-critic only (strictly isolated)
-        opt_rl = AdamATan2(list(self.model.striatum.parameters()), self.config.optimizer_rl)
-        # Optimizer C: vmPFC — pfc.estimator only (auxiliary Q-predictor)
+        opt_rl = AdamATan2(list(self.model.str.parameters()), self.config.optimizer_rl)
+        # Optimizer C: vmPFC — pfc.estimator only (value estimator, auxiliary critic)
         opt_qv = AdamATan2(list(self.model.pfc.estimator.parameters()), self.config.optimizer_qv)
 
         sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, self.config.scheduler)
@@ -228,8 +225,6 @@ class TrainingModel(L.LightningModule):
         sch_qv = CosineAnnealingLRWithWarmup(opt_qv, total_steps, self.config.scheduler)
 
         return [opt_sup, opt_rl, opt_qv], [sch_sup, sch_rl, sch_qv]
-
-    # -- Lifecycle --------------------------------------------------------------------------------
 
     def on_train_epoch_start(  # ------------------------------------------------------------------
         self,
@@ -245,15 +240,15 @@ class TrainingModel(L.LightningModule):
         """Reset validation metrics at the start of each epoch."""
         self.val_metrics.reset()
 
-    # -- Training ----------------------------------------------------------------------------------
-
     def training_step(  # -------------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
     ) -> dict[str, Any]:  # fmt: skip
         """Run one training step (horizon = 1) with manual optimization.
 
-        Training uses a carry object produced by :class:`~ehc_sn.objectives.rl.RLLossHead`
-        to support partial resets: rows that halted in the previous step are
+        The controller emits one :class:`~ehc_sn.controllers.rl.InteractionRecord`
+        per step; the objective scores it and returns a loss. The carry is the
+        rollout state produced by :class:`~ehc_sn.controllers.rl.RLController`
+        and is used for partial resets: rows that halted in the previous step are
         replaced with fresh examples from the current incoming batch.
 
         Notes:
@@ -267,30 +262,39 @@ class TrainingModel(L.LightningModule):
         if self._train_carry is None:
             self._train_carry = self.controller.initial_state(batch)
 
-        local_bs = int(batch["input_ids"].shape[0])
-        opt_sup, opt_rl, opt_qv = self.optimizers()  # type: ignore[misc]
-        sch_sup, sch_rl, sch_qv = self.lr_schedulers()  # type: ignore[misc]
-
-        output = self._learner.step(
-            batch=batch,
-            carry=self._train_carry,
-            global_step=self.global_step,
+        evaluation = evaluate_rollout(
+            runner=self._train_runner,
+            source=PartialResetSource(incoming=batch, assembler=self._train_batch_assembler, carry0=self._train_carry),
             controller=self.controller,
+            carry=self._train_carry,
             objective=self.objective,
-            local_batch_size=local_bs,
-            optimizers=(opt_sup, opt_rl, opt_qv),
-            schedulers=(sch_sup, sch_rl, sch_qv),
-            manual_backward=self.manual_backward,
+            runner_options={"allow_halt": True, "explore": True},
+            objective_options={"controller": self.controller, "td_target": True},
         )
-        self._train_carry = output.evaluation.chunk.final_carry.detach()
+        self._train_carry = evaluation.chunk.final_carry.detach()
 
-        # Update metrics and log.
-        update_metric_collection_from_evaluated_chunk(self.train_metrics, output.evaluation.evaluated, RL_STEP_ROUTES)
-        self.log("train/loss", output.loss, on_step=True, on_epoch=False, prog_bar=True, logger=True)
+        # Normalize by local batch size; DDP averages gradients across ranks.
+        local_bs = int(batch["input_ids"].shape[0])
+        loss = normalize_loss_for_backward(evaluation.evaluated.loss, local_bs=local_bs)
 
-        return {"loss": output.loss, "signals": output.signals}
+        optimizers = self.optimizers()
+        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
+            opt.zero_grad(set_to_none=True)  # type: ignore
 
-    # -- Validation -------------------------------------------------------------------------------
+        self.manual_backward(loss)
+
+        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
+            opt.step()  # type: ignore
+
+        scheduler = self.lr_schedulers()
+        for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
+            sch.step()  # type: ignore
+
+        # Update metrics with unnormalized loss and log to TensorBoard.
+        update_metric_collection_from_evaluated_chunk(self.train_metrics, evaluation.evaluated, RL_STEP_ROUTES)
+        self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
+
+        return {"loss": loss.detach(), "signals": evaluation.evaluated.last_step.outputs.signals}
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
@@ -303,7 +307,6 @@ class TrainingModel(L.LightningModule):
         if self.controller is None or self.objective is None:
             raise RuntimeError("HRM v2 runtime is not initialized. Call setup() before validation.")
 
-        rl_options = {"explore": False, "allow_halt": False, "is_warmup": False}
         carry0 = self.controller.initial_state(batch)
         evaluation = evaluate_rollout(
             runner=self._eval_runner,
@@ -313,9 +316,13 @@ class TrainingModel(L.LightningModule):
             objective=self.objective,
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
-            runner_options=rl_options,
-            objective_options=rl_options,
+            runner_options={"explore": False, "allow_halt": False, "is_warmup": False},
+            objective_options={"explore": False, "allow_halt": False, "is_warmup": False},
         )
         trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, RL_EPISODE_ROUTES)
         return {"trace": trace}
+
+
+# =============================================================================
+__all__ = ["ModelConfig_HRM_V2", "TrainingModel"]

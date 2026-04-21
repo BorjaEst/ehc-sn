@@ -274,3 +274,7 @@ class TrainingModel(L.LightningModule):
         trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, ACT_EPISODE_ROUTES)
         return {"trace": trace}
+
+
+# =============================================================================
+__all__ = ["ModelConfig_HRM_V1", "TrainingModel"]
