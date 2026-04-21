@@ -11,14 +11,14 @@ This example script:
 Typical usage:
 
 ```bash
-# Dungeons dataset (Structure + Perception panels)
-python examples/data_visualization.py --dataset_path data/processed/dungeons --split train --idx 0
+# Dungeon dataset (Structure + Perception panels)
+python examples/data_visualization.py --dataset_path data/processed/dungeon --split train --idx 0
 
 # Maze-hard dataset (Navigation panel)
 python examples/data_visualization.py --dataset_path data/processed/maze-30x30-hard-1k --split train --idx 42
 
 # Save to file instead of showing
-python examples/data_visualization.py --dataset_path data/processed/dungeons --split train --output sample.pdf
+python examples/data_visualization.py --dataset_path data/processed/dungeon --split train --output sample.pdf
 ```
 """
 
