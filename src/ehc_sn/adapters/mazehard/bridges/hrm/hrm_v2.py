@@ -12,8 +12,8 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.adapters.maze_hard.decoders import MazeHardDecoder
-from ehc_sn.adapters.maze_hard.encoders import MazeHardEncoder
+from ehc_sn.adapters.mazehard.decoders import MazeHardDecoder
+from ehc_sn.adapters.mazehard.encoders import MazeHardEncoder
 from ehc_sn.models.hrm.hrm_v2 import HRMInputV2, HRModelV2, HRMOutputV2, HRMStateV2
 from ehc_sn.tasks.maze_hard.contracts import MazeHardTaskInput, MazeHardTaskOutput
 from ehc_sn.tasks.maze_hard.runtime import extract_maze_hard_task_input
