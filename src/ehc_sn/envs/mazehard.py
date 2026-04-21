@@ -1,19 +1,18 @@
 """Mazehard deliberation environment (TorchRL).
 
-The agent submits predictions as actions. The environment evaluates
-prediction quality and returns improvement-based reward.
+The environment owns only the mechanical rollout kernel: static token tape,
+step count, and halt/truncation transitions. MazeHard supervision labels,
+accuracy tracking, and reward shaping are task-owned and are attached by the
+task runtime after env stepping.
 
 TensorDict contract:
     state_spec / observation_spec:
-        "input_ids"     : (S,)   int64   — static token sequence
-        "labels"        : (S,)   int64   — ground truth labels
-        "prev_accuracy" : ()     float32 — accuracy at previous step
-        "step_count"    : ()     int32   — steps taken so far
+        "input_ids"   : (S,) int64   — static token sequence for the episode
+        "step_count"  : ()   int32   — steps taken so far
     action_spec:
-        "action"  : ()     int64   — halt index (0 = halt, 1 = continue)
-        "logits"  : (S, V) float32 — prediction logits from the policy
+        "action"      : ()   int64   — halt index (0 = halt, 1 = continue)
     reward_spec:
-        "reward"    : (1,) float32
+        "reward"      : (1,) float32 — placeholder overwritten by task runtime
     done_spec (auto):
         "done"       : (1,) bool
         "terminated" : (1,) bool
@@ -27,8 +26,6 @@ from torch import device as Device
 from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
-IGNORE_LABEL_ID = -100
-
 
 # =================================================================================================
 class EnvConfig(BaseModel, extra="forbid"):
@@ -36,7 +33,7 @@ class EnvConfig(BaseModel, extra="forbid"):
 
     max_episode_steps: int = Field(default=10, ge=1, description="Maximum steps per episode before truncation.")
     seq_length: int = Field(..., ge=1, description="Length of input and prediction sequences.")
-    vocab_size: int = Field(..., ge=1, description="Size of the token vocabulary.")
+    vocab_size: int = Field(..., ge=1, description="Token vocabulary size retained for MazeHard config compatibility.")
     halt_action: int = Field(
         default=0,
         ge=0,
@@ -54,7 +51,7 @@ class MazeHardEnv(EnvBase):
     Usage::
 
         env = MazeHardEnv(config, batch_size=32, device="cuda")
-        td = env.reset(TensorDict({"input_ids": x, "labels": y}, batch_size=[32]))
+        td = env.reset(TensorDict({"input_ids": x}, batch_size=[32]))
         td["action"] = policy(td)
         td = env.step(td)
 
@@ -86,20 +83,16 @@ class MazeHardEnv(EnvBase):
         self,
     ) -> None:  # fmt: skip
         S = self._config.seq_length
-        V = self._config.vocab_size
         bs = self.batch_size  # torch.Size([B])
 
         self.observation_spec = Composite(
             input_ids=Unbounded(shape=(*bs, S), dtype=torch.int64),
-            labels=Unbounded(shape=(*bs, S), dtype=torch.int64),
-            prev_accuracy=Unbounded(shape=(*bs, 1), dtype=torch.float32),
             step_count=Unbounded(shape=(*bs, 1), dtype=torch.int32),
             shape=bs,
         )
         self.state_spec = self.observation_spec.clone()
         self.action_spec = Composite(
             action=Categorical(n=2, shape=(*bs, 1), dtype=torch.int64),
-            logits=Unbounded(shape=(*bs, S, V), dtype=torch.float32),
             shape=bs,
         )
         self.reward_spec = Unbounded(shape=(*bs, 1), dtype=torch.float32)
@@ -109,18 +102,16 @@ class MazeHardEnv(EnvBase):
     ) -> TensorDictBase:  # fmt: skip
         """Initialise episode state from external data.
 
-        The controller injects ``input_ids`` and ``labels`` from the dataloader.
+        The controller injects ``input_ids`` from the dataloader.
         """
         if tensordict is None or tensordict.is_empty():
-            raise ValueError("MazeHardEnv._reset requires tensordict with 'input_ids' and 'labels'.")
+            raise ValueError("MazeHardEnv._reset requires tensordict with 'input_ids'.")
 
         B = self.batch_size[0]
         kw = {"device": self.device}
         return TensorDict(
             {
                 "input_ids": tensordict["input_ids"],
-                "labels": tensordict["labels"],
-                "prev_accuracy": torch.zeros(B, 1, dtype=torch.float32, **kw),
                 "step_count": torch.zeros(B, 1, dtype=torch.int32, **kw),
             },
             batch_size=self.batch_size,
@@ -131,22 +122,16 @@ class MazeHardEnv(EnvBase):
     def _step(  # --------------------------------------------------------------------------------
         self, tensordict: TensorDictBase,
     ) -> TensorDictBase:  # fmt: skip
-        """Compute reward, done-flags, and next state from action + current state.
+        """Advance the mechanical env state from the current action.
 
-        Reward = exp(acc) - exp(prev_acc): smooth, bounded, rewards improvement.
-        Terminated when agent selects halt_action. Truncated at max_episode_steps.
+        The env owns only halt/truncation transitions. It emits a zero reward
+        placeholder so the task runtime can attach task-owned reward semantics
+        after stepping.
         """
-        logits = tensordict["logits"]  # (B, S, V)
         action = tensordict["action"]  # (B, 1)
-        labels = tensordict["labels"]  # (B, S)
-        prev_accuracy = tensordict["prev_accuracy"]  # (B, 1)
         step_count = tensordict["step_count"]  # (B, 1)
 
-        mask = labels != IGNORE_LABEL_ID  # (B, S) bool
-        counts = mask.sum(-1, keepdim=True).clamp_min(1).float()  # (B, 1)
-        acc = ((logits.argmax(-1) == labels) & mask).sum(-1, keepdim=True).float() / counts
-
-        reward = torch.exp(acc) - torch.exp(prev_accuracy)  # (B, 1)
+        reward = torch.zeros_like(step_count, dtype=torch.float32)
         terminated = action == self._config.halt_action  # (B, 1)
         truncated = (step_count + 1) >= self._config.max_episode_steps  # (B, 1)
         done = terminated | truncated  # (B, 1)
@@ -154,8 +139,6 @@ class MazeHardEnv(EnvBase):
         return TensorDict(
             {
                 "input_ids": tensordict["input_ids"],  # static — carry unchanged
-                "labels": labels,
-                "prev_accuracy": acc,
                 "step_count": step_count + 1,
                 "reward": reward,
                 "terminated": terminated,
