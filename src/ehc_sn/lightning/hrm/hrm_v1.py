@@ -25,9 +25,9 @@ from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.maze_hard.bridges.hrm.hrm_v1 import MazeHardHRMV1AdapterSettings, MazeHardHRMV1BridgeAdapter
-from ehc_sn.adapters.maze_hard.bridges.hrm.objectives import MazeHardHRMACTTaskBinding
-from ehc_sn.adapters.maze_hard.bridges.hrm.traces import MAZE_HARD_HRM_ACT_TRACE_FIELDS
+from ehc_sn.adapters.mazehard.bridges.hrm.hrm_v1 import MazeHardHRMV1AdapterSettings, MazeHardHRMV1BridgeAdapter
+from ehc_sn.adapters.mazehard.bridges.hrm.objectives import MazeHardHRMACTTaskBinding
+from ehc_sn.adapters.mazehard.bridges.hrm.traces import MAZE_HARD_HRM_ACT_TRACE_FIELDS
 from ehc_sn.controllers.act import ACTController, ACTControllerConfig
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
@@ -67,12 +67,12 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
         description="Settings for the MazeHard bridge adapter that binds the HRM core to task inputs/outputs.",
     )
 
-    act_controller: ACTControllerConfig = Field(
+    controller: ACTControllerConfig = Field(
         ...,
         description=(
             "Configuration for the ACT controller, which manages halting and partial resets during "
             "training. "
-            "The keys in `act_controller` are passed to the ACTController constructor."
+            "The keys in `controller` are passed to the ACTController constructor."
         ),
     )
     objective: ACTLossConfig = Field(
@@ -134,7 +134,7 @@ class TrainingModel(L.LightningModule):
         model_settings = ModelSettingsV1.from_config(config.model_config_path)
         self.model = HRModelV1(model_settings)
         self.bridge_adapter = MazeHardHRMV1BridgeAdapter(self.model, config.adapter)
-        self.controller = ACTController(self.bridge_adapter, config.act_controller)
+        self.controller = ACTController(self.bridge_adapter, config.controller)
         self.objective = ACTLossHead(config.objective, task_binding=MazeHardHRMACTTaskBinding())
         self._config = config
         self._train_runner = SingleStepRunner()
