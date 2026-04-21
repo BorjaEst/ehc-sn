@@ -8,7 +8,7 @@
 model_config_path = "config/models/hrm-v1.toml"
 
 # -- Dataset & training -------------------------------------------------------
-dataset_path      = "data/processed/maze-30x30-hard-1k"
+dataset_path      = "data/processed/mazehard"
 global_batch_size = 16
 max_epochs        = 100
 seed              = 42
