@@ -1,8 +1,0 @@
-benchmark_config = "config/benchmarks/b0-example.toml"
-model_kind = "hrm_v2"
-model_config_path = "config/models/hrm-v2.toml"
-model_checkpoint = "models/hrm.v2.epoch=80-step=5000.ckpt"
-
-seed = 42
-device = "cuda"
-output_dir = "outputs/benchmarks/b0-hrm-v2"

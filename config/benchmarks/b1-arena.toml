@@ -1,0 +1,6 @@
+benchmark_id = "b1-arena"
+dataset_root = "data/processed/arena"
+split = "test"
+manifest_path = "data/processed/arena/benchmarks/b1/manifest.json"
+compute_budget = 16
+write_sample_records = true

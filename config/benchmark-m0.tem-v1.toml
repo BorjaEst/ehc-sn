@@ -1,8 +1,0 @@
-benchmark_config = "config/benchmarks/m0-example.toml"
-model_kind = "tem_v1"
-model_config_path = "config/models/tem-v1.toml"
-model_checkpoint = "models/tem.v1.epoch=2-step=1000.ckpt"
-
-seed = 42
-device = "cuda"
-output_dir = "outputs/benchmarks/m0-tem-v1"
