@@ -100,7 +100,7 @@ class ExampleArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description=("Architecture config for the HRM model. The keys in `architecture` are passed to the" "HRModel constructor."),
     )
-    act_controller: ACTControllerConfig = Field(
+    controller: ACTControllerConfig = Field(
         ...,
         description="ACT controller config for the HRM model.",
     )
