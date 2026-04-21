@@ -2,7 +2,14 @@
 
 These routes map metric keys to dotted attribute paths on
 :class:`~ehc_sn.training.types.StepMetrics`, which is the step-metrics object
-produced by :class:`~ehc_sn.objectives.rl.RLLossHead`.
+produced by :class:`~ehc_sn.objectives.hybrid_rl.HybridRLLossHead` via
+:meth:`~ehc_sn.objectives.hybrid_rl.HybridRLLossHead.compute_step`.
+
+The hybrid RL path is a **learner-owned batch-loss path**, not a rollout-scoring
+objective.  These routes are consumed by
+:func:`~ehc_sn.lightning._rollout.update_metric_collection_from_evaluated_chunk`
+for both training and validation (where the scorer is
+:class:`~ehc_sn.lightning.hrm.core.validation.HRMV2ValidationScorer`).
 """
 
 from ehc_sn.metrics.adapter import Route

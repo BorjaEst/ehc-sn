@@ -1,7 +1,7 @@
 """Canonical signal vocabulary for diagnostic and research logging.
 
 All signal producers (:meth:`~ehc_sn.objectives.act.ACTLossHead.compute_signals`,
-:meth:`~ehc_sn.objectives.rl.RLLossHead.compute_signals`,
+:meth:`~ehc_sn.objectives.hybrid_rl.HybridRLLossHead.compute_step`,
 :meth:`~ehc_sn.objectives.var.VARLossHead.compute_signals`) and consumers
 (:class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback`) import from this
 module rather than using string literals. This ensures that renaming a signal
@@ -64,8 +64,9 @@ ACT_SIGNALS: frozenset[str] = frozenset({LOSS_Q_DONE, TARGET_Q_MEAN, TARGET_Q_ST
 
 
 # =================================================================================================
-# RL-specific — produced by RLLossHead.compute_signals()
+# RL-specific — produced by HybridRLLossHead.compute_step()
 # =================================================================================================
+
 
 REWARD_MEAN: str = "reward_mean"
 """Mean environment reward across the batch."""

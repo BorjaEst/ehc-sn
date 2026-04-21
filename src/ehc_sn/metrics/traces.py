@@ -183,7 +183,7 @@ ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_Q_LOGITS_ACT,)
 
 
 # =================================================================================================
-# RL-specific — produced by RLLossHead / RLController
+# RL-specific — produced by HybridRLLossHead.compute_step() via HRMV2ValidationScorer
 # =================================================================================================
 
 

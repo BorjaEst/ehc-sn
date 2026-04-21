@@ -37,7 +37,7 @@ class EnvConfig(BaseModel, extra="forbid"):
     halt_action: int = Field(
         default=0,
         ge=0,
-        description=("Action index the environment interprets as 'halt' (terminates the episode). " "Must match RLLossConfig.halt_action."),
+        description=("Action index the environment interprets as 'halt' (terminates the episode). " "Must match the halt action configured in the RL controller."),
     )
 
 
