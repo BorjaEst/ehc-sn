@@ -61,7 +61,7 @@ class TEMObjectiveBinding[TargetsT](Protocol):
     metric assembly.
 
     Type parameter ``TargetsT`` is the task-owned supervision-target dataclass
-    (e.g. :class:`~ehc_sn.tasks.navigation.contracts.NavigationTargets`).
+    (e.g. :class:`~ehc_sn.tasks.arena.contracts.ArenaTargets`).
     """
 
     def extract_targets(self, batch: Batch, carry: Any, step_output: Any) -> TargetsT:
@@ -76,9 +76,7 @@ class TEMObjectiveBinding[TargetsT](Protocol):
         """Return the boolean protocol-eligibility mask ``(B,)`` from ``targets``."""
         ...
 
-    def evaluate_observation_metrics(
-        self, step_output: Any, targets: TargetsT
-    ) -> dict[str, RatioStat]:
+    def evaluate_observation_metrics(self, step_output: Any, targets: TargetsT) -> dict[str, RatioStat]:
         """Return task-owned count-bearing accuracy metrics for one step.
 
         The values are :class:`~ehc_sn.training.types.RatioStat` numerator/
@@ -178,7 +176,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
             config: TEM objective configuration.
             task_binding: Explicit binding for extracting supervision targets and
                 evaluating observation correctness.  Use the task-owned adapter
-                (e.g. ``NavigationTEMTaskBinding``); no implicit default exists.
+                (e.g. ``ArenaTEMTaskBinding``); no implicit default exists.
         """
         super().__init__(config=config)
         self._task_binding = task_binding
@@ -355,7 +353,6 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
             first_block = code if isinstance(code, Tensor) else next(iter(code))
             return first_block.new_zeros((first_block.shape[0],))
         return coefficient * sum_regularization_terms(code, norm)
-
 
 
 # =================================================================================================
