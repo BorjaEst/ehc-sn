@@ -1,4 +1,4 @@
-"""MazeHard task-owned contracts."""
+"""MazeHard task-owned contracts and constants."""
 
 from __future__ import annotations
 
@@ -7,9 +7,7 @@ from typing import Final
 
 from torch import Tensor
 
-from ehc_sn.envs.mazehard import IGNORE_LABEL_ID
-
-MAZE_HARD_IGNORE_LABEL_ID: Final[int] = IGNORE_LABEL_ID
+MAZE_HARD_IGNORE_LABEL_ID: Final[int] = -100
 """Canonical ignore label used for masked MazeHard supervision."""
 
 
