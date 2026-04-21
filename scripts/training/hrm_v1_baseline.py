@@ -80,12 +80,12 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Settings for the MazeHard bridge adapter that binds the HRM core to task inputs/outputs.",
     )
-    act_controller: ACTControllerConfig = Field(
+    controller: ACTControllerConfig = Field(
         ...,
         description=(
             "Configuration for the ACT controller, which manages halting and partial resets"
             "during training. "
-            "The keys in `act_controller` are passed to the ACTController constructor."
+            "The keys in `controller` are passed to the ACTController constructor."
         ),
     )
     objective: ACTObjectiveConfig = Field(

@@ -9,17 +9,16 @@ from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
-from ehc_sn.adapters.navigation.bridges.tem.tem_v1 import NavigationTEMV1AdapterSettings
+from ehc_sn.adapters.arena.bridges.tem.tem_v1 import ArenaTEMV1AdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
-from ehc_sn.controllers.tem import TEMControllerConfig
+from ehc_sn.controllers.replay import ReplayTrajectoryControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.envs.dungeon_walk import EnvConfig
 from ehc_sn.lightning.tem.tem_v1 import ModelConfig_TEM_V1, RuntimeConfig, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.objectives import TEMObjectiveConfig
@@ -75,17 +74,13 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Path to the model configuration TOML file that specifies the TEM v1 architecture.",
     )
-    adapter: NavigationTEMV1AdapterSettings = Field(
+    adapter: ArenaTEMV1AdapterSettings = Field(
         ...,
-        description="Settings for the navigation bridge adapter that binds TEM v1 to task inputs/outputs.",
+        description="Settings for the arena bridge adapter that binds TEM v1 to task inputs/outputs.",
     )
-    environment: EnvConfig = Field(
+    controller: ReplayTrajectoryControllerConfig = Field(
         ...,
-        description="Environment configuration (max_episode_steps, observation_dim, action_count, use_start_channel).",
-    )
-    controller: TEMControllerConfig = Field(
-        ...,
-        description="TEM controller configuration (exploration probability).",
+        description="Replay trajectory controller configuration (window_size for fixed-window TBPTT).",
     )
     objective: TEMObjectiveConfig = Field(
         ...,

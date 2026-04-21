@@ -9,17 +9,16 @@ from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
-from ehc_sn.adapters.navigation.bridges.tem.tem_v2 import NavigationTEMV2AdapterSettings
+from ehc_sn.adapters.arena.bridges.tem.tem_v2 import ArenaTEMV2AdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
-from ehc_sn.controllers.tem import TEMControllerConfig
+from ehc_sn.controllers.replay import ReplayTrajectoryControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.envs.dungeon_walk import EnvConfig
 from ehc_sn.lightning.tem.tem_v2 import ModelConfig_TEM_V2, RuntimeConfig, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.objectives import TEMObjectiveConfig
@@ -61,7 +60,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     project_name: Optional[str] = Field(
         default=None,
         description=(
-            "Project name. If not set, it defaults to the capitalized name of the dataset " "(for example `Dungeons` -> `Dungeons`)."
+            "Project name. If not set, it defaults to the capitalized name of the dataset " "(for example `Dungeon` -> `Dungeon`)."
         ),
     )
     run_name: Optional[str] = Field(
@@ -75,17 +74,13 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Path to the model configuration TOML file that specifies the TEM v2 architecture.",
     )
-    adapter: NavigationTEMV2AdapterSettings = Field(
+    adapter: ArenaTEMV2AdapterSettings = Field(
         ...,
-        description="Navigation-to-TEM v2 adapter configuration.",
+        description="Arena-to-TEM v2 adapter configuration.",
     )
-    environment: EnvConfig = Field(
+    controller: ReplayTrajectoryControllerConfig = Field(
         ...,
-        description="Dungeon-walk environment configuration for TEM rollouts.",
-    )
-    controller: TEMControllerConfig = Field(
-        ...,
-        description="TEM rollout controller configuration.",
+        description="Replay trajectory controller configuration (window_size for fixed-window TBPTT).",
     )
     objective: TEMObjectiveConfig = Field(
         ...,
