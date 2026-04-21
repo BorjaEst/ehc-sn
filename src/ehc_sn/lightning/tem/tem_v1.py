@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import lightning as L
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.navigation.bridges.tem.objectives import NavigationTEMTaskBinding
-from ehc_sn.adapters.navigation.bridges.tem.tem_v1 import NavigationTEMV1AdapterSettings, NavigationTEMV1BridgeAdapter
-from ehc_sn.adapters.navigation.bridges.tem.traces import NAVIGATION_TEM_TRACE_FIELDS, select_navigation_tem_trace_fields
-from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
-from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
-from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
+from ehc_sn.adapters.arena.bridges.tem.objectives import ArenaTEMTaskBinding
+from ehc_sn.adapters.arena.bridges.tem.tem_v1 import ArenaTEMV1AdapterSettings, ArenaTEMV1BridgeAdapter
+from ehc_sn.adapters.arena.bridges.tem.traces import ARENA_TEM_TRACE_FIELDS, select_arena_tem_trace_fields
+from ehc_sn.controllers.replay import ReplayTrajectoryController, ReplayTrajectoryControllerConfig
 from ehc_sn.lightning._rollout import (
     evaluate_rollout,
     evaluate_rollout_streaming,
@@ -28,17 +26,14 @@ from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
 from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
 from ehc_sn.objectives.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
-from ehc_sn.tasks.navigation import NavigationControllerRuntime
+from ehc_sn.tasks.arena import ArenaReplayTrajectoryRuntime, infer_arena_replay_batch_keys
+from ehc_sn.tasks.arena.runtime import batch_size_from_arena_batch
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
 from ehc_sn.types import Batch
-
-# Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
-TEM_STATIC_REQUIRED_KEYS = ("topology", "observations", "mask_valid")
-TEM_STATIC_OPTIONAL_KEYS = ("regions", "start", "goals", "landmarks")
 
 
 # =================================================================================================
@@ -50,17 +45,13 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
         ...,
         description="Path to the model configuration TOML file that specifies the TEM v1 architecture.",
     )
-    adapter: NavigationTEMV1AdapterSettings = Field(
+    adapter: ArenaTEMV1AdapterSettings = Field(
         ...,
-        description="Settings for the navigation bridge adapter that binds TEM v1 to task inputs/outputs.",
+        description="Settings for the arena bridge adapter that binds TEM v1 to task inputs/outputs.",
     )
-    environment: EnvironmentConfig = Field(
+    controller: ReplayTrajectoryControllerConfig = Field(
         ...,
-        description="",
-    )
-    controller: TEMControllerConfig = Field(
-        ...,
-        description="",
+        description="Replay trajectory controller configuration.",
     )
     objective: TEMLossConfig = Field(
         ...,
@@ -88,14 +79,10 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
     )  # TODO: consider moving to BufferSettings or similar
 
     @model_validator(mode="after")
-    def validate_environment_contract(self) -> "ModelConfig_TEM_V1":
+    def validate_adapter_contract(self) -> "ModelConfig_TEM_V1":
         model_settings = ModelSettingsV1.from_config(self.model_config_path)
-        if self.environment.action_count != model_settings.transition_action_count:
-            raise ValueError("environment.action_count must match model.transition_action_count.")
-        if self.adapter.observation_dim != self.environment.observation_dim:
-            raise ValueError("adapter.observation_dim must match environment.observation_dim.")
-        if self.adapter.action_count != self.environment.action_count:
-            raise ValueError("adapter.action_count must match environment.action_count.")
+        if self.adapter.action_count != model_settings.transition_action_count:
+            raise ValueError("adapter.action_count must match model.transition_action_count.")
         return self
 
 
@@ -110,14 +97,14 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettingsV1.from_config(config.model_config_path)
         self.model = TEMModelV1(model_settings)
-        self.bridge_adapter = NavigationTEMV1BridgeAdapter(self.model, config.adapter)
-        self._controller_runtime = NavigationControllerRuntime()
-        self.train_environment: Environment | None = None
-        self.train_controller: TEMController | None = None
+        self.bridge_adapter = ArenaTEMV1BridgeAdapter(self.model, config.adapter)
+
+        self.train_controller: ReplayTrajectoryController | None = None
         self.train_objective: TEMLossHead | None = None
-        self.eval_environment: Environment | None = None
-        self.eval_controller: TEMController | None = None
+
+        self.eval_controller: ReplayTrajectoryController | None = None
         self.eval_objective: TEMLossHead | None = None
+
         self._config = config
         self._train_runner = RecurrentRunner()
         self._eval_runner = RecurrentRunner()
@@ -130,10 +117,10 @@ class TrainingModel(L.LightningModule):
         self.train_metrics = build_train_metrics(TEM_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(TEM_EPISODE_ROUTES).clone(prefix="val/")
         self.primary_val_metric_key = f"val/{TEM_PRIMARY_VAL_ROUTE_KEY}"
-        self.trace_specs = build_trace_spec("tem", extra_fields=NAVIGATION_TEM_TRACE_FIELDS)
+        self.trace_specs = build_trace_spec("tem", extra_fields=ARENA_TEM_TRACE_FIELDS)
         self._eval_trace_keys: set[str] | None = None
 
-        # Buffer + assembler implement partial-reset batching for ACT runs.
+        # Buffer + assembler implement partial-reset batching for replay training.
         self._train_buffer: FifoBuffer | None = None
         self._train_batch_assembler: PartialResetBatchAssembler | None = None
 
@@ -142,22 +129,15 @@ class TrainingModel(L.LightningModule):
         """Return the parsed configuration used by this LightningModule."""
         return self._config
 
-    def _local_batch_size(self) -> int:
-        """Return the per-rank batch size used by train and evaluation runtimes."""
-        trainer = getattr(self, "_trainer", None)
-        world_size = max(getattr(trainer, "world_size", 1), 1)
-        return max(self.config.global_batch_size // world_size, 1)
-
-    def _train_chunk_steps(self) -> int:
-        """Return the TEM TBPTT chunk length used for one optimizer update."""
-        return self.config.runtime.sequence.tbptt_steps
-
-    def _build_runtime(self, *, batch_size: int) -> tuple[Environment, TEMController, TEMLossHead]:
-        """Construct one phase-local TEM rollout runtime around the shared model."""
-        environment = Environment(self.config.environment, batch_size=batch_size)
-        controller = TEMController(self.bridge_adapter, environment, self.config.controller, self._controller_runtime)
-        objective = TEMLossHead(self.config.objective, task_binding=NavigationTEMTaskBinding())
-        return environment, controller, objective
+    def _build_runtime(self) -> tuple[ReplayTrajectoryController, TEMLossHead]:
+        """Construct one phase-local replay runtime around the shared model."""
+        controller = ReplayTrajectoryController(
+            backbone=self.bridge_adapter,
+            config=self.config.controller,
+            runtime=ArenaReplayTrajectoryRuntime(),
+        )
+        objective = TEMLossHead(self.config.objective, task_binding=ArenaTEMTaskBinding())
+        return controller, objective
 
     def _ensure_train_runtime(self) -> None:
         """Initialize the training runtime once per process."""
@@ -171,7 +151,7 @@ class TrainingModel(L.LightningModule):
             return
         self.eval_environment, self.eval_controller, self.eval_objective = self._build_runtime(batch_size=self._local_batch_size())
 
-    def _require_train_controller(self) -> TEMController:
+    def _require_train_controller(self) -> ReplayTrajectoryController:
         """Return the training controller, initializing the train runtime if needed."""
         self._ensure_train_runtime()
         if self.train_controller is None:
@@ -185,7 +165,7 @@ class TrainingModel(L.LightningModule):
             raise RuntimeError("TEM training runtime is not initialized.")
         return self.train_objective
 
-    def _require_eval_controller(self) -> TEMController:
+    def _require_eval_controller(self) -> ReplayTrajectoryController:
         """Return the evaluation controller, initializing the eval runtime if needed."""
         self._ensure_eval_runtime()
         if self.eval_controller is None:
@@ -199,18 +179,20 @@ class TrainingModel(L.LightningModule):
             raise RuntimeError("TEM evaluation runtime is not initialized.")
         return self.eval_objective
 
-    def _build_trace_meta(self, controller: TEMController) -> dict[str, object]:
+    def _build_trace_meta(self, batch: Batch) -> dict[str, object]:
         """Return out-of-band trace metadata for figure-facing evaluation traces."""
-        return {"environments": ReplayableEnvironments(controller.environment.build_world_descriptors())}
+        B = batch_size_from_arena_batch(batch)
+        worlds = [{"topology": batch["topology"][b], "observations": batch["observations"][b]} for b in range(B)]
+        return {"environments": ReplayableEnvironments(worlds)}
 
     def _ensure_train_batch_assembler(  # ---------------------------------------------------------
         self, batch: Batch,
     ) -> PartialResetBatchAssembler:  # fmt: skip
-        """Create the partial-reset buffer lazily from the observed static maze schema."""
+        """Create the partial-reset buffer lazily from the observed arena batch schema."""
         if self._train_batch_assembler is not None:
             return self._train_batch_assembler
 
-        keys = infer_tem_static_batch_keys(batch)
+        keys = infer_arena_replay_batch_keys(batch)
         capacity_rows = 4 * self.config.global_batch_size
         self._train_buffer = FifoBuffer(capacity_rows, keys, pin_memory=True)
         self._train_batch_assembler = PartialResetBatchAssembler(buffer=self._train_buffer, keys=keys)
@@ -275,13 +257,6 @@ class TrainingModel(L.LightningModule):
         """Set the semantic trace keys required for evaluation-time figure capture."""
         self._eval_trace_keys = set(keys)
 
-    def _validation_seed(self, batch_idx: int) -> int:
-        """Return the explicit evaluation seed for one validation batch."""
-        seed = self.config.runtime.validation.seed
-        if seed is None:
-            raise ValueError("TEM evaluation requires runtime.validation.seed to be set.")
-        return int(seed) + int(batch_idx)
-
     # -- Training ----------------------------------------------------------------------------------
 
     def training_step(  # -------------------------------------------------------------------------
@@ -311,7 +286,7 @@ class TrainingModel(L.LightningModule):
         self._train_carry = evaluation.execution.final_carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
-        local_bs = batch_size_from_static_maze_batch(batch)
+        local_bs = batch_size_from_arena_batch(batch)
         loss = normalize_loss_for_backward(evaluation.loss, local_bs=local_bs)
         loss = loss / self._train_chunk_steps()  # Further normalize by chunk length for stability.
 
@@ -340,17 +315,15 @@ class TrainingModel(L.LightningModule):
         self._apply_runtime(self.global_step, log_values=False)
         eval_controller = self._require_eval_controller()
         eval_objective = self._require_eval_objective()
-        eval_controller.set_evaluation_seed(self._validation_seed(batch_idx))
-        step_options = {"allow_halt": True, "explore": False}
+        step_options = {"allow_halt": True}
         carry0 = eval_controller.initial_state(batch)
-        trace_meta = self._build_trace_meta(eval_controller)
+        trace_meta = self._build_trace_meta(batch)
 
-        # Initialize carry/state on the first batch
         if self._eval_trace_keys is None:
             trace_specs = self.trace_specs
         else:
-            nav_extra = select_navigation_tem_trace_fields(self._eval_trace_keys)
-            trace_specs = build_trace_spec("tem", include_keys=self._eval_trace_keys, extra_fields=nav_extra)
+            arena_extra = select_arena_tem_trace_fields(self._eval_trace_keys)
+            trace_specs = build_trace_spec("tem", include_keys=self._eval_trace_keys, extra_fields=arena_extra)
 
         evaluation = evaluate_rollout(
             runner=self._eval_runner,
@@ -365,22 +338,3 @@ class TrainingModel(L.LightningModule):
         trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES)
         return {"trace": trace}
-
-
-# =================================================================================================
-def infer_tem_static_batch_keys(  # ---------------------------------------------------------------
-    batch: Batch,
-) -> tuple[str, ...]:  # fmt: skip
-    """Return the static maze keys that must move together through partial reset."""
-    missing = [key for key in TEM_STATIC_REQUIRED_KEYS if key not in batch]
-    if missing:
-        raise KeyError(f"TEM batch is missing required static maze keys: {', '.join(missing)}.")
-    return TEM_STATIC_REQUIRED_KEYS + tuple(key for key in TEM_STATIC_OPTIONAL_KEYS if key in batch)
-
-
-# =================================================================================================
-def batch_size_from_static_maze_batch(  # ---------------------------------------------------------
-    batch: Batch,
-) -> int:  # fmt: skip
-    """Return the leading batch dimension from the required TEM maze tensor schema."""
-    return int(batch[TEM_STATIC_REQUIRED_KEYS[0]].shape[0])
