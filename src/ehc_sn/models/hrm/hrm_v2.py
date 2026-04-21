@@ -92,15 +92,10 @@ class HRMStateV2(DetachMixin):
 class HRMOutputV2:
     """Architecture-native HRM v2 output."""
 
-    theta_summary: Tensor
-    schema_slots: Tensor
-    q_logits: Tensor
-    state_value: Tensor
-
-    @property
-    def r_logits(self) -> Tensor:
-        """Backward-compatible alias for the critic state value."""
-        return self.state_value
+    theta_summary: Tensor  # (B, D) summary readout from the PFC backbone (e.g., CLS token)
+    schema_slots: Tensor  # (B, S, D) schema-slot tokens from the PFC workspace
+    policy_logits: Tensor  # (B, A) actor-head logits; used for action selection and actor loss
+    state_value: Tensor  # (B, 1) critic state value; used for value regression loss
 
 
 # =============================================================================
@@ -201,7 +196,7 @@ class HRModelV2(nn.Module):
         output = HRMOutputV2(
             theta_summary=pfc_out.summary,
             schema_slots=pfc_out.workspace.family("schema"),
-            q_logits=pfc_out.q_values,
+            policy_logits=pfc_out.q_values,  # PFC q_values are the actor policy logits
             state_value=state_value.unsqueeze(-1),
         )
         return output, state
