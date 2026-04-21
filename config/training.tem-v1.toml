@@ -6,7 +6,7 @@
 model_config_path = "config/models/tem-v1.toml"
 
 # -- General settings ---------------------------------------------------------
-dataset_path         = "data/processed/dungeons"
+dataset_path         = "data/processed/dungeon"
 global_batch_size    = 8
 max_epochs           = 100
 seed                 = 42

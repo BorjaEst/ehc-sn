@@ -1,6 +1,0 @@
-benchmark_id = "b2-dungeons"
-dataset_root = "data/processed/dungeons"
-split = "test"
-manifest_path = "data/processed/dungeons/benchmarks/b2/manifest.json"
-compute_budget = 16
-write_sample_records = true
