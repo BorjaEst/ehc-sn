@@ -1,8 +1,10 @@
 """Canonical public surface for rollout-scoring objective modules.
 
 All objective-scoring implementations reside in the submodules of this package.
-The canonical names follow the ``*Objective*`` vocabulary; the legacy ``*LossHead*``
-names are preserved as backward-compatible aliases.
+For the ACT and TEM families the canonical names follow the ``*Objective*``
+vocabulary; the legacy ``*LossHead*`` names are preserved as backward-compatible
+aliases. The hybrid RL family uses ``*LossHead*`` names directly — it is a
+learner-owned batch-loss path, not a rollout-scoring objective.
 
 Prefer ``from ehc_sn.objectives import ...`` over any sub-module import.
 """
@@ -27,8 +29,7 @@ from ehc_sn.objectives._variational import (
     require_latent_relation,
 )
 from ehc_sn.objectives.act import ACTLossConfig, ACTLossHead, ACTLossStep, ACTTaskBinding
-from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLosses, HybridRLLossHead, HybridRLLossStep, HybridRLObjectiveBinding
-from ehc_sn.objectives.rl import RewardBearingStep, RLLossConfig, RLLosses, RLLossHead, RLLossStep, RLObjectiveBinding
+from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLosses, HybridRLLossHead, HybridRLLossStep
 from ehc_sn.objectives.tem import (
     TEMLossConfig,
     TEMLosses,
@@ -40,17 +41,6 @@ from ehc_sn.objectives.tem import (
     TEMObjectiveStep,
     TEMSupervisionBinding,
 )
-from ehc_sn.objectives.var import (
-    LatentCode,
-    VARLossConfig,
-    VARLosses,
-    VARLossHead,
-    VARLossStep,
-    VARObjective,
-    VARObjectiveBinding,
-    VARObjectiveConfig,
-    VARObjectiveStep,
-)
 
 # ── Canonical objective aliases (preferred) ──────────────────────────────────
 # ACT
@@ -58,14 +48,6 @@ ACTObjectiveConfig = ACTLossConfig
 ACTObjective = ACTLossHead
 ACTObjectiveStep = ACTLossStep
 ACTObjectiveBinding = ACTTaskBinding
-# RL — pure reward-first family (canonical names)
-RLObjectiveConfig = RLLossConfig
-RLObjective = RLLossHead
-RLObjectiveStep = RLLossStep
-# RL — hybrid token-supervised + actor-critic family (canonical names)
-HybridRLObjectiveConfig = HybridRLLossConfig
-HybridRLObjective = HybridRLLossHead
-HybridRLObjectiveStep = HybridRLLossStep
 # Base families
 TokenObjectiveBase = TokenLossHeadBase
 VariationalObjectiveBase = VariationalLossHeadBase
@@ -103,27 +85,11 @@ __all__ = [
     "ACTLossHead",
     "ACTLossStep",
     "ACTTaskBinding",
-    # rl — canonical (pure reward-first)
-    "RLObjectiveConfig",
-    "RLObjective",
-    "RLObjectiveStep",
-    # rl — compat / binding
-    "RewardBearingStep",
-    "RLLossConfig",
-    "RLLossHead",
-    "RLLosses",
-    "RLLossStep",
-    "RLObjectiveBinding",
-    # hybrid rl — canonical
-    "HybridRLObjectiveConfig",
-    "HybridRLObjective",
-    "HybridRLObjectiveStep",
-    # hybrid rl — compat
+    # hybrid rl — batch-loss path (no *Objective* aliases; not a rollout scorer)
     "HybridRLLossConfig",
     "HybridRLLossHead",
     "HybridRLLosses",
     "HybridRLLossStep",
-    "HybridRLObjectiveBinding",
     # tem — canonical
     "TEMObjectiveBinding",
     "TEMObjectiveConfig",
@@ -135,15 +101,4 @@ __all__ = [
     "TEMLossHead",
     "TEMLosses",
     "TEMLossStep",
-    # var — canonical
-    "VARObjectiveBinding",
-    "VARObjectiveConfig",
-    "VARObjective",
-    "VARObjectiveStep",
-    # var — compat
-    "LatentCode",
-    "VARLossConfig",
-    "VARLossHead",
-    "VARLosses",
-    "VARLossStep",
 ]

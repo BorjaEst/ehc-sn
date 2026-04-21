@@ -31,13 +31,28 @@ from torchrl.envs import EnvBase
 class EnvConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`MazeHardEnv`."""
 
-    max_episode_steps: int = Field(default=10, ge=1, description="Maximum steps per episode before truncation.")
-    seq_length: int = Field(..., ge=1, description="Length of input and prediction sequences.")
-    vocab_size: int = Field(..., ge=1, description="Token vocabulary size retained for MazeHard config compatibility.")
+    max_episode_steps: int = Field(
+        default=10,
+        ge=1,
+        description="Maximum steps per episode before truncation.",
+    )
+    seq_length: int = Field(
+        ...,
+        ge=1,
+        description="Length of input and prediction sequences.",
+    )
+    vocab_size: int = Field(
+        ...,
+        ge=1,
+        description="Token vocabulary size retained for MazeHard config compatibility.",
+    )
     halt_action: int = Field(
         default=0,
         ge=0,
-        description=("Action index the environment interprets as 'halt' (terminates the episode). " "Must match the halt action configured in the RL controller."),
+        description=(
+            "Action index the environment interprets as 'halt' (terminates the episode). "
+            "Must match the halt action configured in the RL controller."
+        ),
     )
 
 

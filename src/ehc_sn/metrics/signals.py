@@ -2,7 +2,7 @@
 
 All signal producers (:meth:`~ehc_sn.objectives.act.ACTLossHead.compute_signals`,
 :meth:`~ehc_sn.objectives.hybrid_rl.HybridRLLossHead.compute_step`,
-:meth:`~ehc_sn.objectives.var.VARLossHead.compute_signals`) and consumers
+:meth:`~ehc_sn.objectives.tem.TEMLossHead.compute_signals`) and consumers
 (:class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback`) import from this
 module rather than using string literals. This ensures that renaming a signal
 requires a single edit, and mismatches between producers and consumers fail
@@ -21,7 +21,8 @@ Structure
     Signals specific to RL (Reinforcement Learning) training objectives.
 
 ``VAR_SIGNALS``
-    Signals specific to VAR (variational latent-consistency) training objectives.
+    Latent variational signals shared across TEM-family objectives (base set for
+    :data:`TEM_SIGNALS`).
 
 ``TEM_SIGNALS``
     Signals specific to TEM variational training objectives.
@@ -102,7 +103,7 @@ RL_SIGNALS: frozenset[str] = frozenset(
 
 
 # =================================================================================================
-# VAR-specific — produced by VARLossHead.compute_signals() (canonical: VARObjective)
+# Latent variational signals — shared base for TEM-family objectives
 # =================================================================================================
 
 LOSS_TOTAL: str = "loss_total"

@@ -7,9 +7,8 @@ Three canonical controller families are exported here:
 - **Replay** — :class:`ReplayTrajectoryController`: stepwise recurrent replay
   over source-provided batch-major trajectory tensors.  Generic and
   task-agnostic; use for arena-family replay.
-- **Online environment rollout** — :class:`RLController` /
-  :class:`TEMController`: policy-driven interaction with a live
-  :class:`~torchrl.envs.EnvBase` environment.
+- **Online environment rollout** — :class:`RLController`: policy-driven
+  interaction with a live :class:`~torchrl.envs.EnvBase` environment.
 
 Internal helpers live in submodules prefixed with ``_``.
 """

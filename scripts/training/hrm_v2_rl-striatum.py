@@ -20,10 +20,10 @@ from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.controllers.rl import RLControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.envs.mazehard import EnvConfig
-from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
+from ehc_sn.lightning.hrm.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v2 import ModelConfig_HRM_V2, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.objectives import RLObjectiveConfig
+from ehc_sn.objectives import HybridRLLossConfig
 from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
@@ -87,11 +87,11 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     )
     controller: RLControllerConfig = Field(
         ...,
-        description="RL controller configuration (exploration probability).",
+        description="RL controller configuration (policy and max-steps settings).",
     )
-    objective: RLObjectiveConfig = Field(
+    objective: HybridRLLossConfig = Field(
         ...,
-        description="RL objective configuration (gamma, halt_action, max_steps, coefficients).",
+        description="Hybrid RL objective configuration (loss function, discount factor, loss coefficients).",
     )
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
