@@ -1,9 +1,9 @@
 """Arena adapter namespace.
 
 This package is a namespace barrel only. Canonical public Arena adapter symbols
-live in ``ehc_sn.adapters.arena.bridges.tem``.
+live in ``ehc_sn.adapters.arena.tem``.
 """
 
-from . import bridges
+from . import tem
 
-__all__ = ["bridges"]
+__all__ = ["tem"]

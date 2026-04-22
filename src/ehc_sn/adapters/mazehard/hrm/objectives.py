@@ -2,7 +2,7 @@
 
 The ACT binding reads from ``ACTStepOutput.backbone_output.task``.
 The hybrid RL binding reads task-specific fields from
-:class:`~ehc_sn.controllers.actor_critic.ActorCriticInteractionRecord` for
+:class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord` for
 the actor-critic path.
 
 Mirrors the pattern used by

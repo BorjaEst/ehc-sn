@@ -25,10 +25,9 @@ from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.mazehard.bridges.hrm.hrm_v1 import MazeHardHRMV1AdapterSettings, MazeHardHRMV1BridgeAdapter
-from ehc_sn.adapters.mazehard.bridges.hrm.objectives import MazeHardHRMACTTaskBinding
-from ehc_sn.adapters.mazehard.bridges.hrm.traces import MAZE_HARD_HRM_ACT_TRACE_FIELDS
-from ehc_sn.controllers.act import ACTController, ACTControllerConfig
+from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings, MazeHardHRMV1ACTTaskBinding, MazeHardHRMV1BridgeAdapter
+from ehc_sn.adapters.mazehard.hrm.traces import MAZE_HARD_HRM_ACT_TRACE_FIELDS
+from ehc_sn.controllers.deliberation.act import ACTController, ACTControllerConfig
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
@@ -62,8 +61,8 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
         ...,
         description="Path to the model configuration TOML file that specifies the HRM v1 architecture.",
     )
-    adapter: MazeHardHRMV1AdapterSettings = Field(
-        default_factory=MazeHardHRMV1AdapterSettings,
+    adapter: MazeHardHRMAdapterSettings = Field(
+        default_factory=MazeHardHRMAdapterSettings,
         description="Settings for the MazeHard bridge adapter that binds the HRM core to task inputs/outputs.",
     )
 
@@ -135,7 +134,7 @@ class TrainingModel(L.LightningModule):
         self.model = HRModelV1(model_settings)
         self.bridge_adapter = MazeHardHRMV1BridgeAdapter(self.model, config.adapter)
         self.controller = ACTController(self.bridge_adapter, config.controller)
-        self.objective = ACTLossHead(config.objective, task_binding=MazeHardHRMACTTaskBinding())
+        self.objective = ACTLossHead(config.objective, task_binding=MazeHardHRMV1ACTTaskBinding())
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()

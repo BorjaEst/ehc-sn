@@ -1,9 +1,8 @@
 """Adapter package namespace.
 
 This package only exports task-family subpackages. Canonical public adapter
-symbols live in family barrels such as
-``ehc_sn.adapters.arena.bridges.tem`` and
-``ehc_sn.adapters.mazehard.bridges.hrm``.
+symbols live in family barrels such as ``ehc_sn.adapters.arena.tem`` and
+``ehc_sn.adapters.mazehard.hrm``.
 """
 
 from . import arena, mazehard
