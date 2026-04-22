@@ -19,7 +19,7 @@ from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.controllers.act import ACTControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.lightning.hrm.runtime import RuntimeConfig
+from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v1 import ModelConfig_HRM_V1, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.objectives import ACTObjectiveConfig
