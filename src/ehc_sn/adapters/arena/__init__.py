@@ -1,4 +1,9 @@
 """Arena adapter namespace.
 
-Re-exports the public adapter symbols for the arena task family.
+This package is a namespace barrel only. Canonical public Arena adapter symbols
+live in ``ehc_sn.adapters.arena.bridges.tem``.
 """
+
+from . import bridges
+
+__all__ = ["bridges"]
