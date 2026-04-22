@@ -1,11 +1,9 @@
 # =============================================================================
-# HRM v2 RL-Striatum — Default Configuration
+# HRM v2 Deliberation Actor-Critic — Default Configuration
 # =============================================================================
 
 # -- Model architecture -------------------------------------------------------
 model_config_path = "config/models/hrm-v2.toml"
-
-
 
 # -- Dataset & training -------------------------------------------------------
 dataset_path       = "data/processed/mazehard"
@@ -21,14 +19,22 @@ supervised_only_warmup_steps = 5000
     encoder_kind = "rope"  # "learned" or "rope"
     vocab_size = 6  # 5 canonical SEM IDs + O_ID (solution-path token)
 
-# -- Environment --------------------------------------------------------------
-[environment]
-    max_episode_steps = 16
-    seq_length  = 900
-    vocab_size  = 6
-    halt_action = 0
+# -- Deliberation AC controller -----------------------------------------------
+[controller]
 
-# -- Optimization -------------------------------------------------------------
+# -- Task (deliberation path) -------------------------------------------------
+[task]
+    halt_action      = 0
+    episode_horizon  = 16
+
+# -- Objective, optimizer, scheduler (defaults are fine; override here if needed) ---
+[objective]
+    function  = "stablemax_cross_entropy"
+    c_actor   = 1.0
+    c_critic  = 0.5
+    c_entropy = 0.01
+    c_q_value = 0.5
+
 [optimizer_supervised]
     lr           = 1e-4
     weight_decay = 1e-2
@@ -48,17 +54,7 @@ supervised_only_warmup_steps = 5000
 [runtime.validation]
     hard_max_rollout_steps = 16
 
-# -- Controller & objective ---------------------------------------------------
-[controller]
-    policy.exploration_prob = 0.1
-
-[objective]
-    function  = "stablemax_cross_entropy"
-    c_actor   = 1.0
-    c_critic  = 0.5
-    c_entropy = 0.01
-    c_q_value = 0.5
-
+# -- Figures & diagnostics ----------------------------------------------------
 [logger]
     save_dir  = "logs"
     name      = "hrm-v2"

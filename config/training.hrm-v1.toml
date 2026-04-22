@@ -41,6 +41,7 @@ val_check_interval = 1000
 [runtime.validation]
     hard_max_rollout_steps = 16
 
+# -- Figures & diagnostics ----------------------------------------------------
 [logger]
     save_dir  = "logs"
     name      = "hrm-v1"
@@ -52,7 +53,6 @@ val_check_interval = 1000
     save_on_train_epoch_end = false
     save_last               = true
 
-# -- Figures & diagnostics ----------------------------------------------------
 [figures]
     enabled = true
     figures = ["overlay", "evolution"]
