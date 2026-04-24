@@ -16,6 +16,9 @@ Before generating any design or code artifact, automated agents **MUST**:
 The only exception is the **Bootstrap Mode** override defined in the
 `bootstrap-specs.prompt.md` prompt, which operates before specs exist.
 
+Spec maintenance and conflict-resolution workflow are owned by
+`spec/spec-process-spec-maintenance.md`.
+
 ---
 
 ## 2 Namespace and Schema Constraints

@@ -18,7 +18,7 @@ When the spec gate passes:
 - Read only the files in `required.files` by default.
 - Treat those required files as the canonical always-read sources of truth.
 - Use `spec/spec-manifest.toml [collection.topic_files]` to fetch companion
-	specs only when the task needs them.
+  specs only when the task needs them.
 
 Topic routing:
 
@@ -26,6 +26,7 @@ Topic routing:
 - `benchmarks`: benchmark definitions, corpus/protocol rules, benchmark-specific reporting.
 - `configuration`: config taxonomy, defaults, and composition patterns.
 - `interfaces`: model state/step surfaces and adapter interface patterns.
+- `process`: spec authoring, ownership, conflict resolution, and spec maintenance workflow.
 
 If the user request conflicts with canonical specs, surface the conflict and ask for a decision before proceeding.
 

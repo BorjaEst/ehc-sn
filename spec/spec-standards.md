@@ -129,6 +129,8 @@ or consumed.
   taxonomy and dependency rules in `spec/spec-architecture.md` in the same change.
 - Changes to dependency declarations in `pyproject.toml` must update the
   dependency inventory in `spec/spec-requirements.md` in the same change.
+- Spec authoring and maintenance workflow are owned by
+  `spec/spec-process-spec-maintenance.md`.
 
 ---
 
