@@ -6,7 +6,7 @@ The hybrid RL binding reads task-specific fields from
 the actor-critic path.
 
 Mirrors the pattern used by
-:class:`~ehc_sn.adapters.arena.bridges.tem.objectives.ArenaTEMTaskBinding`
+:class:`~ehc_sn.adapters.arena.tem.objectives.ArenaTEMTaskBinding`
 for the Arena+TEM family.
 """
 

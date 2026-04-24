@@ -9,10 +9,10 @@ import lightning as L
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.arena.bridges.tem.objectives import ArenaTEMTaskBinding
-from ehc_sn.adapters.arena.bridges.tem.tem_v2 import ArenaTEMV2AdapterSettings, ArenaTEMV2BridgeAdapter
-from ehc_sn.adapters.arena.bridges.tem.traces import ARENA_TEM_TRACE_FIELDS, select_arena_tem_trace_fields
-from ehc_sn.controllers.replay import ReplayTrajectoryController, ReplayTrajectoryControllerConfig
+from ehc_sn.adapters.arena.tem.objectives import ArenaTEMTaskBinding
+from ehc_sn.adapters.arena.tem.tem_v2 import ArenaTEMV2AdapterSettings, ArenaTEMV2BridgeAdapter
+from ehc_sn.adapters.arena.tem.traces import ARENA_TEM_TRACE_FIELDS, select_arena_tem_trace_fields
+from ehc_sn.controllers.replay.trajectory import ReplayTrajectoryController, ReplayTrajectoryControllerConfig
 from ehc_sn.lightning._rollout import (
     evaluate_rollout,
     evaluate_rollout_streaming,

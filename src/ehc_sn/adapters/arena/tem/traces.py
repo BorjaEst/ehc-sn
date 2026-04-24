@@ -8,7 +8,7 @@ task-model coupling that belongs at the adapter boundary.
 
 Usage
 -----
-    from ehc_sn.adapters.arena.bridges.tem.traces import (
+    from ehc_sn.adapters.arena.tem.traces import (
         ARENA_TEM_TRACE_FIELDS,
         select_arena_tem_trace_fields,
     )

@@ -1,4 +1,11 @@
-""" """
+"""ACT deliberation controller — canonical owner.
+
+Canonical import path::
+
+    from ehc_sn.controllers.deliberation.act import (
+        ACTController, ACTControllerConfig, ACTRolloutState, ACTStepOutput,
+    )
+"""
 
 from __future__ import annotations
 
@@ -82,7 +89,7 @@ class ACTHaltContinueScores:
 
 
 # =============================================================================
-def collapse_act_halt_continue_logits(  # -------------------------------------
+def collapse_act_halt_continue_logits(
     q_logits: Tensor,
     *,
     done_action: int,
@@ -90,11 +97,11 @@ def collapse_act_halt_continue_logits(  # -------------------------------------
     """Collapse q_logits into halt vs continue scores.
 
     Args:
-            q_logits: Shape ``(B, A)`` with ``A >= 2``.
-            done_action: Index of the halt action; must be in ``[0, A)``.
+        q_logits: Shape ``(B, A)`` with ``A >= 2``.
+        done_action: Index of the halt action; must be in ``[0, A)``.
 
     Returns:
-            :class:`ACTHaltContinueScores` with ``halt_logit`` and ``continue_logit``.
+        :class:`ACTHaltContinueScores` with ``halt_logit`` and ``continue_logit``.
     """
     if q_logits.ndim != 2:
         raise ValueError(f"collapse_act_halt_continue_logits expects shape (B, A), got {tuple(q_logits.shape)}.")
@@ -111,7 +118,7 @@ def collapse_act_halt_continue_logits(  # -------------------------------------
 
 
 # =============================================================================
-def maybe_flip_halt_decision(  # ----------------------------------------------
+def maybe_flip_halt_decision(
     greedy_halt: Tensor,
     *,
     explore: bool,
@@ -120,12 +127,12 @@ def maybe_flip_halt_decision(  # ----------------------------------------------
     """Optionally flip the halt boolean with probability ``exploration_prob``.
 
     Args:
-            greedy_halt: Bool tensor of shape ``(B,)``.
-            explore: Whether exploration is active.
-            exploration_prob: Per-slot probability of flipping the halt decision.
+        greedy_halt: Bool tensor of shape ``(B,)``.
+        explore: Whether exploration is active.
+        exploration_prob: Per-slot probability of flipping the halt decision.
 
     Returns:
-            Bool tensor of shape ``(B,)`` with some decisions flipped.
+        Bool tensor of shape ``(B,)`` with some decisions flipped.
     """
     if not explore or exploration_prob <= 0.0:
         return greedy_halt
@@ -146,7 +153,7 @@ class ACTStepOutput(DetachMixin):
 class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig]):
     """One-step masked recurrent transition primitive for ACT rollouts."""
 
-    def __init__(  # ----------------------------------------------------------
+    def __init__(
         self,
         backbone: ACTRolloutBackbone[ModelState],
         config: ACTControllerConfig,
@@ -159,7 +166,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         """Return the wrapped ACT backbone typed to the local protocol."""
         return cast(ACTRolloutBackbone[ModelState], super().backbone)
 
-    def initial_state(  # -----------------------------------------------------
+    def initial_state(
         self,
         batch_sample: Batch,
     ) -> ACTRolloutState[ModelState]:
@@ -172,7 +179,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
             data=slots.data,
         )
 
-    def step(  # ---------------------------------------------------------------
+    def step(
         self,
         state: ACTRolloutState[ModelState],
         batch: Batch,
@@ -183,10 +190,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         """Advance the controller by one recurrent step.
 
         ``allow_halt=False`` disables learned halting for this step while still
-        enforcing the hard ``config.max_steps`` budget. This is useful for
-        fixed-budget evaluation over repeated sources, where early-halting rows
-        would otherwise be refreshed immediately and never converge to a single
-        batch-aligned stop event.
+        enforcing the hard ``config.max_steps`` budget.
         """
         _ = options
         data = self.refresh_slot_data(batch, state)
@@ -200,7 +204,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         output = ACTStepOutput(backbone_output=backbone_output)
         return next_state, output
 
-    def _compute_done(  # -----------------------------------------------------
+    def _compute_done(
         self,
         backbone_output: ACTBackboneOutput,
         steps: Tensor,

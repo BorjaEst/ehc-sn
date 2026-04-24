@@ -119,7 +119,7 @@ class MazeHardControllerRuntime:
         supervision labels for each slot.
 
         Args:
-            carry: The :class:`~ehc_sn.controllers.rl.RLRolloutState` produced
+            carry: The :class:`~ehc_sn.controllers.online.actor_critic.RLRolloutState` produced
                 after the most recent controller step.
 
         Returns:

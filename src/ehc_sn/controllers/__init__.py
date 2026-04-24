@@ -1,58 +1,15 @@
 """Controller families for EHC-SN rollout execution.
 
-Three canonical controller families are exported here:
+Canonical import paths:
 
-- **Deliberation** — :class:`ACTController`: adaptive computation-time
-  deliberation with halt/continue logic.
-- **Replay** — :class:`ReplayTrajectoryController`: stepwise recurrent replay
-  over source-provided batch-major trajectory tensors.  Generic and
-  task-agnostic; use for arena-family replay.
-- **Online environment rollout** — :class:`RLController`: policy-driven
-  interaction with a live :class:`~torchrl.envs.EnvBase` environment.
+- :mod:`ehc_sn.controllers.contracts.actor_critic` — neutral actor-critic contracts.
+- :mod:`ehc_sn.controllers.deliberation.act` — ACT deliberation controller.
+- :mod:`ehc_sn.controllers.deliberation.actor_critic` — deliberation actor-critic controller.
+- :mod:`ehc_sn.controllers.replay.trajectory` — stepwise trajectory replay.
+- :mod:`ehc_sn.controllers.online.actor_critic` — online RL controller.
 
-Internal helpers live in submodules prefixed with ``_``.
+Internal support modules: ``_base.py``, ``_env_rollout.py``.
 """
 
-from ehc_sn.controllers.act import ACTController, ACTControllerConfig, ACTRolloutState, ACTStepOutput
-from ehc_sn.controllers.replay import (
-    ReplayRolloutState,
-    ReplayStepOutput,
-    ReplayTrajectoryController,
-    ReplayTrajectoryControllerConfig,
-    ReplayTrajectoryRuntime,
-)
-from ehc_sn.controllers.rl import (
-    InteractionRecord,
-    RLBackboneOutput,
-    RLController,
-    RLControllerConfig,
-    RLCriticOutput,
-    RLPolicyOutput,
-    RLRolloutBackbone,
-    RLRolloutState,
-    RLTaskRuntime,
-)
 
-__all__ = [
-    # Deliberation family
-    "ACTController",
-    "ACTControllerConfig",
-    "ACTRolloutState",
-    "ACTStepOutput",
-    # Replay family
-    "ReplayRolloutState",
-    "ReplayStepOutput",
-    "ReplayTrajectoryController",
-    "ReplayTrajectoryControllerConfig",
-    "ReplayTrajectoryRuntime",
-    # Online rollout — RL
-    "InteractionRecord",
-    "RLBackboneOutput",
-    "RLController",
-    "RLControllerConfig",
-    "RLCriticOutput",
-    "RLPolicyOutput",
-    "RLRolloutBackbone",
-    "RLRolloutState",
-    "RLTaskRuntime",
-]
+

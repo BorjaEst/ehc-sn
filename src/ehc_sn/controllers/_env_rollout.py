@@ -1,6 +1,7 @@
-"""Shared online environment rollout helpers.
+"""Shared online environment rollout helpers for environment-stepping controllers.
 
-TODO: ...
+Contains the :class:`EnvRolloutEnvironment` protocol, :func:`initial_env_reset`,
+and :func:`reset_halted_slots` — used by :mod:`ehc_sn.controllers.online.actor_critic`.
 """
 
 from __future__ import annotations
@@ -59,7 +60,12 @@ def initial_env_reset(
 ) -> tuple[TensorDict, TensorDictBase]:
     """Perform the initial environment reset from a batch sample.
 
-    # TODO:...
+    Converts *batch* to a reset TensorDict via *build_reset_td*, then calls
+    ``environment.reset()`` to obtain the initial environment state.
+
+    Returns:
+        ``(reset_td, env_td)`` — the static reset payload and the initial
+        environment state TensorDict.
     """
     reset_td = build_reset_td(batch)
     env_td = environment.reset(reset_td)
