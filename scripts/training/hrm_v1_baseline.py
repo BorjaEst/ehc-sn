@@ -12,12 +12,12 @@ from lightning.pytorch import Trainer, seed_everything
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
-from ehc_sn.adapters.mazehard.bridges.hrm.hrm_v1 import MazeHardHRMV1AdapterSettings
+from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
-from ehc_sn.controllers.act import ACTControllerConfig
+from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v1 import ModelConfig_HRM_V1, TrainingModel
@@ -76,7 +76,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Path to the model configuration TOML file that specifies the HRM v1 architecture.",
     )
-    adapter: MazeHardHRMV1AdapterSettings = Field(
+    adapter: MazeHardHRMAdapterSettings = Field(
         ...,
         description="Settings for the MazeHard bridge adapter that binds the HRM core to task inputs/outputs.",
     )

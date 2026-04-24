@@ -12,12 +12,12 @@ from lightning.pytorch import Trainer, seed_everything
 from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
-from ehc_sn.adapters.arena.bridges.tem.tem_v2 import ArenaTEMV2AdapterSettings
+from ehc_sn.adapters.arena.tem import ArenaTEMAdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
-from ehc_sn.controllers.replay import ReplayTrajectoryControllerConfig
+from ehc_sn.controllers.replay.trajectory import ReplayTrajectoryControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.tem.tem_v2 import ModelConfig_TEM_V2, RuntimeConfig, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
@@ -74,7 +74,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Path to the model configuration TOML file that specifies the TEM v2 architecture.",
     )
-    adapter: ArenaTEMV2AdapterSettings = Field(
+    adapter: ArenaTEMAdapterSettings = Field(
         ...,
         description="Arena-to-TEM v2 adapter configuration.",
     )

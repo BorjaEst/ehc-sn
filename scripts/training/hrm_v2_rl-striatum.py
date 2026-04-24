@@ -12,12 +12,12 @@ from lightning.pytorch import Trainer, seed_everything
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
-from ehc_sn.adapters.mazehard.bridges.hrm.hrm_v2 import MazeHardHRMV2AdapterSettings
+from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
-from ehc_sn.controllers.deliberation_ac import DeliberationACControllerConfig
+from ehc_sn.controllers.deliberation.actor_critic import DeliberationACControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v2 import ModelConfig_HRM_V2, TrainingModel
@@ -77,8 +77,8 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Path to the model configuration TOML file that specifies the HRM v2 architecture.",
     )
-    adapter: MazeHardHRMV2AdapterSettings = Field(
-        default_factory=MazeHardHRMV2AdapterSettings,
+    adapter: MazeHardHRMAdapterSettings = Field(
+        default_factory=MazeHardHRMAdapterSettings,
         description="Adapter settings for the MazeHard environment and HRM v2 model.",
     )
     task: MazeHardDeliberationTaskConfig = Field(

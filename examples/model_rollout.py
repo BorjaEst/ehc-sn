@@ -33,7 +33,7 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn import figures
-from ehc_sn.controllers.act import ACTControllerConfig
+from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.sinks import save_pdf
