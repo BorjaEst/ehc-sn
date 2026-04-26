@@ -22,8 +22,8 @@ supervised_only_warmup_steps = 5000
 # -- Deliberation AC controller -----------------------------------------------
 [controller]
 
-# -- Task (deliberation path) -------------------------------------------------
-[task]
+# -- Deliberation-mode config -------------------------------------------------
+[deliberation]
     halt_action      = 0
     episode_horizon  = 16
 

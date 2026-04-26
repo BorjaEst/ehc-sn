@@ -45,7 +45,7 @@ from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLossHead
 from ehc_sn.rollouts import RecurrentRunner, RepeatSource
-from ehc_sn.tasks.mazehard.modes.deliberation import MazeHardDeliberationFinalizer, MazeHardDeliberationTaskConfig
+from ehc_sn.tasks.mazehard.modes.deliberation import MazeHardDeliberationConfig, MazeHardDeliberationFinalizer
 from ehc_sn.training.actor_critic import TD0ActorCriticBatchBuilder, ZeroBootstrapActorCriticValidationScorer
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
@@ -61,7 +61,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
 
     This config wires together:
         - model settings (:class:`ModelSettingsV2`)
-        - task settings (:class:`~ehc_sn.tasks.mazehard.modes.deliberation.MazeHardDeliberationTaskConfig`)
+        - deliberation-mode settings (:class:`~ehc_sn.tasks.mazehard.modes.deliberation.MazeHardDeliberationConfig`)
         - deliberation controller and objective configs
         - optimizer and scheduler settings
 
@@ -79,9 +79,9 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
         default_factory=MazeHardHRMAdapterSettings,
         description="Settings for the MazeHard bridge adapter that binds the HRM v2 core to task inputs/outputs.",
     )
-    task: MazeHardDeliberationTaskConfig = Field(
+    deliberation: MazeHardDeliberationConfig = Field(
         ...,
-        description="MazeHard task settings (halt_action, episode_horizon) for the deliberation path.",
+        description="Deliberation-mode config (halt_action, episode_horizon) for the MazeHard deliberation path.",
     )
     controller: DeliberationACControllerConfig = Field(
         default_factory=DeliberationACControllerConfig,
@@ -187,7 +187,7 @@ class TrainingModel(L.LightningModule):
         self, stage: Optional[str] = None,
     ) -> None:  # fmt: skip
         """Initialize the deliberation controller and wiring."""
-        task_config = self.config.task
+        task_config = self.config.deliberation
         finalizer = MazeHardDeliberationFinalizer(task_config)
         self.controller = DeliberationACController(self.bridge_adapter, self.config.controller, finalizer)
         self.objective = HybridRLLossHead(self.config.objective)
