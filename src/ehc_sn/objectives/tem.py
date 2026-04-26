@@ -18,15 +18,7 @@ from typing import Any, Optional, Protocol
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.controllers.tem import (
-    GRID_REG_TERM,
-    GRID_TRANSITION_RELATION,
-    PLACE_REG_TERM,
-    PLACE_SENSORY_RELATION,
-    PLACE_TRANSITION_RELATION,
-    TEMStepOutput,
-)
-from ehc_sn.loss.consistency import LatentCode, mean_latent_norm, mse_consistency, sum_latent_terms
+from ehc_sn.loss.consistency import LatentCode, LatentRelation, mean_latent_norm, mse_consistency, sum_latent_terms
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_terms
 from ehc_sn.metrics import signals as S
@@ -49,6 +41,50 @@ from ehc_sn.objectives._variational import (
 )
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
+
+GRID_REG_TERM = "grid_reg_term"
+GRID_TRANSITION_RELATION = "grid_transition_relation"
+PLACE_REG_TERM = "place_reg_term"
+PLACE_SENSORY_RELATION = "place_sensory_relation"
+PLACE_TRANSITION_RELATION = "place_transition_relation"
+
+
+# =================================================================================================
+class TEMStepOutputs(Protocol):
+    """Objective-facing output contract for TEM-family rollout steps."""
+
+    @property
+    def logits_inference(self) -> Tensor:
+        """Return posterior-path observation logits of shape ``(B, V)``."""
+        ...
+
+    @property
+    def logits_retrieved(self) -> Tensor:
+        """Return sensory-recall-path observation logits of shape ``(B, V)``."""
+        ...
+
+    @property
+    def logits_ancestral(self) -> Tensor:
+        """Return structural-prior-path observation logits of shape ``(B, V)``."""
+        ...
+
+    @property
+    def latent_relations(self) -> dict[str, LatentRelation]:
+        """Return named TEM latent-consistency relations."""
+        ...
+
+    @property
+    def reg_terms(self) -> dict[str, LatentCode] | None:
+        """Return optional named regularization-code overrides."""
+        ...
+
+    @property
+    def theta_cls(self) -> Tensor | None:
+        """Return optional theta-classifier state used for diagnostics."""
+        ...
+
+
+TEMStepOutput = TEMStepOutputs
 
 
 # =================================================================================================
@@ -301,8 +337,9 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
                 S.PLACE_PRIOR_NORM: mean_latent_norm(place_transition_relation.rhs),
             }
         )
-        if outputs.theta_cls is not None:
-            signals[S.THETA_CLS_NORM] = outputs.theta_cls.detach().norm(dim=-1).mean()
+        theta_cls = getattr(outputs, "theta_cls", None)
+        if theta_cls is not None:
+            signals[S.THETA_CLS_NORM] = theta_cls.detach().norm(dim=-1).mean()
         return signals
 
     @staticmethod
@@ -362,6 +399,13 @@ TEMObjective = TEMLossHead
 TEMObjectiveStep = TEMLossStep
 
 __all__ = [
+    "GRID_REG_TERM",
+    "GRID_TRANSITION_RELATION",
+    "PLACE_REG_TERM",
+    "PLACE_SENSORY_RELATION",
+    "PLACE_TRANSITION_RELATION",
+    "TEMStepOutputs",
+    "TEMStepOutput",
     # canonical names
     "TEMObjectiveBinding",
     "TEMObjectiveConfig",

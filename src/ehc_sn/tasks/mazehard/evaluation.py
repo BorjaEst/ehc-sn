@@ -1,4 +1,11 @@
-"""MazeHard task evaluation helpers."""
+"""MazeHard task evaluation helpers.
+
+Owns sequence-level correctness metrics and builds the typed
+:class:`~ehc_sn.tasks.mazehard.contracts.MazeHardAggregateReport`
+benchmark-facing score surface.  Import
+:class:`~ehc_sn.tasks.mazehard.contracts.MazeHardAggregateReport` from
+:mod:`ehc_sn.tasks.mazehard.contracts` or the mazehard task barrel.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +14,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from .contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets, MazeHardTaskOutput
+from .contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardAggregateReport as _MazeHardAggregateReport, MazeHardTargets, MazeHardTaskOutput
 
 
 # =============================================================================
@@ -83,51 +90,32 @@ def compute_maze_hard_sequence_accuracy(  # -----------------------------------
 
 
 # =============================================================================
-def compute_maze_hard_improvement_reward(  # ----------------------------------
-    output: MazeHardTaskOutput | Tensor,
-    targets: MazeHardTargets | Tensor,
-    *,
-    prev_accuracy: Tensor | None = None,
-    ignore_label_id: int = MAZE_HARD_IGNORE_LABEL_ID,
-) -> tuple[Tensor, Tensor]:
-    """Return ``(accuracy, reward)`` for the canonical MazeHard dense reward.
-
-    Reward is the smooth improvement mapping ``exp(acc_t) - exp(acc_{t-1})``.
-    When ``prev_accuracy`` is omitted, the previous accuracy is treated as zero.
-    """
-    accuracy = compute_maze_hard_sequence_accuracy(
-        output,
-        targets,
-        ignore_label_id=ignore_label_id,
-    ).to(dtype=torch.float32)
-    if prev_accuracy is None:
-        prev_accuracy = torch.zeros_like(accuracy)
-    else:
-        prev_accuracy = prev_accuracy.to(device=accuracy.device, dtype=torch.float32)
-    reward = torch.exp(accuracy) - torch.exp(prev_accuracy)
-    return accuracy, reward
-
-
-# =============================================================================
 def build_maze_hard_report(  # ------------------------------------------------
     metrics: MazeHardSequenceMetrics,
-) -> dict[str, Tensor]:
-    """Return compact aggregate reporting tensors for a MazeHard batch."""
+) -> _MazeHardAggregateReport:
+    """Return typed aggregate benchmark report for a MazeHard batch.
+
+    Args:
+        metrics: Per-sequence correctness summary from :func:`evaluate_maze_hard_sequences`.
+
+    Returns:
+        :class:`~ehc_sn.tasks.mazehard.contracts.MazeHardAggregateReport`
+        with scalar accuracy fields.
+    """
     token_correct_sum = metrics.token_is_correct.to(dtype=torch.float32).sum()
     token_count_sum = metrics.valid_mask.to(dtype=torch.float32).sum().clamp_min(1.0)
     sequence_count = metrics.sequence_accuracy.new_tensor(float(metrics.sequence_accuracy.shape[0])).clamp_min(1.0)
-    return {
-        "tokens/accuracy": token_correct_sum / token_count_sum,
-        "sequences/accuracy": metrics.sequence_accuracy.sum() / sequence_count,
-        "sequences/exact": metrics.sequence_is_correct.to(dtype=torch.float32).sum() / sequence_count,
-    }
+    return _MazeHardAggregateReport(
+        tokens_accuracy=token_correct_sum / token_count_sum,
+        sequences_accuracy=metrics.sequence_accuracy.sum() / sequence_count,
+        sequences_exact=metrics.sequence_is_correct.to(dtype=torch.float32).sum() / sequence_count,
+    )
 
 
 # =============================================================================
 __all__ = [
     "MazeHardSequenceMetrics",
     "build_maze_hard_report",
-    "compute_maze_hard_improvement_reward",
     "compute_maze_hard_sequence_accuracy",
     "evaluate_maze_hard_sequences",
     "is_maze_hard_sequence_correct",

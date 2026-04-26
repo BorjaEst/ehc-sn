@@ -2,6 +2,10 @@
 
 Provides the canonical additive structural score, full-episode evaluation
 primitives, and coercion utilities used by arena objective bindings.
+
+:class:`~ehc_sn.tasks.arena.contracts.ArenaStructuralScore` is the
+task-owned benchmark contract; import it from
+:mod:`ehc_sn.tasks.arena.contracts` or the arena task barrel.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ from typing import Mapping
 import torch
 from torch import Tensor
 
+from .contracts import ArenaStructuralScore as _ArenaStructuralScore
 from .contracts import ArenaTargets, ArenaTaskInput
 
 
@@ -48,31 +53,6 @@ class ArenaPathwayMetrics:
     def accuracy_revisit(self) -> Tensor:
         """Return revisit-only accuracy for this pathway."""
         return self.correct_revisit / self.count_revisit.clamp_min(1.0)
-
-
-# =============================================================================
-@dataclass(frozen=True)
-class ArenaStructuralScore:
-    """Canonical additive structural score for one arena evaluation batch.
-
-    The structural score is the task-owned benchmark primitive.  It exposes
-    both raw counts (for correct cross-batch accumulation) and derived
-    accuracy scalars (for per-step logging).  Multi-pathway fan-out
-    (TEM-specific) is adapter-side and must not add new fields here.
-    """
-
-    accuracy_all: Tensor
-    """Mean per-step observation accuracy across all steps."""
-    accuracy_revisit: Tensor
-    """Mean per-step observation accuracy restricted to revisit steps."""
-    correct_all: Tensor
-    """Raw correct-prediction count (all steps)."""
-    count_all: Tensor
-    """Raw total-step count (all steps)."""
-    correct_revisit: Tensor
-    """Raw correct-prediction count (revisit steps only)."""
-    count_revisit: Tensor
-    """Raw total revisit-step count."""
 
 
 # =============================================================================
@@ -119,7 +99,7 @@ def evaluate_observation_logits(
 # =============================================================================
 def compute_arena_structural_score(
     metrics: ArenaPathwayMetrics,
-) -> ArenaStructuralScore:
+) -> _ArenaStructuralScore:
     """Return the canonical additive structural score from pathway accuracy counts.
 
     The structural score exposes both raw counts and derived accuracies so
@@ -130,9 +110,10 @@ def compute_arena_structural_score(
         metrics: Pathway accuracy counts from :func:`evaluate_observation_logits`.
 
     Returns:
-        :class:`ArenaStructuralScore` with accuracy scalars and raw counts.
+        :class:`~ehc_sn.tasks.arena.contracts.ArenaStructuralScore` with
+        accuracy scalars and raw counts.
     """
-    return ArenaStructuralScore(
+    return _ArenaStructuralScore(
         accuracy_all=metrics.accuracy_all,
         accuracy_revisit=metrics.accuracy_revisit,
         correct_all=metrics.correct_all,
@@ -214,10 +195,12 @@ def coerce_revisit_mask(
 __all__ = [
     "ArenaEpisodeSemantics",
     "ArenaPathwayMetrics",
-    "ArenaStructuralScore",
     "coerce_observation_ids",
     "coerce_revisit_mask",
     "compute_arena_structural_score",
     "evaluate_observation_logits",
     "extract_arena_episode_semantics",
+]
+]
+]
 ]

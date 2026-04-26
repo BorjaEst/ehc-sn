@@ -1,31 +1,53 @@
-"""MazeHard deliberation-family step finalizer.
+"""MazeHard deliberation-mode capability binding.
 
-This module owns the :class:`DeliberationStepFinalizer` implementation for
-MazeHard.  It is entirely separate from the online RL runtime helper in
-:mod:`~ehc_sn.tasks.mazehard.runtime` so the two seams remain orthogonal.
+Owns the :class:`MazeHardDeliberationConfig` and
+:class:`MazeHardDeliberationFinalizer` that wire MazeHard task semantics into
+the deliberation actor-critic controller.
 
-Reward:        dense improvement reward ``exp(acc_t) - exp(acc_{t-1})``.
-Termination:   per-slot when ``action == config.halt_action`` (learned halt).
-Truncation:    per-slot when ``steps >= config.episode_horizon`` (task-owned semantic horizon).
-Runtime state: ``prev_accuracy`` tensor of shape ``(B, 1)`` threaded across steps.
+This is an *execution-mode* binding, not a task-identity definition.
+MazeHard semantics (score, evaluation, contracts) live in the parent task package.
 """
 
 from __future__ import annotations
-
-from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
 from ehc_sn.controllers.deliberation.actor_critic import DeliberationStepFinalizer, DeliberationStepResult
-from ehc_sn.tasks.mazehard.contracts import MazeHardTaskOutput
-from ehc_sn.tasks.mazehard.evaluation import compute_maze_hard_improvement_reward
+from ehc_sn.tasks.mazehard.contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets, MazeHardTaskOutput
+from ehc_sn.tasks.mazehard.evaluation import compute_maze_hard_sequence_accuracy
 from ehc_sn.types import Batch
 
 
 # =============================================================================
-class MazeHardDeliberationTaskConfig(BaseModel, extra="forbid"):
+def _compute_improvement_reward(
+    output: MazeHardTaskOutput | Tensor,
+    targets: MazeHardTargets | Tensor,
+    *,
+    prev_accuracy: Tensor | None = None,
+    ignore_label_id: int = MAZE_HARD_IGNORE_LABEL_ID,
+) -> tuple[Tensor, Tensor]:
+    """Return ``(accuracy, reward)`` for the MazeHard dense improvement reward.
+
+    Reward formula: ``exp(acc_t) - exp(acc_{t-1})``.
+    When ``prev_accuracy`` is omitted the previous accuracy is treated as zero.
+    """
+    accuracy = compute_maze_hard_sequence_accuracy(
+        output,
+        targets,
+        ignore_label_id=ignore_label_id,
+    ).to(dtype=torch.float32)
+    if prev_accuracy is None:
+        prev_accuracy = torch.zeros_like(accuracy)
+    else:
+        prev_accuracy = prev_accuracy.to(device=accuracy.device, dtype=torch.float32)
+    reward = torch.exp(accuracy) - torch.exp(prev_accuracy)
+    return accuracy, reward
+
+
+# =============================================================================
+class MazeHardDeliberationConfig(BaseModel, extra="forbid"):
     """Task-owned configuration for MazeHard deliberation training.
 
     Attributes:
@@ -58,15 +80,15 @@ class MazeHardDeliberationFinalizer:
 
     Responsibilities:
         - Compute dense improvement reward from current task logits.
-        - Mark per-slot termination when ``action == config.halt_action`` (learned halt).
-        - Mark per-slot truncation when ``steps >= config.episode_horizon`` (task-owned semantic horizon).
+        - Mark per-slot termination when ``action == config.halt_action``.
+        - Mark per-slot truncation when ``steps >= config.episode_horizon``.
         - Thread ``prev_accuracy`` as ``runtime_state`` across steps.
 
     Implements :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationStepFinalizer`
     structurally (duck-typed; no Protocol inheritance required for runtime use).
     """
 
-    def __init__(self, config: MazeHardDeliberationTaskConfig) -> None:
+    def __init__(self, config: MazeHardDeliberationConfig) -> None:
         """Create the MazeHard deliberation finalizer.
 
         Args:
@@ -90,8 +112,7 @@ class MazeHardDeliberationFinalizer:
             task_output: Must be a :class:`~ehc_sn.tasks.mazehard.contracts.MazeHardTaskOutput`
                 with a ``task_logits`` tensor of shape ``(B, S, V)``.
             action: Sampled action tensor of shape ``(B,)``.
-            steps: Per-slot step counters of shape ``(B,)`` (not used here; present
-                for protocol conformance).
+            steps: Per-slot step counters of shape ``(B,)``.
             runtime_state: Previous ``prev_accuracy`` tensor of shape ``(B, 1)``,
                 or ``None`` on the first step.
 
@@ -102,14 +123,13 @@ class MazeHardDeliberationFinalizer:
                 - ``truncated``: ``steps >= episode_horizon``, shape ``(B,)``.
                 - ``next_runtime_state``: updated ``prev_accuracy`` tensor, ``(B, 1)``.
         """
-        assert isinstance(task_output, MazeHardTaskOutput), (
-            f"MazeHardDeliberationFinalizer expects MazeHardTaskOutput, got {type(task_output).__name__}"
-        )
+        assert isinstance(
+            task_output, MazeHardTaskOutput
+        ), f"MazeHardDeliberationFinalizer expects MazeHardTaskOutput, got {type(task_output).__name__}"
         labels: Tensor = data["labels"]
-
         prev_accuracy: Tensor | None = runtime_state if isinstance(runtime_state, Tensor) else None
 
-        accuracy, reward = compute_maze_hard_improvement_reward(
+        accuracy, reward = _compute_improvement_reward(
             task_output,
             labels,
             prev_accuracy=prev_accuracy,
@@ -129,5 +149,5 @@ class MazeHardDeliberationFinalizer:
 # =============================================================================
 __all__ = [
     "MazeHardDeliberationFinalizer",
-    "MazeHardDeliberationTaskConfig",
+    "MazeHardDeliberationConfig",
 ]

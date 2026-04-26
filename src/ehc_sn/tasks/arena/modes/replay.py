@@ -1,13 +1,9 @@
-"""Arena replay runtime helpers.
+"""Arena replay execution-mode binding.
 
-These helpers operate on batch-major replay tensors (Phase 1 contract) and
-derive current-step payloads from the compact trajectory arrays.  The runtime
-does NOT call ``EnvBase.step()`` and does NOT own any recurrent carry.
-Cursor management belongs to the replay controller (Phase 3).
-
-Step ``t`` inputs depend only on replay batch tensors, the cursor position
-``t``, and visit-count carry — no future observations leak through this layer
-(SCI-001).
+Canonical owner of replay-mode runtime constants, helpers, and the
+:class:`ArenaReplayTrajectoryRuntime` class.  This is an *execution-mode*
+binding, not a task-identity definition.  Arena semantics (score, evaluation,
+contracts) live in the parent task package.
 """
 
 from __future__ import annotations
@@ -18,9 +14,8 @@ import torch
 from torch import Tensor
 
 from ehc_sn.tasks._movement import _ACTION_DELTAS
+from ehc_sn.tasks.arena.contracts import ArenaTargets, ArenaTaskInput
 from ehc_sn.types import Batch
-
-from .contracts import ArenaTargets, ArenaTaskInput
 
 # =============================================================================
 ARENA_REPLAY_REQUIRED_KEYS: Final[tuple[str, ...]] = (
@@ -61,22 +56,7 @@ def extract_arena_step_tensors(
     batch: Batch,
     t: int,
 ) -> dict[str, Tensor]:
-    """Extract current-step tensors from a batch-major arena replay batch at step ``t``.
-
-    Reads trajectory arrays at step index ``t`` and derives ``location_id``
-    and ``valid_action_mask`` from the static grid tensors.  Does NOT produce
-    ``observation`` (one-hot / encoded); that is the adapter's responsibility.
-
-    Args:
-        batch: Arena replay batch containing all required trajectory and grid
-            tensors as defined by the Phase 1 contract.
-        t: Current replay step index (0-based, must be < T).
-
-    Returns:
-        Dict with ``observation_id``, ``previous_action``, ``location_id``,
-        ``valid_action_mask``, ``step_count``, ``episode_start``, and
-        optional ``region_id`` / ``landmark_id`` when present in ``batch``.
-    """
+    """Extract current-step tensors from a batch-major arena replay batch at step ``t``."""
     topology = batch["topology"]  # (B, H, W) bool
     observations = batch["observations"]  # (B, H, W) int64
     row = batch["trajectory_row"][:, t].long()  # (B,)
@@ -115,16 +95,6 @@ def _compute_valid_action_mask(
     row: Tensor,
     col: Tensor,
 ) -> Tensor:
-    """Return a valid-action mask derived from the topology grid.
-
-    Args:
-        topology: Passable-cell grid, shape ``(B, H, W)`` bool.
-        row: Current row per batch element, shape ``(B,)`` int64.
-        col: Current column per batch element, shape ``(B,)`` int64.
-
-    Returns:
-        Boolean mask of shape ``(B, A)``.
-    """
     B, H, W = topology.shape
     device = topology.device
     arange_b = torch.arange(B, device=device)
@@ -143,87 +113,12 @@ def _compute_valid_action_mask(
 
 
 # =============================================================================
-def coerce_arena_step_input(
-    data: Mapping[str, Tensor],
-) -> ArenaTaskInput:
-    """Convert a step payload dict to a typed :class:`ArenaTaskInput`.
-
-    Callers must enrich ``data`` with an ``observation`` key (adapter-encoded
-    sensory vector) before calling this function.
-
-    Args:
-        data: Step payload dict, must contain all required arena step fields.
-
-    Returns:
-        Typed :class:`ArenaTaskInput`.
-
-    Raises:
-        KeyError: If any mandatory step field is absent.
-    """
-    required = ("observation", "observation_id", "previous_action", "location_id")
-    missing = [k for k in required if k not in data]
-    if missing:
-        raise KeyError(f"Arena step payload is missing required fields: {', '.join(missing)}.")
-    return ArenaTaskInput(
-        observation=data["observation"],
-        observation_id=data["observation_id"],
-        previous_action=data["previous_action"],
-        location_id=data["location_id"],
-        valid_action_mask=data.get(
-            "valid_action_mask",
-            data["observation"].new_zeros(data["observation"].shape[0]),
-        ),
-        step_count=data.get(
-            "step_count",
-            data["observation"].new_zeros(data["observation"].shape[0], 1),
-        ),
-        region_id=data.get("region_id"),
-        landmark_id=data.get("landmark_id"),
-        episode_start=data.get("episode_start"),
-        is_revisit=data.get("is_revisit"),
-    )
-
-
-# =============================================================================
-def coerce_arena_targets(
-    data: Mapping[str, Tensor],
-) -> ArenaTargets:
-    """Extract :class:`ArenaTargets` from a carry data mapping.
-
-    Args:
-        data: Carry data dict, must contain ``observation_id``.
-
-    Returns:
-        :class:`ArenaTargets` with ``observation_id`` and optional
-        ``is_revisit``.
-
-    Raises:
-        KeyError: If ``observation_id`` is absent.
-    """
-    if "observation_id" not in data:
-        raise KeyError("Arena carry data must provide 'observation_id' to build ArenaTargets.")
-    return ArenaTargets(
-        observation_id=data["observation_id"],
-        is_revisit=data.get("is_revisit"),
-    )
-
-
-# =============================================================================
 def new_arena_visit_counts(
     batch: Batch,
     *,
     device: Any,
 ) -> Tensor:
-    """Allocate per-slot location visit counters from the batch topology.
-
-    Args:
-        batch: Arena replay batch containing ``topology`` of shape
-            ``(B, H, W)``.
-        device: Target device for the counter tensor.
-
-    Returns:
-        Zero-initialised int32 tensor of shape ``(B, H * W)``.
-    """
+    """Allocate per-slot location visit counters from the batch topology."""
     topology = batch["topology"]
     B = int(topology.shape[0])
     n_locations = int(topology.shape[-2] * topology.shape[-1])
@@ -235,16 +130,7 @@ def record_arena_visit(
     visit_counts: Tensor,
     location_id: Tensor,
 ) -> Tensor:
-    """Return updated visit counters after recording visits at ``location_id``.
-
-    Args:
-        visit_counts: Per-slot visit counter of shape ``(B, N_locs)`` int32.
-        location_id: Current-step locations, shape ``(B, 1)`` or ``(B,)``
-            int64.
-
-    Returns:
-        Cloned and updated visit-count tensor.
-    """
+    """Return updated visit counters after recording visits at ``location_id``."""
     updated = visit_counts.clone()
     index = location_id.to(device=updated.device, dtype=torch.int64)
     if index.ndim == 1:
@@ -260,17 +146,7 @@ def annotate_arena_revisit_state(
     location_id: Tensor,
     visit_counts: Tensor,
 ) -> dict[str, Tensor]:
-    """Attach a revisit annotation to a current-step payload dict.
-
-    Args:
-        payload: Current-step tensor dict; modified in-place.
-        location_id: Current-step location ids, shape ``(B, 1)`` or ``(B,)``
-            int64.
-        visit_counts: Per-slot visit counter of shape ``(B, N_locs)`` int32.
-
-    Returns:
-        The input ``payload`` dict with ``is_revisit`` added.
-    """
+    """Attach a revisit annotation to a current-step payload dict."""
     idx = location_id.to(device=visit_counts.device, dtype=torch.int64)
     if idx.ndim == 1:
         idx = idx.unsqueeze(-1)
@@ -287,11 +163,7 @@ def batch_size_from_arena_batch(batch: Batch) -> int:
 
 # =============================================================================
 def infer_arena_replay_batch_keys(batch: Batch) -> tuple[str, ...]:
-    """Return the replay batch keys present in ``batch``, validating required keys.
-
-    Raises:
-        KeyError: If any required key is absent.
-    """
+    """Return the replay batch keys present in ``batch``, validating required keys."""
     missing = [key for key in ARENA_REPLAY_REQUIRED_KEYS if key not in batch]
     if missing:
         raise KeyError("Arena replay batch is missing required keys: " + ", ".join(missing) + ".")
@@ -300,18 +172,11 @@ def infer_arena_replay_batch_keys(batch: Batch) -> tuple[str, ...]:
 
 # =============================================================================
 class ArenaReplayTrajectoryRuntime:
-    """Arena-family replay runtime satisfying the :class:`ReplayTrajectoryRuntime` protocol.
+    """Arena-family replay runtime satisfying the ReplayTrajectoryRuntime protocol.
 
     Provides per-slot cursor-indexed step extraction from batch-major arena
     replay tensors.  Maintains per-slot visit counters internally so that
     ``is_revisit`` annotations are available to objectives and trace fields.
-
-    Visit counters are reset for any batch slot whose extracted step has
-    ``episode_start=True``, which is guaranteed to be True at cursor=0 of
-    each fresh trajectory.
-
-    This class is stateful across sequential ``extract_step_per_slot`` calls:
-    visit counts accumulate within each episode and reset at episode boundaries.
     """
 
     def __init__(self) -> None:
@@ -322,22 +187,7 @@ class ArenaReplayTrajectoryRuntime:
         return batch["trajectory_length"]
 
     def extract_step_per_slot(self, batch: Batch, cursor: Tensor) -> dict[str, Tensor]:
-        """Extract current-step tensors at per-slot cursor positions.
-
-        Does NOT produce ``observation`` (encoded sensory vector); that is
-        the adapter encoder's responsibility (SCI-001 / adapter enrichment
-        pattern).
-
-        Args:
-            batch: Full arena replay batch with ``(B, T, ...)`` trajectory axes.
-            cursor: Per-slot current step indices, shape ``(B,)`` int64.
-
-        Returns:
-            Dict containing ``observation_id``, ``previous_action``,
-            ``location_id``, ``valid_action_mask``, ``step_count``,
-            ``episode_start``, optional ``region_id`` / ``landmark_id``,
-            and ``is_revisit``.
-        """
+        """Extract current-step tensors at per-slot cursor positions."""
         topology = batch["topology"]  # (B, H, W) bool
         B, _H, W = topology.shape
         device = topology.device
@@ -367,7 +217,6 @@ class ArenaReplayTrajectoryRuntime:
         if "landmarks" in batch:
             result["landmark_id"] = batch["landmarks"][arange_b, row, col].unsqueeze(-1)
 
-        # Visit bookkeeping: allocate lazily, reset on episode boundaries.
         if self._visit_counts is None:
             self._visit_counts = new_arena_visit_counts(batch, device=device)
 
@@ -387,10 +236,9 @@ __all__ = [
     "ARENA_REPLAY_OPTIONAL_KEYS",
     "ARENA_REPLAY_REQUIRED_KEYS",
     "ARENA_STEP_KEYS",
+    "ArenaReplayTrajectoryRuntime",
     "annotate_arena_revisit_state",
     "batch_size_from_arena_batch",
-    "coerce_arena_step_input",
-    "coerce_arena_targets",
     "extract_arena_step_tensors",
     "infer_arena_replay_batch_keys",
     "new_arena_visit_counts",

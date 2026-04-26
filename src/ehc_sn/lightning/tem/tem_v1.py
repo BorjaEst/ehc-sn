@@ -9,8 +9,7 @@ import lightning as L
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.arena.tem.objectives import ArenaTEMTaskBinding
-from ehc_sn.adapters.arena.tem.tem_v1 import ArenaTEMV1AdapterSettings, ArenaTEMV1BridgeAdapter
+from ehc_sn.adapters.arena.tem import ArenaTEMAdapterSettings, ArenaTEMTaskBinding, ArenaTEMV1BridgeAdapter
 from ehc_sn.adapters.arena.tem.traces import ARENA_TEM_TRACE_FIELDS, select_arena_tem_trace_fields
 from ehc_sn.controllers.replay.trajectory import ReplayTrajectoryController, ReplayTrajectoryControllerConfig
 from ehc_sn.lightning._rollout import (
@@ -26,8 +25,7 @@ from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
 from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
 from ehc_sn.objectives.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
-from ehc_sn.tasks.arena import ArenaReplayTrajectoryRuntime, infer_arena_replay_batch_keys
-from ehc_sn.tasks.arena.runtime import batch_size_from_arena_batch
+from ehc_sn.tasks.arena.modes.replay import ArenaReplayTrajectoryRuntime, batch_size_from_arena_batch, infer_arena_replay_batch_keys
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
@@ -45,7 +43,7 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
         ...,
         description="Path to the model configuration TOML file that specifies the TEM v1 architecture.",
     )
-    adapter: ArenaTEMV1AdapterSettings = Field(
+    adapter: ArenaTEMAdapterSettings = Field(
         ...,
         description="Settings for the arena bridge adapter that binds TEM v1 to task inputs/outputs.",
     )

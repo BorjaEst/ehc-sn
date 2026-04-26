@@ -1,67 +1,53 @@
-"""Arena task family — stepwise teacher-forced replay for structural-knowledge claims.
+"""Arena task family — structural navigation over a maze world.
 
-Arena is the canonical task/runtime family backing B1-style structural-knowledge
-benchmark reports.  It is stepwise, teacher-forced, and recurrent.
-Whole-trajectory model inputs are forbidden (REQ-001, SCI-001).
+Arena defines the observation/action ontology, revisit semantics, and additive
+structural score for maze-world navigation.  These are task-owned semantics;
+they do not depend on any particular execution mode.
 
-Benchmark evaluation consumes :class:`ArenaStructuralScore`.
-RL training may opt in to :class:`ArenaRewardConfig` (disabled by default, REQ-004).
+Canonical task surfaces:
+
+- :mod:`~ehc_sn.tasks.arena.contracts` — observation, action, and score contracts
+  (including :class:`ArenaStructuralScore`, the benchmark-facing score type).
+- :mod:`~ehc_sn.tasks.arena.evaluation` — structural score and evaluation helpers.
+- :mod:`~ehc_sn.tasks.arena.batch` — task-level batch coercion helpers.
+
+Mode bindings (execution-mode, not task identity):
+
+- :mod:`~ehc_sn.tasks.arena.modes` — replay and other mode bindings.
+
+Benchmark evaluation consumes :class:`ArenaStructuralScore` directly from the
+task-owned contracts surface.  Whole-trajectory model inputs are forbidden
+(REQ-001, SCI-001).
 """
 
-from .contracts import ARENA_ACTION_COUNT, ArenaAction, ArenaTargets, ArenaTaskInput, ArenaTaskOutput
+from . import batch, contracts, evaluation, modes  # noqa: F401
+from .contracts import ARENA_ACTION_COUNT, ArenaAction, ArenaStructuralScore, ArenaTargets, ArenaTaskInput, ArenaTaskOutput
 from .evaluation import (
     ArenaEpisodeSemantics,
     ArenaPathwayMetrics,
-    ArenaStructuralScore,
     coerce_observation_ids,
     coerce_revisit_mask,
     compute_arena_structural_score,
     evaluate_observation_logits,
     extract_arena_episode_semantics,
 )
-from .reward import ArenaRewardConfig, ArenaRewardMode, compute_arena_reward
-from .runtime import (
-    ARENA_REPLAY_OPTIONAL_KEYS,
-    ARENA_REPLAY_REQUIRED_KEYS,
-    ARENA_STEP_KEYS,
-    ArenaReplayTrajectoryRuntime,
-    annotate_arena_revisit_state,
-    batch_size_from_arena_batch,
-    coerce_arena_step_input,
-    coerce_arena_targets,
-    extract_arena_step_tensors,
-    infer_arena_replay_batch_keys,
-    new_arena_visit_counts,
-    record_arena_visit,
-)
 
 __all__ = [
     "ARENA_ACTION_COUNT",
-    "ARENA_REPLAY_OPTIONAL_KEYS",
-    "ARENA_REPLAY_REQUIRED_KEYS",
-    "ARENA_STEP_KEYS",
     "ArenaAction",
     "ArenaEpisodeSemantics",
     "ArenaPathwayMetrics",
-    "ArenaReplayTrajectoryRuntime",
-    "ArenaRewardConfig",
-    "ArenaRewardMode",
     "ArenaStructuralScore",
     "ArenaTargets",
     "ArenaTaskInput",
     "ArenaTaskOutput",
-    "annotate_arena_revisit_state",
-    "batch_size_from_arena_batch",
-    "coerce_arena_step_input",
-    "coerce_arena_targets",
+    "batch",
+    "contracts",
     "coerce_observation_ids",
     "coerce_revisit_mask",
-    "compute_arena_reward",
     "compute_arena_structural_score",
     "evaluate_observation_logits",
+    "evaluation",
     "extract_arena_episode_semantics",
-    "extract_arena_step_tensors",
-    "infer_arena_replay_batch_keys",
-    "new_arena_visit_counts",
-    "record_arena_visit",
+    "modes",
 ]
