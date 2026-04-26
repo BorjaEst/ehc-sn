@@ -1,6 +1,6 @@
 """ """
 
-from typing import Literal
+from typing import Literal, TypeAlias
 
 import torch
 import torch.nn.functional as F
@@ -8,7 +8,7 @@ from torch import Tensor
 
 from ehc_sn.activations.stablemax import log_stablemax
 
-LossType = Literal["stablemax_cross_entropy", "softmax_cross_entropy"]
+LossType: TypeAlias = Literal["stablemax_cross_entropy", "softmax_cross_entropy"]
 
 
 # =================================================================================================

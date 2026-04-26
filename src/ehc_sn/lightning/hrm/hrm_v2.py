@@ -40,12 +40,12 @@ from ehc_sn.controllers.deliberation.actor_critic import DeliberationACControlle
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
-from ehc_sn.metrics.routes import ACTOR_CRITIC_EPISODE_ROUTES, ACTOR_CRITIC_STEP_ROUTES
+from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLossHead
 from ehc_sn.rollouts import RecurrentRunner, RepeatSource
-from ehc_sn.tasks.mazehard.deliberation import MazeHardDeliberationFinalizer, MazeHardDeliberationTaskConfig
+from ehc_sn.tasks.mazehard.modes.deliberation import MazeHardDeliberationFinalizer, MazeHardDeliberationTaskConfig
 from ehc_sn.training.actor_critic import TD0ActorCriticBatchBuilder, ZeroBootstrapActorCriticValidationScorer
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
@@ -61,7 +61,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
 
     This config wires together:
         - model settings (:class:`ModelSettingsV2`)
-        - task settings (:class:`~ehc_sn.tasks.mazehard.deliberation.MazeHardDeliberationTaskConfig`)
+        - task settings (:class:`~ehc_sn.tasks.mazehard.modes.deliberation.MazeHardDeliberationTaskConfig`)
         - deliberation controller and objective configs
         - optimizer and scheduler settings
 
@@ -163,8 +163,8 @@ class TrainingModel(L.LightningModule):
         self._train_carry = None
 
         # Metrics are cloned for train/val to allow separate logging and state management.
-        self.train_metrics = build_train_metrics(ACTOR_CRITIC_STEP_ROUTES).clone(prefix="train/")
-        self.val_metrics = build_val_metrics(ACTOR_CRITIC_EPISODE_ROUTES).clone(prefix="val/")
+        self.train_metrics = build_train_metrics(RL_STEP_ROUTES).clone(prefix="train/")
+        self.val_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(prefix="val/")
         self.trace_specs = build_trace_spec("actor_critic", extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS)
 
         # Buffer + assembler implement partial-reset batching for deliberation runs.
@@ -325,7 +325,7 @@ class TrainingModel(L.LightningModule):
             runner_options={"explore": False, "allow_halt": False},
         )
         trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs)
-        update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, ACTOR_CRITIC_EPISODE_ROUTES)
+        update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, RL_EPISODE_ROUTES)
         return {"trace": trace}
 
 
