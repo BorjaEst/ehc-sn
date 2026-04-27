@@ -50,30 +50,20 @@ class DungeonTaskInput:
 
 # =============================================================================
 @dataclass(frozen=True)
-class DungeonScoreReport:
-    """Benchmark-time score report for a batch of completed dungeon episodes.
+class DungeonTaskOutput:
+    """Task-owned dungeon navigation output.
 
-    Token-supervision targets are not defined in dungeon v1.
+    Carries the model's per-step action prediction.
     """
 
-    success: Tensor
-    """Goal reached within episode horizon, shape ``(B,)`` bool."""
-    score: Tensor
-    """Sparse path-efficiency score: ``1 / episode_steps`` for successful episodes, 0 for failures.
-
-    Shape ``(B,)`` float.  Computed by
-    :func:`~ehc_sn.tasks.dungeon.evaluation.build_dungeon_score_report` from the
-    task-owned episode-end tensors ``success`` and ``episode_steps``.
-    Higher is better; a perfect one-step success scores 1.0.
-    """
-    episode_steps: Tensor
-    """Steps taken in the episode, shape ``(B,)`` int64."""
+    action_logits: Tensor
+    """Predicted action logits, shape ``(B, A)`` float."""
 
 
 # =============================================================================
 __all__ = [
     "DUNGEON_ACTION_COUNT",
     "DungeonAction",
-    "DungeonScoreReport",
     "DungeonTaskInput",
+    "DungeonTaskOutput",
 ]

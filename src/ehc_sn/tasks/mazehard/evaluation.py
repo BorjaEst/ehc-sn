@@ -1,10 +1,7 @@
 """MazeHard task evaluation helpers.
 
-Owns sequence-level correctness metrics and builds the typed
-:class:`~ehc_sn.tasks.mazehard.contracts.MazeHardAggregateReport`
-benchmark-facing score surface.  Import
-:class:`~ehc_sn.tasks.mazehard.contracts.MazeHardAggregateReport` from
-:mod:`ehc_sn.tasks.mazehard.contracts` or the mazehard task barrel.
+Owns sequence-level correctness metrics and the benchmark-facing
+:class:`MazeHardScoreReport` aggregate score surface.
 """
 
 from __future__ import annotations
@@ -14,12 +11,39 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from .contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardAggregateReport as _MazeHardAggregateReport, MazeHardTargets, MazeHardTaskOutput
+from .contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets, MazeHardTaskOutput
 
 
 # =============================================================================
 @dataclass(frozen=True)
-class MazeHardSequenceMetrics:
+class MazeHardScoreReport:
+    """Typed benchmark-facing aggregate score report for a MazeHard batch.
+
+    All tensors are scalar (0-d) float32.  Benchmarks consume these fields;
+    mode internals are not part of this surface.
+
+    Attributes:
+        tokens_accuracy: Token-level accuracy over all supervised tokens.
+        sequences_accuracy: Mean per-sequence token accuracy.
+        sequences_exact: Fraction of fully correct sequences.
+    """
+
+    tokens_accuracy: Tensor
+    sequences_accuracy: Tensor
+    sequences_exact: Tensor
+
+    def as_dict(self) -> dict[str, Tensor]:
+        """Return the canonical key-value dict for logging."""
+        return {
+            "tokens/accuracy": self.tokens_accuracy,
+            "sequences/accuracy": self.sequences_accuracy,
+            "sequences/exact": self.sequences_exact,
+        }
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class MazeHardStepScore:
     """Per-sequence correctness summary for MazeHard token prediction."""
 
     valid_mask: Tensor
@@ -45,18 +69,18 @@ class MazeHardSequenceMetrics:
 
 
 # =============================================================================
-def evaluate_maze_hard_sequences(  # ------------------------------------------
+def build_maze_hard_step_score(  # --------------------------------------------
     output: MazeHardTaskOutput | Tensor,
     targets: MazeHardTargets | Tensor,
     *,
     ignore_label_id: int = MAZE_HARD_IGNORE_LABEL_ID,
-) -> MazeHardSequenceMetrics:
+) -> MazeHardStepScore:
     """Return masked token-correctness metrics for a MazeHard batch."""
     logits = output.task_logits if isinstance(output, MazeHardTaskOutput) else output
     labels = targets.labels if isinstance(targets, MazeHardTargets) else targets
     valid_mask = labels != ignore_label_id
     token_is_correct = valid_mask & logits.argmax(dim=-1).eq(labels)
-    return MazeHardSequenceMetrics(valid_mask=valid_mask, token_is_correct=token_is_correct)
+    return MazeHardStepScore(valid_mask=valid_mask, token_is_correct=token_is_correct)
 
 
 # =============================================================================
@@ -67,7 +91,7 @@ def is_maze_hard_sequence_correct(  # -----------------------------------------
     ignore_label_id: int = MAZE_HARD_IGNORE_LABEL_ID,
 ) -> Tensor:
     """Return the exact-correctness flag for each MazeHard sequence."""
-    return evaluate_maze_hard_sequences(
+    return build_maze_hard_step_score(
         output,
         targets,
         ignore_label_id=ignore_label_id,
@@ -82,7 +106,7 @@ def compute_maze_hard_sequence_accuracy(  # -----------------------------------
     ignore_label_id: int = MAZE_HARD_IGNORE_LABEL_ID,
 ) -> Tensor:
     """Return per-sequence token accuracy for one MazeHard batch."""
-    return evaluate_maze_hard_sequences(
+    return build_maze_hard_step_score(
         output,
         targets,
         ignore_label_id=ignore_label_id,
@@ -90,22 +114,21 @@ def compute_maze_hard_sequence_accuracy(  # -----------------------------------
 
 
 # =============================================================================
-def build_maze_hard_report(  # ------------------------------------------------
-    metrics: MazeHardSequenceMetrics,
-) -> _MazeHardAggregateReport:
+def build_maze_hard_score_report(  # ------------------------------------------
+    metrics: MazeHardStepScore,
+) -> MazeHardScoreReport:
     """Return typed aggregate benchmark report for a MazeHard batch.
 
     Args:
-        metrics: Per-sequence correctness summary from :func:`evaluate_maze_hard_sequences`.
+        metrics: Per-sequence correctness summary from :func:`build_maze_hard_step_score`.
 
     Returns:
-        :class:`~ehc_sn.tasks.mazehard.contracts.MazeHardAggregateReport`
-        with scalar accuracy fields.
+        :class:`MazeHardScoreReport` with scalar accuracy fields.
     """
     token_correct_sum = metrics.token_is_correct.to(dtype=torch.float32).sum()
     token_count_sum = metrics.valid_mask.to(dtype=torch.float32).sum().clamp_min(1.0)
     sequence_count = metrics.sequence_accuracy.new_tensor(float(metrics.sequence_accuracy.shape[0])).clamp_min(1.0)
-    return _MazeHardAggregateReport(
+    return MazeHardScoreReport(
         tokens_accuracy=token_correct_sum / token_count_sum,
         sequences_accuracy=metrics.sequence_accuracy.sum() / sequence_count,
         sequences_exact=metrics.sequence_is_correct.to(dtype=torch.float32).sum() / sequence_count,
@@ -114,9 +137,10 @@ def build_maze_hard_report(  # ------------------------------------------------
 
 # =============================================================================
 __all__ = [
-    "MazeHardSequenceMetrics",
-    "build_maze_hard_report",
+    "MazeHardScoreReport",
+    "MazeHardStepScore",
+    "build_maze_hard_score_report",
+    "build_maze_hard_step_score",
     "compute_maze_hard_sequence_accuracy",
-    "evaluate_maze_hard_sequences",
     "is_maze_hard_sequence_correct",
 ]

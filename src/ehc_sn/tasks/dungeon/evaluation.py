@@ -1,4 +1,8 @@
-"""Dungeon task evaluation helpers."""
+"""Dungeon task evaluation helpers.
+
+Owns episode-level correctness primitives and the benchmark-facing
+:class:`DungeonScoreReport` aggregate score surface.
+"""
 
 from __future__ import annotations
 
@@ -6,72 +10,82 @@ from dataclasses import dataclass
 
 from torch import Tensor
 
-from .contracts import DungeonScoreReport as _DungeonScoreReport
-
 
 # =============================================================================
 @dataclass(frozen=True)
-class DungeonEpisodeResult:
-    """Aggregate evaluation result over a batch of dungeon episodes."""
+class DungeonScoreReport:
+    """Canonical aggregate benchmark-facing score report for a batch of dungeon episodes.
+
+    This is the task-owned aggregate surface; benchmarks consume these fields.
+    Computed by :func:`build_dungeon_score_report` from a batch of
+    :class:`DungeonStepScore` units.
+    """
 
     success_rate: Tensor
     """Mean episode success rate, scalar float."""
     mean_score: Tensor
-    """Mean episode score per episode, scalar float."""
+    """Mean path-efficiency score per episode, scalar float."""
     mean_steps: Tensor
     """Mean episode length in steps, scalar float."""
 
 
 # =============================================================================
-def build_dungeon_score_report(
+@dataclass(frozen=True)
+class DungeonStepScore:
+    """Per-slot local semantic state for one dungeon episode step.
+
+    Carries task-observable quantities only.  The pre-computed efficiency
+    score (a reward signal) was removed; it is derived in
+    :func:`build_dungeon_score_report` and :class:`~ehc_sn.tasks.dungeon.reward.DungeonRewardProjector`
+    when needed.
+    """
+
+    success: Tensor
+    """Goal reached within episode horizon, shape ``(B,)`` bool."""
+    episode_steps: Tensor
+    """Steps taken in the episode, shape ``(B,)`` int64."""
+
+
+# =============================================================================
+def build_dungeon_step_score(
     success: Tensor,
     episode_steps: Tensor,
-) -> _DungeonScoreReport:
-    """Return a :class:`~ehc_sn.tasks.dungeon.contracts.DungeonScoreReport` from raw episode-end tensors.
-
-    The canonical task-owned score is the sparse path-efficiency signal:
-    ``1 / episode_steps`` for successful episodes and 0 for failures.  This
-    makes the score a pure function of task-observable quantities with no
-    dependence on reward shaping or adapter-layer conventions.
+) -> DungeonStepScore:
+    """Return a :class:`DungeonStepScore` from raw episode-end tensors.
 
     Args:
         success: Goal-reached indicator per episode, shape ``(B,)`` bool.
         episode_steps: Steps taken per episode, shape ``(B,)`` int64.
 
     Returns:
-        :class:`~ehc_sn.tasks.dungeon.contracts.DungeonScoreReport` with the computed score field.
+        :class:`DungeonStepScore` with task-observable local state.
     """
-    steps_f = episode_steps.float().clamp_min(1.0)
-    score = success.float() / steps_f
-    return _DungeonScoreReport(
-        success=success,
-        score=score,
-        episode_steps=episode_steps,
-    )
+    return DungeonStepScore(success=success, episode_steps=episode_steps)
 
 
 # =============================================================================
-def compute_dungeon_episode_score(
-    reports: _DungeonScoreReport,
-) -> DungeonEpisodeResult:
-    """Return aggregate evaluation metrics from a batch of dungeon score reports.
+def build_dungeon_score_report(
+    step_scores: DungeonStepScore,
+) -> DungeonScoreReport:
+    """Return aggregate evaluation metrics from a batch of dungeon step scores.
 
     Args:
-        reports: Score reports for a batch of completed dungeon episodes.
+        step_scores: Episode-level primitive scores for a completed batch.
 
     Returns:
-        :class:`DungeonEpisodeResult` with batch-mean scalar metrics.
+        :class:`DungeonScoreReport` with batch-mean scalar metrics.
     """
-    return DungeonEpisodeResult(
-        success_rate=reports.success.float().mean(),
-        mean_score=reports.score.float().mean(),
-        mean_steps=reports.episode_steps.float().mean(),
+    return DungeonScoreReport(
+        success_rate=step_scores.success.float().mean(),
+        mean_score=(step_scores.success.float() / step_scores.episode_steps.float().clamp_min(1.0)).mean(),
+        mean_steps=step_scores.episode_steps.float().mean(),
     )
 
 
 # =============================================================================
 __all__ = [
-    "DungeonEpisodeResult",
+    "DungeonScoreReport",
+    "DungeonStepScore",
     "build_dungeon_score_report",
-    "compute_dungeon_episode_score",
+    "build_dungeon_step_score",
 ]

@@ -1,60 +1,41 @@
-"""MazeHard deliberation-mode capability binding.
+"""MazeHard deliberation capability object and config.
 
-Owns the :class:`MazeHardDeliberationConfig` and
-:class:`MazeHardDeliberationFinalizer` that wire MazeHard task semantics into
-the deliberation actor-critic controller.
+Canonical owner of the :class:`MazeHardDeliberationConfig` and
+:class:`MazeHardDeliberationCapability` that wire MazeHard task semantics into
+the deliberation actor-critic controller.  This is an *execution binding*, not
+a task-identity definition.  MazeHard semantics (score, evaluation, contracts)
+live in the parent task package.
 
-This is an *execution-mode* binding, not a task-identity definition.
-MazeHard semantics (score, evaluation, contracts) live in the parent task package.
+Task-owned reward semantics live in
+:mod:`ehc_sn.tasks.mazehard.reward` (:class:`~ehc_sn.tasks.mazehard.reward.MazeHardRewardProjector`).
+This capability delegates reward computation to the projector and keeps only
+terminated, truncated, reward emission, and runtime-state threading.
 """
 
 from __future__ import annotations
 
-import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.controllers.deliberation.actor_critic import DeliberationStepFinalizer, DeliberationStepResult
-from ehc_sn.tasks.mazehard.contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets, MazeHardTaskOutput
-from ehc_sn.tasks.mazehard.evaluation import compute_maze_hard_sequence_accuracy
+from ehc_sn.controllers.deliberation.actor_critic import DeliberationStepResult
+from ehc_sn.tasks.mazehard.contracts import MazeHardTaskOutput
+from ehc_sn.tasks.mazehard.evaluation import build_maze_hard_step_score
+from ehc_sn.tasks.mazehard.reward import MazeHardRewardProjector
 from ehc_sn.types import Batch
 
 
 # =============================================================================
-def _compute_improvement_reward(
-    output: MazeHardTaskOutput | Tensor,
-    targets: MazeHardTargets | Tensor,
-    *,
-    prev_accuracy: Tensor | None = None,
-    ignore_label_id: int = MAZE_HARD_IGNORE_LABEL_ID,
-) -> tuple[Tensor, Tensor]:
-    """Return ``(accuracy, reward)`` for the MazeHard dense improvement reward.
-
-    Reward formula: ``exp(acc_t) - exp(acc_{t-1})``.
-    When ``prev_accuracy`` is omitted the previous accuracy is treated as zero.
-    """
-    accuracy = compute_maze_hard_sequence_accuracy(
-        output,
-        targets,
-        ignore_label_id=ignore_label_id,
-    ).to(dtype=torch.float32)
-    if prev_accuracy is None:
-        prev_accuracy = torch.zeros_like(accuracy)
-    else:
-        prev_accuracy = prev_accuracy.to(device=accuracy.device, dtype=torch.float32)
-    reward = torch.exp(accuracy) - torch.exp(prev_accuracy)
-    return accuracy, reward
-
-
-# =============================================================================
 class MazeHardDeliberationConfig(BaseModel, extra="forbid"):
-    """Task-owned configuration for MazeHard deliberation training.
+    """Mode-scoped configuration for MazeHard deliberation capability.
+
+    This is capability config, not task identity.  Task-owned semantics
+    (score, evaluation, reward) live in the parent package.
 
     Attributes:
         halt_action: Action index the model uses to signal 'done' for a slot.
             Must match the action space configured in the backbone / policy head.
-        episode_horizon: Task-owned semantic step budget per slot.  When
-            ``steps >= episode_horizon`` the finalizer emits ``truncated=True``.
+        episode_horizon: Semantic step budget per slot.  When
+            ``steps >= episode_horizon`` the capability emits ``truncated=True``.
             Must be > 0.  Owned here; never forwarded to the controller.
     """
 
@@ -66,12 +47,12 @@ class MazeHardDeliberationConfig(BaseModel, extra="forbid"):
     episode_horizon: int = Field(
         default=16,
         ge=1,
-        description="Task-owned semantic step budget per slot; finalizer emits truncated when steps reach this value.",
+        description="Task-owned semantic step budget per slot; capability emits truncated when steps reach this value.",
     )
 
 
 # =============================================================================
-class MazeHardDeliberationFinalizer:
+class MazeHardDeliberationCapability:
     """MazeHard implementation of :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationStepFinalizer`.
 
     Owned by the task layer; injected into
@@ -79,7 +60,7 @@ class MazeHardDeliberationFinalizer:
     at wiring time.
 
     Responsibilities:
-        - Compute dense improvement reward from current task logits.
+        - Delegate reward computation to :class:`~ehc_sn.tasks.mazehard.reward.MazeHardRewardProjector`.
         - Mark per-slot termination when ``action == config.halt_action``.
         - Mark per-slot truncation when ``steps >= config.episode_horizon``.
         - Thread ``prev_accuracy`` as ``runtime_state`` across steps.
@@ -88,14 +69,18 @@ class MazeHardDeliberationFinalizer:
     structurally (duck-typed; no Protocol inheritance required for runtime use).
     """
 
-    def __init__(self, config: MazeHardDeliberationConfig) -> None:
-        """Create the MazeHard deliberation finalizer.
+    def __init__(self, config: MazeHardDeliberationConfig, reward_projector: MazeHardRewardProjector) -> None:
+        """Create the MazeHard deliberation capability.
 
         Args:
             config: Task-owned config specifying ``halt_action`` and ``episode_horizon``.
+            reward_projector: Task-owned reward projector, injected at wiring time.
+                Lives in :mod:`ehc_sn.tasks.mazehard.reward`; the capability
+                does not construct it internally.
         """
         self._halt_action = config.halt_action
         self._episode_horizon = config.episode_horizon
+        self._reward_projector = reward_projector
 
     def finalize_step(
         self,
@@ -125,13 +110,13 @@ class MazeHardDeliberationFinalizer:
         """
         assert isinstance(
             task_output, MazeHardTaskOutput
-        ), f"MazeHardDeliberationFinalizer expects MazeHardTaskOutput, got {type(task_output).__name__}"
+        ), f"MazeHardDeliberationCapability expects MazeHardTaskOutput, got {type(task_output).__name__}"
         labels: Tensor = data["labels"]
         prev_accuracy: Tensor | None = runtime_state if isinstance(runtime_state, Tensor) else None
 
-        accuracy, reward = _compute_improvement_reward(
-            task_output,
-            labels,
+        step_score = build_maze_hard_step_score(task_output, labels)
+        accuracy, reward = self._reward_projector.project_step_reward(
+            step_score,
             prev_accuracy=prev_accuracy,
         )
 
@@ -148,6 +133,6 @@ class MazeHardDeliberationFinalizer:
 
 # =============================================================================
 __all__ = [
-    "MazeHardDeliberationFinalizer",
+    "MazeHardDeliberationCapability",
     "MazeHardDeliberationConfig",
 ]

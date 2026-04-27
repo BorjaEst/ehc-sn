@@ -1,38 +1,36 @@
-"""MazeHard task public export surface.
+"""MazeHard task family — token-prediction over maze layouts.
 
-Canonical task-first surfaces:
+MazeHard defines the token-prediction protocol, sequence evaluation semantics,
+and dense improvement reward semantics.  These are task-owned semantics; they
+do not depend on any particular execution binding.
 
-- :mod:`~ehc_sn.tasks.mazehard.contracts` — task contracts and constants
-  (including :class:`MazeHardAggregateReport`, the benchmark-facing score type).
+Stable task surface:
+
+- :mod:`~ehc_sn.tasks.mazehard.contracts` — task contracts and constants.
 - :mod:`~ehc_sn.tasks.mazehard.evaluation` — sequence evaluation and aggregate report.
-- :mod:`~ehc_sn.tasks.mazehard.batch` — task-level batch coercion helpers.
+- :mod:`~ehc_sn.tasks.mazehard.reward` — task-owned reward semantics.
 
-Mode bindings (execution-mode, not task identity):
+Execution-binding capability:
 
-- :mod:`~ehc_sn.tasks.mazehard.modes` — deliberation and other mode bindings.
+- :class:`MazeHardDeliberationCapability` — deliberation actor-critic capability.
+  Full module: :mod:`ehc_sn.tasks.mazehard.capabilities.deliberation`.
+
+Raw channel-to-batch coercion lives in :mod:`ehc_sn.data.mazehard` (data layer).
 """
 
-from . import batch, contracts, evaluation, modes  # noqa: F401
-from .contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardAggregateReport, MazeHardTargets, MazeHardTaskInput, MazeHardTaskOutput
-from .evaluation import (
-    MazeHardSequenceMetrics,
-    build_maze_hard_report,
-    evaluate_maze_hard_sequences,
-    is_maze_hard_sequence_correct,
-)
+from .capabilities.deliberation import MazeHardDeliberationCapability
+from .contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets, MazeHardTaskInput, MazeHardTaskOutput
+from .evaluation import MazeHardScoreReport, MazeHardStepScore
+from .reward import MazeHardRewardConfig, MazeHardRewardProjector
 
 __all__ = [
     "MAZE_HARD_IGNORE_LABEL_ID",
-    "MazeHardAggregateReport",
-    "MazeHardSequenceMetrics",
+    "MazeHardDeliberationCapability",
+    "MazeHardRewardConfig",
+    "MazeHardRewardProjector",
+    "MazeHardScoreReport",
+    "MazeHardStepScore",
     "MazeHardTargets",
     "MazeHardTaskInput",
     "MazeHardTaskOutput",
-    "batch",
-    "build_maze_hard_report",
-    "contracts",
-    "evaluate_maze_hard_sequences",
-    "evaluation",
-    "is_maze_hard_sequence_correct",
-    "modes",
 ]

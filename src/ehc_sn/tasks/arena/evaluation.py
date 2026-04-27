@@ -1,11 +1,8 @@
 """Arena task evaluation helpers.
 
-Provides the canonical additive structural score, full-episode evaluation
-primitives, and coercion utilities used by arena objective bindings.
-
-:class:`~ehc_sn.tasks.arena.contracts.ArenaStructuralScore` is the
-task-owned benchmark contract; import it from
-:mod:`ehc_sn.tasks.arena.contracts` or the arena task barrel.
+Owns the canonical additive structural score, the benchmark-facing
+:class:`ArenaScoreReport`, full-episode evaluation primitives, and coercion
+utilities used by arena objective bindings.
 """
 
 from __future__ import annotations
@@ -16,8 +13,32 @@ from typing import Mapping
 import torch
 from torch import Tensor
 
-from .contracts import ArenaStructuralScore as _ArenaStructuralScore
 from .contracts import ArenaTargets, ArenaTaskInput
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class ArenaScoreReport:
+    """Canonical additive structural score for one arena evaluation batch.
+
+    The structural score is the task-owned benchmark primitive.  It exposes
+    both raw counts (for correct cross-batch accumulation) and derived
+    accuracy scalars (for per-step logging).  Multi-pathway fan-out
+    (TEM-specific) is adapter-side and must not add new fields here.
+    """
+
+    accuracy_all: Tensor
+    """Mean per-step observation accuracy across all steps."""
+    accuracy_revisit: Tensor
+    """Mean per-step observation accuracy restricted to revisit steps."""
+    correct_all: Tensor
+    """Raw correct-prediction count (all steps)."""
+    count_all: Tensor
+    """Raw total-step count (all steps)."""
+    correct_revisit: Tensor
+    """Raw correct-prediction count (revisit steps only)."""
+    count_revisit: Tensor
+    """Raw total revisit-step count."""
 
 
 # =============================================================================
@@ -32,27 +53,18 @@ class ArenaEpisodeSemantics:
 
 # =============================================================================
 @dataclass(frozen=True)
-class ArenaPathwayMetrics:
-    """Raw accuracy counts for one arena observation-logit pathway.
+class ArenaStepScore:
+    """Per-slot observation prediction result for one arena step.
 
-    Raw counts rather than normalised rates are stored so callers can
-    accumulate across batches before computing global accuracy.
+    Local semantic state — stores per-slot booleans, not batch aggregates.
+    Aggregate statistics (counts, accuracies) are computed by
+    :func:`build_arena_score_report` when needed.
     """
 
-    correct_all: Tensor
-    count_all: Tensor
-    correct_revisit: Tensor
-    count_revisit: Tensor
-
-    @property
-    def accuracy_all(self) -> Tensor:
-        """Return all-step accuracy for this pathway."""
-        return self.correct_all / self.count_all.clamp_min(1.0)
-
-    @property
-    def accuracy_revisit(self) -> Tensor:
-        """Return revisit-only accuracy for this pathway."""
-        return self.correct_revisit / self.count_revisit.clamp_min(1.0)
+    is_correct: Tensor
+    """Whether the predicted observation id matched, shape ``(B,)`` bool."""
+    is_revisit: Tensor | None
+    """Whether this step is a revisit, shape ``(B,)`` bool, or ``None`` if unknown."""
 
 
 # =============================================================================
@@ -74,14 +86,11 @@ def extract_arena_episode_semantics(
 
 
 # =============================================================================
-def evaluate_observation_logits(
+def build_arena_step_score(
     logits: Tensor,
     targets: ArenaTargets,
-) -> ArenaPathwayMetrics:
-    """Return all-step and revisit-split accuracy counts for one observation logit pathway.
-
-    This is the task-generic primitive.  Multi-pathway (TEM-specific) fan-out
-    is handled by the adapter/objective layer, not here.
+) -> ArenaStepScore:
+    """Return local per-slot prediction semantics for one arena step.
 
     Args:
         logits: Predicted observation logits of shape ``(B, obs_dim)``.
@@ -89,61 +98,46 @@ def evaluate_observation_logits(
             optional ``is_revisit``.
 
     Returns:
-        :class:`ArenaPathwayMetrics` with raw counts (not normalised).
+        :class:`ArenaStepScore` with per-slot boolean correctness and revisit flag.
     """
     labels = coerce_observation_ids(targets.observation_id)
     revisit_mask = coerce_revisit_mask(targets.is_revisit, device=labels.device)
-    return _evaluate_pathway(logits, labels, revisit_mask)
+    is_correct = logits.argmax(dim=-1).eq(labels)
+    return ArenaStepScore(is_correct=is_correct, is_revisit=revisit_mask)
 
 
 # =============================================================================
-def compute_arena_structural_score(
-    metrics: ArenaPathwayMetrics,
-) -> _ArenaStructuralScore:
-    """Return the canonical additive structural score from pathway accuracy counts.
+def build_arena_score_report(
+    step: ArenaStepScore,
+) -> ArenaScoreReport:
+    """Return the canonical additive structural score from local step semantics.
 
-    The structural score exposes both raw counts and derived accuracies so
-    callers can aggregate correctly across batches by summing counts rather
-    than averaging accuracy scalars.
+    Aggregates per-slot local state into count-bearing scalars suitable for
+    cross-batch accumulation.  Callers accumulate correctly by summing counts
+    rather than averaging accuracy scalars.
 
     Args:
-        metrics: Pathway accuracy counts from :func:`evaluate_observation_logits`.
+        step: Per-slot prediction semantics from :func:`build_arena_step_score`.
 
     Returns:
-        :class:`~ehc_sn.tasks.arena.contracts.ArenaStructuralScore` with
-        accuracy scalars and raw counts.
+        :class:`ArenaScoreReport` with accuracy scalars and raw counts.
     """
-    return _ArenaStructuralScore(
-        accuracy_all=metrics.accuracy_all,
-        accuracy_revisit=metrics.accuracy_revisit,
-        correct_all=metrics.correct_all,
-        count_all=metrics.count_all,
-        correct_revisit=metrics.correct_revisit,
-        count_revisit=metrics.count_revisit,
-    )
-
-
-# =============================================================================
-def _evaluate_pathway(
-    logits: Tensor,
-    labels: Tensor,
-    revisit_mask: Tensor | None,
-) -> ArenaPathwayMetrics:
-    correct = logits.argmax(dim=-1).eq(labels)
-    dtype = logits.dtype
-    correct_all = correct.sum().to(dtype=dtype)
-    count_all = logits.new_tensor(float(labels.shape[0]), dtype=dtype)
-    if revisit_mask is None:
-        revisit = logits.new_zeros(())
-        revisit_count = logits.new_zeros(())
+    dtype = torch.float32
+    correct_all = step.is_correct.sum().to(dtype=dtype)
+    count_all = step.is_correct.new_tensor(float(step.is_correct.shape[0]), dtype=dtype)
+    if step.is_revisit is not None:
+        correct_revisit = (step.is_correct & step.is_revisit).sum().to(dtype=dtype)
+        count_revisit = step.is_revisit.sum().to(dtype=dtype)
     else:
-        revisit = (correct & revisit_mask).sum().to(dtype=dtype)
-        revisit_count = revisit_mask.to(dtype=dtype).sum()
-    return ArenaPathwayMetrics(
+        correct_revisit = step.is_correct.new_zeros(())
+        count_revisit = step.is_correct.new_zeros(())
+    return ArenaScoreReport(
+        accuracy_all=correct_all / count_all.clamp_min(1.0),
+        accuracy_revisit=correct_revisit / count_revisit.clamp_min(1.0),
         correct_all=correct_all,
         count_all=count_all,
-        correct_revisit=revisit,
-        count_revisit=revisit_count,
+        correct_revisit=correct_revisit,
+        count_revisit=count_revisit,
     )
 
 
@@ -194,13 +188,11 @@ def coerce_revisit_mask(
 # =============================================================================
 __all__ = [
     "ArenaEpisodeSemantics",
-    "ArenaPathwayMetrics",
+    "ArenaScoreReport",
+    "ArenaStepScore",
+    "build_arena_score_report",
+    "build_arena_step_score",
     "coerce_observation_ids",
     "coerce_revisit_mask",
-    "compute_arena_structural_score",
-    "evaluate_observation_logits",
     "extract_arena_episode_semantics",
-]
-]
-]
 ]

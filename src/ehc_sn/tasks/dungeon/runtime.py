@@ -1,8 +1,8 @@
-"""Dungeon task-level batch helpers.
+"""Dungeon task-level runtime helpers.
 
-Task-level coercion helpers that are needed outside any single execution mode.
+Generic task coercion helpers that are needed outside any single execution mode.
 These functions operate on generic step payload mappings and produce typed
-task contracts without depending on online-mode internals.
+task contracts without depending on any capability internals.
 """
 
 from __future__ import annotations

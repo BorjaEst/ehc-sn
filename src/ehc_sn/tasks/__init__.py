@@ -11,8 +11,8 @@ Canonical task families defined by their semantic domain:
 - :mod:`ehc_sn.tasks.mazehard` — batch token prediction over full-maze token
   sequences; task owns sequence evaluation and aggregate benchmark score.
 
-Execution-mode bindings (replay, online control, deliberation) live in
-``<task>.modes.*`` sub-packages when implemented for that task family.
+Execution-binding capabilities (replay, online control, deliberation) live in
+``<task>.capabilities.*`` sub-packages when implemented for that task family.
 """
 
 from ehc_sn.tasks import arena, dungeon, mazehard

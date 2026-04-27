@@ -2,52 +2,38 @@
 
 Arena defines the observation/action ontology, revisit semantics, and additive
 structural score for maze-world navigation.  These are task-owned semantics;
-they do not depend on any particular execution mode.
+they do not depend on any particular execution binding.
 
-Canonical task surfaces:
+Stable task surface:
 
-- :mod:`~ehc_sn.tasks.arena.contracts` — observation, action, and score contracts
-  (including :class:`ArenaStructuralScore`, the benchmark-facing score type).
+- :mod:`~ehc_sn.tasks.arena.contracts` — observation, action, and score contracts.
 - :mod:`~ehc_sn.tasks.arena.evaluation` — structural score and evaluation helpers.
-- :mod:`~ehc_sn.tasks.arena.batch` — task-level batch coercion helpers.
+- :mod:`~ehc_sn.tasks.arena.reward` — task-owned reward projection.
 
-Mode bindings (execution-mode, not task identity):
+Optional execution-binding capability:
 
-- :mod:`~ehc_sn.tasks.arena.modes` — replay and other mode bindings.
+- :class:`ArenaReplayCapability` — replay execution-binding capability.
+  Full module: :mod:`ehc_sn.tasks.arena.capabilities.replay`.
 
-Benchmark evaluation consumes :class:`ArenaStructuralScore` directly from the
+Benchmark evaluation consumes :class:`~ehc_sn.tasks.arena.evaluation.ArenaScoreReport` directly from the
 task-owned contracts surface.  Whole-trajectory model inputs are forbidden
 (REQ-001, SCI-001).
 """
 
-from . import batch, contracts, evaluation, modes  # noqa: F401
-from .contracts import ARENA_ACTION_COUNT, ArenaAction, ArenaStructuralScore, ArenaTargets, ArenaTaskInput, ArenaTaskOutput
-from .evaluation import (
-    ArenaEpisodeSemantics,
-    ArenaPathwayMetrics,
-    coerce_observation_ids,
-    coerce_revisit_mask,
-    compute_arena_structural_score,
-    evaluate_observation_logits,
-    extract_arena_episode_semantics,
-)
+from .capabilities.replay import ArenaReplayCapability
+from .contracts import ARENA_ACTION_COUNT, ArenaAction, ArenaTargets, ArenaTaskInput, ArenaTaskOutput
+from .evaluation import ArenaScoreReport, ArenaStepScore
+from .reward import ArenaRewardConfig, ArenaRewardProjector
 
 __all__ = [
     "ARENA_ACTION_COUNT",
     "ArenaAction",
-    "ArenaEpisodeSemantics",
-    "ArenaPathwayMetrics",
-    "ArenaStructuralScore",
+    "ArenaReplayCapability",
+    "ArenaRewardConfig",
+    "ArenaRewardProjector",
+    "ArenaScoreReport",
+    "ArenaStepScore",
     "ArenaTargets",
     "ArenaTaskInput",
     "ArenaTaskOutput",
-    "batch",
-    "contracts",
-    "coerce_observation_ids",
-    "coerce_revisit_mask",
-    "compute_arena_structural_score",
-    "evaluate_observation_logits",
-    "evaluation",
-    "extract_arena_episode_semantics",
-    "modes",
 ]
