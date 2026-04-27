@@ -23,9 +23,9 @@ from ehc_sn.metrics.keys import (
     TEM_ACC_OBS_RETRIEVED_REVISIT,
 )
 from ehc_sn.objectives.tem import TEMStepOutputs
-from ehc_sn.tasks.arena.batch import coerce_arena_targets
 from ehc_sn.tasks.arena.contracts import ArenaTargets
-from ehc_sn.tasks.arena.evaluation import coerce_observation_ids, coerce_revisit_mask, evaluate_observation_logits
+from ehc_sn.tasks.arena.evaluation import build_arena_step_score, coerce_observation_ids, coerce_revisit_mask
+from ehc_sn.tasks.arena.runtime import coerce_arena_targets
 from ehc_sn.training.types import RatioStat
 from ehc_sn.types import Batch
 
@@ -81,18 +81,28 @@ class ArenaTEMTaskBinding:
         targets: ArenaTargets,
     ) -> dict[str, RatioStat]:
         """Return TEM-pathway count-bearing accuracy metrics for one step."""
-        m_inf = evaluate_observation_logits(step_output.logits_inference, targets)
-        m_ret = evaluate_observation_logits(step_output.logits_retrieved, targets)
-        m_anc = evaluate_observation_logits(step_output.logits_ancestral, targets)
-        protocol_count = m_inf.count_revisit
-        batch_count = m_inf.count_all
+        m_inf = build_arena_step_score(step_output.logits_inference, targets)
+        m_ret = build_arena_step_score(step_output.logits_retrieved, targets)
+        m_anc = build_arena_step_score(step_output.logits_ancestral, targets)
+
+        batch_count = m_inf.is_correct.new_tensor(float(m_inf.is_correct.shape[0]))
+        protocol_count = m_inf.is_revisit.sum().float() if m_inf.is_revisit is not None else m_inf.is_correct.new_zeros(())
+
+        def _correct(m: "ArenaStepScore") -> Tensor:
+            return m.is_correct.sum().float()
+
+        def _correct_revisit(m: "ArenaStepScore") -> Tensor:
+            if m.is_revisit is None:
+                return m.is_correct.new_zeros(())
+            return (m.is_correct & m.is_revisit).sum().float()
+
         return {
-            TEM_ACC_OBS_INFERENCE_REVISIT: RatioStat(m_inf.correct_revisit, protocol_count),
-            TEM_ACC_OBS_RETRIEVED_REVISIT: RatioStat(m_ret.correct_revisit, protocol_count),
-            TEM_ACC_OBS_ANCESTRAL_REVISIT: RatioStat(m_anc.correct_revisit, protocol_count),
-            TEM_ACC_OBS_INFERENCE_ALL: RatioStat(m_inf.correct_all, batch_count),
-            TEM_ACC_OBS_RETRIEVED_ALL: RatioStat(m_ret.correct_all, batch_count),
-            TEM_ACC_OBS_ANCESTRAL_ALL: RatioStat(m_anc.correct_all, batch_count),
+            TEM_ACC_OBS_INFERENCE_REVISIT: RatioStat(_correct_revisit(m_inf), protocol_count),
+            TEM_ACC_OBS_RETRIEVED_REVISIT: RatioStat(_correct_revisit(m_ret), protocol_count),
+            TEM_ACC_OBS_ANCESTRAL_REVISIT: RatioStat(_correct_revisit(m_anc), protocol_count),
+            TEM_ACC_OBS_INFERENCE_ALL: RatioStat(_correct(m_inf), batch_count),
+            TEM_ACC_OBS_RETRIEVED_ALL: RatioStat(_correct(m_ret), batch_count),
+            TEM_ACC_OBS_ANCESTRAL_ALL: RatioStat(_correct(m_anc), batch_count),
         }
 
 

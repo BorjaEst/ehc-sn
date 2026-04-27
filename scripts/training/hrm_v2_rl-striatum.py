@@ -23,8 +23,8 @@ from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v2 import ModelConfig_HRM_V2, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.objectives import HybridRLLossConfig
-from ehc_sn.tasks.mazehard.batch import coerce_maze_hard_batch
-from ehc_sn.tasks.mazehard.modes.deliberation import MazeHardDeliberationConfig
+from ehc_sn.data.mazehard import coerce_maze_hard_batch
+from ehc_sn.tasks.mazehard.capabilities.deliberation import MazeHardDeliberationConfig
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
@@ -83,7 +83,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     )
     deliberation: MazeHardDeliberationConfig = Field(
         ...,
-        description="Deliberation-mode config (halt_action, episode_horizon) for the MazeHard deliberation path.",
+        description="Deliberation capability config (halt_action, episode_horizon) for the MazeHard deliberation path.",
     )
     controller: DeliberationACControllerConfig = Field(
         default_factory=DeliberationACControllerConfig,

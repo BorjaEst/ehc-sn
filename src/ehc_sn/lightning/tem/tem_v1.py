@@ -25,7 +25,8 @@ from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
 from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
 from ehc_sn.objectives.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
-from ehc_sn.tasks.arena.modes.replay import ArenaReplayTrajectoryRuntime, batch_size_from_arena_batch, infer_arena_replay_batch_keys
+from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
+from ehc_sn.tasks.arena.runtime import batch_size_from_arena_batch, infer_arena_replay_batch_keys
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
@@ -132,7 +133,7 @@ class TrainingModel(L.LightningModule):
         controller = ReplayTrajectoryController(
             backbone=self.bridge_adapter,
             config=self.config.controller,
-            runtime=ArenaReplayTrajectoryRuntime(),
+            runtime=ArenaReplayCapability(),
         )
         objective = TEMLossHead(self.config.objective, task_binding=ArenaTEMTaskBinding())
         return controller, objective

@@ -45,7 +45,8 @@ from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLossHead
 from ehc_sn.rollouts import RecurrentRunner, RepeatSource
-from ehc_sn.tasks.mazehard.modes.deliberation import MazeHardDeliberationConfig, MazeHardDeliberationFinalizer
+from ehc_sn.tasks.mazehard.capabilities.deliberation import MazeHardDeliberationCapability, MazeHardDeliberationConfig
+from ehc_sn.tasks.mazehard.reward import MazeHardRewardProjector
 from ehc_sn.training.actor_critic import TD0ActorCriticBatchBuilder, ZeroBootstrapActorCriticValidationScorer
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
@@ -61,7 +62,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
 
     This config wires together:
         - model settings (:class:`ModelSettingsV2`)
-        - deliberation-mode settings (:class:`~ehc_sn.tasks.mazehard.modes.deliberation.MazeHardDeliberationConfig`)
+        - deliberation capability settings (:class:`~ehc_sn.tasks.mazehard.capabilities.deliberation.MazeHardDeliberationConfig`)
         - deliberation controller and objective configs
         - optimizer and scheduler settings
 
@@ -81,7 +82,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
     )
     deliberation: MazeHardDeliberationConfig = Field(
         ...,
-        description="Deliberation-mode config (halt_action, episode_horizon) for the MazeHard deliberation path.",
+        description="Deliberation capability config (halt_action, episode_horizon) for the MazeHard deliberation path.",
     )
     controller: DeliberationACControllerConfig = Field(
         default_factory=DeliberationACControllerConfig,
@@ -188,7 +189,7 @@ class TrainingModel(L.LightningModule):
     ) -> None:  # fmt: skip
         """Initialize the deliberation controller and wiring."""
         task_config = self.config.deliberation
-        finalizer = MazeHardDeliberationFinalizer(task_config)
+        finalizer = MazeHardDeliberationCapability(task_config, MazeHardRewardProjector())
         self.controller = DeliberationACController(self.bridge_adapter, self.config.controller, finalizer)
         self.objective = HybridRLLossHead(self.config.objective)
         task_binding = MazeHardHRMV2HybridTaskBinding()

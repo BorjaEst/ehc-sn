@@ -16,7 +16,7 @@ from ehc_sn.adapters.mazehard.hrm.core import (
     build_token_encoder,
 )
 from ehc_sn.models.hrm.hrm_v1 import HRMInputV1, HRModelV1, HRMOutputV1, HRMStateV1
-from ehc_sn.tasks.mazehard.batch import extract_maze_hard_task_input
+from ehc_sn.tasks.mazehard.runtime import extract_maze_hard_task_input
 from ehc_sn.types import Batch
 
 

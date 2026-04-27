@@ -10,7 +10,7 @@ Canonical import path::
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
 import torch
@@ -26,8 +26,26 @@ from ehc_sn.utils.detach import DetachMixin
 class ReplayTrajectoryRuntime(Protocol):
     """Task-owned per-step extraction interface for replay trajectory controllers."""
 
-    def extract_step_per_slot(self, batch: Batch, cursor: Tensor) -> dict[str, Tensor]:
-        """Extract current-step tensors independently for each batch slot."""
+    def extract_step_per_slot(
+        self,
+        batch: Batch,
+        cursor: Tensor,
+        task_state: dict[str, Tensor],
+    ) -> tuple[dict[str, Tensor], dict[str, Tensor]]:
+        """Extract current-step tensors and return the updated task state.
+
+        Args:
+            batch: Current replay batch.
+            cursor: Per-slot step cursor ``(B,)`` int64.
+            task_state: Mutable task-local state threaded through carry.
+
+        Returns:
+            ``(step_data, new_task_state)`` — step tensors and updated carry state.
+        """
+        ...
+
+    def initial_task_state(self, batch: Batch, *, device: Any) -> dict[str, Tensor]:
+        """Allocate the initial (zeroed) task-local state for a fresh episode."""
         ...
 
     def trajectory_lengths(self, batch: Batch) -> Tensor:
@@ -55,8 +73,10 @@ class ReplayTrajectoryControllerConfig(BaseModel, extra="forbid"):
 class ReplayRolloutState[ModelState](RolloutState[ModelState]):
     """Controller carry for replay trajectory controllers."""
 
-    cursor: Tensor          # (B,) int64 — current step index per slot
+    cursor: Tensor  # (B,) int64 — current step index per slot
     trajectory_length: Tensor  # (B,) int64 — effective trajectory length per slot
+    task_state: dict[str, Tensor] = field(default_factory=dict)
+    """Task-owned replay-local state (e.g. visit counts) threaded explicitly through carry."""
 
 
 # =============================================================================
@@ -88,7 +108,8 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
         return self._runtime
 
     def initial_state(
-        self, batch_sample: Batch,
+        self,
+        batch_sample: Batch,
     ) -> ReplayRolloutState[ModelState]:
         """Build the initial carry from the first source batch."""
         anchor = batch_anchor_tensor(batch_sample)
@@ -96,6 +117,7 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
         device = anchor.device
 
         traj_len = self._runtime.trajectory_lengths(batch_sample).to(device=device, dtype=torch.int64)
+        task_state = self._runtime.initial_task_state(batch_sample, device=device)
 
         return ReplayRolloutState(
             model_state=self.backbone.init_state(B),
@@ -104,6 +126,7 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
             data={},
             cursor=torch.zeros((B,), dtype=torch.int64, device=device),
             trajectory_length=traj_len,
+            task_state=task_state,
         )
 
     def step(
@@ -121,7 +144,7 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
         traj_len = torch.where(state.halted, new_traj_len, state.trajectory_length)
 
         model_state = self.backbone.reset_state(state.halted, state.model_state)
-        current_data = self._runtime.extract_step_per_slot(batch, cursor)
+        current_data, new_task_state = self._runtime.extract_step_per_slot(batch, cursor, state.task_state)
         backbone_output, model_state = self.backbone(current_data, model_state)
 
         steps = self.advance_steps(state)
@@ -137,6 +160,7 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
             data=current_data,
             cursor=cursor,
             trajectory_length=traj_len,
+            task_state=new_task_state,
         )
         output = ReplayStepOutput(backbone_output=backbone_output, cursor=cursor)
         return new_state, output
