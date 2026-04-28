@@ -12,13 +12,13 @@ Typical usage:
 
 ```bash
 # Dungeon dataset (Structure + Perception panels)
-python examples/data_visualization.py --dataset_path data/processed/dungeon --split train --idx 0
+python examples/data_visualization.py --dataset_path data/processed/dungeon/default/v1 --split train --idx 0
 
 # Maze-hard dataset (Navigation panel)
-python examples/data_visualization.py --dataset_path data/processed/mazehard --split train --idx 42
+python examples/data_visualization.py --dataset_path data/processed/mazehard/default/v1 --split train --idx 42
 
 # Save to file instead of showing
-python examples/data_visualization.py --dataset_path data/processed/dungeon --split train --output sample.pdf
+python examples/data_visualization.py --dataset_path data/processed/dungeon/default/v1 --split train --output sample.pdf
 ```
 """
 
@@ -34,7 +34,7 @@ from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSetti
 
 from ehc_sn.data.datasets import MazeDataset
 from ehc_sn.data.index import MazeIndexEntry, filter_index, read_index
-from ehc_sn.figures.modules.dataset import plot
+from ehc_sn.figures.inspect import plot_processed_sample as plot
 
 NAME = __file__.split("/")[-1].replace(".py", "")
 logger = logging.getLogger(NAME)
