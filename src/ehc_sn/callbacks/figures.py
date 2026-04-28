@@ -22,7 +22,7 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from matplotlib.figure import Figure
 from pydantic import BaseModel, Field
 
-from ehc_sn.figures import register, sinks
+from ehc_sn.figures import register_builtin_figures, render, sinks
 from ehc_sn.figures.registry import REGISTRY, FigureContext
 from ehc_sn.traces.trace_tree import TraceTree
 
@@ -106,7 +106,7 @@ class FiguresCallback(pl.Callback):
         self._captured_trace: Optional[TraceTree] = None
         self._required_trace_keys: set[str] = set()
         self._required_meta_keys: set[str] = set()
-        register.register_builtin_figures()  # Ensure built-in figure specs are registered.
+        register_builtin_figures()  # Ensure built-in figure specs are registered.
         REGISTRY.validate(self.settings.figures)
 
     def on_validation_epoch_start(  # -------------------------------------------------------------
@@ -201,10 +201,7 @@ class FiguresCallback(pl.Callback):
     ) -> None:  # fmt: skip
         """Render and persist each figure listed in ``figure_names``."""
         for figure_name in figure_names:
-            spec = REGISTRY.get(figure_name)
-            self._validate_trace_keys(trace, spec.trace_keys, figure_name)
-            self._validate_meta_keys(trace, spec.meta_keys, figure_name)
-            self.generate_figure(trainer, trace, context, spec)
+            self.generate_figure(trainer, figure_name, trace, context)
 
     def figure_context(  # ------------------------------------------------------------------------
         self, trainer: Trainer, split_name: Optional[str],
@@ -238,52 +235,6 @@ class FiguresCallback(pl.Callback):
         for name in names:
             keys.update(REGISTRY.get(name).meta_keys)
         return keys
-
-    def _validate_trace_keys(  # ------------------------------------------------------------------
-        self, trace: TraceTree, required: set[str], figure_name: str,
-    ) -> None:  # fmt: skip
-        """Validate required numeric trace keys for a figure."""
-        if not required:
-            return
-        missing: list[str] = []
-        for path in sorted(required):
-            if not self._trace_has_numeric_path(trace, path):
-                missing.append(path)
-        if missing:
-            raise ValueError(f"Figure '{figure_name}' missing required trace keys: {', '.join(missing)}")
-
-    def _validate_meta_keys(  # -------------------------------------------------------------------
-        self, trace: TraceTree, required: set[str], figure_name: str,
-    ) -> None:  # fmt: skip
-        """Validate required metadata trace keys for a figure."""
-        if not required:
-            return
-        missing = [path for path in sorted(required) if not self._trace_has_meta_path(trace, path)]
-        if missing:
-            raise ValueError(f"Figure '{figure_name}' missing required trace metadata: {', '.join(missing)}")
-
-    def _trace_has_numeric_path(  # ---------------------------------------------------------------
-        self, trace: TraceTree, path: str,
-    ) -> bool:  # fmt: skip
-        """Return whether a numeric leaf or numeric subtree exists at ``path``."""
-        if not trace.path_to_index:
-            return False
-
-        idx = trace.path_to_index.get(path)
-        if idx is not None:
-            return bool(trace.leaf_is_numeric[idx])
-
-        prefix = f"{path}/"
-        for candidate, candidate_idx in trace.path_to_index.items():
-            if candidate.startswith(prefix) and trace.leaf_is_numeric[candidate_idx]:
-                return True
-        return False
-
-    def _trace_has_meta_path(  # ------------------------------------------------------------------
-        self, trace: TraceTree, path: str,
-    ) -> bool:  # fmt: skip
-        """Return whether a metadata leaf exists at ``path``."""
-        return trace.has_meta_path(path)
 
     def _extract_trace(  # ------------------------------------------------------------------------
         self, outputs: Any,
@@ -319,6 +270,7 @@ class FiguresCallback(pl.Callback):
             if isinstance(leaf, torch.Tensor):
                 trace.dense_leaves[idx] = leaf.detach().cpu().numpy()
         trace.meta_first = [self._normalize_meta_value(value) for value in trace.meta_first]
+        trace.attached_meta = {key: self._normalize_meta_value(value) for key, value in trace.attached_meta.items()}
         return trace
 
     def _normalize_meta_value(self, value: object) -> object:
@@ -334,17 +286,21 @@ class FiguresCallback(pl.Callback):
         return value
 
     def generate_figure(  # -----------------------------------------------------------------------
-        self, trainer: Trainer, trace: Any, ctx: FigureContext, spec: Any,
+        self, trainer: Trainer, figure_name: str, trace: Any, ctx: FigureContext,
     ) -> None:  # fmt: skip
         """Generate a single figure and persist it using the configured sinks.
 
+        Renders via :func:`ehc_sn.figures.render`, which validates trace
+        requirements before plotting.
+
         Args:
             trainer: PyTorch Lightning trainer.
-            trace: Captured trace object passed to the figure spec's ``plot``.
+            figure_name: Registered figure name.
+            trace: Captured rollout trace.
             ctx: Figure rendering context.
-            spec: Figure spec retrieved from the registry.
         """
-        fig = spec.plot(trace, ctx)
+        spec = REGISTRY.get(figure_name)
+        fig = render(figure_name, trace, ctx)
         if self.settings.save_pdf:
             self._save_pdf(trainer, fig, spec)
         if self.settings.log_tensorboard:
