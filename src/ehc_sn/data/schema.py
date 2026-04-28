@@ -1,14 +1,18 @@
-"""Canonical on-disk format contracts for maze NPZ files.
+"""Canonical on-disk format contracts for shared-substrate maze datasets.
 
-Each processed maze is stored as a single NPZ file containing a dict of named
-2D channels with shape ``(H, W)``. This module defines:
+Each processed dataset is stored as a directory of named per-channel ``.npy``
+files with spatial shape ``(H, W)`` (or ``(N, H, W)`` for stacked splits).
+This module defines:
 
-- Channel name constants (``CHANNEL_*``).
+- Channel name constants for **shared-substrate** channels (``CHANNEL_*``).
 - Expected numpy dtypes per channel (``CHANNEL_DTYPES``).
 - The mandatory channel set (``MANDATORY_CHANNELS``).
-- A ``validate_npz`` function that enforces the contract at load time.
+- A ``validate_processed`` function that enforces the shared contract.
 
-See ``spec/spec-architecture.md`` §3.6.2 for the full format specification.
+Trajectory and replay channel constants belong to the owning task packages
+(``ehc_sn.tasks.dungeon`` and ``ehc_sn.tasks.arena``), not here.
+
+See ``spec/spec-data-contracts.md`` §6 for the full channel classification.
 """
 
 from __future__ import annotations
@@ -16,36 +20,23 @@ from __future__ import annotations
 import numpy as np
 
 # =================================================================================================
+# Shared spatial channel name constants
+# =================================================================================================
+
 CHANNEL_TOPOLOGY: str = "topology"
 """Passable cells (``True``) vs walls (``False``). Mandatory."""
 
 CHANNEL_OBSERVATIONS: str = "observations"
-"""Unique observation ID per passable cell. Optional."""
-
-CHANNEL_START: str = "start"
-"""Agent start position(s). Optional."""
-
-CHANNEL_GOALS: str = "goals"
-"""Target goal position(s). Optional."""
-
-CHANNEL_SOLUTION: str = "solution"
-"""Shortest-path distance or step label (0 = not on path). Optional."""
-
-CHANNEL_LANDMARKS: str = "landmarks"
-"""Special object IDs ('shiny'). Optional."""
-
-CHANNEL_REGIONS: str = "regions"
-"""Room/region ID. Optional."""
+"""Unique observation ID per passable cell. Optional shared channel."""
 
 CHANNEL_MASK_VALID: str = "mask_valid"
-"""Explicit reachability mask. Optional."""
+"""Explicit reachability mask (largest passable component). Optional shared channel."""
 
-# =================================================================================================
-# Vocabulary token IDs
-# =================================================================================================
+CHANNEL_REGIONS: str = "regions"
+"""Room/region ID. Optional shared channel."""
 
-O_ID: int = 5
-"""Solution-path overlay token ID used in MazeHard supervised training."""
+CHANNEL_LANDMARKS: str = "landmarks"
+"""Structural landmark IDs. Optional shared channel."""
 
 # =================================================================================================
 MANDATORY_CHANNELS: frozenset[str] = frozenset({CHANNEL_TOPOLOGY})
@@ -53,61 +44,66 @@ MANDATORY_CHANNELS: frozenset[str] = frozenset({CHANNEL_TOPOLOGY})
 CHANNEL_DTYPES: dict[str, np.dtype] = {
     CHANNEL_TOPOLOGY: np.dtype(bool),
     CHANNEL_OBSERVATIONS: np.dtype(np.int32),
-    CHANNEL_START: np.dtype(bool),
-    CHANNEL_GOALS: np.dtype(bool),
-    CHANNEL_SOLUTION: np.dtype(np.int32),
-    CHANNEL_LANDMARKS: np.dtype(np.int32),
-    CHANNEL_REGIONS: np.dtype(np.int32),
     CHANNEL_MASK_VALID: np.dtype(bool),
+    CHANNEL_REGIONS: np.dtype(np.int32),
+    CHANNEL_LANDMARKS: np.dtype(np.int32),
 }
+
+_SPATIAL_CHANNELS: frozenset[str] = frozenset(CHANNEL_DTYPES.keys())
+"""All channels whose trailing two dimensions must be the same ``(H, W)`` grid."""
 
 
 # =================================================================================================
-def validate_npz(  # ------------------------------------------------------------------------------
+def validate_processed(  # ------------------------------------------------------------------------
     data: dict[str, np.ndarray],
 ) -> None:  # fmt: skip
-    """Validate that *data* conforms to the canonical channel contract.
+    """Validate that *data* conforms to the canonical processed dataset contract.
 
-    Accepts both single-maze arrays ``(H, W)`` and stacked arrays ``(N, H, W)``.
+    Accepts both single-sample arrays and stacked arrays (leading batch dim).
+    Validates only channels listed in ``CHANNEL_DTYPES`` (shared spatial
+    channels). Trajectory and replay channels are validated by task-owned
+    validators.
+
+    Checks:
+    - Mandatory channel ``topology`` is present.
+    - All known channels have the expected dtype.
+    - All 2-D spatial channels share the same ``(H, W)`` shape.
 
     Args:
         data: Dict of channel name → numpy array.
 
     Raises:
-        ValueError: If any mandatory channel is missing, any known channel has
-            the wrong dtype, or channels have inconsistent spatial shapes.
+        ValueError: On any contract violation.
     """
     missing = MANDATORY_CHANNELS - data.keys()
     if missing:
-        raise ValueError(f"Missing mandatory NPZ channels: {sorted(missing)}")
+        raise ValueError(f"Missing mandatory channels: {sorted(missing)}")
 
     shapes: dict[str, tuple[int, ...]] = {}
     for name, arr in data.items():
         if name in CHANNEL_DTYPES and arr.dtype != CHANNEL_DTYPES[name]:
             raise ValueError(f"Channel '{name}' has dtype {arr.dtype}, expected {CHANNEL_DTYPES[name]}.")
-        if arr.ndim not in (2, 3):
-            raise ValueError(f"Channel '{name}' must be 2D (H, W) or 3D (N, H, W), got shape {arr.shape}.")
-        # Compare only spatial dimensions (last two).
-        shapes[name] = arr.shape[-2:]
+        if name in _SPATIAL_CHANNELS:
+            if arr.ndim not in (2, 3):
+                raise ValueError(
+                    f"Channel '{name}' has invalid rank {arr.ndim}; expected 2 (H, W) or 3 (N, H, W)."
+                )
+            shapes[name] = arr.shape[-2:]
 
-    unique_shapes = set(shapes.values())
-    if len(unique_shapes) > 1:
+    unique = set(shapes.values())
+    if len(unique) > 1:
         detail = ", ".join(f"'{k}': {v}" for k, v in shapes.items())
-        raise ValueError(f"All channels must have the same (H, W) shape. Got: {detail}.")
+        raise ValueError(f"All spatial channels must share the same (H, W) shape. Got: {detail}.")
 
 
 # =================================================================================================
 __all__ = [
     "CHANNEL_TOPOLOGY",
     "CHANNEL_OBSERVATIONS",
-    "CHANNEL_START",
-    "CHANNEL_GOALS",
-    "CHANNEL_SOLUTION",
-    "CHANNEL_LANDMARKS",
-    "CHANNEL_REGIONS",
     "CHANNEL_MASK_VALID",
-    "O_ID",
+    "CHANNEL_REGIONS",
+    "CHANNEL_LANDMARKS",
     "MANDATORY_CHANNELS",
     "CHANNEL_DTYPES",
-    "validate_npz",
+    "validate_processed",
 ]

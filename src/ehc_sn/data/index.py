@@ -17,6 +17,12 @@ class MazeIndexEntry(BaseModel, extra="forbid"):
     id: str = Field(..., description="Unique identifier for the maze (e.g., 'maze_00001')")
     source: str = Field(..., description="Source dataset name (e.g., 'huggingface')")
     split: str = Field(..., description="Split name (e.g., 'train', 'val', 'test')")
+    source_record_id: str | None = Field(
+        default=None,
+        description="Stable raw-source record identity (e.g. 'train:12345' for MazeHard puzzle_index). "
+                    "Used by task builders to recover task-owned channels by source identity, "
+                    "not by split-local position.",
+    )
 
     shape: tuple[int, int] = Field(..., description="Maze shape as (height, width)")
 
@@ -69,18 +75,16 @@ def read_index(  # -------------------------------------------------------------
 
 # =================================================================================================
 def write_index(  # -------------------------------------------------------------------------------
-    entries: list[MazeIndexEntry], path: Path, *, append: bool = False,
+    entries: list[MazeIndexEntry], path: Path,
 ) -> None:  # fmt: skip
     """Write entries to a JSONL index file.
 
     Args:
         entries: Entries to write.
         path: Destination path (created if needed).
-        append: If ``True``, append to an existing file; otherwise overwrite.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    mode = "a" if append else "w"
-    with path.open(mode) as f:
+    with path.open("w") as f:
         for entry in entries:
             f.write(entry.model_dump_json() + "\n")
 
