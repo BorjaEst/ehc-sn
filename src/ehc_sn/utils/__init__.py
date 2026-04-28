@@ -19,7 +19,14 @@ from torch import nn
 from ehc_sn.types import LocationBelief, Matrix, Reduction, Vector
 
 
-def _find_multiple(
+def has_any_grad(
+    opt: Any,
+) -> bool:
+    raw_opt = getattr(opt, "optimizer", opt)
+    return any(param.grad is not None for group in raw_opt.param_groups for param in group["params"])
+
+
+def find_multiple(
     n: int,
     k: int,
 ) -> int:

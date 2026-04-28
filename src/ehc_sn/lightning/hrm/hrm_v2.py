@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.optim import Optimizer
 
+from ehc_sn import utils
 from ehc_sn.adapters.mazehard.hrm import (
     MazeHardHRMAdapterSettings,
     MazeHardHRMV2BridgeAdapter,
@@ -262,46 +263,55 @@ class TrainingModel(L.LightningModule):
             - ``setup()`` must have run so that ``self.controller`` and ``self.objective`` are available.
             - During warmup (``global_step < supervised_only_warmup_steps``), halting is disabled.
         """
-        if self.controller is None or self.objective is None:
+        if self.controller is None or self.objective is None or self.learner is None:
             raise RuntimeError("HRM v2 runtime is not initialized. Call setup() before training.")
 
         # Initialize carry/state on the first batch.
         if self._train_carry is None:
             self._train_carry = self.controller.initial_state(batch)
 
-        evaluation = evaluate_rollout(
-            runner=self._train_runner,
+        is_warmup = self.global_step < self.config.supervised_only_warmup_steps
+
+        execution = self._train_runner.run(
             source=PartialResetSource(incoming=batch, assembler=self._train_batch_assembler, carry0=self._train_carry),
             controller=self.controller,
             carry=self._train_carry,
-            objective=self.objective,
-            runner_options={"allow_halt": True, "explore": True},
-            objective_options={"controller": self.controller, "td_target": True},
+            options={"allow_halt": not is_warmup, "explore": True},
         )
-        self._train_carry = evaluation.chunk.final_carry.detach()
+        self._train_carry = execution.final_carry.detach()
 
-        # Normalize by local batch size; DDP averages gradients across ranks.
+        record = execution.last_record
+        if record.snapshot.steps is None:
+            raise RuntimeError("HRM v2 training runner produced a record without step counters.")
+
+        ac_batch = self.learner.build_deliberation_ac_batch(record.outputs, record.snapshot)
+        step_output = self.objective.compute_step(ac_batch, is_warmup=is_warmup)
+
         local_bs = int(batch["input_ids"].shape[0])
-        loss = normalize_loss_for_backward(evaluation.evaluated.loss, local_bs=local_bs)
+        loss = normalize_loss_for_backward(step_output.loss, local_bs=local_bs)
 
-        optimizers = self.optimizers()
-        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
-            opt.zero_grad(set_to_none=True)  # type: ignore
+        optimizer_list = self.optimizers()
+        optimizer_list = list(optimizer_list) if isinstance(optimizer_list, (list, tuple)) else [optimizer_list]
+
+        scheduler_list = self.lr_schedulers()
+        scheduler_list = list(scheduler_list) if isinstance(scheduler_list, (list, tuple)) else [scheduler_list]
+
+        for opt in optimizer_list:
+            opt.zero_grad(set_to_none=True)  # type: ignore[arg-type]
 
         self.manual_backward(loss)
 
-        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
-            opt.step()  # type: ignore
+        active_indices = [0] if is_warmup else list(range(len(optimizer_list)))
+        for idx in active_indices:
+            opt = optimizer_list[idx]
+            if utils.has_any_grad(opt):
+                opt.step()  # type: ignore[misc]
+                scheduler_list[idx].step()  # type: ignore[misc]
 
-        scheduler = self.lr_schedulers()
-        for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
-            sch.step()  # type: ignore
-
-        # Update metrics with unnormalized loss and log to TensorBoard.
-        update_metric_collection_from_evaluated_chunk(self.train_metrics, evaluation.evaluated, RL_STEP_ROUTES)
+        update_metrics_from_step(self.train_metrics, step_output.metrics, RL_STEP_ROUTES)
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
 
-        return {"loss": loss.detach(), "signals": evaluation.evaluated.last_step.outputs.signals}
+        return {"loss": loss.detach(), "signals": step_output.signals}
 
     def validation_step(  # -----------------------------------------------------------------------
         self, batch: Batch, batch_idx: int,
