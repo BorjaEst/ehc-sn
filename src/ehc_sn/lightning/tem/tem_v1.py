@@ -23,7 +23,7 @@ from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
 from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
-from ehc_sn.objectives.tem import TEMLossConfig, TEMLossHead
+from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
 from ehc_sn.tasks.arena.runtime import batch_size_from_arena_batch, infer_arena_replay_batch_keys
@@ -52,7 +52,7 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
         ...,
         description="Replay trajectory controller configuration.",
     )
-    objective: TEMLossConfig = Field(
+    objective: TEMObjectiveConfig = Field(
         ...,
         description="TEM objective configuration.",
     )
@@ -99,10 +99,10 @@ class TrainingModel(L.LightningModule):
         self.bridge_adapter = ArenaTEMV1BridgeAdapter(self.model, config.adapter)
 
         self.train_controller: ReplayTrajectoryController | None = None
-        self.train_objective: TEMLossHead | None = None
+        self.train_objective: TEMObjective | None = None
 
         self.eval_controller: ReplayTrajectoryController | None = None
-        self.eval_objective: TEMLossHead | None = None
+        self.eval_objective: TEMObjective | None = None
 
         self._config = config
         self._train_runner = RecurrentRunner()
@@ -128,27 +128,33 @@ class TrainingModel(L.LightningModule):
         """Return the parsed configuration used by this LightningModule."""
         return self._config
 
-    def _build_runtime(self) -> tuple[ReplayTrajectoryController, TEMLossHead]:
+    def _train_chunk_steps(self) -> int:
+        """Return the TBPTT chunk length used for one optimizer update."""
+        if self.config.controller.window_size is not None:
+            return self.config.controller.window_size
+        return self.config.runtime.sequence.tbptt_steps
+
+    def _build_runtime(self) -> tuple[ReplayTrajectoryController, TEMObjective]:
         """Construct one phase-local replay runtime around the shared model."""
         controller = ReplayTrajectoryController(
             backbone=self.bridge_adapter,
             config=self.config.controller,
             runtime=ArenaReplayCapability(),
         )
-        objective = TEMLossHead(self.config.objective, task_binding=ArenaTEMTaskBinding())
+        objective = TEMObjective(self.config.objective, task_binding=ArenaTEMTaskBinding())
         return controller, objective
 
     def _ensure_train_runtime(self) -> None:
         """Initialize the training runtime once per process."""
-        if self.train_environment is not None and self.train_controller is not None and self.train_objective is not None:
+        if self.train_controller is not None and self.train_objective is not None:
             return
-        self.train_environment, self.train_controller, self.train_objective = self._build_runtime(batch_size=self._local_batch_size())
+        self.train_controller, self.train_objective = self._build_runtime()
 
     def _ensure_eval_runtime(self) -> None:
         """Initialize the evaluation runtime once per process."""
-        if self.eval_environment is not None and self.eval_controller is not None and self.eval_objective is not None:
+        if self.eval_controller is not None and self.eval_objective is not None:
             return
-        self.eval_environment, self.eval_controller, self.eval_objective = self._build_runtime(batch_size=self._local_batch_size())
+        self.eval_controller, self.eval_objective = self._build_runtime()
 
     def _require_train_controller(self) -> ReplayTrajectoryController:
         """Return the training controller, initializing the train runtime if needed."""
@@ -157,7 +163,7 @@ class TrainingModel(L.LightningModule):
             raise RuntimeError("TEM training runtime is not initialized.")
         return self.train_controller
 
-    def _require_train_objective(self) -> TEMLossHead:
+    def _require_train_objective(self) -> TEMObjective:
         """Return the training objective, initializing the train runtime if needed."""
         self._ensure_train_runtime()
         if self.train_objective is None:
@@ -171,7 +177,7 @@ class TrainingModel(L.LightningModule):
             raise RuntimeError("TEM evaluation runtime is not initialized.")
         return self.eval_controller
 
-    def _require_eval_objective(self) -> TEMLossHead:
+    def _require_eval_objective(self) -> TEMObjective:
         """Return the evaluation objective, initializing the eval runtime if needed."""
         self._ensure_eval_runtime()
         if self.eval_objective is None:
@@ -318,12 +324,6 @@ class TrainingModel(L.LightningModule):
         carry0 = eval_controller.initial_state(batch)
         trace_meta = self._build_trace_meta(batch)
 
-        if self._eval_trace_keys is None:
-            trace_specs = self.trace_specs
-        else:
-            arena_extra = select_arena_tem_trace_fields(self._eval_trace_keys)
-            trace_specs = build_trace_spec("tem", include_keys=self._eval_trace_keys, extra_fields=arena_extra)
-
         evaluation = evaluate_rollout(
             runner=self._eval_runner,
             source=RepeatSource(batch),
@@ -334,6 +334,11 @@ class TrainingModel(L.LightningModule):
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options=step_options,
         )
-        trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES)
+        if self._eval_trace_keys is None:
+            return {"trace": None}
+
+        arena_extra = select_arena_tem_trace_fields(self._eval_trace_keys)
+        trace_specs = build_trace_spec("tem", include_keys=self._eval_trace_keys, extra_fields=arena_extra)
+        trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)
         return {"trace": trace}

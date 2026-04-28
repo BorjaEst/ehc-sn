@@ -6,7 +6,7 @@
 model_config_path = "config/models/tem-v2.toml"
 
 # -- General settings ---------------------------------------------------------
-dataset_path         = "data/processed/dungeon"
+dataset_path         = "data/processed/arena/default/v1"
 global_batch_size    = 8
 max_epochs           = 100
 seed                 = 42
@@ -42,7 +42,7 @@ diagnostic_level     = "standard"
 
 # -- Controller ---------------------------------------------------------------
 [controller]
-    window_size = None  # Controller sees the entire history.
+    # window_size = None  # Controller sees the entire history.
 
 # -- Optimization -------------------------------------------------------------
 [optimizer]
@@ -84,6 +84,7 @@ diagnostic_level     = "standard"
     grid_reg_norm    = "l2"
     place_reg_norm   = "l1"
 
+# -- Figures & diagnostics ----------------------------------------------------
 [logger]
     save_dir  = "logs"
     name      = "tem-v2"
@@ -94,3 +95,7 @@ diagnostic_level     = "standard"
     every_n_epochs          = 1
     save_on_train_epoch_end = false
     save_last               = true
+
+[figures]
+    enabled = true
+    figures = ["lec_summary", "mec_summary", "hpc_summary"]

@@ -22,7 +22,7 @@ from ehc_sn.metrics.keys import (
     TEM_ACC_OBS_RETRIEVED_ALL,
     TEM_ACC_OBS_RETRIEVED_REVISIT,
 )
-from ehc_sn.objectives.tem import TEMStepOutputs
+from ehc_sn.objectives.tem import TEMStepOutput
 from ehc_sn.tasks.arena.contracts import ArenaTargets
 from ehc_sn.tasks.arena.evaluation import build_arena_step_score, coerce_observation_ids, coerce_revisit_mask
 from ehc_sn.tasks.arena.runtime import coerce_arena_targets
@@ -77,7 +77,7 @@ class ArenaTEMTaskBinding:
 
     def evaluate_observation_metrics(
         self,
-        step_output: TEMStepOutputs,
+        step_output: TEMStepOutput,
         targets: ArenaTargets,
     ) -> dict[str, RatioStat]:
         """Return TEM-pathway count-bearing accuracy metrics for one step."""

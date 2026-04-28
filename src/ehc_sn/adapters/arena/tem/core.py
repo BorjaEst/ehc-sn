@@ -102,7 +102,7 @@ class ArenaTEMAdapterSettings(BaseModel, extra="forbid"):
 class ArenaTEMDiagnostics(DetachMixin):
     """TEM-family diagnostic surface for controller and objective consumption.
 
-    Satisfies :class:`~ehc_sn.objectives.tem.TEMStepOutputs` via computed
+    Satisfies :class:`~ehc_sn.objectives.tem.TEMStepOutput` via computed
     properties that map bridge-native fields to the protocol's attribute names.
 
     Used by both TEM v1 and TEM v2 bridge adapters.
@@ -112,7 +112,7 @@ class ArenaTEMDiagnostics(DetachMixin):
     grid_codes: GridCodes
     place_codes: PlaceCodes
 
-    # -- TEMStepOutputs protocol surface -----------------------------------------
+    # -- TEMStepOutput protocol surface -----------------------------------------
 
     @property
     def logits_inference(self) -> Tensor:
@@ -131,7 +131,7 @@ class ArenaTEMDiagnostics(DetachMixin):
 
     @property
     def latent_relations(self) -> dict[str, LatentRelation]:
-        """Named latent consistency relations expected by :class:`~ehc_sn.objectives.tem.TEMLossHead`."""
+        """Named latent consistency relations expected by :class:`~ehc_sn.objectives.tem.TEMObjective`."""
         relations: dict[str, LatentRelation] = {
             GRID_TRANSITION_RELATION: LatentRelation(lhs=self.grid_codes.post, rhs=self.grid_codes.prior),
             PLACE_TRANSITION_RELATION: LatentRelation(lhs=self.place_codes.inference, rhs=self.place_codes.ancestral),
@@ -142,7 +142,7 @@ class ArenaTEMDiagnostics(DetachMixin):
 
     @property
     def reg_terms(self) -> None:
-        """No regularization-code overrides; TEMLossHead falls back to relation codes."""
+        """No regularization-code overrides; TEMObjective falls back to relation codes."""
         return None
 
 
@@ -155,6 +155,41 @@ class ArenaTEMBridgeOutput(DetachMixin):
 
     task: ArenaTaskOutput
     tem: ArenaTEMDiagnostics
+
+    @property
+    def obs_logits(self) -> tuple[Tensor, Tensor, Tensor]:
+        """Return pathway logits on the bridge output's public surface."""
+        return self.tem.obs_logits
+
+    @property
+    def logits_inference(self) -> Tensor:
+        """Return posterior-path observation logits."""
+        return self.tem.logits_inference
+
+    @property
+    def logits_retrieved(self) -> Tensor:
+        """Return sensory-recall-path observation logits."""
+        return self.tem.logits_retrieved
+
+    @property
+    def logits_ancestral(self) -> Tensor:
+        """Return structural-prior-path observation logits."""
+        return self.tem.logits_ancestral
+
+    @property
+    def latent_relations(self) -> dict[str, LatentRelation]:
+        """Expose TEM latent-consistency relations on the bridge output."""
+        return self.tem.latent_relations
+
+    @property
+    def reg_terms(self) -> None:
+        """Expose optional TEM regularization-code overrides on the bridge output."""
+        return self.tem.reg_terms
+
+    @property
+    def theta_cls(self) -> Tensor | None:
+        """Return the optional theta-classifier state used for diagnostics."""
+        return None
 
 
 # =============================================================================

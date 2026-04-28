@@ -132,7 +132,7 @@ class VARLossHead(VariationalLossHeadBase[VARLossConfig]):
         self, outputs: VARStepOutput, carry: Any, batch: Any = None, step_output: Any = None, **_: Any,
     ) -> VARLosses:  # fmt: skip
         """Compute aggregate observation, latent-consistency, and regularization losses."""
-        targets = self._task_binding.extract_targets(batch, carry, outputs)
+        targets = self._task_binding.extract_targets(batch, carry, step_output if step_output is not None else outputs)
         labels = self._task_binding.extract_observation_id(targets)
         main_relation = require_latent_relation(outputs.latent_relations, MAIN_LATENT_RELATION)
         if labels.ndim == outputs.obs_logits.ndim:

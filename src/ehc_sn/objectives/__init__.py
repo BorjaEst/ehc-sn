@@ -30,17 +30,7 @@ from ehc_sn.objectives._variational import (
 )
 from ehc_sn.objectives.act import ACTLossConfig, ACTLossHead, ACTLossStep, ACTTaskBinding
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLosses, HybridRLLossHead, HybridRLLossStep
-from ehc_sn.objectives.tem import (
-    TEMLossConfig,
-    TEMLosses,
-    TEMLossHead,
-    TEMLossStep,
-    TEMObjective,
-    TEMObjectiveBinding,
-    TEMObjectiveConfig,
-    TEMObjectiveStep,
-    TEMSupervisionBinding,
-)
+from ehc_sn.objectives.tem import TEMLosses, TEMObjective, TEMObjectiveBinding, TEMObjectiveConfig, TEMObjectiveStep
 
 # ── Canonical objective aliases (preferred) ──────────────────────────────────
 # ACT
@@ -95,10 +85,5 @@ __all__ = [
     "TEMObjectiveConfig",
     "TEMObjective",
     "TEMObjectiveStep",
-    # tem — compat
-    "TEMSupervisionBinding",
-    "TEMLossConfig",
-    "TEMLossHead",
     "TEMLosses",
-    "TEMLossStep",
 ]

@@ -120,7 +120,7 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
         task_state = self._runtime.initial_task_state(batch_sample, device=device)
 
         return ReplayRolloutState(
-            model_state=self.backbone.init_state(B),
+            model_state=self.backbone.init_state(B, device=device),
             steps=torch.zeros((B,), dtype=torch.int32, device=device),
             halted=torch.ones((B,), dtype=torch.bool, device=device),
             data={},

@@ -2,7 +2,7 @@
 
 All signal producers (:meth:`~ehc_sn.objectives.act.ACTLossHead.compute_signals`,
 :meth:`~ehc_sn.objectives.hybrid_rl.HybridRLLossHead.compute_step`,
-:meth:`~ehc_sn.objectives.tem.TEMLossHead.compute_signals`) and consumers
+:meth:`~ehc_sn.objectives.tem.TEMObjective.compute_signals`) and consumers
 (:class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback`) import from this
 module rather than using string literals. This ensures that renaming a signal
 requires a single edit, and mismatches between producers and consumers fail
@@ -128,7 +128,7 @@ VAR_SIGNALS: frozenset[str] = frozenset({LOSS_TOTAL, LOSS_OBS_NLL, LOSS_LATENT, 
 
 
 # =================================================================================================
-# TEM-specific — produced by TEMLossHead.compute_signals() (canonical: TEMObjective)
+# TEM-specific — produced by TEMObjective.compute_signals() (canonical: TEMObjective)
 # =================================================================================================
 
 LOSS_GRID_KL: str = "loss_grid_kl"

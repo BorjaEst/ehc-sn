@@ -2,8 +2,8 @@
 
 This module implements the ELBO-style TEM rollout-scoring objective. The
 canonical public surface is :class:`TEMObjectiveBinding` (protocol),
-:class:`TEMLossHead` (implementation, also exported as ``TEMObjective``), and
-:class:`TEMLossConfig` (also exported as ``TEMObjectiveConfig``).
+:class:`TEMObjective` (implementation, also exported as ``TEMObjective``), and
+:class:`TEMObjectiveConfig` (also exported as ``TEMObjectiveConfig``).
 
 Task-specific supervision extraction and correctness evaluation are fully
 delegated to the injected :class:`TEMObjectiveBinding`, so this module remains
@@ -50,7 +50,7 @@ PLACE_TRANSITION_RELATION = "place_transition_relation"
 
 
 # =================================================================================================
-class TEMStepOutputs(Protocol):
+class TEMStepOutput(Protocol):
     """Objective-facing output contract for TEM-family rollout steps."""
 
     @property
@@ -84,14 +84,11 @@ class TEMStepOutputs(Protocol):
         ...
 
 
-TEMStepOutput = TEMStepOutputs
-
-
 # =================================================================================================
 class TEMObjectiveBinding[TargetsT](Protocol):
     """Canonical task-binding protocol for the TEM objective.
 
-    Implemented in the adapter layer so that :class:`TEMLossHead` stays
+    Implemented in the adapter layer so that :class:`TEMObjective` stays
     task-agnostic.  The binding owns all task-specific target extraction and
     observation-correctness evaluation; the objective owns only loss math and
     metric assembly.
@@ -123,12 +120,12 @@ class TEMObjectiveBinding[TargetsT](Protocol):
 
 
 # Backward-compatible alias — prefer TEMObjectiveBinding in new code.
-TEMSupervisionBinding = TEMObjectiveBinding
+TEMObjectiveBinding = TEMObjectiveBinding
 
 
 # =================================================================================================
-class TEMLossConfig(BaseModel, extra="forbid"):
-    """Configuration for :class:`TEMLossHead`."""
+class TEMObjectiveConfig(BaseModel, extra="forbid"):
+    """Configuration for :class:`TEMObjective`."""
 
     observation_loss: LossType = Field(
         default="softmax_cross_entropy",
@@ -185,8 +182,8 @@ class TEMLosses(VariationalLosses):
 
 # =================================================================================================
 @dataclass(frozen=True)
-class TEMLossStep(VariationalLossStep):
-    """A single rollout/loss step produced by :class:`TEMLossHead`."""
+class TEMObjectiveStep(VariationalLossStep):
+    """A single rollout/loss step produced by :class:`TEMObjective`."""
 
     losses: TEMLosses
     metrics: StepMetrics
@@ -195,7 +192,7 @@ class TEMLossStep(VariationalLossStep):
 
 
 # =================================================================================================
-class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
+class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
     """TEM objective scored over executed rollout chunks.
 
     Loss math (ELBO decomposition) lives here. Task-specific target extraction
@@ -204,7 +201,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: TEMLossConfig, *, task_binding: TEMObjectiveBinding[Any],
+        self, config: TEMObjectiveConfig, *, task_binding: TEMObjectiveBinding[Any],
     ) -> None:  # fmt: skip
         """Create a TEM objective from its loss configuration.
 
@@ -297,9 +294,9 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
 
     def _build_step_output(  # -------------------------------------------------------------------
         self, losses: TEMLosses, metrics: StepMetrics, signals: dict[str, Any], outputs: Any,
-    ) -> TEMLossStep:  # fmt: skip
-        """Wrap losses, metrics, and signals into a :class:`TEMLossStep`."""
-        return TEMLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
+    ) -> TEMObjectiveStep:  # fmt: skip
+        """Wrap losses, metrics, and signals into a :class:`TEMObjectiveStep`."""
+        return TEMObjectiveStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
     def compute_signals(  # -----------------------------------------------------------------------
         self, batch: Batch, carry: Any, outputs: TEMStepOutput, losses: TEMLosses,
@@ -394,9 +391,6 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
 
 # =================================================================================================
 # Canonical aliases — preferred over the LossHead-style names in new code.
-TEMObjectiveConfig = TEMLossConfig
-TEMObjective = TEMLossHead
-TEMObjectiveStep = TEMLossStep
 
 __all__ = [
     "GRID_REG_TERM",
@@ -404,17 +398,11 @@ __all__ = [
     "PLACE_REG_TERM",
     "PLACE_SENSORY_RELATION",
     "PLACE_TRANSITION_RELATION",
-    "TEMStepOutputs",
     "TEMStepOutput",
     # canonical names
     "TEMObjectiveBinding",
     "TEMObjectiveConfig",
     "TEMObjective",
     "TEMObjectiveStep",
-    # backward-compatible aliases
-    "TEMSupervisionBinding",
-    "TEMLossConfig",
-    "TEMLossHead",
     "TEMLosses",
-    "TEMLossStep",
 ]

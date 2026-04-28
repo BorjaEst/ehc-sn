@@ -2,7 +2,7 @@
 
 These fields bind Arena task semantics to TEM-specific output surfaces.
 They live here — in the shared Arena+TEM bridge namespace — because they
-read from the normalised TEM controller output (``ctx.outputs.obs_logits``) and
+read from the replay controller wrapper (``ctx.outputs.backbone_output``) and
 from the arena step payload (``ctx.carry.data``), both of which carry
 task-model coupling that belongs at the adapter boundary.
 
@@ -35,8 +35,12 @@ class _ArenaTEMCarry(Protocol):
     data: _ArenaTEMCarryData
 
 
-class _ArenaTEMOutputs(Protocol):
+class _ArenaTEMBackboneOutputs(Protocol):
     obs_logits: tuple[Tensor, Tensor, Tensor]
+
+
+class _ArenaTEMOutputs(Protocol):
+    backbone_output: _ArenaTEMBackboneOutputs
 
 
 class _ArenaTEMTraceContext(Protocol):
@@ -58,15 +62,15 @@ def _get_is_revisit(ctx: _ArenaTEMTraceContext) -> TraceValue:
 
 
 def _get_pred_obs_id_inference(ctx: _ArenaTEMTraceContext) -> TraceValue:
-    return ctx.outputs.obs_logits[0].detach().argmax(dim=-1)
+    return ctx.outputs.backbone_output.obs_logits[0].detach().argmax(dim=-1)
 
 
 def _get_pred_obs_id_retrieved(ctx: _ArenaTEMTraceContext) -> TraceValue:
-    return ctx.outputs.obs_logits[1].detach().argmax(dim=-1)
+    return ctx.outputs.backbone_output.obs_logits[1].detach().argmax(dim=-1)
 
 
 def _get_pred_obs_id_ancestral(ctx: _ArenaTEMTraceContext) -> TraceValue:
-    return ctx.outputs.obs_logits[2].detach().argmax(dim=-1)
+    return ctx.outputs.backbone_output.obs_logits[2].detach().argmax(dim=-1)
 
 
 # =================================================================================================

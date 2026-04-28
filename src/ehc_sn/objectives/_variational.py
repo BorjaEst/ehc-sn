@@ -80,15 +80,34 @@ class VariationalLossHeadBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
         self, record: StepRecord, **options: Any,
     ) -> Any:  # fmt: skip
         """Score one executed variational-family step."""
-        carry, outputs = record.carry, record.outputs
-        losses = self.compute_losses(outputs, carry, **options)
+        carry = record.carry
+        step_output = record.outputs
+        outputs = self._unwrap_controller_outputs(step_output)
+        losses = self.compute_losses(outputs, carry, batch=record.batch, step_output=step_output, **options)
         metrics = build_variational_step_metrics(
-            self._build_metric_ratios(losses, carry=carry, outputs=outputs, batch_size=int(carry.halted.shape[0])),
+            self._build_metric_ratios(
+                losses,
+                carry=carry,
+                outputs=outputs,
+                batch_size=int(carry.halted.shape[0]),
+                batch=record.batch,
+                step_output=step_output,
+                **options,
+            ),
             batch_size=int(carry.halted.shape[0]),
             like=losses.total.detach(),
         )  # fmt: skip
-        signals = self.compute_signals(record.batch, carry, outputs, losses)
+        signals = self.compute_signals(record.batch, carry, outputs, losses, step_output=step_output, **options)
         return self._build_step_output(losses, metrics, signals, outputs)
+
+    @staticmethod
+    def _unwrap_controller_outputs(step_output: Any) -> Any:
+        """Return the objective-facing output surface for one controller step."""
+        sentinel = object()
+        backbone_output = getattr(step_output, "backbone_output", sentinel)
+        if backbone_output is sentinel:
+            return step_output
+        return backbone_output
 
     def compute_losses(  # ------------------------------------------------------------------------
         self, outputs: Any, carry: Any, **options: Any,
