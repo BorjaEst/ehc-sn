@@ -102,6 +102,24 @@ def build_arena_step_score(
     """
     labels = coerce_observation_ids(targets.observation_id)
     revisit_mask = coerce_revisit_mask(targets.is_revisit, device=labels.device)
+    if logits.ndim != 2:
+        raise ValueError(
+            f"Arena observation logits must have shape (B, obs_dim), got {tuple(logits.shape)}."
+        )
+    if labels.ndim != 1:
+        raise ValueError(
+            f"Arena observation labels must have shape (B,), got {tuple(labels.shape)}."
+        )
+    if logits.shape[0] != labels.shape[0]:
+        raise ValueError(
+            "Arena logits/labels batch size mismatch: "
+            f"logits batch={logits.shape[0]}, labels batch={labels.shape[0]}."
+        )
+    if revisit_mask is not None and revisit_mask.shape[0] != labels.shape[0]:
+        raise ValueError(
+            "Arena revisit mask/labels batch size mismatch: "
+            f"revisit batch={revisit_mask.shape[0]}, labels batch={labels.shape[0]}."
+        )
     is_correct = logits.argmax(dim=-1).eq(labels)
     return ArenaStepScore(is_correct=is_correct, is_revisit=revisit_mask)
 
