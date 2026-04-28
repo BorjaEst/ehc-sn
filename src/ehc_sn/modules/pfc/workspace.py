@@ -119,6 +119,10 @@ class WorkspaceLayout:
         """Compile a layout from a declarative schema."""
         return cls(schema)
 
+    def clone(self) -> "WorkspaceLayout":
+        """Return a fresh layout rebuilt from the immutable schema."""
+        return self.from_schema(self.schema)
+
     @property
     def size(self) -> int:
         """Total number of slots in this layout."""
