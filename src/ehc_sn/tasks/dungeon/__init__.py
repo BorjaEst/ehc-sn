@@ -18,16 +18,20 @@ the environment kernel is not yet written.
 """
 
 from .contracts import DUNGEON_ACTION_COUNT, DungeonAction, DungeonTaskInput, DungeonTaskOutput
+from .data import DUNGEON_TASK_CHANNELS, DUNGEON_TRAJECTORY_CHANNELS, build_dungeon_task_corpus
 from .evaluation import DungeonScoreReport, DungeonStepScore
 from .reward import DungeonRewardConfig, DungeonRewardProjector
 
 __all__ = [
     "DUNGEON_ACTION_COUNT",
     "DungeonAction",
+    "DUNGEON_TASK_CHANNELS",
+    "DUNGEON_TRAJECTORY_CHANNELS",
     "DungeonRewardConfig",
     "DungeonRewardProjector",
     "DungeonScoreReport",
     "DungeonStepScore",
     "DungeonTaskInput",
     "DungeonTaskOutput",
+    "build_dungeon_task_corpus",
 ]

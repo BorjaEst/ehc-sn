@@ -2,7 +2,7 @@
 
 Owns typed extraction of task dataclasses from generic batch mappings so
 controller and script code remains task-agnostic.  Raw channel-to-batch
-coercion lives in :mod:`ehc_sn.data.mazehard` (data layer).
+coercion lives in :mod:`ehc_sn.adapters.mazehard.hrm.core`.
 """
 
 from __future__ import annotations

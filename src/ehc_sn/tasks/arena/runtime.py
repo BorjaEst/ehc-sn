@@ -38,8 +38,6 @@ ARENA_REPLAY_REQUIRED_KEYS: Final[tuple[str, ...]] = (
 ARENA_REPLAY_OPTIONAL_KEYS: Final[tuple[str, ...]] = (
     "regions",
     "landmarks",
-    "start",
-    "goals",
 )
 
 ARENA_STEP_KEYS: Final[tuple[str, ...]] = (

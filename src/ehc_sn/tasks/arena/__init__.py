@@ -22,12 +22,14 @@ task-owned contracts surface.  Whole-trajectory model inputs are forbidden
 
 from .capabilities.replay import ArenaReplayCapability
 from .contracts import ARENA_ACTION_COUNT, ArenaAction, ArenaTargets, ArenaTaskInput, ArenaTaskOutput
+from .data import ARENA_TASK_CHANNELS, build_arena_task_corpus
 from .evaluation import ArenaScoreReport, ArenaStepScore
 from .reward import ArenaRewardConfig, ArenaRewardProjector
 
 __all__ = [
     "ARENA_ACTION_COUNT",
     "ArenaAction",
+    "ARENA_TASK_CHANNELS",
     "ArenaReplayCapability",
     "ArenaRewardConfig",
     "ArenaRewardProjector",
@@ -36,4 +38,5 @@ __all__ = [
     "ArenaTargets",
     "ArenaTaskInput",
     "ArenaTaskOutput",
+    "build_arena_task_corpus",
 ]
