@@ -92,10 +92,10 @@ TASK_FAMILY: Final[str] = "dungeon"
 # Movement constants — must match ehc_sn.tasks._movement.
 # stay=0, up=1, right=2, down=3, left=4
 _ACTION_DELTAS: Final[tuple[tuple[int, int], ...]] = (
-    (0, 0),   # STAY
+    (0, 0),  # STAY
     (-1, 0),  # UP
-    (0, 1),   # RIGHT
-    (1, 0),   # DOWN
+    (0, 1),  # RIGHT
+    (1, 0),  # DOWN
     (0, -1),  # LEFT
 )
 _ACTION_STAY: Final[int] = 0
@@ -129,9 +129,7 @@ def validate_dungeon_task_sample(data: dict[str, np.ndarray]) -> None:
         T = valid_step.shape[-1]
         expected = np.arange(T) < int(np.asarray(length).flat[0])
         if not np.array_equal(valid_step, expected):
-            raise ValueError(
-                "Prefix invariant violated: trajectory_valid_step must equal (t < trajectory_length)."
-            )
+            raise ValueError("Prefix invariant violated: trajectory_valid_step must equal (t < trajectory_length).")
 
 
 # =============================================================================
@@ -174,21 +172,12 @@ def validate_dungeon_task_root(root: Path) -> dict:
             arr = arrays[ch]
             expected_dtype = _DUNGEON_TRAJECTORY_DTYPES[ch]
             if arr.dtype != expected_dtype:
-                raise ValueError(
-                    f"Trajectory channel '{ch}' in split '{split}' has dtype {arr.dtype}, "
-                    f"expected {expected_dtype}."
-                )
+                raise ValueError(f"Trajectory channel '{ch}' in split '{split}' has dtype {arr.dtype}, " f"expected {expected_dtype}.")
             expected_ndim = 1 if ch == CHANNEL_TRAJECTORY_LENGTH else 2
             if arr.ndim != expected_ndim:
-                raise ValueError(
-                    f"Trajectory channel '{ch}' in split '{split}' has rank {arr.ndim}, "
-                    f"expected {expected_ndim}."
-                )
+                raise ValueError(f"Trajectory channel '{ch}' in split '{split}' has rank {arr.ndim}, " f"expected {expected_ndim}.")
             if arr.shape[0] != n:
-                raise ValueError(
-                    f"Trajectory channel '{ch}' in split '{split}' has {arr.shape[0]} samples, "
-                    f"manifest declares {n}."
-                )
+                raise ValueError(f"Trajectory channel '{ch}' in split '{split}' has {arr.shape[0]} samples, " f"manifest declares {n}.")
 
         # Validate per-sample semantics (reuses sample validator for prefix invariant).
         for i in range(n):
@@ -277,8 +266,7 @@ def build_dungeon_task_corpus(
 
     if parent_manifest.get("family") != DUNGEON_SHARED_FAMILY:
         raise ValueError(
-            f"Dungeon task corpus requires a {DUNGEON_SHARED_FAMILY!r} shared substrate, "
-            f"got family={parent_manifest.get('family')!r}."
+            f"Dungeon task corpus requires a {DUNGEON_SHARED_FAMILY!r} shared substrate, " f"got family={parent_manifest.get('family')!r}."
         )
 
     split_counts = {"train": n_train, "val": n_val, "test": n_test}
@@ -286,16 +274,17 @@ def build_dungeon_task_corpus(
     for split, n in split_counts.items():
         avail = parent_n.get(split, 0)
         if n > avail:
-            raise ValueError(
-                f"Requested {n} {split!r} samples but parent substrate only has {avail}."
-            )
+            raise ValueError(f"Requested {n} {split!r} samples but parent substrate only has {avail}.")
 
     shape: tuple[int, int] = tuple(parent_manifest["shape"])  # type: ignore[assignment]
 
     stage_params = {
         "corpus": corpus,
-        "n_train": n_train, "n_val": n_val, "n_test": n_test,
-        "max_steps": max_steps, "seed": seed,
+        "n_train": n_train,
+        "n_val": n_val,
+        "n_test": n_test,
+        "max_steps": max_steps,
+        "seed": seed,
         "parent_version": parent_manifest["version"],
     }
     canonical_parent = f"data/processed/{parent_manifest['family']}/v{parent_manifest['version']}"
@@ -363,5 +352,4 @@ __all__ = [
     "DUNGEON_TASK_CHANNELS",
     "validate_dungeon_task_sample",
     "build_dungeon_task_corpus",
-]
 ]

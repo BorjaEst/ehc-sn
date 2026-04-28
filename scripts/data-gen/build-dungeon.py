@@ -2,8 +2,8 @@
 
 Stages
 ------
-fetch-raw           Generate raw dungeongen topologies (if not present).
-prepare-interim     Copy raw topologies to a deterministic interim artifact.
+fetch-raw           Create or validate the canonical tar-sharded raw snapshot.
+prepare-interim     Normalize the raw snapshot into deterministic per-split NPZ files.
 materialize-shared  Build the dungeongen shared substrate.
 materialize-task    Build the Dungeon task corpus over a shared substrate.
 validate            Validate an existing versioned root's manifest and data.
@@ -37,8 +37,8 @@ from typing import Annotated
 import typer
 
 from ehc_sn.data._validator import validate_version_root
-from ehc_sn.data.dungeon_builder import _RAW_SEED_OFFSET, SHARED_FAMILY, build_dungeongen_substrate, prepare_dungeongen_interim
-from ehc_sn.data.dungeon_raw import ensure_raw_corpus
+from ehc_sn.data.dungeon_builder import SHARED_FAMILY, build_dungeongen_substrate, prepare_dungeongen_interim
+from ehc_sn.data.dungeon_raw import ensure_raw_snapshot
 from ehc_sn.tasks.dungeon.data import build_dungeon_task_corpus
 
 # ---------------------------------------------------------------------------
@@ -60,9 +60,13 @@ def fetch_raw(
     n_test: Annotated[int, typer.Option("--n-test")] = 40,
     seed: Annotated[int, typer.Option("--seed")] = 42,
 ) -> None:
-    """Generate raw dungeongen topologies (if not already present)."""
-    for split, n in (("train", n_train), ("val", n_val), ("test", n_test)):
-        ensure_raw_corpus(raw_root, split, n, seed + _RAW_SEED_OFFSET[split])
+    """Create the canonical tar-sharded raw snapshot for dungeongen (if not already present).
+
+    If data/raw/dungeongen does not exist, generates the snapshot and writes manifest.json.
+    If it exists and the manifest identity matches the request, this is a no-op.
+    If it exists with a mismatched identity, exits with an actionable error.
+    """
+    ensure_raw_snapshot(raw_root, seed, {"train": n_train, "val": n_val, "test": n_test})
     typer.echo(f"Raw corpus at {raw_root}")
 
 
@@ -75,7 +79,12 @@ def prepare_interim(
     n_val: Annotated[int, typer.Option("--n-val")] = 40,
     n_test: Annotated[int, typer.Option("--n-test")] = 40,
 ) -> None:
-    """Copy raw topologies to a deterministic interim artifact under data/interim/."""
+    """Normalize the raw snapshot into per-split NPZ files under data/interim/dungeongen/.
+
+    Reads from the canonical tar-sharded raw snapshot and writes one NPZ file per split.
+    The interim format is materially different from raw: no tar packaging, no per-sample
+    file fan-out, padded arrays with height/width metadata for native-shape reconstruction.
+    """
     prepare_dungeongen_interim(
         raw_root.resolve(),
         interim_root.resolve(),
