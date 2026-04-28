@@ -1,275 +1,177 @@
-"""Build a canonical processed MazeHard dataset from scratch.
+"""Staged CLI for building the MazeHard datasets.
 
-Generates deterministic static spatial samples (topology, mask_valid, start,
-goals, solution) and writes them as stacked ``.npy`` files under a structured
-output root that the existing ``MazeDataset`` / ``Datamodule`` pipeline can
-load directly.
+Stages
+------
+fetch-raw            Download raw maze-nd corpus from HuggingFace.
+prepare-interim      Normalize raw corpus to a deterministic interim artifact.
+materialize-shared   Build the maze-nd shared substrate.
+materialize-task     Build the MazeHard task corpus over a shared substrate.
+validate             Validate an existing versioned root's manifest and data.
+build-all            Convenience alias: all stages in DAG order.
 
-Usage examples
---------------
-Quick local build (default output root, small sample counts)::
+Default paths
+-------------
+Shared substrate:  data/processed/maze-nd/v1
+Task corpus:       data/processed/mazehard/default/v1
+Raw corpus:        data/raw/huggingface/maze_hard_augmented
+Interim:           data/interim/maze-nd
 
-    python build-mazehard.py
+Examples
+--------
+Quick local build::
 
-Larger overridden build::
+    python build-mazehard.py build-all
 
-    python build-mazehard.py \\
-        --output-root /scratch/data/processed/mazehard \\
-        --n-train 4000 --n-val 500 --n-test 500 \\
-        --height 17 --width 17 --seed 1234 --overwrite
+Custom sizes::
+
+    python build-mazehard.py build-all \\
+        --n-train 4000 --n-val 500 --n-test 500 --seed 7
 """
 
 from __future__ import annotations
 
-import json
-import shutil
-import sys
-from collections import deque
 from pathlib import Path
 from typing import Annotated
 
-import numpy as np
 import typer
 
-# ---------------------------------------------------------------------------
-# Make the package importable when running the script directly.
-# ---------------------------------------------------------------------------
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(_REPO_ROOT / "src") not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT / "src"))
-
-from ehc_sn.data._canonical import farthest_reachable_cell, first_true_cell, largest_component_mask, singleton_mask
-from ehc_sn.data.index import MazeIndexEntry, write_index
-from ehc_sn.data.schema import validate_npz
+from ehc_sn.data._validator import validate_version_root
+from ehc_sn.data.mazehard_builder import SHARED_FAMILY, build_mazehard_substrate, prepare_mazehard_interim
+from ehc_sn.data.mazehard_raw import ensure_raw_corpus
+from ehc_sn.tasks.mazehard.data import build_mazehard_task_corpus
 
 # ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-SOURCE = "mazehard"
-CHANNELS = ["topology", "mask_valid", "start", "goals", "solution"]
-SPLITS = ("train", "val", "test")
-_DIRS4 = ((-1, 0), (0, -1), (0, 1), (1, 0))
-_SPLIT_SEED_OFFSET: dict[str, int] = {"train": 0, "val": 100_000, "test": 200_000}
-
-
-# ---------------------------------------------------------------------------
-# Topology generation
-# ---------------------------------------------------------------------------
-
-
-def _make_topology(H: int, W: int, *, rng: np.random.Generator) -> np.ndarray:
-    """Return a random passable mask with outer walls and ~20 % interior blocks."""
-    topology = np.zeros((H, W), dtype=bool)
-    topology[1:-1, 1:-1] = True
-    interior = np.argwhere(topology)
-    n_block = max(0, int(0.20 * len(interior)))
-    if n_block:
-        idxs = rng.choice(len(interior), size=n_block, replace=False)
-        for i in idxs:
-            r, c = map(int, interior[i])
-            topology[r, c] = False
-    return topology
-
-
-def _path_mask(mask_valid: np.ndarray, start: tuple[int, int], goal: tuple[int, int]) -> np.ndarray:
-    """Return int32 mask with 1 on BFS-shortest-path cells, 0 elsewhere."""
-    parent: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
-    queue: deque[tuple[int, int]] = deque([start])
-    found = False
-    while queue:
-        r, c = queue.popleft()
-        if (r, c) == goal:
-            found = True
-            break
-        for dr, dc in _DIRS4:
-            nr, nc = r + dr, c + dc
-            if 0 <= nr < mask_valid.shape[0] and 0 <= nc < mask_valid.shape[1]:
-                if mask_valid[nr, nc] and (nr, nc) not in parent:
-                    parent[(nr, nc)] = (r, c)
-                    queue.append((nr, nc))
-
-    out = np.zeros(mask_valid.shape, dtype=np.int32)
-    if not found:
-        return out
-    cell: tuple[int, int] | None = goal
-    while cell is not None:
-        out[cell] = 1
-        cell = parent[cell]
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Per-sample generation
-# ---------------------------------------------------------------------------
-
-
-def _generate_sample(
-    H: int,
-    W: int,
-    *,
-    seed: int,
-) -> dict[str, np.ndarray]:
-    """Generate one deterministic MazeHard sample."""
-    rng = np.random.default_rng(seed)
-
-    topology = _make_topology(H, W, rng=rng)
-    mask_valid = largest_component_mask(topology)
-
-    start_cell = first_true_cell(mask_valid)
-    if start_cell is None:
-        raise RuntimeError(f"Empty valid mask for seed={seed}.")
-    goal_cell = farthest_reachable_cell(mask_valid, start_cell)
-
-    start = singleton_mask((H, W), start_cell)
-    goals = singleton_mask((H, W), goal_cell)
-    solution = _path_mask(mask_valid, start_cell, goal_cell)
-
-    return {
-        "topology": topology,
-        "mask_valid": mask_valid,
-        "start": start,
-        "goals": goals,
-        "solution": solution,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Pure builder function
-# ---------------------------------------------------------------------------
-
-
-def build_mazehard_dataset(
-    output_root: Path,
-    *,
-    n_train: int = 200,
-    n_val: int = 40,
-    n_test: int = 40,
-    height: int = 11,
-    width: int = 11,
-    seed: int = 42,
-    overwrite: bool = False,
-) -> None:
-    """Build a canonical MazeHard processed dataset.
-
-    Writes stacked ``.npy`` files and an ``index.jsonl`` under ``output_root``
-    in the layout expected by :class:`~ehc_sn.data.datasets.MazeDataset`.
-
-    Args:
-        output_root: Destination directory (created if absent).
-        n_train: Number of training samples.
-        n_val: Number of validation samples.
-        n_test: Number of test samples.
-        height: Grid height in cells (including outer walls).
-        width: Grid width in cells (including outer walls).
-        seed: Base RNG seed; per-sample seeds are derived deterministically.
-        overwrite: If ``True``, delete and recreate ``output_root``; if
-            ``False`` and ``output_root`` already exists, raise ``FileExistsError``.
-
-    Raises:
-        FileExistsError: When ``output_root`` exists and ``overwrite`` is
-            ``False``.
-        RuntimeError: When a generated sample has an empty valid mask.
-    """
-    if output_root.exists():
-        if not overwrite:
-            raise FileExistsError(f"Output root already exists: {output_root}. Use --overwrite to rebuild.")
-        shutil.rmtree(output_root)
-
-    output_root.mkdir(parents=True)
-
-    split_counts = {"train": n_train, "val": n_val, "test": n_test}
-    all_entries: list[MazeIndexEntry] = []
-
-    for split in SPLITS:
-        n = split_counts[split]
-        split_dir = output_root / split
-        split_dir.mkdir()
-
-        stacked: dict[str, list[np.ndarray]] = {ch: [] for ch in CHANNELS}
-
-        for idx in range(n):
-            sample_seed = seed + _SPLIT_SEED_OFFSET[split] + idx
-            sample = _generate_sample(height, width, seed=sample_seed)
-            for ch in CHANNELS:
-                stacked[ch].append(sample[ch])
-
-        # Validate spatial channels before writing.
-        spatial_sample = {ch: stacked[ch][0] for ch in CHANNELS}
-        validate_npz(spatial_sample)
-
-        # Stack and save.
-        arrays: dict[str, np.ndarray] = {ch: np.stack(stacked[ch], axis=0) for ch in CHANNELS}
-        for ch, arr in arrays.items():
-            np.save(split_dir / f"{ch}.npy", arr)
-
-        # Write per-split dataset.json.
-        (split_dir / "dataset.json").write_text(
-            json.dumps(
-                {
-                    "source": SOURCE,
-                    "split": split,
-                    "n_samples": n,
-                    "shape": [height, width],
-                    "channels": CHANNELS,
-                },
-                indent=2,
-            )
-        )
-
-        # Collect index entries.
-        for idx in range(n):
-            sample_id = f"{SOURCE}-{split}-{idx + 1:06d}"
-            all_entries.append(
-                MazeIndexEntry(
-                    id=sample_id,
-                    source=SOURCE,
-                    split=split,
-                    shape=(height, width),
-                    channels=CHANNELS,
-                    n_observations=0,
-                    n_goals=1,
-                    difficulty="medium",
-                )
-            )
-
-    write_index(all_entries, output_root / "index.jsonl")
-    print(f"MazeHard dataset written to {output_root}  ({sum(split_counts.values())} samples).")
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+_DEFAULT_RAW_ROOT = Path("data/raw/huggingface/maze_hard_augmented")
+_DEFAULT_INTERIM_ROOT = Path("data/interim/maze-nd")
+_DEFAULT_SHARED_VERSION = 1
+_DEFAULT_TASK_VERSION = 1
+_DEFAULT_CORPUS = "default"
 
 app = typer.Typer(add_completion=False, help=__doc__)
 
 
-@app.command()
-def main(
-    output_root: Annotated[
-        Path,
-        typer.Option("--output-root", help="Dataset root directory."),
-    ] = Path("data/processed/mazehard"),
-    n_train: Annotated[int, typer.Option("--n-train", help="Training samples.")] = 200,
-    n_val: Annotated[int, typer.Option("--n-val", help="Validation samples.")] = 40,
-    n_test: Annotated[int, typer.Option("--n-test", help="Test samples.")] = 40,
-    height: Annotated[int, typer.Option("--height", help="Grid height (cells).")] = 11,
-    width: Annotated[int, typer.Option("--width", help="Grid width (cells).")] = 11,
-    seed: Annotated[int, typer.Option("--seed", help="Base RNG seed.")] = 42,
-    overwrite: Annotated[
-        bool,
-        typer.Option("--overwrite/--no-overwrite", help="Delete output root and rebuild."),
-    ] = False,
+# ---------------------------------------------------------------------------
+@app.command("fetch-raw")
+def fetch_raw(
+    raw_root: Annotated[Path, typer.Option("--raw-root")] = _DEFAULT_RAW_ROOT,
 ) -> None:
-    """Build a canonical MazeHard processed dataset."""
-    build_mazehard_dataset(
-        output_root.resolve(),
+    """Download raw maze-nd corpus from HuggingFace."""
+    ensure_raw_corpus(raw_root.resolve())
+    typer.echo(f"Raw corpus at {raw_root}")
+
+
+# ---------------------------------------------------------------------------
+@app.command("prepare-interim")
+def prepare_interim(
+    raw_root: Annotated[Path, typer.Option("--raw-root")] = _DEFAULT_RAW_ROOT,
+    interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
+) -> None:
+    """Normalize raw corpus to a deterministic interim artifact under data/interim/."""
+    prepare_mazehard_interim(raw_root.resolve(), interim_root.resolve())
+    typer.echo(f"Interim written to {interim_root}")
+
+
+# ---------------------------------------------------------------------------
+@app.command("materialize-shared")
+def materialize_shared(
+    interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
+    n_train: Annotated[int, typer.Option("--n-train")] = 200,
+    n_val: Annotated[int, typer.Option("--n-val")] = 40,
+    n_test: Annotated[int, typer.Option("--n-test")] = 40,
+    version: Annotated[int, typer.Option("--version")] = _DEFAULT_SHARED_VERSION,
+    seed: Annotated[int, typer.Option("--seed")] = 42,
+) -> None:
+    """Build the maze-nd shared substrate."""
+    shared_root = Path(f"data/processed/{SHARED_FAMILY}/v{version}")
+    build_mazehard_substrate(
+        shared_root.resolve(),
+        interim_root=interim_root.resolve(),
         n_train=n_train,
         n_val=n_val,
         n_test=n_test,
-        height=height,
-        width=width,
         seed=seed,
-        overwrite=overwrite,
+    )
+
+
+# ---------------------------------------------------------------------------
+@app.command("materialize-task")
+def materialize_task(
+    interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
+    corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
+    n_train: Annotated[int, typer.Option("--n-train")] = 200,
+    n_val: Annotated[int, typer.Option("--n-val")] = 40,
+    n_test: Annotated[int, typer.Option("--n-test")] = 40,
+    shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
+    version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
+    seed: Annotated[int, typer.Option("--seed")] = 42,
+) -> None:
+    """Build the MazeHard task corpus from a shared substrate."""
+    shared_root = Path(f"data/processed/{SHARED_FAMILY}/v{shared_version}")
+    task_root = Path(f"data/processed/mazehard/{corpus}/v{version}")
+    build_mazehard_task_corpus(
+        task_root.resolve(),
+        parent_substrate=shared_root.resolve(),
+        interim_root=interim_root.resolve(),
+        corpus=corpus,
+        n_train=n_train,
+        n_val=n_val,
+        n_test=n_test,
+        seed=seed,
+    )
+
+
+# ---------------------------------------------------------------------------
+@app.command("validate")
+def validate(
+    root: Annotated[Path, typer.Argument(help="Versioned root to validate.")],
+) -> None:
+    """Validate the manifest and data of a versioned root."""
+    manifest = validate_version_root(root.resolve())
+    if manifest["dataset_class"] == "task_corpus":
+        from ehc_sn.tasks.mazehard.data import validate_mazehard_task_root
+
+        validate_mazehard_task_root(root.resolve())
+    typer.echo(f"OK  {root}")
+    typer.echo(f"    dataset_class : {manifest['dataset_class']}")
+    typer.echo(f"    family        : {manifest['family']}")
+    typer.echo(f"    version       : {manifest['version']}")
+    typer.echo(f"    channels      : {manifest['channels']}")
+    typer.echo(f"    n_samples     : {manifest['n_samples']}")
+
+
+# ---------------------------------------------------------------------------
+@app.command("build-all")
+def build_all(
+    raw_root: Annotated[Path, typer.Option("--raw-root")] = _DEFAULT_RAW_ROOT,
+    interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
+    corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
+    n_train: Annotated[int, typer.Option("--n-train")] = 200,
+    n_val: Annotated[int, typer.Option("--n-val")] = 40,
+    n_test: Annotated[int, typer.Option("--n-test")] = 40,
+    shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
+    version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
+    seed: Annotated[int, typer.Option("--seed")] = 42,
+) -> None:
+    """Full pipeline: fetch-raw → prepare-interim → materialize-shared → materialize-task."""
+    fetch_raw(raw_root=raw_root)
+    prepare_interim(raw_root=raw_root, interim_root=interim_root)
+    materialize_shared(
+        interim_root=interim_root,
+        n_train=n_train,
+        n_val=n_val,
+        n_test=n_test,
+        version=shared_version,
+        seed=seed,
+    )
+    materialize_task(
+        interim_root=interim_root,
+        corpus=corpus,
+        n_train=n_train,
+        n_val=n_val,
+        n_test=n_test,
+        shared_version=shared_version,
+        version=version,
+        seed=seed,
     )
 
 
