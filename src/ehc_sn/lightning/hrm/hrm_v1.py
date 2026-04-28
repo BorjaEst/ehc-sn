@@ -25,7 +25,12 @@ from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings, MazeHardHRMV1ACTTaskBinding, MazeHardHRMV1BridgeAdapter
+from ehc_sn.adapters.mazehard.hrm import (
+    MazeHardHRMAdapterSettings,
+    MazeHardHRMV1ACTTaskBinding,
+    MazeHardHRMV1BridgeAdapter,
+    build_mazehard_hrm_trace_meta,
+)
 from ehc_sn.adapters.mazehard.hrm.traces import MAZE_HARD_HRM_ACT_TRACE_FIELDS
 from ehc_sn.controllers.deliberation.act import ACTController, ACTControllerConfig
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
@@ -270,7 +275,7 @@ class TrainingModel(L.LightningModule):
             runner_options={"allow_halt": False, "explore": False},
             objective_options={"controller": self.controller, "td_target": False},
         )
-        trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs)
+        trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs, trace_meta=build_mazehard_hrm_trace_meta(batch))
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, ACT_EPISODE_ROUTES)
         return {"trace": trace}
 

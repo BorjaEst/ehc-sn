@@ -202,7 +202,7 @@ class ACTLossHead(TokenLossHeadBase[ACTLossConfig]):
             raise ValueError("ACT TD target requires carry.data, carry.model_state, and carry.steps.")
 
         with torch.no_grad():
-            _, backbone_output = controller.backbone(data, model_state)
+            backbone_output, _ = controller.backbone(data, model_state)
             next_q = backbone_output.control.q_logits
 
         done_action = controller.config.done_action

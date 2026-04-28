@@ -13,6 +13,7 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings
+from ehc_sn.adapters.mazehard.hrm.core import coerce_maze_hard_batch
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
@@ -23,7 +24,6 @@ from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v2 import ModelConfig_HRM_V2, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.objectives import HybridRLLossConfig
-from ehc_sn.data.mazehard import coerce_maze_hard_batch
 from ehc_sn.tasks.mazehard.capabilities.deliberation import MazeHardDeliberationConfig
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config

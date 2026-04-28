@@ -29,12 +29,16 @@ from pathlib import Path
 from typing import Any, Optional
 
 import lightning as L
-import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings, MazeHardHRMV2BridgeAdapter, MazeHardHRMV2HybridTaskBinding
+from ehc_sn.adapters.mazehard.hrm import (
+    MazeHardHRMAdapterSettings,
+    MazeHardHRMV2BridgeAdapter,
+    MazeHardHRMV2HybridTaskBinding,
+    build_mazehard_hrm_trace_meta,
+)
 from ehc_sn.adapters.mazehard.hrm.traces import MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
 from ehc_sn.controllers.deliberation.actor_critic import DeliberationACController, DeliberationACControllerConfig
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
@@ -44,7 +48,7 @@ from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLossHead
-from ehc_sn.rollouts import RecurrentRunner, RepeatSource
+from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
 from ehc_sn.tasks.mazehard.capabilities.deliberation import MazeHardDeliberationCapability, MazeHardDeliberationConfig
 from ehc_sn.tasks.mazehard.reward import MazeHardRewardProjector
 from ehc_sn.training.actor_critic import TD0ActorCriticBatchBuilder, ZeroBootstrapActorCriticValidationScorer
@@ -166,7 +170,7 @@ class TrainingModel(L.LightningModule):
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(RL_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(prefix="val/")
-        self.trace_specs = build_trace_spec("actor_critic", extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS)
+        self.trace_specs = build_trace_spec("rl", extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS)
 
         # Buffer + assembler implement partial-reset batching for deliberation runs.
         self._train_buffer = FifoBuffer(
@@ -325,7 +329,7 @@ class TrainingModel(L.LightningModule):
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options={"explore": False, "allow_halt": False},
         )
-        trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs)
+        trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs, trace_meta=build_mazehard_hrm_trace_meta(batch))
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, RL_EPISODE_ROUTES)
         return {"trace": trace}
 

@@ -1,15 +1,16 @@
 """Shared MazeHard+HRM bridge family core.
 
-Holds the task-side settings and token encoder/decoder glue shared by the
-MazeHard+HRM v1 and v2 bridge adapters. Versioned bridge modules keep the
-model-native input and controller-output types local.
+Holds the task-side settings, raw channel coercion, and token encoder/decoder
+glue shared by the MazeHard+HRM v1 and v2 bridge adapters.  Versioned bridge
+modules keep the model-native input and controller-output types local.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Generic, Literal, Protocol, TypeVar
+from collections.abc import Callable, Mapping
+from typing import Any, Generic, Literal, Protocol, TypeVar
 
+import numpy as np
 import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
@@ -19,11 +20,16 @@ from torch import nn
 
 from ehc_sn.adapters.mazehard.decoders import MazeHardDecoder
 from ehc_sn.adapters.mazehard.encoders import MazeHardEncoder
-from ehc_sn.data.schema import O_ID
-from ehc_sn.data.vocabulary import VOCAB_SIZE as MAZE_SEM_VOCAB_SIZE
+from ehc_sn.adapters.mazehard.transforms import channels_to_grid
+from ehc_sn.adapters.mazehard.vocabulary import VOCAB_SIZE as MAZE_SEM_VOCAB_SIZE
+from ehc_sn.data.schema import validate_processed
 from ehc_sn.tasks.mazehard.contracts import MazeHardTaskInput, MazeHardTaskOutput
+from ehc_sn.types import Batch
 
 TInput = TypeVar("TInput")
+
+O_ID: int = 5
+"""Overlay token ID — solution-path cell token in the MazeHard+HRM vocabulary."""
 
 DEFAULT_MAZE_HARD_HRM_VOCAB_SIZE: int = max(MAZE_SEM_VOCAB_SIZE, O_ID + 1)
 
@@ -189,9 +195,70 @@ def build_token_decoder(
     )
 
 
+_CHANNEL_SOLUTION: str = "solution"
+
+
+def coerce_maze_hard_batch(raw: Mapping[str, Any]) -> Batch:
+    """Convert raw MazeHard channels into canonical token and label tensors.
+
+    Supports both single-maze arrays ``(H, W)`` and aligned stacked arrays
+    ``(B, H, W)``.  Spatial dimensions are flattened while any leading batch
+    dimensions are preserved.
+    """
+    channels = _coerce_numpy_channels(raw)
+    _validate_channel_stack_shapes(channels)
+
+    grid = channels_to_grid(channels)["grid"]
+    input_ids = _flatten_spatial_to_tensor(grid, dtype=np.int64, name="grid")
+    labels = input_ids.clone()
+
+    if _CHANNEL_SOLUTION in channels:
+        solution_mask = _flatten_spatial_to_tensor(
+            channels[_CHANNEL_SOLUTION] > 0,
+            dtype=np.bool_,
+            name=_CHANNEL_SOLUTION,
+        ).to(dtype=torch.bool)
+        labels = torch.where(solution_mask, torch.full_like(labels, O_ID), labels)
+
+    return {"input_ids": input_ids, "labels": labels}
+
+
+def _coerce_numpy_channels(raw: Mapping[str, Any]) -> dict[str, np.ndarray]:
+    channels: dict[str, np.ndarray] = {}
+    for key, value in raw.items():
+        if isinstance(value, np.ndarray):
+            channels[key] = value
+            continue
+        if isinstance(value, Tensor):
+            channels[key] = value.detach().cpu().numpy()
+            continue
+        raise TypeError(f"Unsupported MazeHard channel type for key {key!r}: {type(value).__name__}.")
+    validate_processed(channels)
+    return channels
+
+
+def _validate_channel_stack_shapes(channels: dict[str, np.ndarray]) -> None:
+    reference_name, reference = next(iter(channels.items()))
+    mismatched = {name: value.shape for name, value in channels.items() if value.shape != reference.shape}
+    if mismatched:
+        detail = ", ".join(f"{name}={shape}" for name, shape in mismatched.items())
+        raise ValueError(
+            "MazeHard batch requires aligned raw channel shapes; "
+            f"expected all channels to match {reference_name}={reference.shape}, got {detail}."
+        )
+
+
+def _flatten_spatial_to_tensor(array: np.ndarray, *, dtype: Any, name: str) -> Tensor:
+    if array.ndim not in (2, 3):
+        raise ValueError(f"MazeHard field {name!r} must have shape (H, W) or (B, H, W), got {array.shape}.")
+    return torch.from_numpy(array.reshape(*array.shape[:-2], -1).astype(dtype, copy=False))
+
+
 # =============================================================================
 __all__ = [
+    "O_ID",
     "DEFAULT_MAZE_HARD_HRM_VOCAB_SIZE",
+    "coerce_maze_hard_batch",
     "MazeHardHRMAdapterSettings",
     "MazeHardLearnedEncoder",
     "MazeHardRoPEEncoder",

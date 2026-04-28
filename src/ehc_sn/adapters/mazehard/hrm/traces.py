@@ -24,8 +24,9 @@ from typing import Protocol
 import torch
 from torch import Tensor
 
-from ehc_sn.data.schema import O_ID
+from ehc_sn.adapters.mazehard.hrm.core import O_ID
 from ehc_sn.traces import TraceField, TraceValue
+from ehc_sn.types import Batch
 
 # =================================================================================================
 # Minimal typed context for MazeHard+HRM ACT trace getters
@@ -88,6 +89,16 @@ def _get_maze_hard_solution_overlay_actor_critic(
     return _solution_overlay_from_task_logits(ctx.outputs.task_output.task_logits)
 
 
+def build_mazehard_hrm_trace_meta(batch: Batch) -> dict[str, object]:
+    """Return out-of-band trace metadata required by MazeHard HRM figures."""
+    root_key, leaf_key = TARGET_SOLUTION_OVERLAY_META_KEY.split("/", maxsplit=1)
+    return {
+        root_key: {
+            leaf_key: (batch["labels"] == O_ID).to(torch.uint8),
+        },
+    }
+
+
 # =================================================================================================
 # Named field objects
 # =================================================================================================
@@ -109,7 +120,14 @@ MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS: tuple[TraceField, ...] = (_MAZE_HARD_HR
 
 # =================================================================================================
 __all__ = [
+    "build_mazehard_hrm_trace_meta",
     "MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS",
     "MAZE_HARD_HRM_ACT_TRACE_FIELDS",
     "MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY",
+    "TARGET_SOLUTION_OVERLAY_META_KEY",
 ]
+
+# Metadata key that lightning modules must populate in trace_meta with the
+# ground-truth overlay mask: ``(batch["labels"] == O_ID).to(torch.uint8)``.
+# Read by figure selectors via ``trace.get_meta_path("target/solution_overlay")``.
+TARGET_SOLUTION_OVERLAY_META_KEY = "target/solution_overlay"
