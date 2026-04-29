@@ -27,7 +27,7 @@ from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
 from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
-from ehc_sn.tasks.arena.runtime import batch_size_from_arena_batch, infer_arena_replay_batch_keys
+from ehc_sn.tasks.arena.runtime import batch_size_from_arena_batch, build_arena_trace_worlds, infer_arena_replay_batch_keys
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
@@ -187,12 +187,10 @@ class TrainingModel(L.LightningModule):
 
     def _build_trace_meta(self, batch: Batch) -> dict[str, object]:
         """Return out-of-band trace metadata for figure-facing evaluation traces."""
-        B = batch_size_from_arena_batch(batch)
-        worlds = [{"topology": batch["topology"][b], "observations": batch["observations"][b]} for b in range(B)]
         lec_alpha = torch.stack([torch.sigmoid(alpha).detach() for alpha in self.model.lec.filter.alpha])
         lec_w_f = torch.stack([torch.sigmoid(weight).detach() for weight in self.model.lec.w_f])
         return {
-            "environments": ReplayableEnvironments(worlds),
+            "environments": ReplayableEnvironments(build_arena_trace_worlds(batch)),
             "lec": {
                 "filter": {"alpha_sigmoid": lec_alpha},
                 "w_f_sigmoid": lec_w_f,
