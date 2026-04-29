@@ -61,7 +61,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.models.ehc.core.ehc_base import FAMILY_CONTENT, SLOT_CUE, SLOT_REPLAY, SLOT_STATE, EHCProjectionSettingsV2
+from ehc_sn.models.ehc.core.ehc_base import FAMILY_CONTENT, SLOT_CUE, SLOT_REPLAY, SLOT_STATE, EHCProjectionSettings
 from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes
 from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState, WritePayload
 from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues, TargetRead
@@ -216,8 +216,8 @@ class ModelSettingsV2(BaseModel, extra="forbid", strict=False):
     pfc: PFCSettings = Field(..., description="Settings for the PFC reasoning module.")
     str: STRSettings = Field(..., description="Settings for the STR reward/value head.")
 
-    projections: EHCProjectionSettingsV2 = Field(
-        default_factory=EHCProjectionSettingsV2,
+    projections: EHCProjectionSettings = Field(
+        default_factory=EHCProjectionSettings,
         description="Inter-region multiscale projection settings (LEC->HPC, MEC->HPC).",
     )
 

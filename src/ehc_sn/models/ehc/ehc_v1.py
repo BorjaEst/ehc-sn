@@ -34,7 +34,9 @@ For the reference config (pfc.seq_length = 36) the content family has 33 slots.
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, cast
 
 import torch
@@ -44,7 +46,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.models.ehc.core.ehc_base import FAMILY_CONTENT, SLOT_CUE, SLOT_REPLAY, SLOT_STATE, EHCProjectionSettingsV1
+from ehc_sn.models.ehc.core.ehc_base import FAMILY_CONTENT, SLOT_CUE, SLOT_REPLAY, SLOT_STATE, EHCProjectionSettings
 from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes
 from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState, WritePayload
 from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues, TargetRead
@@ -66,26 +68,25 @@ class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
     numbers appear in ``EHCModelV1``.
     """
 
+    @classmethod
+    def from_config(cls, path: str | Path) -> "ModelSettingsV1":
+        config_map = tomllib.load(Path(path).open("rb"))
+        return cls.model_validate(config_map)
+
     transition_action_count: int = Field(
         ...,
         ge=1,
-        description="Number of discrete transition actions in the environment.",
-    )
-    internal_action_count: int = Field(
-        ...,
-        ge=1,
-        description="Number of internal control actions scored by the PFC/STR control path.",
-    )
-    external_context_dim: int = Field(
-        default=1,
-        ge=1,
-        description="Width of the optional external context payload.",
+        description="Number of discrete transition actions for the MEC path-integration surface.",
     )
     f_initial: list[float] = Field(
         default_factory=lambda: [0.99, 0.3, 0.09, 0.5, 0.4],
         min_length=1,
-        description="Initial feature frequencies resolved across MEC and HPC modules.",
+        description="Shared multiscale frequency ordering across LEC, MEC, and HPC.",
     )
+
+    @property
+    def internal_action_count(self) -> int:
+        return int(self.pfc.value_head.n_actions)
 
     hpc: HPCAttentionSettings = Field(..., description="Settings for the attention-based hippocampal memory.")
     lec: LECSettings = Field(..., description="Settings for the LEC sensory pathway.")
@@ -93,8 +94,8 @@ class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
     pfc: PFCSettings = Field(..., description="Settings for the PFC reasoning module.")
     str: STRSettings = Field(..., description="Settings for the STR reward/value head.")
 
-    projections: EHCProjectionSettingsV1 = Field(
-        default_factory=EHCProjectionSettingsV1,
+    projections: EHCProjectionSettings = Field(
+        default_factory=EHCProjectionSettings,
         description="Inter-region multiscale projection settings (LEC->HPC, MEC->HPC).",
     )
 

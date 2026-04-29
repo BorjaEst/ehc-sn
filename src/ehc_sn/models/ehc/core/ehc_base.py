@@ -22,17 +22,13 @@ FAMILY_CONTENT: str = "content"
 
 
 # ===========================================================================
-class EHCProjectionSettingsV2(BaseModel, extra="forbid", strict=False):
-    """Inter-region projection settings for EHC v2.
+class EHCProjectionSettings(BaseModel, extra="forbid", strict=False):
+    """Shared inter-region projection settings for EHC backbones.
 
-    ``lec_to_hpc`` and ``mec_to_hpc`` are multiscale-to-multiscale edges.
-    ``pfc_to_hpc`` is a flat-to-multiscale broadcast edge that maps the
-    previous-step public PFC summary into the hippocampal contextual cue
-    family ``c``.
-    ``hpc_to_pfc`` is an aligned workspace-to-workspace edge that projects the
-    three fixed HPC interface slots (state, replay, cue) from the flattened HPC
-    dimension into PFC hidden size.  Each fixed role gets its own independent
-    parameter block; weights are not shared across roles by default.
+    lec_to_hpc: multiscale -> multiscale
+    mec_to_hpc: multiscale -> multiscale
+    pfc_to_hpc: flat -> multiscale via broadcast
+    hpc_to_pfc: workspace -> workspace via aligned fixed-slot projection
     """
 
     lec_to_hpc: ProjectionSettings = Field(
@@ -58,7 +54,7 @@ class EHCProjectionSettingsV2(BaseModel, extra="forbid", strict=False):
 
 # ===========================================================================
 __all__ = [
-    "EHCProjectionSettingsV2",
+    "EHCProjectionSettings",
     "SLOT_CUE",
     "SLOT_REPLAY",
     "SLOT_STATE",
