@@ -1,16 +1,23 @@
 # EHC-SN Standards Specification
 
-> Canonical source of truth for coding, testing, documentation, and artifact
-> standards.
+> Canonical source of truth for coding, testing, documentation, and repository
+> artifact standards.
+
+This file owns repository-wide engineering conventions only. Architecture
+boundaries, benchmark semantics, and spec-governance workflow are owned by
+other specs and are referenced here rather than restated.
 
 ## 1 Code Style
 
 ### 1.1 Formatting
 
 - **PEP 8** naming and layout conventions.
-- **Black** formatter: `line-length = 110`, `target-version = ["py312"]`.
-- **isort**: `profile = "black"`, `line_length = 110`,
+- **Black** formatter: `line-length = 140`, `target-version = ["py312"]`.
+- **isort**: `profile = "black"`, `line_length = 140`,
   `known_first_party = ["ehc_sn"]`.
+- `pyproject.toml` is the executable source of truth for tool settings. If a
+  setting in this file conflicts with `pyproject.toml`, update this file in the
+  same change or reduce it to a policy-only statement.
 - Lines that Black cannot format cleanly (e.g., long function signatures) may
   use `# fmt: skip` or `# fmt: off` / `# fmt: on` sparingly.
 
@@ -64,16 +71,19 @@
   construction (e.g., architectural dimensions).
 - **CLI entry points**: `pydantic_settings.BaseSettings(extra="forbid",
 cli_parse_args=True)`. CLI source must have highest precedence.
-- **Static defaults**: TOML files under `config/`. Currently
-  `config/defaults_ehc.toml` (empty — to be populated).
+- **Static defaults**: entry-point-owned TOML files under `config/`.
+  Canonical examples include `config/training.ehc-v1.toml` and
+  `config/benchmark-b0.hrm-v1.toml`. Entry points load file defaults first,
+  then allow CLI values to override them.
 - **Validation**: Use Pydantic validators (`@field_validator`) for non-trivial
   constraints. Fail fast with actionable error messages.
 - Benchmark entry points under `scripts/benchmarks/` should remain thin wrappers
   around `ehc_sn.benchmarks`; they may resolve config inputs, checkpoint paths,
   and concrete benchmark bindings, but must not duplicate evaluator semantics,
   shared benchmark infrastructure, or artifact-writing logic.
-- Benchmark-like scripts under experiments/ are non-canonical and should be used
-  only for exploratory or one-off research workflows.
+- Canonical training entry points live under `scripts/training/` and optional
+  cluster-launch wrappers under `scripts/haicore/`. Shared logic must live in
+  `src/ehc_sn/`, not inside those entry points.
 
 ---
 
@@ -97,8 +107,8 @@ cli_parse_args=True)`. CLI source must have highest precedence.
 
 ### 5.1 Repository Documentation
 
-- **`README.md`** (repo root): Must be non-empty. Contains project overview,
-  installation instructions, and quick-start guide.
+- If build metadata references a repo-root `README.md`, that file must exist
+  and remain non-empty.
 - **`docs/`** (outer): Documentation root (`docs_root` in manifest). Contains
   MkDocs configuration (`docs/mkdocs.yml`) and content pages
   (`docs/docs/*.md`).
@@ -116,21 +126,14 @@ or consumed.
 
 - Canonical specs (`spec/*.md`) are living documents. They must be updated
   when the architecture, requirements, or standards change.
-- Only the files listed in `spec/spec-manifest.toml [required.files]` are the
-  always-read core spec set for agents. Keep that set small and hot.
-- Low-frequency reference material belongs in companion specs that are linked
-  from the core specs rather than copied into them.
-- Core specs should stay short, direct, and low-duplication. If a rule already
-  lives in one required spec, other required specs should reference it rather
-  than restating its narrative explanation.
+- Spec ownership, conflict resolution, and required/companion routing are owned
+  by `spec/spec-process-spec-maintenance.md` and `spec/spec-manifest.toml`.
 - Specs are not duplicated into `docs/`. If the MkDocs site needs to reference
   specs, it should link to the `spec/` files.
 - Changes to top-level packages under `src/ehc_sn/` must update the component
   taxonomy and dependency rules in `spec/spec-architecture.md` in the same change.
 - Changes to dependency declarations in `pyproject.toml` must update the
   dependency inventory in `spec/spec-requirements.md` in the same change.
-- Spec authoring and maintenance workflow are owned by
-  `spec/spec-process-spec-maintenance.md`.
 
 ---
 
@@ -142,8 +145,9 @@ or consumed.
 | Plan details   | `.copilot-tracking/details/` | Markdown | Linked from parent plan                    |
 | Change records | `.copilot-tracking/changes/` | Markdown | What Changed, Why, Files Affected, Testing |
 
-Spec file precedence is defined in `spec/spec-manifest.toml [precedence]` and
-is the single source of truth. Do not duplicate the precedence order elsewhere.
+Canonical artifact roots and spec precedence are defined in
+`spec/spec-manifest.toml`. Do not duplicate those path or precedence tables in
+other specs.
 
 ---
 
@@ -165,9 +169,6 @@ is the single source of truth. Do not duplicate the precedence order elsewhere.
   New figure types must be registered via `FigureSpec` and the `REGISTRY`.
 - Publication-ready output via **SciencePlots** (style) and **pub-ready-plots**
   (layout).
-- Figure sinks: `save_pdf` for file output; interactive `plt.show()` for
-  development.
-- Axis utilities in `figures/utils/` for consistent subplot layout.
 - Public figure modules should keep low-level drawing in `figures/plots/` and
   reserve figure classes for data selection, layout, and panel orchestration.
 - Panel methods on `BaseFigureTemplate` subclasses accept an `Axes` and mutate
@@ -178,21 +179,8 @@ is the single source of truth. Do not duplicate the precedence order elsewhere.
 
 ## 9 Experiment Reporting Standards
 
-- Canonical benchmark writeups must identify the benchmark id (`B0`, `M0`,
-  `B1`, `B2`, or `B3`) and state the exact corpus, split sizes, and any
-  generated OOD corpora used in the run.
-- Reports for B2 one-shot evaluation must explicitly state that learned weights
-  were frozen during exposure and probe episodes and must distinguish fast-memory
-  adaptation from any gradient-based learning.
-- Every canonical benchmark report must list: seed count, baseline pack,
-  compute-budget settings, primary metrics, and preregistered success criteria.
-- Aggregate plots are not sufficient on their own. Benchmark reports must show
-  per-seed scatter or equivalent seed-resolved summaries alongside means and
-  confidence intervals.
-- When reporting adaptive-computation models, include results at the canonical
-  internal-step budgets `4`, `8`, and `16` in addition to any unconstrained best
-  result.
-- If a manuscript or report draws broader general-reasoning conclusions from
-  navigation benchmarks, it must label those conclusions as architectural
-  interpretation unless an explicit non-navigation benchmark suite is also
-  reported.
+- Canonical benchmark reporting semantics are owned by
+  `spec/spec-benchmark-suite.md`.
+- Repository-level reports and docs must not restate benchmark outcomes in a way
+  that drops benchmark id, corpus/split identity, seed treatment, or major
+  evaluation caveats.

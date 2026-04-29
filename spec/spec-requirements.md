@@ -60,22 +60,22 @@ Spec maintenance and conflict-resolution workflow are owned by
 
 ## 3 Architectural Enforcement Rules
 
-- `models/` must remain task-agnostic.
-- `tasks/` own observation/action/workspace/episode/reward semantics.
-- `adapters/` are the only canonical model-task seam.
+- `spec/spec-architecture.md` owns canonical boundary vocabulary, component
+  taxonomy, and dependency-layer rules.
+- Changes must satisfy the owning architecture rules rather than reinterpreting
+  them locally in this file.
 - Model configs define architecture only. Task and adapter configs define task
   semantics and binding semantics.
 - Lightning training surfaces instantiate `task -> model -> adapter` and must
   execute through adapter interfaces.
 - Reusable objective scoring belongs in `objectives/`; Lightning remains the
   executable training orchestration surface.
-- Adding a new task or puzzle must require changes only in `tasks/` and
-  optional adapters.
-- Adding a new architecture must require changes only in `models/`, optional
-  adapters, and model-aware training surfaces.
-- Detailed boundary vocabulary lives in `spec/spec-architecture.md`.
+- Architecture-affecting changes must update `spec/spec-architecture.md` in the
+  same change.
 - Detailed model and adapter interface patterns live in
   `spec/spec-model-interfaces.md`.
+- Detailed controller-to-learner and family-specific runtime contracts live in
+  `spec/spec-controller-runtime-contracts.md`.
 
 ---
 
@@ -92,6 +92,7 @@ Spec maintenance and conflict-resolution workflow are owned by
 | `pydantic`           | Configuration schema    | `BaseModel(extra="forbid")` pattern.      |
 | `pydantic_settings`  | CLI settings            | `BaseSettings(cli_parse_args=True)`.      |
 | `scipy`              | Scientific computing    | Combinatorics and special functions.      |
+| `networkx`           | Graph algorithms        | Connectivity and graph utilities.         |
 | `matplotlib`         | Visualization           | Base figure rendering.                    |
 | `SciencePlots`       | Visualization           | Publication plotting styles.              |
 | `pub-ready-plots`    | Visualization           | Publication layout helpers.               |
@@ -104,11 +105,14 @@ Spec maintenance and conflict-resolution workflow are owned by
 | `adam-atan2-pytorch` | Optimizer               | AdamAtan2 for HRM training.               |
 | `setuptools`         | Build backend           | Package build and version management.     |
 
+`pyproject.toml` is the executable source of truth for dependency declarations.
+This table is the human-readable inventory and must stay synchronized with it.
+
 ### 4.2 Dev and Script Dependencies
 
 - `pytest` for testing.
 - `black` for formatting.
-- `flake` for linting.
+- `flake8` for linting.
 - `mypy` for type checking.
 
 ### 4.3 New Dependency Policy
@@ -131,34 +135,48 @@ Spec maintenance and conflict-resolution workflow are owned by
 - Active first-party package: `ehc_sn` only.
 - Single-source version: `src/ehc_sn/VERSION`.
 
-### 5.2 Ownership Matrix
+### 5.2 Executable Surface Matrix
 
-| Component                       | Constraint                                                                                                                                                                                     |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `training/`                     | Must remain model-agnostic and task-agnostic. No imports from `models/`, `modules/`, `tasks/`, `adapters/`, or `lightning/`.                                                                   |
-| `tasks/`                        | Must remain model-agnostic. No imports from `models/`, `modules/`, `adapters/`, or `lightning/`.                                                                                               |
-| `adapters/`                     | Canonical model-task seam. May import `models/`, `tasks/`, and lower reusable layers, but must not own benchmark semantics, CLI orchestration, or generic training primitives.                 |
-| `rollouts/`, `traces/`          | Must remain model-agnostic. No imports from `models/` or `lightning/`.                                                                                                                         |
-| `controllers/`, `objectives/`   | Controllers own rollout-state transitions and objectives own reusable rollout scoring. Both must remain model-agnostic and task-agnostic. No imports from `models/`, `tasks/`, or `adapters/`. |
-| `policies/`                     | Own action selection only. Must remain model-agnostic and controller-agnostic. No imports from `models/`, `tasks/`, `adapters/`, `controllers/`, `objectives/`, `training/`, or `modules/`.    |
-| `benchmarks/` semantic packages | Must remain model-agnostic. No imports from `models/` or `lightning/`.                                                                                                                         |
-| `benchmarks/_bindings/`         | Only model-aware benchmark subarea. May import `models/`, `tasks/`, `adapters/`, and lower reusable layers, but must not own benchmark semantics.                                              |
-| `lightning/`                    | Owns executable training orchestration. Reusable objective scoring lives in `objectives/`. Must execute through adapters rather than task-shaped model payloads.                               |
-| `scripts/benchmarks/`           | Thin wrappers only. Shared benchmark logic belongs in `ehc_sn.benchmarks`.                                                                                                                     |
-| `experiments/`                  | Exploratory or paper-specific entry points only. Must not duplicate shared benchmark or training infrastructure.                                                                               |
+- `scripts/training/` contains thin training entry points only. Shared training
+  logic belongs in `src/ehc_sn/`.
+- `scripts/haicore/` contains cluster-launch wrappers only. They may provide
+  scheduler glue but must not duplicate training or benchmark logic.
+- `scripts/benchmarks/` contains thin wrappers only. Shared benchmark logic
+  belongs in `ehc_sn.benchmarks`.
+- `lightning/` is the executable training orchestration surface. It must
+  execute through adapters rather than bypassing them with task-shaped model
+  payloads directly.
 
 ---
 
 ## 6 Data and Path Constraints
 
 - Canonical data pipeline: `data/raw/` → `data/interim/` → `data/processed/`.
-- DataModules consume only `processed` data.
+- DataModules consume only `data/processed/` data.
 - Raw data is not committed to version control.
 - Processing scripts live in `scripts/data-gen/`.
 - `data/interim/` is optional scratch space; `data/external/` is for
   third-party datasets.
 - No hard-coded absolute paths. Use config or CLI inputs.
-- Detailed processed-data format and dataset output contracts live in
+- All roots under `data/processed/` are **immutable versioned leaves**. The
+  two canonical dataset classes are:
+  - **Shared substrate**: `data/processed/<shared-family>/v<integer>/` —
+    owned by the upstream source, task-neutral channels only.
+  - **Task corpus**: `data/processed/<task-name>/<corpus-name>/v<integer>/` —
+    owned by the task package, includes task-protocol channels.
+- A shared-family name must not collide with a task namespace. Registered
+  shared families are `maze-nd`, `dungeongen`, and `numberline`; task namespaces are
+  `mazehard`, `dungeon`, `arena`, and `countwalk`.
+- `data/` owns provenance, normalization, shared schema, shared manifests,
+  shared validation, and shared substrate materialization. `tasks/` own task
+  schema, task corpus materialization, replay rows, episode protocol,
+  reward/supervision semantics, and runtime reconstruction. `adapters/` own
+  nothing persistent.
+- Build reports and benchmark manifests are not canonical dataset contents and
+  must not live under `data/processed/`. Use `reports/benchmarks/` or
+  `outputs/`.
+- Detailed versioned-root format, path grammar, dataset class rules, root
+  manifest contract, and staged CLI semantics live in
   `spec/spec-data-contracts.md`.
 
 ---
@@ -170,8 +188,8 @@ Spec maintenance and conflict-resolution workflow are owned by
   `spec/spec-benchmark-suite.md` and are normative.
 - Canonical benchmark entry points belong under `scripts/benchmarks/` as thin
   wrappers around `ehc_sn.benchmarks`.
-- Benchmark-like code under `experiments/` is non-canonical and must not
-  duplicate shared benchmark orchestration or artifact writing.
+- Benchmark-like code outside the canonical script roots is non-canonical and
+  must not duplicate shared benchmark orchestration or artifact writing.
 - Repository-level reporting and documentation standards remain governed by
   `spec/spec-standards.md`.
 

@@ -16,17 +16,51 @@ claims for EHC-SN. Core benchmark ownership rules remain in
 The canonical benchmark family is divided into two bridge benchmarks and three
 primary goal-directed navigation benchmarks.
 
-| Benchmark                           | Purpose                                                                                                                                                | Canonical split / protocol                                                                                                                                              | Current implementation status                                                                        |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| **B0 HRM Deliberation Bridge**      | Bridge benchmark for HRM-style deliberative batch prediction over full-maze token targets.                                                             | Use the processed `maze-30x30-hard-1k` split: `1000/1000/1000` train/val/test 30x30 mazes. Report full test plus a preregistered hard subset derived from `difficulty`. | Partially scaffolded by `envs/mazehard.py`, HRM entry points, and `scripts/benchmarks/b0_bridge.py`. |
-| **M0 Episodic Memory Bridge**       | Bridge benchmark for TEM-style structural memory, sensory binding, episodic write/read, and one-shot memory behavior under fixed trajectory contracts. | Reuse the B1 processed dungeon split and OOD corpora together with the B2/B3 six-goal / three-start contract.                                                           | Not yet implemented.                                                                                 |
-| **B1 Dungeon Navigation Reasoning** | Main within-episode reasoning benchmark for goal-directed navigation.                                                                                  | Train on the processed dungeon split: `800/100/100` train/val/test layouts, then evaluate in-distribution and on OOD generated corpora.                                 | Requires a goal-reaching reward/binding layer on top of the dungeon processed-data contract.         |
-| **B2 One-Shot Goal Relocation**     | Main across-episode one-shot adaptation benchmark.                                                                                                     | Reuse B1 layouts with a six-goal / three-start contract. Train on goals `1-4`, evaluate held-out goals `5-6`.                                                           | Requires explicit frozen-weight one-shot evaluation support.                                         |
-| **B3 Interference and Control**     | Main mechanism benchmark for complementary-memory claims.                                                                                              | Reuse B1 layouts with the same six-goal / three-start contract and blocked vs interleaved schedules.                                                                    | Requires retrieval/control diagnostics on top of rollout traces.                                     |
+- **B0 HRM Deliberation Bridge**
+  - Purpose: bridge benchmark for HRM-style deliberative batch prediction over
+    full-maze token targets.
+  - Canonical split/protocol: use the processed `maze-30x30-hard-1k` split:
+    `1000/1000/1000` train/val/test 30x30 mazes. Report full test plus a
+    preregistered hard subset derived from `difficulty`.
+  - Repository status (informational): not yet implemented.
+    `scripts/benchmarks/b0-mazehard.py` is currently a fail-fast stub; any
+    reusable evaluator must live in `ehc_sn.benchmarks`.
+- **M0 Episodic Memory Bridge**
+  - Purpose: bridge benchmark for TEM-style structural memory, sensory binding,
+    episodic write/read, and one-shot memory behavior under fixed trajectory
+    contracts.
+  - Canonical split/protocol: reuse the B1 processed dungeon split and OOD
+    corpora together with the B2/B3 six-goal / three-start contract.
+  - Repository status (informational): not yet implemented.
+- **B1 Dungeon Navigation Reasoning**
+  - Purpose: main within-episode reasoning benchmark for goal-directed
+    navigation.
+  - Canonical split/protocol: train on the processed dungeon split:
+    `800/100/100` train/val/test layouts, then evaluate in-distribution and on
+    OOD generated corpora.
+  - Repository status (informational): benchmark contract exists; a complete
+    goal-reaching reward/binding layer still needs to be wired on top of the
+    dungeon processed-data contract.
+- **B2 One-Shot Goal Relocation**
+  - Purpose: main across-episode one-shot adaptation benchmark.
+  - Canonical split/protocol: reuse B1 layouts with a six-goal / three-start
+    contract. Train on goals `1-4`, evaluate held-out goals `5-6`.
+  - Repository status (informational): frozen-weight one-shot evaluation
+    support still needs to be implemented.
+- **B3 Interference and Control**
+  - Purpose: main mechanism benchmark for complementary-memory claims.
+  - Canonical split/protocol: reuse B1 layouts with the same six-goal /
+    three-start contract and blocked vs interleaved schedules.
+  - Repository status (informational): retrieval/control diagnostics over
+    rollout traces still need to be implemented.
 
 Bridge benchmarks validate inherited predictive or memory capabilities in
 isolation. Primary benchmarks evaluate complete goal-directed navigation
 agents.
+
+The benchmark contract columns above are normative. The repository-status
+column is informational and must match the current codebase rather than planned
+future architecture.
 
 ---
 
