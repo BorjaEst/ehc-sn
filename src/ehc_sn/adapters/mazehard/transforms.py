@@ -11,8 +11,10 @@ from __future__ import annotations
 import numpy as np
 
 from ehc_sn.adapters.mazehard.vocabulary import EMPTY_ID, GOAL_ID, START_ID, WALL_ID
-from ehc_sn.data.schema import CHANNEL_TOPOLOGY
 from ehc_sn.types import Channels
+
+_CHANNEL_TOPOLOGY: str = "topology"
+"""Canonical topology channel name (matches ehc_sn.data.substrate.grid2d.CHANNEL_TOPOLOGY)."""
 
 
 # =================================================================================================
@@ -35,7 +37,7 @@ def channels_to_grid(channels: Channels) -> Channels:
     Returns:
         Input dict extended with ``"grid": int32 array of shape (H, W)``.
     """
-    topology = channels[CHANNEL_TOPOLOGY]
+    topology = channels[_CHANNEL_TOPOLOGY]
     grid = np.where(topology, EMPTY_ID, WALL_ID).astype(np.int32)
     if "start" in channels:
         grid = np.where(channels["start"], START_ID, grid)

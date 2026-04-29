@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn.loss.consistency import LatentRelation
-from ehc_sn.models.ehc.core.ehc_base import GridCodes, PlaceCodes
+from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes
 from ehc_sn.modules.autoencoder import MLPDecoder, TwoHotEncoder
 from ehc_sn.objectives.ehc import GRID_TRANSITION_RELATION, PLACE_SENSORY_RELATION, PLACE_TRANSITION_RELATION
 from ehc_sn.tasks.arena.contracts import ArenaTaskOutput

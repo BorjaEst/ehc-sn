@@ -22,9 +22,11 @@ from ehc_sn.adapters.mazehard.decoders import MazeHardDecoder
 from ehc_sn.adapters.mazehard.encoders import MazeHardEncoder
 from ehc_sn.adapters.mazehard.transforms import channels_to_grid
 from ehc_sn.adapters.mazehard.vocabulary import VOCAB_SIZE as MAZE_SEM_VOCAB_SIZE
-from ehc_sn.data.schema import validate_processed
 from ehc_sn.tasks.mazehard.contracts import MazeHardTaskInput, MazeHardTaskOutput
 from ehc_sn.types import Batch
+
+_MANDATORY_GRID2D_CHANNEL: str = "topology"
+"""Mandatory channel that must be present in every grid2d substrate sample."""
 
 TInput = TypeVar("TInput")
 
@@ -233,7 +235,10 @@ def _coerce_numpy_channels(raw: Mapping[str, Any]) -> dict[str, np.ndarray]:
             channels[key] = value.detach().cpu().numpy()
             continue
         raise TypeError(f"Unsupported MazeHard channel type for key {key!r}: {type(value).__name__}.")
-    validate_processed(channels)
+    if _MANDATORY_GRID2D_CHANNEL not in channels:
+        raise ValueError(
+            f"MazeHard batch must contain the mandatory '{_MANDATORY_GRID2D_CHANNEL}' channel."
+        )
     return channels
 
 
