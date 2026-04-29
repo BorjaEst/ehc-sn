@@ -1,8 +1,8 @@
-"""Load-time transforms for maze NPZ channels.
+"""Load-time transforms for processed channel dicts.
 
-Transforms operate on ``dict[str, np.ndarray]`` channel dicts and return the
-same type. They are composable via :class:`Compose` and follow the
-torchvision-style callable convention.
+Transforms operate on ``dict[str, np.ndarray]`` channel dicts loaded from
+versioned processed split roots and return the same type. They are composable
+via :class:`Compose` and follow the torchvision-style callable convention.
 
 Provided transforms:
 - :class:`RandomDihedral` — randomly applies one of the 8 dihedral symmetries
@@ -31,8 +31,13 @@ class Compose:
 
     Example::
 
-        transform = Compose([RandomDihedral(), channels_to_grid])
-        sample = transform(raw_channels)
+        transform = Compose([RandomDihedral()])
+        sample = transform(channels)
+
+    Note:
+        Task-specific transforms (such as grid-projection or action encoding)
+        live outside :mod:`ehc_sn.data.transforms` in their respective task
+        adapter packages.
     """
 
     def __init__(  # ------------------------------------------------------------------------------

@@ -1,3 +1,8 @@
+"""PyTorch :class:`Dataset` wrappers for versioned processed split roots.
+
+Public surface: :class:`MazeMetadata`, :class:`MazeDataset`.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -14,17 +19,17 @@ from ehc_sn.data.index import MazeIndexEntry
 
 # =================================================================================================
 class MazeMetadata(BaseModel, extra="allow"):
-    """Dataset-level metadata for a maze dataset.
+    """Dataset-level metadata for one resolved processed split root.
 
-    This is typically read from a companion metadata file and is less strict
+    This is typically read from a split-local metadata file and is less strict
     than :class:`~ehc_sn.data.index.MazeIndexEntry` (``extra=allow``).
     """
 
-    source: str = Field(..., description="Source dataset name")
-    split: str = Field(..., description="Split name (e.g., 'train', 'val', 'test')")
-    n_samples: int = Field(..., ge=0, description="Number of samples in the dataset")
-    shape: list[int] = Field(..., description="Shape of the maze (height, width)")
-    channels: list[str] = Field(..., description="List of channel names (e.g., ['observation', 'goal'])")
+    source: str = Field(..., description="Owning source or corpus name for the resolved split root")
+    split: str = Field(..., description="Canonical split name for the resolved root (for example train/val/test)")
+    n_samples: int = Field(..., ge=0, description="Number of samples materialized in the resolved split root")
+    shape: list[int] = Field(..., description="Common spatial grid shape for samples in the split root")
+    channels: list[str] = Field(..., description="Canonical processed channel names present in every sample")
 
 
 # =================================================================================================
@@ -33,21 +38,18 @@ class MazeDataset(Dataset):
     def __init__(  # ------------------------------------------------------------------------------
         self, entries: list[MazeIndexEntry], data_dir: Path, transform: Callable | None = None,
     ) -> None:  # fmt: skip
-        """Dataset for maze data, backed by memory-mapped .npy files."""
+        """Dataset backed by memory-mapped arrays from one resolved split root."""
         if not entries:
             raise ValueError("MazeDataset requires at least one index entry.")
 
         splits = {entry.split for entry in entries}
         if len(splits) != 1:
-            raise ValueError(
-                "MazeDataset requires entries from exactly one split; resolve a single split before loading arrays."
-            )
+            raise ValueError("MazeDataset requires entries from exactly one split; resolve a single split before loading arrays.")
 
         split = next(iter(splits))
         if (data_dir / split).is_dir():
             raise ValueError(
-                f"MazeDataset expects a resolved split directory, got dataset root '{data_dir}'. "
-                f"Use '{data_dir / split}' instead."
+                f"MazeDataset expects a resolved split directory, got dataset root '{data_dir}'. " f"Use '{data_dir / split}' instead."
             )
 
         self._entries = entries

@@ -17,8 +17,15 @@ the environment kernel is not yet written.
 
 """
 
+from .builder import (
+    DUNGEON_TASK_CHANNELS,
+    DUNGEON_TRAJECTORY_CHANNELS,
+    TASK_FAMILY,
+    build_dungeon_task_corpus,
+    validate_dungeon_task_root,
+    validate_dungeon_task_sample,
+)
 from .contracts import DUNGEON_ACTION_COUNT, DungeonAction, DungeonTaskInput, DungeonTaskOutput
-from .data import DUNGEON_TASK_CHANNELS, DUNGEON_TRAJECTORY_CHANNELS, build_dungeon_task_corpus
 from .evaluation import DungeonScoreReport, DungeonStepScore
 from .reward import DungeonRewardConfig, DungeonRewardProjector
 
@@ -33,5 +40,8 @@ __all__ = [
     "DungeonStepScore",
     "DungeonTaskInput",
     "DungeonTaskOutput",
+    "TASK_FAMILY",
     "build_dungeon_task_corpus",
+    "validate_dungeon_task_root",
+    "validate_dungeon_task_sample",
 ]

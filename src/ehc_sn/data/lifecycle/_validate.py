@@ -63,17 +63,6 @@ def _validate_structure(root: Path) -> dict[str, Any]:
     Does not check path grammar (leaf name vs. manifest version).  Safe to
     call on a temporary staging directory before the atomic rename.
 
-    Checks:
-    - ``manifest.json`` is present and contains required fields.
-    - ``topology`` is declared in channels (mandatory shared channel).
-    - Class-specific required manifest fields are present.
-    - Task corpora declare ``parent_substrate`` as a repo-relative path.
-    - ``index.jsonl`` is present.
-    - Every declared split directory, ``dataset.json``, and channel ``.npy``
-      file exist.
-    - Array leading dimension matches declared ``n_samples`` count.
-    - Spatial arrays (ndim >= 3) have trailing ``(H, W)`` matching manifest.
-
     Args:
         root: Root directory to validate (may be a staging temp dir).
 
@@ -123,7 +112,6 @@ def _validate_structure(root: Path) -> dict[str, Any]:
     if not index_path.exists():
         raise FileNotFoundError(f"Missing index: {index_path}")
 
-    # Count index entries per split and compare with manifest.
     split_counts_from_index: dict[str, int] = {}
     with index_path.open() as fh:
         for line in fh:
@@ -170,14 +158,6 @@ def _validate_structure(root: Path) -> dict[str, Any]:
 def _validate_path_grammar(root: Path, manifest: dict[str, Any]) -> None:
     """Validate that the path structure matches the manifest identity.
 
-    Checks:
-    - Version leaf name equals ``v<manifest['version']>``.
-    - For ``shared_substrate``: ``root.parent.name == manifest['family']``.
-    - For ``task_corpus``: ``root.parent.name == manifest['corpus']`` and
-      ``root.parent.parent.name == manifest['task']``.
-    - ``parent_substrate`` (when present) matches a canonical pattern and
-      is consistent with ``parent_family`` / ``parent_version``.
-
     Args:
         root: Versioned dataset root path.
         manifest: Already-parsed manifest dict.
@@ -214,7 +194,6 @@ def _validate_path_grammar(root: Path, manifest: dict[str, Any]) -> None:
                 f"Task corpus path grammar violation: "
                 f"grandparent dir is {root.parent.parent.name!r}, manifest task is {task!r}."
             )
-        # Validate parent_substrate canonical format.
         ps: str = manifest["parent_substrate"]
         parent_family = manifest["parent_family"]
         parent_version = manifest["parent_version"]

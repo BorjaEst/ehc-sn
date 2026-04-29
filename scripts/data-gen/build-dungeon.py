@@ -45,10 +45,10 @@ from typing import Annotated
 
 import typer
 
-from ehc_sn.data._validator import validate_version_root
-from ehc_sn.data.dungeon_builder import SHARED_FAMILY
-from ehc_sn.tasks.dungeon.data import TASK_FAMILY as DUNGEON_TASK_FAMILY
-from ehc_sn.tasks.dungeon.data import build_dungeon_task_corpus, validate_dungeon_task_root
+from ehc_sn.data.build import validate_version_root
+from ehc_sn.data.substrate.dungeongen import SHARED_FAMILY
+from ehc_sn.tasks.dungeon import TASK_FAMILY as DUNGEON_TASK_FAMILY
+from ehc_sn.tasks.dungeon import build_dungeon_task_corpus, validate_dungeon_task_root
 
 # ---------------------------------------------------------------------------
 _DEFAULT_SHARED_VERSION = 1

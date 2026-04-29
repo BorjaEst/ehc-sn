@@ -139,7 +139,7 @@ class TrainingModel(L.LightningModule):
         controller = ReplayTrajectoryController(
             backbone=self.bridge_adapter,
             config=self.config.controller,
-            runtime=ArenaReplayCapability(),
+            runtime=ArenaReplayCapability(observation_dim=self.config.adapter.observation_dim),
         )
         objective = TEMObjective(self.config.objective, task_binding=ArenaTEMTaskBinding())
         return controller, objective

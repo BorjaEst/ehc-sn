@@ -16,7 +16,6 @@ from ehc_sn.data.index import MazeIndexEntry, read_index
 from ehc_sn.data.manifest import read_manifest
 
 
-# =============================================================================
 def iter_substrate_samples(
     substrate_root: Path,
     split: str,
@@ -28,8 +27,7 @@ def iter_substrate_samples(
         substrate_root: Versioned root of the shared substrate
             (e.g. ``data/processed/dungeongen/v1``).
         split: One of ``"train"``, ``"val"``, ``"test"``.
-        channels: Channel names to load.  Each must have a corresponding
-            ``<channel>.npy`` file in ``<substrate_root>/<split>/``.
+        channels: Channel names to load.
 
     Yields:
         Dict mapping each channel name to a single-sample numpy array.
@@ -44,7 +42,6 @@ def iter_substrate_samples(
         yield {ch: arrays[ch][i] for ch in channels}
 
 
-# =============================================================================
 def iter_substrate_entries_and_samples(
     substrate_root: Path,
     split: str,
@@ -73,15 +70,11 @@ def iter_substrate_entries_and_samples(
     arrays = {ch: np.load(split_dir / f"{ch}.npy") for ch in channels}
     n_arrays = next(iter(arrays.values())).shape[0]
     if len(entries) != n_arrays:
-        raise ValueError(
-            f"Index has {len(entries)} {split!r} entries but arrays have {n_arrays} samples "
-            f"in {substrate_root}."
-        )
+        raise ValueError(f"Index has {len(entries)} {split!r} entries but arrays have {n_arrays} samples " f"in {substrate_root}.")
     for i, entry in enumerate(entries):
         yield entry, {ch: arrays[ch][i] for ch in channels}
 
 
-# =============================================================================
 def load_substrate_manifest(substrate_root: Path) -> dict:
     """Return the manifest dict for a shared substrate root.
 
@@ -97,14 +90,10 @@ def load_substrate_manifest(substrate_root: Path) -> dict:
     """
     manifest = read_manifest(substrate_root)
     if manifest.get("dataset_class") != "shared_substrate":
-        raise ValueError(
-            f"'{substrate_root}' is not a shared_substrate "
-            f"(got dataset_class={manifest.get('dataset_class')!r})."
-        )
+        raise ValueError(f"Expected a shared_substrate root, got dataset_class=" f"{manifest.get('dataset_class')!r} at {substrate_root}.")
     return manifest
 
 
-# =============================================================================
 __all__ = [
     "iter_substrate_samples",
     "iter_substrate_entries_and_samples",

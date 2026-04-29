@@ -1,3 +1,8 @@
+"""Lightning :class:`~lightning.LightningDataModule` for maze datasets.
+
+Public surface: :class:`Datamodule`, :class:`DatamoduleConfig`.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable

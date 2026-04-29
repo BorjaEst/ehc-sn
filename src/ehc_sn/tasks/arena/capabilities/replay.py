@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, Final
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 
 from ehc_sn.tasks._movement import _ACTION_DELTAS
@@ -95,6 +96,9 @@ class ArenaReplayCapability:
     controller's ``task_state`` carry — no mutable instance state is kept.
     """
 
+    def __init__(self, observation_dim: int) -> None:
+        self._obs_dim = observation_dim
+
     def trajectory_lengths(self, batch: Batch) -> Tensor:
         """Return per-slot trajectory lengths from ``batch["trajectory_length"]``."""
         return batch["trajectory_length"]
@@ -127,8 +131,10 @@ class ArenaReplayCapability:
         location_id = row * W + col  # (B,)
         observation_id = batch["observations"][arange_b, row, col]  # (B,)
         valid_action_mask = _compute_valid_action_mask(topology, row, col)  # (B, A)
+        observation = F.one_hot(observation_id.long(), num_classes=self._obs_dim).float()  # (B, obs_dim)
 
         result: dict[str, Tensor] = {
+            "observation": observation,
             "observation_id": observation_id.unsqueeze(-1),
             "previous_action": prev_action.unsqueeze(-1),
             "location_id": location_id.unsqueeze(-1),

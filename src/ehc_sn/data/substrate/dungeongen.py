@@ -1,18 +1,17 @@
 """Shared-substrate builder for the dungeongen dataset family.
 
-Orchestrates the shared-substrate pipeline for Dungeon:
+Orchestrates the shared-substrate pipeline for the dungeongen source family:
 
-1. ``dungeon_raw.ensure_raw_snapshot`` — create/validate canonical raw snapshot.
-2. ``prepare_dungeongen_interim`` — normalize raw topologies into per-split NPZ files.
-3. ``iter_interim_topologies`` — stream topology arrays from the interim split files.
-4. Pad and augment each topology into shared-substrate channels.
-5. ``_writer.create_version_root`` — create the immutable version leaf.
-6. ``_writer.write_split`` / ``write_index_at_root`` — write processed output.
-7. ``manifest.write_manifest`` — write the authoritative root manifest.
+1. :func:`ensure_raw` — create/validate canonical tar-sharded raw snapshot.
+2. :func:`prepare_interim` — normalize raw topologies into per-split NPZ files.
+3. :func:`build_shared_substrate` — build the versioned immutable substrate root.
+
+Public surface: SHARED_FAMILY, SHARED_CHANNELS, ensure_raw, prepare_interim,
+build_shared_substrate.
 
 Shared-substrate channels (topology, observations, mask_valid, regions,
-landmarks) are task-neutral.  Trajectory and replay channels belong in the
-Dungeon task corpus; see ``ehc_sn.tasks.dungeon.data``.
+landmarks) are task-neutral.  Trajectory and replay channels belong in task
+corpora; see ``ehc_sn.tasks.dungeon`` and ``ehc_sn.tasks.arena``.
 
 Interim layer: ``data/interim/dungeongen/`` — one NPZ file per split.
 Shared substrate: ``data/processed/dungeongen/v<version>/``
@@ -25,20 +24,16 @@ from typing import Final, Iterator
 
 import numpy as np
 
-from ehc_sn.data._canonical import (
-    binary_structural_landmarks,
-    largest_component_mask,
-    sample_observations,
-)
-from ehc_sn.data._writer import _extract_version, _staging_root, write_index_at_root, write_split
-from ehc_sn.data.dungeon_raw import iter_raw_topologies
+from ehc_sn.data.lifecycle import extract_version, staging_root, write_index_at_root, write_split
 from ehc_sn.data.manifest import write_manifest
+from ehc_sn.data.substrate._common import binary_structural_landmarks, largest_component_mask, sample_observations
+from ehc_sn.data.substrate._dungeongen_raw import ensure_raw_snapshot, iter_raw_topologies
 
 # ---------------------------------------------------------------------------
 SHARED_FAMILY: Final[str] = "dungeongen"
 """Shared-substrate family name for the dungeongen source."""
 
-DUNGEON_SUBSTRATE_CHANNELS: Final[list[str]] = [
+SHARED_CHANNELS: Final[list[str]] = [
     "topology",
     "observations",
     "mask_valid",
@@ -50,11 +45,25 @@ DUNGEON_SUBSTRATE_CHANNELS: Final[list[str]] = [
 _SPLITS: tuple[str, ...] = ("train", "val", "test")
 _SPLIT_SEED_OFFSET: dict[str, int] = {"train": 0, "val": 100_000, "test": 200_000}
 _SOURCE_ID: Final[str] = "dungeongen"
-"""Stable upstream source identifier."""
 
 
 # ---------------------------------------------------------------------------
-def prepare_dungeongen_interim(
+def ensure_raw(
+    raw_root: Path,
+    base_seed: int,
+    split_counts: dict[str, int],
+) -> None:
+    """Create or validate the canonical tar-sharded raw snapshot.
+
+    Args:
+        raw_root: Canonical raw root (e.g. ``data/raw/dungeongen``).
+        base_seed: Root base seed used across splits.
+        split_counts: Mapping of split name to number of samples.
+    """
+    ensure_raw_snapshot(raw_root, base_seed, split_counts)
+
+
+def prepare_interim(
     raw_root: Path,
     interim_root: Path,
     *,
@@ -64,16 +73,10 @@ def prepare_dungeongen_interim(
 ) -> None:
     """Normalize the raw snapshot into per-split NPZ files in the interim layer.
 
-    Reads topology data from the canonical raw snapshot via
-    :func:`~ehc_sn.data.dungeon_raw.iter_raw_topologies` and writes one NPZ
+    Reads topology data from the canonical raw snapshot and writes one NPZ
     file per split to ``data/interim/dungeongen/<split>.npz``.  Each split
     NPZ stores deterministically normalized arrays padded to the split's max
-    shape, suitable for downstream substrate building without re-reading raw
-    shards.
-
-    This is a real normalization boundary: the interim format is materially
-    different from the raw tar-sharded snapshot.  It does not preserve tar
-    packaging or per-sample filesystem fan-out.
+    shape.
 
     Per-split NPZ arrays:
 
@@ -117,11 +120,8 @@ def prepare_dungeongen_interim(
 
         count = len(sample_ids)
         if count < n:
-            raise RuntimeError(
-                f"Interim: only {count} raw topologies found for '{split}', need {n}."
-            )
+            raise RuntimeError(f"Interim: only {count} raw topologies found for '{split}', need {n}.")
 
-        # Pad to max shape within split.
         h_max = int(max(h for h in heights))
         w_max = int(max(w for w in widths))
         topo_arr = np.zeros((count, h_max, w_max), dtype=bool)
@@ -142,17 +142,12 @@ def prepare_dungeongen_interim(
         )
 
 
-def iter_interim_topologies(
-    interim_root: Path, split: str
-) -> Iterator[tuple[np.ndarray, np.ndarray, int]]:
+def _iter_interim_topologies(interim_root: Path, split: str) -> Iterator[tuple[np.ndarray, np.ndarray, int]]:
     """Yield ``(topology, regions, seed)`` from the dungeongen interim split file.
-
-    Reconstructs native-shape arrays by slicing with the stored ``height`` and
-    ``width`` arrays — no padding is exposed to callers.
 
     Args:
         interim_root: Interim root (e.g. ``data/interim/dungeongen``).
-        split: Split name (``"train"``, ``"val"``, or ``"test"``).
+        split: Split name.
 
     Yields:
         ``(topology, regions, seed)`` tuples in deterministic index order.
@@ -162,9 +157,7 @@ def iter_interim_topologies(
     """
     split_path = interim_root / f"{split}.npz"
     if not split_path.exists():
-        raise FileNotFoundError(
-            f"Interim split file not found: {split_path}.  Run prepare-interim first."
-        )
+        raise FileNotFoundError(f"Interim split file not found: {split_path}.  Run prepare-interim first.")
     data = np.load(split_path)
     heights = data["height"]
     widths = data["width"]
@@ -180,10 +173,7 @@ def iter_interim_topologies(
 def _pad_to_shape(arr: np.ndarray, target_h: int, target_w: int, *, fill: int | bool) -> np.ndarray:
     h, w = arr.shape
     if h > target_h or w > target_w:
-        raise ValueError(
-            f"Source shape ({h}, {w}) exceeds target ({target_h}, {target_w}). "
-            "Increase --height/--width."
-        )
+        raise ValueError(f"Source shape ({h}, {w}) exceeds target ({target_h}, {target_w}). " "Increase --height/--width.")
     if h == target_h and w == target_w:
         return arr
     out = np.full((target_h, target_w), fill, dtype=arr.dtype)
@@ -223,28 +213,15 @@ def _sample_seed(base_seed: int, split: str, idx: int) -> int:
     return base_seed + _SPLIT_SEED_OFFSET[split] + idx
 
 
-# ---------------------------------------------------------------------------
 def _infer_shape(
     interim_root: Path,
     split_counts: dict[str, int],
 ) -> tuple[int, int]:
-    """Return (max_height, max_width) across all selected interim samples.
-
-    Scans the first ``n`` samples for each split as given by *split_counts*
-    and returns the per-dimension maximum.  This is the minimum target shape
-    that can accommodate every selected sample without discarding cells.
-
-    Args:
-        interim_root: Interim root (e.g. ``data/interim/dungeongen``).
-        split_counts: Mapping of split name → number of samples to consider.
-
-    Returns:
-        ``(max_height, max_width)`` as a two-int tuple.
-    """
+    """Return (max_height, max_width) across all selected interim samples."""
     max_h = 0
     max_w = 0
     for split, n in split_counts.items():
-        for idx, (topology, _, _) in enumerate(iter_interim_topologies(interim_root, split)):
+        for idx, (topology, _, _) in enumerate(_iter_interim_topologies(interim_root, split)):
             if idx >= n:
                 break
             h, w = topology.shape
@@ -256,7 +233,7 @@ def _infer_shape(
 
 
 # ---------------------------------------------------------------------------
-def build_dungeongen_substrate(
+def build_shared_substrate(
     version_root: Path,
     *,
     interim_root: Path,
@@ -271,14 +248,11 @@ def build_dungeongen_substrate(
     """Build the dungeongen shared substrate at *version_root*.
 
     Reads topology files from *interim_root* (produced by
-    :func:`prepare_dungeongen_interim`), pads each topology, and assigns
-    shared-substrate channels (no trajectory data).
+    :func:`prepare_interim`), pads each topology, and assigns shared-substrate
+    channels (no trajectory data).
 
     When *height* and/or *width* are omitted (``None``), the required
-    processed grid dimensions are inferred from the selected interim slice:
-    the maximum height and maximum width across all samples in the chosen
-    ``n_train``/``n_val``/``n_test`` slice.  Passing an explicit value
-    smaller than the inferred maximum raises ``ValueError`` immediately.
+    processed grid dimensions are inferred from the selected interim slice.
 
     The version integer is derived from the ``v<N>`` leaf of *version_root*;
     there is no separate ``version`` parameter.
@@ -290,23 +264,19 @@ def build_dungeongen_substrate(
         n_train: Number of training samples.
         n_val: Number of validation samples.
         n_test: Number of test samples.
-        height: Target grid height after padding.  When ``None`` (default),
-            inferred as the maximum height across the selected interim slice.
-        width: Target grid width after padding.  When ``None`` (default),
-            inferred as the maximum width across the selected interim slice.
+        height: Target grid height after padding.  When ``None``, inferred.
+        width: Target grid width after padding.  When ``None``, inferred.
         n_observations: Number of distinct observation ids to assign.
-        seed: Base RNG seed; per-sample seeds are derived deterministically.
+        seed: Base RNG seed.
 
     Raises:
         FileExistsError: When *version_root* already exists (immutable root).
-        ValueError: When an explicit *height* or *width* is smaller than the
-            maximum shape required by the selected interim slice.
+        ValueError: When explicit height/width is smaller than the inferred max.
         RuntimeError: When augmentation encounters an empty valid mask.
     """
-    version = _extract_version(version_root)
+    version = extract_version(version_root)
     split_counts = {"train": n_train, "val": n_val, "test": n_test}
 
-    # Resolve grid dimensions — infer from interim slice when not explicit.
     inferred_h, inferred_w = _infer_shape(interim_root, split_counts)
     if height is None:
         resolved_h = inferred_h
@@ -331,16 +301,20 @@ def build_dungeongen_substrate(
 
     shape: tuple[int, int] = (resolved_h, resolved_w)
     stage_params = {
-        "n_train": n_train, "n_val": n_val, "n_test": n_test,
-        "height": resolved_h, "width": resolved_w,
-        "n_observations": n_observations, "seed": seed,
+        "n_train": n_train,
+        "n_val": n_val,
+        "n_test": n_test,
+        "height": resolved_h,
+        "width": resolved_w,
+        "n_observations": n_observations,
+        "seed": seed,
     }
 
-    with _staging_root(version_root) as tmp:
+    with staging_root(version_root) as tmp:
         all_entries = []
         for split in _SPLITS:
             n = split_counts[split]
-            interim_topologies = list(iter_interim_topologies(interim_root, split))[:n]
+            interim_topologies = list(_iter_interim_topologies(interim_root, split))[:n]
             samples = [
                 _build_substrate_sample(
                     topology,
@@ -358,8 +332,8 @@ def build_dungeongen_substrate(
                 samples,
                 source=SHARED_FAMILY,
                 shape=shape,
-                channels=DUNGEON_SUBSTRATE_CHANNELS,
-                spatial_channels=DUNGEON_SUBSTRATE_CHANNELS,
+                channels=SHARED_CHANNELS,
+                spatial_channels=SHARED_CHANNELS,
                 index_kwargs={"n_observations": n_observations, "n_goals": 0, "difficulty": "medium"},
             )
             all_entries.extend(entries)
@@ -371,11 +345,11 @@ def build_dungeongen_substrate(
             dataset_class="shared_substrate",
             family=SHARED_FAMILY,
             version=version,
-            channels=DUNGEON_SUBSTRATE_CHANNELS,
+            channels=SHARED_CHANNELS,
             shape=shape,
             n_samples=split_counts,
             source_id=_SOURCE_ID,
-            builder="ehc_sn.data.dungeon_builder.build_dungeongen_substrate",
+            builder="ehc_sn.data.substrate.dungeongen.build_shared_substrate",
             seed=seed,
             stage_params=stage_params,
         )
@@ -386,9 +360,8 @@ def build_dungeongen_substrate(
 
 __all__ = [
     "SHARED_FAMILY",
-    "DUNGEON_SUBSTRATE_CHANNELS",
-    "_RAW_SEED_OFFSET",
-    "prepare_dungeongen_interim",
-    "iter_interim_topologies",
-    "build_dungeongen_substrate",
+    "SHARED_CHANNELS",
+    "ensure_raw",
+    "prepare_interim",
+    "build_shared_substrate",
 ]

@@ -1,3 +1,9 @@
+"""Dataset index types and JSONL I/O.
+
+Public surface: :class:`MazeIndexEntry`, :func:`read_index`,
+:func:`write_index`, :func:`filter_index`.
+"""
+
 from __future__ import annotations
 
 import json
@@ -8,23 +14,24 @@ from pydantic import BaseModel, Field
 
 # =================================================================================================
 class MazeIndexEntry(BaseModel, extra="forbid"):
-    """One entry in a maze dataset index.
+    """One sample entry in a shared-substrate or task-corpus index.
 
-    Index entries are stored as JSONL and describe where and how to interpret a
-    sample dataset (shape, channels, split/source metadata).
+    Index entries are stored as JSONL and describe how to interpret a sample in
+    a versioned processed root: spatial shape, materialized channels, split,
+    and source provenance.
     """
 
-    id: str = Field(..., description="Unique identifier for the maze (e.g., 'maze_00001')")
-    source: str = Field(..., description="Source dataset name (e.g., 'huggingface')")
-    split: str = Field(..., description="Split name (e.g., 'train', 'val', 'test')")
+    id: str = Field(..., description="Unique sample identifier within the versioned processed root")
+    source: str = Field(..., description="Source family or task corpus that materialized the sample")
+    split: str = Field(..., description="Canonical split name recorded for the sample")
     source_record_id: str | None = Field(
         default=None,
         description="Stable raw-source record identity (e.g. 'train:12345' for MazeHard puzzle_index). "
-                    "Used by task builders to recover task-owned channels by source identity, "
-                    "not by split-local position.",
+        "Used by task builders to recover task-owned channels by source identity, "
+        "not by split-local position.",
     )
 
-    shape: tuple[int, int] = Field(..., description="Maze shape as (height, width)")
+    shape: tuple[int, int] = Field(..., description="Spatial grid shape as (height, width)")
 
     @property
     def height(self) -> int:
@@ -36,21 +43,21 @@ class MazeIndexEntry(BaseModel, extra="forbid"):
         """Maze grid width (columns)."""
         return self.shape[1]
 
-    channels: list[str] = Field(..., description="List of channel names (e.g., ['observation', 'goal'])")
+    channels: list[str] = Field(..., description="Canonical processed channel names materialized for the sample")
 
     n_observations: int = Field(
         default=0,
         ge=0,
-        description="Number of observation channels (e.g., 1 for top-down view, >1 for multi-view)",
+        description="Legacy count of task-visible observation channels when the corpus defines them",
     )
     n_goals: int = Field(
         default=0,
         ge=0,
-        description="Number of goal channels (e.g., 1 for single-goal mazes, >1 for multi-goal mazes)",
+        description="Legacy count of goal-like task channels when the corpus defines them",
     )
     difficulty: str = Field(
         default="unknown",
-        description="Difficulty level (e.g., 'easy', 'medium', 'hard')",
+        description="Optional task-corpus difficulty label for the sample",
     )
 
 

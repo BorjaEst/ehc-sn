@@ -4,12 +4,9 @@ Owns the I/O concerns shared across builder scripts: creating immutable
 version-leaf directories, stacking and writing per-channel ``.npy`` files,
 writing ``dataset.json``, and collecting ``index.jsonl`` entries.
 
-Dataset roots are immutable.  Builders must use :func:`_staging_root` for
+Dataset roots are immutable.  Builders must use :func:`staging_root` for
 transactional materialization: all output goes to a temp sibling dir, is
 structurally validated, then atomically renamed to the final version leaf.
-
-Source-specific processing logic belongs in source-specific modules
-(e.g. ``dungeon_builder.py``, ``mazehard_builder.py``).
 """
 
 from __future__ import annotations
@@ -25,13 +22,12 @@ import numpy as np
 from ehc_sn.data.index import MazeIndexEntry, write_index
 from ehc_sn.data.schema import validate_processed
 
-
 # ---------------------------------------------------------------------------
 # Version-path helpers
 # ---------------------------------------------------------------------------
 
 
-def _extract_version(version_root: Path) -> int:
+def extract_version(version_root: Path) -> int:
     """Extract the version integer from a canonical version leaf name.
 
     Args:
@@ -45,10 +41,7 @@ def _extract_version(version_root: Path) -> int:
     """
     name = version_root.name
     if not (name.startswith("v") and name[1:].isdigit()):
-        raise ValueError(
-            f"Version root leaf must be 'v<integer>', got: {name!r}.  "
-            "Use a path like 'data/processed/maze-nd/v1'."
-        )
+        raise ValueError(f"Version root leaf must be 'v<integer>', got: {name!r}.  " "Use a path like 'data/processed/maze-nd/v1'.")
     return int(name[1:])
 
 
@@ -58,7 +51,7 @@ def _extract_version(version_root: Path) -> int:
 
 
 @contextmanager
-def _staging_root(version_root: Path) -> Iterator[Path]:
+def staging_root(version_root: Path) -> Iterator[Path]:
     """Context manager for transactional dataset materialization.
 
     Materialises into a temporary sibling directory, runs a structural
@@ -82,14 +75,14 @@ def _staging_root(version_root: Path) -> Iterator[Path]:
             f"Version root already exists (dataset roots are immutable): {version_root}\n"
             "Bump the version integer to create a new version."
         )
-    _extract_version(version_root)  # validate leaf name before starting work
+    extract_version(version_root)  # validate leaf name before starting work
     tmp = version_root.parent / f".building-{version_root.name}"
     if tmp.exists():
         shutil.rmtree(tmp)
     tmp.mkdir(parents=True)
     try:
         yield tmp
-        from ehc_sn.data._validator import _validate_structure  # local to avoid circular at module level
+        from ehc_sn.data.lifecycle._validate import _validate_structure
 
         _validate_structure(tmp)
         tmp.rename(version_root)
@@ -99,7 +92,7 @@ def _staging_root(version_root: Path) -> Iterator[Path]:
 
 
 # ---------------------------------------------------------------------------
-# Direct root creation (for tests and non-transactional fixture setup only)
+# Direct root creation
 # ---------------------------------------------------------------------------
 
 
@@ -110,8 +103,7 @@ def create_version_root(version_root: Path) -> None:
         version_root: Target directory (e.g. ``data/processed/maze-nd/v1``).
 
     Raises:
-        FileExistsError: When *version_root* already exists.  Dataset roots
-            are immutable; bump the version integer to create a new version.
+        FileExistsError: When *version_root* already exists.
     """
     if version_root.exists():
         raise FileExistsError(
@@ -149,9 +141,8 @@ def write_split(
         index_kwargs: Extra keyword arguments forwarded to
             :class:`~ehc_sn.data.index.MazeIndexEntry` (all samples share these).
         per_sample_extra: Optional per-sample extra fields for index entries.
-            If provided, must have the same length as *samples*.
         sample_validator: Optional callable ``(dict) -> None`` called on
-            every sample after stacking.  Raises ``ValueError`` on violations.
+            every sample after stacking.
 
     Returns:
         List of :class:`~ehc_sn.data.index.MazeIndexEntry` for the split.
@@ -211,6 +202,8 @@ def write_index_at_root(
 
 
 __all__ = [
+    "extract_version",
+    "staging_root",
     "create_version_root",
     "write_split",
     "write_index_at_root",

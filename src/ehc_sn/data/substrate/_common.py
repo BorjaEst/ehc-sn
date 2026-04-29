@@ -1,22 +1,18 @@
 """Deterministic canonicalization helpers for processed maze channels.
 
-These helpers keep source-specific scripts small while centralizing the rules
-for valid-mask selection, singleton-cell choice, structural landmarks, and
-observation assignment.
+Shared-substrate normalization concerns: largest-component masking,
+landmark generation, and shared observation assignment.
 """
 
 from __future__ import annotations
 
-import hashlib
 from collections import deque
 
 import numpy as np
 
-# =================================================================================================
 _NEIGHBORS4: tuple[tuple[int, int], ...] = ((-1, 0), (0, -1), (0, 1), (1, 0))
 
 
-# =================================================================================================
 def largest_component_mask(topology: np.ndarray) -> np.ndarray:
     """Return the largest 4-connected component of ``topology``.
 
@@ -64,7 +60,6 @@ def largest_component_mask(topology: np.ndarray) -> np.ndarray:
     return np.zeros_like(topology, dtype=bool) if best_mask is None else best_mask
 
 
-# =================================================================================================
 def first_true_cell(mask: np.ndarray) -> tuple[int, int] | None:
     """Return the lexicographically first true cell in ``mask``."""
     coords = np.argwhere(mask.astype(bool, copy=False))
@@ -74,7 +69,6 @@ def first_true_cell(mask: np.ndarray) -> tuple[int, int] | None:
     return int(row), int(col)
 
 
-# =================================================================================================
 def singleton_mask(shape: tuple[int, int], cell: tuple[int, int]) -> np.ndarray:
     """Return a boolean mask with exactly one true cell."""
     mask = np.zeros(shape, dtype=bool)
@@ -82,7 +76,6 @@ def singleton_mask(shape: tuple[int, int], cell: tuple[int, int]) -> np.ndarray:
     return mask
 
 
-# =================================================================================================
 def shortest_path_distances(mask_valid: np.ndarray, start: tuple[int, int]) -> np.ndarray:
     """Return 4-neighbor shortest-path distances over ``mask_valid``.
 
@@ -109,35 +102,24 @@ def shortest_path_distances(mask_valid: np.ndarray, start: tuple[int, int]) -> n
     return distances
 
 
-# =================================================================================================
 def farthest_reachable_cell(mask_valid: np.ndarray, start: tuple[int, int]) -> tuple[int, int]:
-    """Return the farthest reachable cell from ``start``.
-
-    Ties are broken lexicographically.
-    """
+    """Return the farthest reachable cell from ``start``. Ties broken lexicographically."""
     distances = shortest_path_distances(mask_valid, start)
     max_distance = int(distances.max())
     if max_distance < 0:
         raise ValueError("valid mask contains no reachable cells.")
-
     candidates = np.argwhere(distances == max_distance)
     row, col = candidates[0]
     return int(row), int(col)
 
 
-# =================================================================================================
 def canonical_cell_from_mask(
     mask: np.ndarray,
     valid_mask: np.ndarray,
     *,
     reference: tuple[int, int] | None = None,
 ) -> tuple[int, int] | None:
-    """Select one canonical true cell from ``mask`` constrained by ``valid_mask``.
-
-    If ``reference`` is provided, the farthest constrained cell from that
-    reference is chosen. Otherwise the lexicographically first constrained cell
-    is returned.
-    """
+    """Select one canonical true cell from ``mask`` constrained by ``valid_mask``."""
     constrained = mask.astype(bool, copy=False) & valid_mask.astype(bool, copy=False)
     if not np.any(constrained):
         return None
@@ -154,15 +136,12 @@ def canonical_cell_from_mask(
     for row, col in coords:
         cell = (int(row), int(col))
         distance = int(distances[cell])
-        if distance > best_distance or (
-            distance == best_distance and (best_cell is None or cell < best_cell)
-        ):
+        if distance > best_distance or (distance == best_distance and (best_cell is None or cell < best_cell)):
             best_distance = distance
             best_cell = cell
     return best_cell
 
 
-# =================================================================================================
 def binary_structural_landmarks(mask_valid: np.ndarray) -> np.ndarray:
     """Return binary junction landmarks encoded as ``int32`` values in ``{0, 1}``."""
     mask_valid = mask_valid.astype(bool, copy=False)
@@ -172,18 +151,12 @@ def binary_structural_landmarks(mask_valid: np.ndarray) -> np.ndarray:
         src_cols = slice(max(0, -d_col), mask_valid.shape[1] - max(0, d_col))
         dst_rows = slice(max(0, d_row), mask_valid.shape[0] - max(0, -d_row))
         dst_cols = slice(max(0, d_col), mask_valid.shape[1] - max(0, -d_col))
-        degrees[dst_rows, dst_cols] += (
-            mask_valid[dst_rows, dst_cols] & mask_valid[src_rows, src_cols]
-        ).astype(np.int32)
+        degrees[dst_rows, dst_cols] += (mask_valid[dst_rows, dst_cols] & mask_valid[src_rows, src_cols]).astype(np.int32)
     return np.where(mask_valid & (degrees >= 3), 1, 0).astype(np.int32)
 
 
-# =================================================================================================
 def sample_observations(mask_valid: np.ndarray, n_observations: int, *, seed: int) -> np.ndarray:
-    """Assign deterministic random observation ids to valid cells.
-
-    Invalid cells are filled with ``-1``.
-    """
+    """Assign deterministic random observation ids to valid cells. Invalid cells get ``-1``."""
     if n_observations <= 0:
         raise ValueError(f"n_observations must be positive, got {n_observations}.")
 
@@ -197,24 +170,3 @@ def sample_observations(mask_valid: np.ndarray, n_observations: int, *, seed: in
     for (row, col), obs_id in zip(valid_coords, obs_ids, strict=True):
         observations[int(row), int(col)] = int(obs_id)
     return observations
-
-
-# =================================================================================================
-def stable_text_seed(text: str) -> int:
-    """Return a stable 32-bit seed derived from ``text``."""
-    digest = hashlib.blake2s(text.encode("utf-8"), digest_size=8).digest()
-    return int.from_bytes(digest[:4], byteorder="little", signed=False)
-
-
-# =================================================================================================
-__all__ = [
-    "binary_structural_landmarks",
-    "canonical_cell_from_mask",
-    "farthest_reachable_cell",
-    "first_true_cell",
-    "largest_component_mask",
-    "sample_observations",
-    "shortest_path_distances",
-    "singleton_mask",
-    "stable_text_seed",
-]

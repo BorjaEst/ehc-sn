@@ -18,9 +18,15 @@ Execution-binding capability:
 Raw channel-to-batch coercion lives in :mod:`ehc_sn.adapters.mazehard.hrm.core`.
 """
 
+from .builder import (
+    MAZEHARD_TASK_CHANNELS,
+    TASK_FAMILY,
+    build_mazehard_task_corpus,
+    validate_mazehard_task_root,
+    validate_mazehard_task_sample,
+)
 from .capabilities.deliberation import MazeHardDeliberationCapability
 from .contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets, MazeHardTaskInput, MazeHardTaskOutput
-from .data import MAZEHARD_TASK_CHANNELS, build_mazehard_task_corpus
 from .evaluation import MazeHardScoreReport, MazeHardStepScore
 from .reward import MazeHardRewardConfig, MazeHardRewardProjector
 
@@ -35,5 +41,8 @@ __all__ = [
     "MazeHardTargets",
     "MazeHardTaskInput",
     "MazeHardTaskOutput",
+    "TASK_FAMILY",
     "build_mazehard_task_corpus",
+    "validate_mazehard_task_root",
+    "validate_mazehard_task_sample",
 ]

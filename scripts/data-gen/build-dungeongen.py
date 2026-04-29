@@ -47,9 +47,9 @@ from typing import Annotated
 
 import typer
 
-from ehc_sn.data._validator import validate_version_root
-from ehc_sn.data.dungeon_builder import SHARED_FAMILY, build_dungeongen_substrate, prepare_dungeongen_interim
-from ehc_sn.data.dungeon_raw import ensure_raw_snapshot
+from ehc_sn.data.build import validate_version_root
+from ehc_sn.data.substrate.dungeongen import SHARED_FAMILY, build_shared_substrate, prepare_interim as _prepare_interim
+from ehc_sn.data.substrate.dungeongen import ensure_raw as _ensure_raw
 
 # ---------------------------------------------------------------------------
 _DEFAULT_RAW_ROOT = Path("data/raw/dungeongen")
@@ -74,7 +74,7 @@ def fetch_raw(
     If it exists and the manifest identity matches the request, this is a no-op.
     If it exists with a mismatched identity, exits with an actionable error.
     """
-    ensure_raw_snapshot(raw_root, seed, {"train": n_train, "val": n_val, "test": n_test})
+    _ensure_raw(raw_root, seed, {"train": n_train, "val": n_val, "test": n_test})
     typer.echo(f"Raw corpus at {raw_root}")
 
 
@@ -93,7 +93,7 @@ def prepare_interim(
     The interim format is materially different from raw: no tar packaging, no per-sample
     file fan-out, padded arrays with height/width metadata for native-shape reconstruction.
     """
-    prepare_dungeongen_interim(
+    _prepare_interim(
         raw_root.resolve(),
         interim_root.resolve(),
         n_train=n_train,
@@ -128,7 +128,7 @@ def materialize_shared(
     as the maximum height and width across the selected interim slice.
     """
     shared_root = Path(f"data/processed/{SHARED_FAMILY}/v{version}")
-    build_dungeongen_substrate(
+    build_shared_substrate(
         shared_root.resolve(),
         interim_root=interim_root.resolve(),
         n_train=n_train,

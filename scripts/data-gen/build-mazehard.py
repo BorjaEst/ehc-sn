@@ -35,10 +35,10 @@ from typing import Annotated
 
 import typer
 
-from ehc_sn.data._validator import validate_version_root
-from ehc_sn.data.mazehard_builder import SHARED_FAMILY, build_mazehard_substrate, prepare_mazehard_interim
-from ehc_sn.data.mazehard_raw import ensure_raw_corpus
-from ehc_sn.tasks.mazehard.data import build_mazehard_task_corpus
+from ehc_sn.data.build import validate_version_root
+from ehc_sn.data.substrate.maze_nd import SHARED_FAMILY, build_shared_substrate, ensure_raw as _ensure_raw_corpus
+from ehc_sn.data.substrate.maze_nd import prepare_interim as _prepare_mazehard_interim
+from ehc_sn.tasks.mazehard import build_mazehard_task_corpus
 
 # ---------------------------------------------------------------------------
 _DEFAULT_RAW_ROOT = Path("data/raw/huggingface/maze_hard_augmented")
@@ -56,7 +56,7 @@ def fetch_raw(
     raw_root: Annotated[Path, typer.Option("--raw-root")] = _DEFAULT_RAW_ROOT,
 ) -> None:
     """Download raw maze-nd corpus from HuggingFace."""
-    ensure_raw_corpus(raw_root.resolve())
+    _ensure_raw_corpus(raw_root.resolve())
     typer.echo(f"Raw corpus at {raw_root}")
 
 
@@ -67,7 +67,7 @@ def prepare_interim(
     interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
 ) -> None:
     """Normalize raw corpus to a deterministic interim artifact under data/interim/."""
-    prepare_mazehard_interim(raw_root.resolve(), interim_root.resolve())
+    _prepare_mazehard_interim(raw_root.resolve(), interim_root.resolve())
     typer.echo(f"Interim written to {interim_root}")
 
 
@@ -83,7 +83,7 @@ def materialize_shared(
 ) -> None:
     """Build the maze-nd shared substrate."""
     shared_root = Path(f"data/processed/{SHARED_FAMILY}/v{version}")
-    build_mazehard_substrate(
+    build_shared_substrate(
         shared_root.resolve(),
         interim_root=interim_root.resolve(),
         n_train=n_train,
@@ -128,7 +128,7 @@ def validate(
     """Validate the manifest and data of a versioned root."""
     manifest = validate_version_root(root.resolve())
     if manifest["dataset_class"] == "task_corpus":
-        from ehc_sn.tasks.mazehard.data import validate_mazehard_task_root
+        from ehc_sn.tasks.mazehard import validate_mazehard_task_root
 
         validate_mazehard_task_root(root.resolve())
     typer.echo(f"OK  {root}")
