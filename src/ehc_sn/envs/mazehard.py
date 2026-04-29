@@ -1,9 +1,16 @@
-"""Mazehard deliberation environment (TorchRL).
+"""Mazehard mechanical environment kernel (TorchRL).
 
-The environment owns only the mechanical rollout kernel: static token tape,
-step count, and halt/truncation transitions. MazeHard supervision labels,
-accuracy tracking, and reward shaping are task-owned and are attached by the
-task runtime after env stepping.
+This module is a low-level env scaffold: static token tape, step count, and
+halt/truncation transitions only. It is **not** the canonical task surface and
+**not** the active HRM v2 deliberation training path.
+
+The active HRM v2 path uses :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationACController`
+injected with :class:`~ehc_sn.tasks.mazehard.capabilities.deliberation.MazeHardDeliberationCapability`
+as the :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationStepFinalizer`.
+That path does not step through this env.
+
+MazeHard supervision labels, accuracy tracking, and reward shaping are
+task-owned; they belong in the capability/finalizer layer, not here.
 
 TensorDict contract:
     state_spec / observation_spec:
@@ -12,7 +19,7 @@ TensorDict contract:
     action_spec:
         "action"      : ()   int64   — halt index (0 = halt, 1 = continue)
     reward_spec:
-        "reward"      : (1,) float32 — placeholder overwritten by task runtime
+        "reward"      : (1,) float32 — zero placeholder; overwritten by the capability/finalizer layer
     done_spec (auto):
         "done"       : (1,) bool
         "terminated" : (1,) bool
@@ -58,17 +65,16 @@ class EnvConfig(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class MazeHardEnv(EnvBase):
-    """Deliberation environment for maze-solving (TorchRL, batch-locked).
+    """Mechanical env kernel for MazeHard (TorchRL, batch-locked).
 
-    Wraps a batched token-prediction task as a TorchRL environment.
-    No subprocess, no numpy — all ops are batched torch kernels.
+    Wraps a batched token-tape as a TorchRL environment. Owns only the
+    mechanical kernel: ``input_ids`` carry, ``step_count`` increment, and
+    halt/truncation transitions. Reward is a zero placeholder; supervision
+    labels and accuracy tracking are task-owned.
 
-    Usage::
-
-        env = MazeHardEnv(config, batch_size=32, device="cuda")
-        td = env.reset(TensorDict({"input_ids": x}, batch_size=[32]))
-        td["action"] = policy(td)
-        td = env.step(td)
+    This class is **not** the active HRM v2 deliberation surface. The active
+    training path uses ``DeliberationACController`` + ``MazeHardDeliberationCapability``
+    and does not step through this env.
 
     The environment is batch-locked: all B slots step simultaneously.
     Per-slot auto-reset is handled by the controller, not this class.
@@ -139,9 +145,8 @@ class MazeHardEnv(EnvBase):
     ) -> TensorDictBase:  # fmt: skip
         """Advance the mechanical env state from the current action.
 
-        The env owns only halt/truncation transitions. It emits a zero reward
-        placeholder so the task runtime can attach task-owned reward semantics
-        after stepping.
+        Owns only halt/truncation transitions. Emits a zero reward placeholder;
+        task-owned reward semantics live in the capability/finalizer layer.
         """
         action = tensordict["action"]  # (B, 1)
         step_count = tensordict["step_count"]  # (B, 1)
