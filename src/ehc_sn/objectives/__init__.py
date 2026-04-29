@@ -29,6 +29,7 @@ from ehc_sn.objectives._variational import (
     require_latent_relation,
 )
 from ehc_sn.objectives.act import ACTLossConfig, ACTLossHead, ACTLossStep, ACTTaskBinding
+from ehc_sn.objectives.ehc import EHCLosses, EHCObjective, EHCObjectiveBinding, EHCObjectiveConfig, EHCObjectiveStep
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLosses, HybridRLLossHead, HybridRLLossStep
 from ehc_sn.objectives.tem import TEMLosses, TEMObjective, TEMObjectiveBinding, TEMObjectiveConfig, TEMObjectiveStep
 
@@ -75,6 +76,12 @@ __all__ = [
     "ACTLossHead",
     "ACTLossStep",
     "ACTTaskBinding",
+    # ehc — canonical
+    "EHCObjectiveBinding",
+    "EHCObjectiveConfig",
+    "EHCObjective",
+    "EHCObjectiveStep",
+    "EHCLosses",
     # hybrid rl — batch-loss path (no *Objective* aliases; not a rollout scorer)
     "HybridRLLossConfig",
     "HybridRLLossHead",

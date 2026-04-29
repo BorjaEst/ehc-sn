@@ -8,7 +8,7 @@ here so model files contain *no* trace wiring.
 Usage
 -----
     from ehc_sn.metrics.traces import build_trace_spec
-    self.trace_specs = build_trace_spec("act")   # or "rl" / "tem"
+    self.trace_specs = build_trace_spec("act")   # or "rl" / "tem" / "ehc"
 
 Naming convention
 -----------------
@@ -383,7 +383,7 @@ def _select_trace_fields(  # ---------------------------------------------------
 
 # =================================================================================================
 def build_trace_spec(  # --------------------------------------------------------------------------
-    paradigm: Literal["act", "rl", "tem"],
+    paradigm: Literal["act", "rl", "tem", "ehc"],
     *,
     include_keys: Iterable[str] | None = None,
     extra_fields: Iterable[TraceField] | None = None,
@@ -397,13 +397,14 @@ def build_trace_spec(  # -------------------------------------------------------
     Args:
         paradigm: ``"act"`` for ACT-based models (hrm_v1) or
             ``"rl"`` for RL-based models (hrm_v2), or
-            ``"tem"`` for TEM-based models (tem_v1).
+            ``"tem"`` for TEM-based models (tem_v1), or
+            ``"ehc"`` for EHC-based models (ehc_v1).
 
     Returns:
         A :class:`~ehc_sn.traces.TraceSpec` instance.
 
     Raises:
-        ValueError: If *paradigm* is not ``"act"``, ``"rl"``, or ``"tem"``.
+        ValueError: If *paradigm* is not ``"act"``, ``"rl"``, ``"tem"``, or ``"ehc"``.
     """
     if paradigm == "act":
         fields = _select_trace_fields(COMMON_TRACE_FIELDS + ACT_TRACE_FIELDS, include_keys)
@@ -411,8 +412,10 @@ def build_trace_spec(  # -------------------------------------------------------
         fields = _select_trace_fields(COMMON_TRACE_FIELDS + RL_TRACE_FIELDS, include_keys)
     elif paradigm == "tem":
         fields = _select_trace_fields(TEM_TRACE_FIELDS, include_keys)
+    elif paradigm == "ehc":
+        fields = _select_trace_fields(TEM_TRACE_FIELDS, include_keys)
     else:
-        raise ValueError(f"Unknown paradigm: {paradigm!r}. Expected 'act', 'rl', or 'tem'.")
+        raise ValueError(f"Unknown paradigm: {paradigm!r}. Expected 'act', 'rl', 'tem', or 'ehc'.")
     if extra_fields is not None:
         fields = fields + tuple(extra_fields)
     return TraceSpec(fields=list(fields))
