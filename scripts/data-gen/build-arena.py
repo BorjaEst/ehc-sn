@@ -45,7 +45,7 @@ from typing import Annotated
 
 import typer
 
-from ehc_sn.data.build import validate_version_root
+from ehc_sn.data.lifecycle import validate_version_root
 from ehc_sn.data.substrate.dungeongen import SHARED_FAMILY
 from ehc_sn.tasks.arena import TASK_FAMILY as ARENA_TASK_FAMILY
 from ehc_sn.tasks.arena import build_arena_task_corpus, validate_arena_task_root

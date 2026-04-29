@@ -35,8 +35,9 @@ from typing import Annotated
 
 import typer
 
-from ehc_sn.data.build import validate_version_root
-from ehc_sn.data.substrate.maze_nd import SHARED_FAMILY, build_shared_substrate, ensure_raw as _ensure_raw_corpus
+from ehc_sn.data.lifecycle import validate_version_root
+from ehc_sn.data.substrate.maze_nd import SHARED_FAMILY, build_shared_substrate
+from ehc_sn.data.substrate.maze_nd import ensure_raw as _ensure_raw_corpus
 from ehc_sn.data.substrate.maze_nd import prepare_interim as _prepare_mazehard_interim
 from ehc_sn.tasks.mazehard import build_mazehard_task_corpus
 
@@ -176,4 +177,5 @@ def build_all(
 
 
 if __name__ == "__main__":
+    app()
     app()
