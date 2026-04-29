@@ -32,8 +32,8 @@ import matplotlib.pyplot as plt
 from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
-from ehc_sn.data.datasets import MazeDataset
-from ehc_sn.data.index import MazeIndexEntry, filter_index, read_index
+from ehc_sn.data.datasets import ProcessedDataset
+from ehc_sn.data.index import DatasetIndexEntry, filter_index, read_index
 from ehc_sn.figures.inspect import plot_processed_sample as plot
 
 NAME = __file__.split("/")[-1].replace(".py", "")
@@ -42,7 +42,7 @@ logger = logging.getLogger(NAME)
 
 def resolve_dataset_split(  # ---------------------------------------------------------------------
     dataset_path: Path, split: str | None,
-) -> tuple[list[MazeIndexEntry], Path, str]:  # fmt: skip
+) -> tuple[list[DatasetIndexEntry], Path, str]:  # fmt: skip
     """Resolve root-level processed data metadata to one concrete split directory."""
     if not (dataset_path / "index.jsonl").is_file():
         if (dataset_path / "dataset.json").is_file() and (dataset_path.parent / "index.jsonl").is_file():
@@ -152,14 +152,14 @@ def main() -> None:
     # ---------------------------------------------------------------------------------------------
     # Step 2: Load raw sample (no transforms → original channels preserved).
     # ---------------------------------------------------------------------------------------------
-    ds = MazeDataset(entries, split_dir, transform=None)
+    ds = ProcessedDataset(entries, split_dir, transform=None)
     if args.idx >= len(ds):
         raise SystemExit(f"Index {args.idx} out of range (dataset has {len(ds)} samples)")
 
     sample = ds[args.idx]
     entry = entries[args.idx]
     print(f"Step 2/3: Sample {args.idx} loaded.")
-    print(f" - source={entry.source}, shape={entry.shape}, channels={entry.channels}")
+    print(f" - source={entry.source}, channels={entry.channels}")
     print()
 
     # ---------------------------------------------------------------------------------------------

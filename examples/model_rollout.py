@@ -127,7 +127,7 @@ class ExampleArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     # Data settings (flat fields composed into DatamoduleConfig)
     dataset_path: Path = Field(
         ...,
-        description="Path to the processed dataset directory (contains index.jsonl + NPZ files).",
+        description="Path to the versioned dataset root (contains index.jsonl and per-split per-channel NPY arrays).",
     )
     seed: int = Field(
         42,
