@@ -15,23 +15,14 @@ fraction* coordinates (0..1).
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Protocol, Sequence, Tuple, cast, overload
+from typing import Any, Literal, Optional, Sequence, Tuple, cast, overload
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
+from ehc_sn.figures._contracts import AnyWorld
 
-# =================================================================================================
-class EnvironmentLike(Protocol):
-    """Minimal protocol for environment coordinate metadata.
-
-    The plotting utilities only rely on a set of named locations with numeric
-    coordinates and (optionally) a location count.
-    """
-
-    locations: Sequence[Mapping[str, float]]
-    n_locations: int
 
 
 @dataclass(frozen=True)
@@ -90,7 +81,7 @@ def _environment_n_locations(environment: object) -> int:
 def configure_environment_axes(  # ----------------------------------------------------------------
     ax: Axes,
     *,
-    environment: Optional[EnvironmentLike] = None, radius: Optional[float] = None,
+    environment: Optional[AnyWorld] = None, radius: Optional[float] = None,
     padding_scale: float = 2.0, invert_y: bool = False,
 ) -> Axes:  # fmt: skip
     """Configure `ax` for plotting a 2D environment/map.

@@ -8,12 +8,13 @@ from matplotlib.collections import PatchCollection
 from matplotlib.colors import Normalize
 from numpy.typing import NDArray
 
+from ehc_sn.figures._contracts import AnyWorld
 from ehc_sn.figures.utils.actions import action_patch
 from ehc_sn.figures.utils.axes import _environment_locations, _environment_n_locations, configure_environment_axes
 
 
 def plot_map(
-    environment,
+    environment: AnyWorld,
     values: NDArray,
     ax: Optional[plt.Axes] = None,
     vmin: Optional[float] = None,

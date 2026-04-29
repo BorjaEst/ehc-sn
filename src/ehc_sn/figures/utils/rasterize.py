@@ -6,11 +6,12 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.spatial import cKDTree
 
+from ehc_sn.figures._contracts import AnyWorld
 from ehc_sn.figures.utils.axes import _environment_locations
 
 
 def rasterize_locations_additive(
-    world: object,
+    world: AnyWorld,
     values: NDArray,
     *,
     grid_res: float | None = None,
@@ -71,7 +72,7 @@ def rasterize_locations_additive(
 
 
 def rasterize_locations(
-    world: object,
+    world: AnyWorld,
     values: NDArray,
     *,
     grid_res: float | None = None,
@@ -97,7 +98,7 @@ def rasterize_locations(
     return grid, valid, extent
 
 
-def _world_coords(world: object) -> NDArray:
+def _world_coords(world: AnyWorld) -> NDArray:
     locations = _environment_locations(world)
     coords = [[loc["o"], loc["y"]] for loc in locations]
     return np.asarray(coords, dtype=float)
