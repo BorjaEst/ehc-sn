@@ -320,6 +320,10 @@ class DenseMemoryStore:
         """Return a cloned dense-memory store preserving tensor semantics."""
         return DenseMemoryStore(matrix=self.matrix.clone())
 
+    def to_dense(self) -> Tensor:
+        """Return the dense memory matrix with shape ``(B, S, S)``."""
+        return self.matrix
+
     @property
     def kind(self) -> MemoryStoreKind:
         """Return the canonical store kind for dense memory."""

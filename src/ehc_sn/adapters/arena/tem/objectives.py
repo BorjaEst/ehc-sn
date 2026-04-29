@@ -85,7 +85,7 @@ class ArenaTEMTaskBinding:
         m_ret = build_arena_step_score(step_output.logits_retrieved, targets)
         m_anc = build_arena_step_score(step_output.logits_ancestral, targets)
 
-        batch_count = m_inf.is_correct.new_tensor(float(m_inf.is_correct.shape[0]))
+        batch_count = m_inf.is_correct.new_tensor(float(m_inf.is_correct.shape[0]), dtype=torch.float32)
         protocol_count = m_inf.is_revisit.sum().float() if m_inf.is_revisit is not None else m_inf.is_correct.new_zeros(())
 
         def _correct(m: "ArenaStepScore") -> Tensor:

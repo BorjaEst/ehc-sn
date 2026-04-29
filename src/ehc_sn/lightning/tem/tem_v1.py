@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import lightning as L
+import torch
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
@@ -188,7 +189,15 @@ class TrainingModel(L.LightningModule):
         """Return out-of-band trace metadata for figure-facing evaluation traces."""
         B = batch_size_from_arena_batch(batch)
         worlds = [{"topology": batch["topology"][b], "observations": batch["observations"][b]} for b in range(B)]
-        return {"environments": ReplayableEnvironments(worlds)}
+        lec_alpha = torch.stack([torch.sigmoid(alpha).detach() for alpha in self.model.lec.filter.alpha])
+        lec_w_f = torch.stack([torch.sigmoid(weight).detach() for weight in self.model.lec.w_f])
+        return {
+            "environments": ReplayableEnvironments(worlds),
+            "lec": {
+                "filter": {"alpha_sigmoid": lec_alpha},
+                "w_f_sigmoid": lec_w_f,
+            },
+        }
 
     def _ensure_train_batch_assembler(  # ---------------------------------------------------------
         self, batch: Batch,

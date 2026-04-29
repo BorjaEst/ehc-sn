@@ -30,6 +30,7 @@ import torch
 from torch import Tensor
 
 from ehc_sn.traces import TraceField, TraceSpec, TraceValue
+from ehc_sn.types import MemoryEntry
 
 
 # =================================================================================================
@@ -258,24 +259,27 @@ def _get_diagnostic_hpc_memory_tem(ctx: _TEMTraceContext) -> TraceValue:
     }
 
 
-def _memory_entry_for_trace(memory: TraceValue) -> TraceValue:
-    """Convert backend-specific memory entries into replayable trace tensors."""
-    if isinstance(memory, torch.Tensor):
-        return memory.detach()
-    values = getattr(memory, "values", None)
-    if isinstance(values, torch.Tensor):
-        return values.detach()
-    return memory
+def _memory_entry_for_trace(memory: MemoryEntry) -> Tensor:
+    """Return the canonical dense memory operator for trace storage."""
+    return memory.to_dense().detach()
 
 
 def _get_lec_alpha_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Static sigmoid-transformed LEC filter alpha values captured in carry data."""
-    return ctx.carry.data["lec_alpha_sigmoid"].detach()
+    value = ctx.carry.data.get("lec_alpha_sigmoid")
+    if value is None:
+        static_data = getattr(ctx.carry, "static_data", None)
+        value = None if static_data is None else static_data.get("lec_alpha_sigmoid")
+    return None if value is None else value.detach()
 
 
 def _get_lec_w_f_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Static sigmoid-transformed LEC frequency weights captured in carry data."""
-    return ctx.carry.data["lec_w_f_sigmoid"].detach()
+    value = ctx.carry.data.get("lec_w_f_sigmoid")
+    if value is None:
+        static_data = getattr(ctx.carry, "static_data", None)
+        value = None if static_data is None else static_data.get("lec_w_f_sigmoid")
+    return None if value is None else value.detach()
 
 
 TRACE_Q_LOGITS_RL = TraceField(
