@@ -1,4 +1,4 @@
-"""Lightning :class:`~lightning.LightningDataModule` for maze datasets.
+"""Lightning :class:`~lightning.LightningDataModule` for processed datasets.
 
 Public surface: :class:`Datamodule`, :class:`DatamoduleConfig`.
 """
@@ -13,7 +13,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 from torch.utils.data import DataLoader
 
-from ehc_sn.data.datasets import MazeDataset
+from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
 from ehc_sn.data.transforms import Compose, RandomDihedral
 
@@ -58,15 +58,13 @@ class DatamoduleConfig(BaseModel, extra="forbid"):
 
 # =================================================================================================
 class Datamodule(L.LightningDataModule):
-    """Lightning DataModule for maze datasets.
+    """Lightning DataModule for processed datasets.
 
     Loads a processed dataset directory containing an ``index.jsonl`` and
     per-split channel arrays. Optionally applies training-time augmentation.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: DatamoduleConfig, transform: Callable | None = None,
-    ) -> None:  # fmt: skip
+    def __init__(self, config: DatamoduleConfig, transform: Callable | None = None,) -> None:  # fmt: skip  # ------------------------------------------------------------------------------
         """Create the data module.
 
         Args:
@@ -76,9 +74,9 @@ class Datamodule(L.LightningDataModule):
         super().__init__()
         self._config = config
         self._adapter = transform
-        self._train: MazeDataset | None = None
-        self._val: MazeDataset | None = None
-        self._test: MazeDataset | None = None
+        self._train: ProcessedDataset | None = None
+        self._val: ProcessedDataset | None = None
+        self._test: ProcessedDataset | None = None
 
     @property
     def config(self) -> DatamoduleConfig:
@@ -100,9 +98,7 @@ class Datamodule(L.LightningDataModule):
             self._adapter,
         ]
 
-    def setup(  # ---------------------------------------------------------------------------------
-        self, stage: str,
-    ) -> None:  # fmt: skip
+    def setup(self, stage: str,) -> None:  # fmt: skip  # ---------------------------------------------------------------------------------
         """Load datasets for the given stage(s)."""
         data_root = self.config.dataset_path
         all_entries = read_index(data_root / "index.jsonl")
@@ -115,23 +111,19 @@ class Datamodule(L.LightningDataModule):
         # We rely on the DataLoader workers to apply the transforms
         if stage in ("fit", "validate"):
             entries = filter_index(all_entries, split="train")
-            self._train = MazeDataset(entries, data_root / "train", transform=train_transform)
+            self._train = ProcessedDataset(entries, data_root / "train", transform=train_transform)
             entries = filter_index(all_entries, split="val")
-            self._val = MazeDataset(entries, data_root / "val", transform=eval_transform)
+            self._val = ProcessedDataset(entries, data_root / "val", transform=eval_transform)
         if stage == "test":
             entries = filter_index(all_entries, split="test")
-            self._test = MazeDataset(entries, data_root / "test", transform=eval_transform)
+            self._test = ProcessedDataset(entries, data_root / "test", transform=eval_transform)
 
-    def _per_gpu_batch_size(
-        self,
-    ) -> int:  # fmt: skip
+    def _per_gpu_batch_size(self,) -> int:  # fmt: skip
         """Compute per-device batch size from the global value."""
         world_size = max(self.trainer.world_size if self.trainer is not None else 1, 1)
         return max(self.config.global_batch_size // world_size, 1)
 
-    def _make_loader(  # --------------------------------------------------------------------------
-        self, dataset: MazeDataset, *, shuffle: bool,
-    ) -> DataLoader:  # fmt: skip
+    def _make_loader(self, dataset: ProcessedDataset, *, shuffle: bool,) -> DataLoader:  # fmt: skip  # --------------------------------------------------------------------------
         """Construct a DataLoader for the given dataset and settings."""
         return DataLoader(
             dataset,
@@ -144,25 +136,19 @@ class Datamodule(L.LightningDataModule):
             drop_last=True,  # Drop last batch to ensure consistent batch size
         )
 
-    def train_dataloader(  # ----------------------------------------------------------------------
-        self,
-    ) -> DataLoader:  # fmt: skip
+    def train_dataloader(self,) -> DataLoader:  # fmt: skip  # ----------------------------------------------------------------------
         """Return the training DataLoader."""
         if self._train is None:
             raise RuntimeError("Call setup('fit') before train_dataloader()")
         return self._make_loader(self._train, shuffle=True)
 
-    def val_dataloader(  # ------------------------------------------------------------------------
-        self,
-    ) -> DataLoader:  # fmt: skip
+    def val_dataloader(self,) -> DataLoader:  # fmt: skip  # ------------------------------------------------------------------------
         """Return the validation DataLoader."""
         if self._val is None:
             raise RuntimeError("Call setup('fit') or setup('validate') before val_dataloader()")
         return self._make_loader(self._val, shuffle=False)
 
-    def test_dataloader(  # -----------------------------------------------------------------------
-        self,
-    ) -> DataLoader:  # fmt: skip
+    def test_dataloader(self,) -> DataLoader:  # fmt: skip  # -----------------------------------------------------------------------
         """Return the test DataLoader."""
         if self._test is None:
             raise RuntimeError("Call setup('test') before test_dataloader()")

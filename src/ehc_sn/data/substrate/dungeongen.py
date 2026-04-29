@@ -28,6 +28,8 @@ from ehc_sn.data.lifecycle import extract_version, staging_root, write_index_at_
 from ehc_sn.data.manifest import write_manifest
 from ehc_sn.data.substrate._common import binary_structural_landmarks, largest_component_mask, sample_observations
 from ehc_sn.data.substrate._dungeongen_raw import ensure_raw_snapshot, iter_raw_topologies
+from ehc_sn.data.substrate.grid2d import TOPOLOGY_KIND as _GRID2D_KIND
+from ehc_sn.data.substrate.grid2d import validate_grid2d_sample
 
 # ---------------------------------------------------------------------------
 SHARED_FAMILY: Final[str] = "dungeongen"
@@ -300,6 +302,7 @@ def build_shared_substrate(
         resolved_w = width
 
     shape: tuple[int, int] = (resolved_h, resolved_w)
+    n_states = resolved_h * resolved_w
     stage_params = {
         "n_train": n_train,
         "n_val": n_val,
@@ -331,10 +334,12 @@ def build_shared_substrate(
                 split,
                 samples,
                 source=SHARED_FAMILY,
-                shape=shape,
                 channels=SHARED_CHANNELS,
-                spatial_channels=SHARED_CHANNELS,
-                index_kwargs={"n_observations": n_observations, "n_goals": 0, "difficulty": "medium"},
+                topology_kind=_GRID2D_KIND,
+                n_states=n_states,
+                extent=[resolved_h, resolved_w],
+                index_kwargs={},
+                sample_validator=validate_grid2d_sample,
             )
             all_entries.extend(entries)
 
@@ -346,7 +351,9 @@ def build_shared_substrate(
             family=SHARED_FAMILY,
             version=version,
             channels=SHARED_CHANNELS,
-            shape=shape,
+            topology_kind=_GRID2D_KIND,
+            n_states=n_states,
+            extent=[resolved_h, resolved_w],
             n_samples=split_counts,
             source_id=_SOURCE_ID,
             builder="ehc_sn.data.substrate.dungeongen.build_shared_substrate",
@@ -358,10 +365,40 @@ def build_shared_substrate(
     print(f"dungeongen shared substrate written to {version_root}  ({n_total} samples.)")
 
 
+def validate_dungeongen_shared_root(root: Path) -> dict:
+    """Validate a dungeongen shared substrate root against generic and family-owned rules.
+
+    Calls the generic structural validator first, then checks dungeongen-specific
+    family semantics (topology_kind, required channels).
+
+    Args:
+        root: Resolved versioned dungeongen shared substrate root.
+
+    Returns:
+        Parsed manifest dict.
+
+    Raises:
+        ValueError: On any contract violation.
+        FileNotFoundError: When a required file is absent.
+    """
+    from ehc_sn.data.lifecycle import validate_version_root
+
+    manifest = validate_version_root(root)
+    if manifest.get("family") != SHARED_FAMILY:
+        raise ValueError(f"Root family is {manifest.get('family')!r}, expected {SHARED_FAMILY!r}.")
+    if manifest.get("topology_kind") != _GRID2D_KIND:
+        raise ValueError(f"Root topology_kind is {manifest.get('topology_kind')!r}, expected {_GRID2D_KIND!r}.")
+    missing_ch = set(SHARED_CHANNELS) - set(manifest.get("channels", []))
+    if missing_ch:
+        raise ValueError(f"Manifest missing required dungeongen channels: {sorted(missing_ch)}")
+    return manifest
+
+
 __all__ = [
     "SHARED_FAMILY",
     "SHARED_CHANNELS",
     "ensure_raw",
     "prepare_interim",
     "build_shared_substrate",
+    "validate_dungeongen_shared_root",
 ]

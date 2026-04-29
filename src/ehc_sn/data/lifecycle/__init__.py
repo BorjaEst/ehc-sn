@@ -1,11 +1,11 @@
-"""Version-root lifecycle mechanics for canonical versioned dataset roots.
+"""Version-root build mechanics for canonical versioned dataset roots.
 
 Public surface:
 
 - :func:`extract_version` — derive version integer from path leaf.
 - :func:`staging_root` — transactional materialization context manager.
 - :func:`create_version_root` — create an immutable version-leaf directory.
-- :func:`write_split` — stack, validate, and write one dataset split.
+- :func:`write_split` — stack and write one dataset split.
 - :func:`write_index_at_root` — write ``index.jsonl`` at the root.
 - :func:`validate_version_root` — full validation of a versioned root.
 """

@@ -15,12 +15,11 @@ import json
 import shutil
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import numpy as np
 
-from ehc_sn.data.index import MazeIndexEntry, write_index
-from ehc_sn.data.schema import validate_processed
+from ehc_sn.data.index import DatasetIndexEntry, write_index
 
 # ---------------------------------------------------------------------------
 # Version-path helpers
@@ -41,7 +40,7 @@ def extract_version(version_root: Path) -> int:
     """
     name = version_root.name
     if not (name.startswith("v") and name[1:].isdigit()):
-        raise ValueError(f"Version root leaf must be 'v<integer>', got: {name!r}.  " "Use a path like 'data/processed/maze-nd/v1'.")
+        raise ValueError(f"Version root leaf must be 'v<integer>', got: {name!r}.  " "Use a path like 'data/processed/numberline/v1'.")
     return int(name[1:])
 
 
@@ -61,7 +60,7 @@ def staging_root(version_root: Path) -> Iterator[Path]:
 
     Args:
         version_root: The intended final versioned root (e.g.
-            ``data/processed/maze-nd/v1``).  Must not already exist.
+            ``data/processed/numberline/v1``).  Must not already exist.
 
     Yields:
         A temporary sibling directory to write all output into.
@@ -100,7 +99,7 @@ def create_version_root(version_root: Path) -> None:
     """Create an immutable version-leaf directory.
 
     Args:
-        version_root: Target directory (e.g. ``data/processed/maze-nd/v1``).
+        version_root: Target directory (e.g. ``data/processed/numberline/v1``).
 
     Raises:
         FileExistsError: When *version_root* already exists.
@@ -119,33 +118,31 @@ def write_split(
     samples: list[dict[str, np.ndarray]],
     *,
     source: str,
-    shape: tuple[int, int],
     channels: list[str],
-    spatial_channels: list[str],
+    topology_kind: str,
+    n_states: int,
+    extent: list[int],
     index_kwargs: dict[str, Any],
     per_sample_extra: list[dict] | None = None,
-    sample_validator: Any | None = None,
-) -> list[MazeIndexEntry]:
-    """Stack, validate, and write one split to disk; return index entries.
+    sample_validator: Callable[[dict[str, np.ndarray]], None] | None = None,
+) -> list[DatasetIndexEntry]:
+    """Stack and write one split to disk; return index entries.
 
     Args:
-        output_root: Dataset root (already created via
-            :func:`create_version_root`).
+        output_root: Dataset root (already created via :func:`create_version_root`).
         split: Split name, e.g. ``"train"``.
         samples: List of per-sample channel dicts.
-        source: Dataset source identifier, e.g. ``"maze-nd"``.
-        shape: Spatial grid shape ``(H, W)``.
+        source: Dataset source identifier.
         channels: Ordered list of all channel names to write.
-        spatial_channels: Subset of *channels* that are ``(H, W)`` arrays
-            to pass to :func:`~ehc_sn.data.schema.validate_processed`.
-        index_kwargs: Extra keyword arguments forwarded to
-            :class:`~ehc_sn.data.index.MazeIndexEntry` (all samples share these).
+        topology_kind: Canonical topology kind (e.g. ``"grid2d"``, ``"line1d"``).
+        n_states: Total number of states in the topology.
+        extent: Topology extent list (e.g. ``[H, W]`` or ``[N]``).
+        index_kwargs: Extra keyword arguments forwarded to :class:`DatasetIndexEntry`.
         per_sample_extra: Optional per-sample extra fields for index entries.
-        sample_validator: Optional callable ``(dict) -> None`` called on
-            every sample after stacking.
+        sample_validator: Optional callable called on every sample after stacking.
 
     Returns:
-        List of :class:`~ehc_sn.data.index.MazeIndexEntry` for the split.
+        List of :class:`DatasetIndexEntry` for the split.
     """
     n = len(samples)
     split_dir = output_root / split
@@ -153,9 +150,8 @@ def write_split(
 
     stacked: dict[str, np.ndarray] = {ch: np.stack([s[ch] for s in samples], axis=0) for ch in channels}
 
-    for i in range(n):
-        validate_processed({ch: stacked[ch][i] for ch in spatial_channels})
-        if sample_validator is not None:
+    if sample_validator is not None:
+        for i in range(n):
             sample_validator({ch: stacked[ch][i] for ch in channels})
 
     for ch, arr in stacked.items():
@@ -167,7 +163,9 @@ def write_split(
                 "source": source,
                 "split": split,
                 "n_samples": n,
-                "shape": list(shape),
+                "topology_kind": topology_kind,
+                "n_states": n_states,
+                "extent": extent,
                 "channels": channels,
             },
             indent=2,
@@ -175,11 +173,10 @@ def write_split(
     )
 
     return [
-        MazeIndexEntry(
+        DatasetIndexEntry(
             id=f"{source}-{split}-{idx + 1:06d}",
             source=source,
             split=split,
-            shape=shape,
             channels=channels,
             **index_kwargs,
             **(per_sample_extra[idx] if per_sample_extra else {}),
@@ -189,7 +186,7 @@ def write_split(
 
 
 def write_index_at_root(
-    entries: list[MazeIndexEntry],
+    entries: list[DatasetIndexEntry],
     output_root: Path,
 ) -> None:
     """Write the canonical ``index.jsonl`` at the dataset root.

@@ -78,7 +78,7 @@ class RandomDihedral:
             a new generator is created from the global numpy random state.
 
     Note:
-        This transform is applied at load time (per :class:`~ehc_sn.data.datasets.MazeDataset`
+        This transform is applied at load time (per :class:`~ehc_sn.data.datasets.ProcessedDataset`
         ``__getitem__`` call), not baked into on-disk files.
 
         Samples that mix spatial grids with non-spatial task fields (for

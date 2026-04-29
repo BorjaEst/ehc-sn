@@ -3,6 +3,11 @@
 Provides :func:`validate_version_root` (full validation including path grammar)
 and the private :func:`_validate_structure` (structural-only, used inside
 transactional staging before the atomic rename).
+
+Generic validation is structural only: manifest fields, canonical path grammar,
+split presence, dataset.json presence, channel-file presence, sample counts,
+and index counts.  Family-owned validators own channel semantics and topology
+checks.
 """
 
 from __future__ import annotations
@@ -14,7 +19,6 @@ from typing import Any
 import numpy as np
 
 from ehc_sn.data.manifest import read_manifest
-from ehc_sn.data.schema import MANDATORY_CHANNELS
 
 # ---------------------------------------------------------------------------
 # Required manifest fields per dataset_class
@@ -27,7 +31,9 @@ _SHARED_REQUIRED: frozenset[str] = frozenset(
         "family",
         "version",
         "channels",
-        "shape",
+        "topology_kind",
+        "n_states",
+        "extent",
         "n_samples",
         "source_id",
         "builder",
@@ -54,7 +60,7 @@ _TASK_REQUIRED: frozenset[str] = _SHARED_REQUIRED | frozenset(
 
 _KNOWN_DATASET_CLASSES: frozenset[str] = frozenset({"shared_substrate", "task_corpus"})
 
-_FORBIDDEN_FIELDS: frozenset[str] = frozenset({"lineage", "created_at", "build_host", "build_time"})
+_FORBIDDEN_FIELDS: frozenset[str] = frozenset({"lineage", "created_at", "build_host", "build_time", "shape"})
 
 
 def _validate_structure(root: Path) -> dict[str, Any]:
@@ -85,7 +91,7 @@ def _validate_structure(root: Path) -> dict[str, Any]:
     present_forbidden = _FORBIDDEN_FIELDS & manifest.keys()
     if present_forbidden:
         raise ValueError(
-            f"Manifest contains forbidden audit fields: {sorted(present_forbidden)}"
+            f"Manifest contains forbidden fields: {sorted(present_forbidden)}"
         )
 
     required = _TASK_REQUIRED if dataset_class == "task_corpus" else _SHARED_REQUIRED
@@ -95,11 +101,6 @@ def _validate_structure(root: Path) -> dict[str, Any]:
 
     channels: list[str] = manifest["channels"]
     n_samples: dict[str, int] = manifest["n_samples"]
-    H, W = manifest["shape"]
-
-    missing_mandatory = MANDATORY_CHANNELS - set(channels)
-    if missing_mandatory:
-        raise ValueError(f"manifest channels missing mandatory: {sorted(missing_mandatory)}")
 
     if dataset_class == "task_corpus":
         ps: str = manifest["parent_substrate"]
@@ -147,10 +148,6 @@ def _validate_structure(root: Path) -> dict[str, Any]:
             arr = np.load(ch_file, mmap_mode="r")
             if arr.shape[0] != n:
                 raise ValueError(f"{ch_file}: has {arr.shape[0]} samples, manifest declares {n}")
-            if arr.ndim >= 3 and arr.shape[-2:] != (H, W):
-                raise ValueError(
-                    f"{ch_file}: spatial shape {arr.shape[-2:]} != manifest ({H}, {W})"
-                )
 
     return manifest
 
@@ -200,29 +197,23 @@ def _validate_path_grammar(root: Path, manifest: dict[str, Any]) -> None:
         expected_ps = f"data/processed/{parent_family}/v{parent_version}"
         if ps != expected_ps:
             raise ValueError(
-                f"parent_substrate {ps!r} does not match expected canonical path "
-                f"{expected_ps!r} (derived from parent_family and parent_version)."
+                f"parent_substrate {ps!r} does not match expected {expected_ps!r}."
             )
 
 
 def validate_version_root(root: Path) -> dict[str, Any]:
-    """Validate a versioned dataset root against its manifest and schema.
-
-    Runs the full validation suite: structural integrity plus path grammar.
+    """Validate a versioned dataset root against structural and path-grammar rules.
 
     Args:
-        root: Resolved versioned dataset root path.
+        root: Resolved versioned dataset root.
 
     Returns:
-        Parsed manifest dict (for optional inspection by the caller).
+        Parsed manifest dict.
 
     Raises:
-        FileNotFoundError: When a required file or directory is absent.
+        FileNotFoundError: When a required file is absent.
         ValueError: On any contract violation.
     """
     manifest = _validate_structure(root)
     _validate_path_grammar(root, manifest)
     return manifest
-
-
-__all__ = ["validate_version_root"]

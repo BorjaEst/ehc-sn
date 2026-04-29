@@ -28,6 +28,8 @@ import numpy as np
 from ehc_sn.data.lifecycle import extract_version, staging_root, write_index_at_root, write_split
 from ehc_sn.data.manifest import write_manifest
 from ehc_sn.data.substrate._maze_nd_raw import ensure_raw_corpus, iter_raw_records, normalize_raw_record
+from ehc_sn.data.substrate.grid2d import TOPOLOGY_KIND as _GRID2D_KIND
+from ehc_sn.data.substrate.grid2d import validate_grid2d_sample
 
 SHARED_FAMILY: str = "maze-nd"
 """Shared-substrate family name for the HuggingFace maze-nd source."""
@@ -202,7 +204,8 @@ def build_shared_substrate(
     }
 
     first_normalized = normalize_raw_record(raw_train_records[0])
-    shape: tuple[int, int] = first_normalized["topology"].shape
+    topo_shape: tuple[int, int] = first_normalized["topology"].shape
+    n_states = topo_shape[0] * topo_shape[1]
 
     stage_params = {"n_train": n_train, "n_val": n_val, "n_test": n_test, "seed": seed}
 
@@ -217,11 +220,13 @@ def build_shared_substrate(
                 split,
                 samples,
                 source=SHARED_FAMILY,
-                shape=shape,
                 channels=SHARED_CHANNELS,
-                spatial_channels=SHARED_CHANNELS,
-                index_kwargs={"n_observations": 0, "n_goals": 0, "difficulty": "medium"},
+                topology_kind=_GRID2D_KIND,
+                n_states=n_states,
+                extent=[topo_shape[0], topo_shape[1]],
+                index_kwargs={},
                 per_sample_extra=per_sample_extra,
+                sample_validator=validate_grid2d_sample,
             )
             all_entries.extend(entries)
 
@@ -233,7 +238,9 @@ def build_shared_substrate(
             family=SHARED_FAMILY,
             version=version,
             channels=SHARED_CHANNELS,
-            shape=shape,
+            topology_kind=_GRID2D_KIND,
+            n_states=n_states,
+            extent=[topo_shape[0], topo_shape[1]],
             n_samples={s: len(raw_by_split[s]) for s in _SPLITS},
             source_id=_SOURCE_ID,
             builder="ehc_sn.data.substrate.maze_nd.build_shared_substrate",
@@ -245,6 +252,32 @@ def build_shared_substrate(
     print(f"maze-nd shared substrate written to {version_root}  ({n_total} samples).")
 
 
+def validate_maze_nd_shared_root(root: Path) -> dict:
+    """Validate a maze-nd shared substrate root against generic and family-owned rules.
+
+    Args:
+        root: Resolved versioned maze-nd shared substrate root.
+
+    Returns:
+        Parsed manifest dict.
+
+    Raises:
+        ValueError: On any contract violation.
+        FileNotFoundError: When a required file is absent.
+    """
+    from ehc_sn.data.lifecycle import validate_version_root
+
+    manifest = validate_version_root(root)
+    if manifest.get("family") != SHARED_FAMILY:
+        raise ValueError(f"Root family is {manifest.get('family')!r}, expected {SHARED_FAMILY!r}.")
+    if manifest.get("topology_kind") != _GRID2D_KIND:
+        raise ValueError(f"Root topology_kind is {manifest.get('topology_kind')!r}, expected {_GRID2D_KIND!r}.")
+    missing_ch = set(SHARED_CHANNELS) - set(manifest.get("channels", []))
+    if missing_ch:
+        raise ValueError(f"Manifest missing required maze-nd channels: {sorted(missing_ch)}")
+    return manifest
+
+
 __all__ = [
     "MazeNdSourceRecord",
     "SHARED_FAMILY",
@@ -253,4 +286,5 @@ __all__ = [
     "prepare_interim",
     "build_shared_substrate",
     "read_source_record_index",
+    "validate_maze_nd_shared_root",
 ]

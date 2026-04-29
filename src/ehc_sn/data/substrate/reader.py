@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ehc_sn.data.index import MazeIndexEntry, read_index
+from ehc_sn.data.index import DatasetIndexEntry, read_index
 from ehc_sn.data.manifest import read_manifest
 
 
@@ -46,7 +46,7 @@ def iter_substrate_entries_and_samples(
     substrate_root: Path,
     split: str,
     channels: list[str],
-) -> Iterator[tuple[MazeIndexEntry, dict[str, np.ndarray]]]:
+) -> Iterator[tuple[DatasetIndexEntry, dict[str, np.ndarray]]]:
     """Yield ``(entry, sample)`` pairs from a shared substrate versioned root.
 
     Pairs each ``index.jsonl`` entry with its corresponding per-sample channel
@@ -59,7 +59,7 @@ def iter_substrate_entries_and_samples(
         channels: Channel names to load.
 
     Yields:
-        ``(MazeIndexEntry, dict[str, ndarray])`` pairs in index order.
+        ``(DatasetIndexEntry, dict[str, ndarray])`` pairs in index order.
 
     Raises:
         FileNotFoundError: When the index or a channel file is missing.

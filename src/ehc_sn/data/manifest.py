@@ -56,7 +56,9 @@ def write_manifest(
     family: str,
     version: int,
     channels: list[str],
-    shape: tuple[int, int],
+    topology_kind: str,
+    n_states: int,
+    extent: list[int],
     n_samples: dict[str, int],
     source_id: str,
     builder: str,
@@ -88,7 +90,9 @@ def write_manifest(
         family: Shared family name (e.g. ``"maze-nd"``) or task namespace.
         version: Version integer.
         channels: Channel names present in every sample.
-        shape: Common spatial grid shape ``(H, W)``.
+        topology_kind: Canonical topology kind string (e.g. ``"grid2d"``, ``"line1d"``).
+        n_states: Total number of states in the topology.
+        extent: Topology extent list (e.g. ``[H, W]`` for grid2d, ``[N]`` for line1d).
         n_samples: Mapping from split name to sample count.
         source_id: Stable upstream source identifier.
         builder: Qualified builder function name.
@@ -127,7 +131,9 @@ def write_manifest(
         "family": family,
         "version": version,
         "channels": channels,
-        "shape": list(shape),
+        "topology_kind": topology_kind,
+        "n_states": n_states,
+        "extent": list(extent),
         "n_samples": n_samples,
         "source_id": source_id,
         "builder": builder,
