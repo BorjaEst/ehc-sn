@@ -1,6 +1,0 @@
-benchmark_id = "b3-sudoku"
-dataset_root = "data/processed/sudoku"
-split = "test"
-manifest_path = "data/processed/sudoku/benchmarks/b3/manifest.json"
-compute_budget = 16
-write_sample_records = true
