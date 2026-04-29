@@ -183,7 +183,9 @@ def build_mazehard_task_corpus(
         avail = parent_n.get(split, 0)
         if n > avail:
             raise ValueError(f"Requested {n} {split!r} samples but parent substrate only has {avail}.")
-    shape: tuple[int, int] = tuple(parent_manifest["shape"])  # type: ignore[assignment]
+    parent_extent: list[int] = parent_manifest["extent"]
+    parent_topology_kind: str = parent_manifest["topology_kind"]
+    parent_n_states: int = parent_manifest["n_states"]
 
     raw_by_id = read_source_record_index(interim_root)
 
@@ -219,10 +221,11 @@ def build_mazehard_task_corpus(
                 split,
                 samples,
                 source=TASK_FAMILY,
-                shape=shape,
                 channels=MAZEHARD_TASK_CHANNELS,
-                spatial_channels=MAZEHARD_TASK_CHANNELS,
-                index_kwargs={"n_observations": 0, "n_goals": 1, "difficulty": "medium"},
+                topology_kind=parent_topology_kind,
+                n_states=parent_n_states,
+                extent=parent_extent,
+                index_kwargs={},
                 sample_validator=validate_mazehard_task_sample,
             )
             all_entries.extend(entries)
@@ -235,7 +238,9 @@ def build_mazehard_task_corpus(
             family=TASK_FAMILY,
             version=version,
             channels=MAZEHARD_TASK_CHANNELS,
-            shape=shape,
+            topology_kind=parent_topology_kind,
+            n_states=parent_n_states,
+            extent=parent_extent,
             n_samples=split_counts,
             source_id="huggingface/maze_hard_augmented",
             builder="ehc_sn.tasks.mazehard.build_mazehard_task_corpus",

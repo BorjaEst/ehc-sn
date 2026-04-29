@@ -230,7 +230,9 @@ def build_arena_task_corpus(
         if n > avail:
             raise ValueError(f"Requested {n} {split!r} samples but parent substrate only has {avail}.")
 
-    shape: tuple[int, int] = tuple(parent_manifest["shape"])  # type: ignore[assignment]
+    parent_extent: list[int] = parent_manifest["extent"]
+    parent_topology_kind: str = parent_manifest["topology_kind"]
+    parent_n_states: int = parent_manifest["n_states"]
 
     stage_params = {
         "corpus": corpus,
@@ -258,10 +260,11 @@ def build_arena_task_corpus(
                 split,
                 samples,
                 source=TASK_FAMILY,
-                shape=shape,
                 channels=ARENA_TASK_CHANNELS,
-                spatial_channels=ARENA_SPATIAL_CHANNELS,
-                index_kwargs={"n_observations": parent_manifest.get("n_observations", 0), "n_goals": 0, "difficulty": "medium"},
+                topology_kind=parent_topology_kind,
+                n_states=parent_n_states,
+                extent=parent_extent,
+                index_kwargs={},
                 sample_validator=validate_arena_task_sample,
             )
             all_entries.extend(entries)
@@ -274,7 +277,9 @@ def build_arena_task_corpus(
             family=TASK_FAMILY,
             version=version,
             channels=ARENA_TASK_CHANNELS,
-            shape=shape,
+            topology_kind=parent_topology_kind,
+            n_states=parent_n_states,
+            extent=parent_extent,
             n_samples=split_counts,
             source_id=DUNGEON_SHARED_FAMILY,
             builder="ehc_sn.tasks.arena.build_arena_task_corpus",

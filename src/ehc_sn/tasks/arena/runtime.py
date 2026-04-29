@@ -134,11 +134,48 @@ def coerce_arena_task_input(
 
 
 # =============================================================================
+def _slot_world(topo: Tensor, H: int, W: int) -> dict[str, object]:
+    """Build a single figure-ready world descriptor from one topology slice.
+
+    Invariant: locations[i] encodes the full-grid cell at row = i // W, col = i % W.
+    Invalid cells are preserved with valid=False; no compacting occurs.
+    """
+    locations: list[dict[str, object]] = [
+        {
+            "o": float(col),
+            "y": float(row),
+            "valid": bool(topo[row, col].item()),
+            "shiny": False,
+            "actions": [],
+        }
+        for row in range(H)
+        for col in range(W)
+    ]
+    return {"locations": locations, "n_locations": H * W, "spatial_geometry": "unknown"}
+
+
+def build_arena_trace_worlds(batch: Batch) -> list[dict[str, object]]:
+    """Build figure-ready world descriptors from an Arena replay batch.
+
+    Returns one world dict per batch slot.  Each descriptor satisfies the
+    figure-pipeline contract (locations / n_locations / spatial_geometry)
+    with full-grid row-major ordering so index i = row * W + col.
+
+    Invalid cells remain present in ``locations`` with ``valid=False``.
+    No torch.Tensor appears anywhere in the returned structure.
+    """
+    topology = batch["topology"]  # (B, H, W) bool tensor
+    B, H, W = topology.shape
+    return [_slot_world(topology[b], H, W) for b in range(B)]
+
+
+# =============================================================================
 __all__ = [
     "ARENA_REPLAY_OPTIONAL_KEYS",
     "ARENA_REPLAY_REQUIRED_KEYS",
     "ARENA_STEP_KEYS",
     "batch_size_from_arena_batch",
+    "build_arena_trace_worlds",
     "coerce_arena_targets",
     "coerce_arena_task_input",
     "infer_arena_replay_batch_keys",
