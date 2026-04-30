@@ -23,6 +23,7 @@ from torch import dtype as Dtype
 from torch import nn
 
 from ehc_sn import utils
+from ehc_sn.activations.softplus import bounded_positive_scale
 from ehc_sn.modules.mlp import MLP
 from ehc_sn.types import Activation, LocationBelief
 
@@ -79,7 +80,7 @@ class PlaceInference(nn.Module):
         self._activation_fn = utils.activation_from_str(self._config.activation)
 
         # Predict uncertainty directly from the inferred grounded-location mean.
-        self.uncertainty_mlp = MLP(shape, shape, [torch.tanh, torch.exp], [2 * n for n in shape])
+        self.uncertainty_mlp = MLP(shape, shape, [torch.tanh, bounded_positive_scale], [2 * n for n in shape])
 
     @property
     def config(self) -> PlaceInferenceSettings:

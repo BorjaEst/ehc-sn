@@ -18,6 +18,11 @@ META_KEY_LEC_ALPHA = "lec/filter/alpha_sigmoid"
 META_KEY_LEC_WF = "lec/w_f_sigmoid"
 
 
+def _to_cpu(value: object) -> object:
+    """Move a tensor to CPU if needed; return other values unchanged."""
+    return value.cpu() if hasattr(value, "cpu") else value  # type: ignore[union-attr]
+
+
 @dataclass
 class LECSummaryFigureData:
     n_freq: int
@@ -76,7 +81,8 @@ def select_lec_pipeline(trace: TraceTree, ctx: FigureContext) -> LECPipelineFigu
 
 
 def _require_param_vector(trace: TraceTree, key: str) -> NDArray:
-    vector = np.asarray(trace.get_meta_path(key), dtype=float)
+    value = _to_cpu(trace.get_meta_path(key))
+    vector = np.asarray(value, dtype=float)
     if vector.ndim != 1:
         raise ValueError(f"Trace metadata '{key}' must be one-dimensional, got shape {vector.shape}")
     return vector

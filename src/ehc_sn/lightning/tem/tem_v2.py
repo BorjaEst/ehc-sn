@@ -9,6 +9,7 @@ import lightning as L
 import torch
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
+from torchmetrics import MetricCollection
 
 from ehc_sn.adapters.arena.tem import ArenaTEMAdapterSettings, ArenaTEMTaskBinding, ArenaTEMV2BridgeAdapter
 from ehc_sn.adapters.arena.tem.traces import ARENA_TEM_TRACE_FIELDS, select_arena_tem_trace_fields
@@ -19,6 +20,7 @@ from ehc_sn.lightning._rollout import (
     observe_rollout_chunk,
     update_metric_collection_from_evaluated_chunk,
 )
+from ehc_sn.lightning.eval.contracts import EvaluationBatchArtifacts, EvaluationTraceRequest
 from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, resolve_tem_runtime
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
@@ -350,3 +352,74 @@ class TrainingModel(L.LightningModule):
         trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES)
         return {"trace": trace}
+
+    # -- Evaluation regime surface ---------------------------------------------------------------
+
+    def build_evaluation_metrics(  # -------------------------------------------------------------
+        self, namespace: str,
+    ) -> MetricCollection:  # fmt: skip
+        """Return a fresh TEM-family metric collection with the given namespace prefix.
+
+        Args:
+            namespace: Metric namespace prefix, e.g. ``"diag/my_probe/"``.
+
+        Returns:
+            A fresh :class:`~torchmetrics.MetricCollection` keyed by TEM episode routes.
+        """
+        return build_val_metrics(TEM_EPISODE_ROUTES).clone(prefix=namespace)
+
+    def execute_evaluation_batch(  # -------------------------------------------------------------
+        self,
+        batch: Batch,
+        trace_request: Optional[EvaluationTraceRequest],
+    ) -> EvaluationBatchArtifacts:  # fmt: skip
+        """Execute one TEM evaluation batch and return scored artifacts.
+
+        Runs a full TEM rollout identical to ``validation_step`` but does **not**
+        update ``self.val_metrics``.
+
+        Args:
+            batch: A task batch in arena replay format.
+            trace_request: Trace key request, or ``None`` for no trace.
+
+        Returns:
+            :class:`~ehc_sn.lightning.eval.contracts.EvaluationBatchArtifacts`.
+        """
+        self._apply_runtime(self.global_step, log_values=False)
+        eval_controller = self._require_eval_controller()
+        eval_objective = self._require_eval_objective()
+        carry0 = eval_controller.initial_state(batch)
+        trace_meta = self._build_trace_meta(batch)
+
+        if trace_request is not None and trace_request.enabled:
+            req_keys = trace_request.key_set()
+            arena_extra = select_arena_tem_trace_fields(req_keys)
+            trace_specs = build_trace_spec("tem", include_keys=req_keys, extra_fields=arena_extra)
+        else:
+            trace_specs = self.trace_specs
+
+        evaluation = evaluate_rollout(
+            runner=self._eval_runner,
+            source=RepeatSource(batch),
+            controller=eval_controller,
+            carry=carry0,
+            objective=eval_objective,
+            max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
+            hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
+            runner_options={"allow_halt": True},
+        )
+
+        trace = None
+        if trace_request is not None and trace_request.enabled:
+            trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)
+
+        def _apply(collection: MetricCollection) -> None:
+            update_metric_collection_from_evaluated_chunk(collection, evaluation.evaluated, TEM_EPISODE_ROUTES)
+
+        return EvaluationBatchArtifacts(
+            regime_id="_inline",
+            metric_namespace="",
+            evaluated=evaluation.evaluated,
+            apply_to_metrics=_apply,
+            trace=trace,
+        )

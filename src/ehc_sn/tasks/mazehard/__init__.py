@@ -9,6 +9,9 @@ Stable task surface:
 - :mod:`~ehc_sn.tasks.mazehard.contracts` — task contracts and constants.
 - :mod:`~ehc_sn.tasks.mazehard.evaluation` — sequence evaluation and aggregate report.
 - :mod:`~ehc_sn.tasks.mazehard.reward` — task-owned reward semantics.
+- :mod:`~ehc_sn.tasks.mazehard.providers` — task-owned evaluation case providers
+  (:class:`~ehc_sn.tasks.mazehard.providers.MazeHardReplayDiagnosticProvider`,
+  :class:`~ehc_sn.tasks.mazehard.providers.MazeHardFixedProbeProvider`).
 
 Execution-binding capability:
 

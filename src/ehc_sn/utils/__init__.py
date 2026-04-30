@@ -19,6 +19,30 @@ from torch import nn
 from ehc_sn.types import LocationBelief, Matrix, Reduction, Vector
 
 
+def inv_var_weight(
+    mus,
+    sigmas,
+    *,
+    eps: float = 1e-4,
+) -> Tuple[Tensor, Tensor]:
+    """
+    Accepts lists batches of row vectors of means and standard deviations, with batches along dim 0.
+    Returns inverse-variance weighted averages and standard deviations.
+    """
+    mus = torch.stack(mus, dim=0)
+    sigmas = torch.stack(sigmas, dim=0)
+
+    max_sigma = 1.0 / eps
+    safe_sigmas = torch.nan_to_num(sigmas, nan=eps, posinf=max_sigma, neginf=eps)
+    safe_sigmas = torch.clamp(safe_sigmas, min=eps, max=max_sigma)
+    precision = 1.0 / safe_sigmas.square()
+    inv_var_var = 1.0 / precision.sum(dim=0).clamp_min(eps)
+    inv_var_avg = (mus * precision).sum(dim=0) * inv_var_var
+    inv_var_sigma = torch.sqrt(inv_var_var.clamp_min(eps))
+
+    return inv_var_avg, inv_var_sigma
+
+
 def has_any_grad(
     opt: Any,
 ) -> bool:
@@ -167,24 +191,6 @@ def inv_var_trans(
         mu_out[f], sigma_out[f] = mu_f, sigma_f
 
     return LocationBelief(mean=mu_out, uncertainty=sigma_out)
-
-
-def inv_var_weight(mus, sigmas):
-    """
-    Accepts lists batches of row vectors of means and standard deviations, with batches along dim 0
-    Return tensors of inverse-variance weighted averages and tensors of inverse-variance weighted standard deviations
-    """
-    # Stack vectors together along first dimension
-    mus = torch.stack(mus, dim=0)
-    sigmas = torch.stack(sigmas, dim=0)
-    # Calculate inverse variance weighted variance from sum over reciprocal of squared sigmas
-    inv_var_var = 1.0 / torch.sum(1.0 / (sigmas**2), dim=0)
-    # Calculate inverse variance weighted average
-    inv_var_avg = torch.sum(mus / (sigmas**2), dim=0) * inv_var_var
-    # Convert weighted variance to sigma
-    inv_var_sigma = torch.sqrt(inv_var_var)
-    # And return results
-    return inv_var_avg, inv_var_sigma
 
 
 def softmax(o):

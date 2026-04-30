@@ -21,6 +21,11 @@ OPEN_FIELD_RATE_SMOOTH_SIGMA = 1.0
 DEFAULT_RATE_SMOOTH_SIGMA = 0.0
 
 
+def _to_cpu(value: object) -> object:
+    """Move a tensor to CPU if needed; return other values unchanged."""
+    return value.cpu() if hasattr(value, "cpu") else value  # type: ignore[union-attr]
+
+
 def world_spatial_geometry(world: AnyWorld) -> str:
     """Return the declared spatial geometry for a world-like object."""
     if isinstance(world, Mapping):
@@ -124,7 +129,7 @@ def prepare_rate_maps(
     min_bin_occupancy: float = DEFAULT_RATE_MAP_MIN_BIN_OCCUPANCY,
 ) -> tuple[PreparedRateMap, ...]:
     """Build prepared rate maps for one or more cells."""
-    cell_array = np.asarray(cells_trace)
+    cell_array = np.asarray(_to_cpu(cells_trace))
     if cell_array.ndim < 2 or cell_array.shape[-1] == 0:
         return ()
 
@@ -175,10 +180,16 @@ def prepare_rate_map_from_location_responses(
     )
 
     response_mass_grid, _, extent = rasterize_locations_additive(
-        world, response_mass_by_location, grid_res=grid_res, include_mask=occupied_locations,
+        world,
+        response_mass_by_location,
+        grid_res=grid_res,
+        include_mask=occupied_locations,
     )
     occupancy_grid, _, _ = rasterize_locations_additive(
-        world, location_counts, grid_res=grid_res, include_mask=occupied_locations,
+        world,
+        location_counts,
+        grid_res=grid_res,
+        include_mask=occupied_locations,
     )
     if response_mass_grid.size == 0 or occupancy_grid.size == 0:
         return _empty_prepared_rate_map(smooth_sigma=smooth_sigma, min_bin_occupancy=min_bin_occupancy)
@@ -189,10 +200,16 @@ def prepare_rate_map_from_location_responses(
     smoothed_occupancy_grid = occupancy_grid.copy()
     if smooth_sigma > 0:
         smoothed_response_mass_grid = gaussian_filter(
-            smoothed_response_mass_grid, sigma=float(smooth_sigma), mode="constant", cval=0.0,
+            smoothed_response_mass_grid,
+            sigma=float(smooth_sigma),
+            mode="constant",
+            cval=0.0,
         )
         smoothed_occupancy_grid = gaussian_filter(
-            smoothed_occupancy_grid, sigma=float(smooth_sigma), mode="constant", cval=0.0,
+            smoothed_occupancy_grid,
+            sigma=float(smooth_sigma),
+            mode="constant",
+            cval=0.0,
         )
 
     with np.errstate(divide="ignore", invalid="ignore"):

@@ -16,6 +16,7 @@ from scipy.stats import truncnorm
 from torch import Tensor, nn
 
 from ehc_sn import utils
+from ehc_sn.activations.softplus import bounded_positive_scale
 from ehc_sn.modules.mlp import MLP
 from ehc_sn.types import LocationBelief
 
@@ -50,7 +51,7 @@ class P2GMemory(nn.Module):
 
     def __init__(  # ------------------------------------------------------------------------------
         self, n_p: list[int], mec_shape: list[int], config: P2GMemSettings,
-    ) -> None:  # fmt: skip
+    ) -> None:
         """ """
         super().__init__()
         self._config = config
@@ -66,7 +67,8 @@ class P2GMemory(nn.Module):
         self.MLP_mu_g_mem.set_weights(-1, [torch.tensor(init_w(f), dtype=torch.float32) for f in range(self._n_freq)])  # fmt: skip
 
         # Uncertainty from memory quality indicators
-        self.MLP_sigma_g_mem = MLP([2 for _ in n_p], mec_shape, activation=[torch.tanh, torch.exp], hidden_dim=[2 * g for g in mec_shape])  # fmt: skip
+        mec_activation = [torch.tanh, bounded_positive_scale]
+        self.MLP_sigma_g_mem = MLP([2 for _ in n_p], mec_shape, mec_activation, hidden_dim=[2 * g for g in mec_shape])  # fmt: skip
 
     @property
     def config(self) -> P2GMemSettings:

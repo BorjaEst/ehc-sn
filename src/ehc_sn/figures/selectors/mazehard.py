@@ -24,11 +24,16 @@ META_KEY_GT_OVERLAY = "target/solution_overlay"
 _DEFAULT_MAX_MAZES = 10
 
 
+def _to_cpu(value: object) -> object:
+    """Move a tensor to CPU if needed; return other values unchanged."""
+    return value.cpu() if hasattr(value, "cpu") else value  # type: ignore[union-attr]
+
+
 @dataclass
 class OverlayFigureData:
     """Prepared data for :class:`~ehc_sn.figures.templates.overlay.OverlayFigure`."""
 
-    input_ids: NDArray   # (n, N)
+    input_ids: NDArray  # (n, N)
     gt_overlays: NDArray  # (n, N) bool
     model_overlays: NDArray  # (n, N)
 
@@ -37,10 +42,10 @@ class OverlayFigureData:
 class EvolutionFigureData:
     """Prepared data for :class:`~ehc_sn.figures.templates.evolution.PredictionEvolutionFigure`."""
 
-    input_ids: NDArray     # (B, N)
-    gt_overlay: NDArray    # (N,) bool — single sample
-    pred_is_o: NDArray     # (T, B, N)
-    halted: NDArray        # (T, B) bool
+    input_ids: NDArray  # (B, N)
+    gt_overlay: NDArray  # (N,) bool — single sample
+    pred_is_o: NDArray  # (T, B, N)
+    halted: NDArray  # (T, B) bool
     sample_idx: int
     t_halt: int
     t_indices: list[int]
@@ -48,10 +53,10 @@ class EvolutionFigureData:
 
 def select_overlay(trace: TraceTree, ctx: FigureContext) -> OverlayFigureData:
     """Extract overlay data from the trace, respecting ctx selection policy."""
-    input_ids = np.asarray(trace.get_meta_path(META_KEY_INPUT_IDS))
-    gt_raw = np.asarray(trace.get_meta_path(META_KEY_GT_OVERLAY))
-    halted = np.asarray(trace.get(TRACE_KEY_HALTED))
-    pred_is_o = np.asarray(trace.get(TRACE_KEY_PRED_OVERLAY))
+    input_ids = np.asarray(_to_cpu(trace.get_meta_path(META_KEY_INPUT_IDS)))
+    gt_raw = np.asarray(_to_cpu(trace.get_meta_path(META_KEY_GT_OVERLAY)))
+    halted = np.asarray(_to_cpu(trace.get(TRACE_KEY_HALTED)))
+    pred_is_o = np.asarray(_to_cpu(trace.get(TRACE_KEY_PRED_OVERLAY)))
 
     if halted.ndim != 2:
         raise ValueError(f"{TRACE_KEY_HALTED} must have shape [T, B]")
@@ -67,9 +72,7 @@ def select_overlay(trace: TraceTree, ctx: FigureContext) -> OverlayFigureData:
         start = 0
 
     end = start + n
-    model_overlays = np.stack(
-        [pred_is_o[first_halt_index(halted[:, b]), b] for b in range(start, end)], axis=0
-    )
+    model_overlays = np.stack([pred_is_o[first_halt_index(halted[:, b]), b] for b in range(start, end)], axis=0)
     return OverlayFigureData(
         input_ids=input_ids[start:end],
         gt_overlays=gt_raw[start:end].astype(bool),
@@ -79,10 +82,10 @@ def select_overlay(trace: TraceTree, ctx: FigureContext) -> OverlayFigureData:
 
 def select_evolution(trace: TraceTree, ctx: FigureContext, k_max: int = 16) -> EvolutionFigureData:
     """Extract evolution data from the trace for the sample chosen by ctx."""
-    input_ids = np.asarray(trace.get_meta_path(META_KEY_INPUT_IDS))
-    gt_raw = np.asarray(trace.get_meta_path(META_KEY_GT_OVERLAY))
-    pred_is_o = np.asarray(trace.get(TRACE_KEY_PRED_OVERLAY))
-    halted = np.asarray(trace.get(TRACE_KEY_HALTED))
+    input_ids = np.asarray(_to_cpu(trace.get_meta_path(META_KEY_INPUT_IDS)))
+    gt_raw = np.asarray(_to_cpu(trace.get_meta_path(META_KEY_GT_OVERLAY)))
+    pred_is_o = np.asarray(_to_cpu(trace.get(TRACE_KEY_PRED_OVERLAY)))
+    halted = np.asarray(_to_cpu(trace.get(TRACE_KEY_HALTED)))
 
     batch_size = halted.shape[1] if halted.ndim == 2 else 1
     sample_idx = ctx.sample_idx if ctx.sample_idx < batch_size else 0

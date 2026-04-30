@@ -9,6 +9,9 @@ Stable task surface:
 - :mod:`~ehc_sn.tasks.arena.contracts` — observation, action, and score contracts.
 - :mod:`~ehc_sn.tasks.arena.evaluation` — structural score and evaluation helpers.
 - :mod:`~ehc_sn.tasks.arena.reward` — task-owned reward projection.
+- :mod:`~ehc_sn.tasks.arena.providers` — task-owned evaluation case providers
+  (:class:`~ehc_sn.tasks.arena.providers.ArenaReplayDiagnosticProvider`,
+  :class:`~ehc_sn.tasks.arena.providers.ArenaFixedProbeProvider`).
 
 Optional execution-binding capability:
 

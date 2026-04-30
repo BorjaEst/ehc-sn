@@ -69,3 +69,28 @@ supervised_only_warmup_steps = 5000
 [figures]
     enabled = true
     figures = ["overlay", "evolution"]
+
+# -- Named evaluation regimes -------------------------------------------------
+# Uncomment and configure to enable out-of-band diagnostic regime runs.
+# Regimes log under diag/<regime_id>/ and never touch val/.
+# Provide a task-owned EvaluationSourceProvider implementation as provider_ref.
+
+[[eval_regimes.regimes]]
+regime_id    = "maze_val_diag"
+phase_kind   = "diag"
+provider_ref = "ehc_sn.tasks.mazehard.providers.MazeHardReplayDiagnosticProvider"
+
+[eval_regimes.regimes.provider_settings]
+dataset_path = "data/processed/mazehard/default/v1"
+split        = "val"
+batch_size   = 1
+n_cases      = 0
+
+[eval_regimes.regimes.schedule]
+every_n_epochs = 5
+every_n_steps  = 0
+max_batches    = 10
+
+[eval_regimes.regimes.trace_request]
+enabled    = false
+trace_keys = []

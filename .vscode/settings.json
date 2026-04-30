@@ -18,7 +18,7 @@
     "evenBetterToml.formatter.indentEntries": true,
     "evenBetterToml.formatter.alignComments": false,
     // Copilot configuration
-    "chat.agent.maxRequests": 100,
+    "chat.agent.maxRequests": 200,
     "chat.tools.terminal.autoApprove": {
         "/.*/": true,
         "git": false,

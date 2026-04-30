@@ -19,6 +19,9 @@ Stable task surface:
   value accuracy, MAE, and stratified scoring.
 - :mod:`~ehc_sn.tasks.countwalk.runtime` — replay batch schema constants and
   batch-cursor-aware target extraction.
+- :mod:`~ehc_sn.tasks.countwalk.providers` — task-owned evaluation case providers
+  (:class:`~ehc_sn.tasks.countwalk.providers.CountwalkReplayDiagnosticProvider`,
+  :class:`~ehc_sn.tasks.countwalk.providers.CountwalkFixedProbeProvider`).
 
 Execution-binding capability:
 

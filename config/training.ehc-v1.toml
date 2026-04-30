@@ -70,7 +70,7 @@ diagnostic_level     = "standard"
     tbptt_steps = 25
 
 [runtime.validation]
-    hard_max_rollout_steps = 300
+    hard_max_rollout_steps = 600
     seed = 42
 
 # -- Objective ----------------------------------------------------------------
@@ -99,3 +99,38 @@ diagnostic_level     = "standard"
 [figures]
     enabled = true
     figures = ["lec_summary", "mec_summary", "hpc_summary"]
+    regime_id = "arena_diag"
+
+# -- Named evaluation regimes -------------------------------------------------
+# Uncomment and configure to enable out-of-band diagnostic regime runs.
+# Regimes log under diag/<regime_id>/ and never touch val/.
+
+[[eval_regimes.regimes]]
+regime_id    = "arena_diag"
+phase_kind   = "diag"
+provider_ref = "ehc_sn.tasks.arena.providers.ArenaReplayDiagnosticProvider"
+
+[eval_regimes.regimes.provider_settings]
+dataset_path = "data/processed/arena/long_horizon/v1"
+split        = "val"
+batch_size   = 4
+n_cases      = 0
+
+[eval_regimes.regimes.schedule]
+every_n_epochs = 5
+every_n_steps  = 0
+max_batches    = 10
+
+[eval_regimes.regimes.trace_request]
+enabled = true
+trace_keys = [
+  "world_step/observation",
+  "diagnostic/lec/cells",
+  "lec/filter/alpha_sigmoid",
+  "lec/w_f_sigmoid",
+  "world_step/location_ids",
+  "diagnostic/mec/location_mean",
+  "environments",
+  "diagnostic/hpc/location_mean",
+  "diagnostic/hpc/memory",
+]

@@ -10,6 +10,9 @@ Stable task surface:
 - :mod:`~ehc_sn.tasks.dungeon.contracts` — observation, action, and score contracts.
 - :mod:`~ehc_sn.tasks.dungeon.evaluation` — step score builder and aggregate report.
 - :mod:`~ehc_sn.tasks.dungeon.reward` — task-owned reward projection.
+- :mod:`~ehc_sn.tasks.dungeon.providers` — task-owned evaluation case providers
+  (:class:`~ehc_sn.tasks.dungeon.providers.DungeonReplayDiagnosticProvider`,
+  :class:`~ehc_sn.tasks.dungeon.providers.DungeonFixedProbeProvider`).
 
 Dungeon v1 models episode-terminal task facts only; token-supervision targets
 are not defined.  No online-control execution-binding capability is implemented:

@@ -32,6 +32,7 @@ import lightning as L
 from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.optim import Optimizer
+from torchmetrics import MetricCollection
 
 from ehc_sn import utils
 from ehc_sn.adapters.mazehard.hrm import (
@@ -43,6 +44,7 @@ from ehc_sn.adapters.mazehard.hrm import (
 from ehc_sn.adapters.mazehard.hrm.traces import MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
 from ehc_sn.controllers.deliberation.actor_critic import DeliberationACController, DeliberationACControllerConfig
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
+from ehc_sn.lightning.eval.contracts import EvaluationBatchArtifacts, EvaluationTraceRequest
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics, update_metrics_from_step
 from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
@@ -342,6 +344,68 @@ class TrainingModel(L.LightningModule):
         trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs, trace_meta=build_mazehard_hrm_trace_meta(batch))
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, RL_EPISODE_ROUTES)
         return {"trace": trace}
+
+    # -- Evaluation regime surface ---------------------------------------------------------------
+
+    def build_evaluation_metrics(  # -------------------------------------------------------------
+        self, namespace: str,
+    ) -> MetricCollection:  # fmt: skip
+        """Return a fresh HRM v2-family metric collection with the given namespace prefix.
+
+        Args:
+            namespace: Metric namespace prefix, e.g. ``"diag/my_probe/"``.
+
+        Returns:
+            A fresh :class:`~torchmetrics.MetricCollection` keyed by RL episode routes.
+        """
+        return build_val_metrics(RL_EPISODE_ROUTES).clone(prefix=namespace)
+
+    def execute_evaluation_batch(  # -------------------------------------------------------------
+        self,
+        batch: Batch,
+        trace_request: Optional[EvaluationTraceRequest],
+    ) -> EvaluationBatchArtifacts:  # fmt: skip
+        """Execute one HRM v2 evaluation batch and return scored artifacts.
+
+        Runs a deterministic RL rollout identical to ``validation_step`` but does **not**
+        update ``self.val_metrics``.
+
+        Args:
+            batch: A task batch in MazeHard format.
+            trace_request: Trace key request, or ``None`` for no trace.
+
+        Returns:
+            :class:`~ehc_sn.lightning.eval.contracts.EvaluationBatchArtifacts`.
+        """
+        if self.controller is None or self.val_scorer is None:
+            raise RuntimeError("HRM v2 runtime is not initialized. Call setup() before evaluation.")
+
+        carry0 = self.controller.initial_state(batch)
+        evaluation = evaluate_rollout(
+            runner=self._eval_runner,
+            source=RepeatSource(batch),
+            controller=self.controller,
+            carry=carry0,
+            objective=self.val_scorer,
+            max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
+            hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
+            runner_options={"explore": False, "allow_halt": False},
+        )
+
+        trace = None
+        if trace_request is not None and trace_request.enabled:
+            trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs, trace_meta=build_mazehard_hrm_trace_meta(batch))
+
+        def _apply(collection: MetricCollection) -> None:
+            update_metric_collection_from_evaluated_chunk(collection, evaluation.evaluated, RL_EPISODE_ROUTES)
+
+        return EvaluationBatchArtifacts(
+            regime_id="_inline",
+            metric_namespace="",
+            evaluated=evaluation.evaluated,
+            apply_to_metrics=_apply,
+            trace=trace,
+        )
 
 
 # =============================================================================

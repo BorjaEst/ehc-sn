@@ -15,6 +15,7 @@ from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSetti
 from ehc_sn.adapters.arena.tem import ArenaTEMAdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
+from ehc_sn.callbacks.eval_regimes import EvaluationRegimesCallback, EvaluationRegimesCallbackSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.controllers.replay.trajectory import ReplayTrajectoryControllerConfig
@@ -44,9 +45,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     """CLI and TOML settings for TEM v2 training runs."""
 
     @classmethod
-    def settings_customise_sources(  # ------------------------------------------------------------
-        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,) -> tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip  # ------------------------------------------------------------
         """Customize settings source order.
 
         Pydantic Settings supports multiple value sources; we explicitly place
@@ -158,6 +157,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     figures: Optional[FigureCallbackSettings] = Field(
         default_factory=FigureCallbackSettings,
         description="Figure generation callback settings.",
+    )
+    eval_regimes: Optional[EvaluationRegimesCallbackSettings] = Field(
+        default=None,
+        description="Named evaluation regime settings. When set, regimes run after each fit-path validation epoch.",
     )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(
         default="standard",
@@ -278,6 +281,8 @@ if __name__ == "__main__":
     callbacks_list = [TrainingMetricsCallback()]
     if settings.checkpoint is not None:
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
+    if settings.eval_regimes is not None:
+        callbacks_list.append(EvaluationRegimesCallback(settings.eval_regimes))
     if settings.figures is not None and settings.figures.enabled:
         callbacks_list.append(FiguresCallback(settings.figures))
     if settings.diagnostic_level != "minimal":

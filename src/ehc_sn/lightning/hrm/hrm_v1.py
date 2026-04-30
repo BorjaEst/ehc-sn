@@ -18,12 +18,13 @@ with keys ``"input_ids"`` and ``"labels"``.
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import lightning as L
 from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
+from torchmetrics import MetricCollection
 
 from ehc_sn.adapters.mazehard.hrm import (
     MazeHardHRMAdapterSettings,
@@ -34,6 +35,7 @@ from ehc_sn.adapters.mazehard.hrm import (
 from ehc_sn.adapters.mazehard.hrm.traces import MAZE_HARD_HRM_ACT_TRACE_FIELDS
 from ehc_sn.controllers.deliberation.act import ACTController, ACTControllerConfig
 from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
+from ehc_sn.lightning.eval.contracts import EvaluationBatchArtifacts, EvaluationTraceRequest
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
@@ -278,6 +280,66 @@ class TrainingModel(L.LightningModule):
         trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs, trace_meta=build_mazehard_hrm_trace_meta(batch))
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, ACT_EPISODE_ROUTES)
         return {"trace": trace}
+
+    # -- Evaluation regime surface ---------------------------------------------------------------
+
+    def build_evaluation_metrics(  # -------------------------------------------------------------
+        self, namespace: str,
+    ) -> MetricCollection:  # fmt: skip
+        """Return a fresh HRM-family metric collection with the given namespace prefix.
+
+        Args:
+            namespace: Metric namespace prefix, e.g. ``"diag/my_probe/"``.
+
+        Returns:
+            A fresh :class:`~torchmetrics.MetricCollection` keyed by ACT episode routes.
+        """
+        return build_val_metrics(ACT_EPISODE_ROUTES).clone(prefix=namespace)
+
+    def execute_evaluation_batch(  # -------------------------------------------------------------
+        self,
+        batch: Batch,
+        trace_request: Optional[EvaluationTraceRequest],
+    ) -> EvaluationBatchArtifacts:  # fmt: skip
+        """Execute one HRM v1 evaluation batch and return scored artifacts.
+
+        Runs a deterministic ACT rollout identical to ``validation_step`` but does **not**
+        update ``self.val_metrics``.
+
+        Args:
+            batch: A task batch in MazeHard format.
+            trace_request: Trace key request, or ``None`` for no trace.
+
+        Returns:
+            :class:`~ehc_sn.lightning.eval.contracts.EvaluationBatchArtifacts`.
+        """
+        carry0 = self.controller.initial_state(batch)
+        evaluation = evaluate_rollout(
+            runner=self._eval_runner,
+            source=RepeatSource(batch),
+            controller=self.controller,
+            carry=carry0,
+            objective=self.objective,
+            max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
+            hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
+            runner_options={"allow_halt": False, "explore": False},
+            objective_options={"controller": self.controller, "td_target": False},
+        )
+
+        trace = None
+        if trace_request is not None and trace_request.enabled:
+            trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs, trace_meta=build_mazehard_hrm_trace_meta(batch))
+
+        def _apply(collection: MetricCollection) -> None:
+            update_metric_collection_from_evaluated_chunk(collection, evaluation.evaluated, ACT_EPISODE_ROUTES)
+
+        return EvaluationBatchArtifacts(
+            regime_id="_inline",
+            metric_namespace="",
+            evaluated=evaluation.evaluated,
+            apply_to_metrics=_apply,
+            trace=trace,
+        )
 
 
 # =============================================================================
