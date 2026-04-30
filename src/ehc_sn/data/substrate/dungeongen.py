@@ -244,7 +244,7 @@ def build_shared_substrate(
     n_test: int = 40,
     height: int | None = None,
     width: int | None = None,
-    n_observations: int = 6,
+    n_observations: int = 45,
     seed: int = 42,
 ) -> None:
     """Build the dungeongen shared substrate at *version_root*.
