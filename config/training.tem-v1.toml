@@ -29,7 +29,7 @@ diagnostic_level     = "standard"
 
 # -- Adapter ------------------------------------------------------------------
 [adapter]
-    observation_dim = 45
+    observation_dim = 28
     action_count    = 5
 
 [adapter.encoder]
@@ -67,7 +67,7 @@ diagnostic_level     = "standard"
     offset_max       = 10000.0
 
 [runtime.sequence]
-    tbptt_steps = 25
+    tbptt_steps = 75
 
 [runtime.validation]
     hard_max_rollout_steps = 600
@@ -124,13 +124,11 @@ max_batches    = 10
 [eval_regimes.regimes.trace_request]
 enabled = true
 trace_keys = [
-  "world_step/observation",
+  # Model-side diagnostic traces (emitted by the runtime/model).
   "diagnostic/lec/cells",
   "lec/filter/alpha_sigmoid",
   "lec/w_f_sigmoid",
-  "world_step/location_ids",
   "diagnostic/mec/location_mean",
-  "environments",
   "diagnostic/hpc/location_mean",
   "diagnostic/hpc/memory",
 ]
