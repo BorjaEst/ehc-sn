@@ -222,12 +222,14 @@ def _get_rpe(ctx: _RLTraceContext) -> TraceValue:
 
 def _get_world_observation_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Current-step observation encoding aligned with this step's TEM outputs."""
-    return ctx.carry.data["observation"].detach()
+    v = ctx.carry.data.get("observation")
+    return None if v is None else v.detach()
 
 
 def _get_world_location_ids_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Current-step location ids aligned with this step's TEM outputs."""
-    return ctx.carry.data["location_id"].squeeze(-1).detach()
+    v = ctx.carry.data.get("location_id")
+    return None if v is None else v.squeeze(-1).detach()
 
 
 def _get_diagnostic_lec_cells_tem(ctx: _TEMTraceContext) -> TraceValue:
