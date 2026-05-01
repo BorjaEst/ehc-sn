@@ -1,8 +1,8 @@
-"""Staged CLI for building the Arena task corpus.
+"""Staged CLI for building the Arena task corpus (v1, topology-free).
 
-Arena consumes the dungeongen shared substrate and adds Arena-specific
-trajectory semantics on top.  This CLI owns only the Arena task corpus
-slice; the shared dungeongen pipeline (raw, interim, substrate) is owned by
+Arena consumes the dungeongen shared substrate and generates topology-free
+episode trajectories.  This CLI owns only the Arena task corpus slice; the
+shared dungeongen pipeline (raw, interim, substrate) is owned by
 scripts/data-gen/build-dungeongen.py.
 
 Stages
@@ -29,13 +29,13 @@ Build the Arena task corpus against the default shared substrate::
 
     python build-arena.py build-all
 
-With an explicit shared-substrate version::
+With explicit parent-map and episode counts::
 
-    python build-arena.py build-all --shared-version 2 --version 2
-
-Custom trajectory length::
-
-    python build-arena.py materialize-task --max-steps 80 --seed 7
+    python build-arena.py materialize-task \\
+        --train-parent-maps 200 --train-episodes-per-parent 100 \\
+        --val-parent-maps 40 --val-episodes-per-parent 4 \\
+        --test-parent-maps 40 --test-episodes-per-parent 1 \\
+        --max-steps 250 --seed 42
 """
 
 from __future__ import annotations
@@ -76,15 +76,18 @@ def _require_shared_substrate(shared_root: Path) -> None:
 @app.command("materialize-task")
 def materialize_task(
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
-    n_train: Annotated[int, typer.Option("--n-train")] = 200,
-    n_val: Annotated[int, typer.Option("--n-val")] = 40,
-    n_test: Annotated[int, typer.Option("--n-test")] = 40,
-    max_steps: Annotated[int, typer.Option("--max-steps")] = 50,
+    train_parent_maps: Annotated[int, typer.Option("--train-parent-maps")] = 200,
+    val_parent_maps: Annotated[int, typer.Option("--val-parent-maps")] = 40,
+    test_parent_maps: Annotated[int, typer.Option("--test-parent-maps")] = 40,
+    train_episodes_per_parent: Annotated[int, typer.Option("--train-episodes-per-parent")] = 100,
+    val_episodes_per_parent: Annotated[int, typer.Option("--val-episodes-per-parent")] = 4,
+    test_episodes_per_parent: Annotated[int, typer.Option("--test-episodes-per-parent")] = 1,
+    max_steps: Annotated[int, typer.Option("--max-steps")] = 250,
     shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
     version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
 ) -> None:
-    """Build the Arena task corpus over a dungeongen shared substrate."""
+    """Build the Arena task corpus (v1, topology-free) over a dungeongen shared substrate."""
     shared_root = Path(f"data/processed/{SHARED_FAMILY}/v{shared_version}")
     task_root = Path(f"data/processed/arena/{corpus}/v{version}")
     _require_shared_substrate(shared_root.resolve())
@@ -92,9 +95,12 @@ def materialize_task(
         task_root.resolve(),
         parent_substrate=shared_root.resolve(),
         corpus=corpus,
-        n_train=n_train,
-        n_val=n_val,
-        n_test=n_test,
+        train_parent_maps=train_parent_maps,
+        val_parent_maps=val_parent_maps,
+        test_parent_maps=test_parent_maps,
+        train_episodes_per_parent=train_episodes_per_parent,
+        val_episodes_per_parent=val_episodes_per_parent,
+        test_episodes_per_parent=test_episodes_per_parent,
         max_steps=max_steps,
         seed=seed,
     )
@@ -126,21 +132,26 @@ def validate(
         raise typer.Exit(code=1)
     validate_arena_task_root(root.resolve())
     typer.echo(f"OK  {root}")
-    typer.echo(f"    dataset_class : {manifest['dataset_class']}")
-    typer.echo(f"    task          : {manifest['task']}")
-    typer.echo(f"    version       : {manifest['version']}")
-    typer.echo(f"    channels      : {manifest['channels']}")
-    typer.echo(f"    n_samples     : {manifest['n_samples']}")
+    typer.echo(f"    dataset_class          : {manifest['dataset_class']}")
+    typer.echo(f"    task                   : {manifest['task']}")
+    typer.echo(f"    task_protocol_version  : {manifest.get('task_protocol_version')}")
+    typer.echo(f"    version                : {manifest['version']}")
+    typer.echo(f"    channels               : {manifest['channels']}")
+    typer.echo(f"    n_samples              : {manifest['n_samples']}")
+    typer.echo(f"    observation_vocab_size : {manifest.get('observation_vocab_size')}")
 
 
 # ---------------------------------------------------------------------------
 @app.command("build-all")
 def build_all(
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
-    n_train: Annotated[int, typer.Option("--n-train")] = 200,
-    n_val: Annotated[int, typer.Option("--n-val")] = 40,
-    n_test: Annotated[int, typer.Option("--n-test")] = 40,
-    max_steps: Annotated[int, typer.Option("--max-steps")] = 50,
+    train_parent_maps: Annotated[int, typer.Option("--train-parent-maps")] = 200,
+    val_parent_maps: Annotated[int, typer.Option("--val-parent-maps")] = 40,
+    test_parent_maps: Annotated[int, typer.Option("--test-parent-maps")] = 40,
+    train_episodes_per_parent: Annotated[int, typer.Option("--train-episodes-per-parent")] = 100,
+    val_episodes_per_parent: Annotated[int, typer.Option("--val-episodes-per-parent")] = 4,
+    test_episodes_per_parent: Annotated[int, typer.Option("--test-episodes-per-parent")] = 1,
+    max_steps: Annotated[int, typer.Option("--max-steps")] = 250,
     shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
     version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
@@ -153,9 +164,12 @@ def build_all(
     """
     materialize_task(
         corpus=corpus,
-        n_train=n_train,
-        n_val=n_val,
-        n_test=n_test,
+        train_parent_maps=train_parent_maps,
+        val_parent_maps=val_parent_maps,
+        test_parent_maps=test_parent_maps,
+        train_episodes_per_parent=train_episodes_per_parent,
+        val_episodes_per_parent=val_episodes_per_parent,
+        test_episodes_per_parent=test_episodes_per_parent,
         max_steps=max_steps,
         shared_version=shared_version,
         version=version,
