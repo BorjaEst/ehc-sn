@@ -75,6 +75,7 @@ def write_manifest(
     parent_version: int | None = None,
     task_schema_version: int | None = None,
     task_protocol_version: int | None = None,
+    **extra_fields: Any,
 ) -> None:
     """Write the authoritative ``manifest.json`` to *version_root*.
 
@@ -118,8 +119,7 @@ def write_manifest(
     dest = version_root / MANIFEST_FILENAME
     if dest.exists():
         raise FileExistsError(
-            f"Manifest already exists (dataset roots are immutable): {dest}\n"
-            "Bump the version integer to create a new version."
+            f"Manifest already exists (dataset roots are immutable): {dest}\n" "Bump the version integer to create a new version."
         )
 
     if stage_params is None:
@@ -160,6 +160,7 @@ def write_manifest(
         manifest["task_schema_version"] = task_schema_version
     if task_protocol_version is not None:
         manifest["task_protocol_version"] = task_protocol_version
+    manifest.update(extra_fields)
 
     dest.write_text(json.dumps(manifest, indent=2))
 
@@ -179,9 +180,7 @@ def read_manifest(version_root: Path) -> dict[str, Any]:
     """
     path = version_root / MANIFEST_FILENAME
     if not path.exists():
-        raise FileNotFoundError(
-            f"No manifest at {path}.  Is '{version_root}' a valid versioned dataset root?"
-        )
+        raise FileNotFoundError(f"No manifest at {path}.  Is '{version_root}' a valid versioned dataset root?")
     return json.loads(path.read_text())
 
 

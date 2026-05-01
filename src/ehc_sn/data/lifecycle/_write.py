@@ -123,6 +123,7 @@ def write_split(
     n_states: int,
     extent: list[int],
     index_kwargs: dict[str, Any],
+    per_sample_ids: list[str] | None = None,
     per_sample_extra: list[dict] | None = None,
     sample_validator: Callable[[dict[str, np.ndarray]], None] | None = None,
 ) -> list[DatasetIndexEntry]:
@@ -138,6 +139,9 @@ def write_split(
         n_states: Total number of states in the topology.
         extent: Topology extent list (e.g. ``[H, W]`` or ``[N]``).
         index_kwargs: Extra keyword arguments forwarded to :class:`DatasetIndexEntry`.
+        per_sample_ids: Optional explicit per-sample id strings.  When provided,
+            must have the same length as ``samples``; ids are used verbatim instead of
+            the default ``"{source}-{split}-{idx:06d}"`` pattern.
         per_sample_extra: Optional per-sample extra fields for index entries.
         sample_validator: Optional callable called on every sample after stacking.
 
@@ -145,6 +149,9 @@ def write_split(
         List of :class:`DatasetIndexEntry` for the split.
     """
     n = len(samples)
+    if per_sample_ids is not None and len(per_sample_ids) != n:
+        raise ValueError(f"per_sample_ids length {len(per_sample_ids)} does not match samples length {n}.")
+
     split_dir = output_root / split
     split_dir.mkdir()
 
@@ -174,7 +181,7 @@ def write_split(
 
     return [
         DatasetIndexEntry(
-            id=f"{source}-{split}-{idx + 1:06d}",
+            id=per_sample_ids[idx] if per_sample_ids else f"{source}-{split}-{idx + 1:06d}",
             source=source,
             split=split,
             channels=channels,

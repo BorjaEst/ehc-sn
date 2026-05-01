@@ -7,6 +7,7 @@ Public surface: :class:`DatasetIndexEntry`, :func:`read_index`,
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -30,6 +31,11 @@ class DatasetIndexEntry(BaseModel, extra="forbid"):
         "not by split-local position.",
     )
     channels: list[str] = Field(..., description="Canonical processed channel names materialized for the sample")
+    task_metadata: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional task-owned per-sample provenance object. Structure is task-defined; "
+        "tasks document the schema in their corpus spec section. Null unless the task builder supplies it.",
+    )
 
 
 # =================================================================================================
