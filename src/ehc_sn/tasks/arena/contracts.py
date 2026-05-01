@@ -5,6 +5,10 @@ revisit semantics, and additive structural score for maze-world navigation.
 
 Contracts owns: semantic task input, output, targets, actions, and constants.
 Score report lives in :mod:`ehc_sn.tasks.arena.evaluation`.
+
+Arena replay v1 is topology-free.  ``ArenaTaskInput`` carries only what the
+model needs: ids and step-semantic flags precomputed at build time.
+``valid_action_mask`` and ``location_id`` are not part of Arena replay v1.
 """
 
 from __future__ import annotations
@@ -27,32 +31,27 @@ ArenaAction = MovementAction
 class ArenaTaskInput:
     """Task-owned current-step input for one arena navigation step.
 
-    All required fields are populated by the adapter encoder before the model
-    sees this struct.  ``observation`` carries the encoded (not raw) sensory
-    vector; encoding is adapter-side so the task contract remains
-    model-agnostic.
+    All fields are populated by the adapter encoder before the model sees this
+    struct.  Observation encoding (e.g. one-hot) is adapter-side so the task
+    contract remains model-agnostic.
+
+    Arena replay v1 contract:
+    - No topology is present in the batch.
+    - ``valid_action_mask`` is not exposed.
+    - ``location_id`` is not exposed.
+    - Provenance (parent_sample_id etc.) is not exposed.
     """
 
-    observation: Tensor
-    """Encoded sensory observation vector, shape ``(B, obs_dim)``."""
     observation_id: Tensor
     """Categorical observation id, shape ``(B, 1)`` int64."""
     previous_action: Tensor
     """Action that produced the current state, shape ``(B, 1)`` int64."""
-    location_id: Tensor
-    """Flattened cell index ``row * W + col``, shape ``(B, 1)`` int64."""
-    valid_action_mask: Tensor
-    """Legal movement mask, shape ``(B, A)`` bool."""
+    landmark_id: Tensor | None
+    """Optional landmark / shiny-cue id, shape ``(B, 1)`` int64."""
     step_count: Tensor
     """Transitions taken in episode, shape ``(B, 1)`` int32."""
-    region_id: Tensor | None = None
-    """Optional region annotation, shape ``(B, 1)`` int64."""
-    landmark_id: Tensor | None = None
-    """Optional landmark / shiny-cue id, shape ``(B, 1)`` int64."""
-    episode_start: Tensor | None = None
+    episode_start: Tensor
     """True on the first step of an episode, shape ``(B,)`` bool."""
-    is_revisit: Tensor | None = None
-    """True when the current location has been visited before, shape ``(B,)`` bool."""
 
 
 # =============================================================================

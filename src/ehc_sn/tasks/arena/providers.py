@@ -88,7 +88,9 @@ class ArenaReplayDiagnosticProvider:
             if max_batches > 0 and batch_idx >= max_batches:
                 break
 
+            start = batch_idx * self._batch_size
             n_episodes = batch[next(iter(batch))].shape[0]
+            ids_in_batch = [e.id for e in entries[start : start + n_episodes]]
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"arena-{self._split}-{batch_idx:04d}",
@@ -96,6 +98,7 @@ class ArenaReplayDiagnosticProvider:
                     "split": self._split,
                     "batch_idx": batch_idx,
                     "n_episodes": n_episodes,
+                    "sample_ids": ids_in_batch,
                     "dataset_path": str(self._dataset_path),
                 },
             )

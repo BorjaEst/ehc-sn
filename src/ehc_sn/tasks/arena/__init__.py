@@ -1,8 +1,12 @@
-"""Arena task family — structural navigation over a maze world.
+"""Arena task family — structural navigation over a maze world (v1, topology-free).
 
 Arena defines the observation/action ontology, revisit semantics, and additive
 structural score for maze-world navigation.  These are task-owned semantics;
 they do not depend on any particular execution binding.
+
+Arena replay v1 is topology-free: the parent dungeongen substrate is the sole
+owner of spatial geometry.  One stored sample equals one episode.  Training
+uses a fixed offline corpus only.
 
 Stable task surface:
 
