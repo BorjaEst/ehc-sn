@@ -24,14 +24,13 @@ from ehc_sn.lightning.ehc.core.runtime import EHCRuntimeState, RuntimeConfig, re
 from ehc_sn.lightning.eval.contracts import EvaluationBatchArtifacts, EvaluationTraceRequest
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import EHC_EPISODE_ROUTES, EHC_PRIMARY_VAL_ROUTE_KEY, EHC_STEP_ROUTES
-from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
+from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.ehc.ehc_v1 import EHCModelV1, ModelSettingsV1
 from ehc_sn.objectives.ehc import EHCObjective, EHCObjectiveConfig
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
-from ehc_sn.tasks.arena.runtime import batch_size_from_arena_batch, build_arena_trace_worlds, infer_arena_replay_batch_keys
+from ehc_sn.tasks.arena.runtime import infer_arena_replay_batch_keys
 from ehc_sn.training.buffers import FifoBuffer
-from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.partial_reset import PartialResetBatchAssembler
 from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
@@ -142,7 +141,7 @@ class TrainingModel(L.LightningModule):
         controller = ReplayTrajectoryController(
             backbone=self.bridge_adapter,
             config=self.config.controller,
-            runtime=ArenaReplayCapability(observation_dim=self.config.adapter.observation_dim),
+            runtime=ArenaReplayCapability(),
         )
         objective = EHCObjective(self.config.objective, task_binding=ArenaEHCTaskBinding())
         return controller, objective
@@ -192,7 +191,6 @@ class TrainingModel(L.LightningModule):
         lec_alpha = torch.stack([torch.sigmoid(alpha).detach() for alpha in self.model.lec.filter.alpha])
         lec_w_f = torch.stack([torch.sigmoid(weight).detach() for weight in self.model.lec.w_f])
         return {
-            "environments": ReplayableEnvironments(build_arena_trace_worlds(batch)),
             "lec": {
                 "filter": {"alpha_sigmoid": lec_alpha},
                 "w_f_sigmoid": lec_w_f,
@@ -299,10 +297,8 @@ class TrainingModel(L.LightningModule):
         )
         self._train_carry = evaluation.execution.final_carry.detach()
 
-        # Normalize by local batch size; DDP averages gradients across ranks.
-        local_bs = batch_size_from_arena_batch(batch)
-        loss = normalize_loss_for_backward(evaluation.loss, local_bs=local_bs)
-        loss = loss / self._train_chunk_steps()  # Further normalize by chunk length for stability.
+        # objective.total is already normalized by the active protocol count per step
+        loss = evaluation.loss / self._train_chunk_steps()
 
         optimizers = self.optimizers()
         for opt in optimizers if isinstance(optimizers, list) else [optimizers]:

@@ -11,7 +11,7 @@ latent outputs abstracted into the output.
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional, cast
 
@@ -217,8 +217,8 @@ class TEMModelV2(nn.Module):
         # 0. Prepare the state, ensuring batch-alignment and extracting memories.
         if state is None:  # Init state if not provided
             state = self.init_state(batch_size, memory=None, device=device)
-        else:  # Clone the state to preserve immutability contract
-            state = state.detach()
+        else:  # Preserve the outer-state without truncating autograd
+            state = replace(state)
 
         # 1. Compute the grid prior by path integration:
         g_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state=state.mec)

@@ -24,12 +24,12 @@ from ehc_sn.lightning.eval.contracts import EvaluationBatchArtifacts, Evaluation
 from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, resolve_tem_runtime
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
-from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
+from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
 from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
-from ehc_sn.tasks.arena.runtime import batch_size_from_arena_batch, build_arena_trace_worlds, infer_arena_replay_batch_keys
+from ehc_sn.tasks.arena.runtime import infer_arena_replay_batch_keys
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
@@ -142,7 +142,7 @@ class TrainingModel(L.LightningModule):
         controller = ReplayTrajectoryController(
             backbone=self.bridge_adapter,
             config=self.config.controller,
-            runtime=ArenaReplayCapability(observation_dim=self.config.adapter.observation_dim),
+            runtime=ArenaReplayCapability(),
         )
         objective = TEMObjective(self.config.objective, task_binding=ArenaTEMTaskBinding())
         return controller, objective
@@ -192,7 +192,6 @@ class TrainingModel(L.LightningModule):
         lec_alpha = torch.stack([torch.sigmoid(alpha).detach() for alpha in self.model.lec.filter.alpha])
         lec_w_f = torch.stack([torch.sigmoid(weight).detach() for weight in self.model.lec.w_f])
         return {
-            "environments": ReplayableEnvironments(build_arena_trace_worlds(batch)),
             "lec": {
                 "filter": {"alpha_sigmoid": lec_alpha},
                 "w_f_sigmoid": lec_w_f,
@@ -299,10 +298,8 @@ class TrainingModel(L.LightningModule):
         )
         self._train_carry = evaluation.execution.final_carry.detach()
 
-        # Normalize by local batch size; DDP averages gradients across ranks.
-        local_bs = batch_size_from_arena_batch(batch)
-        loss = normalize_loss_for_backward(evaluation.loss, local_bs=local_bs)
-        loss = loss / self._train_chunk_steps()  # Further normalize by chunk length for stability.
+        # objective.total is already normalized by the active protocol count per step
+        loss = evaluation.loss / self._train_chunk_steps()
 
         optimizers = self.optimizers()
         for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
