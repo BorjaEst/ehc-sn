@@ -51,7 +51,7 @@ For the reference config (pfc.seq_length = 36) the content family has 33 slots.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, cast
 
 import torch
@@ -454,9 +454,8 @@ class EHCModelV2(nn.Module):
         # 0. Prepare state ----------------------------------------------------
         if state is None:
             state = self.init_state(batch_size, device=device)
-        else:
-            # Detach to preserve the immutable recurrent-state contract (TBPTT).
-            state = state.detach()
+        else:  # Preserve the outer-state without truncating autograd
+            state = replace(state)
 
         # --- V2 uses current-step PFC output as the cue source (not previous-step) ---
         # c_prop, c_mem, c_use are set after the first PFC pass (stage 1 below).

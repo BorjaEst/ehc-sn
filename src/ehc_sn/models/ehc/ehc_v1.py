@@ -35,7 +35,7 @@ For the reference config (pfc.seq_length = 36) the content family has 33 slots.
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional, cast
 
@@ -430,9 +430,8 @@ class EHCModelV1(nn.Module):
         # 0. Prepare state ----------------------------------------------------
         if state is None:
             state = self.init_state(batch_size, device=device)
-        else:
-            # Detach to preserve the immutable recurrent-state contract (TBPTT).
-            state = state.detach()
+        else:  # Preserve the outer-state without truncating autograd
+            state = replace(state)
 
         # --- V1 cue: previous-step PFC summary (before this step's PFC run) --
         # c_prop: project previous-step PFC summary into the hippocampal multi-frequency cue family.
