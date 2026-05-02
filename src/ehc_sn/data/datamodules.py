@@ -5,6 +5,7 @@ Public surface: :class:`Datamodule`, :class:`DatamoduleConfig`.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from pathlib import Path
 
@@ -153,6 +154,53 @@ class Datamodule(L.LightningDataModule):
         if self._test is None:
             raise RuntimeError("Call setup('test') before test_dataloader()")
         return self._make_loader(self._test, shuffle=False)
+
+    def val_sample_ids_for_batch(
+        self,
+        batch_idx: int,
+        batch_size: int,
+        rank: int = 0,
+        world_size: int = 1,
+    ) -> list[str]:
+        """Return ordered sample IDs for a validation batch on the given process.
+
+        Simulates ``DistributedSampler(shuffle=False, drop_last=False)`` plus
+        sequential ``DataLoader(drop_last=True)`` batching — the same
+        distribution that PyTorch Lightning applies to the val dataloader in
+        DDP mode.  For ``world_size == 1`` this reduces to simple sequential
+        batching.
+
+        Args:
+            batch_idx: Index of the batch within this process's local val stream.
+            batch_size: Number of samples per batch on this process.
+            rank: This process's global rank (0-based). Default ``0``.
+            world_size: Total number of processes. Default ``1``.
+
+        Returns:
+            Ordered list of :attr:`~ehc_sn.data.index.DatasetIndexEntry.id`
+            values for the requested batch.  Returns an empty list when
+            the datamodule has not been set up or the batch falls outside the
+            available samples (i.e. would have been dropped by ``drop_last``).
+        """
+        if self._val is None:
+            return []
+        entries = self._val._entries
+        n = len(entries)
+        if world_size <= 1:
+            start = batch_idx * batch_size
+            end = start + batch_size
+            return [entries[i].id for i in range(start, min(end, n))]
+        # Simulate DistributedSampler(shuffle=False, drop_last=False):
+        # pad index list from the beginning so total is divisible by world_size.
+        total_size = math.ceil(n / world_size) * world_size
+        padding = total_size - n
+        all_indices = list(range(n)) + list(range(padding))
+        local_indices = all_indices[rank:total_size:world_size]
+        start = batch_idx * batch_size
+        end = start + batch_size
+        if end > len(local_indices):
+            return []  # incomplete batch; would be dropped by drop_last=True
+        return [entries[i].id for i in local_indices[start:end]]
 
 
 # =================================================================================================

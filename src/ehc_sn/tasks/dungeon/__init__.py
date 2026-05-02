@@ -31,20 +31,30 @@ from .builder import (
 from .contracts import DUNGEON_ACTION_COUNT, DungeonAction, DungeonTaskInput, DungeonTaskOutput
 from .evaluation import DungeonScoreReport, DungeonStepScore
 from .reward import DungeonRewardConfig, DungeonRewardProjector
+from .traces import (
+    DungeonEvaluationSourceContext,
+    DungeonTraceSupplements,
+    apply_dungeon_trace_supplements,
+    build_dungeon_trace_supplements,
+)
 
 __all__ = [
     "DUNGEON_ACTION_COUNT",
     "DungeonAction",
     "DUNGEON_TASK_CHANNELS",
     "DUNGEON_TRAJECTORY_CHANNELS",
+    "DungeonEvaluationSourceContext",
     "DungeonRewardConfig",
     "DungeonRewardProjector",
     "DungeonScoreReport",
     "DungeonStepScore",
     "DungeonTaskInput",
     "DungeonTaskOutput",
+    "DungeonTraceSupplements",
     "TASK_FAMILY",
+    "apply_dungeon_trace_supplements",
     "build_dungeon_task_corpus",
+    "build_dungeon_trace_supplements",
     "validate_dungeon_task_root",
     "validate_dungeon_task_sample",
 ]

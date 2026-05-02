@@ -39,12 +39,19 @@ from .capabilities.replay import ArenaReplayCapability
 from .contracts import ARENA_ACTION_COUNT, ArenaAction, ArenaTargets, ArenaTaskInput, ArenaTaskOutput
 from .evaluation import ArenaScoreReport, ArenaStepScore
 from .reward import ArenaRewardConfig, ArenaRewardProjector
+from .traces import (
+    ArenaEvaluationSourceContext,
+    ArenaTraceSupplements,
+    apply_arena_trace_supplements,
+    build_arena_trace_supplements,
+)
 
 __all__ = [
     "ARENA_ACTION_COUNT",
     "ArenaAction",
     "ARENA_SPATIAL_CHANNELS",
     "ARENA_TASK_CHANNELS",
+    "ArenaEvaluationSourceContext",
     "ArenaReplayCapability",
     "ArenaRewardConfig",
     "ArenaRewardProjector",
@@ -53,8 +60,11 @@ __all__ = [
     "ArenaTargets",
     "ArenaTaskInput",
     "ArenaTaskOutput",
+    "ArenaTraceSupplements",
     "TASK_FAMILY",
+    "apply_arena_trace_supplements",
     "build_arena_task_corpus",
+    "build_arena_trace_supplements",
     "validate_arena_task_root",
     "validate_arena_task_sample",
 ]

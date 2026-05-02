@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
 from ehc_sn.lightning.eval.contracts import EvaluationCaseBatch, EvaluationSourceProvider
+from ehc_sn.tasks.arena.traces import ArenaEvaluationSourceContext
 
 
 # =================================================================================================
@@ -94,13 +95,12 @@ class ArenaReplayDiagnosticProvider:
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"arena-{self._split}-{batch_idx:04d}",
-                metadata={
-                    "split": self._split,
-                    "batch_idx": batch_idx,
-                    "n_episodes": n_episodes,
-                    "sample_ids": ids_in_batch,
-                    "dataset_path": str(self._dataset_path),
-                },
+                source_context=ArenaEvaluationSourceContext(
+                    task_family="arena",
+                    dataset_path=self._dataset_path,
+                    split=self._split,
+                    sample_ids=tuple(ids_in_batch),
+                ),
             )
 
     def description(self) -> str:
@@ -211,12 +211,12 @@ class ArenaFixedProbeProvider:
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=case_id,
-                metadata={
-                    "split": self._split,
-                    "batch_idx": batch_idx,
-                    "sample_ids": ids_in_batch,
-                    "dataset_path": str(self._dataset_path),
-                },
+                source_context=ArenaEvaluationSourceContext(
+                    task_family="arena",
+                    dataset_path=self._dataset_path,
+                    split=self._split,
+                    sample_ids=tuple(ids_in_batch),
+                ),
             )
 
     def description(self) -> str:

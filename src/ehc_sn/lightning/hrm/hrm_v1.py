@@ -43,6 +43,11 @@ from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
 from ehc_sn.objectives.act import ACTLossConfig, ACTLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
+from ehc_sn.tasks.mazehard.traces import (
+    MazeHardEvaluationSourceContext,
+    apply_mazehard_trace_supplements,
+    build_mazehard_trace_supplements,
+)
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
@@ -300,6 +305,7 @@ class TrainingModel(L.LightningModule):
         self,
         batch: Batch,
         trace_request: Optional[EvaluationTraceRequest],
+        source_context: object | None = None,
     ) -> EvaluationBatchArtifacts:  # fmt: skip
         """Execute one HRM v1 evaluation batch and return scored artifacts.
 
@@ -309,6 +315,9 @@ class TrainingModel(L.LightningModule):
         Args:
             batch: A task batch in MazeHard format.
             trace_request: Trace key request, or ``None`` for no trace.
+            source_context: Optional typed provider context. When
+                :class:`~ehc_sn.tasks.mazehard.traces.MazeHardEvaluationSourceContext`
+                is supplied, the MazeHard supplement seam is invoked (currently a no-op).
 
         Returns:
             :class:`~ehc_sn.lightning.eval.contracts.EvaluationBatchArtifacts`.
@@ -327,8 +336,10 @@ class TrainingModel(L.LightningModule):
         )
 
         trace = None
+        supplements_applied: tuple[str, ...] = ()
         if trace_request is not None and trace_request.enabled:
             trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs, trace_meta=build_mazehard_hrm_trace_meta(batch))
+            supplements_applied = _maybe_apply_mazehard_supplements(trace, source_context)
 
         def _apply(collection: MetricCollection) -> None:
             update_metric_collection_from_evaluated_chunk(collection, evaluation.evaluated, ACT_EPISODE_ROUTES)
@@ -339,7 +350,33 @@ class TrainingModel(L.LightningModule):
             evaluated=evaluation.evaluated,
             apply_to_metrics=_apply,
             trace=trace,
+            source_context=source_context,
+            trace_supplements_applied=supplements_applied,
         )
+
+# =================================================================================================
+def _maybe_apply_mazehard_supplements(
+    trace: "TraceTree",  # noqa: F821
+    source_context: object | None,
+) -> tuple[str, ...]:
+    """Apply MazeHard trace supplements to *trace* if source_context is MazeHardEvaluationSourceContext.
+
+    MazeHard supplements are currently a no-op seam: no keys are attached and the empty
+    tuple is returned.  This function exists so the HRM family contract is uniform with
+    the Arena families — all families route through their task-local supplement seam.
+
+    Args:
+        trace: TraceTree to enrich in-place.
+        source_context: Typed provider context; supplements applied only when MazeHard-typed.
+
+    Returns:
+        Always ``()`` — MazeHard supplements are a no-op seam.
+    """
+    if not isinstance(source_context, MazeHardEvaluationSourceContext):
+        return ()
+    supplements = build_mazehard_trace_supplements(source_context, trace.length)
+    apply_mazehard_trace_supplements(trace, supplements)
+    return ()
 
 
 # =============================================================================

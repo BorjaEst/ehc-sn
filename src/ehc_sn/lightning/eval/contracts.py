@@ -107,12 +107,15 @@ class EvaluationCaseBatch:
     Attributes:
         batch: The raw task batch (same type as fit-path batches).
         case_id: Optional identifier for this case, for logging.
-        metadata: Optional provider-specific metadata.
+        source_context: Optional typed provider-supplied context object. The
+            concrete type is task-family-specific (e.g.
+            :class:`~ehc_sn.tasks.arena.traces.ArenaEvaluationSourceContext`
+            for Arena). Producers must not emit free-form dict blobs here.
     """
 
     batch: Batch
     case_id: Optional[str] = None
-    metadata: Optional[dict[str, Any]] = None
+    source_context: object | None = None
 
 
 # =================================================================================================
@@ -130,9 +133,16 @@ class EvaluationBatchArtifacts:
             :class:`~torchmetrics.MetricCollection` with this batch's results.
             Set by ``execute_evaluation_batch`` as a closure over the evaluated chunk
             and the family's route table; the runner calls it with the regime collection.
-        trace: Optional trace tree for figure consumers.
+        trace: Optional trace tree for figure consumers. When task-family supplements
+            have been applied (e.g. Arena world/context keys), the trace is the
+            fully-prepared, figure-ready source of truth — no callback-side enrichment needed.
         case_id: Forwarded from the :class:`EvaluationCaseBatch` if present.
-        source_metadata: Provider-supplied metadata.
+        source_context: Typed provider-supplied context object forwarded from
+            :attr:`EvaluationCaseBatch.source_context`. The concrete type is
+            task-family-specific. Consumers must not inspect this for enrichment;
+            enrichment belongs on the producer side.
+        trace_supplements_applied: Tuple of supplement identifiers that were applied
+            to the trace by the producer. Empty when no supplements were applied.
     """
 
     regime_id: str
@@ -141,7 +151,8 @@ class EvaluationBatchArtifacts:
     apply_to_metrics: Optional[Callable[[MetricCollection], None]] = None
     trace: Optional[TraceTree] = None
     case_id: Optional[str] = None
-    source_metadata: Optional[dict[str, Any]] = None
+    source_context: object | None = None
+    trace_supplements_applied: tuple[str, ...] = field(default_factory=tuple)
 
 
 # =================================================================================================
@@ -210,15 +221,22 @@ class SupportsEvaluationRegimes(Protocol):
         self,
         batch: Batch,
         trace_request: Optional[EvaluationTraceRequest],
+        source_context: object | None = None,
     ) -> EvaluationBatchArtifacts:
         """Execute one evaluation batch and return scored artifacts.
 
         Must not write into ``self.val_metrics``. Returns a scored rollout result
-        and an optional trace for figure consumers.
+        and an optional trace for figure consumers. When ``source_context`` is a
+        typed task-family context (e.g. :class:`~ehc_sn.tasks.arena.traces.ArenaEvaluationSourceContext`),
+        the implementation must apply the corresponding trace supplements to the
+        trace before returning so that the artifact is fully prepared for visualization.
 
         Args:
             batch: A task batch identical in structure to fit-path validation batches.
             trace_request: Which trace keys to include in the output, or ``None`` for no trace.
+            source_context: Optional typed provider context forwarded from
+                :attr:`EvaluationCaseBatch.source_context`. Used to apply
+                task-family-specific trace supplements on the producer side.
 
         Returns:
             :class:`EvaluationBatchArtifacts` with ``regime_id`` set to ``"_inline"``

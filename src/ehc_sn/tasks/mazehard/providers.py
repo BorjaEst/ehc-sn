@@ -28,6 +28,7 @@ from ehc_sn.adapters.mazehard.hrm.core import coerce_maze_hard_batch
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
 from ehc_sn.lightning.eval.contracts import EvaluationCaseBatch, EvaluationSourceProvider
+from ehc_sn.tasks.mazehard.traces import MazeHardEvaluationSourceContext
 
 
 # =================================================================================================
@@ -98,16 +99,18 @@ class MazeHardReplayDiagnosticProvider:
             if max_batches > 0 and batch_idx >= max_batches:
                 break
 
-            n_mazes = batch[next(iter(batch))].shape[0]
+            first_key = next(iter(batch))
+            n_in_batch = batch[first_key].shape[0]
+            ids_in_batch = [entries[batch_idx * self._batch_size + i].id for i in range(n_in_batch)]
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"mazehard-{self._split}-{batch_idx:04d}",
-                metadata={
-                    "split": self._split,
-                    "batch_idx": batch_idx,
-                    "n_mazes": n_mazes,
-                    "dataset_path": str(self._dataset_path),
-                },
+                source_context=MazeHardEvaluationSourceContext(
+                    task_family="mazehard",
+                    dataset_path=self._dataset_path,
+                    split=self._split,
+                    sample_ids=tuple(ids_in_batch),
+                ),
             )
 
     def description(self) -> str:
@@ -218,12 +221,12 @@ class MazeHardFixedProbeProvider:
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=case_id,
-                metadata={
-                    "split": self._split,
-                    "batch_idx": batch_idx,
-                    "sample_ids": ids_in_batch,
-                    "dataset_path": str(self._dataset_path),
-                },
+                source_context=MazeHardEvaluationSourceContext(
+                    task_family="mazehard",
+                    dataset_path=self._dataset_path,
+                    split=self._split,
+                    sample_ids=tuple(ids_in_batch),
+                ),
             )
 
     def description(self) -> str:

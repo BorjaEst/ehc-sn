@@ -32,11 +32,18 @@ from .capabilities.deliberation import MazeHardDeliberationCapability
 from .contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets, MazeHardTaskInput, MazeHardTaskOutput
 from .evaluation import MazeHardScoreReport, MazeHardStepScore
 from .reward import MazeHardRewardConfig, MazeHardRewardProjector
+from .traces import (
+    MazeHardEvaluationSourceContext,
+    MazeHardTraceSupplements,
+    apply_mazehard_trace_supplements,
+    build_mazehard_trace_supplements,
+)
 
 __all__ = [
     "MAZE_HARD_IGNORE_LABEL_ID",
     "MAZEHARD_TASK_CHANNELS",
     "MazeHardDeliberationCapability",
+    "MazeHardEvaluationSourceContext",
     "MazeHardRewardConfig",
     "MazeHardRewardProjector",
     "MazeHardScoreReport",
@@ -44,8 +51,11 @@ __all__ = [
     "MazeHardTargets",
     "MazeHardTaskInput",
     "MazeHardTaskOutput",
+    "MazeHardTraceSupplements",
     "TASK_FAMILY",
+    "apply_mazehard_trace_supplements",
     "build_mazehard_task_corpus",
+    "build_mazehard_trace_supplements",
     "validate_mazehard_task_root",
     "validate_mazehard_task_sample",
 ]

@@ -106,6 +106,12 @@ from .runtime import (
     batch_size_from_countwalk_batch,
     infer_countwalk_replay_batch_keys,
 )
+from .traces import (
+    CountwalkEvaluationSourceContext,
+    CountwalkTraceSupplements,
+    apply_countwalk_trace_supplements,
+    build_countwalk_trace_supplements,
+)
 
 __all__ = [
     # Family
@@ -190,4 +196,9 @@ __all__ = [
     "validate_countwalk_task_sample",
     # Capabilities
     "CountwalkReplayCapability",
+    # Trace supplements
+    "CountwalkEvaluationSourceContext",
+    "CountwalkTraceSupplements",
+    "build_countwalk_trace_supplements",
+    "apply_countwalk_trace_supplements",
 ]

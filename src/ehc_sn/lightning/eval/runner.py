@@ -151,13 +151,13 @@ def run_evaluation_regime(
 
     for case_batch in provider.provide_cases(max_batches=regime.schedule.max_batches):
         batch = _transfer_batch(case_batch.batch)
-        artifact = pl_module.execute_evaluation_batch(batch, trace_request)
+        artifact = pl_module.execute_evaluation_batch(batch, trace_request, case_batch.source_context)
 
-        # Stamp regime identity and forwarded metadata onto the artifact.
+        # Stamp regime identity and forwarded source context onto the artifact.
         artifact.regime_id = regime.regime_id
         artifact.metric_namespace = namespace
         artifact.case_id = case_batch.case_id
-        artifact.source_metadata = case_batch.metadata
+        artifact.source_context = case_batch.source_context
 
         # Update the regime metric collection via the family-owned closure.
         if artifact.apply_to_metrics is not None:

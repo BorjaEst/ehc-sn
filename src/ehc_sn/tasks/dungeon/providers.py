@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
 from ehc_sn.lightning.eval.contracts import EvaluationCaseBatch, EvaluationSourceProvider
+from ehc_sn.tasks.dungeon.traces import DungeonEvaluationSourceContext
 
 
 # =================================================================================================
@@ -66,7 +67,8 @@ class DungeonReplayDiagnosticProvider:
 
         Yields:
             :class:`~ehc_sn.lightning.eval.contracts.EvaluationCaseBatch` items with
-            dungeon channel tensors, a deterministic ``case_id``, and split metadata.
+            dungeon channel tensors, a deterministic ``case_id``, and a typed
+            :class:`~ehc_sn.tasks.dungeon.traces.DungeonEvaluationSourceContext`.
         """
         data_root = self._dataset_path
         all_entries = read_index(data_root / "index.jsonl")
@@ -88,16 +90,18 @@ class DungeonReplayDiagnosticProvider:
             if max_batches > 0 and batch_idx >= max_batches:
                 break
 
-            n_episodes = batch[next(iter(batch))].shape[0]
+            first_key = next(iter(batch))
+            n_in_batch = batch[first_key].shape[0]
+            ids_in_batch = [entries[batch_idx * self._batch_size + i].id for i in range(n_in_batch)]
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"dungeon-{self._split}-{batch_idx:04d}",
-                metadata={
-                    "split": self._split,
-                    "batch_idx": batch_idx,
-                    "n_episodes": n_episodes,
-                    "dataset_path": str(self._dataset_path),
-                },
+                source_context=DungeonEvaluationSourceContext(
+                    task_family="dungeon",
+                    dataset_path=self._dataset_path,
+                    split=self._split,
+                    sample_ids=tuple(ids_in_batch),
+                ),
             )
 
     def description(self) -> str:
@@ -132,7 +136,7 @@ class DungeonFixedProbeProvider:
     - ``batch_size`` (*int*, default ``1``): Episodes per evaluation case batch.
       When ``batch_size == 1`` the single sample id is used as ``case_id`` directly.
       When ``batch_size > 1`` a deterministic ``"dungeon-probe-NNNN"`` id is used and
-      the ordered sample ids are recorded in ``metadata["sample_ids"]``.
+      the ordered sample ids are used directly as ``case_id`` (batch_size 1) or encoded in ``case_id``.
 
     Raises:
         ValueError: On construction if ``sample_ids`` is empty or contains duplicates.
@@ -169,7 +173,8 @@ class DungeonFixedProbeProvider:
 
         Yields:
             :class:`~ehc_sn.lightning.eval.contracts.EvaluationCaseBatch` items with
-            dungeon channel tensors, a deterministic ``case_id``, and probe metadata.
+            dungeon channel tensors, a deterministic ``case_id``, and a typed
+            :class:`~ehc_sn.tasks.dungeon.traces.DungeonEvaluationSourceContext`.
 
         Raises:
             KeyError: If any ``sample_id`` is not found in the dataset index.
@@ -208,12 +213,12 @@ class DungeonFixedProbeProvider:
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=case_id,
-                metadata={
-                    "split": self._split,
-                    "batch_idx": batch_idx,
-                    "sample_ids": ids_in_batch,
-                    "dataset_path": str(self._dataset_path),
-                },
+                source_context=DungeonEvaluationSourceContext(
+                    task_family="dungeon",
+                    dataset_path=self._dataset_path,
+                    split=self._split,
+                    sample_ids=tuple(ids_in_batch),
+                ),
             )
 
     def description(self) -> str:

@@ -30,6 +30,11 @@ from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
 from ehc_sn.tasks.arena.runtime import infer_arena_replay_batch_keys
+from ehc_sn.tasks.arena.traces import (
+    ArenaEvaluationSourceContext,
+    apply_arena_trace_supplements,
+    build_arena_trace_supplements,
+)
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
@@ -348,7 +353,43 @@ class TrainingModel(L.LightningModule):
         )
         trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES)
+        _maybe_apply_arena_supplements(trace, self._resolve_val_source_context(batch_idx, batch))
         return {"trace": trace}
+
+    def _resolve_val_source_context(  # ----------------------------------------------------------
+        self, batch_idx: int, batch: Batch,
+    ) -> object | None:  # fmt: skip
+        """Resolve typed Arena source context for a fit-path validation batch.
+
+        Queries the attached datamodule for ordered sample IDs, accounting for
+        DistributedSampler interleaving in DDP runs.  Returns ``None`` when the
+        trainer/datamodule is unavailable or resolution fails.
+        """
+        try:
+            from ehc_sn.data.datamodules import Datamodule
+            trainer = getattr(self, "trainer", None)
+            if trainer is None:
+                return None
+            dm = getattr(trainer, "datamodule", None)
+            if not isinstance(dm, Datamodule):
+                return None
+            first_key = next(iter(batch))
+            batch_size = batch[first_key].shape[0]
+            sample_ids = dm.val_sample_ids_for_batch(
+                batch_idx, batch_size,
+                rank=trainer.global_rank,
+                world_size=trainer.world_size,
+            )
+            if not sample_ids:
+                return None
+            return ArenaEvaluationSourceContext(
+                task_family="arena",
+                dataset_path=dm.config.dataset_path,
+                split="val",
+                sample_ids=tuple(sample_ids),
+            )
+        except Exception:
+            return None
 
     # -- Evaluation regime surface ---------------------------------------------------------------
 
@@ -369,15 +410,20 @@ class TrainingModel(L.LightningModule):
         self,
         batch: Batch,
         trace_request: Optional[EvaluationTraceRequest],
+        source_context: object | None = None,
     ) -> EvaluationBatchArtifacts:  # fmt: skip
         """Execute one TEM evaluation batch and return scored artifacts.
 
         Runs a full TEM rollout identical to ``validation_step`` but does **not**
         update ``self.val_metrics``.
 
+        When ``source_context`` is an :class:`~ehc_sn.tasks.arena.traces.ArenaEvaluationSourceContext`,
+        Arena world/context supplements are applied to the trace before returning.
+
         Args:
             batch: A task batch in arena replay format.
             trace_request: Trace key request, or ``None`` for no trace.
+            source_context: Optional typed provider context for producer-side enrichment.
 
         Returns:
             :class:`~ehc_sn.lightning.eval.contracts.EvaluationBatchArtifacts`.
@@ -407,8 +453,10 @@ class TrainingModel(L.LightningModule):
         )
 
         trace = None
+        supplements_applied: tuple[str, ...] = ()
         if trace_request is not None and trace_request.enabled:
             trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)
+            supplements_applied = _maybe_apply_arena_supplements(trace, source_context)
 
         def _apply(collection: MetricCollection) -> None:
             update_metric_collection_from_evaluated_chunk(collection, evaluation.evaluated, TEM_EPISODE_ROUTES)
@@ -419,4 +467,17 @@ class TrainingModel(L.LightningModule):
             evaluated=evaluation.evaluated,
             apply_to_metrics=_apply,
             trace=trace,
+            trace_supplements_applied=supplements_applied,
         )
+
+# =================================================================================================
+def _maybe_apply_arena_supplements(
+    trace: "TraceTree",  # noqa: F821
+    source_context: object | None,
+) -> tuple[str, ...]:
+    """Apply Arena trace supplements if source_context is ArenaEvaluationSourceContext."""
+    if not isinstance(source_context, ArenaEvaluationSourceContext):
+        return ()
+    supplements = build_arena_trace_supplements(source_context, trace.length)
+    apply_arena_trace_supplements(trace, supplements)
+    return ("arena",)
