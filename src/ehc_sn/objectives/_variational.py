@@ -82,22 +82,23 @@ class VariationalLossHeadBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
         """Score one executed variational-family step."""
         carry = record.carry
         step_output = record.outputs
+        executed = record.executed_frame if record.executed_frame is not None else record.batch
         outputs = self._unwrap_controller_outputs(step_output)
-        losses = self.compute_losses(outputs, carry, batch=record.batch, step_output=step_output, **options)
+        losses = self.compute_losses(outputs, carry, batch=executed, step_output=step_output, **options)
         metrics = build_variational_step_metrics(
             self._build_metric_ratios(
                 losses,
                 carry=carry,
                 outputs=outputs,
                 batch_size=int(carry.halted.shape[0]),
-                batch=record.batch,
+                batch=executed,
                 step_output=step_output,
                 **options,
             ),
             batch_size=int(carry.halted.shape[0]),
             like=losses.total.detach(),
         )  # fmt: skip
-        signals = self.compute_signals(record.batch, carry, outputs, losses, step_output=step_output, **options)
+        signals = self.compute_signals(executed, carry, outputs, losses, step_output=step_output, **options)
         return self._build_step_output(losses, metrics, signals, outputs)
 
     @staticmethod

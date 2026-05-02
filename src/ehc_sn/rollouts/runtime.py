@@ -87,6 +87,22 @@ class StepRecord(Generic[ControllerOutputT]):
 
     This record stores the executed batch, a frozen post-step carry snapshot,
     the controller outputs, and the step index.
+
+    Fields
+    ------
+    batch:
+        Backward-compatible alias; always contains the *executed_frame* content
+        (the exact tensors consumed by the model, objective, and diagnostics).
+        Do not confuse with the raw source batch — use ``sampled_input`` for that.
+    sampled_input:
+        What the source proposed: the raw batch returned by the source before the
+        controller processed it.  May contain large trajectory arrays not consumed
+        by active slots.  ``None`` when the runner does not populate this field.
+    executed_frame:
+        The exact tensors actually consumed by the model, objective, and
+        diagnostics for this step.  For replay controllers this is the
+        carry-owned step slice, independent of the source batch.
+        ``None`` when the runner does not populate this field (legacy path).
     """
 
     index: int
@@ -94,6 +110,8 @@ class StepRecord(Generic[ControllerOutputT]):
     snapshot: CarrySnapshot
     outputs: ControllerOutputT
     all_halted: bool
+    sampled_input: Batch | None = None
+    executed_frame: Batch | None = None
 
     @property
     def carry(self) -> CarrySnapshot:
@@ -144,12 +162,25 @@ class RolloutChunk(Generic[CarryT, ControllerOutputT]):
 # =================================================================================================
 @dataclass(frozen=True)
 class ObservedStep(Generic[ScoredOutputT]):
-    """Objective-scored step context consumed by metrics and trace observers."""
+    """Objective-scored step context consumed by metrics and trace observers.
+
+    Fields
+    ------
+    batch:
+        Backward-compatible alias; always contains the *executed_frame* content.
+    sampled_input:
+        Raw source-batch proposal; ``None`` when not populated by the runner.
+    executed_frame:
+        Exact tensors consumed by the model and objective on this step.
+        ``None`` when not populated (legacy path).
+    """
 
     index: int
     batch: Batch
     snapshot: CarrySnapshot
     outputs: ScoredOutputT
+    sampled_input: Batch | None = None
+    executed_frame: Batch | None = None
 
     @property
     def carry(self) -> CarrySnapshot:
@@ -329,9 +360,14 @@ class SingleStepRunner:
         carry, outputs = controller.step(carry, batch, **options_dict)
         snapshot = _snapshot_carry(carry)
         source.update(carry=carry)
+        # executed_frame: the actual step tensors consumed by the model — taken from
+        # carry.data which the controller sets from resident_payload for replay controllers.
+        executed = dict(getattr(carry, "data", None) or {})
         record = StepRecord(
             index=0,
-            batch=batch,
+            batch=executed,
+            sampled_input=batch,
+            executed_frame=executed,
             snapshot=snapshot,
             outputs=outputs,
             all_halted=bool(snapshot.halted.all()),
@@ -400,9 +436,13 @@ class RecurrentRunner:
             carry, outputs = controller.step(carry, batch, **options_dict)
             snapshot = _snapshot_carry(carry)
             source.update(carry=carry)
+            # executed_frame: carry-owned step tensors, independent of source batch.
+            executed = dict(getattr(carry, "data", None) or {})
             record = StepRecord(
                 index=step_idx,
-                batch=batch,
+                batch=executed,
+                sampled_input=batch,
+                executed_frame=executed,
                 snapshot=snapshot,
                 outputs=outputs,
                 all_halted=bool(snapshot.halted.all()),

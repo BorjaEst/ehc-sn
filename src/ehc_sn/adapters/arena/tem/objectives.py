@@ -47,15 +47,17 @@ class ArenaTEMTaskBinding:
         carry: Any,
         step_output: Any,
     ) -> ArenaTargets:
-        """Build an :class:`ArenaTargets` from carry data.
+        """Build an :class:`ArenaTargets` from the executed step payload.
 
         Args:
-            batch: Generic batch mapping; unused here.
-            carry: Controller carry state.
+            batch: Executed step payload (observation_id, is_revisit, ...).
+                This is the executed_frame alias set by the runner — carry is
+                NOT consulted so snapshot is not the execution authority.
+            carry: Controller carry state; unused here.
             step_output: Controller step output; unused here.
         """
-        _ = batch, step_output
-        return coerce_arena_targets(carry.data)
+        _ = carry, step_output
+        return coerce_arena_targets(batch)
 
     def extract_observation_id(
         self,

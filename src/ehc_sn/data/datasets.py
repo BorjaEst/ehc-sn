@@ -67,7 +67,12 @@ class ProcessedDataset(Dataset):
         sample = {k: v[idx] for k, v in self._arrays.items()}
         if self._transform:
             sample = self._transform(sample)
-        return {k: torch.from_numpy(np.array(v)) for k, v in sample.items()}
+        result = {k: torch.from_numpy(np.array(v)) for k, v in sample.items()}
+        # Stable fit-path identity derived from dataset index position.
+        # Non-model-visible: consumed only by the replay controller at admission
+        # to populate carry.trajectory_id; never passed to the model or objectives.
+        result["__trajectory_id__"] = torch.tensor(idx, dtype=torch.int64)
+        return result
 
 
 # =================================================================================================

@@ -104,7 +104,15 @@ def evaluate_rollout_streaming(
         step_output = objective.evaluate_step(record, **objective_options_dict)
         if metric_collection is not None:
             update_metrics_from_step(metric_collection, step_output.metrics, metric_routes)
-        last_step = ObservedStep(index=record.index, batch=record.batch, snapshot=record.snapshot, outputs=step_output)
+        executed = record.executed_frame if record.executed_frame is not None else record.batch
+        last_step = ObservedStep(
+            index=record.index,
+            batch=executed,
+            executed_frame=executed,
+            sampled_input=record.sampled_input,
+            snapshot=record.snapshot,
+            outputs=step_output,
+        )
         total_loss = step_output.loss if total_loss is None else total_loss + step_output.loss
 
     executed = runner.run(

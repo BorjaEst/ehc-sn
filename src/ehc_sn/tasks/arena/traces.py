@@ -145,8 +145,7 @@ def build_arena_trace_supplements(
     missing_parent = [pid for pid in parent_sample_ids if pid not in parent_split_pos]
     if missing_parent:
         raise ValueError(
-            f"build_arena_trace_supplements: parent sample ids not found in parent index "
-            f"(split={split!r}): {missing_parent}"
+            f"build_arena_trace_supplements: parent sample ids not found in parent index " f"(split={split!r}): {missing_parent}"
         )
     parent_positions = [parent_split_pos[pid] for pid in parent_sample_ids]
 
@@ -228,11 +227,13 @@ def _build_world(mask_valid: np.ndarray, h: int, w: int) -> dict[str, Any]:
     locations: list[dict[str, Any]] = []
     for row in range(h):
         for col in range(w):
-            locations.append({
-                "o": col,
-                "y": row,
-                "valid": bool(mask_valid[row, col]),
-            })
+            locations.append(
+                {
+                    "o": col,
+                    "y": row,
+                    "valid": bool(mask_valid[row, col]),
+                }
+            )
     return {
         "locations": locations,
         "n_locations": h * w,

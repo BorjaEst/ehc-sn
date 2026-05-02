@@ -205,11 +205,18 @@ class TrainingModel(L.LightningModule):
     def _ensure_train_batch_assembler(  # ---------------------------------------------------------
         self, batch: Batch,
     ) -> PartialResetBatchAssembler:  # fmt: skip
-        """Create the partial-reset buffer lazily from the observed arena batch schema."""
+        """Create the partial-reset buffer lazily from the observed arena batch schema.
+
+        Includes ``__trajectory_id__`` in the key set when present so that
+        stable fit-path identity travels with each row through the buffer and
+        is correctly associated with the trajectory arrays at admission time.
+        """
         if self._train_batch_assembler is not None:
             return self._train_batch_assembler
 
         keys = infer_arena_replay_batch_keys(batch)
+        if "__trajectory_id__" in batch:
+            keys = keys + ("__trajectory_id__",)
         capacity_rows = 4 * self.config.global_batch_size
         self._train_buffer = FifoBuffer(capacity_rows, keys, pin_memory=True)
         self._train_batch_assembler = PartialResetBatchAssembler(buffer=self._train_buffer, keys=keys)

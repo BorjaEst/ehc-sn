@@ -10,6 +10,11 @@ Arena replay v1 contract:
 - ``location_id`` is not exposed.
 - Initial task state is empty — no carry state is maintained.
 - Halt logic uses ``trajectory_length`` only.
+
+After the slot-authoritative refactor the ``extract_step_per_slot`` method
+receives *resident* — the carry-owned trajectory arrays for the admitted row,
+not the raw source batch.  The slicing logic is identical; only the data
+source changes.
 """
 
 from __future__ import annotations
@@ -41,7 +46,7 @@ class ArenaReplayCapability:
 
     def extract_step_per_slot(
         self,
-        batch: Batch,
+        resident: Batch,
         cursor: Tensor,
         task_state: dict[str, Tensor],
     ) -> tuple[dict[str, Tensor], dict[str, Tensor]]:
@@ -50,19 +55,27 @@ class ArenaReplayCapability:
         Slices precomputed trajectory arrays at per-slot cursor ``t``.  No
         topology is accessed; no carry state is updated.
 
+        Args:
+            resident: Carry-owned trajectory arrays for the admitted row (NOT the
+                raw source batch).  Contains the same trajectory_* columns as the
+                original batch but is indexed by the admitted slot, not the latest
+                incoming batch row.
+            cursor: Per-slot step cursor ``(B,)`` int64.
+            task_state: Unused; Arena replay v1 is stateless.
+
         Returns:
             ``(step_data, new_task_state)`` where ``new_task_state`` is empty.
         """
-        B = batch["trajectory_row"].shape[0]
-        device = batch["trajectory_row"].device
+        B = resident["trajectory_row"].shape[0]
+        device = resident["trajectory_row"].device
         arange_b = torch.arange(B, device=device)
         t = cursor.to(device=device, dtype=torch.int64)
 
-        observation_id = batch["trajectory_observation_id"][arange_b, t]  # (B,)
-        previous_action = batch["trajectory_previous_action"][arange_b, t]  # (B,)
-        landmark_id = batch["trajectory_landmark_id"][arange_b, t]  # (B,)
-        episode_start = batch["trajectory_episode_start"][arange_b, t]  # (B,) bool
-        is_revisit = batch["trajectory_is_revisit"][arange_b, t]  # (B,) bool
+        observation_id = resident["trajectory_observation_id"][arange_b, t]  # (B,)
+        previous_action = resident["trajectory_previous_action"][arange_b, t]  # (B,)
+        landmark_id = resident["trajectory_landmark_id"][arange_b, t]  # (B,)
+        episode_start = resident["trajectory_episode_start"][arange_b, t]  # (B,) bool
+        is_revisit = resident["trajectory_is_revisit"][arange_b, t]  # (B,) bool
 
         result: dict[str, Tensor] = {
             "observation_id": observation_id.unsqueeze(-1),

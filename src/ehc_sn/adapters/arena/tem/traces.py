@@ -3,8 +3,12 @@
 These fields bind Arena task semantics to TEM-specific output surfaces.
 They live here — in the shared Arena+TEM bridge namespace — because they
 read from the replay controller wrapper (``ctx.outputs.backbone_output``) and
-from the arena step payload (``ctx.carry.data``), both of which carry
+from the executed step payload (``ctx.batch``), both of which carry
 task-model coupling that belongs at the adapter boundary.
+
+World-step fields (observation_id, is_revisit) read ``ctx.batch``, which is
+the executed_frame alias populated by the runner from carry-owned step data.
+Prediction fields read ``ctx.outputs`` directly.
 
 Usage
 -----
@@ -17,7 +21,7 @@ Usage
 
 from __future__ import annotations
 
-from typing import Iterable, Protocol
+from typing import Iterable, Mapping, Protocol
 
 from torch import Tensor
 
@@ -46,16 +50,17 @@ class _ArenaTEMOutputs(Protocol):
 class _ArenaTEMTraceContext(Protocol):
     carry: _ArenaTEMCarry
     outputs: _ArenaTEMOutputs
+    batch: Mapping[str, Tensor]
 
 
 # =================================================================================================
 def _get_world_observation_id(ctx: _ArenaTEMTraceContext) -> TraceValue:
-    obs_id: Tensor = ctx.carry.data["observation_id"]
+    obs_id: Tensor = ctx.batch["observation_id"]
     return coerce_observation_ids(obs_id).detach()
 
 
 def _get_is_revisit(ctx: _ArenaTEMTraceContext) -> TraceValue:
-    is_revisit: Tensor | None = ctx.carry.data.get("is_revisit")
+    is_revisit: Tensor | None = ctx.batch.get("is_revisit")
     if is_revisit is None:
         return None
     return is_revisit.view(-1).bool().detach()
