@@ -17,14 +17,22 @@ def rasterize_locations_additive(
     grid_res: float | None = None,
     include_mask: NDArray | None = None,
 ) -> tuple[NDArray, NDArray, tuple[float, float, float, float]]:
-    """Rasterize per-location values by additive accumulation."""
-    coords = _world_coords(world)
-    if coords.size == 0:
+    """Rasterize per-location values by additive accumulation.
+
+    The raster support follows the visible environment occupancy: locations
+    marked ``valid=False`` are excluded from bounds estimation and grid
+    resolution so hidden latent lattice points do not inflate the displayed
+    extent. Unvisited but valid locations still contribute to the raster
+    support, because ``include_mask`` only controls which values are written,
+    not which valid world coordinates define the map footprint.
+    """
+    all_coords, plot_mask = _world_coords_and_plot_mask(world)
+    if all_coords.size == 0:
         empty = np.zeros((0, 0), dtype=float)
         return empty, empty.astype(int), (0.0, 0.0, 0.0, 0.0)
 
     values = np.asarray(values, dtype=float)
-    n_locations = coords.shape[0]
+    n_locations = all_coords.shape[0]
     if values.shape[0] < n_locations:
         pad = np.full((n_locations - values.shape[0],), np.nan, dtype=float)
         values = np.concatenate([values, pad])
@@ -41,6 +49,13 @@ def rasterize_locations_additive(
         elif include.shape[0] > n_locations:
             include = include[:n_locations]
         include &= np.isfinite(values)
+
+    coords = all_coords[plot_mask]
+    values = values[plot_mask]
+    include = include[plot_mask]
+    if coords.size == 0:
+        empty = np.zeros((0, 0), dtype=float)
+        return empty, empty.astype(int), (0.0, 0.0, 0.0, 0.0)
 
     if grid_res is None:
         grid_res = _estimate_grid_res(coords)
@@ -98,10 +113,19 @@ def rasterize_locations(
     return grid, valid, extent
 
 
-def _world_coords(world: AnyWorld) -> NDArray:
+def _world_coords_and_plot_mask(world: AnyWorld) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """Return world coordinates and the mask that defines visible plot support."""
     locations = _environment_locations(world)
-    coords = [[loc["o"], loc["y"]] for loc in locations]
-    return np.asarray(coords, dtype=float)
+    if not locations:
+        return np.zeros((0, 2), dtype=float), np.zeros((0,), dtype=bool)
+
+    coords = np.asarray([[loc["o"], loc["y"]] for loc in locations], dtype=float)
+    finite = np.isfinite(coords).all(axis=1)
+    visible = np.asarray([bool(loc.get("valid", True)) for loc in locations], dtype=bool)
+    plot_mask = finite & visible
+    if not np.any(plot_mask):
+        plot_mask = finite
+    return coords, plot_mask
 
 
 def _estimate_grid_res(coords: NDArray) -> float:

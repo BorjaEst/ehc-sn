@@ -28,12 +28,13 @@ def plot_rate_map(
 ) -> Axes:
     """Plot one prepared rate map as a raster image."""
     rate_map = np.asarray(prepared_rate_map.rate_map, dtype=float)
-    extent = _expand_degenerate_extent(prepared_rate_map.extent)
 
     if rate_map.size == 0 or not np.isfinite(rate_map).any():
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
         ax.axis("off")
         return ax
+
+    extent = _imshow_extent_from_center_extent(prepared_rate_map.extent, rate_map.shape)
 
     finite = np.isfinite(rate_map)
     if vmin is None:
@@ -87,19 +88,33 @@ def plot_rate_map_mosaic(
     return axes_list
 
 
-def _expand_degenerate_extent(
+def _imshow_extent_from_center_extent(
     extent: tuple[float, float, float, float],
+    shape: tuple[int, int],
     *,
     min_span: float = 1.0,
 ) -> tuple[float, float, float, float]:
-    """Return an ``imshow`` extent with non-zero span on both axes."""
+    """Return an ``imshow`` edge extent from center-based raster coordinates."""
+    n_rows, n_cols = shape
     xmin, xmax, ymin, ymax = extent
-    if xmin == xmax:
-        half = min_span / 2
-        xmin -= half
-        xmax += half
-    if ymin == ymax:
-        half = min_span / 2
-        ymin -= half
-        ymax += half
-    return xmin, xmax, ymin, ymax
+    left, right = _pixel_edge_bounds(xmin, xmax, n_cols, min_span=min_span)
+    bottom, top = _pixel_edge_bounds(ymin, ymax, n_rows, min_span=min_span)
+    return left, right, top, bottom
+
+
+def _pixel_edge_bounds(
+    min_coord: float,
+    max_coord: float,
+    n_pixels: int,
+    *,
+    min_span: float = 1.0,
+) -> tuple[float, float]:
+    """Return edge bounds for a 1D center-based raster coordinate span."""
+    span = float(max_coord) - float(min_coord)
+    if n_pixels <= 1 or not np.isfinite(span) or span <= 0:
+        center = 0.5 * (float(min_coord) + float(max_coord))
+        half = min_span / 2.0
+        return center - half, center + half
+
+    step = span / float(n_pixels - 1)
+    return float(min_coord) - step / 2.0, float(max_coord) + step / 2.0
