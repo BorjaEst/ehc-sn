@@ -24,7 +24,6 @@ from numpy.typing import NDArray
 from ehc_sn.figures._contracts import AnyWorld
 
 
-
 @dataclass(frozen=True)
 class _AxesRect:
     """Rectangle in container coordinates."""
@@ -77,6 +76,27 @@ def _environment_n_locations(environment: object) -> int:
     return int(value)
 
 
+def _environment_plot_coords(environment: object) -> NDArray[np.float64]:
+    """Return finite coordinates for the locations that should be rendered.
+
+    When location metadata exposes a boolean ``valid`` flag, invalid locations
+    are omitted so axis fitting matches the visible occupancy rather than the
+    full latent lattice. If every location is marked invalid, fall back to all
+    finite coordinates so callers still get deterministic bounds.
+    """
+    locations = _environment_locations(environment)
+    if not locations:
+        return np.zeros((0, 2), dtype=float)
+
+    coords = np.asarray([[loc.get("o"), loc.get("y")] for loc in locations], dtype=float)
+    finite = np.isfinite(coords).all(axis=1)
+    visible = np.asarray([bool(loc.get("valid", True)) for loc in locations], dtype=bool)
+    selected = finite & visible
+    if not np.any(selected):
+        selected = finite
+    return coords[selected]
+
+
 # =================================================================================================
 def configure_environment_axes(  # ----------------------------------------------------------------
     ax: Axes,
@@ -88,7 +108,7 @@ def configure_environment_axes(  # ---------------------------------------------
 
     This helper standardizes axes defaults used across the figure system:
 
-    - Sets x/y limits based on `environment.locations` when available.
+    - Sets x/y limits based on the visible environment occupancy when available.
     - Enforces equal aspect ratio.
     - Hides ticks/spines (the map content should define the visual frame).
     - Optionally inverts the y-axis (common for image-like coordinate systems).
@@ -111,11 +131,8 @@ def configure_environment_axes(  # ---------------------------------------------
         The same `ax` instance (mutated).
     """
 
-    locations = [] if environment is None else _environment_locations(environment)
-    if locations:
-        coords = np.array([[loc.get("o"), loc.get("y")] for loc in locations], dtype=float)
-        valid = np.isfinite(coords).all(axis=1)
-        coords = coords[valid]
+    if environment is not None:
+        coords = _environment_plot_coords(environment)
         if coords.size > 0:
             x_min, y_min = coords.min(axis=0)
             x_max, y_max = coords.max(axis=0)
@@ -390,4 +407,5 @@ def _get_figure_size_inches(  # ------------------------------------------------
     raise ValueError("Cannot determine figure size in inches.")
 
 
+# =============================================================================
 __all__ = ["configure_environment_axes", "mosaic_axes", "subdivide_axes"]
