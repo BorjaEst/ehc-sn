@@ -25,8 +25,14 @@ from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import (
     TEM_LOSS_GRID_KL_ALL,
     TEM_LOSS_GRID_KL_REVISIT,
+    TEM_LOSS_OBS_ANCESTRAL_ALL,
+    TEM_LOSS_OBS_ANCESTRAL_REVISIT,
+    TEM_LOSS_OBS_INFERENCE_ALL,
+    TEM_LOSS_OBS_INFERENCE_REVISIT,
     TEM_LOSS_OBS_NLL_ALL,
     TEM_LOSS_OBS_NLL_REVISIT,
+    TEM_LOSS_OBS_RETRIEVED_ALL,
+    TEM_LOSS_OBS_RETRIEVED_REVISIT,
     TEM_LOSS_PLACE_CONSISTENCY_ALL,
     TEM_LOSS_PLACE_CONSISTENCY_REVISIT,
     TEM_LOSS_REG_ALL,
@@ -169,8 +175,23 @@ class TEMObjectiveConfig(BaseModel, extra="forbid"):
 # =================================================================================================
 @dataclass(frozen=True)
 class TEMLosses(VariationalLosses):
-    """ELBO-style TEM loss bundle with explicit latent groups."""
+    """ELBO-style TEM loss bundle with explicit latent groups and per-pathway observation sums.
 
+    Observation sums are masked weighted sums under the protocol mask.
+    ``loss_obs_nll_sum`` equals the sum of the three per-pathway sums.
+    ``loss_place_consistency_sum`` equals the sum of the two place sub-losses.
+    """
+
+    # Per-pathway observation sums (masked, weighted by c_obs)
+    loss_obs_inference_sum: Tensor
+    loss_obs_retrieved_sum: Tensor
+    loss_obs_ancestral_sum: Tensor
+
+    # Per-component place-consistency sums (masked, weighted by c_place)
+    loss_place_transition_sum: Tensor
+    loss_place_sensory_sum: Tensor
+
+    # Aggregate latent and denominator
     loss_grid_kl_sum: Tensor
     loss_place_consistency_sum: Tensor
     protocol_count: Tensor
@@ -230,7 +251,10 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
         loss_obs_inference = self.loss_fn(outputs.logits_inference, labels)
         loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels)
         loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels)
-        loss_obs_nll_sum = self.config.c_obs * self._masked_sum(loss_obs_inference + loss_obs_retrieved + loss_obs_ancestral, protocol_mask)  # fmt: skip
+        loss_obs_inference_sum = self.config.c_obs * self._masked_sum(loss_obs_inference, protocol_mask)
+        loss_obs_retrieved_sum = self.config.c_obs * self._masked_sum(loss_obs_retrieved, protocol_mask)
+        loss_obs_ancestral_sum = self.config.c_obs * self._masked_sum(loss_obs_ancestral, protocol_mask)
+        loss_obs_nll_sum = loss_obs_inference_sum + loss_obs_retrieved_sum + loss_obs_ancestral_sum
         loss_grid_kl_sum = self.config.c_grid * self._masked_sum(sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs), protocol_mask)  # fmt: skip
 
         place_transition = sum_latent_terms(mse_consistency, place_transition_relation.lhs, place_transition_relation.rhs)  # fmt: skip
@@ -239,7 +263,9 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
             place_sensory = sum_latent_terms(mse_consistency, place_sensory_relation.lhs, place_sensory_relation.rhs)  # fmt: skip
         else:
             place_sensory = place_transition.new_zeros(place_transition.shape)
-        loss_place_consistency_sum = self.config.c_place * self._masked_sum(place_transition + place_sensory, protocol_mask)
+        loss_place_transition_sum = self.config.c_place * self._masked_sum(place_transition, protocol_mask)
+        loss_place_sensory_sum = self.config.c_place * self._masked_sum(place_sensory, protocol_mask)
+        loss_place_consistency_sum = loss_place_transition_sum + loss_place_sensory_sum
 
         grid_reg_code = get_reg_term(outputs.reg_terms, GRID_REG_TERM)
         if grid_reg_code is None:
@@ -254,6 +280,11 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
 
         return TEMLosses(
             loss_obs_nll_sum=loss_obs_nll_sum,
+            loss_obs_inference_sum=loss_obs_inference_sum,
+            loss_obs_retrieved_sum=loss_obs_retrieved_sum,
+            loss_obs_ancestral_sum=loss_obs_ancestral_sum,
+            loss_place_transition_sum=loss_place_transition_sum,
+            loss_place_sensory_sum=loss_place_sensory_sum,
             loss_reg_sum=loss_reg_sum,
             loss_grid_kl_sum=loss_grid_kl_sum,
             loss_place_consistency_sum=loss_place_consistency_sum,
@@ -278,10 +309,16 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
         return {
             **acc_metrics,
             TEM_LOSS_OBS_NLL_REVISIT: RatioStat(losses.loss_obs_nll_sum.detach(), protocol_count),
+            TEM_LOSS_OBS_INFERENCE_REVISIT: RatioStat(losses.loss_obs_inference_sum.detach(), protocol_count),
+            TEM_LOSS_OBS_RETRIEVED_REVISIT: RatioStat(losses.loss_obs_retrieved_sum.detach(), protocol_count),
+            TEM_LOSS_OBS_ANCESTRAL_REVISIT: RatioStat(losses.loss_obs_ancestral_sum.detach(), protocol_count),
             TEM_LOSS_GRID_KL_REVISIT: RatioStat(losses.loss_grid_kl_sum.detach(), protocol_count),
             TEM_LOSS_PLACE_CONSISTENCY_REVISIT: RatioStat(losses.loss_place_consistency_sum.detach(), protocol_count),
             TEM_LOSS_REG_REVISIT: RatioStat(losses.loss_reg_sum.detach(), protocol_count),
             TEM_LOSS_OBS_NLL_ALL: RatioStat(all_loss_sums["loss_obs_nll_sum"], batch_count),
+            TEM_LOSS_OBS_INFERENCE_ALL: RatioStat(all_loss_sums["loss_obs_inference_sum"], batch_count),
+            TEM_LOSS_OBS_RETRIEVED_ALL: RatioStat(all_loss_sums["loss_obs_retrieved_sum"], batch_count),
+            TEM_LOSS_OBS_ANCESTRAL_ALL: RatioStat(all_loss_sums["loss_obs_ancestral_sum"], batch_count),
             TEM_LOSS_GRID_KL_ALL: RatioStat(all_loss_sums["loss_grid_kl_sum"], batch_count),
             TEM_LOSS_PLACE_CONSISTENCY_ALL: RatioStat(all_loss_sums["loss_place_consistency_sum"], batch_count),
             TEM_LOSS_REG_ALL: RatioStat(all_loss_sums["loss_reg_sum"], batch_count),
@@ -292,23 +329,17 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
         return TEMObjectiveStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
     def compute_signals(self, batch: Batch, carry: Any, outputs: TEMStepOutput, losses: TEMLosses, step_output: Any = None, **_: Any,) -> dict[str, Tensor]:  # fmt: skip  # -----------------------------------------------------------------------
-        """Compute detached TEM diagnostics and ELBO-style scalar signals."""
-        targets = self._task_binding.extract_targets(batch, carry, step_output)
-        labels = self._task_binding.extract_observation_id(targets)
+        """Compute detached TEM diagnostics and ELBO-style scalar signals.
+
+        All per-pathway observation and place-consistency signals are
+        objective-scope contributions: weighted by their loss coefficients,
+        revisit-masked, and normalised by protocol_count.  This makes every
+        signal denominator-consistent with the backward objective.
+        """
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
-        place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
         denom = losses.protocol_count.detach().clamp_min(1.0)
         signals = super().compute_signals(batch, carry, outputs, losses)
-
-        loss_obs_inference = self.loss_fn(outputs.logits_inference, labels).sum().detach()
-        loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels).sum().detach()
-        loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels).sum().detach()
-        place_transition = sum_latent_terms(mse_consistency, place_transition_relation.lhs, place_transition_relation.rhs).sum().detach()  # fmt: skip
-        if place_sensory_relation is not None:
-            place_sensory = sum_latent_terms(mse_consistency, place_sensory_relation.lhs, place_sensory_relation.rhs).sum().detach()  # fmt: skip
-        else:
-            place_sensory = losses.loss_place_consistency_sum.new_zeros(())
 
         signals.update(
             {
@@ -317,11 +348,11 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
                 S.LOSS_REG: losses.loss_reg_sum.detach() / denom,
                 S.LOSS_GRID_KL: losses.loss_grid_kl_sum.detach() / denom,
                 S.LOSS_PLACE_CONSISTENCY: losses.loss_place_consistency_sum.detach() / denom,
-                S.LOSS_OBS_INFER: loss_obs_inference / denom,
-                S.LOSS_OBS_RETRIEVED: loss_obs_retrieved / denom,
-                S.LOSS_OBS_ANCESTRAL: loss_obs_ancestral / denom,
-                S.LOSS_PLACE_TRANSITION: place_transition,
-                S.LOSS_PLACE_SENSORY: place_sensory,
+                S.LOSS_OBS_INFER: losses.loss_obs_inference_sum.detach() / denom,
+                S.LOSS_OBS_RETRIEVED: losses.loss_obs_retrieved_sum.detach() / denom,
+                S.LOSS_OBS_ANCESTRAL: losses.loss_obs_ancestral_sum.detach() / denom,
+                S.LOSS_PLACE_TRANSITION: losses.loss_place_transition_sum.detach() / denom,
+                S.LOSS_PLACE_SENSORY: losses.loss_place_sensory_sum.detach() / denom,
                 S.GRID_POST_NORM: mean_latent_norm(grid_relation.lhs),
                 S.GRID_PRIOR_NORM: mean_latent_norm(grid_relation.rhs),
                 S.PLACE_POST_NORM: mean_latent_norm(place_transition_relation.lhs),
@@ -347,7 +378,10 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
         loss_obs_inference = self.loss_fn(outputs.logits_inference, labels)
         loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels)
         loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels)
-        loss_obs_nll_sum = self.config.c_obs * (loss_obs_inference + loss_obs_retrieved + loss_obs_ancestral).sum()
+        loss_obs_inference_sum = (self.config.c_obs * loss_obs_inference.sum()).detach()
+        loss_obs_retrieved_sum = (self.config.c_obs * loss_obs_retrieved.sum()).detach()
+        loss_obs_ancestral_sum = (self.config.c_obs * loss_obs_ancestral.sum()).detach()
+        loss_obs_nll_sum = loss_obs_inference_sum + loss_obs_retrieved_sum + loss_obs_ancestral_sum
 
         place_transition = sum_latent_terms(mse_consistency, place_transition_relation.lhs, place_transition_relation.rhs)  # fmt: skip
         if place_sensory_relation is not None:
@@ -367,7 +401,10 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
         place_reg = self._regularization_terms(place_reg_code, self.config.place_reg_norm, self.config.c_place_reg)  # fmt: skip
 
         return {
-            "loss_obs_nll_sum": loss_obs_nll_sum.detach(),
+            "loss_obs_nll_sum": loss_obs_nll_sum,
+            "loss_obs_inference_sum": loss_obs_inference_sum,
+            "loss_obs_retrieved_sum": loss_obs_retrieved_sum,
+            "loss_obs_ancestral_sum": loss_obs_ancestral_sum,
             "loss_grid_kl_sum": (self.config.c_grid * sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs).sum()).detach(),  # fmt: skip
             "loss_place_consistency_sum": (self.config.c_place * (place_transition + place_sensory).sum()).detach(),
             "loss_reg_sum": (grid_reg.sum() + place_reg.sum()).detach(),

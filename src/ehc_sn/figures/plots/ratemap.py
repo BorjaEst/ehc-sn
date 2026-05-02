@@ -17,7 +17,6 @@ from ehc_sn.figures._contracts import PreparedRateMap
 __all__ = ["plot_rate_map", "plot_rate_map_mosaic"]
 
 
-
 def plot_rate_map(
     ax: Axes,
     prepared_rate_map: PreparedRateMap,

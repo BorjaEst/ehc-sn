@@ -32,6 +32,13 @@ TEM_ACC_OBS_RETRIEVED_ALL: str = "accuracy_obs_retrieved_all"
 TEM_ACC_OBS_ANCESTRAL_REVISIT: str = "accuracy_obs_ancestral_revisit"
 TEM_ACC_OBS_ANCESTRAL_ALL: str = "accuracy_obs_ancestral_all"
 
+TEM_LOSS_OBS_INFERENCE_REVISIT: str = "loss_obs_inference_revisit"
+TEM_LOSS_OBS_RETRIEVED_REVISIT: str = "loss_obs_retrieved_revisit"
+TEM_LOSS_OBS_ANCESTRAL_REVISIT: str = "loss_obs_ancestral_revisit"
+TEM_LOSS_OBS_INFERENCE_ALL: str = "loss_obs_inference_all"
+TEM_LOSS_OBS_RETRIEVED_ALL: str = "loss_obs_retrieved_all"
+TEM_LOSS_OBS_ANCESTRAL_ALL: str = "loss_obs_ancestral_all"
+
 EHC_LOSS_OBS_NLL_REVISIT: str = "ehc_loss_obs_nll_revisit"
 EHC_LOSS_OBS_NLL_ALL: str = "ehc_loss_obs_nll_all"
 EHC_LOSS_GRID_KL_REVISIT: str = "ehc_loss_grid_kl_revisit"
@@ -49,9 +56,7 @@ EHC_ACC_OBS_ANCESTRAL_ALL: str = "ehc_accuracy_obs_ancestral_all"
 
 
 # =================================================================================================
-def extra_ratio_paths(  # -------------------------------------------------------------------------
-    key: str,
-) -> tuple[str, str]:  # fmt: skip
+def extra_ratio_paths(key: str,) -> tuple[str, str]:  # fmt: skip  # -------------------------------------------------------------------------
     """Return numerator/denominator paths for a keyed extra ratio metric."""
     base_path = f"extras.{key}"
     return f"{base_path}.numerator_sum", f"{base_path}.denominator_sum"
@@ -72,6 +77,9 @@ __all__ = [
     "TEM_ACC_OBS_RETRIEVED_REVISIT", "TEM_LOSS_GRID_KL_ALL",
     "TEM_LOSS_GRID_KL_REVISIT", "TEM_LOSS_OBS_NLL_ALL", "TEM_LOSS_OBS_NLL_REVISIT",
     "TEM_LOSS_PLACE_CONSISTENCY_ALL", "TEM_LOSS_PLACE_CONSISTENCY_REVISIT",
-    "TEM_LOSS_REG_ALL", "TEM_LOSS_REG_REVISIT", "VAR_LOSS_LATENT", "VAR_LOSS_OBS_NLL",
+    "TEM_LOSS_REG_ALL", "TEM_LOSS_REG_REVISIT",
+    "TEM_LOSS_OBS_INFERENCE_REVISIT", "TEM_LOSS_OBS_RETRIEVED_REVISIT", "TEM_LOSS_OBS_ANCESTRAL_REVISIT",
+    "TEM_LOSS_OBS_INFERENCE_ALL", "TEM_LOSS_OBS_RETRIEVED_ALL", "TEM_LOSS_OBS_ANCESTRAL_ALL",
+    "VAR_LOSS_LATENT", "VAR_LOSS_OBS_NLL",
     "VAR_LOSS_REG", "extra_ratio_paths",
 ]  # fmt: skip

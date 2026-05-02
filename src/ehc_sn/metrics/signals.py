@@ -138,19 +138,37 @@ LOSS_PLACE_CONSISTENCY: str = "loss_place_consistency"
 """Place consistency loss sum (TEM)."""
 
 LOSS_OBS_INFER: str = "loss_obs_infer"
-"""Observation NLL from the inference pathway (TEM)."""
+"""Objective-scope inference-pathway observation NLL (TEM).
+
+Weighted by ``c_obs``, revisit-masked, and normalised by ``protocol_count``.
+Equals ``loss_obs_nll`` minus the retrieved and ancestral components.
+"""
 
 LOSS_OBS_RETRIEVED: str = "loss_obs_retrieved"
-"""Observation NLL from the retrieved pathway (TEM)."""
+"""Objective-scope retrieved-pathway observation NLL (TEM).
+
+Weighted by ``c_obs``, revisit-masked, and normalised by ``protocol_count``.
+Equals ``loss_obs_nll`` minus the inference and ancestral components.
+"""
 
 LOSS_OBS_ANCESTRAL: str = "loss_obs_ancestral"
-"""Observation NLL from the ancestral pathway (TEM)."""
+"""Objective-scope ancestral-pathway observation NLL (TEM).
+
+Weighted by ``c_obs``, revisit-masked, and normalised by ``protocol_count``.
+Equals ``loss_obs_nll`` minus the inference and retrieved components.
+"""
 
 LOSS_PLACE_TRANSITION: str = "loss_place_transition"
-"""Place consistency contribution from the transition path (TEM)."""
+"""Objective-scope place-consistency transition contribution (TEM).
+
+Weighted by ``c_place``, revisit-masked, and normalised by ``protocol_count``.
+"""
 
 LOSS_PLACE_SENSORY: str = "loss_place_sensory"
-"""Place consistency contribution from sensory-cued recall (TEM)."""
+"""Objective-scope place-consistency sensory-cued contribution (TEM).
+
+Weighted by ``c_place``, revisit-masked, and normalised by ``protocol_count``.
+"""
 
 GRID_POST_NORM: str = "grid_post_norm"
 """Mean activation norm of inferred grid-code blocks (TEM)."""
