@@ -14,6 +14,7 @@ from torchmetrics import MetricCollection
 from ehc_sn.adapters.arena.tem import ArenaTEMAdapterSettings, ArenaTEMTaskBinding, ArenaTEMV1BridgeAdapter
 from ehc_sn.adapters.arena.tem.traces import ARENA_TEM_TRACE_FIELDS, select_arena_tem_trace_fields
 from ehc_sn.controllers.replay.trajectory import ReplayTrajectoryController, ReplayTrajectoryControllerConfig
+from ehc_sn.data.datamodules import Datamodule
 from ehc_sn.lightning._rollout import (
     evaluate_rollout,
     evaluate_rollout_streaming,
@@ -35,6 +36,7 @@ from ehc_sn.tasks.arena.traces import (
     apply_arena_trace_supplements,
     build_arena_trace_supplements,
 )
+from ehc_sn.traces import TraceTree
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
@@ -98,8 +100,9 @@ class TrainingModel(L.LightningModule):
     """ """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: ModelConfig_TEM_V1,
-    ) -> None:  # fmt: skip
+        self,
+        config: ModelConfig_TEM_V1,
+    ) -> None:
         """ """
         super().__init__()
         model_settings = ModelSettingsV1.from_config(config.model_config_path)
@@ -204,8 +207,9 @@ class TrainingModel(L.LightningModule):
         }
 
     def _ensure_train_batch_assembler(  # ---------------------------------------------------------
-        self, batch: Batch,
-    ) -> PartialResetBatchAssembler:  # fmt: skip
+        self,
+        batch: Batch,
+    ) -> PartialResetBatchAssembler:
         """Create the partial-reset buffer lazily from the observed arena batch schema.
 
         Includes ``__trajectory_id__`` in the key set when present so that
@@ -224,8 +228,9 @@ class TrainingModel(L.LightningModule):
         return self._train_batch_assembler
 
     def setup(  # --------------------------------------------------------------------------------
-        self, stage: Optional[str] = None,
-    ) -> None:  # fmt: skip
+        self,
+        stage: Optional[str] = None,
+    ) -> None:
         """Initialize phase-local train and evaluation runtimes around the shared model."""
         if stage in (None, "fit"):
             self._ensure_train_runtime()
@@ -235,7 +240,7 @@ class TrainingModel(L.LightningModule):
 
     def configure_optimizers(  # -------------------------------------------------------------------
         self,
-    ) -> tuple[list[Optimizer], list[SequentialLR]]:  # fmt: skip
+    ) -> tuple[list[Optimizer], list[SequentialLR]]:
         """Build the optimizer and learning-rate scheduler."""
         total_steps = int(self.trainer.estimated_stepping_batches)
 
@@ -248,8 +253,11 @@ class TrainingModel(L.LightningModule):
         return [opt_sup], [sch_sup]
 
     def _apply_runtime(  # ------------------------------------------------------------------------
-        self, step: int, *, log_values: bool,
-    ) -> TEMRuntimeState:  # fmt: skip
+        self,
+        step: int,
+        *,
+        log_values: bool,
+    ) -> TEMRuntimeState:
         """Resolve and apply TEM runtime dynamics for the current global step."""
         runtime = resolve_tem_runtime(step, self.config.runtime)
         self.model.set_runtime(runtime.eta, runtime.hebbian_decay, runtime.p2g_uncertainty_offset)
@@ -258,23 +266,31 @@ class TrainingModel(L.LightningModule):
             self.log("train/runtime/eta", runtime.eta, on_step=True, on_epoch=False, logger=True)
             self.log("train/runtime/hebbian_decay", runtime.hebbian_decay, on_step=True, on_epoch=False, logger=True)  # fmt: skip
             self.log("train/runtime/p2g_uncertainty_offset", runtime.p2g_uncertainty_offset, on_step=True, on_epoch=False, logger=True)  # fmt: skip
+            self.log("train/runtime/p2g_trust", runtime.p2g_trust, on_step=True, on_epoch=False, logger=True)  # fmt: skip
 
         return runtime
 
-    # -- Lifecycle --------------------------------------------------------------------------------
+    def _reset_train_stream(self) -> None:
+        """Invalidate fit-path recurrent state and queued refill rows.
 
-    def on_train_epoch_start(  # ------------------------------------------------------------------
-        self,
-    ) -> None:  # fmt: skip
-        """ """
+        TEM carry includes parameter-dependent associative memory. Reusing that
+        carry after an optimizer update starts the next chunk from state built
+        under stale weights, which destabilizes replay training.
+        """
         self._train_carry = None
         if self._train_buffer is not None:
             self._train_buffer.clear()
+
+    def on_train_epoch_start(  # ------------------------------------------------------------------
+        self,
+    ) -> None:
+        """ """
+        self._reset_train_stream()
         self.train_metrics.reset()
 
     def on_validation_epoch_start(  # ------------------------------------------------------------
         self,
-    ) -> None:  # fmt: skip
+    ) -> None:
         """ """
         self.val_metrics.reset()
 
@@ -285,10 +301,12 @@ class TrainingModel(L.LightningModule):
     # -- Training ----------------------------------------------------------------------------------
 
     def training_step(  # -------------------------------------------------------------------------
-        self, batch: Batch, batch_idx: int,
-    ) -> dict[str, object]:  # fmt: skip
+        self,
+        batch: Batch,
+        batch_idx: int,
+    ) -> dict[str, object]:
         """Run one TEM chunked-TBPTT optimizer update through the recurrent runner."""
-        self._apply_runtime(self.global_step, log_values=True)
+        runtime = self._apply_runtime(self.global_step, log_values=True)
         train_controller = self._require_train_controller()
         train_objective = self._require_train_objective()
         batch_assembler = self._ensure_train_batch_assembler(batch)
@@ -307,35 +325,39 @@ class TrainingModel(L.LightningModule):
             max_rollout_steps=self._train_chunk_steps(),
             metric_collection=self.train_metrics,
             metric_routes=TEM_STEP_ROUTES,
+            objective_options={"p2g_trust": runtime.p2g_trust},
         )
-        self._train_carry = evaluation.execution.final_carry.detach()
 
         # objective.total is already normalized by the active protocol count per step
         loss = evaluation.loss / self._train_chunk_steps()
 
         optimizers = self.optimizers()
-        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
+        optimizer_handles = list(optimizers) if isinstance(optimizers, list) else [optimizers]
+        for opt in optimizer_handles:
             opt.zero_grad(set_to_none=True)  # type: ignore
 
         self.manual_backward(loss)
 
-        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
+        for opt in optimizer_handles:
             opt.step()  # type: ignore
 
         scheduler = self.lr_schedulers()
         for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
             sch.step()  # type: ignore
 
+        self._reset_train_stream()
+
         # Log the accumulated chunk loss to TensorBoard.
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
-
         return {"loss": loss.detach(), "signals": evaluation.last_step.outputs.signals}
 
     def validation_step(  # -----------------------------------------------------------------------
-        self, batch: Batch, batch_idx: int,
-    ) -> dict[str, object]:  # fmt: skip
+        self,
+        batch: Batch,
+        batch_idx: int,
+    ) -> dict[str, object]:
         """Run a full TEM rollout through the recurrent runner and trace observer."""
-        self._apply_runtime(self.global_step, log_values=False)
+        runtime = self._apply_runtime(self.global_step, log_values=False)
         eval_controller = self._require_eval_controller()
         eval_objective = self._require_eval_objective()
         step_options = {"allow_halt": True}
@@ -351,6 +373,7 @@ class TrainingModel(L.LightningModule):
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options=step_options,
+            objective_options={"p2g_trust": runtime.p2g_trust},
         )
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES)
         if self._eval_trace_keys is None:
@@ -362,66 +385,12 @@ class TrainingModel(L.LightningModule):
         _maybe_apply_arena_supplements(trace, self._resolve_val_source_context(batch_idx, batch))
         return {"trace": trace}
 
-    def _resolve_val_source_context(  # ----------------------------------------------------------
-        self, batch_idx: int, batch: Batch,
-    ) -> object | None:  # fmt: skip
-        """Resolve a typed :class:`~ehc_sn.tasks.arena.traces.ArenaEvaluationSourceContext`
-        for a fit-path validation batch by querying the attached datamodule.
-
-        Uses :meth:`~ehc_sn.data.datamodules.Datamodule.val_sample_ids_for_batch`
-        to resolve ordered sample IDs that account for DistributedSampler
-        interleaving in DDP runs.  Returns ``None`` when the trainer/datamodule
-        is unavailable or sample ID resolution fails, so the caller can skip
-        supplements gracefully.
-        """
-        try:
-            from ehc_sn.data.datamodules import Datamodule
-            trainer = getattr(self, "trainer", None)
-            if trainer is None:
-                return None
-            dm = getattr(trainer, "datamodule", None)
-            if not isinstance(dm, Datamodule):
-                return None
-            first_key = next(iter(batch))
-            batch_size = batch[first_key].shape[0]
-            sample_ids = dm.val_sample_ids_for_batch(
-                batch_idx, batch_size,
-                rank=trainer.global_rank,
-                world_size=trainer.world_size,
-            )
-            if not sample_ids:
-                return None
-            return ArenaEvaluationSourceContext(
-                task_family="arena",
-                dataset_path=dm.config.dataset_path,
-                split="val",
-                sample_ids=tuple(sample_ids),
-            )
-        except Exception:
-            return None
-
-    def build_evaluation_metrics(  # -------------------------------------------------------------
-        self, namespace: str,
-    ) -> "MetricCollection":  # fmt: skip
-        """Return a fresh TEM-family metric collection with the given namespace prefix.
-
-        The returned collection is independent of ``self.val_metrics`` and may be
-        accumulated by the regime runner across multiple case batches.
-
-        Args:
-            namespace: Metric namespace prefix, e.g. ``"diag/my_probe/"``.
-
-        Returns:
-            A fresh :class:`~torchmetrics.MetricCollection` keyed by TEM episode routes.
-        """
-        return build_val_metrics(TEM_EPISODE_ROUTES).clone(prefix=namespace)
-
-    def execute_evaluation_batch(  # -------------------------------------------------------------
+    def execute_evaluation_batch(
         self,
         batch: "Batch",
         trace_request: "Optional[EvaluationTraceRequest]",
         source_context: object | None = None,
-    ) -> "EvaluationBatchArtifacts":  # fmt: skip
+    ) -> "EvaluationBatchArtifacts":
         """Execute one TEM evaluation batch and return scored artifacts.
 
         Runs a full TEM rollout identical to ``validation_step`` but does **not**
@@ -441,12 +410,11 @@ class TrainingModel(L.LightningModule):
             :class:`~ehc_sn.lightning.eval.contracts.EvaluationBatchArtifacts` with
             ``regime_id`` set to ``"_inline"`` (overwritten by the runner).
         """
-        self._apply_runtime(self.global_step, log_values=False)
+        runtime = self._apply_runtime(self.global_step, log_values=False)
         eval_controller = self._require_eval_controller()
         eval_objective = self._require_eval_objective()
         carry0 = eval_controller.initial_state(batch)
         trace_meta = self._build_trace_meta(batch)
-
         evaluation = evaluate_rollout(
             runner=self._eval_runner,
             source=RepeatSource(batch),
@@ -456,6 +424,7 @@ class TrainingModel(L.LightningModule):
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options={"allow_halt": True},
+            objective_options={"p2g_trust": runtime.p2g_trust},
         )
 
         trace = None
@@ -479,9 +448,64 @@ class TrainingModel(L.LightningModule):
             trace_supplements_applied=supplements_applied,
         )
 
+    def _resolve_val_source_context(  # ---------------------------------------
+        self,
+        batch_idx: int,
+        batch: Batch,
+    ) -> ArenaEvaluationSourceContext:
+        """Resolve a typed :class:`~ehc_sn.tasks.arena.traces.ArenaEvaluationSourceContext`
+        for a fit-path validation batch by querying the attached datamodule.
+
+        Uses :meth:`~ehc_sn.data.datamodules.Datamodule.val_sample_ids_for_batch`
+        to resolve ordered sample IDs that account for DistributedSampler
+        interleaving in DDP runs.  Returns ``None`` when the trainer/datamodule
+        is unavailable or sample ID resolution fails, so the caller can skip
+        supplements gracefully.
+        """
+        trainer = getattr(self, "trainer", None)
+        if trainer is None:
+            return None
+        dm = getattr(trainer, "datamodule", None)
+        if not isinstance(dm, Datamodule):
+            return None
+        first_key = next(iter(batch))
+        batch_size = batch[first_key].shape[0]
+        sample_ids = dm.val_sample_ids_for_batch(
+            batch_idx,
+            batch_size,
+            rank=trainer.global_rank,
+            world_size=trainer.world_size,
+        )
+        if not sample_ids:
+            return None
+        return ArenaEvaluationSourceContext(
+            task_family="arena",
+            dataset_path=dm.config.dataset_path,
+            split="val",
+            sample_ids=tuple(sample_ids),
+        )
+
+    def build_evaluation_metrics(
+        self,
+        namespace: str,
+    ) -> "MetricCollection":
+        """Return a fresh TEM-family metric collection with the given namespace prefix.
+
+        The returned collection is independent of ``self.val_metrics`` and may be
+        accumulated by the regime runner across multiple case batches.
+
+        Args:
+            namespace: Metric namespace prefix, e.g. ``"diag/my_probe/"``.
+
+        Returns:
+            A fresh :class:`~torchmetrics.MetricCollection` keyed by TEM episode routes.
+        """
+        return build_val_metrics(TEM_EPISODE_ROUTES).clone(prefix=namespace)
+
+
 # =================================================================================================
 def _maybe_apply_arena_supplements(
-    trace: "TraceTree",  # noqa: F821
+    trace: TraceTree,
     source_context: object | None,
 ) -> tuple[str, ...]:
     """Apply Arena trace supplements to *trace* if source_context is ArenaEvaluationSourceContext.
@@ -498,4 +522,3 @@ def _maybe_apply_arena_supplements(
     supplements = build_arena_trace_supplements(source_context, trace.length)
     apply_arena_trace_supplements(trace, supplements)
     return ("arena",)
-

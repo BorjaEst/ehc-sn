@@ -35,6 +35,8 @@ from ehc_sn.metrics.keys import (
     TEM_LOSS_OBS_RETRIEVED_REVISIT,
     TEM_LOSS_PLACE_CONSISTENCY_ALL,
     TEM_LOSS_PLACE_CONSISTENCY_REVISIT,
+    TEM_LOSS_PLACE_RECALL_BOOTSTRAP_ALL,
+    TEM_LOSS_PLACE_RECALL_BOOTSTRAP_REVISIT,
     TEM_LOSS_REG_ALL,
     TEM_LOSS_REG_REVISIT,
 )
@@ -50,6 +52,7 @@ from ehc_sn.types import Batch
 
 GRID_REG_TERM = "grid_reg_term"
 GRID_TRANSITION_RELATION = "grid_transition_relation"
+PLACE_RECALL_BOOTSTRAP_RELATION = "place_recall_bootstrap_relation"
 PLACE_REG_TERM = "place_reg_term"
 PLACE_SENSORY_RELATION = "place_sensory_relation"
 PLACE_TRANSITION_RELATION = "place_transition_relation"
@@ -170,6 +173,15 @@ class TEMObjectiveConfig(BaseModel, extra="forbid"):
         default="l1",
         description="Regularization norm for place codes.",
     )
+    c_place_recall_bootstrap: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Coefficient for the place-recall bootstrap loss (p_sensory → p_post). Set 0 to disable.",
+    )
+    detach_place_recall_bootstrap_teacher: bool = Field(
+        default=True,
+        description="When True, detach p_post (the teacher) before computing the bootstrap MSE term.",
+    )
 
 
 # =================================================================================================
@@ -191,6 +203,9 @@ class TEMLosses(VariationalLosses):
     loss_place_transition_sum: Tensor
     loss_place_sensory_sum: Tensor
 
+    # Bootstrap term (masked, scaled by c_place_recall_bootstrap * p2g_trust)
+    loss_place_recall_bootstrap_sum: Tensor
+
     # Aggregate latent and denominator
     loss_grid_kl_sum: Tensor
     loss_place_consistency_sum: Tensor
@@ -205,7 +220,13 @@ class TEMLosses(VariationalLosses):
     def total(self) -> Tensor:
         """Return the total ELBO loss for the current TEM step."""
         denom = self.protocol_count.clamp_min(1.0)
-        return (self.loss_obs_nll_sum + self.loss_grid_kl_sum + self.loss_place_consistency_sum + self.loss_reg_sum) / denom
+        return (
+            self.loss_obs_nll_sum
+            + self.loss_grid_kl_sum
+            + self.loss_place_consistency_sum
+            + self.loss_place_recall_bootstrap_sum
+            + self.loss_reg_sum
+        ) / denom
 
 
 # =================================================================================================
@@ -228,7 +249,12 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
     :class:`TEMObjectiveBinding`.
     """
 
-    def __init__(self, config: TEMObjectiveConfig, *, task_binding: TEMObjectiveBinding[Any],) -> None:  # fmt: skip  # ------------------------------------------------------------------------------
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: TEMObjectiveConfig,
+        *,
+        task_binding: TEMObjectiveBinding[Any],
+    ) -> None:
         """Create a TEM objective from its loss configuration.
 
         Args:
@@ -240,7 +266,15 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
         super().__init__(config=config)
         self._task_binding = task_binding
 
-    def compute_losses(self, outputs: TEMStepOutput, carry: Any, batch: Any = None, step_output: Any = None, **_: Any,) -> TEMLosses:  # fmt: skip  # -----------------------------------------------------------------------
+    def compute_losses(  # ----------------------------------------------------
+        self,
+        outputs: TEMStepOutput,
+        carry: Any,
+        batch: Any = None,
+        step_output: Any = None,
+        p2g_trust: float = 1.0,
+        **_: Any,
+    ) -> TEMLosses:
         """Compute ELBO-style TEM losses for a single step."""
         targets = self._task_binding.extract_targets(batch, carry, step_output)
         labels = self._task_binding.extract_observation_id(targets)
@@ -278,6 +312,21 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
         place_reg = self._regularization_terms(place_reg_code, self.config.place_reg_norm, self.config.c_place_reg)  # fmt: skip
         loss_reg_sum = self._masked_sum(grid_reg + place_reg, protocol_mask)
 
+        bootstrap_relation = outputs.latent_relations.get(PLACE_RECALL_BOOTSTRAP_RELATION)
+        if bootstrap_relation is not None and self.config.c_place_recall_bootstrap > 0.0:
+            teacher_rhs = bootstrap_relation.rhs
+            if self.config.detach_place_recall_bootstrap_teacher:
+                if isinstance(teacher_rhs, Tensor):
+                    teacher_rhs = teacher_rhs.detach()
+                else:
+                    teacher_rhs = tuple(t.detach() for t in teacher_rhs)
+            bootstrap_mse = sum_latent_terms(mse_consistency, bootstrap_relation.lhs, teacher_rhs)
+            loss_place_recall_bootstrap_sum = (
+                self.config.c_place_recall_bootstrap * p2g_trust * self._masked_sum(bootstrap_mse, protocol_mask)
+            )
+        else:
+            loss_place_recall_bootstrap_sum = loss_obs_nll_sum.new_zeros(())
+
         return TEMLosses(
             loss_obs_nll_sum=loss_obs_nll_sum,
             loss_obs_inference_sum=loss_obs_inference_sum,
@@ -285,13 +334,14 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
             loss_obs_ancestral_sum=loss_obs_ancestral_sum,
             loss_place_transition_sum=loss_place_transition_sum,
             loss_place_sensory_sum=loss_place_sensory_sum,
+            loss_place_recall_bootstrap_sum=loss_place_recall_bootstrap_sum,
             loss_reg_sum=loss_reg_sum,
             loss_grid_kl_sum=loss_grid_kl_sum,
             loss_place_consistency_sum=loss_place_consistency_sum,
             protocol_count=protocol_mask.to(dtype=loss_obs_inference.dtype).sum(),
         )
 
-    def _build_metric_ratios(self, losses: TEMLosses, *, carry: Any, outputs: TEMStepOutput, batch_size: int, batch: Any = None, step_output: Any = None, **_: Any,) -> dict[str, RatioStat]:  # fmt: skip  # -----------------------------------------------------------------
+    def _build_metric_ratios(self, losses: TEMLosses, *, carry: Any, outputs: TEMStepOutput, batch_size: int, batch: Any = None, step_output: Any = None, p2g_trust: float = 1.0, **_: Any,) -> dict[str, RatioStat]:  # fmt: skip  # -----------------------------------------------------------------
         """Build detached TEM ratio metrics for logging.
 
         Accuracy metrics come from the task-owned binding so this objective
@@ -303,7 +353,7 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
         protocol_mask = self._task_binding.extract_protocol_mask(targets)
         protocol_count = protocol_mask.to(dtype=losses.total.dtype).sum()
         batch_count = losses.total.new_tensor(batch_size, dtype=losses.total.dtype)
-        all_loss_sums = self._all_step_loss_sums(outputs, labels)
+        all_loss_sums = self._all_step_loss_sums(outputs, labels, p2g_trust=p2g_trust)
         # Accuracy metrics are owned by the task; the binding delegates to the task evaluator.
         acc_metrics = self._task_binding.evaluate_observation_metrics(outputs, targets)
         return {
@@ -314,6 +364,7 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
             TEM_LOSS_OBS_ANCESTRAL_REVISIT: RatioStat(losses.loss_obs_ancestral_sum.detach(), protocol_count),
             TEM_LOSS_GRID_KL_REVISIT: RatioStat(losses.loss_grid_kl_sum.detach(), protocol_count),
             TEM_LOSS_PLACE_CONSISTENCY_REVISIT: RatioStat(losses.loss_place_consistency_sum.detach(), protocol_count),
+            TEM_LOSS_PLACE_RECALL_BOOTSTRAP_REVISIT: RatioStat(losses.loss_place_recall_bootstrap_sum.detach(), protocol_count),
             TEM_LOSS_REG_REVISIT: RatioStat(losses.loss_reg_sum.detach(), protocol_count),
             TEM_LOSS_OBS_NLL_ALL: RatioStat(all_loss_sums["loss_obs_nll_sum"], batch_count),
             TEM_LOSS_OBS_INFERENCE_ALL: RatioStat(all_loss_sums["loss_obs_inference_sum"], batch_count),
@@ -321,6 +372,7 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
             TEM_LOSS_OBS_ANCESTRAL_ALL: RatioStat(all_loss_sums["loss_obs_ancestral_sum"], batch_count),
             TEM_LOSS_GRID_KL_ALL: RatioStat(all_loss_sums["loss_grid_kl_sum"], batch_count),
             TEM_LOSS_PLACE_CONSISTENCY_ALL: RatioStat(all_loss_sums["loss_place_consistency_sum"], batch_count),
+            TEM_LOSS_PLACE_RECALL_BOOTSTRAP_ALL: RatioStat(all_loss_sums["loss_place_recall_bootstrap_sum"], batch_count),
             TEM_LOSS_REG_ALL: RatioStat(all_loss_sums["loss_reg_sum"], batch_count),
         }  # fmt: skip
 
@@ -328,7 +380,7 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
         """Wrap losses, metrics, and signals into a :class:`TEMObjectiveStep`."""
         return TEMObjectiveStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
-    def compute_signals(self, batch: Batch, carry: Any, outputs: TEMStepOutput, losses: TEMLosses, step_output: Any = None, **_: Any,) -> dict[str, Tensor]:  # fmt: skip  # -----------------------------------------------------------------------
+    def compute_signals(self, batch: Batch, carry: Any, outputs: TEMStepOutput, losses: TEMLosses, step_output: Any = None, p2g_trust: float = 1.0, **_: Any,) -> dict[str, Tensor]:  # fmt: skip  # -----------------------------------------------------------------------
         """Compute detached TEM diagnostics and ELBO-style scalar signals.
 
         All per-pathway observation and place-consistency signals are
@@ -353,6 +405,7 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
                 S.LOSS_OBS_ANCESTRAL: losses.loss_obs_ancestral_sum.detach() / denom,
                 S.LOSS_PLACE_TRANSITION: losses.loss_place_transition_sum.detach() / denom,
                 S.LOSS_PLACE_SENSORY: losses.loss_place_sensory_sum.detach() / denom,
+                S.LOSS_PLACE_RECALL_BOOTSTRAP: losses.loss_place_recall_bootstrap_sum.detach() / denom,
                 S.GRID_POST_NORM: mean_latent_norm(grid_relation.lhs),
                 S.GRID_PRIOR_NORM: mean_latent_norm(grid_relation.rhs),
                 S.PLACE_POST_NORM: mean_latent_norm(place_transition_relation.lhs),
@@ -369,7 +422,7 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
         """Return the scalar sum over values selected by a boolean batch mask."""
         return (values * mask.to(dtype=values.dtype)).sum()
 
-    def _all_step_loss_sums(self, outputs: TEMStepOutput, labels: Tensor) -> dict[str, Tensor]:
+    def _all_step_loss_sums(self, outputs: TEMStepOutput, labels: Tensor, p2g_trust: float = 1.0) -> dict[str, Tensor]:
         """Return detached all-step TEM loss sums for diagnostics and metric logging."""
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
@@ -400,6 +453,19 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
         grid_reg = self._regularization_terms(grid_reg_code, self.config.grid_reg_norm, self.config.c_grid_reg)
         place_reg = self._regularization_terms(place_reg_code, self.config.place_reg_norm, self.config.c_place_reg)  # fmt: skip
 
+        bootstrap_relation = outputs.latent_relations.get(PLACE_RECALL_BOOTSTRAP_RELATION)
+        if bootstrap_relation is not None and self.config.c_place_recall_bootstrap > 0.0:
+            teacher_rhs = bootstrap_relation.rhs
+            if self.config.detach_place_recall_bootstrap_teacher:
+                if isinstance(teacher_rhs, Tensor):
+                    teacher_rhs = teacher_rhs.detach()
+                else:
+                    teacher_rhs = tuple(t.detach() for t in teacher_rhs)
+            bootstrap_mse = sum_latent_terms(mse_consistency, bootstrap_relation.lhs, teacher_rhs)
+            loss_place_recall_bootstrap_sum = (self.config.c_place_recall_bootstrap * p2g_trust * bootstrap_mse.sum()).detach()
+        else:
+            loss_place_recall_bootstrap_sum = loss_obs_nll_sum.new_zeros(())
+
         return {
             "loss_obs_nll_sum": loss_obs_nll_sum,
             "loss_obs_inference_sum": loss_obs_inference_sum,
@@ -407,6 +473,7 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
             "loss_obs_ancestral_sum": loss_obs_ancestral_sum,
             "loss_grid_kl_sum": (self.config.c_grid * sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs).sum()).detach(),  # fmt: skip
             "loss_place_consistency_sum": (self.config.c_place * (place_transition + place_sensory).sum()).detach(),
+            "loss_place_recall_bootstrap_sum": loss_place_recall_bootstrap_sum,
             "loss_reg_sum": (grid_reg.sum() + place_reg.sum()).detach(),
         }
 
@@ -429,6 +496,7 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
 __all__ = [
     "GRID_REG_TERM",
     "GRID_TRANSITION_RELATION",
+    "PLACE_RECALL_BOOTSTRAP_RELATION",
     "PLACE_REG_TERM",
     "PLACE_SENSORY_RELATION",
     "PLACE_TRANSITION_RELATION",
