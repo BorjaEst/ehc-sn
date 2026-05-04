@@ -276,7 +276,7 @@ class TEMModelV1(nn.Module):
         # Package controller-compatible latent outputs and return the new state.
         grid_codes = GridCodes(prior=g_prior, post=g_post)
         place_codes = PlaceCodes(prior=p_prior, posterior=p_post, retrieved=p_retrieved, sensory=p_sensory_read)
-        sensory_codes = PredCodes(ancestral=x_ancestral, inference=x_inference, retrieved=x_retrieved)
+        pred_codes = PredCodes(ancestral=x_ancestral, inference=x_inference, retrieved=x_retrieved)
 
         return TEMOutputV1(grid_codes=grid_codes, place_codes=place_codes, pred_codes=pred_codes), state
 

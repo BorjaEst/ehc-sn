@@ -56,9 +56,11 @@ class ArenaOutputsDecoderV2(nn.Module):
         single_freq: int | None = None,
     ) -> None:
         super().__init__()
-        self.decoder = MLPDecoder(latent_dim, observation_dim)
         self._obs_dim = observation_dim
         self._single_freq = single_freq
+        self.w_x = torch.nn.Parameter(torch.tensor(1.0))
+        self.b_x = torch.nn.Parameter(torch.zeros(latent_dim))
+        self.decoder = MLPDecoder(latent_dim, observation_dim)
 
     def _decode(  # -----------------------------------------------------------
         self,
@@ -146,15 +148,15 @@ def _build_decoder_v2(  # -----------------------------------------------------
     model: TEMModelV2,
     config: ArenaTEMAdapterSettings,
 ) -> ArenaOutputsDecoderV2:
-    hpc_shape = model.config.hpc.shape
-    n_freq = len(hpc_shape)
-    if config.decoder.kind == "single_scale":
+    feature_dim = model.config.lec.feature_dim
+    n_freq = len(model.config.hpc.shape)
+    if config.decoder.kind in ("single_scale", "legacy_lec_pipeline"):
         freq = config.decoder.prediction_freq
         if not (0 <= freq < n_freq):
             raise ValueError(f"prediction_freq={freq} is out of range for hpc.shape with {n_freq} bands " f"(valid: 0..{n_freq - 1}).")
         return ArenaOutputsDecoderV2(
             observation_dim=config.observation_dim,
-            latent_dim=hpc_shape[freq],
+            latent_dim=feature_dim,
             single_freq=freq,
         )
     if config.decoder.kind == "multi_scale":

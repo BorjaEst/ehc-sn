@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn.loss.consistency import LatentRelation
-from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes
+from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes
 from ehc_sn.modules.autoencoder import TwoHotEncoder
 from ehc_sn.objectives.tem import (
     GRID_TRANSITION_RELATION,
@@ -116,8 +116,8 @@ class ArenaTEMDiagnostics(DetachMixin):
 
     obs_logits: tuple[Tensor, Tensor, Tensor]
     grid_codes: GridCodes  # (prior, post)
-    place_codes: PlaceCodes  # (prior, post, retrieved, sensory)
-    pred_codes: MultiScaleCode  # (inference, retrieved, ancestral)
+    place_codes: PlaceCodes  # (posterior, prior, retrieved, sensory)
+    pred_codes: PredCodes  # (inference, retrieved, ancestral)
 
     # -- TEMStepOutput protocol surface -----------------------------------------
 
@@ -195,11 +195,6 @@ class ArenaTEMBridgeOutput(DetachMixin):
         """Expose optional TEM regularization-code overrides on the bridge output."""
         return self.tem.reg_terms
 
-    @property
-    def theta_cls(self) -> Tensor | None:
-        """Return the optional theta-classifier state used for diagnostics."""
-        return None
-
 
 # =============================================================================
 # Shared encoder base
@@ -250,5 +245,4 @@ __all__ = [
     "ArenaTEMDiagnostics",
     "ArenaTwoHotEncoder",
     "ArenaTaskOutput",
-    "decode_observation_pathways",
 ]
