@@ -39,9 +39,6 @@ TEM_LOSS_OBS_INFERENCE_ALL: str = "loss_obs_inference_all"
 TEM_LOSS_OBS_RETRIEVED_ALL: str = "loss_obs_retrieved_all"
 TEM_LOSS_OBS_ANCESTRAL_ALL: str = "loss_obs_ancestral_all"
 
-TEM_LOSS_PLACE_RECALL_BOOTSTRAP_REVISIT: str = "loss_place_recall_bootstrap_revisit"
-TEM_LOSS_PLACE_RECALL_BOOTSTRAP_ALL: str = "loss_place_recall_bootstrap_all"
-
 EHC_LOSS_OBS_NLL_REVISIT: str = "ehc_loss_obs_nll_revisit"
 EHC_LOSS_OBS_NLL_ALL: str = "ehc_loss_obs_nll_all"
 EHC_LOSS_GRID_KL_REVISIT: str = "ehc_loss_grid_kl_revisit"
@@ -83,7 +80,6 @@ __all__ = [
     "TEM_LOSS_REG_ALL", "TEM_LOSS_REG_REVISIT",
     "TEM_LOSS_OBS_INFERENCE_REVISIT", "TEM_LOSS_OBS_RETRIEVED_REVISIT", "TEM_LOSS_OBS_ANCESTRAL_REVISIT",
     "TEM_LOSS_OBS_INFERENCE_ALL", "TEM_LOSS_OBS_RETRIEVED_ALL", "TEM_LOSS_OBS_ANCESTRAL_ALL",
-    "TEM_LOSS_PLACE_RECALL_BOOTSTRAP_REVISIT", "TEM_LOSS_PLACE_RECALL_BOOTSTRAP_ALL",
     "VAR_LOSS_LATENT", "VAR_LOSS_OBS_NLL",
     "VAR_LOSS_REG", "extra_ratio_paths",
 ]  # fmt: skip

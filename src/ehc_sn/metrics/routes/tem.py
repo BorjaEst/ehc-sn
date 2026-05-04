@@ -20,8 +20,6 @@ from ehc_sn.metrics.keys import (
     TEM_LOSS_OBS_RETRIEVED_REVISIT,
     TEM_LOSS_PLACE_CONSISTENCY_ALL,
     TEM_LOSS_PLACE_CONSISTENCY_REVISIT,
-    TEM_LOSS_PLACE_RECALL_BOOTSTRAP_ALL,
-    TEM_LOSS_PLACE_RECALL_BOOTSTRAP_REVISIT,
     TEM_LOSS_REG_ALL,
     TEM_LOSS_REG_REVISIT,
     extra_ratio_paths,
@@ -46,7 +44,6 @@ TEM_STEP_ROUTES: tuple[Route, ...] = (
     Route("loss/obs_ancestral_revisit", *extra_ratio_paths(TEM_LOSS_OBS_ANCESTRAL_REVISIT)),
     Route("loss/grid_kl_revisit", *extra_ratio_paths(TEM_LOSS_GRID_KL_REVISIT)),
     Route("loss/place_consistency_revisit", *extra_ratio_paths(TEM_LOSS_PLACE_CONSISTENCY_REVISIT)),
-    Route("loss/place_recall_bootstrap_revisit", *extra_ratio_paths(TEM_LOSS_PLACE_RECALL_BOOTSTRAP_REVISIT)),
     Route("loss/reg_revisit", *extra_ratio_paths(TEM_LOSS_REG_REVISIT)),
     Route("loss/obs_nll_all", *extra_ratio_paths(TEM_LOSS_OBS_NLL_ALL)),
     Route("loss/obs_inference_all", *extra_ratio_paths(TEM_LOSS_OBS_INFERENCE_ALL)),
@@ -54,7 +51,6 @@ TEM_STEP_ROUTES: tuple[Route, ...] = (
     Route("loss/obs_ancestral_all", *extra_ratio_paths(TEM_LOSS_OBS_ANCESTRAL_ALL)),
     Route("loss/grid_kl_all", *extra_ratio_paths(TEM_LOSS_GRID_KL_ALL)),
     Route("loss/place_consistency_all", *extra_ratio_paths(TEM_LOSS_PLACE_CONSISTENCY_ALL)),
-    Route("loss/place_recall_bootstrap_all", *extra_ratio_paths(TEM_LOSS_PLACE_RECALL_BOOTSTRAP_ALL)),
     Route("loss/reg_all", *extra_ratio_paths(TEM_LOSS_REG_ALL)),
 )
 

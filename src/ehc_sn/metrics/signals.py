@@ -170,13 +170,6 @@ LOSS_PLACE_SENSORY: str = "loss_place_sensory"
 Weighted by ``c_place``, revisit-masked, and normalised by ``protocol_count``.
 """
 
-LOSS_PLACE_RECALL_BOOTSTRAP: str = "loss_place_recall_bootstrap"
-"""Objective-scope place-recall bootstrap contribution (TEM).
-
-Weighted by ``c_place_recall_bootstrap * p2g_trust``, revisit-masked,
-and normalised by ``protocol_count``.
-"""
-
 GRID_POST_NORM: str = "grid_post_norm"
 """Mean activation norm of inferred grid-code blocks (TEM)."""
 
@@ -192,7 +185,7 @@ PLACE_PRIOR_NORM: str = "place_prior_norm"
 TEM_SIGNALS: frozenset[str] = VAR_SIGNALS | frozenset(
     {
         LOSS_GRID_KL, LOSS_PLACE_CONSISTENCY, LOSS_OBS_INFER, LOSS_OBS_RETRIEVED, LOSS_OBS_ANCESTRAL,
-        LOSS_PLACE_TRANSITION, LOSS_PLACE_SENSORY, LOSS_PLACE_RECALL_BOOTSTRAP,
+        LOSS_PLACE_TRANSITION, LOSS_PLACE_SENSORY,
         GRID_POST_NORM, GRID_PRIOR_NORM, PLACE_POST_NORM,
         PLACE_PRIOR_NORM,
     }
