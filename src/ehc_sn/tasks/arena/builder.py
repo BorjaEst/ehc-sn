@@ -22,16 +22,17 @@ ARENA_SPATIAL_CHANNELS is empty.
 Path written: ``data/processed/arena/<corpus>/v<version>/``
 
 Freeze rule: after this reset (task_protocol_version = 1), any semantic change
-to stored channels, shapes, dtypes, sentinels, or walk/start policies is a new
-protocol version.
+to stored channels, shapes, dtypes, sentinels, or to the registered Arena v1
+start/walk policy ids is a new protocol version.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal, TypeAlias
 
 import numpy as np
 
@@ -41,7 +42,7 @@ from ehc_sn.data.manifest import write_manifest
 from ehc_sn.data.substrate.dungeongen import SHARED_CHANNELS as DUNGEON_SUBSTRATE_CHANNELS
 from ehc_sn.data.substrate.dungeongen import SHARED_FAMILY as DUNGEON_SHARED_FAMILY
 from ehc_sn.data.substrate.reader import iter_substrate_entries_and_samples, load_substrate_manifest
-from ehc_sn.tasks._replay_build import random_valid_cell, random_walk_no_backtrack
+from ehc_sn.tasks._replay_build import first_true_cell, random_valid_cell, random_walk, random_walk_no_backtrack
 
 # =============================================================================
 # Protocol constants (frozen for task_protocol_version = 1)
@@ -51,8 +52,33 @@ TASK_FAMILY: Final[str] = "arena"
 TASK_SCHEMA_VERSION: Final[int] = 1
 TASK_PROTOCOL_VERSION: Final[int] = 1
 
-START_POLICY_ID: Final[str] = "random_valid_cell_v1"
-WALK_POLICY_ID: Final[str] = "random_walk_no_immediate_backtrack_v1"
+ArenaStartPolicy: TypeAlias = Literal["random_valid", "canonical_entrance"]
+ArenaWalkPolicy: TypeAlias = Literal["no_immediate_backtrack", "uniform"]
+ArenaWalkFn: TypeAlias = Callable[..., tuple[np.ndarray, np.ndarray, np.ndarray]]
+
+DEFAULT_START_POLICY: Final[ArenaStartPolicy] = "random_valid"
+DEFAULT_WALK_POLICY: Final[ArenaWalkPolicy] = "no_immediate_backtrack"
+DEFAULT_MAX_STEPS: Final[int] = 250
+
+START_POLICY_RANDOM_VALID_ID: Final[str] = "random_valid_cell_v1"
+START_POLICY_CANONICAL_ENTRANCE_ID: Final[str] = "dungeongen_canonical_entrance_v1"
+WALK_POLICY_NO_IMMEDIATE_BACKTRACK_ID: Final[str] = "random_walk_no_immediate_backtrack_v1"
+WALK_POLICY_UNIFORM_ID: Final[str] = "random_walk_uniform_v1"
+
+_START_POLICY_ID_BY_NAME: Final[dict[str, str]] = {
+    "random_valid": START_POLICY_RANDOM_VALID_ID,
+    "canonical_entrance": START_POLICY_CANONICAL_ENTRANCE_ID,
+}
+_WALK_POLICY_ID_BY_NAME: Final[dict[str, str]] = {
+    "no_immediate_backtrack": WALK_POLICY_NO_IMMEDIATE_BACKTRACK_ID,
+    "uniform": WALK_POLICY_UNIFORM_ID,
+}
+_WALK_FUNCTION_BY_NAME: Final[dict[str, ArenaWalkFn]] = {
+    "no_immediate_backtrack": random_walk_no_backtrack,
+    "uniform": random_walk,
+}
+_ALLOWED_START_POLICY_IDS: Final[frozenset[str]] = frozenset(_START_POLICY_ID_BY_NAME.values())
+_ALLOWED_WALK_POLICY_IDS: Final[frozenset[str]] = frozenset(_WALK_POLICY_ID_BY_NAME.values())
 
 ACTION_COUNT: Final[int] = 5
 ACTION_ID_SPACE: Final[str] = "STAY=0,UP=1,RIGHT=2,DOWN=3,LEFT=4"
@@ -108,6 +134,7 @@ _ARENA_TRAJECTORY_DTYPES: Final[dict[str, np.dtype]] = {
 }
 
 _SPLITS: Final[tuple[str, ...]] = ("train", "val", "test")
+_DUNGEONGEN_SPLIT_SEED_OFFSET: Final[dict[str, int]] = {"train": 0, "val": 100_000, "test": 200_000}
 
 
 # =============================================================================
@@ -160,6 +187,9 @@ def _build_episode(
     parent_sample: dict[str, np.ndarray],
     max_steps: int,
     walk_seed: int,
+    *,
+    start_cell: tuple[int, int] | None = None,
+    walk_fn=random_walk_no_backtrack,
 ) -> dict[str, np.ndarray]:
     """Build one Arena episode from a parent substrate sample.
 
@@ -180,9 +210,12 @@ def _build_episode(
     observations: np.ndarray = parent_sample["observations"]
     landmarks: np.ndarray = parent_sample["landmarks"]
 
-    start_r, start_c = random_valid_cell(mask_valid, rng)
+    if start_cell is None:
+        start_r, start_c = random_valid_cell(mask_valid, rng)
+    else:
+        start_r, start_c = start_cell
 
-    rows, cols, prev_actions = random_walk_no_backtrack(
+    rows, cols, prev_actions = walk_fn(
         mask_valid,
         (start_r, start_c),
         max_steps,
@@ -221,6 +254,170 @@ def _build_episode(
         CHANNEL_TRAJECTORY_VALID_STEP: valid_step,
         CHANNEL_TRAJECTORY_LENGTH: np.array(traj_length, dtype=np.int32),
     }
+
+
+def _dungeongen_parent_seed(parent_manifest: dict, *, split: str, parent_index: int) -> int:
+    """Return the raw dungeongen seed for one parent sample position."""
+    base_seed = parent_manifest.get("seed")
+    if not isinstance(base_seed, int):
+        raise ValueError("Arena task corpus requires integer 'seed' in the parent dungeongen manifest.")
+    if split not in _DUNGEONGEN_SPLIT_SEED_OFFSET:
+        raise ValueError(f"Unsupported split {split!r} for dungeongen seed derivation.")
+    return base_seed + _DUNGEONGEN_SPLIT_SEED_OFFSET[split] + parent_index
+
+
+def _dungeongen_room_center(dungeon: object, room_id: str) -> tuple[int, int] | None:
+    """Return the integer world-space center of the room attached to one exit."""
+    room = getattr(dungeon, "rooms", {}).get(room_id)
+    if room is None:
+        return None
+    x = int(getattr(room, "x", 0))
+    y = int(getattr(room, "y", 0))
+    width = int(getattr(room, "width", 1))
+    height = int(getattr(room, "height", 1))
+    return x + width // 2, y + height // 2
+
+
+def _dungeongen_is_entrance_exit(exit_obj: object) -> bool:
+    """Return ``True`` when one raw dungeongen exit should be treated as an entrance."""
+    exit_type = getattr(exit_obj, "exit_type", None)
+    type_name = getattr(exit_type, "name", str(exit_type))
+    return type_name == "ENTRANCE"
+
+
+def _dungeongen_map_exit_to_valid_cell(
+    exit_obj: object,
+    dungeon: object,
+    mask_valid: np.ndarray,
+    *,
+    origin_x: int,
+    origin_y: int,
+) -> tuple[int, int] | None:
+    """Map one raw dungeongen exit to a valid processed-grid cell."""
+    world_x = getattr(exit_obj, "x", None)
+    world_y = getattr(exit_obj, "y", None)
+    if world_x is None or world_y is None:
+        return None
+
+    room_center = _dungeongen_room_center(dungeon, getattr(exit_obj, "room_id", ""))
+    candidates: list[tuple[int, int, int, int]] = []
+    for cand_x, cand_y in (
+        (world_x, world_y),
+        (world_x - 1, world_y),
+        (world_x + 1, world_y),
+        (world_x, world_y - 1),
+        (world_x, world_y + 1),
+    ):
+        row = int(cand_y - origin_y)
+        col = int(cand_x - origin_x)
+        if row < 0 or row >= mask_valid.shape[0] or col < 0 or col >= mask_valid.shape[1]:
+            continue
+        if mask_valid[row, col]:
+            candidates.append((row, col, int(cand_x), int(cand_y)))
+
+    if not candidates:
+        return None
+    if room_center is None:
+        row, col, _, _ = min(candidates)
+        return row, col
+
+    center_x, center_y = room_center
+    row, col, _, _ = min(
+        candidates,
+        key=lambda cell: (abs(cell[2] - center_x) + abs(cell[3] - center_y), (cell[0], cell[1])),
+    )
+    return row, col
+
+
+def _dungeongen_canonical_entrance_cell(dungeon: object, mask_valid: np.ndarray) -> tuple[int, int]:
+    """Return the canonical entrance cell for one processed dungeongen sample."""
+    min_x, min_y, *_ = getattr(dungeon, "bounds")
+    raw_exits = list(getattr(dungeon, "exits", {}).values())
+    priorities = (
+        lambda exit_obj: bool(getattr(exit_obj, "is_main", False)),
+        _dungeongen_is_entrance_exit,
+        lambda exit_obj: getattr(exit_obj, "room_id", "") == getattr(dungeon, "spine_start_room", None),
+    )
+
+    for predicate in priorities:
+        mapped = [
+            _dungeongen_map_exit_to_valid_cell(exit_obj, dungeon, mask_valid, origin_x=int(min_x), origin_y=int(min_y))
+            for exit_obj in raw_exits
+            if predicate(exit_obj)
+        ]
+        mapped = [cell for cell in mapped if cell is not None]
+        if mapped:
+            return min(mapped)
+
+    fallback = first_true_cell(mask_valid)
+    if fallback is None:
+        raise RuntimeError("Cannot derive a canonical entrance cell from an empty valid mask.")
+    return fallback
+
+
+def _resolve_canonical_entrance_start_cell(
+    mask_valid: np.ndarray,
+    *,
+    split: str,
+    parent_index: int,
+    parent_manifest: dict,
+) -> tuple[int, int]:
+    """Resolve the canonical-entrance start cell for one Arena parent map."""
+    try:
+        from dungeongen.layout import DungeonGenerator
+    except Exception as exc:
+        raise RuntimeError(
+            "Arena canonical-entrance start generation requires dungeongen to be installed in the active environment."
+        ) from exc
+
+    dungeon_seed = _dungeongen_parent_seed(parent_manifest, split=split, parent_index=parent_index)
+    dungeon = DungeonGenerator().generate(seed=dungeon_seed)
+    return _dungeongen_canonical_entrance_cell(dungeon, mask_valid)
+
+
+def _resolve_start_policy_id(start_policy: str) -> str:
+    """Resolve one public start-policy name to its frozen manifest id."""
+    policy_id = _START_POLICY_ID_BY_NAME.get(start_policy)
+    if policy_id is None:
+        raise ValueError(f"Unsupported Arena start_policy {start_policy!r}. " f"Expected one of {sorted(_START_POLICY_ID_BY_NAME)}.")
+    return policy_id
+
+
+def _resolve_walk_policy_id(walk_policy: str) -> str:
+    """Resolve one public walk-policy name to its frozen manifest id."""
+    policy_id = _WALK_POLICY_ID_BY_NAME.get(walk_policy)
+    if policy_id is None:
+        raise ValueError(f"Unsupported Arena walk_policy {walk_policy!r}. " f"Expected one of {sorted(_WALK_POLICY_ID_BY_NAME)}.")
+    return policy_id
+
+
+def _resolve_walk_function(walk_policy: str) -> ArenaWalkFn:
+    """Resolve one public walk-policy name to its trajectory sampler."""
+    walk_fn = _WALK_FUNCTION_BY_NAME.get(walk_policy)
+    if walk_fn is None:
+        raise ValueError(f"Unsupported Arena walk_policy {walk_policy!r}. " f"Expected one of {sorted(_WALK_FUNCTION_BY_NAME)}.")
+    return walk_fn
+
+
+def _resolve_start_cell(
+    *,
+    start_policy: str,
+    mask_valid: np.ndarray,
+    split: str,
+    parent_index: int,
+    parent_manifest: dict,
+) -> tuple[int, int] | None:
+    """Resolve one parent-level start cell, or ``None`` for per-episode sampling."""
+    if start_policy == "random_valid":
+        return None
+    if start_policy == "canonical_entrance":
+        return _resolve_canonical_entrance_start_cell(
+            mask_valid,
+            split=split,
+            parent_index=parent_index,
+            parent_manifest=parent_manifest,
+        )
+    raise ValueError(f"Unsupported Arena start_policy {start_policy!r}. " f"Expected one of {sorted(_START_POLICY_ID_BY_NAME)}.")
 
 
 # =============================================================================
@@ -312,8 +509,6 @@ def validate_arena_task_root(root: Path, *, _repo_root: Path | None = None) -> d
         "task_schema_version": TASK_SCHEMA_VERSION,
         "task_protocol_version": TASK_PROTOCOL_VERSION,
         "parent_family": DUNGEON_SHARED_FAMILY,
-        "start_policy_id": START_POLICY_ID,
-        "walk_policy_id": WALK_POLICY_ID,
         "action_count": ACTION_COUNT,
         "action_id_space": ACTION_ID_SPACE,
         "store_row_col": True,
@@ -323,6 +518,16 @@ def validate_arena_task_root(root: Path, *, _repo_root: Path | None = None) -> d
         actual = manifest.get(field)
         if actual != expected:
             raise ValueError(f"Manifest field {field!r}: expected {expected!r}, got {actual!r}.")
+    start_policy_id = manifest.get("start_policy_id")
+    if start_policy_id not in _ALLOWED_START_POLICY_IDS:
+        raise ValueError(
+            "Manifest field 'start_policy_id': expected one of " f"{sorted(_ALLOWED_START_POLICY_IDS)!r}, got {start_policy_id!r}."
+        )
+    walk_policy_id = manifest.get("walk_policy_id")
+    if walk_policy_id not in _ALLOWED_WALK_POLICY_IDS:
+        raise ValueError(
+            "Manifest field 'walk_policy_id': expected one of " f"{sorted(_ALLOWED_WALK_POLICY_IDS)!r}, got {walk_policy_id!r}."
+        )
     if "observation_vocab_size" not in manifest:
         raise ValueError("Manifest missing required field 'observation_vocab_size'.")
     obs_vocab = manifest["observation_vocab_size"]
@@ -419,6 +624,8 @@ def build_arena_task_corpus(
     *,
     parent_substrate: Path,
     corpus: str = "default",
+    start_policy: ArenaStartPolicy = DEFAULT_START_POLICY,
+    walk_policy: ArenaWalkPolicy = DEFAULT_WALK_POLICY,
     train_parent_maps: int = 200,
     val_parent_maps: int = 40,
     test_parent_maps: int = 40,
@@ -441,6 +648,8 @@ def build_arena_task_corpus(
         version_root: Destination versioned root (e.g. ``data/processed/arena/default/v1``).
         parent_substrate: Path to the parent dungeongen shared substrate root.
         corpus: Corpus label (e.g. ``"default"``).
+        start_policy: Parent-map reset policy name.
+        walk_policy: Trajectory walk policy name.
         train_parent_maps: Number of parent maps to use for training.
         val_parent_maps: Number of parent maps to use for validation.
         test_parent_maps: Number of parent maps to use for testing.
@@ -455,6 +664,10 @@ def build_arena_task_corpus(
         ValueError: When the parent is not a dungeongen shared substrate, or
             the parent split has fewer entries than requested.
     """
+    start_policy_id = _resolve_start_policy_id(start_policy)
+    walk_policy_id = _resolve_walk_policy_id(walk_policy)
+    walk_fn = _resolve_walk_function(walk_policy)
+
     version = extract_version(version_root)
     parent_manifest = load_substrate_manifest(parent_substrate)
 
@@ -497,6 +710,8 @@ def build_arena_task_corpus(
         "corpus": corpus,
         "max_steps": max_steps,
         "seed": seed,
+        "start_policy": start_policy,
+        "walk_policy": walk_policy,
         "test_episodes_per_parent": test_episodes_per_parent,
         "test_parent_maps": test_parent_maps,
         "train_episodes_per_parent": train_episodes_per_parent,
@@ -504,8 +719,8 @@ def build_arena_task_corpus(
         "val_episodes_per_parent": val_episodes_per_parent,
         "val_parent_maps": val_parent_maps,
         "parent_version": parent_manifest["version"],
-        "start_policy_id": START_POLICY_ID,
-        "walk_policy_id": WALK_POLICY_ID,
+        "start_policy_id": start_policy_id,
+        "walk_policy_id": walk_policy_id,
     }
 
     # We need parent topology_kind/n_states/extent for dataset.json provenance.
@@ -533,17 +748,25 @@ def build_arena_task_corpus(
                 if parent_idx >= n_parent:
                     break
 
+                start_cell = _resolve_start_cell(
+                    start_policy=start_policy,
+                    mask_valid=parent_sample["mask_valid"],
+                    split=split,
+                    parent_index=parent_idx,
+                    parent_manifest=parent_manifest,
+                )
+
                 for ep_idx in range(k_ep):
                     walk_seed = derive_walk_seed(
                         seed=seed,
                         split=split,
                         parent_sample_id=parent_entry.id,
                         episode_index=ep_idx,
-                        start_policy_id=START_POLICY_ID,
-                        walk_policy_id=WALK_POLICY_ID,
+                        start_policy_id=start_policy_id,
+                        walk_policy_id=walk_policy_id,
                         max_steps=max_steps,
                     )
-                    episode = _build_episode(parent_sample, max_steps, walk_seed)
+                    episode = _build_episode(parent_sample, max_steps, walk_seed, start_cell=start_cell, walk_fn=walk_fn)
                     samples.append(episode)
                     per_sample_ids.append(f"arena-{split}-{parent_entry.id}-ep{ep_idx:04d}")
                     per_sample_extra.append(
@@ -595,8 +818,8 @@ def build_arena_task_corpus(
             task=TASK_FAMILY,
             corpus=corpus,
             parent_substrate=canonical_parent,
-            start_policy_id=START_POLICY_ID,
-            walk_policy_id=WALK_POLICY_ID,
+            start_policy_id=start_policy_id,
+            walk_policy_id=walk_policy_id,
             action_count=ACTION_COUNT,
             action_id_space=ACTION_ID_SPACE,
             store_row_col=True,

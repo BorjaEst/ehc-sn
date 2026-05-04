@@ -1,20 +1,30 @@
 """Staged CLI for building the Arena task corpus (v1, topology-free).
 
 Arena consumes the dungeongen shared substrate and generates topology-free
-episode trajectories.  This CLI owns only the Arena task corpus slice; the
+episode trajectories. This CLI owns only the Arena task corpus slice; the
 shared dungeongen pipeline (raw, interim, substrate) is owned by
 scripts/data-gen/build-dungeongen.py.
 
 Stages
 ------
-materialize-task  Build the Arena task corpus over a dungeongen shared substrate.
-validate          Validate an Arena task-corpus version root.
-build-all         Convenience alias: materialize-task (requires substrate to exist).
+materialize-task   Build an Arena task corpus over a dungeongen shared substrate.
+validate           Validate an Arena task-corpus version root.
+build-all          Convenience alias: materialize-task (requires substrate to exist).
 
 Default paths
 -------------
 Shared substrate:  data/processed/dungeongen/v1
 Task corpus:       data/processed/arena/default/v1
+
+Documented recipes
+------------------
+Standard Arena recipe:
+    --start-policy random_valid --walk-policy no_immediate_backtrack
+
+Canonical-entrance uniform recipe:
+    --start-policy canonical_entrance --walk-policy uniform
+
+Arena v1 always materializes 250 steps per episode.
 
 Prerequisites
 -------------
@@ -25,17 +35,16 @@ Build it first::
 
 Examples
 --------
-Build the Arena task corpus against the default shared substrate::
+Build the default Arena task corpus against the shared substrate::
 
     python build-arena.py build-all
 
-With explicit parent-map and episode counts::
+Build the canonical-entrance uniform recipe into a descriptive corpus label::
 
-    python build-arena.py materialize-task \\
-        --train-parent-maps 200 --train-episodes-per-parent 100 \\
-        --val-parent-maps 40 --val-episodes-per-parent 4 \\
-        --test-parent-maps 40 --test-episodes-per-parent 1 \\
-        --max-steps 250 --seed 42
+    python build-arena.py materialize-task \
+        --corpus canonical_entrance_uniform \
+        --start-policy canonical_entrance \
+        --walk-policy uniform
 """
 
 from __future__ import annotations
@@ -54,6 +63,8 @@ from ehc_sn.tasks.arena import build_arena_task_corpus, validate_arena_task_root
 _DEFAULT_SHARED_VERSION = 1
 _DEFAULT_TASK_VERSION = 1
 _DEFAULT_CORPUS = "default"
+_DEFAULT_START_POLICY = "random_valid"
+_DEFAULT_WALK_POLICY = "no_immediate_backtrack"
 
 app = typer.Typer(add_completion=False, help=__doc__)
 
@@ -76,6 +87,8 @@ def _require_shared_substrate(shared_root: Path) -> None:
 @app.command("materialize-task")
 def materialize_task(
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
+    start_policy: Annotated[str, typer.Option("--start-policy")] = _DEFAULT_START_POLICY,
+    walk_policy: Annotated[str, typer.Option("--walk-policy")] = _DEFAULT_WALK_POLICY,
     train_parent_maps: Annotated[int, typer.Option("--train-parent-maps")] = 200,
     val_parent_maps: Annotated[int, typer.Option("--val-parent-maps")] = 40,
     test_parent_maps: Annotated[int, typer.Option("--test-parent-maps")] = 40,
@@ -93,8 +106,9 @@ def materialize_task(
     _require_shared_substrate(shared_root.resolve())
     build_arena_task_corpus(
         task_root.resolve(),
-        parent_substrate=shared_root.resolve(),
         corpus=corpus,
+        start_policy=start_policy,
+        walk_policy=walk_policy,
         train_parent_maps=train_parent_maps,
         val_parent_maps=val_parent_maps,
         test_parent_maps=test_parent_maps,
@@ -102,6 +116,7 @@ def materialize_task(
         val_episodes_per_parent=val_episodes_per_parent,
         test_episodes_per_parent=test_episodes_per_parent,
         max_steps=max_steps,
+        parent_substrate=shared_root.resolve(),
         seed=seed,
     )
 
@@ -145,6 +160,8 @@ def validate(
 @app.command("build-all")
 def build_all(
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
+    start_policy: Annotated[str, typer.Option("--start-policy")] = _DEFAULT_START_POLICY,
+    walk_policy: Annotated[str, typer.Option("--walk-policy")] = _DEFAULT_WALK_POLICY,
     train_parent_maps: Annotated[int, typer.Option("--train-parent-maps")] = 200,
     val_parent_maps: Annotated[int, typer.Option("--val-parent-maps")] = 40,
     test_parent_maps: Annotated[int, typer.Option("--test-parent-maps")] = 40,
@@ -164,6 +181,8 @@ def build_all(
     """
     materialize_task(
         corpus=corpus,
+        start_policy=start_policy,
+        walk_policy=walk_policy,
         train_parent_maps=train_parent_maps,
         val_parent_maps=val_parent_maps,
         test_parent_maps=test_parent_maps,
