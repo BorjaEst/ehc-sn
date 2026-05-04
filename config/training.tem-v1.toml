@@ -7,7 +7,7 @@ model_config_path = "config/models/tem-v1.toml"
 
 # -- General settings ---------------------------------------------------------
 dataset_path         = "data/processed/arena/default/v1"
-global_batch_size    = 8
+global_batch_size    = 16
 max_epochs           = 100
 seed                 = 42
 augment              = true
@@ -29,7 +29,7 @@ diagnostic_level     = "standard"
 
 # -- Adapter ------------------------------------------------------------------
 [adapter]
-    observation_dim = 28
+    observation_dim = 45
     action_count    = 5
 
 [adapter.encoder]
@@ -46,7 +46,7 @@ diagnostic_level     = "standard"
 
 # -- Optimization -------------------------------------------------------------
 [optimizer]
-    lr           = 1e-4
+    lr           = 9.4e-4
     weight_decay = 1e-2
     betas        = [0.9, 0.98]
 
@@ -83,6 +83,11 @@ diagnostic_level     = "standard"
     c_place_reg      = 0.02
     grid_reg_norm    = "l2"
     place_reg_norm   = "l1"
+    temp_it          = 2000
+    p2g_use_it       = 0
+    p2g_scale        = 200.0
+    g_reg_it         = 40000000
+    p_reg_it         = 4000
 
 # -- Figures & diagnostics ----------------------------------------------------
 [logger]
