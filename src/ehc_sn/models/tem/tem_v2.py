@@ -22,7 +22,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, TEMProjectionSettings
+from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes, TEMProjectionSettings
 from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState, WritePayload
 from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
@@ -90,6 +90,7 @@ class TEMOutputV2(DetachMixin):
 
     grid_codes: GridCodes
     place_codes: PlaceCodes
+    pred_codes: PredCodes
 
 
 # =============================================================================
@@ -267,10 +268,17 @@ class TEMModelV2(nn.Module):
         payload = WritePayload(generative=p_retrieved, inference=p_sensory_read)
         state.hpc = self.hpc.update(p_post, payload, state=state.hpc)
 
-        # 9. Package controller-compatible latent outputs and return the new state.
+        # 9. Decode the place codes back to sensory space for output:
+        x_inference = self.projections.lec_to_hpc.inverse(p_post)
+        x_ancestral = self.projections.lec_to_hpc.inverse(p_prior)
+        x_retrieved = self.projections.lec_to_hpc.inverse(p_retrieved)
+
+        # Package controller-compatible latent outputs and return the new state.
         grid_codes = GridCodes(prior=g_prior, post=g_post)
-        place_codes = PlaceCodes(inference=p_post, ancestral=p_prior, retrieved=p_retrieved, sensory=p_sensory_read)
-        return TEMOutputV2(grid_codes=grid_codes, place_codes=place_codes), state
+        place_codes = PlaceCodes(prior=p_prior, posterior=p_post, retrieved=p_retrieved, sensory=p_sensory_read)
+        pred_codes = PredCodes(ancestral=x_ancestral, inference=x_inference, retrieved=x_retrieved)
+
+        return TEMOutputV2(grid_codes=grid_codes, place_codes=place_codes, pred_codes=pred_codes), state
 
 
 # =============================================================================

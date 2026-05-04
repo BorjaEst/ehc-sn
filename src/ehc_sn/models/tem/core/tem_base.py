@@ -38,8 +38,8 @@ class PlaceCodes:
     """Named container for the three TEM place-pathway codes.
 
     Attributes:
-        inference: Posterior place code grounded by the current sensory observation (HPC inference).
-        ancestral: Structural prior place code derived from the grid prior path-integration (HPC generative).
+        posterior: Posterior place code grounded by the current sensory observation (HPC inference).
+        prior: Structural prior place code derived from the grid prior path-integration (HPC generative).
         retrieved: Corrected-grid generative place code (HPC generative from post-corrected grid). ``None``
             when sensory recall is disabled.
         sensory: Sensory-cued place retrieval from the previous memory state, used as the
@@ -50,10 +50,20 @@ class PlaceCodes:
         bundle has shape ``(batch, place_dim_f)`` for its frequency-specific hippocampal width.
     """
 
+    posterior: GroundedLocation
+    prior: GroundedLocation
+    retrieved: Optional[GroundedLocation] = None
+    sensory: Optional[GroundedLocation] = None
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class PredCodes:
+    """ """  # TODO: Docstring for PredCodes.
+
     inference: GroundedLocation
     ancestral: GroundedLocation
     retrieved: Optional[GroundedLocation] = None
-    sensory: Optional[GroundedLocation] = None
 
 
 # =============================================================================
@@ -71,4 +81,4 @@ class TEMProjectionSettings(BaseModel, extra="forbid", strict=False):
 
 
 # =============================================================================
-__all__ = ["TEMProjectionSettings", "GridCodes", "PlaceCodes"]
+__all__ = ["TEMProjectionSettings", "GridCodes", "PlaceCodes", "PredCodes"]
