@@ -150,7 +150,7 @@ def _build_decoder_v2(  # -----------------------------------------------------
 ) -> ArenaOutputsDecoderV2:
     feature_dim = model.config.lec.feature_dim
     n_freq = len(model.config.hpc.shape)
-    if config.decoder.kind in ("single_scale", "legacy_lec_pipeline"):
+    if config.decoder.kind == "single_scale":
         freq = config.decoder.prediction_freq
         if not (0 <= freq < n_freq):
             raise ValueError(f"prediction_freq={freq} is out of range for hpc.shape with {n_freq} bands " f"(valid: 0..{n_freq - 1}).")

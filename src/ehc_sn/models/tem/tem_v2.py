@@ -274,7 +274,7 @@ class TEMModelV2(nn.Module):
         x_retrieved = self.projections.lec_to_hpc.inverse(p_retrieved)
 
         # Package controller-compatible latent outputs and return the new state.
-        grid_codes = GridCodes(prior=g_prior, post=g_post)
+        grid_codes = GridCodes(prior=g_prior, posterior=g_post)
         place_codes = PlaceCodes(prior=p_prior, posterior=p_post, retrieved=p_retrieved, sensory=p_sensory_read)
         pred_codes = PredCodes(ancestral=x_ancestral, inference=x_inference, retrieved=x_retrieved)
 

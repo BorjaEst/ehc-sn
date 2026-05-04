@@ -25,7 +25,6 @@ from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes
 from ehc_sn.modules.autoencoder import TwoHotEncoder
 from ehc_sn.objectives.tem import (
     GRID_TRANSITION_RELATION,
-    PLACE_RECALL_BOOTSTRAP_RELATION,
     PLACE_SENSORY_RELATION,
     PLACE_TRANSITION_RELATION,
 )
@@ -140,13 +139,11 @@ class ArenaTEMDiagnostics(DetachMixin):
     def latent_relations(self) -> dict[str, LatentRelation]:
         """Named latent consistency relations expected by :class:`~ehc_sn.objectives.tem.TEMObjective`."""
         relations: dict[str, LatentRelation] = {
-            GRID_TRANSITION_RELATION: LatentRelation(lhs=self.grid_codes.post, rhs=self.grid_codes.prior),
-            PLACE_TRANSITION_RELATION: LatentRelation(lhs=self.place_codes.inference, rhs=self.place_codes.ancestral),
+            GRID_TRANSITION_RELATION: LatentRelation(lhs=self.grid_codes.posterior, rhs=self.grid_codes.prior),
+            PLACE_TRANSITION_RELATION: LatentRelation(lhs=self.place_codes.posterior, rhs=self.place_codes.retrieved),
         }
-        if self.place_codes.retrieved is not None and self.place_codes.sensory is not None:
-            relations[PLACE_SENSORY_RELATION] = LatentRelation(lhs=self.place_codes.retrieved, rhs=self.place_codes.sensory)
         if self.place_codes.sensory is not None:
-            relations[PLACE_RECALL_BOOTSTRAP_RELATION] = LatentRelation(lhs=self.place_codes.sensory, rhs=self.place_codes.inference)
+            relations[PLACE_SENSORY_RELATION] = LatentRelation(lhs=self.place_codes.posterior, rhs=self.place_codes.sensory)
         return relations
 
     @property

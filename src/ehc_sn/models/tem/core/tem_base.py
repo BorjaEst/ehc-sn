@@ -17,10 +17,10 @@ class GridCodes:
     """Named container for the two TEM grid-pathway codes.
 
     Attributes:
+        posterior: Posterior grid code derived from the current step's sensory-grounded place code and
+            the previous step's grid code.
         prior: Prior grid code derived from path integration of the previous step's grid code and
             executed action.
-        post: Posterior grid code derived from the current step's sensory-grounded place code and
-            the previous step's grid code.
 
     Shape conventions:
         Each code is a multi-scale bundle with length ``n_freq``. Every tensor in the bundle has
@@ -28,7 +28,7 @@ class GridCodes:
 
     """
 
-    post: AbstractLocation
+    posterior: AbstractLocation
     prior: AbstractLocation
 
 

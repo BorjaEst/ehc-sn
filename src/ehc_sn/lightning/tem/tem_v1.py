@@ -27,7 +27,7 @@ from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
-from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
+from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig, resolve_objective_schedule
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
 from ehc_sn.tasks.arena.runtime import infer_arena_replay_batch_keys
@@ -325,7 +325,7 @@ class TrainingModel(L.LightningModule):
             max_rollout_steps=self._train_chunk_steps(),
             metric_collection=self.train_metrics,
             metric_routes=TEM_STEP_ROUTES,
-            objective_options={"p2g_trust": runtime.p2g_trust},
+            objective_options=resolve_objective_schedule(self.global_step, self.config.objective),
         )
 
         # objective.total is already normalized by the active protocol count per step
@@ -373,7 +373,7 @@ class TrainingModel(L.LightningModule):
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options=step_options,
-            objective_options={"p2g_trust": runtime.p2g_trust},
+            objective_options=resolve_objective_schedule(self.global_step, self.config.objective),
         )
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES)
         if self._eval_trace_keys is None:
@@ -424,7 +424,7 @@ class TrainingModel(L.LightningModule):
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options={"allow_halt": True},
-            objective_options={"p2g_trust": runtime.p2g_trust},
+            objective_options=resolve_objective_schedule(self.global_step, self.config.objective),
         )
 
         trace = None
