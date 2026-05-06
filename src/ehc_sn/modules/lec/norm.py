@@ -8,8 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from torch import Tensor
 from torch import device as Device
 from torch import dtype as Dtype
@@ -55,10 +54,12 @@ class FeatureNorm(nn.Module):
         Returns:
             Normalized per-frequency feature tensors.
         """
-        n_freq = len(x)
-        positive_centered = [utils.relu(x[f] - torch.mean(x[f])) for f in range(n_freq)]
-        normalized = [utils.normalize(positive_centered[f]) for f in range(n_freq)]
-        return normalized
+        # Subtract per-row mean (keepdim so shape stays (B, D)), then ReLU, then L2-normalize.
+        # Reference: tem_tf2/tem_model.py:684 — tf.reduce_mean(x[f], axis=1, keepdims=True).
+        return [
+            utils.normalize(utils.relu(x[f] - x[f].mean(dim=-1, keepdim=True)))
+            for f in range(len(x))
+        ]
 
 
 # =================================================================================================
