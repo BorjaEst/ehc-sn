@@ -21,7 +21,7 @@ from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.controllers.replay.trajectory import ReplayTrajectoryControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.ehc.core.runtime import RuntimeConfig
-from ehc_sn.lightning.ehc.ehc_v1 import ModelConfig_EHC_V1, TrainingModel
+from ehc_sn.lightning.ehc.ehc_v1_arena import ModelConfig_EHC_V1, TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.objectives import EHCObjectiveConfig
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
@@ -247,6 +247,14 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     eval_save_outputs: list[str] = Field(
         default_factory=list,
         description="Evaluation output keys saved as tensors in the checkpoint directory.",
+    )
+    arena_phase: Literal["arena_spatial_pretrain"] = Field(
+        default="arena_spatial_pretrain",
+        description=(
+            "Arena training phase. Controls which model parameters the optimizer updates. "
+            "'arena_spatial_pretrain': trains only LEC, MEC, HPC, lec_to_hpc, mec_to_hpc, "
+            "and arena_bridge._decoder; PFC, STR, pfc_to_hpc, and hpc_to_pfc are frozen."
+        ),
     )
 
     # ---------------------------------------------------------------------------------------------

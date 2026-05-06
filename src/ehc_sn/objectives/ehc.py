@@ -11,6 +11,7 @@ task-agnostic.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
@@ -151,6 +152,32 @@ class EHCObjectiveConfig(BaseModel, extra="forbid"):
         default="l1",
         description="Regularization norm for place codes.",
     )
+    # Schedule fields (mirroring TEM training dynamics)
+    temp_it: int = Field(
+        default=2000,
+        ge=1,
+        description="Steps over which the temperature ramp reaches 1.0.",
+    )
+    p2g_use_it: int = Field(
+        default=0,
+        ge=0,
+        description="Sigmoid midpoint (steps) for the p2g-use schedule.",
+    )
+    p2g_scale: float = Field(
+        default=200.0,
+        gt=0.0,
+        description="Sigmoid scale (steps) for the p2g-use schedule.",
+    )
+    g_reg_it: int = Field(
+        default=40000000,
+        ge=1,
+        description="Steps over which the grid regularizer decays to zero.",
+    )
+    p_reg_it: int = Field(
+        default=4000,
+        ge=1,
+        description="Steps over which the place regularizer decays to zero.",
+    )
 
 
 # =================================================================================================
@@ -158,13 +185,22 @@ class EHCObjectiveConfig(BaseModel, extra="forbid"):
 class EHCLosses(VariationalLosses):
     """ELBO-style EHC loss bundle with explicit latent groups."""
 
+    loss_place_transition_sum: Tensor
+    loss_place_sensory_sum: Tensor
     loss_grid_kl_sum: Tensor
     loss_place_consistency_sum: Tensor
+    protocol_count: Tensor
 
     @property
     def loss_latent_sum(self) -> Tensor:
         """Return the aggregate latent loss for the current EHC step."""
         return self.loss_grid_kl_sum + self.loss_place_consistency_sum
+
+    @property
+    def total(self) -> Tensor:
+        """Return the total loss normalized by active protocol count."""
+        denom = self.protocol_count.clamp_min(1.0)
+        return (self.loss_obs_nll_sum + self.loss_grid_kl_sum + self.loss_place_consistency_sum + self.loss_reg_sum) / denom
 
 
 # =================================================================================================
@@ -198,6 +234,10 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
         carry: Any,
         batch: Any = None,
         step_output: Any = None,
+        temp: float = 1.0,
+        p2g_use: float = 1.0,
+        g_cell_reg: float = 1.0,
+        p_cell_reg: float = 1.0,
         **_: Any,
     ) -> EHCLosses:
         """Compute ELBO-style EHC losses for a single step."""
@@ -214,10 +254,8 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
             loss_obs_inference + loss_obs_retrieved + loss_obs_ancestral,
             protocol_mask,
         )
-        loss_grid_kl_sum = self.config.c_grid * self._masked_sum(
-            sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs),
-            protocol_mask,
-        )
+        grid_mse = sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs)
+        loss_grid_kl_sum = temp * self.config.c_grid * self._masked_sum(grid_mse, protocol_mask)
 
         place_transition = sum_latent_terms(mse_consistency, place_transition_relation.lhs, place_transition_relation.rhs)
         place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
@@ -225,7 +263,9 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
             place_sensory = sum_latent_terms(mse_consistency, place_sensory_relation.lhs, place_sensory_relation.rhs)
         else:
             place_sensory = place_transition.new_zeros(place_transition.shape)
-        loss_place_consistency_sum = self.config.c_place * self._masked_sum(place_transition + place_sensory, protocol_mask)
+        loss_place_transition_sum = temp * self.config.c_place * self._masked_sum(place_transition, protocol_mask)
+        loss_place_sensory_sum = temp * p2g_use * self.config.c_place * self._masked_sum(place_sensory, protocol_mask)
+        loss_place_consistency_sum = loss_place_transition_sum + loss_place_sensory_sum
 
         grid_reg_code = get_reg_term(outputs.reg_terms, GRID_REG_TERM)
         if grid_reg_code is None:
@@ -235,15 +275,19 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
         if place_reg_code is None:
             place_reg_code = place_transition_relation.lhs
 
-        grid_reg = self._regularization_terms(grid_reg_code, self.config.grid_reg_norm, self.config.c_grid_reg)
-        place_reg = self._regularization_terms(place_reg_code, self.config.place_reg_norm, self.config.c_place_reg)
+        grid_reg = self._regularization_terms(grid_reg_code, self.config.grid_reg_norm, self.config.c_grid_reg * g_cell_reg)
+        place_reg = self._regularization_terms(place_reg_code, self.config.place_reg_norm, self.config.c_place_reg * p_cell_reg)
         loss_reg_sum = self._masked_sum(grid_reg + place_reg, protocol_mask)
 
+        protocol_count = protocol_mask.to(dtype=loss_obs_nll_sum.dtype).sum()
         return EHCLosses(
             loss_obs_nll_sum=loss_obs_nll_sum,
             loss_reg_sum=loss_reg_sum,
+            loss_place_transition_sum=loss_place_transition_sum,
+            loss_place_sensory_sum=loss_place_sensory_sum,
             loss_grid_kl_sum=loss_grid_kl_sum,
             loss_place_consistency_sum=loss_place_consistency_sum,
+            protocol_count=protocol_count,
         )
 
     def _build_metric_ratios(
@@ -255,6 +299,10 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
         batch_size: int,
         batch: Any = None,
         step_output: Any = None,
+        temp: float = 1.0,
+        p2g_use: float = 1.0,
+        g_cell_reg: float = 1.0,
+        p_cell_reg: float = 1.0,
         **_: Any,
     ) -> dict[str, RatioStat]:
         """Build detached EHC ratio metrics for logging."""
@@ -263,7 +311,7 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
         protocol_mask = self._task_binding.extract_protocol_mask(targets)
         protocol_count = protocol_mask.to(dtype=losses.total.dtype).sum()
         batch_count = losses.total.new_tensor(batch_size, dtype=losses.total.dtype)
-        all_loss_sums = self._all_step_loss_sums(outputs, labels)
+        all_loss_sums = self._all_step_loss_sums(outputs, labels, temp=temp, p2g_use=p2g_use, g_cell_reg=g_cell_reg, p_cell_reg=p_cell_reg)
         acc_metrics = self._task_binding.evaluate_observation_metrics(outputs, targets)
         return {
             **acc_metrics,
@@ -294,6 +342,10 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
         outputs: EHCStepOutput,
         losses: EHCLosses,
         step_output: Any = None,
+        temp: float = 1.0,
+        p2g_use: float = 1.0,
+        g_cell_reg: float = 1.0,
+        p_cell_reg: float = 1.0,
         **_: Any,
     ) -> dict[str, Tensor]:
         """Compute detached EHC diagnostics and ELBO-style scalar signals."""
@@ -302,6 +354,7 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)
         place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
+        denom = losses.protocol_count.detach().clamp_min(1.0)
         signals = super().compute_signals(batch, carry, outputs, losses)
 
         loss_obs_inference = self.loss_fn(outputs.logits_inference, labels).sum().detach()
@@ -315,13 +368,13 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
 
         signals.update(
             {
-                S.LOSS_GRID_KL: losses.loss_grid_kl_sum.detach(),
-                S.LOSS_PLACE_CONSISTENCY: losses.loss_place_consistency_sum.detach(),
-                S.LOSS_OBS_INFER: loss_obs_inference,
-                S.LOSS_OBS_RETRIEVED: loss_obs_retrieved,
-                S.LOSS_OBS_ANCESTRAL: loss_obs_ancestral,
-                S.LOSS_PLACE_TRANSITION: place_transition,
-                S.LOSS_PLACE_SENSORY: place_sensory,
+                S.LOSS_GRID_KL: losses.loss_grid_kl_sum.detach() / denom,
+                S.LOSS_PLACE_CONSISTENCY: losses.loss_place_consistency_sum.detach() / denom,
+                S.LOSS_OBS_INFER: loss_obs_inference / denom,
+                S.LOSS_OBS_RETRIEVED: loss_obs_retrieved / denom,
+                S.LOSS_OBS_ANCESTRAL: loss_obs_ancestral / denom,
+                S.LOSS_PLACE_TRANSITION: place_transition / denom,
+                S.LOSS_PLACE_SENSORY: place_sensory / denom,
                 S.GRID_POST_NORM: mean_latent_norm(grid_relation.lhs),
                 S.GRID_PRIOR_NORM: mean_latent_norm(grid_relation.rhs),
                 S.PLACE_POST_NORM: mean_latent_norm(place_transition_relation.lhs),
@@ -338,7 +391,15 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
         """Return the scalar sum over values selected by a boolean batch mask."""
         return (values * mask.to(dtype=values.dtype)).sum()
 
-    def _all_step_loss_sums(self, outputs: EHCStepOutput, labels: Tensor) -> dict[str, Tensor]:
+    def _all_step_loss_sums(
+        self,
+        outputs: EHCStepOutput,
+        labels: Tensor,
+        temp: float = 1.0,
+        p2g_use: float = 1.0,
+        g_cell_reg: float = 1.0,
+        p_cell_reg: float = 1.0,
+    ) -> dict[str, Tensor]:
         """Return detached all-step EHC loss sums for diagnostics and metric logging."""
         grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
         place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)
@@ -363,15 +424,15 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
         if place_reg_code is None:
             place_reg_code = place_transition_relation.lhs
 
-        grid_reg = self._regularization_terms(grid_reg_code, self.config.grid_reg_norm, self.config.c_grid_reg)
-        place_reg = self._regularization_terms(place_reg_code, self.config.place_reg_norm, self.config.c_place_reg)
+        grid_reg = self._regularization_terms(grid_reg_code, self.config.grid_reg_norm, self.config.c_grid_reg * g_cell_reg)
+        place_reg = self._regularization_terms(place_reg_code, self.config.place_reg_norm, self.config.c_place_reg * p_cell_reg)
 
         return {
             "loss_obs_nll_sum": loss_obs_nll_sum.detach(),
             "loss_grid_kl_sum": (
-                self.config.c_grid * sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs).sum()
+                temp * self.config.c_grid * sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs).sum()
             ).detach(),
-            "loss_place_consistency_sum": (self.config.c_place * (place_transition + place_sensory).sum()).detach(),
+            "loss_place_consistency_sum": (self.config.c_place * (temp * place_transition + temp * p2g_use * place_sensory).sum()).detach(),
             "loss_reg_sum": (grid_reg.sum() + place_reg.sum()).detach(),
         }
 
@@ -389,6 +450,16 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
 
 
 # =================================================================================================
+def resolve_objective_schedule(step: int, config: EHCObjectiveConfig) -> dict[str, float]:
+    """Derive per-step schedule scalars from global_step and objective config."""
+    temp = min((step + 1) / config.temp_it, 1.0)
+    p2g_use = 1.0 / (1.0 + math.exp(-(step - config.p2g_use_it) / config.p2g_scale))
+    g_cell_reg = 1.0 - min((step + 1) / config.g_reg_it, 1.0)
+    p_cell_reg = 1.0 - min((step + 1) / config.p_reg_it, 1.0)
+    return {"temp": temp, "p2g_use": p2g_use, "g_cell_reg": g_cell_reg, "p_cell_reg": p_cell_reg}
+
+
+# =================================================================================================
 __all__ = [
     "GRID_REG_TERM",
     "GRID_TRANSITION_RELATION",
@@ -401,4 +472,5 @@ __all__ = [
     "EHCObjective",
     "EHCObjectiveStep",
     "EHCLosses",
+    "resolve_objective_schedule",
 ]

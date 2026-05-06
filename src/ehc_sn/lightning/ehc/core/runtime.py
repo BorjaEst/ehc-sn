@@ -118,6 +118,7 @@ class EHCRuntimeState:
     eta: float
     hebbian_decay: float
     p2g_uncertainty_offset: float
+    p2g_trust: float
 
 
 def resolve_ehc_runtime(step: int, config: RuntimeConfig) -> EHCRuntimeState:
@@ -129,13 +130,14 @@ def resolve_ehc_runtime(step: int, config: RuntimeConfig) -> EHCRuntimeState:
     uncertainty = config.uncertainty
     progress_eta = min((step + 1) / float(memory.eta_it), 1.0)
     progress_decay = min((step + 1) / float(memory.lambda_it), 1.0)
-    p2g_scale = 1.0 / (1.0 + math.exp((step - uncertainty.p2g_sig_half_it) / uncertainty.p2g_sig_scale_it))
-    p2g_uncertainty_offset = uncertainty.offset_min + (uncertainty.offset_max - uncertainty.offset_min) * p2g_scale
+    p2g_trust = 1.0 / (1.0 + math.exp(-(step - uncertainty.p2g_sig_half_it) / uncertainty.p2g_sig_scale_it))
+    p2g_uncertainty_offset = uncertainty.offset_min + (1.0 - p2g_trust) * (uncertainty.offset_max - uncertainty.offset_min)
 
     return EHCRuntimeState(
         eta=progress_eta * memory.eta,
         hebbian_decay=progress_decay * memory.hebbian_decay,
         p2g_uncertainty_offset=p2g_uncertainty_offset,
+        p2g_trust=p2g_trust,
     )
 
 
