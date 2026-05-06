@@ -8,6 +8,7 @@ from typing import Optional
 import lightning as L
 import torch
 from pydantic import BaseModel, Field, model_validator
+from rich import protocol
 from torch.optim import Optimizer
 from torchmetrics import MetricCollection
 
@@ -121,7 +122,7 @@ class TrainingModel(L.LightningModule):
 
         # Manual optimization: explicit backward + opt step (legacy parity + dual-opt clarity).
         self.automatic_optimization = False
-        self._train_carry = None
+        self._fit_path_carry = None
 
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(TEM_STEP_ROUTES).clone(prefix="train/")
@@ -131,8 +132,8 @@ class TrainingModel(L.LightningModule):
         self._eval_trace_keys: set[str] | None = None
 
         # Buffer + assembler implement partial-reset batching for replay training.
-        self._train_buffer: FifoBuffer | None = None
-        self._train_batch_assembler: PartialResetBatchAssembler | None = None
+        self._fit_path_buffer: FifoBuffer | None = None
+        self._fit_path_batch_assembler: PartialResetBatchAssembler | None = None
 
     @property
     def config(self) -> ModelConfig_TEM_V2:
@@ -206,7 +207,7 @@ class TrainingModel(L.LightningModule):
             },
         }
 
-    def _ensure_train_batch_assembler(  # ---------------------------------------------------------
+    def _ensure_fit_path_batch_assembler(  # -------------------------------------------------------
         self,
         batch: Batch,
     ) -> PartialResetBatchAssembler:
@@ -216,16 +217,16 @@ class TrainingModel(L.LightningModule):
         stable fit-path identity travels with each row through the buffer and
         is correctly associated with the trajectory arrays at admission time.
         """
-        if self._train_batch_assembler is not None:
-            return self._train_batch_assembler
+        if self._fit_path_batch_assembler is not None:
+            return self._fit_path_batch_assembler
 
         keys = infer_arena_replay_batch_keys(batch)
         if "__trajectory_id__" in batch:
             keys = keys + ("__trajectory_id__",)
         capacity_rows = 4 * self.config.global_batch_size
-        self._train_buffer = FifoBuffer(capacity_rows, keys, pin_memory=True)
-        self._train_batch_assembler = PartialResetBatchAssembler(buffer=self._train_buffer, keys=keys)
-        return self._train_batch_assembler
+        self._fit_path_buffer = FifoBuffer(capacity_rows, keys, pin_memory=True)
+        self._fit_path_batch_assembler = PartialResetBatchAssembler(buffer=self._fit_path_buffer, keys=keys)
+        return self._fit_path_batch_assembler
 
     def setup(  # -------------------------------------------------------------
         self,
@@ -270,22 +271,17 @@ class TrainingModel(L.LightningModule):
 
         return runtime
 
-    def _reset_train_stream(self) -> None:
-        """Invalidate fit-path recurrent state and queued refill rows.
-
-        TEM carry includes parameter-dependent associative memory. Reusing that
-        carry after an optimizer update starts the next chunk from state built
-        under stale weights, which destabilizes replay training.
-        """
-        self._train_carry = None
-        if self._train_buffer is not None:
-            self._train_buffer.clear()
+    def _reset_fit_path_stream(self) -> None:
+        """Clear fit-path carry and buffer at epoch boundaries."""
+        self._fit_path_carry = None
+        if self._fit_path_buffer is not None:
+            self._fit_path_buffer.clear()
 
     def on_train_epoch_start(
         self,
     ) -> None:
         """Reset training carry and metric state at the start of each epoch."""
-        self._reset_train_stream()
+        self._reset_fit_path_stream()
         self.train_metrics.reset()
 
     def on_validation_epoch_start(
@@ -307,18 +303,18 @@ class TrainingModel(L.LightningModule):
         runtime = self._apply_runtime(self.global_step, log_values=True)
         train_controller = self._require_train_controller()
         train_objective = self._require_train_objective()
-        batch_assembler = self._ensure_train_batch_assembler(batch)
+        batch_assembler = self._ensure_fit_path_batch_assembler(batch)
 
-        # Initialize carry/state on the first batch
-        if self._train_carry is None:
-            self._train_carry = train_controller.initial_state(batch)
+        if self._fit_path_carry is None:
+            self._fit_path_carry = train_controller.initial_state(batch)
 
-        source = PartialResetSource(incoming=batch, assembler=batch_assembler, carry0=self._train_carry)
+        prev_trajectory_id = self._fit_path_carry.trajectory_id
+        source = PartialResetSource(incoming=batch, assembler=batch_assembler, carry0=self._fit_path_carry)
         evaluation = evaluate_rollout_streaming(
             runner=self._train_runner,
             source=source,
             controller=train_controller,
-            carry=self._train_carry,
+            carry=self._fit_path_carry,
             objective=train_objective,
             max_rollout_steps=self._train_chunk_steps(),
             metric_collection=self.train_metrics,
@@ -345,7 +341,19 @@ class TrainingModel(L.LightningModule):
         for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
             sch.step()  # type: ignore
 
-        self._reset_train_stream()
+        # Commit detached carry so the next chunk resumes from where this one ended.
+        self._fit_path_carry = evaluation.execution.final_carry.detach()
+        protocol_count = evaluation.last_step.outputs.losses.protocol_count
+
+        # Fit-path diagnostics.
+        final_carry = evaluation.execution.final_carry
+        valid_prev = prev_trajectory_id >= 0
+        reused = (final_carry.trajectory_id == prev_trajectory_id) & valid_prev
+        self.log("train/fit_path/max_cursor", final_carry.cursor.max().float(), on_step=True, on_epoch=False, logger=True)
+        self.log("train/fit_path/min_cursor", final_carry.cursor.min().float(), on_step=True, on_epoch=False, logger=True)
+        self.log("train/fit_path/halted_fraction", final_carry.halted.float().mean(), on_step=True, on_epoch=False, logger=True)
+        self.log("train/fit_path/reused_trajectory_fraction", reused.float().mean(), on_step=True, on_epoch=False, logger=True)
+        self.log("train/fit_path/protocol_count", protocol_count.float(), on_step=True, on_epoch=False, logger=True)
 
         # Log the accumulated chunk loss to TensorBoard.
         self.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
