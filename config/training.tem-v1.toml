@@ -70,7 +70,7 @@ diagnostic_level     = "standard"
     tbptt_steps = 75
 
 [runtime.validation]
-    hard_max_rollout_steps = 600
+    hard_max_rollout_steps = 1000
     seed = 42
 
 # -- Objective ----------------------------------------------------------------
@@ -118,7 +118,7 @@ provider_ref = "ehc_sn.tasks.arena.providers.ArenaReplayDiagnosticProvider"
 [eval_regimes.regimes.provider_settings]
 dataset_path = "data/processed/arena/long_horizon/v1"
 split        = "val"
-batch_size   = 4
+batch_size   = 1
 n_cases      = 0
 
 [eval_regimes.regimes.schedule]
