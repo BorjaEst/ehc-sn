@@ -119,7 +119,7 @@ def materialize_shared(
         int | None,
         typer.Option("--width", help="Target grid width. Inferred from interim slice when omitted."),
     ] = None,
-    n_observations: Annotated[int, typer.Option("--n-observations")] = 28,
+    n_observations: Annotated[int, typer.Option("--n-observations")] = 45,
     version: Annotated[int, typer.Option("--version")] = _DEFAULT_SHARED_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
 ) -> None:
@@ -190,7 +190,7 @@ def build_all(
         int | None,
         typer.Option("--width", help="Target grid width. Inferred from interim slice when omitted."),
     ] = None,
-    n_observations: Annotated[int, typer.Option("--n-observations")] = 28,
+    n_observations: Annotated[int, typer.Option("--n-observations")] = 45,
     version: Annotated[int, typer.Option("--version")] = _DEFAULT_SHARED_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
 ) -> None:
