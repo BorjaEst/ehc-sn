@@ -1,0 +1,381 @@
+"""EHC v1 spatial pretrain regime: arena replay, EHC variational objective, recurrent TBPTT."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Literal
+
+import lightning as L
+import torch
+from pydantic import BaseModel, Field
+from torch.optim import Optimizer
+from torchmetrics import MetricCollection
+
+from ehc_sn.adapters.arena.ehc import ArenaEHCAdapterSettings, ArenaEHCTaskBinding, ArenaEHCV1BridgeAdapter
+from ehc_sn.adapters.arena.ehc.traces import ARENA_EHC_TRACE_FIELDS, select_arena_ehc_trace_fields
+from ehc_sn.adapters.mazehard.ehc import MazeHardEHCV1BridgeAdapter
+from ehc_sn.controllers.replay.trajectory import ReplayTrajectoryController, ReplayTrajectoryControllerConfig
+from ehc_sn.data.datamodules import Datamodule
+from ehc_sn.lightning._rollout import (
+    evaluate_rollout,
+    evaluate_rollout_streaming,
+    observe_rollout_chunk,
+    update_metric_collection_from_evaluated_chunk,
+)
+from ehc_sn.lightning.ehc.core._base import EHCMode, EHCRegime, freeze_params
+from ehc_sn.lightning.ehc.core.runtime import EHCRuntimeState, RuntimeConfig, resolve_ehc_runtime
+from ehc_sn.lightning.eval.contracts import EvaluationBatchArtifacts, EvaluationTraceRequest
+from ehc_sn.metrics import build_train_metrics, build_val_metrics
+from ehc_sn.metrics.routes import EHC_EPISODE_ROUTES, EHC_STEP_ROUTES
+from ehc_sn.metrics.routes.ehc import EHC_EPISODE_ROUTES, EHC_PRIMARY_VAL_ROUTE_KEY, EHC_STEP_ROUTES
+from ehc_sn.metrics.routes.rl import RL_EPISODE_ROUTES, RL_STEP_ROUTES
+from ehc_sn.metrics.traces import build_trace_spec
+from ehc_sn.models.ehc.ehc_v1 import EHCModelV1, ModelSettingsV1
+from ehc_sn.objectives.ehc import EHCObjective, EHCObjectiveConfig, resolve_objective_schedule
+from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
+from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
+from ehc_sn.tasks.arena.runtime import infer_arena_replay_batch_keys
+from ehc_sn.tasks.arena.traces import ArenaEvaluationSourceContext, apply_arena_trace_supplements, build_arena_trace_supplements
+from ehc_sn.traces import TraceTree
+from ehc_sn.training.buffers import FifoBuffer
+from ehc_sn.training.optim import Adam, AdamConfig
+from ehc_sn.training.partial_reset import PartialResetBatchAssembler
+from ehc_sn.training.schedules import CosineAnnealingLRWithWarmup, SchedulerConfig, SequentialLR
+from ehc_sn.types import Batch
+
+
+# =============================================================================
+class EHCSpatialPretrainConfig(BaseModel, extra="forbid"):
+    """Config for spatial pretrain (arena replay, EHC variational objective)."""
+
+    mode: Literal["spatial_pretrain"] = "spatial_pretrain"
+
+    model_config_path: Path = Field(
+        ...,
+        description="",
+    )
+    adapter: ArenaEHCAdapterSettings = Field(
+        ...,
+        description="",
+    )
+    controller: ReplayTrajectoryControllerConfig = Field(
+        ...,
+        description="",
+    )
+    objective: EHCObjectiveConfig = Field(
+        ...,
+        description="",
+    )
+    optimizer: AdamConfig = Field(
+        default_factory=AdamConfig,
+        description="",
+    )
+    scheduler: SchedulerConfig = Field(
+        default_factory=SchedulerConfig,
+        description="",
+    )
+    runtime: RuntimeConfig = Field(
+        default_factory=RuntimeConfig,
+        description="",
+    )
+
+
+# =============================================================================
+class EHCSpatialPretrainRegime:
+    """Arena replay spatial pretrain regime.
+
+    Trains spatial_core + arena_decoder.
+    Freezes controller_body, controller_heads, controller_bridge.
+    """
+
+    def __init__(  # ----------------------------------------------------------
+        self,
+        lm: L.LightningModule,
+        model: EHCModelV1,
+        config: EHCSpatialPretrainConfig,
+    ) -> None:
+        self._lm = lm
+        self._config = config
+        self._adapter = ArenaEHCV1BridgeAdapter(model, config.adapter)
+
+        # Freeze controller params (pfc, str, bridge projections).
+        freeze_params(model, "pfc", "str", "pfc_to_hpc", "hpc_to_pfc")
+
+        self._train_controller: ReplayTrajectoryController | None = None
+        self._train_objective: EHCObjective | None = None
+        self._eval_controller: ReplayTrajectoryController | None = None
+        self._eval_objective: EHCObjective | None = None
+
+        self._train_runner = RecurrentRunner()
+        self._eval_runner = RecurrentRunner()
+        self._train_carry = None
+        self._train_buffer: FifoBuffer | None = None
+        self._train_batch_assembler: PartialResetBatchAssembler | None = None
+        self._eval_trace_keys: set[str] | None = None
+
+    def _build_runtime(self) -> tuple[ReplayTrajectoryController, EHCObjective]:
+        lm = self._lm
+        controller = ReplayTrajectoryController(
+            backbone=lm.bridge_adapter,
+            config=self._config.controller,
+            runtime=ArenaReplayCapability(),
+        )
+        objective = EHCObjective(self._config.objective, task_binding=ArenaEHCTaskBinding())
+        return controller, objective
+
+    def _ensure_train_runtime(self) -> None:
+        if self._train_controller is None:
+            self._train_controller, self._train_objective = self._build_runtime()
+
+    def _ensure_eval_runtime(self) -> None:
+        if self._eval_controller is None:
+            self._eval_controller, self._eval_objective = self._build_runtime()
+
+    def _require_train_controller(self) -> ReplayTrajectoryController:
+        self._ensure_train_runtime()
+        assert self._train_controller is not None
+        return self._train_controller
+
+    def _require_train_objective(self) -> EHCObjective:
+        self._ensure_train_runtime()
+        assert self._train_objective is not None
+        return self._train_objective
+
+    def _require_eval_controller(self) -> ReplayTrajectoryController:
+        self._ensure_eval_runtime()
+        assert self._eval_controller is not None
+        return self._eval_controller
+
+    def _require_eval_objective(self) -> EHCObjective:
+        self._ensure_eval_runtime()
+        assert self._eval_objective is not None
+        return self._eval_objective
+
+    def _train_chunk_steps(self) -> int:
+        if self._config.controller.window_size is not None:
+            return self._config.controller.window_size
+        return self._config.runtime.sequence.tbptt_steps
+
+    def _apply_runtime(self, step: int, *, log_values: bool) -> EHCRuntimeState:
+        runtime = resolve_ehc_runtime(step, self._config.runtime)
+        self._lm.model.set_runtime(runtime.eta, runtime.hebbian_decay, runtime.p2g_uncertainty_offset)
+        if log_values:
+            lm = self._lm
+            lm.log("train/runtime/eta", runtime.eta, on_step=True, on_epoch=False, logger=True)
+            lm.log("train/runtime/hebbian_decay", runtime.hebbian_decay, on_step=True, on_epoch=False, logger=True)
+            lm.log("train/runtime/p2g_uncertainty_offset", runtime.p2g_uncertainty_offset, on_step=True, on_epoch=False, logger=True)
+            lm.log("train/runtime/p2g_trust", runtime.p2g_trust, on_step=True, on_epoch=False, logger=True)
+        return runtime
+
+    def _ensure_train_batch_assembler(self, batch: Batch) -> PartialResetBatchAssembler:
+        if self._train_batch_assembler is not None:
+            return self._train_batch_assembler
+        keys = infer_arena_replay_batch_keys(batch)
+        if "__trajectory_id__" in batch:
+            keys = keys + ("__trajectory_id__",)
+        local_bs = batch[next(iter(batch))].shape[0]
+        capacity_rows = 4 * local_bs
+        self._train_buffer = FifoBuffer(capacity_rows, keys, pin_memory=True)
+        self._train_batch_assembler = PartialResetBatchAssembler(buffer=self._train_buffer, keys=keys)
+        return self._train_batch_assembler
+
+    def _build_trace_meta(self) -> dict[str, object]:
+        model = self._lm.model
+        lec_alpha = torch.stack([torch.sigmoid(alpha).detach() for alpha in model.lec.filter.alpha])
+        lec_w_f = torch.stack([torch.sigmoid(weight).detach() for weight in model.lec.w_f])
+        return {"lec": {"filter": {"alpha_sigmoid": lec_alpha}, "w_f_sigmoid": lec_w_f}}
+
+    def _reset_train_stream(self) -> None:
+        self._train_carry = None
+        if self._train_buffer is not None:
+            self._train_buffer.clear()
+
+    def set_eval_trace_keys(self, keys: set[str]) -> None:
+        self._eval_trace_keys = set(keys)
+
+    # -- Regime hooks -----------------------------------------------------------------------------
+
+    def setup(self, stage: str | None) -> None:
+        if stage in (None, "fit"):
+            self._ensure_train_runtime()
+            self._ensure_eval_runtime()
+        elif stage in ("validate", "test"):
+            self._ensure_eval_runtime()
+
+    def configure_optimizers(self) -> tuple[list[Optimizer], list[SequentialLR]]:
+        total_steps = int(self._lm.trainer.estimated_stepping_batches)
+        # spatial_pretrain: exclude controller params (already frozen via requires_grad=False).
+        excluded = (
+            {id(p) for p in self._lm.model.pfc.parameters()}
+            | {id(p) for p in self._lm.model.str.parameters()}
+            | {id(p) for p in self._lm.model.pfc_to_hpc.parameters()}
+            | {id(p) for p in self._lm.model.hpc_to_pfc.parameters()}
+        )
+        sup_params = [p for p in self._lm.bridge_adapter.parameters() if p.requires_grad and id(p) not in excluded]
+        opt = Adam(sup_params, self._config.optimizer)
+        sch = CosineAnnealingLRWithWarmup(opt, total_steps, self._config.scheduler)
+        return [opt], [sch]
+
+    def on_train_epoch_start(self) -> None:
+        self._reset_train_stream()
+        self._lm.train_metrics.reset()
+
+    def on_validation_epoch_start(self) -> None:
+        self._lm.val_metrics.reset()
+
+    def training_step(self, batch: Batch, batch_idx: int) -> dict[str, Any]:
+        lm = self._lm
+        self._apply_runtime(lm.global_step, log_values=True)
+        ctrl = self._require_train_controller()
+        obj = self._require_train_objective()
+        assembler = self._ensure_train_batch_assembler(batch)
+
+        if self._train_carry is None:
+            self._train_carry = ctrl.initial_state(batch)
+
+        source = PartialResetSource(incoming=batch, assembler=assembler, carry0=self._train_carry)
+        evaluation = evaluate_rollout_streaming(
+            runner=self._train_runner,
+            source=source,
+            controller=ctrl,
+            carry=self._train_carry,
+            objective=obj,
+            max_rollout_steps=self._train_chunk_steps(),
+            metric_collection=lm.train_metrics,
+            metric_routes=EHC_STEP_ROUTES,
+            objective_options=resolve_objective_schedule(lm.global_step, self._config.objective),
+        )
+        self._train_carry = evaluation.execution.final_carry.detach()
+        loss = evaluation.loss / self._train_chunk_steps()
+
+        optimizers = lm.optimizers()
+        for opt in (optimizers if isinstance(optimizers, list) else [optimizers]):
+            opt.zero_grad(set_to_none=True)  # type: ignore[union-attr]
+        lm.manual_backward(loss)
+        for opt in (optimizers if isinstance(optimizers, list) else [optimizers]):
+            opt.step()  # type: ignore[union-attr]
+        scheduler = lm.lr_schedulers()
+        for sch in (scheduler if isinstance(scheduler, list) else [scheduler]):
+            sch.step()  # type: ignore[union-attr]
+
+        lm.log("train/loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, logger=True)
+        return {"loss": loss.detach(), "signals": evaluation.last_step.outputs.signals}
+
+    def validation_step(self, batch: Batch, batch_idx: int) -> dict[str, Any]:
+        lm = self._lm
+        self._apply_runtime(lm.global_step, log_values=False)
+        ctrl = self._require_eval_controller()
+        obj = self._require_eval_objective()
+        carry0 = ctrl.initial_state(batch)
+        trace_meta = self._build_trace_meta()
+
+        evaluation = evaluate_rollout(
+            runner=self._eval_runner,
+            source=RepeatSource(batch),
+            controller=ctrl,
+            carry=carry0,
+            objective=obj,
+            max_rollout_steps=self._config.runtime.validation.max_rollout_steps,
+            hard_max_rollout_steps=self._config.runtime.validation.hard_max_rollout_steps,
+            runner_options={"allow_halt": True},
+            objective_options=resolve_objective_schedule(lm.global_step, self._config.objective),
+        )
+        update_metric_collection_from_evaluated_chunk(lm.val_metrics, evaluation.evaluated, EHC_EPISODE_ROUTES)
+
+        if self._eval_trace_keys is None:
+            return {"trace": None}
+        arena_extra = select_arena_ehc_trace_fields(self._eval_trace_keys)
+        trace_specs = build_trace_spec("ehc", include_keys=self._eval_trace_keys, extra_fields=arena_extra)
+        trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)
+        _maybe_apply_arena_supplements(trace, self._resolve_val_source_context(batch_idx, batch))
+        return {"trace": trace}
+
+    def _resolve_val_source_context(self, batch_idx: int, batch: Batch) -> object | None:
+        lm = self._lm
+        trainer = getattr(lm, "trainer", None)
+        if trainer is None:
+            return None
+        dm = getattr(trainer, "datamodule", None)
+        if not isinstance(dm, Datamodule):
+            return None
+        first_key = next(iter(batch))
+        batch_size = batch[first_key].shape[0]
+        sample_ids = dm.val_sample_ids_for_batch(
+            batch_idx,
+            batch_size,
+            rank=trainer.global_rank,
+            world_size=trainer.world_size,
+        )
+        if not sample_ids:
+            return None
+        return ArenaEvaluationSourceContext(
+            task_family="arena",
+            dataset_path=dm.config.dataset_path,
+            split="val",
+            sample_ids=tuple(sample_ids),
+        )
+
+    def build_evaluation_metrics(self, namespace: str) -> MetricCollection:
+        return build_val_metrics(EHC_EPISODE_ROUTES).clone(prefix=namespace)
+
+    def execute_evaluation_batch(
+        self,
+        batch: Batch,
+        trace_request: EvaluationTraceRequest | None,
+        source_context: object | None = None,
+    ) -> EvaluationBatchArtifacts:
+        lm = self._lm
+        self._apply_runtime(lm.global_step, log_values=False)
+        ctrl = self._require_eval_controller()
+        obj = self._require_eval_objective()
+        carry0 = ctrl.initial_state(batch)
+        trace_meta = self._build_trace_meta()
+
+        evaluation = evaluate_rollout(
+            runner=self._eval_runner,
+            source=RepeatSource(batch),
+            controller=ctrl,
+            carry=carry0,
+            objective=obj,
+            max_rollout_steps=self._config.runtime.validation.max_rollout_steps,
+            hard_max_rollout_steps=self._config.runtime.validation.hard_max_rollout_steps,
+            runner_options={"allow_halt": True},
+            objective_options=resolve_objective_schedule(lm.global_step, self._config.objective),
+        )
+
+        trace = None
+        supplements_applied: tuple[str, ...] = ()
+        if trace_request is not None and trace_request.enabled:
+            req_keys = trace_request.key_set()
+            arena_extra = select_arena_ehc_trace_fields(req_keys)
+            trace_specs = build_trace_spec("ehc", include_keys=req_keys, extra_fields=arena_extra)
+            trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)
+            supplements_applied = _maybe_apply_arena_supplements(trace, source_context)
+
+        def _apply(collection: MetricCollection) -> None:
+            update_metric_collection_from_evaluated_chunk(collection, evaluation.evaluated, EHC_EPISODE_ROUTES)
+
+        return EvaluationBatchArtifacts(
+            regime_id="_inline",
+            metric_namespace="",
+            evaluated=evaluation.evaluated,
+            apply_to_metrics=_apply,
+            trace=trace,
+            trace_supplements_applied=supplements_applied,
+        )
+
+
+# =============================================================================
+def _maybe_apply_arena_supplements(
+    trace: TraceTree,
+    source_context: object | None,
+) -> tuple[str, ...]:
+    if not isinstance(source_context, ArenaEvaluationSourceContext):
+        return ()
+    supplements = build_arena_trace_supplements(source_context, trace.length)
+    apply_arena_trace_supplements(trace, supplements)
+    return ("arena",)
+
+
+# =============================================================================
+__all__ = ["EHCSpatialPretrainConfig", "EHCSpatialPretrainRegime"]

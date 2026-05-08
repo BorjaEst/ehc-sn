@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, Field, model_validator
 
 
+# =============================================================================
 class MemoryRuntimeConfig(BaseModel, extra="forbid"):
     """Step-based runtime schedule for EHC memory dynamics."""
 
@@ -31,6 +32,7 @@ class MemoryRuntimeConfig(BaseModel, extra="forbid"):
     )
 
 
+# =============================================================================
 class UncertaintyRuntimeConfig(BaseModel, extra="forbid"):
     """Step-based runtime schedule for MEC uncertainty correction."""
 
@@ -60,6 +62,7 @@ class UncertaintyRuntimeConfig(BaseModel, extra="forbid"):
         return self
 
 
+# =============================================================================
 class SequenceRuntimeConfig(BaseModel, extra="forbid"):
     """Sequence-level training settings for EHC chunked TBPTT."""
 
@@ -70,6 +73,7 @@ class SequenceRuntimeConfig(BaseModel, extra="forbid"):
     )
 
 
+# =============================================================================
 class ValidationRuntimeConfig(BaseModel, extra="forbid"):
     """Runner-owned safety limits for EHC validation rollouts."""
 
@@ -83,13 +87,9 @@ class ValidationRuntimeConfig(BaseModel, extra="forbid"):
         ge=1,
         description="Defensive runner cap for validation rollouts. Separate from semantic model max_steps.",
     )
-    seed: int | None = Field(
-        default=None,
-        ge=0,
-        description="Explicit evaluation seed used to make validation rollouts reproducible.",
-    )
 
 
+# =============================================================================
 class RuntimeConfig(BaseModel, extra="forbid"):
     """Step-based runtime schedules for EHC training dynamics and validation safety."""
 
@@ -111,6 +111,7 @@ class RuntimeConfig(BaseModel, extra="forbid"):
     )
 
 
+# =============================================================================
 @dataclass(frozen=True)
 class EHCRuntimeState:
     """Resolved EHC runtime values for the current optimizer step."""
@@ -121,6 +122,7 @@ class EHCRuntimeState:
     p2g_trust: float
 
 
+# =============================================================================
 def resolve_ehc_runtime(step: int, config: RuntimeConfig) -> EHCRuntimeState:
     """Resolve EHC runtime values from the current global training step."""
     if step < 0:
@@ -141,6 +143,7 @@ def resolve_ehc_runtime(step: int, config: RuntimeConfig) -> EHCRuntimeState:
     )
 
 
+# =============================================================================
 __all__ = [
     "MemoryRuntimeConfig",
     "RuntimeConfig",
