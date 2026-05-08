@@ -11,7 +11,7 @@ Ownership rules:
 
 Batch format:
     Each provider yields batches already transformed through
-    :func:`~ehc_sn.adapters.mazehard.hrm.core.coerce_maze_hard_batch`, so
+    :func:`~ehc_sn.tasks.mazehard.runtime.coerce_maze_hard_batch`, so
     ``hrm_v1.py`` and ``hrm_v2.py`` can consume them unchanged through
     :meth:`execute_evaluation_batch` without any adapter change.
 """
@@ -24,10 +24,10 @@ from typing import Any
 
 from torch.utils.data import DataLoader
 
-from ehc_sn.adapters.mazehard.hrm.core import coerce_maze_hard_batch
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
 from ehc_sn.lightning.eval.contracts import EvaluationCaseBatch, EvaluationSourceProvider
+from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.tasks.mazehard.traces import MazeHardEvaluationSourceContext
 
 
@@ -37,7 +37,7 @@ class MazeHardReplayDiagnosticProvider:
 
     Loads from a versioned processed MazeHard task corpus and yields batched
     cases for named evaluation regimes.  Each case batch is already transformed
-    through :func:`~ehc_sn.adapters.mazehard.hrm.core.coerce_maze_hard_batch`
+    through :func:`~ehc_sn.tasks.mazehard.runtime.coerce_maze_hard_batch`
     (i.e. ``{"input_ids": Tensor, "labels": Tensor}``) so any HRM Lightning
     family can consume it unchanged through :meth:`execute_evaluation_batch`.
 

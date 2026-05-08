@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ehc_sn.adapters.mazehard.vocabulary import EMPTY_ID, GOAL_ID, START_ID, WALL_ID
+from ehc_sn.tasks.mazehard.runtime import EMPTY_ID, GOAL_ID, START_ID, WALL_ID
 from ehc_sn.types import Channels
 
 _CHANNEL_TOPOLOGY: str = "topology"

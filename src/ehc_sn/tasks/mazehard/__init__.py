@@ -18,7 +18,7 @@ Execution-binding capability:
 - :class:`MazeHardDeliberationCapability` — deliberation actor-critic capability.
   Full module: :mod:`ehc_sn.tasks.mazehard.capabilities.deliberation`.
 
-Raw channel-to-batch coercion lives in :mod:`ehc_sn.adapters.mazehard.hrm.core`.
+Raw channel-to-batch coercion lives in :mod:`ehc_sn.tasks.mazehard.runtime`.
 """
 
 from .builder import (
