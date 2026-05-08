@@ -45,8 +45,12 @@ Use ${selection} if it is present and relevant. Otherwise rely on the current co
 6. The generated prompt must instruct the receiving agent to:
    - start from the named anchor,
    - re-check current status before editing,
+   - identify the owning abstraction before editing and explain why the change belongs there,
    - state a short status summary and whether the task may already be done,
    - prefer removal, simplification, and reuse over adding code,
+   - treat a new wrapper, helper, file, or public API as disallowed by default unless it has a real justification,
+   - if a new wrapper, helper, file, or public API is proposed, justify it as boundary translation, a second real consumer, compatibility surface, or explicit isolation need,
+   - if no such justification exists, change the existing owner instead of adding another layer,
    - avoid unrelated cleanup, broad refactors, or scope expansion,
    - run the narrowest available validation immediately after the first substantive edit,
    - stop with a concise done-or-not-done report.
@@ -76,16 +80,24 @@ Expected behavior
 Constraints
 <scope, architecture, repo rules, or placeholders>
 
+Owning abstraction
+<module, class, function, or explicit placeholder>
+
+Abstraction gate
+<state whether a new wrapper, helper, file, or public API is needed; if yes, justify it>
+
 Workflow
 1. Verify spec/spec-manifest.toml exists and that every required spec file exists before doing any design or code work.
 2. Start from the Primary anchor and read only enough nearby code to confirm the current control path and status.
-3. Before the first edit, state whether the task appears already done, partially done, or not done.
-4. If the task is already done, do not edit code. Run the cheapest relevant validation and report the result.
-5. If changes are needed, make the smallest local edit that moves the task toward done.
-6. Prefer removal, simplification, and reuse over adding code.
-7. After the first substantive edit, run the narrowest available validation before doing more reading or patching.
-8. If validation fails, repair the same slice and rerun the same validation before expanding scope.
-9. Stop when the definition of done is met or when a concrete blocker remains.
+3. Before the first edit, identify the Owning abstraction and state whether the task appears already done, partially done, or not done.
+4. If the cheapest local patch would place logic in the wrong layer, move one hop to the owning abstraction instead of adding another wrapper.
+5. Treat new wrappers, helpers, files, and public APIs as disallowed by default. Only add one if the Abstraction gate has a concrete justification: boundary translation, second real consumer, compatibility surface, or explicit isolation need.
+6. If the task is already done, do not edit code. Run the cheapest relevant validation and report the result.
+7. If changes are needed, make the smallest local edit in the owning abstraction that moves the task toward done.
+8. Prefer removal, simplification, and reuse over adding code.
+9. After the first substantive edit, run the narrowest available validation before doing more reading or patching.
+10. If validation fails, repair the same slice and rerun the same validation before expanding scope.
+11. Stop when the definition of done is met or when a concrete blocker remains.
 
 Validation
 <test, command, or explicit placeholder>
@@ -106,4 +118,5 @@ Reporting format
 - Do not perform implementation work.
 - Do not return analysis outside the fenced handoff prompt.
 - Do not widen scope beyond the current target.
+- Make the ownership check and abstraction gate explicit in the generated prompt.
 - Prefer explicit placeholders over guessed details.
