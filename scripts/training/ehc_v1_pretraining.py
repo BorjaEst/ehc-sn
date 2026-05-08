@@ -16,7 +16,7 @@ from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
@@ -66,7 +66,7 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
     # -- Mode ----------------------------------------------------------------------------------
     mode: Literal["spatial_pretrain", "reason_pretrain"] = Field(
         ...,
-        description="EHC training mode. Determines adapter, controller, objective, and optimizer families.",
+        description="EHC training mode. Determines training objective, adapter family, and optimizer configuration.",
     )
 
     # -- Names and tracking --------------------------------------------------------------------
@@ -224,6 +224,17 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
     # ---------------------------------------------------------------------------------------------
     # Aggregate settings (compose leaf settings for modules)
 
+    @model_validator(mode="after")
+    def _validate_checkpoint_mutual_exclusion(self) -> "RunArguments":
+        if self.checkpoint_path is not None and self.init_weights_from is not None:
+            raise ValueError(
+                "checkpoint_path and init_weights_from are mutually exclusive. "
+                "Use checkpoint_path for full Trainer resume (restores optimizer, scheduler, and "
+                "trainer-progress state). Use init_weights_from for init-only semantic-group "
+                "weight hydration without restoring training state."
+            )
+        return self
+
     @property
     def datamodule_config(self) -> DatamoduleConfig:
         return DatamoduleConfig.model_validate(self, from_attributes=True)
@@ -310,7 +321,7 @@ if __name__ == "__main__":
         )
 
     trainer.fit(
-        # Lightning module: training step, optimizer and schedule setup.
+        # Lightning module: EHC training step, optimizer and schedule setup.
         model=training_model,
         # Data module: dataset + DataLoader construction.
         datamodule=Datamodule(settings.datamodule_config, transform=transform),
