@@ -47,7 +47,7 @@ from torch import dtype as Dtype
 from torch import nn
 
 from ehc_sn.models.ehc.core.ehc_base import FAMILY_CONTENT, SLOT_CUE, SLOT_REPLAY, SLOT_STATE, EHCProjectionSettings
-from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes
+from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes
 from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState, WritePayload
 from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues, TargetRead
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
@@ -191,13 +191,15 @@ class EHCOutputV1(DetachMixin):
         control:     PFC/STR control-pathway outputs.
         content:     PFC body workspace content outputs.
         grid_codes:  Named MEC grid codes (prior and posterior).
-        place_codes: Named HPC place codes (inference, ancestral, retrieved, sensory).
+        place_codes: Named HPC place codes (posterior, prior, retrieved, sensory).
+        pred_codes:  LEC-space projections of HPC place codes for decoding.
     """
 
     control: EHCControlV1
     content: EHCContentV1
     grid_codes: GridCodes
     place_codes: PlaceCodes
+    pred_codes: PredCodes
 
 
 # =============================================================================
@@ -346,6 +348,8 @@ class EHCModelV1(nn.Module):
         Returns:
             Freshly initialized :class:`EHCStateV1`.
         """
+        if device is None:
+            device = next(self.parameters()).device
         memory = memory if memory is not None else self.hpc.init_memory(batch_size=batch_size, device=device)
         return EHCStateV1(
             # NOTE: PFCModel.init_state does NOT accept a device kwarg.
@@ -437,7 +441,11 @@ class EHCModelV1(nn.Module):
         # c_prop: project previous-step PFC summary into the hippocampal multi-frequency cue family.
         # c_mem:  reinstated contextual evidence from bank c — deferred in V1.
         # c_use:  routed cue for replay bias and bank-c writes; equals c_prop in V1.
-        prev_pfc_summary: Tensor = state.pfc.summary  # (B, D)
+        #
+        # Arena stop-gradient seam: detach the PFC summary so arena loss cannot update PFC
+        # or propagate back through this edge. pfc_to_hpc is not bypassed so it remains
+        # trainable from arena loss when its optimizer exclusion is lifted in a future phase.
+        prev_pfc_summary: Tensor = state.pfc.summary.detach()  # (B, D)
         c_prop: list[Tensor] = cast(list[Tensor], self.pfc_to_hpc(prev_pfc_summary))
         c_mem: Optional[list[Tensor]] = None  # deferred: bank-c reinstatement not implemented
         c_use: list[Tensor] = c_prop  # V1: use cortical cue proposal directly
@@ -542,13 +550,17 @@ class EHCModelV1(nn.Module):
         state.hpc = self.hpc.update(p_post, write_payload, state=state.hpc)
 
         # 13. Package and return outputs --------------------------------------
-        grid_codes = GridCodes(prior=g_prior, post=g_post)
+        grid_codes = GridCodes(prior=g_prior, posterior=g_post)
         place_codes = PlaceCodes(
-            inference=p_post,
-            ancestral=p_prior,
+            posterior=p_post,
+            prior=p_prior,
             retrieved=p_retrieved,
             sensory=p_sensory_read,
         )
+        x_inference = self.projections.lec_to_hpc.inverse(p_post)
+        x_ancestral = self.projections.lec_to_hpc.inverse(p_prior)
+        x_retrieved = self.projections.lec_to_hpc.inverse(p_retrieved)
+        pred_codes = PredCodes(inference=x_inference, ancestral=x_ancestral, retrieved=x_retrieved)
 
         # EHCContentV1 exposes post-reasoning PFC workspace slots.
         content = EHCContentV1(
@@ -562,7 +574,7 @@ class EHCModelV1(nn.Module):
             control_logits=control_logits,  # (B, n_actions)
             reward_prediction=reward_prediction,  # (B,)
         )
-        return EHCOutputV1(control=control, content=content, grid_codes=grid_codes, place_codes=place_codes), state
+        return EHCOutputV1(control=control, content=content, grid_codes=grid_codes, place_codes=place_codes, pred_codes=pred_codes), state
 
 
 # =============================================================================

@@ -598,10 +598,10 @@ class EHCModelV2(nn.Module):
         state.hpc = self.hpc.update(p_post, write_payload, state=state.hpc)
 
         # 13. Package and return outputs --------------------------------------
-        grid_codes = GridCodes(prior=g_prior, post=g_post)
+        grid_codes = GridCodes(prior=g_prior, posterior=g_post)
         place_codes = PlaceCodes(
-            inference=p_post,
-            ancestral=p_prior,
+            posterior=p_post,
+            prior=p_prior,
             retrieved=p_retrieved,
             sensory=p_sensory_read,
         )
