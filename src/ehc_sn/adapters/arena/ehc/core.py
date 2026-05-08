@@ -11,17 +11,17 @@ version-specific bridge implementations.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
 import torch
+import torch.nn.functional as F
 from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn.loss.consistency import LatentRelation
-from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes
-from ehc_sn.modules.autoencoder import MLPDecoder, TwoHotEncoder
+from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes
+from ehc_sn.modules.autoencoder import TwoHotEncoder
 from ehc_sn.objectives.ehc import GRID_TRANSITION_RELATION, PLACE_SENSORY_RELATION, PLACE_TRANSITION_RELATION
 from ehc_sn.tasks.arena.contracts import ArenaTaskOutput
 from ehc_sn.types import Batch, MultiScaleCode
@@ -50,22 +50,22 @@ class ArenaEncoderConfig(BaseModel, extra="forbid"):
 class ArenaDecoderConfig(BaseModel, extra="forbid"):
     """Decoder strategy config for the EHC-to-arena output pathway."""
 
-    kind: Literal["single_scale", "concat_all_scales"] = Field(
+    kind: Literal["single_scale", "multi_scale"] = Field(
         default="single_scale",
         description="Decoder input policy.",
     )
     prediction_freq: int = Field(
         default=0,
         ge=0,
-        description="HPC band index for single_scale decoding. Must be 0 when kind='concat_all_scales'.",
+        description="HPC band index for single_scale decoding. Must be 0 when kind='multi_scale'.",
     )
 
     @model_validator(mode="after")
     def _check_concat_has_no_freq(self) -> "ArenaDecoderConfig":
-        if self.kind == "concat_all_scales" and self.prediction_freq != 0:
+        if self.kind == "multi_scale" and self.prediction_freq != 0:
             raise ValueError(
                 "ArenaDecoderConfig: prediction_freq must be 0 (unused) when "
-                f"kind='concat_all_scales', got prediction_freq={self.prediction_freq}."
+                f"kind='multi_scale', got prediction_freq={self.prediction_freq}."
             )
         return self
 
@@ -111,6 +111,8 @@ class ArenaEHCDiagnostics(DetachMixin):
     obs_logits: tuple[Tensor, Tensor, Tensor]
     grid_codes: GridCodes
     place_codes: PlaceCodes
+    pred_codes: PredCodes
+    theta_cls: Tensor | None
 
     # -- EHCStepOutput protocol surface -----------------------------------------
 
@@ -133,11 +135,11 @@ class ArenaEHCDiagnostics(DetachMixin):
     def latent_relations(self) -> dict[str, LatentRelation]:
         """Named latent consistency relations expected by :class:`~ehc_sn.objectives.ehc.EHCObjective`."""
         relations: dict[str, LatentRelation] = {
-            GRID_TRANSITION_RELATION: LatentRelation(lhs=self.grid_codes.post, rhs=self.grid_codes.prior),
-            PLACE_TRANSITION_RELATION: LatentRelation(lhs=self.place_codes.inference, rhs=self.place_codes.ancestral),
+            GRID_TRANSITION_RELATION: LatentRelation(lhs=self.grid_codes.posterior, rhs=self.grid_codes.prior),
+            PLACE_TRANSITION_RELATION: LatentRelation(lhs=self.place_codes.posterior, rhs=self.place_codes.retrieved),
         }
-        if self.place_codes.retrieved is not None and self.place_codes.sensory is not None:
-            relations[PLACE_SENSORY_RELATION] = LatentRelation(lhs=self.place_codes.retrieved, rhs=self.place_codes.sensory)
+        if self.place_codes.sensory is not None:
+            relations[PLACE_SENSORY_RELATION] = LatentRelation(lhs=self.place_codes.posterior, rhs=self.place_codes.sensory)
         return relations
 
     @property
@@ -189,7 +191,7 @@ class ArenaEHCBridgeOutput(DetachMixin):
     @property
     def theta_cls(self) -> Tensor | None:
         """Return the optional theta-classifier state used for diagnostics."""
-        return None
+        return self.ehc.theta_cls
 
 
 # =============================================================================
@@ -217,8 +219,6 @@ class ArenaTwoHotEncoder(nn.Module):
 
     def encode(self, batch: Batch) -> tuple[MultiScaleCode, Tensor, object, object]:
         """Return ``(sensory_codes, previous_action, episode_start, landmark_id)``."""
-        import torch.nn.functional as F
-
         obs_id = batch["observation_id"].view(-1).long()  # (B,)
         observation = F.one_hot(obs_id, num_classes=self._obs_dim).float()  # (B, obs_dim)
         code = self.encoder(observation)
@@ -232,46 +232,6 @@ class ArenaTwoHotEncoder(nn.Module):
 
 
 # =============================================================================
-# Shared decode helper
-# =============================================================================
-def decode_observation_pathways(
-    pc: PlaceCodes,
-    gc: GridCodes,
-    decoder: MLPDecoder,
-    obs_dim: int,
-    single_freq: int | None,
-) -> ArenaEHCBridgeOutput:
-    """Decode all three HPC place pathways into an :class:`ArenaEHCBridgeOutput`.
-
-    Shared by :class:`ArenaOutputsDecoderV1` and :class:`ArenaOutputsDecoderV2`.
-    """
-    obs_inference = decoder(_select_code(pc.inference, single_freq))
-    obs_retrieved = (
-        decoder(_select_code(pc.retrieved, single_freq))
-        if pc.retrieved is not None
-        else obs_inference.new_zeros(obs_inference.shape[0], obs_dim)
-    )
-    obs_ancestral = decoder(_select_code(pc.ancestral, single_freq))
-    ol = (obs_inference, obs_retrieved, obs_ancestral)
-    task = ArenaTaskOutput(obs_logits=obs_inference)
-    ehc = ArenaEHCDiagnostics(obs_logits=ol, grid_codes=gc, place_codes=pc)
-    return ArenaEHCBridgeOutput(task=task, ehc=ehc)
-
-
-def _select_code(code: Tensor | Sequence[Tensor], single_freq: int | None) -> Tensor:
-    """Return a ``(B, D)`` tensor for decoder use."""
-    if isinstance(code, Tensor):
-        if single_freq is not None:
-            raise ValueError("single_scale decoder received a pre-concatenated flat Tensor; " "expected a sequence of per-band tensors.")
-        return code
-    if len(code) == 0:
-        raise ValueError("EHC latent code sequences must not be empty.")
-    if single_freq is not None:
-        return code[single_freq]
-    return torch.cat(tuple(code), dim=1)
-
-
-# =============================================================================
 __all__ = [
     "ArenaDecoderConfig",
     "ArenaEncoderConfig",
@@ -279,5 +239,4 @@ __all__ = [
     "ArenaEHCBridgeOutput",
     "ArenaEHCDiagnostics",
     "ArenaTwoHotEncoder",
-    "decode_observation_pathways",
 ]

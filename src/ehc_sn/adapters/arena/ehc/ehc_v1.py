@@ -14,10 +14,11 @@ from ehc_sn.adapters.arena.ehc.core import (
     ArenaDecoderConfig,
     ArenaEHCAdapterSettings,
     ArenaEHCBridgeOutput,
+    ArenaEHCDiagnostics,
     ArenaEncoderConfig,
     ArenaTwoHotEncoder,
-    decode_observation_pathways,
 )
+from ehc_sn.adapters.arena.ehc import core as _core
 from ehc_sn.models.ehc.ehc_v1 import EHCInputV1, EHCModelV1, EHCOutputV1, EHCStateV1
 from ehc_sn.modules.autoencoder import MLPDecoder
 from ehc_sn.types import Batch
@@ -59,22 +60,40 @@ class ArenaOutputsDecoderV1(nn.Module):
         observation_dim: int,
         latent_dim: int,
         *,
-        single_freq: int | None = None,
+        single_freq: int,
     ) -> None:
         super().__init__()
-        self.decoder = MLPDecoder(latent_dim, observation_dim)
         self._obs_dim = observation_dim
         self._single_freq = single_freq
+        self.w_x = torch.nn.Parameter(torch.tensor(1.0))
+        self.b_x = torch.nn.Parameter(torch.zeros(latent_dim))
+        self.decoder = MLPDecoder(latent_dim, observation_dim)
+
+    def _decode(self, pred_code: list) -> Tensor:
+        """Select the configured frequency band, apply affine, then MLP decode."""
+        recon = self.w_x * pred_code[self._single_freq] + self.b_x
+        return self.decoder(recon)
 
     def forward(self, model_output: EHCOutputV1) -> ArenaEHCBridgeOutput:
-        """Decode all three place pathways and return the split task + EHC surfaces."""
-        return decode_observation_pathways(
-            model_output.place_codes,
-            model_output.grid_codes,
-            self.decoder,
-            self._obs_dim,
-            self._single_freq,
+        """Decode all three pred_code pathways and return the split task + EHC surfaces."""
+        pc = model_output.place_codes
+        gc = model_output.grid_codes
+        xc = model_output.pred_codes
+
+        obs_inference = self._decode(xc.inference)
+        obs_retrieved = self._decode(xc.retrieved) if xc.retrieved is not None else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)  # fmt: skip
+        obs_ancestral = self._decode(xc.ancestral)
+
+        ol = (obs_inference, obs_retrieved, obs_ancestral)
+        task = _core.ArenaTaskOutput(obs_logits=obs_inference)
+        ehc = ArenaEHCDiagnostics(
+            obs_logits=ol,
+            grid_codes=gc,
+            place_codes=pc,
+            pred_codes=xc,
+            theta_cls=model_output.control.theta_summary,
         )
+        return ArenaEHCBridgeOutput(task=task, ehc=ehc)
 
 
 # =============================================================================
@@ -125,21 +144,18 @@ def _build_encoder_v1(model: EHCModelV1, config: ArenaEHCAdapterSettings) -> Are
 
 
 def _build_decoder_v1(model: EHCModelV1, config: ArenaEHCAdapterSettings) -> ArenaOutputsDecoderV1:
-    hpc_shape = model.config.hpc.shape
-    n_freq = len(hpc_shape)
+    feature_dim = model.config.lec.feature_dim
+    n_freq = len(model.config.hpc.shape)
     if config.decoder.kind == "single_scale":
         freq = config.decoder.prediction_freq
         if not (0 <= freq < n_freq):
             raise ValueError(f"prediction_freq={freq} is out of range for hpc.shape with {n_freq} bands " f"(valid: 0..{n_freq - 1}).")
         return ArenaOutputsDecoderV1(
             observation_dim=config.observation_dim,
-            latent_dim=hpc_shape[freq],
+            latent_dim=feature_dim,
             single_freq=freq,
         )
-    return ArenaOutputsDecoderV1(
-        observation_dim=config.observation_dim,
-        latent_dim=sum(hpc_shape),
-    )
+    raise NotImplementedError("Multi-scale decoding is not implemented for ArenaEHCV1BridgeAdapter.")
 
 
 # =============================================================================
