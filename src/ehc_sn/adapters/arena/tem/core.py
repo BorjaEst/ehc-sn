@@ -216,6 +216,13 @@ class ArenaTwoHotEncoder(nn.Module):
         self._obs_dim = observation_dim
         self._n_freq = n_freq
 
+    @staticmethod
+    def _normalize_landmark_id(landmark_id: Tensor | None) -> Tensor | None:
+        """Map Arena's absent-cue sentinel to the model-facing no-cue value."""
+        if landmark_id is None or not torch.any(landmark_id < 0):
+            return landmark_id
+        return torch.where(landmark_id < 0, torch.zeros_like(landmark_id), landmark_id)
+
     def forward(  # -----------------------------------------------------------
         self,
         batch: Batch,
@@ -225,11 +232,12 @@ class ArenaTwoHotEncoder(nn.Module):
         observation = F.one_hot(obs_id, num_classes=self._obs_dim).float()  # (B, obs_dim)
         code = self.encoder(observation)
         sensory_codes: MultiScaleCode = [code.clone() for _ in range(self._n_freq)]
+        landmark_id = self._normalize_landmark_id(batch.get("landmark_id"))
         return (
             sensory_codes,
             batch["previous_action"],
             batch.get("episode_start"),
-            batch.get("landmark_id"),
+            landmark_id,
         )
 
 
