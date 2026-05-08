@@ -44,10 +44,17 @@ CONFIGURATION_PATH = os.environ.get("HRM_V1_CONFIGURATION_PATH", "config/trainin
 # Settings Model
 # =================================================================================================
 class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
-    """ """
+    """Common training script arguments. Mode-specific model settings are read from TOML."""
 
     @classmethod
-    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,) -> tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip  # ------------------------------------------------------------
+    def settings_customise_sources(  # ------------------------------------------------------------
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
         """Customize settings source order.
 
         Pydantic Settings supports multiple value sources; we explicitly place
