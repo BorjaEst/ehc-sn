@@ -10,7 +10,7 @@ argument-hint: "Objective or target override, optional"
 
 Generate one ready-to-paste implementation prompt for another coding agent.
 Do not implement the task yourself.
-Use the current conversation as the primary source of truth, then do the smallest local status check needed to avoid stale or misleading instructions.
+Use the current conversation as the primary source of truth for intent, then use the smallest local repo status check needed to avoid stale or misleading instructions.
 
 ## Inputs
 
@@ -39,14 +39,15 @@ Use ${selection} if it is present and relevant. Otherwise rely on the current co
 
 1. Review the current conversation and latest user request. Extract the actual task, active target, constraints, validation path, and definition of done.
 2. Pass the spec gate and read the required files from [spec/spec-manifest.toml](../../spec/spec-manifest.toml).
-3. Re-check the current implementation status using the smallest local read around the active anchor. Determine whether the task appears done, partially done, or not done.
+3. Re-check the current implementation status using the smallest discriminating local read around the active anchor. Base the status on what you verified in the repo during this run, not on the conversation alone. Determine whether the task appears done, partially done, or not done.
 4. If any key fact is still unclear, do not invent it. Keep an explicit placeholder in the generated prompt.
 5. Generate one self-contained prompt that another agent can execute safely.
 6. The generated prompt must instruct the receiving agent to:
    - start from the named anchor,
    - re-check current status before editing,
+   - distinguish requested intent from verified current repo status,
    - identify the owning abstraction before editing and explain why the change belongs there,
-   - state a short status summary and whether the task may already be done,
+   - state a short status summary, name the observed file, symbol, test, or command that informed it, and say whether the task may already be done,
    - prefer removal, simplification, and reuse over adding code,
    - treat a new wrapper, helper, file, or public API as disallowed by default unless it has a real justification,
    - if a new wrapper, helper, file, or public API is proposed, justify it as boundary translation, a second real consumer, compatibility surface, or explicit isolation need,
@@ -69,7 +70,7 @@ Task
 <one short paragraph>
 
 Current status
-<2 to 4 lines on what already exists and what is still missing>
+<2 to 4 lines covering: what was verified to already exist, what is still missing or uncertain, and the verdict: done, partially done, or not done. Name the observed file, symbol, test, or command used for the status check.>
 
 Primary anchor
 <file, symbol, failing test, or command>
@@ -89,10 +90,10 @@ Abstraction gate
 Workflow
 1. Verify spec/spec-manifest.toml exists and that every required spec file exists before doing any design or code work.
 2. Start from the Primary anchor and read only enough nearby code to confirm the current control path and status.
-3. Before the first edit, identify the Owning abstraction and state whether the task appears already done, partially done, or not done.
+3. Before the first edit, identify the Owning abstraction and state whether the task appears already done, partially done, or not done based on what you verified in the repo during this run.
 4. If the cheapest local patch would place logic in the wrong layer, move one hop to the owning abstraction instead of adding another wrapper.
 5. Treat new wrappers, helpers, files, and public APIs as disallowed by default. Only add one if the Abstraction gate has a concrete justification: boundary translation, second real consumer, compatibility surface, or explicit isolation need.
-6. If the task is already done, do not edit code. Run the cheapest relevant validation and report the result.
+6. If the task is already done, do not edit code. Generate a validation-only handoff, run the cheapest relevant validation, and report the result.
 7. If changes are needed, make the smallest local edit in the owning abstraction that moves the task toward done.
 8. Prefer removal, simplification, and reuse over adding code.
 9. After the first substantive edit, run the narrowest available validation before doing more reading or patching.
@@ -108,6 +109,7 @@ Definition of done
 Reporting format
 - Status: done or not done
 - Changes: short summary or none
+- Status evidence: observed file, symbol, test, or command from this run
 - Validation: what ran or why it could not run
 - Result: whether the definition of done was met
 - Blockers: only if not done
