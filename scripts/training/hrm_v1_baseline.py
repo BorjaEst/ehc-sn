@@ -13,7 +13,6 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
 from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings
-from ehc_sn.adapters.mazehard.hrm.core import coerce_maze_hard_batch
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.eval_regimes import EvaluationRegimesCallback, EvaluationRegimesCallbackSettings
@@ -22,9 +21,10 @@ from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
-from ehc_sn.lightning.hrm.hrm_v1 import ModelConfig_HRM_V1, TrainingModel
+from ehc_sn.lightning.hrm.hrm_v1 import HRMV1TrainingModel, ModelConfig_HRM_V1
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.objectives import ACTObjectiveConfig
+from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
@@ -331,7 +331,7 @@ if __name__ == "__main__":
     # - The DataModule constructs loaders for the puzzle/maze dataset.
     trainer.fit(
         # Lightning module: training step, optimizer and schedule setup.
-        model=TrainingModel(settings.hrm_config),
+        model=HRMV1TrainingModel(settings.hrm_config),
         # Data module: dataset + DataLoader construction.
         datamodule=Datamodule(settings.datamodule, transform=coerce_maze_hard_batch),
         # Optional: resume training from a checkpoint.

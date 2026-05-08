@@ -2,7 +2,7 @@
 
 Supports two public modes (selected by the ``mode`` field in the config):
     spatial_pretrain    — arena replay, EHC variational objective.
-    controller_pretrain — MazeHard deliberation, hybrid RL.
+    reason_pretrain — MazeHard deliberation, hybrid RL.
 
 Configuration path: EHC_V1_CONFIGURATION_PATH (default: config/training.ehc-v1.toml).
 """
@@ -25,12 +25,10 @@ from ehc_sn.callbacks.eval_regimes import EvaluationRegimesCallback, EvaluationR
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.lightning.ehc.ehc_v1 import (
-    ModelConfig_EHC_V1,
-    TrainingModel,
-    parse_ehc_v1_config,
-)
+from ehc_sn.lightning.ehc.core._base import load_weights_from_checkpoint
+from ehc_sn.lightning.ehc.ehc_v1 import EHCV1TrainingModel, parse_ehc_v1_config
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
+from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import (
     resolve_effective_world_size,
     resolve_trainer_strategy,
@@ -66,7 +64,7 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
         return CliSettingsSource(settings_cls), *extra
 
     # -- Mode ----------------------------------------------------------------------------------
-    mode: Literal["spatial_pretrain", "controller_pretrain"] = Field(
+    mode: Literal["spatial_pretrain", "reason_pretrain"] = Field(
         ...,
         description="EHC training mode. Determines adapter, controller, objective, and optimizer families.",
     )
@@ -191,7 +189,24 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
     # -- Checkpointing -------------------------------------------------------------------------
     checkpoint_path: Optional[str] = Field(
         default=None,
-        description="Optional checkpoint path to resume from via Trainer.fit(ckpt_path=...).",
+        description="Optional checkpoint path to resume full training state via Trainer.fit(ckpt_path=...). Does not initialize model weights independently.",
+    )
+    init_weights_from: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional checkpoint path for model-weight initialization only. "
+            "Hydrates named semantic groups without restoring optimizer, scheduler, or "
+            "trainer-progress state. Distinct from checkpoint_path (full resume). "
+            "Specify which groups via init_weights_groups."
+        ),
+    )
+    init_weights_groups: list[str] = Field(
+        default_factory=lambda: ["spatial_core"],
+        description=(
+            "Named EHC semantic groups to hydrate from init_weights_from. "
+            "Valid groups: spatial_core, controller_bridge, controller_heads. "
+            "Ignored when init_weights_from is None."
+        ),
     )
     checkpoint_every_eval: bool = Field(
         default=False,
@@ -238,10 +253,8 @@ if __name__ == "__main__":
     # Seed everything for reproducibility.
     seed_everything(settings.seed)
 
-    # Datamodule: spatial_pretrain uses plain loader; controller_pretrain applies MazeHard coercion.
-    if settings.mode == "controller_pretrain":
-        from ehc_sn.adapters.mazehard.hrm.core import coerce_maze_hard_batch
-
+    # Datamodule: spatial_pretrain uses plain loader; reason_pretrain applies MazeHard coercion.
+    if settings.mode == "reason_pretrain":
         transform = coerce_maze_hard_batch
     else:
         transform = None
@@ -281,9 +294,24 @@ if __name__ == "__main__":
     # Start training.
     # - The LightningModule wraps the HRM model and defines the training loop.
     # - The DataModule constructs loaders for the puzzle/maze dataset.
+    training_model = EHCV1TrainingModel(ehc_config)
+
+    # Optional: initialize model weights from a separate checkpoint (does not restore
+    # optimizer, scheduler, or trainer-progress state — use checkpoint_path for that).
+    if settings.init_weights_from is not None:
+        loaded_keys = load_weights_from_checkpoint(
+            training_model.model,
+            settings.init_weights_from,
+            settings.init_weights_groups,
+        )
+        print(
+            f"[init_weights_from] Loaded {len(loaded_keys)} parameter keys "
+            f"(groups={settings.init_weights_groups}) from {settings.init_weights_from!r}."
+        )
+
     trainer.fit(
         # Lightning module: training step, optimizer and schedule setup.
-        model=TrainingModel(ehc_config),
+        model=training_model,
         # Data module: dataset + DataLoader construction.
         datamodule=Datamodule(settings.datamodule_config, transform=transform),
         # Optional: resume training from a checkpoint.

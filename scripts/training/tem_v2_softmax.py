@@ -20,7 +20,7 @@ from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.controllers.replay.trajectory import ReplayTrajectoryControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.lightning.tem.tem_v2 import ModelConfig_TEM_V2, RuntimeConfig, TrainingModel
+from ehc_sn.lightning.tem.tem_v2 import ModelConfig_TEM_V2, RuntimeConfig, TEMV2TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.objectives import TEMObjectiveConfig
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
@@ -314,7 +314,7 @@ if __name__ == "__main__":
     # - The DataModule constructs loaders for the puzzle/maze dataset.
     trainer.fit(
         # Lightning module: training step, optimizer and schedule setup.
-        model=TrainingModel(settings.tem_config),
+        model=TEMV2TrainingModel(settings.tem_config),
         # Data module: dataset + DataLoader construction.
         datamodule=Datamodule(settings.datamodule, transform=None),
         # Optional: resume training from a checkpoint.
