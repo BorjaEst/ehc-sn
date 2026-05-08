@@ -13,7 +13,9 @@ from ehc_sn.tasks.mazehard.runtime import (
     GOAL_ID,
     MAZE_HARD_VOCAB_SIZE,
     PATH_ID,
-    SEM_VOCAB_SIZE as VOCAB_SIZE,
+)
+from ehc_sn.tasks.mazehard.runtime import SEM_VOCAB_SIZE as VOCAB_SIZE
+from ehc_sn.tasks.mazehard.runtime import (
     START_ID,
     WALL_ID,
 )
