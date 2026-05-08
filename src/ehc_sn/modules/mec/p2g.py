@@ -8,7 +8,7 @@ weighting.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
@@ -90,13 +90,15 @@ class P2GMemory(nn.Module):
         return self._n_freq
 
     def forward(  # -------------------------------------------------------------------------------
-        self, p_x: list[Tensor], transition: LocationBelief,
+        self, p_x: list[Tensor], transition: LocationBelief, *, quality_error: Optional[list[Tensor]] = None,
     ) -> LocationBelief:  # fmt: skip
         """Infer a corrected grid-code transition from place cells.
 
         Args:
             p_x: Retrieved place-cell activations per frequency.
             transition: Reference transition to correct (e.g., path integration).
+            quality_error: Optional caller-supplied correction-quality error per
+                frequency. Lower values indicate a better-supported memory cue.
 
         Returns:
             A fused `LocationBelief` after memory-based correction.
@@ -104,7 +106,7 @@ class P2GMemory(nn.Module):
         g_ref, sigma_ref = transition.mean, transition.uncertainty  # Unpack for clarity
 
         mu = self._inference_mean(p_x)
-        sigma = self._inference_uncertainty(g_ref, err=utils.squared_error(mu, g_ref))
+        sigma = self._inference_uncertainty(g_ref, err=utils.squared_error(mu, g_ref), quality_error=quality_error)
 
         correction = LocationBelief(mean=mu, uncertainty=sigma)
         return utils.inv_var_trans(transition, correction)
@@ -123,20 +125,24 @@ class P2GMemory(nn.Module):
         return self.MLP_mu_g_mem(p_x)
 
     def _inference_uncertainty(  # ----------------------------------------------------------------
-        self, g: list[Tensor], err: list[Tensor],
+        self, g: list[Tensor], err: list[Tensor], quality_error: Optional[list[Tensor]] = None,
     ) -> list[Tensor]:  # fmt: skip
         """Estimate uncertainty from grid-code magnitude and reconstruction error.
 
         Args:
             g: Reference grid-code activations per frequency.
-            err: Per-frequency reconstruction error features.
+            err: Fallback per-frequency error features derived from grid-space
+                disagreement.
+            quality_error: Optional caller-supplied per-frequency error
+                features. When present, these override the fallback error.
 
         Returns:
             Estimated uncertainty per frequency.
         """
+        sigma_err = err if quality_error is None else quality_error
         sigma_g_input = [
-            torch.cat((torch.sum(mu_f**2, dim=1, keepdim=True), torch.unsqueeze(err[f], dim=1)), dim=1)
-            for f, mu_f in enumerate(g)
+            torch.cat((torch.sum(g_f**2, dim=1, keepdim=True), torch.unsqueeze(sigma_err[f], dim=1)), dim=1)
+            for f, g_f in enumerate(g)
         ]
         sigma = self.MLP_sigma_g_mem(sigma_g_input)
         return [sigma[f] + self.runtime.uncertainty_offset for f in range(self._n_freq)]

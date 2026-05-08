@@ -308,7 +308,7 @@ class TEMObjective(VariationalLossHeadBase[TEMObjectiveConfig]):
             place_sensory = sum_latent_terms(mse_consistency, place_sensory_relation.lhs, place_sensory_relation.rhs)  # fmt: skip
         else:
             place_sensory = place_transition.new_zeros(place_transition.shape)
-        loss_place_transition_sum = temp * self.config.c_place * self._masked_sum(place_transition, protocol_mask)
+        loss_place_transition_sum = temp * p2g_use * self.config.c_place * self._masked_sum(place_transition, protocol_mask)
         loss_place_sensory_sum = temp * p2g_use * self.config.c_place * self._masked_sum(place_sensory, protocol_mask)
         loss_place_consistency_sum = loss_place_transition_sum + loss_place_sensory_sum
 

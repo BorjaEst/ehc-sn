@@ -310,7 +310,7 @@ class MECModel(nn.Module):
         return g_gen, state.new(cells_next, transition.uncertainty)
 
     def inference(  # -----------------------------------------------------------------------------
-        self, p_x: Optional[GroundedLocation], landmark_id: Tensor | None, state: MECState,
+        self, p_x: Optional[GroundedLocation], landmark_id: Tensor | None, state: MECState, *, correction_error: list[Tensor] | None = None,
     ) -> tuple[AbstractLocation, MECState]:  # fmt: skip
         """Run inference by fusing memory and OVC cues into the state.
 
@@ -318,6 +318,9 @@ class MECModel(nn.Module):
             p_x: Retrieved place-cell activations per frequency (from HPC).
             landmark_id: Optional current-cell landmark ids of shape `(batch, 1)`.
             state: Current MEC state (typically after path integration).
+            correction_error: Optional caller-supplied quality signal for p→g
+                correction. When omitted, MEC falls back to its legacy
+                grid-space disagreement feature.
 
         Returns:
             A tuple `(g_inf, new_state)` where `g_inf` is the inferred grid code
@@ -325,7 +328,7 @@ class MECModel(nn.Module):
         """
         transition: LocationBelief = state.abstract_belief
         # Step 1: Correct path integration with memory-based inference
-        transition = self.p2g_correction(p_x, transition) if p_x is not None else transition
+        transition = self.p2g_correction(p_x, transition, quality_error=correction_error) if p_x is not None else transition
         # Step 2: Apply OVC correction from shiny landmarks.
         transition = self.ovc_correction(landmark_id, transition) if self.config.ovc.mode != "off" else transition # fmt: skip
 

@@ -22,6 +22,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
+from ehc_sn import utils
 from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes, TEMProjectionSettings
 from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCState, WritePayload
 from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues
@@ -197,6 +198,25 @@ class TEMModelV1(nn.Module):
         self.mec.set_runtime(p2g_uncertainty_offset=p2g_uncertainty_offset)
         self.hpc.set_runtime(eta=eta, hebbian_decay=hebbian_decay)
 
+    def _sensory_correction_error(
+        self,
+        sensory_features: MultiScaleCode,
+        p_sensory_read: Optional[list[Tensor]],
+    ) -> Optional[list[Tensor]]:
+        """Assemble detached p→g confidence evidence in HPC-projected sensory space.
+
+        Error is computed in HPC space (after forward projection) rather than by
+        inverting back to LEC space.  The transpose-based inverse scales by the
+        tiling factor k, so a perfect tiled match would yield (k-1)²‖x‖² instead
+        of zero.  Projecting forward keeps both sides in the same space and gives
+        zero error for an exact recall regardless of tiling factor.
+        """
+        if p_sensory_read is None:
+            return None
+
+        x_query = self.lec_to_hpc(sensory_features)
+        return [band_error.detach() for band_error in utils.squared_error(x_query, p_sensory_read)]
+
     def forward(  # -----------------------------------------------------------
         self,
         inputs: TEMInputV1,
@@ -222,7 +242,12 @@ class TEMModelV1(nn.Module):
             state = replace(state)
 
         # 1. Compute the grid prior by path integration:
-        g_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state=state.mec)
+        g_prior, state.mec = self.mec.generative(
+            previous_action,
+            episode_start,
+            landmark_id,
+            state=state.mec,
+        )
         g_query_prior = self.mec_to_hpc(g_prior)
 
         # 2. Read sensory-cued place from the previous memory state.
@@ -246,7 +271,12 @@ class TEMModelV1(nn.Module):
         )
 
         # 4. Correct the grid prior using sensory recall:
-        g_post, state.mec = self.mec.inference(p_sensory_read, landmark_id, state=state.mec)
+        g_post, state.mec = self.mec.inference(
+            p_sensory_read,
+            landmark_id,
+            state=state.mec,
+            correction_error=self._sensory_correction_error(x_, p_sensory_read),
+        )
         g_query_post = self.mec_to_hpc(g_post)
 
         # 5. Read retrieved place from the corrected grid:
