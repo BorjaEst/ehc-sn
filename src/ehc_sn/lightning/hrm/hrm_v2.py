@@ -146,7 +146,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class TrainingModel(L.LightningModule):
+class HRMV2TrainingModel(L.LightningModule):
     """LightningModule wrapper for HRM v2 deliberation actor-critic training.
 
     This wrapper manages:
@@ -448,4 +448,4 @@ def _maybe_apply_mazehard_supplements(
 
 
 # =============================================================================
-__all__ = ["ModelConfig_HRM_V2", "TrainingModel"]
+__all__ = ["ModelConfig_HRM_V2", "HRMV2TrainingModel"]

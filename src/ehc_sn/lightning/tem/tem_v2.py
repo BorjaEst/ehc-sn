@@ -97,7 +97,7 @@ class ModelConfig_TEM_V2(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class TrainingModel(L.LightningModule):
+class TEMV2TrainingModel(L.LightningModule):
     """Lightning wrapper for TEM v2 training and evaluation."""
 
     def __init__(  # ----------------------------------------------------------

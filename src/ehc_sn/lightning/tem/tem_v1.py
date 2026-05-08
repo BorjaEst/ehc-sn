@@ -96,7 +96,7 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class TrainingModel(L.LightningModule):
+class TEMV1TrainingModel(L.LightningModule):
     """ """
 
     def __init__(  # ------------------------------------------------------------------------------

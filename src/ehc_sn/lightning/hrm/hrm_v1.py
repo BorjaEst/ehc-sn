@@ -116,7 +116,7 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
 
 
 # =================================================================================================
-class TrainingModel(L.LightningModule):
+class HRMV1TrainingModel(L.LightningModule):
     """LightningModule wrapper for HRM v1 training.
 
     This module composes:
@@ -380,4 +380,4 @@ def _maybe_apply_mazehard_supplements(
 
 
 # =============================================================================
-__all__ = ["ModelConfig_HRM_V1", "TrainingModel"]
+__all__ = ["ModelConfig_HRM_V1", "HRMV1TrainingModel"]
