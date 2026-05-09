@@ -9,17 +9,24 @@ argument-hint: "Optional: spec file, section, or maintenance concern"
 ## Mission
 
 Maintain the canonical specs under [spec/](../../spec/) so they stay short, unambiguous, non-redundant, and easy for both humans and LLM agents to retrieve.
+Treat the task as remediation work, not a one-pass review.
+Do not stop after listing findings.
+End clean only when a final rescan finds no actionable remaining issues in scope.
 
 Default behavior:
 
-- make the smallest correct edit set;
+- make the smallest correct edit set per iteration;
 - update the owning spec instead of restating rules in multiple places;
-- stop when ownership, precedence, or source-of-truth is ambiguous.
+- continue iterating until every actionable finding in scope is fixed or explicitly blocked;
+- stop only when the run is clean or a blocker prevents further correct edits.
 
 ## Input
 
 Focus
 ${input:Focus:optional spec file, section, or maintenance concern}
+
+Scope Override
+${input:ScopeOverride:optional, one of implicated or all-specs}
 
 ## Always-Read Sources
 
@@ -49,18 +56,35 @@ Apply these baselines explicitly and cite only the ones that materially affected
 
 ## Maintenance Workflow
 
-1. Determine the owning spec for every rule or taxonomy you touch.
-2. If the Focus is empty, start with the required specs plus the process spec and expand only when a concrete issue requires a companion spec.
-3. For each candidate change, prefer deletion, reduction, or cross-reference over expansion.
-4. Keep required specs short and hot. Move low-frequency detail to the owning companion spec only when the detail is truly required and the move improves clarity.
-5. Rewrite policy text as falsifiable statements.
-6. Use uppercase `MUST`, `SHOULD`, and `MAY` only when you intend normative force. Otherwise use ordinary prose.
-7. Keep one rule, invariant, or claim per bullet or paragraph when practical.
-8. Remove duplicate rules, repeated rationale, and repeated path or precedence tables. Keep the owner and reduce the rest to references.
-9. Preserve canonical vocabulary from [spec/spec-architecture.md](../../spec/spec-architecture.md) and the ownership model from [spec/spec-process-spec-maintenance.md](../../spec/spec-process-spec-maintenance.md).
-10. Replace vague modifiers such as "robust", "clean", "simple", "fast", or "flexible" unless the file defines measurable meaning.
-11. Prefer active voice, explicit subjects, and concrete repository nouns over pronouns and paper-local aliases.
-12. Do not mass-reflow unrelated text. If you touch prose, remove arbitrary hard wraps only in the touched block and preserve the surrounding file style unless the user explicitly asks for a broader normalization.
+1. Determine the working scope.
+   - Default to `implicated`: the focused spec files plus any owning specs they reference.
+   - Use `all-specs` only when the Focus explicitly requests a repository-wide maintenance pass.
+2. Inspect the current git diff for files under `spec/` before editing.
+   - Use the diff to identify recent churn, moved ownership, and likely contradiction zones.
+   - Do not treat the diff as the only source of truth; the current full file contents remain authoritative.
+3. Determine the owning spec for every rule or taxonomy you touch.
+4. If the Focus is empty, start with the required specs plus the process spec and expand only when a concrete issue requires a companion spec.
+5. Build a remediation ledger with one row per finding and one status: `fixed`, `remaining`, `blocked`, or `not-applicable`.
+6. For each candidate change, prefer deletion, reduction, or cross-reference over expansion.
+7. Keep required specs short and hot. Move low-frequency detail to the owning companion spec only when the detail is truly required and the move improves clarity.
+8. Rewrite policy text as falsifiable statements.
+9. Use uppercase `MUST`, `SHOULD`, and `MAY` only when you intend normative force. Otherwise use ordinary prose.
+10. Keep one rule, invariant, or claim per bullet or paragraph when practical.
+11. Remove duplicate rules, repeated rationale, and repeated path or precedence tables. Keep the owner and reduce the rest to references.
+12. Preserve canonical vocabulary from [spec/spec-architecture.md](../../spec/spec-architecture.md) and the ownership model from [spec/spec-process-spec-maintenance.md](../../spec/spec-process-spec-maintenance.md).
+13. Replace vague modifiers such as "robust", "clean", "simple", "fast", or "flexible" unless the file defines measurable meaning.
+14. Prefer active voice, explicit subjects, and concrete repository nouns over pronouns and paper-local aliases.
+15. Do not mass-reflow unrelated text. If you touch prose, remove arbitrary hard wraps only in the touched block and preserve the surrounding file style unless the user explicitly asks for a broader normalization.
+16. After each edit batch, rescan the current full contents of the touched files and update the remediation ledger.
+17. Continue the loop `audit -> edit -> validate -> rescan` until no actionable `remaining` findings exist in scope or a concrete blocker remains.
+
+## Completion Contract
+
+- A run is `clean` only when the final rescan finds no actionable `remaining` findings in scope.
+- A run is `partial` when at least one actionable finding remains but no blocking conflict prevents the run from continuing.
+- A run is `blocked` when unresolved ownership, precedence, or source-of-truth conflicts prevent further correct edits.
+- Do not report success when unresolved findings still exist unless they are explicitly marked `blocked` with a reason.
+- If a finding remains because it is outside the chosen scope, mark it `not-applicable` and say why.
 
 ## Conflict Rules
 
@@ -78,6 +102,7 @@ Stop and surface a blocker instead of editing through it when:
 - If you introduce or move a rule, update the non-owning location to reference the owner.
 - Do not invent new canonical taxonomies, precedence tables, or duplicate governance text when an owning spec already defines them.
 - Do not claim compliance with a convention unless the edited text actually reflects it.
+- Every changed hunk in `spec/` must map to one remediation-ledger finding or one validation repair.
 
 ## Validation
 
@@ -87,23 +112,36 @@ After editing:
 2. Verify that every touched rule has a single obvious owner.
 3. Verify that no touched paragraph silently changed normative force.
 4. Verify that companion-detail moves did not leave broken references or duplicate text behind.
-5. Run the narrowest available validation for the touched files. If no executable validation exists, inspect the diff for redundancy, ownership drift, and wrapping noise.
+5. Re-read the full current contents of each touched spec and any directly implicated owning spec, not just the edited hunk.
+6. Run the narrowest available validation for the touched files. If no executable validation exists, inspect the diff for redundancy, ownership drift, wrapping noise, and unexplained hunks.
+7. Use the post-edit diff to reconcile the run:
+   - every changed hunk must correspond to `fixed` or `blocked` ledger items;
+   - unexplained hunks are defects until explained or reverted in the same change.
 
 ## Output Expectations
 
-Return results in this order:
+Before the first edit, provide a short Preflight block.
+At the end, return results in this exact order:
 
-1. `Findings`
-   - list the concrete issues found, ordered by severity;
-   - include file and section anchors when possible.
-2. `Edits`
-   - summarize the minimal changes made;
-   - if no edit was needed, say so explicitly.
-3. `Standards Applied`
-   - cite the baselines used from the list above;
-   - explain in one sentence each why they mattered for this change.
-4. `Validation`
-   - report spec-gate status, ownership checks, and any remaining risks.
+### Preflight
+
+- Scope: <implicated or all-specs>
+- Status: clean | partial | blocked
+- Status evidence: <file, section, diff hunk, or command from this run>
+- Primary owner(s): <owning spec files or explicit blocker>
+- Local hypothesis: <one sentence>
+- First validation: <check, command, or none>
+
+### Completion
+
+- Run Status: clean | partial | blocked
+- Fixed Findings: <resolved items, ordered by severity>
+- Remaining Findings: <unresolved actionable items, or none>
+- Blocked Findings: <blocked items with concrete reason, or none>
+- Files Reviewed But Unchanged: <files reviewed with no edit, or none>
+- Changes: <brief summary mapped to the fixed findings>
+- Standards Applied: <only the baselines that materially affected the run, with one-sentence why>
+- Validation And Diff Reconciliation: <spec-gate result, ownership checks, full-file reread result, diff reconciliation, and remaining risks>
 
 ## Stop Condition
 
