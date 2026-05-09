@@ -9,6 +9,45 @@ This spec owns detailed controller, learner, and runtime execution contracts
 that sit above the model step and adapter surfaces. Generic model and adapter
 patterns remain in `spec/spec-model-interfaces.md`.
 
+### 1.1 Runner Snapshot Contract
+
+The canonical runner-owned per-step snapshot surface lives in
+`ehc_sn.rollouts.runtime`:
+
+- `CarrySnapshot`: frozen post-step projection stored on `StepRecord.snapshot`
+  and `ObservedStep.snapshot`.
+- `final_carry`: authoritative controller-owned continuity state returned at
+  the end of execution.
+- `StepRecord.executed_frame`: the exact tensors consumed by the model,
+  objective, and diagnostics on this step.  For replay controllers this is the
+  carry-owned step slice, independent of the source batch.
+- `StepRecord.sampled_input`: what the source proposed; the raw batch from the
+  source before the controller processed it.
+- `StepRecord.batch`: backward-compatible alias; always contains
+  `executed_frame` content (not `sampled_input`).
+
+Rules:
+
+- Carry owns continuity. Snapshots are lean projections of that continuity for
+  learners and observers; they are not a second source of replay truth.
+- Snapshot fields may expose current-step data and lightweight slot-local
+  continuity facts (`halted`, `steps`, model/runtime state, or small static
+  metadata) when downstream consumers need them.
+- Runner snapshots must not duplicate source-owned full replay rows or other
+  full `(B, T, ...)` tensors. If a value is source-owned or time-major enough
+  to bloat per-step records, it stays in the source batch or an out-of-band
+  join path, not in carry.  `resident_payload` is explicitly excluded from
+  `CarrySnapshot` for this reason.
+- Observability must not widen the carry contract by default. When traces,
+  figures, or diagnostics need source-owned context, they should rejoin it from
+  batch/source metadata or task-owned artifacts rather than smuggling it into
+  every snapshot.
+- Family-specific snapshot protocols are projections of this runner snapshot
+  contract and must expose only the fields their consumer actually needs.
+- Objectives and traces must read `executed_frame` (not `sampled_input` or the
+  generic snapshot) when they need step-truth data.  `record.batch` is a
+  backward-compatible alias for `executed_frame`.
+
 ---
 
 ## 2 Neutral Actor-Critic Contracts
@@ -28,10 +67,10 @@ The canonical definitions live in `ehc_sn.controllers.contracts.actor_critic`.
   never `None`.
 - `ActorCriticPolicyOutput`: policy head payload.
 - `ActorCriticCriticOutput`: value head payload.
-- `ActorCriticExecutionSnapshot`: minimal learner-side snapshot containing
-  `steps` and `halted`.
-- `OnlineBootstrapCarry`: execution snapshot extended with `model_state` for
-  TD(0) bootstrap.
+- `ActorCriticExecutionSnapshot`: minimal learner-side projection of the
+  runner snapshot containing `steps` and `halted`.
+- `OnlineBootstrapCarry`: that projection extended with `model_state` for TD(0)
+  bootstrap.
 - `OnlineBootstrapRuntime`: minimal runtime seam exposing
   `extract_next_step_obs(carry) -> Batch`.
 

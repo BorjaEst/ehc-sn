@@ -83,32 +83,56 @@ when the concrete type is not semantically required.
 
 ## 5 Replay Controller Surface
 
-Replay controllers operate on source-provided replay rows and current-step
-state, not on full trajectories stored in carry.
+Replay controllers operate on source-provided replay rows through controller-
+owned slot continuity, not by pushing progression state back into the source or
+by storing full trajectories in carry.
 
-Preferred replay-carry pattern:
+**Slot-authoritative invariant (non-negotiable):** carry is the only continuity
+authority. Active slots never consult the incoming source batch for trajectory
+data. Dataloader batch boundaries and runner chunk boundaries are not reset
+boundaries. Trajectory identity changes only on the halted→admitted boundary.
+
+Canonical replay-carry pattern:
 
 ```python
 @dataclass
 class ReplayCarry:
     model_state: object
-    cursor: Tensor
-    trajectory_length: Tensor
-    halted: Tensor
-    data: dict[str, Tensor]
+    cursor: Tensor            # (B,) int64 — per-slot step position
+    trajectory_length: Tensor # (B,) int64 — authoritative, set at admission only
+    halted: Tensor            # (B,) bool  — slot done; next step will admit
+    trajectory_id: Tensor     # (B,) int64 — stable dataset identity; -1 = not yet admitted
+    resident_payload: dict[str, Tensor]  # carry-owned trajectory arrays for admitted row
+    data: dict[str, Tensor]   # current-step extracted payload (small, included in snapshot)
+    task_state: dict[str, Tensor]  # task-local carry state
 ```
 
 Rules:
 
-- Replay sources own full replay rows and any full batch-major replay tensors.
-- Replay carry owns only recurrent state, cursor-local stop facts, and the
-  current-step task payload.
-- Replay carry must not retain full `(B, T, ...)` trajectory tensors or other
-  full replay batches that would be cloned into rollout records on every step.
+- Replay sources own immutable full replay rows and any full batch-major
+  replay tensors. They do not own per-slot execution continuity after a batch
+  has been emitted.
+- Replay carry owns slot-local continuity: recurrent state, cursor, stop facts
+  (`trajectory_length`, `halted`), stable identity (`trajectory_id`), and
+  carry-owned trajectory arrays (`resident_payload`) for the admitted episode.
+- `resident_payload` stores the trajectory columns for the admitted row. It is
+  NOT included in `CarrySnapshot` (and thus not cloned into per-step records),
+  satisfying the "no large tensors in per-step snapshots" constraint.
+- `data` stores the current-step extracted payload (small `(B, ...)` tensors)
+  and IS included in `CarrySnapshot.data`.
+- Active slots read exclusively from `resident_payload` at the authoritative
+  cursor position. They never consult the incoming source batch.
+- Halted slots may admit exactly one new candidate row per step, atomically
+  replacing `trajectory_id`, `resident_payload`, `cursor`, `trajectory_length`,
+  `steps`, `task_state`, and resetting `model_state`.
+- `trajectory_id` is fit-path identity only (non-model-visible). It must NOT
+  appear in `ArenaTaskInput` or any model input.
 - Replay runtime batches are batch-major: `B` is the leading axis and `T` is
   the second axis.
 - Current-step replay payloads are derived from the source batch plus the
-  current cursor. Step records should snapshot only current-step data.
+  carry-owned continuity state. Step records and runner snapshots should
+  project only current-step data plus the minimal post-step continuity needed
+  downstream.
 
 Detailed controller/runtime execution contracts are intentionally split into
 `spec/spec-controller-runtime-contracts.md` so this companion stays focused on
@@ -136,3 +160,73 @@ Example optional checkpoint fields:
 hpc_checkpoint: Optional[Path] = None
 pfc_checkpoint: Optional[Path] = None
 ```
+
+---
+
+## 7 Lightning Evaluation Surface
+
+Every Lightning training family exposes a pair of methods that let the
+out-of-band evaluation regime runner drive the family without touching the
+fit-path `val_metrics`.
+
+### Protocol
+
+```python
+class SupportsEvaluationRegimes(Protocol):
+    def build_evaluation_metrics(self, namespace: str) -> MetricCollection: ...
+    def execute_evaluation_batch(
+        self,
+        batch: Batch,
+        trace_request: Optional[EvaluationTraceRequest],
+    ) -> EvaluationBatchArtifacts: ...
+```
+
+Defined in `ehc_sn.lightning.eval.contracts`.
+
+### `build_evaluation_metrics(namespace)`
+
+- Returns a **fresh** `MetricCollection` keyed to the family's episode route
+  table and prefixed with `namespace`.
+- Must use `.clone(prefix=namespace)` on the same route table used for `val_metrics`.
+- The runner calls this once per regime run; the collection is discarded after
+  metrics are computed.
+
+### `execute_evaluation_batch(batch, trace_request)`
+
+- Runs a deterministic rollout identical to `validation_step` but **does not**
+  update `self.val_metrics`.
+- Returns `EvaluationBatchArtifacts` with:
+  - `evaluated`: the evaluated chunk from the rollout.
+  - `apply_to_metrics`: a closure that stamps the evaluated chunk into any
+    `MetricCollection` keyed by the family's route table. The runner calls
+    this on the collection returned by `build_evaluation_metrics`.
+  - `trace`: populated only when `trace_request.enabled` is `True`.
+- Never logs metrics directly; logging is the caller's responsibility.
+
+### Trace request handshake
+
+- `trace_request` is `None` when the regime or runner does not need a trace.
+- When non-`None` and `trace_request.enabled` is `True`, the family builds a
+  `TraceTree` from `trace_request.key_set()` and includes it in the artifact.
+- Families that have a fixed trace spec (e.g. HRM families) may ignore the
+  key set and use their canonical spec; this is acceptable for v1.
+
+### Namespace rules
+
+- `val/` — fit-path metrics only (`validation_step`). Never written by regimes.
+- `diag/<regime_id>/` — diagnostic regime metrics (out-of-band, driven by
+  `EvaluationRegimesCallback`).
+- `bench/<regime_id>/` — benchmark regime metrics (reserved for future use).
+
+### Families
+
+All 5 Lightning families implement this surface in parallel with identical
+method names:
+
+| Family | Route table          | Module                        |
+| ------ | -------------------- | ----------------------------- |
+| TEM v1 | `TEM_EPISODE_ROUTES` | `ehc_sn.lightning.tem.tem_v1` |
+| TEM v2 | `TEM_EPISODE_ROUTES` | `ehc_sn.lightning.tem.tem_v2` |
+| EHC v1 | `EHC_EPISODE_ROUTES` | `ehc_sn.lightning.ehc.ehc_v1` |
+| HRM v1 | `ACT_EPISODE_ROUTES` | `ehc_sn.lightning.hrm.hrm_v1` |
+| HRM v2 | `RL_EPISODE_ROUTES`  | `ehc_sn.lightning.hrm.hrm_v2` |

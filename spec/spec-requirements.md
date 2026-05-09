@@ -13,9 +13,6 @@ Before generating any design or code artifact, automated agents **MUST**:
 3. If any are missing, **STOP** and output exactly:
    `Blocking: missing required specs: <comma-separated list of missing paths>`
 
-The only exception is the **Bootstrap Mode** override defined in the
-`bootstrap-specs.prompt.md` prompt, which operates before specs exist.
-
 Spec maintenance and conflict-resolution workflow are owned by
 `spec/spec-process-spec-maintenance.md`.
 
@@ -164,9 +161,9 @@ This table is the human-readable inventory and must stay synchronized with it.
     owned by the upstream source, task-neutral channels only.
   - **Task corpus**: `data/processed/<task-name>/<corpus-name>/v<integer>/` —
     owned by the task package, includes task-protocol channels.
-- A shared-family name must not collide with a task namespace. Registered
-  shared families are `maze-nd`, `dungeongen`, and `numberline`; task namespaces are
-  `mazehard`, `dungeon`, `arena`, and `countwalk`.
+- A shared-family name must not collide with a task namespace.
+- The current shared-family and task-namespace registry is owned by
+  `spec/spec-data-contracts.md`.
 - `data/` owns provenance, normalization, shared schema, shared manifests,
   shared validation, and shared substrate materialization. `tasks/` own task
   schema, task corpus materialization, replay rows, episode protocol,
@@ -197,8 +194,9 @@ This table is the human-readable inventory and must stay synchronized with it.
 
 ## 8 Cross-Component Change Policy
 
-Cross-component changes require a tracked plan in `.copilot-tracking/plans/`
-before implementation begins. This includes:
+Cross-component changes require a tracked plan under the manifest-owned plans
+root (`spec/spec-manifest.toml [canonical_paths.plans_root]`) before
+implementation begins. This includes:
 
 - adding a new top-level package under `ehc_sn/`;
 - moving code between components;

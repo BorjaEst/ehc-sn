@@ -66,24 +66,12 @@ other specs and are referenced here rather than restated.
 
 ## 3 Configuration Standards
 
-- **Component configs**: `pydantic.BaseModel(extra="forbid")` with `Field(...)`
-  descriptors. Use `frozen=True` on fields that must not change after
-  construction (e.g., architectural dimensions).
-- **CLI entry points**: `pydantic_settings.BaseSettings(extra="forbid",
-cli_parse_args=True)`. CLI source must have highest precedence.
-- **Static defaults**: entry-point-owned TOML files under `config/`.
-  Canonical examples include `config/training.ehc-v1.toml` and
-  `config/benchmark-b0.hrm-v1.toml`. Entry points load file defaults first,
-  then allow CLI values to override them.
+- Configuration taxonomy, entry-point setting shapes, static defaults, and
+  composition rules are owned by `spec/spec-configuration-patterns.md`.
 - **Validation**: Use Pydantic validators (`@field_validator`) for non-trivial
   constraints. Fail fast with actionable error messages.
-- Benchmark entry points under `scripts/benchmarks/` should remain thin wrappers
-  around `ehc_sn.benchmarks`; they may resolve config inputs, checkpoint paths,
-  and concrete benchmark bindings, but must not duplicate evaluator semantics,
-  shared benchmark infrastructure, or artifact-writing logic.
-- Canonical training entry points live under `scripts/training/` and optional
-  cluster-launch wrappers under `scripts/haicore/`. Shared logic must live in
-  `src/ehc_sn/`, not inside those entry points.
+- Executable-surface placement and thin-entry-point rules are owned by
+  `spec/spec-requirements.md`.
 
 ---
 
@@ -139,11 +127,13 @@ or consumed.
 
 ## 6 Artifact Standards
 
-| Artifact       | Location                     | Format   | Required sections                          |
-| -------------- | ---------------------------- | -------- | ------------------------------------------ |
-| Plans          | `.copilot-tracking/plans/`   | Markdown | Goal, Scope, Steps, Acceptance Criteria    |
-| Plan details   | `.copilot-tracking/details/` | Markdown | Linked from parent plan                    |
-| Change records | `.copilot-tracking/changes/` | Markdown | What Changed, Why, Files Affected, Testing |
+- Plans use `spec/spec-manifest.toml [canonical_paths.plans_root]`, Markdown,
+  and the sections Goal, Scope, Steps, and Acceptance Criteria.
+- Plan details use `spec/spec-manifest.toml [canonical_paths.plan_details_root]`
+  and Markdown.
+- Change records use
+  `spec/spec-manifest.toml [canonical_paths.plan_changes_root]`, Markdown, and
+  the sections What Changed, Why, Files Affected, and Testing.
 
 Canonical artifact roots and spec precedence are defined in
 `spec/spec-manifest.toml`. Do not duplicate those path or precedence tables in

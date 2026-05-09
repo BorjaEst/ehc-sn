@@ -51,7 +51,8 @@ Rules:
 - Reusable raw acquisition, canonicalization, and writer logic lives under
   `src/ehc_sn/data/`.
 - Build reports and benchmark manifests are **not** canonical dataset contents
-  and **must not** live under `data/processed/`. Use `outputs/` or `reports/`.
+  and **must not** live under `data/processed/`. Use `reports/benchmarks/` or
+  `outputs/`.
 
 ---
 
@@ -80,16 +81,25 @@ data/processed/<task-name>/<corpus-name>/v<integer>/
 ```
 
 A **task corpus** stores task-protocol channels (replay rows, episode data,
-task-supervision labels) and carries the shared channels it extends. The
-`<task-name>` matches the owning package under `tasks/`. The `<corpus-name>`
-is a corpus-specific label (e.g. `default`).
+task-supervision labels). A task corpus may reference a **parent shared
+substrate** without physically carrying all shared channels into its own
+files. Shared channels such as spatial maps are owned by the parent substrate
+and must be loaded from there when needed (e.g. for geometry-aware figures or
+evaluation). The `<task-name>` matches the owning package under `tasks/`. The
+`<corpus-name>` is a corpus-specific label (e.g. `default`).
 
-| Task      | Corpus root prefix          | Parent substrate  |
-| --------- | --------------------------- | ----------------- |
-| mazehard  | `data/processed/mazehard/`  | `maze-nd/v<N>`    |
-| dungeon   | `data/processed/dungeon/`   | `dungeongen/v<N>` |
-| arena     | `data/processed/arena/`     | `dungeongen/v<N>` |
-| countwalk | `data/processed/countwalk/` | `numberline/v<N>` |
+Countwalk demonstrates this pattern: it omits numberline's `state_ids`
+channel and instead derives all world identity from its own replay channels.
+Arena v1 applies the same principle at scale: the dungeongen spatial maps
+(`topology`, `observations`, `mask_valid`, `regions`, `landmarks`) remain in
+the parent substrate; the Arena corpus stores only trajectory-derived channels.
+
+| Task      | Corpus root prefix          | Parent substrate  | Carries parent channels? |
+| --------- | --------------------------- | ----------------- | ------------------------ |
+| mazehard  | `data/processed/mazehard/`  | `maze-nd/v<N>`    | Yes (topology, mask)     |
+| dungeon   | `data/processed/dungeon/`   | `dungeongen/v<N>` | Yes (all spatial)        |
+| arena     | `data/processed/arena/`     | `dungeongen/v<N>` | No (topology-free)       |
+| countwalk | `data/processed/countwalk/` | `numberline/v<N>` | No (topology-free)       |
 
 ### 3.3 Immutability Invariant
 
@@ -114,8 +124,9 @@ family/task/corpus/version numbers, not from arbitrary path overrides.
 ### 3.6 Collision Rule
 
 A shared-family name and a task namespace must not be the same string. The
-registered shared families (`maze-nd`, `dungeongen`, `numberline`) do not collide with the
-task namespaces (`mazehard`, `dungeon`, `arena`).
+registered shared families (`maze-nd`, `dungeongen`, `numberline`) do not
+collide with the task namespaces (`mazehard`, `dungeon`, `arena`,
+`countwalk`).
 
 ---
 
@@ -260,29 +271,127 @@ data/processed/dungeon/default/v1/
 
 ### 5.5 Task Corpus (arena)
 
-Arena is a task corpus over the `dungeongen` shared substrate. It inherits all
-dungeongen spatial channels (topology, observations, mask_valid, regions,
-landmarks) and adds Arena-owned trajectory channels.
+Arena replay v1 is topology-free. Spatial geometry lives exclusively in the
+parent `dungeongen` shared substrate; the Arena corpus carries only
+trajectory-derived channels. Observation and landmark ids are precomputed at
+build time from the parent spatial maps and stored directly in trajectory
+arrays so the runtime never needs parent maps.
+
+**Freeze rule:** after this reset (task_protocol_version = 1), any semantic
+change to the stored channels, shapes, dtypes, sentinels, or walk/start
+policies is a new protocol version.
+
+#### 5.5.1 On-disk layout
 
 ```text
-data/processed/arena/default/v1/
-├── manifest.json
-├── index.jsonl
+data/processed/arena/<corpus-name>/v1/
+├── manifest.json           ← authoritative root descriptor (see §5.5.3)
+├── index.jsonl             ← per-sample entries with task_metadata (see §5.5.4)
 ├── train/
 │   ├── dataset.json
-│   ├── topology.npy                    ← (N, H, W) bool
-│   ├── observations.npy               ← (N, H, W) int32
-│   ├── mask_valid.npy                  ← (N, H, W) bool
-│   ├── regions.npy                     ← (N, H, W) int32
-│   ├── landmarks.npy                   ← (N, H, W) int32
-│   ├── trajectory_row.npy              ← (N, T) int32
-│   ├── trajectory_col.npy              ← (N, T) int32
-│   ├── trajectory_previous_action.npy  ← (N, T) int32
-│   ├── trajectory_episode_start.npy    ← (N, T) bool
-│   ├── trajectory_valid_step.npy       ← (N, T) bool
-│   └── trajectory_length.npy           ← (N,) int32
-└── ...
+│   ├── trajectory_row.npy                ← (N, T_max) int32
+│   ├── trajectory_col.npy                ← (N, T_max) int32
+│   ├── trajectory_observation_id.npy     ← (N, T_max) int32
+│   ├── trajectory_previous_action.npy    ← (N, T_max) int32
+│   ├── trajectory_landmark_id.npy        ← (N, T_max) int32
+│   ├── trajectory_is_revisit.npy         ← (N, T_max) bool
+│   ├── trajectory_episode_start.npy      ← (N, T_max) bool
+│   ├── trajectory_valid_step.npy         ← (N, T_max) bool
+│   └── trajectory_length.npy            ← (N,) int32
+├── val/   (same layout)
+└── test/  (same layout)
 ```
+
+#### 5.5.2 Channel definitions (exact frozen order)
+
+| #   | Channel name                 | Shape        | dtype | Sentinel / invariant                            |
+| --- | ---------------------------- | ------------ | ----- | ----------------------------------------------- |
+| 0   | `trajectory_row`             | `(N, T_max)` | int32 | `-1` on invalid padded steps                    |
+| 1   | `trajectory_col`             | `(N, T_max)` | int32 | `-1` on invalid padded steps                    |
+| 2   | `trajectory_observation_id`  | `(N, T_max)` | int32 | `-1` on invalid padded steps                    |
+| 3   | `trajectory_previous_action` | `(N, T_max)` | int32 | step 0 = STAY (0); `-1` on invalid padded steps |
+| 4   | `trajectory_landmark_id`     | `(N, T_max)` | int32 | `-1` when absent or on invalid padded steps     |
+| 5   | `trajectory_is_revisit`      | `(N, T_max)` | bool  | `False` on invalid padded steps                 |
+| 6   | `trajectory_episode_start`   | `(N, T_max)` | bool  | `True` only at step 0; `False` elsewhere        |
+| 7   | `trajectory_valid_step`      | `(N, T_max)` | bool  | equals `t < trajectory_length`                  |
+| 8   | `trajectory_length`          | `(N,)`       | int32 | actual number of valid steps in this episode    |
+
+**Padding rule:** all `T_max`-shaped arrays are padded to the same length
+within a split. Valid steps are `0 <= t < trajectory_length[i]`; all other
+positions use the frozen sentinel for that channel.
+
+**Landmark normalization:** the parent dungeongen substrate uses `0` to
+indicate "no landmark". The Arena builder normalizes this to `-1` during
+materialization so that `trajectory_landmark_id == -1` consistently means
+"no landmark at this step". Real landmark ids (1, 2, …) are preserved as-is.
+
+**Action id space (frozen):** STAY=0, UP=1, RIGHT=2, DOWN=3, LEFT=4.
+
+**Start policy ids (registered Arena v1):**
+
+- `random_valid_cell_v1` — enumerate valid cells in row-major order from the
+  parent `mask_valid` map, then sample uniformly using the episode RNG.
+- `dungeongen_canonical_entrance_v1` — reconstruct the parent dungeongen map
+  from the parent manifest seed and split/index position, then derive the
+  canonical entrance cell from the raw exit metadata.
+
+**Walk policy ids (registered Arena v1):**
+
+- `random_walk_no_immediate_backtrack_v1` — enumerate legal movement actions
+  from the current cell; if the inverse of the previous non-STAY action is
+  legal and at least one other legal movement exists, exclude it; if no legal
+  movement remains, emit STAY; otherwise sample uniformly from the remaining
+  legal actions. Inverse map: UP↔DOWN, RIGHT↔LEFT, STAY has no
+  inverse-suppression effect.
+- `random_walk_uniform_v1` — enumerate all legal movement actions from the
+  current cell and sample uniformly with no immediate-backtrack suppression;
+  emit STAY only when no legal movement exists.
+
+**RNG:** NumPy PCG64. Per-episode `walk_seed` is derived as the first 8 bytes
+of SHA-256 over the canonical JSON object (keys sorted):
+`{seed, split, parent_sample_id, episode_index, start_policy_id,
+walk_policy_id, max_steps}`, interpreted as unsigned little-endian int64.
+
+#### 5.5.3 Required manifest constants (arena v1)
+
+| Field                    | Value / type                             |
+| ------------------------ | ---------------------------------------- |
+| `task`                   | `"arena"`                                |
+| `task_schema_version`    | `1`                                      |
+| `task_protocol_version`  | `1`                                      |
+| `parent_family`          | `"dungeongen"`                           |
+| `start_policy_id`        | registered Arena v1 start-policy id      |
+| `walk_policy_id`         | registered Arena v1 walk-policy id       |
+| `action_count`           | `5`                                      |
+| `action_id_space`        | `"STAY=0,UP=1,RIGHT=2,DOWN=3,LEFT=4"`    |
+| `store_row_col`          | `true`                                   |
+| `store_landmark_id`      | `true`                                   |
+| `observation_vocab_size` | `int` — number of unique observation ids |
+
+`action_id_space` is stored as a plain string (not a JSON object).
+
+`observation_vocab_size` must be derived from the parent substrate manifest
+(or computed during Arena materialization if the parent does not expose it).
+It must not be a hidden constant.
+
+#### 5.5.4 Per-sample index metadata (task_metadata)
+
+Each `index.jsonl` entry for an Arena sample includes a `task_metadata`
+object with the following required fields:
+
+| Field              | Type  | Description                                                  |
+| ------------------ | ----- | ------------------------------------------------------------ |
+| `parent_sample_id` | `str` | The `id` of the corresponding parent dungeongen index entry  |
+| `episode_index`    | `int` | Zero-based episode index within this parent sample and split |
+| `walk_seed`        | `int` | The deterministic uint64 seed used to generate this episode  |
+
+**Sample id rule (frozen):** `arena-{split}-{parent_sample_id}-ep{episode_index:04d}`
+
+**Invariants:**
+
+- `episode_index` is unique per `(parent_sample_id, split)` combination.
+- `walk_seed` is unique per `(parent_sample_id, split)` combination.
+- `parent_sample_id` must exist in the declared parent substrate root index **in the same split** (train Arena entries reference train parent ids, val → val, test → test).
 
 ### 5.6 Shared Substrate (numberline)
 
@@ -377,17 +486,20 @@ substrate builds:
 
 Path: `<version-root>/index.jsonl`
 
-| Field              | Type              | Description                                                                                                                                             |
-| ------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`               | `str`             | Unique sample identifier.                                                                                                                               |
-| `source`           | `str`             | Generator or source dataset name.                                                                                                                       |
-| `split`            | `str`             | `train`, `val`, or `test`.                                                                                                                              |
-| `source_record_id` | `str \| null`     | Stable raw-source record identity (e.g. `"train:12345"`). Null for tasks that generate samples synthetically and have no upstream raw record to rejoin. |
-| `shape`            | `tuple[int, int]` | Grid shape `(H, W)`.                                                                                                                                    |
-| `channels`         | `list[str]`       | Channel names present in the split.                                                                                                                     |
-| `n_observations`   | `int`             | Observation vocabulary size, or `0`.                                                                                                                    |
-| `n_goals`          | `int`             | Number of goal cells, or `0`.                                                                                                                           |
-| `difficulty`       | `str`             | Optional source-defined difficulty label.                                                                                                               |
+| Field              | Type             | Description                                                                                                  |
+| ------------------ | ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| `id`               | `str`            | Unique sample identifier within the versioned processed root.                                                |
+| `source`           | `str`            | Source family or task corpus that materialized the sample.                                                   |
+| `split`            | `str`            | Canonical split name (`train`, `val`, or `test`).                                                            |
+| `source_record_id` | `str \| null`    | Stable raw-source record identity (e.g. `"train:12345"`). Null when the sample has no upstream raw identity. |
+| `channels`         | `list[str]`      | Canonical processed channel names materialized for the sample.                                               |
+| `task_metadata`    | `object \| null` | Optional task-owned per-sample provenance. Null unless the task builder supplies it. Task-defined schema.    |
+
+The `task_metadata` field is a generic slot for task-owned per-sample
+provenance that is not universally required. Tasks that need it (e.g. Arena's
+`parent_sample_id`, `episode_index`, `walk_seed`) populate this field; others
+leave it null. The data layer makes no assumptions about its internal
+structure; each task documents its own schema in the relevant corpus section.
 
 ---
 
