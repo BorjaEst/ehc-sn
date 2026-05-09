@@ -4,7 +4,7 @@ description: "Generate a self-contained copy-paste prompt for another agent to i
 argument-hint: "Objective or target override, optional"
 ---
 
-# Create Safe Handoff Prompt
+# Create Handoff Prompt
 
 ## Mission
 
