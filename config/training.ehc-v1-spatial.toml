@@ -6,6 +6,7 @@
 model_config_path = "config/models/ehc-v1.toml"
 
 # -- General settings ---------------------------------------------------------
+mode                 = "spatial_pretrain"
 dataset_path         = "data/processed/arena/default/v1"
 global_batch_size    = 8
 max_epochs           = 100
@@ -46,7 +47,7 @@ diagnostic_level     = "standard"
 
 # -- Optimization -------------------------------------------------------------
 [optimizer]
-    lr           = 1e-4
+    lr           = 9.4e-4
     weight_decay = 1e-2
     betas        = [0.9, 0.98]
 
@@ -67,11 +68,10 @@ diagnostic_level     = "standard"
     offset_max       = 10000.0
 
 [runtime.sequence]
-    tbptt_steps = 25
+    tbptt_steps = 75
 
 [runtime.validation]
     hard_max_rollout_steps = 600
-    seed = 42
 
 # -- Objective ----------------------------------------------------------------
 [objective]
@@ -83,6 +83,11 @@ diagnostic_level     = "standard"
     c_place_reg      = 0.02
     grid_reg_norm    = "l2"
     place_reg_norm   = "l1"
+    temp_it          = 2000
+    p2g_use_it       = 8000
+    p2g_scale        = 200.0
+    g_reg_it         = 40000000
+    p_reg_it         = 4000
 
 # -- Figures & diagnostics ----------------------------------------------------
 [logger]

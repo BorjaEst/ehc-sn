@@ -2,9 +2,9 @@
 
 Supports two public modes (selected by the ``mode`` field in the config):
     spatial_pretrain    — arena replay, EHC variational objective.
-    reason_pretrain — MazeHard deliberation, hybrid RL.
+    reason_pretrain     — MazeHard deliberation, hybrid RL.
 
-Configuration path: EHC_V1_CONFIGURATION_PATH (default: config/training.ehc-v1.toml).
+Configuration path: EHC_V1_CONFIGURATION_PATH (default: config/training.ehc-v1-spatial.toml).
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
-CONFIGURATION_PATH = os.environ.get("EHC_V1_CONFIGURATION_PATH", "config/training.ehc-v1.toml")
+CONFIGURATION_PATH = os.environ.get("EHC_V1_CONFIGURATION_PATH", "config/training.ehc-v1-spatial.toml")
 
 
 # =================================================================================================
@@ -245,6 +245,10 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
 
 
 # =================================================================================================
+RunArguments.model_rebuild()
+
+
+# =================================================================================================
 # Entrypoint
 # =================================================================================================
 if __name__ == "__main__":
@@ -303,8 +307,8 @@ if __name__ == "__main__":
     )
 
     # Start training.
-    # - The LightningModule wraps the HRM model and defines the training loop.
-    # - The DataModule constructs loaders for the puzzle/maze dataset.
+    # - The LightningModule wraps the EHC model family and defines the training loop.
+    # - The DataModule constructs loaders for the selected processed dataset.
     training_model = EHCV1TrainingModel(ehc_config)
 
     # Optional: initialize model weights from a separate checkpoint (does not restore
