@@ -72,7 +72,7 @@ class TensorBoardExportReport:
 
 
 # =============================================================================
-def discover_tensorboard_runs(  # ---------------------------------------------
+def discover_runs(  # ---------------------------------------------------------
     search_root: Path,
 ) -> list[TensorBoardRun]:
     """Return all TensorBoard runs reachable from ``search_root``."""
@@ -103,7 +103,7 @@ def discover_tensorboard_runs(  # ---------------------------------------------
 
 
 # =============================================================================
-def export_tensorboard_scalars(  # --------------------------------------------
+def export_scalars(  # --------------------------------------------------------
     search_root: Path,
     output_path: Path,
     *,
@@ -117,7 +117,7 @@ def export_tensorboard_scalars(  # --------------------------------------------
     if sample_points < 1:
         raise ValueError("sample_points must be at least 1.")
 
-    runs = discover_tensorboard_runs(search_root)
+    runs = discover_runs(search_root)
     requested_tags = set(tags) if tags is not None else None
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -309,6 +309,6 @@ __all__ = [
     "Logger",
     "TensorBoardRun",
     "TensorBoardExportReport",
-    "discover_tensorboard_runs",
-    "export_tensorboard_scalars",
+    "discover_runs",
+    "export_scalars",
 ]
