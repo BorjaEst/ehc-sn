@@ -170,9 +170,6 @@ def load_weights_from_checkpoint(  # ------------------------------------------
 # =============================================================================
 __all__ = [
     "EHCMode",
-    "EHCSpatialPretrainConfig",
-    "EHCControllerPretrainConfig",
-    "ModelConfig_EHC_V1",
     "EHCRegime",
     "VALID_INIT_GROUPS",
     "resolve_spatial_core_ids",
