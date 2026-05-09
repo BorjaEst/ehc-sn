@@ -76,6 +76,12 @@ class EvaluationRegimesCallback(pl.Callback):
         self.settings = settings
         # Regime id -> latest artifact from the most recent run.
         self._latest_artifacts: dict[str, EvaluationBatchArtifacts] = {}
+        # Regime ids that produced a fresh artifact in the current validation cycle.
+        self._refreshed_this_cycle: set[str] = set()
+
+    def was_refreshed_this_cycle(self, regime_id: str) -> bool:  # fmt: skip  # --------------------------------------------------------------------------------
+        """Return whether ``regime_id`` produced a fresh artifact in the current validation cycle."""
+        return regime_id in self._refreshed_this_cycle
 
     def get_latest_artifact(self, regime_id: str,) -> Optional[EvaluationBatchArtifacts]:  # fmt: skip  # -------------------------------------------------------------------
         """Return the most recently cached artifact for a named regime.
@@ -88,6 +94,10 @@ class EvaluationRegimesCallback(pl.Callback):
             or ``None`` if the regime has not run yet or produced no batches.
         """
         return self._latest_artifacts.get(regime_id)
+
+    def on_validation_epoch_start(self, trainer: Trainer, pl_module: LightningModule,) -> None:  # fmt: skip  # ---------------------------------------------------------------
+        """Clear the per-cycle freshness set before each validation run."""
+        self._refreshed_this_cycle.clear()
 
     def on_validation_epoch_end(self, trainer: Trainer, pl_module: LightningModule,) -> None:  # fmt: skip  # ---------------------------------------------------------------
         """Run all scheduled named regimes after fit validation completes.
@@ -181,6 +191,7 @@ class EvaluationRegimesCallback(pl.Callback):
         # Cache the latest artifact for FiguresCallback consumption.
         if result.latest_artifact is not None:
             self._latest_artifacts[regime.regime_id] = result.latest_artifact
+            self._refreshed_this_cycle.add(regime.regime_id)
 
         # Log metrics via the module's log_dict (routed to whatever logger is active).
         if result.metrics:

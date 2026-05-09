@@ -197,6 +197,13 @@ class FiguresCallback(pl.Callback):
             )
             return
 
+        if not regime_callback.was_refreshed_this_cycle(regime_id):
+            print(
+                f"FiguresCallback: Regime '{regime_id}' did not run this validation cycle. "
+                "Skipping figure generation to avoid duplicate figures."
+            )
+            return
+
         artifact = regime_callback.get_latest_artifact(regime_id)
         if artifact is None:
             print(
