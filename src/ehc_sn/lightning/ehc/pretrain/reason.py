@@ -12,6 +12,7 @@ from torchmetrics import MetricCollection
 
 from ehc_sn import utils
 from ehc_sn.adapters.mazehard.ehc import MazeHardEHCAdapterSettings, MazeHardEHCV1HybridTaskBinding
+from ehc_sn.adapters.mazehard.ehc.traces import build_mazehard_ehc_trace_meta
 from ehc_sn.controllers.deliberation.actor_critic import DeliberationACController, DeliberationACControllerConfig
 from ehc_sn.lightning._rollout import (
     evaluate_rollout,
@@ -45,7 +46,7 @@ from ehc_sn.types import Batch
 
 
 # =============================================================================
-class EHCControllerPretrainConfig(BaseModel, extra="forbid"):
+class EHCReasonPretrainConfig(BaseModel, extra="forbid"):
     """Config for controller pretrain (MazeHard deliberation, hybrid RL objective)."""
 
     mode: Literal["reason_pretrain"] = "reason_pretrain"
@@ -94,7 +95,7 @@ class EHCControllerPretrainConfig(BaseModel, extra="forbid"):
 
 
 # =============================================================================
-class EHCControllerPretrainRegime:
+class EHCReasonPretrainRegime:
     """MazeHard deliberation controller pretrain regime.
 
     Trains controller_body, controller_heads, controller_bridge.
@@ -106,7 +107,7 @@ class EHCControllerPretrainRegime:
         self,
         lm: L.LightningModule,
         model: EHCModelV1,
-        config: EHCControllerPretrainConfig,
+        config: EHCReasonPretrainConfig,
     ) -> None:
         """Initialize regime with model and config. Build controller, objective, learner, scorer."""
         self._lm = lm
@@ -268,7 +269,7 @@ class EHCControllerPretrainRegime:
             hard_max_rollout_steps=self._config.runtime.validation.hard_max_rollout_steps,
             runner_options={"explore": False, "allow_halt": False},
         )
-        trace = observe_rollout_chunk(evaluation.chunk, lm.trace_specs, trace_meta={})
+        trace = observe_rollout_chunk(evaluation.chunk, lm.trace_specs, trace_meta=build_mazehard_ehc_trace_meta(batch))
         update_metric_collection_from_evaluated_chunk(lm.val_metrics, evaluation.evaluated, RL_EPISODE_ROUTES)
         return {"trace": trace}
 
@@ -304,7 +305,7 @@ class EHCControllerPretrainRegime:
 
         trace = None
         if trace_request is not None and trace_request.enabled:
-            trace = observe_rollout_chunk(evaluation.chunk, lm.trace_specs, trace_meta={})
+            trace = observe_rollout_chunk(evaluation.chunk, lm.trace_specs, trace_meta=build_mazehard_ehc_trace_meta(batch))
 
         def _apply(collection: MetricCollection) -> None:
             update_metric_collection_from_evaluated_chunk(collection, evaluation.evaluated, RL_EPISODE_ROUTES)
@@ -321,4 +322,4 @@ class EHCControllerPretrainRegime:
 
 
 # =============================================================================
-__all__ = ["EHCControllerPretrainConfig", "EHCControllerPretrainRegime"]
+__all__ = ["EHCReasonPretrainConfig", "EHCReasonPretrainRegime"]

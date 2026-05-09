@@ -18,9 +18,9 @@ from torchmetrics import MetricCollection
 
 from ehc_sn.adapters.arena.ehc import ArenaEHCV1BridgeAdapter
 from ehc_sn.adapters.arena.ehc.traces import ARENA_EHC_TRACE_FIELDS
-from ehc_sn.adapters.mazehard.ehc import MazeHardEHCV1BridgeAdapter
+from ehc_sn.adapters.mazehard.ehc import MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS, MazeHardEHCV1BridgeAdapter
 from ehc_sn.lightning.ehc.core._base import EHCMode, EHCRegime
-from ehc_sn.lightning.ehc.pretrain.controller import EHCControllerPretrainConfig, EHCControllerPretrainRegime
+from ehc_sn.lightning.ehc.pretrain.reason import EHCReasonPretrainConfig, EHCReasonPretrainRegime
 from ehc_sn.lightning.ehc.pretrain.spatial import EHCSpatialPretrainConfig, EHCSpatialPretrainRegime
 from ehc_sn.lightning.eval.contracts import EvaluationBatchArtifacts, EvaluationTraceRequest
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
@@ -34,7 +34,7 @@ from ehc_sn.types import Batch
 ModelConfig_EHC_V1: TypeAlias = Annotated[  # ---------------------------------
     Union[
         EHCSpatialPretrainConfig,
-        EHCControllerPretrainConfig,
+        EHCReasonPretrainConfig,
     ],
     Field(discriminator="mode"),
 ]
@@ -84,13 +84,13 @@ class EHCV1TrainingModel(L.LightningModule):
             self.trace_specs = build_trace_spec("ehc", extra_fields=ARENA_EHC_TRACE_FIELDS)
             return EHCSpatialPretrainRegime(self, model, config)
 
-        if isinstance(config, EHCControllerPretrainConfig):
+        if isinstance(config, EHCReasonPretrainConfig):
             self.bridge_adapter = MazeHardEHCV1BridgeAdapter(model, config.adapter)
             self.train_metrics = build_train_metrics(RL_STEP_ROUTES).clone(prefix="train/")
             self.val_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(prefix="val/")
             self.primary_val_metric_key = None
-            self.trace_specs = build_trace_spec("rl")
-            return EHCControllerPretrainRegime(self, model, config)
+            self.trace_specs = build_trace_spec("rl", extra_fields=MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS)
+            return EHCReasonPretrainRegime(self, model, config)
 
         else:
             raise ValueError(f"Unsupported config type: {type(config)}")
@@ -165,8 +165,8 @@ def build_ehc_v1_regime(  # ---------------------------------------------------
     """Build the appropriate regime based on the config type."""
     if isinstance(config, EHCSpatialPretrainConfig):
         return EHCSpatialPretrainRegime(training_model, model, config)
-    if isinstance(config, EHCControllerPretrainConfig):
-        return EHCControllerPretrainRegime(training_model, model, config)
+    if isinstance(config, EHCReasonPretrainConfig):
+        return EHCReasonPretrainRegime(training_model, model, config)
     else:
         raise ValueError(f"Unsupported config type: {type(config)}")
 
@@ -181,8 +181,8 @@ def parse_ehc_v1_config(  # ---------------------------------------------------
         fields = set(EHCSpatialPretrainConfig.model_fields)
         return EHCSpatialPretrainConfig(**{k: v for k, v in raw.items() if k in fields})
     if mode == "reason_pretrain":
-        fields = set(EHCControllerPretrainConfig.model_fields)
-        return EHCControllerPretrainConfig(**{k: v for k, v in raw.items() if k in fields})
+        fields = set(EHCReasonPretrainConfig.model_fields)
+        return EHCReasonPretrainConfig(**{k: v for k, v in raw.items() if k in fields})
     raise ValueError(f"Unknown EHC mode: {mode!r}. Must be 'spatial_pretrain' or 'reason_pretrain'.")
 
 
