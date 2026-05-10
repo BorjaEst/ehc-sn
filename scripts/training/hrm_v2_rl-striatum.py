@@ -5,24 +5,27 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
+from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
+from ehc_sn.callbacks.eval_regimes import EvaluationRegimesCallback, EvaluationRegimesCallbackSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
-from ehc_sn.controllers.rl import RLControllerConfig
+from ehc_sn.controllers.deliberation.actor_critic import DeliberationACControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.envs.mazehard import EnvConfig
-from ehc_sn.heads.rl import RLLossConfig
-from ehc_sn.lightning.hrm.core.runtime import supervised_maze_tokenize
-from ehc_sn.lightning.hrm.hrm_v2 import ModelConfig_HRM_V2, TrainingModel
+from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
+from ehc_sn.lightning.hrm.hrm_v2 import HRMV2TrainingModel, ModelConfig_HRM_V2
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
+from ehc_sn.objectives import HybridRLLossConfig
+from ehc_sn.tasks.mazehard.capabilities.deliberation import MazeHardDeliberationConfig
+from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
@@ -45,9 +48,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     """ """
 
     @classmethod
-    def settings_customise_sources(  # ------------------------------------------------------------
-        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,) -> tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip  # ------------------------------------------------------------
         """Customize settings source order.
 
         Pydantic Settings supports multiple value sources; we explicitly place
@@ -75,17 +76,21 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Path to the model configuration TOML file that specifies the HRM v2 architecture.",
     )
-    environment: EnvConfig = Field(
-        ...,
-        description="Environment configuration (max_episode_steps, seq_length, vocab_size, halt_action).",
+    adapter: MazeHardHRMAdapterSettings = Field(
+        default_factory=MazeHardHRMAdapterSettings,
+        description="Adapter settings for the MazeHard environment and HRM v2 model.",
     )
-    controller: RLControllerConfig = Field(
+    deliberation: MazeHardDeliberationConfig = Field(
         ...,
-        description="RL controller configuration (exploration probability).",
+        description="Deliberation capability config (halt_action, episode_horizon) for the MazeHard deliberation path.",
     )
-    loss: RLLossConfig = Field(
+    controller: DeliberationACControllerConfig = Field(
+        default_factory=DeliberationACControllerConfig,
+        description="Deliberation actor-critic controller configuration (policy settings).",
+    )
+    objective: HybridRLLossConfig = Field(
         ...,
-        description="RL loss head configuration (gamma, halt_action, max_steps, coefficients).",
+        description="Hybrid RL objective configuration (loss function, discount factor, loss coefficients).",
     )
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -113,6 +118,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
             "STR and vmPFC are frozen; allow_halt=False forces full deliberation. "
             "Prevents 'halt immediately' collapse before PFC representations are informative."
         ),
+    )
+    runtime: RuntimeConfig = Field(
+        default_factory=RuntimeConfig,
+        description="HRM runtime-owned validation safety settings.",
     )
 
     # ---------------------------------------------------------------------------------------------
@@ -172,6 +181,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     figures: Optional[FigureCallbackSettings] = Field(
         default_factory=FigureCallbackSettings,
         description="Figure generation callback settings.",
+    )
+    eval_regimes: Optional[EvaluationRegimesCallbackSettings] = Field(
+        default=None,
+        description="Named evaluation regime settings. When set, regimes run after each fit-path validation epoch.",
     )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(
         default="standard",
@@ -292,6 +305,8 @@ if __name__ == "__main__":
     callbacks_list = [TrainingMetricsCallback()]
     if settings.checkpoint is not None:
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
+    if settings.eval_regimes is not None:
+        callbacks_list.append(EvaluationRegimesCallback(settings.eval_regimes))
     if settings.figures is not None and settings.figures.enabled:
         callbacks_list.append(FiguresCallback(settings.figures))
     if settings.diagnostic_level != "minimal":
@@ -323,9 +338,9 @@ if __name__ == "__main__":
     # - The DataModule constructs loaders for the puzzle/maze dataset.
     trainer.fit(
         # Lightning module: training step, optimizer and schedule setup.
-        model=TrainingModel(settings.hrm_config),
+        model=HRMV2TrainingModel(settings.hrm_config),
         # Data module: dataset + DataLoader construction.
-        datamodule=Datamodule(settings.datamodule, transform=supervised_maze_tokenize),
+        datamodule=Datamodule(settings.datamodule, transform=coerce_maze_hard_batch),
         # Optional: resume training from a checkpoint.
         ckpt_path=settings.checkpoint_path,
     )

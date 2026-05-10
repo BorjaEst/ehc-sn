@@ -5,23 +5,24 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
 from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
+from ehc_sn.adapters.arena.tem import ArenaTEMAdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
+from ehc_sn.callbacks.eval_regimes import EvaluationRegimesCallback, EvaluationRegimesCallbackSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
-from ehc_sn.controllers.tem import TEMControllerConfig
+from ehc_sn.controllers.replay.trajectory import ReplayTrajectoryControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.envs.dungeon_walk import EnvConfig
-from ehc_sn.heads.tem import TEMLossConfig
-from ehc_sn.lightning.tem.tem_v1 import ModelConfig_TEM_V1, RuntimeConfig, TrainingModel
+from ehc_sn.lightning.tem.tem_v1 import ModelConfig_TEM_V1, RuntimeConfig, TEMV1TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
+from ehc_sn.objectives import TEMObjectiveConfig
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamConfig
 from ehc_sn.training.schedules import SchedulerConfig
@@ -44,9 +45,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     """ """
 
     @classmethod
-    def settings_customise_sources(  # ------------------------------------------------------------
-        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,) -> tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip  # ------------------------------------------------------------
         """Customize settings source order.
 
         Pydantic Settings supports multiple value sources; we explicitly place
@@ -74,17 +73,17 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Path to the model configuration TOML file that specifies the TEM v1 architecture.",
     )
-    environment: EnvConfig = Field(
+    adapter: ArenaTEMAdapterSettings = Field(
         ...,
-        description="Environment configuration (max_episode_steps, observation_dim, action_count, use_start_channel).",
+        description="Settings for the arena bridge adapter that binds TEM v1 to task inputs/outputs.",
     )
-    controller: TEMControllerConfig = Field(
+    controller: ReplayTrajectoryControllerConfig = Field(
         ...,
-        description="TEM controller configuration (exploration probability).",
+        description="Replay trajectory controller configuration (window_size for fixed-window TBPTT).",
     )
-    loss: TEMLossConfig = Field(
+    objective: TEMObjectiveConfig = Field(
         ...,
-        description="TEM loss head configuration (observation, latent, regularization",
+        description="TEM objective configuration (observation, latent, regularization).",
     )
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -158,6 +157,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     figures: Optional[FigureCallbackSettings] = Field(
         default_factory=FigureCallbackSettings,
         description="Figure generation callback settings.",
+    )
+    eval_regimes: Optional[EvaluationRegimesCallbackSettings] = Field(
+        default=None,
+        description="Named evaluation regime settings. When set, regimes run after each fit-path validation epoch.",
     )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(
         default="standard",
@@ -278,6 +281,8 @@ if __name__ == "__main__":
     callbacks_list = [TrainingMetricsCallback()]
     if settings.checkpoint is not None:
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
+    if settings.eval_regimes is not None:
+        callbacks_list.append(EvaluationRegimesCallback(settings.eval_regimes))
     if settings.figures is not None and settings.figures.enabled:
         callbacks_list.append(FiguresCallback(settings.figures))
     if settings.diagnostic_level != "minimal":
@@ -309,7 +314,7 @@ if __name__ == "__main__":
     # - The DataModule constructs loaders for the puzzle/maze dataset.
     trainer.fit(
         # Lightning module: training step, optimizer and schedule setup.
-        model=TrainingModel(settings.tem_config),
+        model=TEMV1TrainingModel(settings.tem_config),
         # Data module: dataset + DataLoader construction.
         datamodule=Datamodule(settings.datamodule, transform=None),
         # Optional: resume training from a checkpoint.

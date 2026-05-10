@@ -5,24 +5,26 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
+from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
+from ehc_sn.callbacks.eval_regimes import EvaluationRegimesCallback, EvaluationRegimesCallbackSettings
 from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
-from ehc_sn.controllers.act import ACTControllerConfig
+from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.heads.act import ACTLossConfig
-from ehc_sn.lightning.hrm.core.runtime import normalize_loss_for_backward, supervised_maze_tokenize
-from ehc_sn.lightning.hrm.hrm_v1 import ModelConfig_HRM_V1, TrainingModel
+from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
+from ehc_sn.lightning.hrm.hrm_v1 import HRMV1TrainingModel, ModelConfig_HRM_V1
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.models.hrm import hrm_v1
+from ehc_sn.objectives import ACTObjectiveConfig
+from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
@@ -42,12 +44,17 @@ CONFIGURATION_PATH = os.environ.get("HRM_V1_CONFIGURATION_PATH", "config/trainin
 # Settings Model
 # =================================================================================================
 class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
-    """ """
+    """Common training script arguments. Mode-specific model settings are read from TOML."""
 
     @classmethod
     def settings_customise_sources(  # ------------------------------------------------------------
-        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:  # fmt: skip
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
         """Customize settings source order.
 
         Pydantic Settings supports multiple value sources; we explicitly place
@@ -75,18 +82,23 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Path to the model configuration TOML file that specifies the HRM v1 architecture.",
     )
-    act_controller: ACTControllerConfig = Field(
+    adapter: MazeHardHRMAdapterSettings = Field(
+        ...,
+        description="Settings for the MazeHard bridge adapter that binds the HRM core to task inputs/outputs.",
+    )
+    controller: ACTControllerConfig = Field(
         ...,
         description=(
             "Configuration for the ACT controller, which manages halting and partial resets"
             "during training. "
-            "The keys in `act_controller` are passed to the ACTController constructor."
+            "The keys in `controller` are passed to the ACTController constructor."
         ),
     )
-    loss: ACTLossConfig = Field(
+    objective: ACTObjectiveConfig = Field(
         ...,
-        description="Loss config. The keys in `loss` are passed to the loss head constructor.",
+        description="Objective config. The keys in `objective` are passed to the ACT objective constructor.",
     )
+
     optimizer: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
         description=(
@@ -99,6 +111,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
             "Learning rate scheduler config. If not set, no learning rate scheduling is applied. "
             "The keys in `scheduler` are passed to the scheduler constructor."
         ),
+    )
+    runtime: RuntimeConfig = Field(
+        default_factory=RuntimeConfig,
+        description="HRM runtime-owned validation safety settings.",
     )
 
     # ---------------------------------------------------------------------------------------------
@@ -158,6 +174,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     figures: Optional[FigureCallbackSettings] = Field(
         default_factory=FigureCallbackSettings,
         description="Figure generation callback settings.",
+    )
+    eval_regimes: Optional[EvaluationRegimesCallbackSettings] = Field(
+        default=None,
+        description="Named evaluation regime settings. When set, regimes run after each fit-path validation epoch.",
     )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(
         default="standard",
@@ -278,6 +298,8 @@ if __name__ == "__main__":
     callbacks_list = [TrainingMetricsCallback()]
     if settings.checkpoint is not None:
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
+    if settings.eval_regimes is not None:
+        callbacks_list.append(EvaluationRegimesCallback(settings.eval_regimes))
     if settings.figures is not None and settings.figures.enabled:
         callbacks_list.append(FiguresCallback(settings.figures))
     if settings.diagnostic_level != "minimal":
@@ -309,9 +331,9 @@ if __name__ == "__main__":
     # - The DataModule constructs loaders for the puzzle/maze dataset.
     trainer.fit(
         # Lightning module: training step, optimizer and schedule setup.
-        model=TrainingModel(settings.hrm_config),
+        model=HRMV1TrainingModel(settings.hrm_config),
         # Data module: dataset + DataLoader construction.
-        datamodule=Datamodule(settings.datamodule, transform=supervised_maze_tokenize),
+        datamodule=Datamodule(settings.datamodule, transform=coerce_maze_hard_batch),
         # Optional: resume training from a checkpoint.
         ckpt_path=settings.checkpoint_path,
     )

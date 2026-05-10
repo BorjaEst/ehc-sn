@@ -22,8 +22,6 @@ from ehc_sn.data._canonical import (
     shortest_path_distances,
     singleton_mask,
 )
-from ehc_sn.data.benchmarks.dungeon_b23 import build_layout_benchmark_contract, resolve_preferred_start
-from ehc_sn.data.benchmarks.dungeon_m0 import validate_m0_layout_feasibility
 from ehc_sn.data.datasets import MazeMetadata
 from ehc_sn.data.index import MazeIndexEntry, write_index
 from ehc_sn.data.schema import (
@@ -112,16 +110,6 @@ def process_dungeongen(  # -----------------------------------------------------
 
             # Rasterize dungeon → channel arrays.
             channels = _rasterize_dungeon(generator, dungeon, n_observations, margin, rng_seed=dungeon_seed)
-            try:
-                _ensure_layout_benchmark_feasible(
-                    channels=channels,
-                    entry_id=str(dungeon_seed),
-                    split=split,
-                )
-            except ValueError as exc:
-                rejected += 1
-                last_rejection = str(exc)
-                continue
 
             # Collect raw dungeon record in memory (written as compressed archive later).
             raw_records.append(_dungeon_to_dict(dungeon))
@@ -151,32 +139,6 @@ def process_dungeongen(  # -----------------------------------------------------
 
     echo(f"\nDone. Index written to {index_path}")
 
-
-def _ensure_layout_benchmark_feasible(
-    *,
-    channels: dict[str, np.ndarray],
-    entry_id: str,
-    split: str,
-) -> None:
-    """Raise ``ValueError`` unless one rasterized layout satisfies the shared benchmark contract."""
-    component = np.asarray(channels[CHANNEL_MASK_VALID], dtype=bool)
-    preferred_start = resolve_preferred_start(
-        component=component,
-        start_mask=np.asarray(channels[CHANNEL_START], dtype=bool),
-    )
-    build_layout_benchmark_contract(
-        component=component,
-        entry_id=entry_id,
-        split=split,
-        preferred_start=preferred_start,
-    )
-    validate_m0_layout_feasibility(
-        valid_mask=component,
-        observation_grid=np.asarray(channels[CHANNEL_OBSERVATIONS], dtype=np.int32),
-        start_mask=np.asarray(channels[CHANNEL_START], dtype=bool),
-        entry_id=entry_id,
-        split=split,
-    )
 
 
 # =================================================================================================
