@@ -2,11 +2,12 @@
 
 ## Description
 
-Entorhinal-Hippocampal Circuit (EHC) Spatial Navigation library
+Entorhinal-Hippocampal Circuit (EHC) spatial cognition and navigation library
 
 ## Reference
 
 Semantic naming reference: [Notation Map](notation-map.md)
+Theory overview: [EHC Theory Foundations](ehc-theory-foundations.md)
 
 ## Commands
 
