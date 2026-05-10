@@ -14,7 +14,7 @@ Longer background notes live in `docs/foundations.md`.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Dict, Literal, Optional, Sequence, TypeAlias
+from typing import Any, Iterator, Literal, Mapping, Optional, Sequence, TypeAlias
 
 import numpy as np
 import torch
@@ -251,7 +251,7 @@ class FactorMemoryView:
     values: Tensor
     valid_mask: Tensor
     coefficients: Optional[Tensor] = None
-    banks: Dict[str, FactorSlotBank] = field(default_factory=dict)
+    banks: dict[str, FactorSlotBank] = field(default_factory=dict)
 
     def default_bank(self) -> FactorSlotBank:
         """Return the legacy default factor bank."""
@@ -320,6 +320,10 @@ class DenseMemoryStore:
         """Return a cloned dense-memory store preserving tensor semantics."""
         return DenseMemoryStore(matrix=self.matrix.clone())
 
+    def to_dense(self) -> Tensor:
+        """Return the dense memory matrix with shape ``(B, S, S)``."""
+        return self.matrix
+
     @property
     def kind(self) -> MemoryStoreKind:
         """Return the canonical store kind for dense memory."""
@@ -342,7 +346,7 @@ class FactorMemoryStore:
     values: Tensor
     valid_mask: Tensor
     coefficients: Optional[Tensor] = None
-    banks: Dict[str, FactorSlotBank] = field(default_factory=dict)
+    banks: dict[str, FactorSlotBank] = field(default_factory=dict)
 
     def as_linear_view(self) -> LinearMemoryView:
         """Return the exact linear operator induced by the stored factors."""
@@ -355,7 +359,7 @@ class FactorMemoryStore:
             values=self.values,
             valid_mask=self.valid_mask,
             coefficients=self.coefficients,
-            banks={name: bank.clone() for name, bank in self.banks.items()},
+            banks=dict(self.banks),
         )
 
     def default_bank(self) -> FactorSlotBank:
@@ -470,7 +474,7 @@ class FactorMemoryStore:
         When ``capacity`` is provided, the oldest atoms are truncated from the
         left after concatenation.
         """
-        merged: Dict[str, FactorSlotBank] = {}
+        merged: dict[str, FactorSlotBank] = {}
         bank_names = sorted(set(_store_banks(self)) | set(_store_banks(fresh)))
         for name in bank_names:
             current_bank = _get_bank(_store_banks(self), name, store=self)
@@ -561,12 +565,12 @@ def _merge_rows(flag: Tensor, current: Tensor, fresh: Tensor) -> Tensor:
     return torch.where(row_flag, fresh.to(dtype=current.dtype), current)
 
 
-def _store_banks(store: FactorMemoryStore) -> Dict[str, FactorSlotBank]:
+def _store_banks(store: FactorMemoryStore) -> dict[str, FactorSlotBank]:
     """Return all banks including the legacy default bank."""
     return {DEFAULT_FACTOR_BANK_NAME: store.default_bank(), **store.banks}
 
 
-def _store_from_banks(banks: Dict[str, FactorSlotBank]) -> FactorMemoryStore:
+def _store_from_banks(banks: dict[str, FactorSlotBank]) -> FactorMemoryStore:
     """Rebuild a factor store from one complete bank mapping."""
     default_bank = banks[DEFAULT_FACTOR_BANK_NAME]
     named_banks = {name: bank for name, bank in banks.items() if name != DEFAULT_FACTOR_BANK_NAME}
@@ -579,16 +583,16 @@ def _store_from_banks(banks: Dict[str, FactorSlotBank]) -> FactorMemoryStore:
     )
 
 
-def _bank_capacities(*stores: FactorMemoryStore) -> Dict[str, int]:
+def _bank_capacities(*stores: FactorMemoryStore) -> dict[str, int]:
     """Return the maximum slot capacity required for each bank across stores."""
-    capacities: Dict[str, int] = {}
+    capacities: dict[str, int] = {}
     for store in stores:
         for name, bank in _store_banks(store).items():
             capacities[name] = max(capacities.get(name, 0), bank.capacity)
     return capacities
 
 
-def _get_bank(banks: Dict[str, FactorSlotBank], name: str, *, store: FactorMemoryStore) -> FactorSlotBank:
+def _get_bank(banks: dict[str, FactorSlotBank], name: str, *, store: FactorMemoryStore) -> FactorSlotBank:
     """Return one bank or an empty compatible bank when it is absent."""
     bank = banks.get(name)
     if bank is not None:
@@ -605,7 +609,7 @@ def _get_bank(banks: Dict[str, FactorSlotBank], name: str, *, store: FactorMemor
     )
 
 
-def _pad_factor_store(store: FactorMemoryStore, target_capacity: Dict[str, int]) -> FactorMemoryStore:
+def _pad_factor_store(store: FactorMemoryStore, target_capacity: dict[str, int]) -> FactorMemoryStore:
     """Pad each bank in ``store`` up to the requested capacities."""
     current_banks = _store_banks(store)
     padded_banks = {name: _pad_factor_bank(_get_bank(current_banks, name, store=store), target_capacity[name]) for name in target_capacity}
@@ -700,7 +704,7 @@ class StepInput:
 
     observation: MultiScaleCode
     action: Optional[int]
-    location_info: Dict[str, Any]
+    location_info: dict[str, Any]
 
 
 @dataclass
@@ -716,7 +720,7 @@ class Trajectory:
     """
 
     steps: Sequence[StepInput]
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
 
     def __len__(self) -> int:
         """Return the number of steps in the trajectory."""
@@ -791,16 +795,15 @@ class Prediction:
 
 
 # TODO
-Activation = Literal["leaky_relu", "sigmoid", "none"]
-ProjectionMode = Literal["identity", "tiling", "low_rank", "random"]
-InitStrategy = Literal["identity", "random"]
+Activation: TypeAlias = Literal["leaky_relu", "sigmoid", "none"]
+ProjectionKind: TypeAlias = Literal["identity", "linear", "tiling", "low_rank"]
+ProjectionBridge: TypeAlias = Literal["auto", "aligned", "broadcast"]
+ProjectionEndpointKind: TypeAlias = Literal["flat", "multiscale", "token_sequence"]
+ProjectionMode: TypeAlias = ProjectionKind
+InitStrategy: TypeAlias = Literal["identity", "random"]
+Channels: TypeAlias = dict[str, np.ndarray]
+Batch: TypeAlias = Mapping[str, Tensor]
+StepBatchSource = Iterator[Batch]
 
-
-Device = torch.device
-Dtype = torch.dtype
-Channels = dict[str, np.ndarray]
-Batch = Dict[str, Tensor]  # Generic batch type, can be specialized as needed
-
-
-RetrievalRole = Literal["generative", "inference"]
+RetrievalRole: TypeAlias = Literal["generative", "inference"]
 """Semantic role used to select the cue-indexed HPC retrieval path."""
