@@ -1,16 +1,12 @@
-"""Load-time transforms for maze NPZ channels.
+"""Load-time transforms for processed channel dicts.
 
-Transforms operate on ``dict[str, np.ndarray]`` channel dicts and return the
-same type. They are composable via :class:`Compose` and follow the
-torchvision-style callable convention.
+Transforms operate on ``dict[str, np.ndarray]`` channel dicts loaded from
+versioned processed split roots and return the same type. They are composable
+via :class:`Compose` and follow the torchvision-style callable convention.
 
 Provided transforms:
 - :class:`RandomDihedral` — randomly applies one of the 8 dihedral symmetries
   (4 rotations × 2 flips) consistently across all channels.
-- :func:`channels_to_grid` — merges ``topology``, ``start``, and ``goals``
-  channels into a single ``int32`` grid using canonical SEM IDs. Utility for
-  gymnasium environments and model adapters; not called by the dataset or
-  DataModule directly.
 - :class:`Compose` — chains multiple transforms sequentially.
 """
 
@@ -20,8 +16,6 @@ from collections.abc import Callable, Sequence
 
 import numpy as np
 
-from ehc_sn.data.schema import CHANNEL_GOALS, CHANNEL_START, CHANNEL_TOPOLOGY
-from ehc_sn.data.vocabulary import EMPTY_ID, GOAL_ID, START_ID, WALL_ID
 from ehc_sn.types import Channels
 from ehc_sn.utils.symmetry import dihedral_transform
 
@@ -37,8 +31,13 @@ class Compose:
 
     Example::
 
-        transform = Compose([RandomDihedral(), channels_to_grid])
-        sample = transform(raw_channels)
+        transform = Compose([RandomDihedral()])
+        sample = transform(channels)
+
+    Note:
+        Task-specific transforms (such as grid-projection or action encoding)
+        live outside :mod:`ehc_sn.data.transforms` in their respective task
+        adapter packages.
     """
 
     def __init__(  # ------------------------------------------------------------------------------
@@ -79,8 +78,13 @@ class RandomDihedral:
             a new generator is created from the global numpy random state.
 
     Note:
-        This transform is applied at load time (per :class:`~ehc_sn.data.datasets.MazeDataset`
+        This transform is applied at load time (per :class:`~ehc_sn.data.datasets.ProcessedDataset`
         ``__getitem__`` call), not baked into on-disk files.
+
+        Samples that mix spatial grids with non-spatial task fields (for
+        example replay trajectories or scalar metadata) are returned unchanged.
+        Generic dihedral augmentation is only valid for uniform 2D spatial
+        channel sets.
     """
 
     def __init__(  # ------------------------------------------------------------------------------
@@ -92,7 +96,13 @@ class RandomDihedral:
         self, channels: Channels
     ) -> Channels:  # fmt: skip
         first_channel = next(iter(channels.values()))
-        h, w = first_channel.shape[-2:]
+        if first_channel.ndim != 2:
+            return channels
+
+        h, w = first_channel.shape
+        if any(channel.ndim != 2 or channel.shape != (h, w) for channel in channels.values()):
+            return channels
+
         valid_tids = (0, 1, 2, 3, 4, 5, 6, 7) if h == w else (0, 2, 4, 5)
         tid = int(valid_tids[int(self._rng.integers(len(valid_tids)))])
         return {name: dihedral_transform(arr, tid) for name, arr in channels.items()}
@@ -104,38 +114,4 @@ class RandomDihedral:
 
 
 # =================================================================================================
-def channels_to_grid(  # --------------------------------------------------------------------------
-    channels: Channels,
-) -> Channels:  # fmt: skip
-    """Merge structural channels into a single canonical semantic grid.
-
-    Combines ``topology``, ``start``, and ``goals`` into a single ``int32``
-    array ``"grid"`` of shape ``(H, W)`` using canonical SEM IDs.  The result
-    is returned non-destructively alongside the original channels.
-
-    Priority (later assignments win): ``WALL < EMPTY < START < GOAL``.
-
-    .. note::
-        ``"grid"`` is a **derived synthetic key** — it is not present on disk.
-        Channels with data-dependent vocabularies (``landmarks``,
-        ``observations``, ``solution``, ``regions``) are deliberately excluded;
-        they remain accessible via the original channel keys.
-
-    Args:
-        channels: Dict of canonical NPZ channel arrays.  Must contain
-            ``"topology"`` (bool, H×W).  Optional: ``"start"``, ``"goals"``.
-
-    Returns:
-        Input dict extended with ``"grid": int32 array of shape (H, W)``.
-    """
-    topology = channels[CHANNEL_TOPOLOGY]
-    grid = np.where(topology, EMPTY_ID, WALL_ID).astype(np.int32)
-    if CHANNEL_START in channels:
-        grid = np.where(channels[CHANNEL_START], START_ID, grid)
-    if CHANNEL_GOALS in channels:
-        grid = np.where(channels[CHANNEL_GOALS], GOAL_ID, grid)
-    return {**channels, "grid": grid}
-
-
-# =================================================================================================
-__all__ = ["Channels", "Compose", "RandomDihedral", "channels_to_grid"]
+__all__ = ["Channels", "Compose", "RandomDihedral"]
