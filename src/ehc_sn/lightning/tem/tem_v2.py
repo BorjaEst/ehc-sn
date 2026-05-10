@@ -23,9 +23,10 @@ from ehc_sn.lightning._rollout import (
 from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, resolve_tem_runtime
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
-from ehc_sn.metrics.traces import ReplayableEnvironments, build_trace_spec
+from ehc_sn.metrics.traces import TEM_TRACE_FIELDS, ReplayableEnvironments, build_trace_spec
 from ehc_sn.models.tem.tem_v2 import Batch, ModelSettings_V2, TEMModelV2
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
+from ehc_sn.tasks.arena.runtime import ARENA_REPLAY_REQUIRED_KEYS, batch_size_from_arena_batch, infer_arena_replay_batch_keys
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
@@ -46,9 +47,9 @@ class ModelConfig_TEM_V2(BaseModel, extra="forbid"):
         ...,
         description="Path to the model configuration TOML file that specifies the TEM v2 architecture.",
     )
-    environment: EnvironmentConfig = Field(
-        ...,
-        description="Dungeon-walk environment configuration.",
+    environment: EnvironmentConfig | None = Field(
+        default=None,
+        description="Dungeon-walk environment configuration. Omit for Arena replay mode.",
     )
     controller: TEMControllerConfig = Field(
         ...,
@@ -81,6 +82,8 @@ class ModelConfig_TEM_V2(BaseModel, extra="forbid"):
 
     @model_validator(mode="after")
     def validate_environment_contract(self) -> "ModelConfig_TEM_V2":
+        if self.environment is None:
+            return self  # Arena replay mode: no environment contract to validate.
         model_settings = ModelSettings_V2.from_config(self.model_config_path)
         if self.environment.observation_dim != model_settings.observation_dim:
             raise ValueError("environment.observation_dim must match model.observation_dim.")
@@ -118,7 +121,13 @@ class TrainingModel(L.LightningModule):
         self.train_metrics = build_train_metrics(TEM_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(TEM_EPISODE_ROUTES).clone(prefix="val/")
         self.primary_val_metric_key = f"val/{TEM_PRIMARY_VAL_ROUTE_KEY}"
-        self.trace_specs = build_trace_spec("tem")
+        if config.environment is None:
+            # Arena replay: location_ids are injected from the dataset by apply_arena_trace_supplements
+            # at figure time; they are not available in carry.data during the live rollout.
+            _arena_keys = {f.name for f in TEM_TRACE_FIELDS} - {"world_step/location_ids"}
+            self.trace_specs = build_trace_spec("tem", include_keys=_arena_keys)
+        else:
+            self.trace_specs = build_trace_spec("tem")
         self._eval_trace_keys: set[str] | None = None
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
@@ -140,22 +149,29 @@ class TrainingModel(L.LightningModule):
         """Return the TEM TBPTT chunk length used for one optimizer update."""
         return self.config.runtime.sequence.tbptt_steps
 
-    def _build_runtime(self, *, batch_size: int) -> tuple[Environment, TEMController, TEMLossHead]:
+    def _build_runtime(self, *, batch_size: int) -> tuple[Environment | None, TEMController, TEMLossHead]:
         """Construct one phase-local TEM rollout runtime around the shared model."""
+        if self.config.environment is None:
+            from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
+            replay = ArenaReplayCapability()
+            controller = TEMController(
+                self.model, None, self.config.controller,
+                replay=replay, observation_dim=self.model.config.observation_dim,
+            )
+            return None, controller, TEMLossHead(self.config.loss)
         environment = Environment(self.config.environment, batch_size=batch_size)
         controller = TEMController(self.model, environment, self.config.controller)
-        objective = TEMLossHead(self.config.loss)
-        return environment, controller, objective
+        return environment, controller, TEMLossHead(self.config.loss)
 
     def _ensure_train_runtime(self) -> None:
         """Initialize the training runtime once per process."""
-        if self.train_environment is not None and self.train_controller is not None and self.train_objective is not None:
+        if self.train_controller is not None and self.train_objective is not None:
             return
         self.train_environment, self.train_controller, self.train_objective = self._build_runtime(batch_size=self._local_batch_size())
 
     def _ensure_eval_runtime(self) -> None:
         """Initialize the evaluation runtime once per process."""
-        if self.eval_environment is not None and self.eval_controller is not None and self.eval_objective is not None:
+        if self.eval_controller is not None and self.eval_objective is not None:
             return
         self.eval_environment, self.eval_controller, self.eval_objective = self._build_runtime(batch_size=self._local_batch_size())
 
@@ -189,6 +205,8 @@ class TrainingModel(L.LightningModule):
 
     def _build_trace_meta(self, controller: TEMController) -> dict[str, object]:
         """Return out-of-band trace metadata for figure-facing evaluation traces."""
+        if self.config.environment is None:
+            return {}  # Arena replay mode: trace supplements are built from dataset at figure time.
         return {"environments": ReplayableEnvironments(controller.environment.build_world_descriptors())}
 
     def _ensure_train_batch_assembler(  # ---------------------------------------------------------
@@ -198,7 +216,7 @@ class TrainingModel(L.LightningModule):
         if self._train_batch_assembler is not None:
             return self._train_batch_assembler
 
-        keys = infer_tem_static_batch_keys(batch)
+        keys = infer_arena_replay_batch_keys(batch) if self.config.environment is None else infer_tem_static_batch_keys(batch)
         capacity_rows = 4 * self.config.global_batch_size
         self._train_buffer = FifoBuffer(capacity_rows, keys, pin_memory=True)
         self._train_batch_assembler = PartialResetBatchAssembler(buffer=self._train_buffer, keys=keys)
@@ -299,7 +317,7 @@ class TrainingModel(L.LightningModule):
         self._train_carry = evaluation.execution.final_carry.detach()
 
         # Normalize by local batch size; DDP averages gradients across ranks.
-        local_bs = batch_size_from_static_maze_batch(batch)
+        local_bs = batch_size_from_arena_batch(batch) if self.config.environment is None else batch_size_from_static_maze_batch(batch)
         loss = normalize_loss_for_backward(evaluation.loss, local_bs=local_bs)
         loss = loss / self._train_chunk_steps()  # Average loss across the chunk for smoother gradients.
 
@@ -337,7 +355,11 @@ class TrainingModel(L.LightningModule):
         if self._eval_trace_keys is None:
             trace_specs = self.trace_specs
         else:
-            trace_specs = build_trace_spec("tem", include_keys=self._eval_trace_keys)
+            keys = self._eval_trace_keys
+            if self._config.environment is None:
+                # Arena replay: location_ids come from dataset supplements at figure time.
+                keys = keys - {"world_step/location_ids"}
+            trace_specs = build_trace_spec("tem", include_keys=keys)
 
         evaluation = evaluate_rollout(
             runner=self._eval_runner,

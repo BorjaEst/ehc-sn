@@ -8,7 +8,7 @@ properties rather than tuple positions or legacy model-internal structures.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import torch
 from pydantic import BaseModel, Field
@@ -24,6 +24,9 @@ from ehc_sn.policies.stay import StayPolicy, StayPolicyConfig
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
+if TYPE_CHECKING:
+    from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
+
 GRID_TRANSITION_RELATION: str = "grid_transition"
 PLACE_TRANSITION_RELATION: str = "place_transition"
 PLACE_SENSORY_RELATION: str = "place_sensory"
@@ -36,7 +39,7 @@ class TEMControllerConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`TEMController`."""
 
     policy: ScriptedPolicyConfig = Field(
-        default_factory=ScriptedPolicyConfig,
+        default_factory=StayPolicyConfig,
         description="Configuration for the scripted TEM walk policy.",
     )
     max_steps: int = Field(
@@ -61,14 +64,18 @@ class TEMRolloutState[ModelState](RolloutState[ModelState]):
     Before the first step, it stores the initial current-step payload.
 
     ``env_td`` stores the mutable environment state that seeds the next TEM
-    iteration. After a controller step it has already advanced to the next
-    current-state payload, but ``data`` remains aligned with the outputs that
-    were just produced.
+    iteration (dungeon mode only). ``None`` in arena replay mode.
+
+    ``resident`` and ``cursor`` are used in arena replay mode. ``resident``
+    holds the per-slot admitted trajectory arrays; ``cursor`` is the per-slot
+    step index ``(B,)`` int64.
     """
 
-    env_td: TensorDictBase
+    env_td: TensorDictBase | None
     static_data: dict[str, Tensor]
     visit_counts: Tensor
+    resident: dict[str, Tensor] | None = None
+    cursor: Tensor | None = None
 
 
 # =================================================================================================
@@ -157,38 +164,57 @@ class TEMOutput(DetachMixin):
 
 # =================================================================================================
 class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig]):
-    """TEM rollout controller with controller-owned environment stepping."""
+    """TEM rollout controller supporting both DungeonWalk and Arena replay modes."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: TEMRolloutBackbone[ModelState], env: DungeonWalk, config: TEMControllerConfig,
+        self,
+        backbone: TEMRolloutBackbone[ModelState],
+        env: DungeonWalk | None,
+        config: TEMControllerConfig,
+        *,
+        replay: ArenaReplayCapability | None = None,
+        observation_dim: int | None = None,
     ) -> None:  # fmt: skip
         """Create a controller.
 
         Args:
             backbone: Model implementing :class:`TEMRolloutBackbone`.
-            env: TorchRL environment used to generate online walk steps.
+            env: TorchRL environment for DungeonWalk mode. ``None`` in Arena replay mode.
             config: Controller configuration.
+            replay: Arena replay capability. When provided, the controller operates in
+                replay mode and ``env`` must be ``None``.
+            observation_dim: Observation vocabulary size for one-hot conversion in
+                replay mode. Required when ``replay`` is not ``None``.
         """
         super().__init__(backbone=backbone, config=config)
         self._env = env
-        if isinstance(config.policy, StayPolicyConfig):
-            self._policy: ActionPolicy = StayPolicy(action=ACTION_STAY)
-        elif isinstance(config.policy, RandomWalkPolicyConfig):
-            self._policy = RandomWalkPolicy(seed=config.policy.seed)
+        self._replay = replay
+        self._observation_dim = observation_dim
+        if replay is None:
+            if isinstance(config.policy, StayPolicyConfig):
+                self._policy: ActionPolicy | None = StayPolicy(action=ACTION_STAY)
+            elif isinstance(config.policy, RandomWalkPolicyConfig):
+                self._policy = RandomWalkPolicy(seed=config.policy.seed)
+            else:
+                raise TypeError(f"Unsupported TEM policy config: {type(config.policy).__name__}.")
         else:
-            raise TypeError(f"Unsupported TEM policy config: {type(config.policy).__name__}.")
+            self._policy = None
 
     @property
     def environment(self) -> DungeonWalk:
-        """Return the TorchRL environment used for stepping."""
+        """Return the TorchRL environment used for stepping (DungeonWalk mode only)."""
+        if self._env is None:
+            raise AttributeError("TEMController is in arena replay mode; no DungeonWalk environment is available.")
         return self._env
 
     def set_evaluation_seed(self, seed: int | None) -> None:
         """Seed controller-owned stochastic evaluation surfaces.
 
-        TEM evaluation is only reproducible when both the reset sampler and any
-        stochastic scripted policy are explicitly seeded.
+        In arena replay mode this is a no-op: replay trajectories are
+        deterministic from the dataset and require no env/policy seeding.
         """
+        if self._replay is not None:
+            return
         if seed is None:
             raise ValueError("TEM evaluation requires an explicit seed for reproducible sampling.")
         self.environment._set_seed(int(seed))
@@ -197,6 +223,18 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
             set_seed(int(seed))
 
     def initial_state(  # -------------------------------------------------------------------------
+        self, batch_sample: Batch
+    ) -> TEMRolloutState[ModelState]:  # fmt: skip
+        """Build an initial rollout state from a batch.
+
+        Dispatches to arena replay or DungeonWalk mode based on the replay
+        capability configured at construction time.
+        """
+        if self._replay is not None:
+            return self._initial_state_arena(batch_sample)
+        return self._initial_state_dungeon(batch_sample)
+
+    def _initial_state_dungeon(  # ----------------------------------------------------------------
         self, batch_sample: Batch
     ) -> TEMRolloutState[ModelState]:  # fmt: skip
         """Build an initial rollout state from a static maze batch."""
@@ -213,11 +251,48 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
             visit_counts=self._new_visit_counts(reset_td, device=env_td.device),
         )
 
+    def _initial_state_arena(  # ------------------------------------------------------------------
+        self, batch_sample: Batch
+    ) -> TEMRolloutState[ModelState]:  # fmt: skip
+        """Build an initial rollout state from an Arena replay batch."""
+        assert self._replay is not None
+        device = batch_sample["trajectory_row"].device
+        batch_size = int(batch_sample["trajectory_row"].shape[0])
+        cursor = torch.zeros((batch_size,), dtype=torch.int64, device=device)
+        resident = {key: batch_sample[key].clone() for key in batch_sample if key.startswith("trajectory_")}
+        step_data, _ = self._replay.extract_step_per_slot(resident, cursor, {})
+        step_data = self._inject_observation(step_data, device)
+        step_data.update(self._trace_metadata())
+        return TEMRolloutState(
+            model_state=self.backbone.init_state(batch_size, device=device),
+            steps=self._zeros(batch_size, dtype="int32", device=device),
+            halted=self._zeros(batch_size, dtype="bool", device=device),
+            data=step_data,
+            env_td=None,
+            static_data={},
+            visit_counts=torch.zeros((batch_size, 1), dtype=torch.int32, device=device),
+            resident=resident,
+            cursor=cursor,
+        )
+
     def step(  # ----------------------------------------------------------------------------------
         self, state: TEMRolloutState[ModelState], batch: Batch, *,
         allow_halt: bool = True, explore: bool = True, **_: Any,
     ) -> tuple[TEMRolloutState[ModelState], TEMOutput]:  # fmt: skip
         """Advance the controller by one variational step.
+
+        Dispatches to arena replay or DungeonWalk mode based on the replay
+        capability configured at construction time.
+        """
+        if self._replay is not None:
+            return self._step_arena(state, batch, allow_halt=allow_halt)
+        return self._step_dungeon(state, batch, allow_halt=allow_halt, explore=explore)
+
+    def _step_dungeon(  # -------------------------------------------------------------------------
+        self, state: TEMRolloutState[ModelState], batch: Batch, *,
+        allow_halt: bool = True, explore: bool = True,
+    ) -> tuple[TEMRolloutState[ModelState], TEMOutput]:  # fmt: skip
+        """Advance the controller via DungeonWalk environment stepping.
 
         The returned carry keeps ``data`` aligned with the payload used for the
         forward pass so losses and traces supervise the current step. The
@@ -254,6 +329,94 @@ class TEMController[ModelState](BaseController[ModelState, TEMControllerConfig])
         output = TEMOutput(obs_logits=obs_logits, latent_relations=latent_relations, reg_terms=reg_terms)
 
         return state, output
+
+    def _step_arena(  # ---------------------------------------------------------------------------
+        self, state: TEMRolloutState[ModelState], batch: Batch, *,
+        allow_halt: bool = True,
+    ) -> tuple[TEMRolloutState[ModelState], TEMOutput]:  # fmt: skip
+        """Advance the controller by one step from Arena replay trajectories.
+
+        Admits a new trajectory row for each halted slot, advances the per-slot
+        cursor, extracts the current-step payload, and halts when the cursor
+        reaches ``trajectory_length``.
+        """
+        assert self._replay is not None
+        assert state.resident is not None
+        assert state.cursor is not None
+
+        resident, cursor = self._refresh_halted_slots_arena(batch, state)
+        step_data, _ = self._replay.extract_step_per_slot(resident, cursor, {})
+        step_data = self._inject_observation(step_data, resident["trajectory_row"].device)
+        step_data.update(self._trace_metadata())
+
+        model_state = self.backbone.reset_state(state.halted, state.model_state)
+        model_state, obs_logits, _, grid, place = self.backbone(step_data, model_state)
+
+        latent_relations = self._coerce_latent(grid, place)
+        reg_terms = self._coerce_regularization(grid, place)
+
+        steps = self.advance_steps(state)
+        next_cursor = cursor + 1
+        trajectory_length = resident["trajectory_length"].reshape(-1)
+        halted = next_cursor >= trajectory_length if allow_halt else torch.zeros_like(next_cursor, dtype=torch.bool)
+
+        new_state = TEMRolloutState(
+            model_state=model_state,
+            steps=steps,
+            halted=halted,
+            data=step_data,
+            env_td=None,
+            static_data={},
+            visit_counts=state.visit_counts,
+            resident=resident,
+            cursor=next_cursor,
+        )
+        output = TEMOutput(obs_logits=obs_logits, latent_relations=latent_relations, reg_terms=reg_terms)
+        return new_state, output
+
+    def _refresh_halted_slots_arena(  # -----------------------------------------------------------
+        self, batch: Batch, state: TEMRolloutState[ModelState],
+    ) -> tuple[dict[str, Tensor], Tensor]:  # fmt: skip
+        """Admit new trajectory rows for halted slots; keep active slots unchanged."""
+        assert state.resident is not None
+        assert state.cursor is not None
+
+        if not torch.any(state.halted):
+            return state.resident, state.cursor
+
+        new_rows = {key: batch[key].clone() for key in batch if key.startswith("trajectory_")}
+        merged: dict[str, Tensor] = {}
+        for key, old_val in state.resident.items():
+            if key in new_rows:
+                halted_view = state.halted.view((-1,) + (1,) * (old_val.ndim - 1))
+                merged[key] = torch.where(halted_view, new_rows[key], old_val)
+            else:
+                merged[key] = old_val
+
+        new_cursor = state.cursor.clone()
+        new_cursor[state.halted] = 0
+        return merged, new_cursor
+
+    def _inject_observation(  # -------------------------------------------------------------------
+        self, step_data: dict[str, Tensor], device: Any,
+    ) -> dict[str, Tensor]:  # fmt: skip
+        """Convert ``observation_id`` to a one-hot ``observation`` tensor.
+
+        The TEM model expects ``inputs["observation"]`` as a float tensor of
+        shape ``(B, observation_dim)``. Arena replay provides ``observation_id``
+        as an integer index; this method converts it locally without touching
+        the dataset or model contracts.
+        """
+        if "observation_id" not in step_data or self._observation_dim is None:
+            return step_data
+        obs_id = step_data["observation_id"].reshape(-1).to(dtype=torch.int64, device=device)
+        obs = torch.zeros(obs_id.shape[0], self._observation_dim, dtype=torch.float32, device=device)
+        obs.scatter_(1, obs_id.unsqueeze(-1), 1.0)
+        out = {**step_data, "observation": obs}
+        if "landmark_id" in out:
+            lm = out["landmark_id"]
+            out["landmark_id"] = lm.clamp(min=0)
+        return out
 
     def _build_reset_td(  # ----------------------------------------------------------------------
         self, batch: Batch,

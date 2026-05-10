@@ -20,6 +20,12 @@ import numpy as np
 import torch
 from torch import Tensor
 
+Device = torch.device
+"""Canonical device type alias (``torch.device``)."""
+
+Dtype = torch.dtype
+"""Canonical dtype type alias (``torch.dtype``)."""
+
 # =============================================================================
 # Mathematical Primitives
 # =============================================================================

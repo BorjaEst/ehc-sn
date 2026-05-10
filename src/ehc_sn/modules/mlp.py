@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from ehc_sn.types import Device, Dtype
-from ehc_sn.utils import _find_multiple, trunc_normal_init_
+from ehc_sn.utils import find_multiple, trunc_normal_init_
 
 
 # =================================================================================================
@@ -57,7 +57,7 @@ class SwiGLU(nn.Module):
         super().__init__()
         self._config = config
 
-        inter = _find_multiple(round(config.expansion * config.hidden_size * 2 / 3), 256)
+        inter = find_multiple(round(config.expansion * config.hidden_size * 2 / 3), 256)
         self.gate_up_proj = nn.Linear(config.hidden_size, inter * 2, bias=False, device=device, dtype=dtype)
         self.down_proj = nn.Linear(inter, config.hidden_size, bias=False, device=device, dtype=dtype)
         self.reset_parameters()

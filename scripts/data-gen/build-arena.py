@@ -64,7 +64,7 @@ _DEFAULT_SHARED_VERSION = 1
 _DEFAULT_TASK_VERSION = 1
 _DEFAULT_CORPUS = "default"
 _DEFAULT_START_POLICY = "random_valid"
-_DEFAULT_WALK_POLICY = "no_immediate_backtrack"
+_DEFAULT_WALK_POLICY = "uniform"
 _DEFAULT_MAX_STEPS = 600
 
 app = typer.Typer(add_completion=False, help=__doc__)

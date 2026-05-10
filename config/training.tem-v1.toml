@@ -6,8 +6,8 @@
 model_config_path = "config/models/tem-v1.toml"
 
 # -- General settings ---------------------------------------------------------
-dataset_path         = "data/processed/dungeons"
-global_batch_size    = 32
+dataset_path         = "data/processed/arena/default/v1"
+global_batch_size    = 10
 max_epochs           = 100
 seed                 = 42
 augment              = true
@@ -26,13 +26,6 @@ trainer_devices      = 1
 trainer_num_nodes    = 1
 trainer_precision    = "16-mixed"
 diagnostic_level     = "standard"
-
-# -- Environment --------------------------------------------------------------
-[environment]
-    max_episode_steps = 300
-    observation_dim   = 45
-    action_count      = 5
-    use_start_channel = true
 
 # -- Optimization -------------------------------------------------------------
 [optimizer]
@@ -60,7 +53,7 @@ diagnostic_level     = "standard"
     tbptt_steps = 25
 
 [runtime.validation]
-    hard_max_rollout_steps = 300
+    hard_max_rollout_steps = 1000
     seed = 42
 
 # -- Controller & loss --------------------------------------------------------
