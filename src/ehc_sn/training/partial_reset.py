@@ -1,6 +1,8 @@
+""" """
+
 from __future__ import annotations
 
-from typing import Dict, Sequence
+from typing import Sequence
 
 import torch
 from torch import Tensor
@@ -9,16 +11,29 @@ from ehc_sn.training.buffers import FifoBuffer
 
 
 class PartialResetBatchAssembler:
-    def __init__(self, *, buffer: FifoBuffer, keys: Sequence[str]):
+    def __init__(
+        self,
+        *,
+        buffer: FifoBuffer,
+        keys: Sequence[str],
+    ):
         self.buffer = buffer
         self.keys = list(keys)
 
-    def make_step_batch(self, *, incoming: Dict[str, Tensor], reset_mask: Tensor) -> Dict[str, Tensor]:
+    def make_step_batch(
+        self,
+        *,
+        incoming: dict[str, Tensor],
+        reset_mask: Tensor,
+    ) -> dict[str, Tensor]:
         return self.ingest_and_make_step_batch(incoming=incoming, reset_mask=reset_mask)
 
     def ingest_and_make_step_batch(
-        self, *, incoming: Dict[str, Tensor], reset_mask: Tensor
-    ) -> Dict[str, Tensor]:
+        self,
+        *,
+        incoming: dict[str, Tensor],
+        reset_mask: Tensor,
+    ) -> dict[str, Tensor]:
         """
         incoming: tensors on GPU (Lightning already moved them).
         reset_mask: bool tensor on GPU, shape (B,). True => this slot will load new data now.
@@ -64,7 +79,12 @@ class PartialResetBatchAssembler:
 
         return step_batch
 
-    def refill_only(self, *, template: Dict[str, Tensor], reset_mask: Tensor) -> Dict[str, Tensor] | None:
+    def refill_only(
+        self,
+        *,
+        template: dict[str, Tensor],
+        reset_mask: Tensor,
+    ) -> dict[str, Tensor] | None:
         """
         Refill reset slots from the buffer only.
 

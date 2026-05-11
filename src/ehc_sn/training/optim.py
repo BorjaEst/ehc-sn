@@ -1,10 +1,9 @@
-from typing import Any, Dict, List, Optional, Tuple, Union
+""" """
 
-import torch
-import torch.distributed as dist
+from typing import Optional
+
 from adam_atan2_pytorch import AdamAtan2
 from pydantic import BaseModel, Field
-from torch import Tensor
 from torch.optim import Adam as TorchAdam
 from torch.optim.optimizer import Optimizer, ParamsT
 
