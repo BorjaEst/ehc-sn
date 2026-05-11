@@ -27,24 +27,25 @@ Legacy namespaces (`torch_tem`, `hrm_sn`) are retired and archived under
 
 ## 3 Public Vocabulary
 
-| Term                               | Meaning                                                                                                                                                   | Canonical owner                                        |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| **Module**                         | Pure reusable `nn.Module` building block with no task semantics.                                                                                          | `modules/`                                             |
-| **Model**                          | Pure architecture composed from modules. Owns recurrent state and architecture-native outputs, not task semantics.                                        | `models/`                                              |
-| **Task**                           | Problem contract: observation/action protocol, workspace geometry, masking, episode semantics, reward or supervision semantics, and evaluation metrics.   | `tasks/`                                               |
-| **Adapter**                        | Explicit binding between one model and one task.                                                                                                          | `adapters/`                                            |
-| **Predictive cognitive-map model** | Model family that learns action-conditioned spatial prediction or memory structure without by itself owning goal selection or overt action policy.        | `models/`                                              |
-| **Navigation-grounded task**       | Spatial or abstract task defined by trajectory, action, transition, and episode semantics; it may be exploratory or predictive rather than goal-directed. | `tasks/`                                               |
-| **Navigation agent**               | Full executable stack that exposes action selection for a goal-directed navigation task.                                                                  | `adapters/`, `controllers/`, `policies/`, `lightning/` |
-| **Controller**                     | Reusable rollout-state transition primitive distinct from policies, which own action selection.                                                           | `controllers/`                                         |
-| **Objective**                      | Reusable objective-scoring primitive over executed rollout data.                                                                                          | `objectives/` (canonical)                              |
-| **Policy**                         | Reusable action-selection primitive.                                                                                                                      | `policies/`                                            |
-| **Training Surface (Lightning)**   | Executable training surface wiring `task -> model -> adapter`.                                                                                            | `lightning/`                                           |
-| **Benchmark semantic package**     | Canonical benchmark definition and evaluator logic.                                                                                                       | `benchmarks/`                                          |
-| **Benchmark binding**              | Internal benchmark-specific adapter family.                                                                                                               | `benchmarks/_bindings/`                                |
-| **Data contract**                  | Persisted processed-data format and static loading contract.                                                                                              | `data/`                                                |
-| **Environment kernel**             | Reusable runtime environment implementation.                                                                                                              | `envs/`                                                |
-| **Entry point**                    | Thin CLI, trainer launcher, or benchmark runner.                                                                                                          | `scripts/`                                             |
+| Term                               | Meaning                                                                                                                                                                                            | Canonical owner                                        |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| **Module**                         | Pure reusable `nn.Module` building block with no task semantics.                                                                                                                                   | `modules/`                                             |
+| **Model**                          | Pure architecture composed from modules. Owns recurrent state and architecture-native outputs, not task semantics.                                                                                 | `models/`                                              |
+| **Task**                           | Problem contract: observation/action protocol, workspace geometry, masking, episode semantics, reward or supervision semantics, and evaluation metrics.                                            | `tasks/`                                               |
+| **Adapter**                        | Explicit binding between one model and one task.                                                                                                                                                   | `adapters/`                                            |
+| **Predictive cognitive-map model** | Model family that learns action-conditioned spatial prediction or memory structure without by itself owning goal selection or overt action policy.                                                 | `models/`                                              |
+| **Navigation-grounded task**       | Spatial or abstract task defined by trajectory, action, transition, and episode semantics; it may be exploratory or predictive rather than goal-directed.                                          | `tasks/`                                               |
+| **Navigation agent**               | Full executable stack that exposes action selection for a goal-directed navigation task.                                                                                                           | `adapters/`, `controllers/`, `policies/`, `lightning/` |
+| **Controller**                     | Reusable rollout-state transition primitive distinct from policies, which own action selection.                                                                                                    | `controllers/`                                         |
+| **Objective**                      | Reusable objective-scoring primitive over executed rollout data.                                                                                                                                   | `objectives/` (canonical)                              |
+| **Policy**                         | Reusable action-selection primitive.                                                                                                                                                               | `policies/`                                            |
+| **Training Surface (Lightning)**   | Executable training surface wiring `task -> model -> adapter`.                                                                                                                                     | `lightning/`                                           |
+| **Benchmark semantic package**     | Canonical benchmark definition and evaluator logic.                                                                                                                                                | `benchmarks/`                                          |
+| **Benchmark binding**              | Internal benchmark-specific adapter family.                                                                                                                                                        | `benchmarks/_bindings/`                                |
+| **Data contract**                  | Persisted processed-data format and static loading contract.                                                                                                                                       | `data/`                                                |
+| **Environment kernel**             | Reusable runtime environment implementation.                                                                                                                                                       | `envs/`                                                |
+| **Task live-environment shell**    | Canonical live sequential-decision shell for task-owned RL interaction. Owns reward, `terminated`, `truncated`, and semantic episode horizon. Deferred tasks must declare their status explicitly. | `tasks/*/environment.py`                               |
+| **Entry point**                    | Thin CLI, trainer launcher, or benchmark runner.                                                                                                                                                   | `scripts/`                                             |
 
 ---
 
@@ -121,6 +122,14 @@ never upward.
 - **Data and environments are reusable infrastructure.** `data/` owns persisted
   static contracts; `envs/` owns reusable runtime kernels; `tasks/` own the task
   meaning attached to those resources.
+- **`tasks/*/environment.py` is the canonical live-env shell.** Each task's
+  `environment.py` is the authoritative live sequential-decision shell for
+  task-owned RL interaction via `RLTaskRuntime`. Reward, `terminated`,
+  `truncated`, and semantic episode horizon belong here, not in `envs/` or in
+  online RL controller configs. Tasks whose live-env implementation is deferred
+  must declare that status explicitly in their `environment.py` rather than
+  leaving an ambiguous empty file. Online RL controllers must not own a
+  `max_steps` or equivalent semantic budget field in their public configs.
 - **Shared substrate versus task corpus.** `data/` owns shared-substrate
   persistence — geometry and spatial channels reused across task corpora.
   Each `tasks/<task>/` owns the schema, validation, and materialization of its

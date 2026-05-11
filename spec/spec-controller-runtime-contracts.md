@@ -19,7 +19,7 @@ The canonical runner-owned per-step snapshot surface lives in
 - `final_carry`: authoritative controller-owned continuity state returned at
   the end of execution.
 - `StepRecord.executed_frame`: the exact tensors consumed by the model,
-  objective, and diagnostics on this step.  For replay controllers this is the
+  objective, and diagnostics on this step. For replay controllers this is the
   carry-owned step slice, independent of the source batch.
 - `StepRecord.sampled_input`: what the source proposed; the raw batch from the
   source before the controller processed it.
@@ -36,7 +36,7 @@ Rules:
 - Runner snapshots must not duplicate source-owned full replay rows or other
   full `(B, T, ...)` tensors. If a value is source-owned or time-major enough
   to bloat per-step records, it stays in the source batch or an out-of-band
-  join path, not in carry.  `resident_payload` is explicitly excluded from
+  join path, not in carry. `resident_payload` is explicitly excluded from
   `CarrySnapshot` for this reason.
 - Observability must not widen the carry contract by default. When traces,
   figures, or diagnostics need source-owned context, they should rejoin it from
@@ -45,7 +45,7 @@ Rules:
 - Family-specific snapshot protocols are projections of this runner snapshot
   contract and must expose only the fields their consumer actually needs.
 - Objectives and traces must read `executed_frame` (not `sampled_input` or the
-  generic snapshot) when they need step-truth data.  `record.batch` is a
+  generic snapshot) when they need step-truth data. `record.batch` is a
   backward-compatible alias for `executed_frame`.
 
 ---
