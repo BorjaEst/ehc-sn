@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Protocol
+from typing import Protocol
 
 import torch
 from pydantic import BaseModel
@@ -28,19 +28,7 @@ def batch_anchor_tensor(batch: Batch) -> Tensor:
 
 # =================================================================================================
 class RolloutBackbone[ModelState, ModelOutput](Protocol):
-    """Protocol for backbone models driven by rollout controllers.
-
-    The backbone owns the recurrent state and the neural forward pass.
-    All three methods must be implemented:
-
-    - ``init_state``: allocate a fresh recurrent state for a given batch size.
-    - ``reset_state``: selectively reset individual slots (partial-reset semantics);
-      only slots where ``reset_flag`` is ``True`` are reset.
-    - ``__call__``: run one forward step; returns
-      ``(next_state, logits_tuple, cls_features)`` where ``cls_features`` is a
-      ``(B, D)`` summary vector and each tensor in ``logits_tuple`` has shape
-      ``(B, S, V)`` or ``(B, A)`` as defined by the model contract.
-    """
+    """ """
 
     def init_state(  # ----------------------------------------------------------------------------
         self, batch_size: int,
@@ -54,7 +42,7 @@ class RolloutBackbone[ModelState, ModelOutput](Protocol):
 
     def __call__(  # ------------------------------------------------------------------------------
         self, batch: Batch, state: ModelState | None = None,
-    ) -> tuple[ModelState, ModelOutput]:  # fmt: skip
+    ) -> tuple[ModelOutput, ModelState]:  # fmt: skip
         ...  # fmt: skip
 
 
@@ -78,7 +66,7 @@ class RolloutState[ModelState](DetachMixin):
     model_state: ModelState
     steps: Tensor
     halted: Tensor
-    data: Dict[str, Tensor]
+    data: dict[str, Tensor]
 
 
 # =================================================================================================
@@ -110,7 +98,8 @@ class BaseController[ModelState, ConfigT: BaseModel]:
 
     1. Call ``self.refresh_slot_data(batch, state)`` to overwrite halted slots.
     2. Call ``self.backbone.reset_state(state.halted, state.model_state)``.
-    3. Call ``self.backbone(data, model_state)`` for the forward pass.
+    3. Call ``self.backbone(data, model_state)`` for the forward pass; it returns
+       ``(output, model_state)`` — output first, state second.
     4. Call ``self.advance_steps(state)`` to update per-slot counters.
     5. Call ``self._select_action_and_done(...)`` — the single algorithm hook;
        it must return at minimum ``(action: Tensor, done: Tensor[bool])``;
@@ -163,13 +152,13 @@ class BaseController[ModelState, ConfigT: BaseModel]:
     @staticmethod
     def make_empty_slot_data(  # ----------------------------------------------------------------------
         batch_sample: Batch,
-    ) -> Dict[str, Tensor]:  # fmt: skip
+    ) -> dict[str, Tensor]:  # fmt: skip
         """Allocate per-slot buffers matching an example batch."""
         return {key: torch.empty_like(value) for key, value in batch_sample.items()}
 
     def refresh_slot_data(  # ---------------------------------------------------------------------
         self, batch: Batch, state: RolloutState[ModelState],
-    ) -> Dict[str, Tensor]:  # fmt: skip
+    ) -> dict[str, Tensor]:  # fmt: skip
         """Refresh slot buffers for halted rows."""
         batch, halted, data = batch, state.halted, state.data
         return {key: torch.where(halted.view((-1,) + (1,) * (value.ndim - 1)), value, data[key]) for key, value in batch.items()}
