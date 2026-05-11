@@ -34,7 +34,6 @@ from torch.optim import Optimizer
 
 from ehc_sn.adapters.mazehard.hrm.rl import HRMv2RLController, MazeHardRLRuntime
 from ehc_sn.controllers.online.actor_critic import RLControllerConfig
-from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.heads.rl import RLLossConfig, RLLossHead
 from ehc_sn.lightning._rollout import evaluate_rollout, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
@@ -43,6 +42,7 @@ from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettings_V2
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
 from ehc_sn.tasks.mazehard.capabilities.deliberation import MazeHardDeliberationConfig
+from ehc_sn.tasks.mazehard.environment import EnvConfig, MazeHardEnv
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config

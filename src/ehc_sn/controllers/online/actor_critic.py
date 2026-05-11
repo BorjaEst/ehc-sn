@@ -24,7 +24,7 @@ Canonical import path::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, cast
+from typing import Any, Protocol, cast
 
 import torch
 from pydantic import BaseModel, Field
@@ -54,11 +54,6 @@ class RLControllerConfig(BaseModel, extra="forbid"):
     policy: CategoricalPolicyConfig = Field(
         default_factory=CategoricalPolicyConfig,
         description="Configuration for the categorical action policy used to sample rollout actions.",
-    )
-    max_steps: Optional[int] = Field(
-        default=None,
-        ge=1,
-        description="Maximum deliberation steps per slot before forced termination.",
     )
 
 
@@ -223,8 +218,6 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         terminated = env_td["terminated"].squeeze(-1)
         truncated = env_td["truncated"].squeeze(-1)
         done = terminated | truncated
-        if self.config.max_steps is not None and allow_halt:
-            done = done | (steps >= self.config.max_steps)
 
         return action, done, env_td, policy_decision
 
