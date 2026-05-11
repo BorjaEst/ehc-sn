@@ -26,13 +26,14 @@ from pydantic import AliasChoices, BaseModel, Field
 from torch.optim import Optimizer
 
 from ehc_sn.adapters.mazehard.hrm.act import HRMv1ACTController as ACTController
+from ehc_sn.adapters.mazehard.hrm.act import MazehardACTBinding
 from ehc_sn.controllers.act import ACTControllerConfig
-from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
 from ehc_sn.lightning._rollout import evaluate_rollout, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v1 import Batch, HRModelV1, ModelSettings_V1
+from ehc_sn.objectives import ACTLossConfig, ACTLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
@@ -127,7 +128,7 @@ class TrainingModel(L.LightningModule):
         model_settings = ModelSettings_V1.from_config(config.model_config_path)
         self.model = HRModelV1(model_settings)
         self.controller = ACTController(self.model, config.act_controller)
-        self.objective = ACTLossHead(config.loss)
+        self.objective = ACTLossHead(config.loss, task_binding=MazehardACTBinding())
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()
@@ -205,7 +206,7 @@ class TrainingModel(L.LightningModule):
         if self._train_carry is None:
             self._train_carry = self.controller.initial_state(batch)
 
-        act_options = {"allow_halt": True, "explore": True}
+        act_options = {"allow_halt": True, "explore": True, "controller": self.controller._inner}
         evaluation = evaluate_rollout(
             runner=self._train_runner,
             source=PartialResetSource(incoming=batch, assembler=self._train_batch_assembler, carry0=self._train_carry),
@@ -248,7 +249,7 @@ class TrainingModel(L.LightningModule):
         Validation uses `EvaluationLoop` (no carry is persisted across batches here) and logs
         normalized metrics.
         """
-        act_options = {"allow_halt": False, "explore": False, "td_target": False}
+        act_options = {"allow_halt": False, "explore": False, "td_target": False, "controller": self.controller._inner}
         carry0 = self.controller.initial_state(batch)
         evaluation = evaluate_rollout(
             runner=self._eval_runner,

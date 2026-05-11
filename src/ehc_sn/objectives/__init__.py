@@ -8,13 +8,6 @@ learner-owned batch-loss path, not a rollout-scoring objective.
 Prefer ``from ehc_sn.objectives import ...`` over any sub-module import.
 """
 
-# ACT/TEM heads live in ehc_sn.heads (migrated implementations compatible with
-# the new adapter-backed controllers). The objectives sub-modules (act.py,
-# tem.py) are preserved on disk but are NOT imported here because they reference
-# the pre-migration inner controller types (ACTStepOutput, TEMStepOutput) which
-# no longer exist at the controllers.act / controllers.tem shim paths.
-from ehc_sn.heads.act import ACTLossConfig, ACTLossHead, ACTLossStep
-from ehc_sn.heads.tem import TEMLossConfig, TEMLosses, TEMLossHead, TEMLossStep
 from ehc_sn.objectives._base import BaseObjective
 from ehc_sn.objectives._token import (
     IGNORE_LABEL_ID,
@@ -34,7 +27,9 @@ from ehc_sn.objectives._variational import (
     get_reg_term,
     require_latent_relation,
 )
+from ehc_sn.objectives.act import ACTLossConfig, ACTLossHead, ACTLossStep
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLosses, HybridRLLossHead, HybridRLLossStep
+from ehc_sn.objectives.tem import TEMLossConfig, TEMLosses, TEMLossHead, TEMLossStep
 
 # ── Canonical objective aliases (preferred) ──────────────────────────────────
 # ACT

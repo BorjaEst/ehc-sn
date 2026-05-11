@@ -10,11 +10,11 @@ import lightning as L
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
+from ehc_sn.adapters.arena.tem.binding import ArenaTEMBinding
 from ehc_sn.adapters.arena.tem.replay import TEMController
 from ehc_sn.controllers.tem import TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
-from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.lightning._rollout import (
     evaluate_rollout,
     evaluate_rollout_streaming,
@@ -24,6 +24,7 @@ from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, re
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
 from ehc_sn.models.tem.tem_v2 import Batch, ModelSettings_V2, TEMModelV2
+from ehc_sn.objectives import TEMLossConfig, TEMLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.arena.runtime import ARENA_REPLAY_REQUIRED_KEYS, batch_size_from_arena_batch, infer_arena_replay_batch_keys
 from ehc_sn.training.buffers import FifoBuffer
@@ -148,10 +149,10 @@ class TrainingModel(L.LightningModule):
                 self.model, None, self.config.controller,
                 replay=replay, observation_dim=self.model.config.observation_dim,
             )
-            return None, controller, TEMLossHead(self.config.loss)
+            return None, controller, TEMLossHead(self.config.loss, task_binding=ArenaTEMBinding())
         environment = Environment(self.config.environment, batch_size=batch_size)
         controller = TEMController(self.model, environment, self.config.controller)
-        return environment, controller, TEMLossHead(self.config.loss)
+        return environment, controller, TEMLossHead(self.config.loss, task_binding=ArenaTEMBinding())
 
     def _ensure_train_runtime(self) -> None:
         """Initialize the training runtime once per process."""
