@@ -4,24 +4,23 @@ These classes are specific to the TEM (Tolman-Eichenbaum Machine) architecture
 and are **not** part of the generic metrics public API exported by
 :mod:`ehc_sn.metrics`.  TEM code should import directly from this module:
 
-    from ehc_sn.metrics.metrics import AccuracyO, SensoryAccuracy
+    from ehc_sn.metrics.metrics import AccuracyO
 
 Migration note: when TEM is refactored to use the standard paradigm-specific
-metrics pipeline (``RatioMetric`` + routing table), these classes should be
-replaced by route entries in a ``metrics/routes/tem.py`` module.
+metrics pipeline (``RatioMetric`` + routing table), replace ``AccuracyO`` with
+route entries in a ``metrics/routes/tem.py`` module and delete this file.
 """
 
-# TODO: When TEM gains a loss head (tem_v2 or later), replace AccuracyO with
+# TODO: When TEM gains a full loss head, replace AccuracyO with
 #       RatioMetric route entries in metrics/routes/tem.py and delete this file.
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
 import torch
-import torch.nn as nn
 from torch import Tensor
+from torch import device as Device
 
 
 @dataclass
@@ -97,58 +96,3 @@ class AccuracyO:
         """
         return AccuracyO(self.acc_p_inf, self.acc_gen_gi, self.acc_gen_gg, _total=self._total / divisor)
 
-
-class SensoryAccuracy(nn.Module):
-    """Compute sensory prediction accuracies.
-
-    This computes categorical prediction accuracy for each of the three TEM
-    sensory prediction pathways, matching the structure of `SensoryReconstructionLoss`.
-    """
-
-    def __init__(self, reduction: Literal["none", "mean"] = "none"):
-        """Initialize the accuracy metric.
-
-        Args:
-            reduction: Output reduction.
-                - "none": return per-environment vectors of shape `[B]`.
-                - "mean": return a scalar mean across environments.
-        """
-        super().__init__()
-        self.reduction = reduction
-
-    def forward(self, output: TEMOutput, label: WorldStep) -> AccuracyO:
-        """Compute `AccuracyO` from logits and ground-truth observations.
-
-        Args:
-            y_p_inf: Predicted observations and logits from inference pathway.
-            y_gen_gi: Predicted observations and logits from retrieved pathway.
-            y_gen_gg: Predicted observations and logits from ancestral pathway.
-            observation: Ground-truth observations (class indices or one-hot).
-
-        Returns:
-            AccuracyO: Per-pathway prediction accuracies (float in [0.0, 1.0]).
-
-        Raises:
-            ValueError: If `o_logits` does not contain exactly 3 tensors.
-        """
-        reconstruction, observation = output.reconstruction, label.observation
-        y_p_inf, y_gen_gi, y_gen_gg = reconstruction.y_p_inf, reconstruction.y_gen_gi, reconstruction.y_gen_gg
-
-        # Convert o to class indices if one-hot
-        if observation.dim() == 2 and observation.shape[1] > 1:
-            labels = torch.argmax(observation, dim=1)
-        else:
-            labels = observation.squeeze(-1) if observation.dim() == 2 else observation
-
-        # Compute per-environment correctness (float 0.0 or 1.0)
-        acc_acc_p_inf = (torch.argmax(y_p_inf.logits, dim=1) == labels).float()
-        acc_acc_gen_gi = (torch.argmax(y_gen_gi.logits, dim=1) == labels).float()
-        acc_acc_gen_gg = (torch.argmax(y_gen_gg.logits, dim=1) == labels).float()
-
-        # Apply reduction if requested
-        if self.reduction == "mean":
-            acc_acc_p_inf = acc_acc_p_inf.mean()
-            acc_acc_gen_gi = acc_acc_gen_gi.mean()
-            acc_acc_gen_gg = acc_acc_gen_gg.mean()
-
-        return AccuracyO(acc_acc_p_inf, acc_acc_gen_gi, acc_acc_gen_gg)
