@@ -21,8 +21,6 @@ from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSetti
 
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
-from ehc_sn.callbacks.eval_regimes import EvaluationRegimesCallback, EvaluationRegimesCallbackSettings
-from ehc_sn.callbacks.figures import FigureCallbackSettings, FiguresCallback
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.ehc.core._base import load_weights_from_checkpoint
@@ -148,14 +146,6 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
         default_factory=CheckpointSettings,
         description="Model checkpoint callback settings.",
     )
-    figures: Optional[FigureCallbackSettings] = Field(
-        default_factory=FigureCallbackSettings,
-        description="Figure-generation callback settings.",
-    )
-    eval_regimes: Optional[EvaluationRegimesCallbackSettings] = Field(
-        default=None,
-        description="Named diagnostic evaluation regime settings run by the evaluation callback.",
-    )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(
         default="standard",
         description=(
@@ -278,17 +268,13 @@ if __name__ == "__main__":
     callbacks_list = [TrainingMetricsCallback()]
     if settings.checkpoint is not None:
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
-    if settings.eval_regimes is not None:
-        callbacks_list.append(EvaluationRegimesCallback(settings.eval_regimes))
-    if settings.figures is not None and settings.figures.enabled:
-        callbacks_list.append(FiguresCallback(settings.figures))
     if settings.diagnostic_level != "minimal":
         callbacks_list.append(DiagnosticsCallback(settings.diagnostics))
 
     # Build the PyTorch Lightning Trainer.
     # This wires together logging, callbacks, and training control.
     trainer = Trainer(
-        # Logger + callbacks handle metrics/hparams, figures, and checkpointing.
+        # Logger + callbacks handle metrics/hparams and checkpointing.
         logger=Logger(settings.logger) if settings.logger is not None else None,
         callbacks=callbacks_list if callbacks_list else None,
         # Lightning Trainer kwargs (extracted from config)
