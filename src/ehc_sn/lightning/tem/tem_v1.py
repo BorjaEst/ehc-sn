@@ -13,8 +13,6 @@ from torch.optim import Adam, Optimizer
 from ehc_sn.adapters.arena.tem.binding import ArenaTEMBinding
 from ehc_sn.adapters.arena.tem.replay import TEMController
 from ehc_sn.controllers.tem import TEMControllerConfig
-from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
-from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
 from ehc_sn.lightning._rollout import (
     evaluate_rollout,
     evaluate_rollout_streaming,
@@ -47,9 +45,14 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
         ...,
         description="Path to the model configuration TOML file that specifies the TEM v1 architecture.",
     )
-    environment: EnvironmentConfig | None = Field(
+    environment: None = Field(
         default=None,
-        description="Dungeon-walk environment configuration. Omit for Arena replay mode.",
+        description=(
+            "Must be None. TEM live environment mode is not implemented; "
+            "the current baseline is arena replay only. "
+            "To add live mode, implement the task environment in tasks/arena/environment.py "
+            "and wire a new controller path in the adapter layer."
+        ),
     )
     controller: TEMControllerConfig = Field(
         ...,
@@ -83,13 +86,11 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
 
     @model_validator(mode="after")
     def validate_environment_contract(self) -> "ModelConfig_TEM_V1":
-        if self.environment is None:
-            return self  # Arena replay mode: no environment contract to validate.
-        model_settings = ModelSettings_V1.from_config(self.model_config_path)
-        if self.environment.observation_dim != model_settings.observation_dim:
-            raise ValueError("environment.observation_dim must match model.observation_dim.")
-        if self.environment.action_count != model_settings.action_count:
-            raise ValueError("environment.action_count must match model.action_count.")
+        if self.environment is not None:
+            raise ValueError(
+                "TEM live environment mode is not implemented. "
+                "Set environment = null / omit the [environment] section to use arena replay mode."
+            )
         return self
 
 
@@ -104,10 +105,10 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettings_V1.from_config(config.model_config_path)
         self.model = TEMModelV1(model_settings)
-        self.train_environment: Environment | None = None
+        self.train_environment: None = None
         self.train_controller: TEMController | None = None
         self.train_objective: TEMLossHead | None = None
-        self.eval_environment: Environment | None = None
+        self.eval_environment: None = None
         self.eval_controller: TEMController | None = None
         self.eval_objective: TEMLossHead | None = None
         self._config = config
@@ -141,19 +142,15 @@ class TrainingModel(L.LightningModule):
         """Return the TEM TBPTT chunk length used for one optimizer update."""
         return self.config.runtime.sequence.tbptt_steps
 
-    def _build_runtime(self, *, batch_size: int) -> tuple[Environment | None, TEMController, TEMLossHead]:
-        """Construct one phase-local TEM rollout runtime around the shared model."""
-        if self.config.environment is None:
-            from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
-            replay = ArenaReplayCapability()
-            controller = TEMController(
-                self.model, None, self.config.controller,
-                replay=replay, observation_dim=self.model.config.observation_dim,
-            )
-            return None, controller, TEMLossHead(self.config.loss, task_binding=ArenaTEMBinding())
-        environment = Environment(self.config.environment, batch_size=batch_size)
-        controller = TEMController(self.model, environment, self.config.controller)
-        return environment, controller, TEMLossHead(self.config.loss, task_binding=ArenaTEMBinding())
+    def _build_runtime(self, *, batch_size: int) -> tuple[None, TEMController, TEMLossHead]:
+        """Construct one phase-local TEM arena replay runtime around the shared model."""
+        from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
+        replay = ArenaReplayCapability()
+        controller = TEMController(
+            self.model, None, self.config.controller,
+            replay=replay, observation_dim=self.model.config.observation_dim,
+        )
+        return None, controller, TEMLossHead(self.config.loss, task_binding=ArenaTEMBinding())
 
     def _ensure_train_runtime(self) -> None:
         """Initialize the training runtime once per process."""

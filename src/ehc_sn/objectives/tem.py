@@ -33,8 +33,14 @@ from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import (
     TEM_LOSS_GRID_KL_ALL,
     TEM_LOSS_GRID_KL_REVISIT,
+    TEM_LOSS_OBS_ANCESTRAL_ALL,
+    TEM_LOSS_OBS_ANCESTRAL_REVISIT,
+    TEM_LOSS_OBS_INFERENCE_ALL,
+    TEM_LOSS_OBS_INFERENCE_REVISIT,
     TEM_LOSS_OBS_NLL_ALL,
     TEM_LOSS_OBS_NLL_REVISIT,
+    TEM_LOSS_OBS_RETRIEVED_ALL,
+    TEM_LOSS_OBS_RETRIEVED_REVISIT,
     TEM_LOSS_PLACE_CONSISTENCY_ALL,
     TEM_LOSS_PLACE_CONSISTENCY_REVISIT,
     TEM_LOSS_REG_ALL,
@@ -167,9 +173,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
     :class:`TEMObjectiveBinding`.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: TEMLossConfig, *, task_binding: TEMObjectiveBinding[Any],
-    ) -> None:  # fmt: skip
+    def __init__(self, config: TEMLossConfig, *, task_binding: TEMObjectiveBinding[Any],) -> None:  # fmt: skip  # ------------------------------------------------------------------------------
         """Create a TEM objective from its loss configuration.
 
         Args:
@@ -181,9 +185,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         super().__init__(config=config)
         self._task_binding = task_binding
 
-    def compute_losses(  # -----------------------------------------------------------------------
-        self, outputs: TEMStepOutput, carry: Any, batch: Any = None, step_output: Any = None, **_: Any,
-    ) -> TEMLosses:  # fmt: skip
+    def compute_losses(self, outputs: TEMStepOutput, carry: Any, batch: Any = None, step_output: Any = None, **_: Any,) -> TEMLosses:  # fmt: skip  # -----------------------------------------------------------------------
         """Compute ELBO-style TEM losses for a single step."""
         targets = self._task_binding.extract_targets(batch, carry, step_output)
         labels = self._task_binding.extract_observation_id(targets)
@@ -229,10 +231,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
             loss_place_consistency_sum=loss_place_consistency_sum,
         )
 
-    def _build_metric_ratios(  # -----------------------------------------------------------------
-        self, losses: TEMLosses, *, carry: Any, outputs: TEMStepOutput, batch_size: int,
-        batch: Any = None, step_output: Any = None, **_: Any,
-    ) -> dict[str, RatioStat]:  # fmt: skip
+    def _build_metric_ratios(self, losses: TEMLosses, *, carry: Any, outputs: TEMStepOutput, batch_size: int, batch: Any = None, step_output: Any = None, **_: Any,) -> dict[str, RatioStat]:  # fmt: skip  # -----------------------------------------------------------------
         """Build detached TEM ratio metrics for logging.
 
         Accuracy metrics come from the task-owned binding so this objective
@@ -245,30 +244,36 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
         protocol_count = protocol_mask.to(dtype=losses.total.dtype).sum()
         batch_count = losses.total.new_tensor(batch_size, dtype=losses.total.dtype)
         all_loss_sums = self._all_step_loss_sums(outputs, labels)
+        # Per-pathway detached losses for the revisit-split and all-step breakdowns.
+        loss_inf = self.loss_fn(outputs.logits_inference, labels).detach()
+        loss_ret = self.loss_fn(outputs.logits_retrieved, labels).detach()
+        loss_anc = self.loss_fn(outputs.logits_ancestral, labels).detach()
+        pmask = protocol_mask.to(dtype=loss_inf.dtype)
         # Accuracy metrics are owned by the task; the binding delegates to the task evaluator.
         acc_metrics = self._task_binding.evaluate_observation_metrics(outputs, targets)
         return {
             **acc_metrics,
             TEM_LOSS_OBS_NLL_REVISIT: RatioStat(losses.loss_obs_nll_sum.detach(), protocol_count),
+            TEM_LOSS_OBS_INFERENCE_REVISIT: RatioStat((loss_inf * pmask).sum(), protocol_count),
+            TEM_LOSS_OBS_RETRIEVED_REVISIT: RatioStat((loss_ret * pmask).sum(), protocol_count),
+            TEM_LOSS_OBS_ANCESTRAL_REVISIT: RatioStat((loss_anc * pmask).sum(), protocol_count),
             TEM_LOSS_GRID_KL_REVISIT: RatioStat(losses.loss_grid_kl_sum.detach(), protocol_count),
             TEM_LOSS_PLACE_CONSISTENCY_REVISIT: RatioStat(losses.loss_place_consistency_sum.detach(), protocol_count),
             TEM_LOSS_REG_REVISIT: RatioStat(losses.loss_reg_sum.detach(), protocol_count),
             TEM_LOSS_OBS_NLL_ALL: RatioStat(all_loss_sums["loss_obs_nll_sum"], batch_count),
+            TEM_LOSS_OBS_INFERENCE_ALL: RatioStat(loss_inf.sum(), batch_count),
+            TEM_LOSS_OBS_RETRIEVED_ALL: RatioStat(loss_ret.sum(), batch_count),
+            TEM_LOSS_OBS_ANCESTRAL_ALL: RatioStat(loss_anc.sum(), batch_count),
             TEM_LOSS_GRID_KL_ALL: RatioStat(all_loss_sums["loss_grid_kl_sum"], batch_count),
             TEM_LOSS_PLACE_CONSISTENCY_ALL: RatioStat(all_loss_sums["loss_place_consistency_sum"], batch_count),
             TEM_LOSS_REG_ALL: RatioStat(all_loss_sums["loss_reg_sum"], batch_count),
         }  # fmt: skip
 
-    def _build_step_output(  # -------------------------------------------------------------------
-        self, losses: TEMLosses, metrics: StepMetrics, signals: dict[str, Any], outputs: Any,
-    ) -> TEMLossStep:  # fmt: skip
+    def _build_step_output(self, losses: TEMLosses, metrics: StepMetrics, signals: dict[str, Any], outputs: Any,) -> TEMLossStep:  # fmt: skip  # -------------------------------------------------------------------
         """Wrap losses, metrics, and signals into a :class:`TEMLossStep`."""
         return TEMLossStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
 
-    def compute_signals(  # -----------------------------------------------------------------------
-        self, batch: Batch, carry: Any, outputs: TEMStepOutput, losses: TEMLosses,
-        step_output: Any = None, **_: Any,
-    ) -> dict[str, Tensor]:  # fmt: skip
+    def compute_signals(self, batch: Batch, carry: Any, outputs: TEMStepOutput, losses: TEMLosses, step_output: Any = None, **_: Any,) -> dict[str, Tensor]:  # fmt: skip  # -----------------------------------------------------------------------
         """Compute detached TEM diagnostics and ELBO-style scalar signals."""
         targets = self._task_binding.extract_targets(batch, carry, step_output)
         labels = self._task_binding.extract_observation_id(targets)
@@ -301,8 +306,6 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
                 S.PLACE_PRIOR_NORM: mean_latent_norm(place_transition_relation.rhs),
             }
         )
-        if outputs.theta_cls is not None:
-            signals[S.THETA_CLS_NORM] = outputs.theta_cls.detach().norm(dim=-1).mean()
         return signals
 
     @staticmethod
@@ -345,9 +348,7 @@ class TEMLossHead(VariationalLossHeadBase[TEMLossConfig]):
             "loss_reg_sum": (grid_reg.sum() + place_reg.sum()).detach(),
         }
 
-    def _regularization_terms(  # ----------------------------------------------------------------
-        self, code: LatentCode, norm: RegularizationNorm, coefficient: float,
-    ) -> Tensor:  # fmt: skip
+    def _regularization_terms(self, code: LatentCode, norm: RegularizationNorm, coefficient: float,) -> Tensor:  # fmt: skip  # ----------------------------------------------------------------
         """Return weighted per-example regularization for one latent group."""
         if coefficient == 0.0 or norm == "none":
             first_block = code if isinstance(code, Tensor) else next(iter(code))
