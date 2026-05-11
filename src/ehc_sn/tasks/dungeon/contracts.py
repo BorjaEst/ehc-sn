@@ -46,6 +46,10 @@ class DungeonTaskInput:
     """True on the first step of an episode, shape ``(B,)`` bool."""
     is_revisit: Tensor | None = None
     """True when the current location has been visited before, shape ``(B,)`` bool."""
+    goal_row: Tensor | None = None
+    """Goal cell row index per slot, shape ``(B, 1)`` int64.  None when the corpus predates goal channels."""
+    goal_col: Tensor | None = None
+    """Goal cell column index per slot, shape ``(B, 1)`` int64.  None when the corpus predates goal channels."""
 
 
 # =============================================================================

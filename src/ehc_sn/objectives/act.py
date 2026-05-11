@@ -106,7 +106,7 @@ class ACTLossHead(TokenLossHeadBase[ACTLossConfig]):
             raise TypeError("ACTLossHead requires controller=ACTController when scoring ACT rollout steps.")
 
         td_target = bool(loss_options.pop("td_target", True))
-        target_q = self._compute_td_target(controller, record) if td_target and controller.config.max_steps > 1 else None
+        target_q = self._compute_td_target(controller, record) if td_target else None
         return super().evaluate_step(record, controller=controller, target_q=target_q, **loss_options)
 
     def compute_losses(
@@ -200,16 +200,15 @@ class ACTLossHead(TokenLossHeadBase[ACTLossConfig]):
         steps = record.carry.steps
         if data is None or model_state is None or steps is None:
             raise ValueError("ACT TD target requires carry.data, carry.model_state, and carry.steps.")
+        del steps  # no longer used for forced-halt boundary; kept for carry validation only
 
         with torch.no_grad():
             _, backbone_output = controller.backbone(data, model_state)
             next_q = backbone_output.control.q_logits
 
         done_action = controller.config.done_action
-        is_last_step = steps >= controller.config.max_steps
         scores = collapse_act_halt_continue_logits(next_q, done_action=done_action)
-        target = torch.where(is_last_step, scores.halt_logit, scores.continue_logit)
-        return torch.sigmoid(target)
+        return torch.sigmoid(scores.continue_logit)
 
 
 # =================================================================================================

@@ -51,6 +51,8 @@ def coerce_dungeon_task_input(
         landmark_id=data.get("landmark_id"),
         episode_start=data.get("episode_start"),
         is_revisit=data.get("is_revisit"),
+        goal_row=data.get("goal_row"),
+        goal_col=data.get("goal_col"),
     )
 
 

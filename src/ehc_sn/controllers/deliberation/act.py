@@ -31,11 +31,6 @@ class ACTControllerConfig(BaseModel, extra="forbid"):
         le=1.0,
         description="Probability of flipping the greedy halt decision during exploration.",
     )
-    max_steps: int = Field(
-        ...,
-        ge=1,
-        description="Maximum deliberation steps per slot.",
-    )
     done_action: int = Field(
         default=0,
         ge=0,
@@ -189,8 +184,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
     ) -> tuple[ACTRolloutState[ModelState], ACTStepOutput]:
         """Advance the controller by one recurrent step.
 
-        ``allow_halt=False`` disables learned halting for this step while still
-        enforcing the hard ``config.max_steps`` budget.
+        ``allow_halt=False`` disables learned halting for this step.
         """
         _ = options
         data = self.refresh_slot_data(batch, state)
@@ -225,7 +219,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         else:
             halt = torch.zeros_like(scores.greedy_halt, dtype=torch.bool)
 
-        return (halt | (steps >= self.config.max_steps)).to(dtype=torch.bool)
+        return halt.to(dtype=torch.bool)
 
 
 # =============================================================================

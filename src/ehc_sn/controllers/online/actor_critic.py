@@ -130,19 +130,28 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         return self._runtime
 
     def initial_state(
-        self, batch_sample: Batch,
+        self,
+        batch_sample: Batch,
     ) -> RLRolloutState[ModelState]:
         """Build an initial rollout state from a batch sample."""
         reset_td, env_td = initial_env_reset(batch_sample, self.runtime.build_reset_td, self._env)
         slots = self.initial_slots(batch_sample)
         return RLRolloutState(
-            model_state=slots.model_state, steps=slots.steps, halted=slots.halted,
-            data=slots.data, env_td=env_td,
+            model_state=slots.model_state,
+            steps=slots.steps,
+            halted=slots.halted,
+            data=slots.data,
+            env_td=env_td,
         )
 
     def step(
-        self, state: RLRolloutState[ModelState], batch: Batch, *,
-        allow_halt: bool = True, explore: bool = True, **_: Any,
+        self,
+        state: RLRolloutState[ModelState],
+        batch: Batch,
+        *,
+        allow_halt: bool = True,
+        explore: bool = True,
+        **_: Any,
     ) -> tuple[RLRolloutState[ModelState], ActorCriticInteractionRecord]:
         """Advance the controller by one step and emit an :class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord`."""
         data = self.refresh_slot_data(batch, state)
@@ -151,7 +160,13 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
 
         steps = self.advance_steps(state)
         action, done, env_td, policy_decision = self._select_action_and_done(
-            backbone_output, steps, data, state.env_td, state.halted, allow_halt, explore,
+            backbone_output,
+            steps,
+            data,
+            state.env_td,
+            state.halted,
+            allow_halt,
+            explore,
         )
         reward = env_td["reward"]
         terminated = env_td["terminated"].squeeze(-1)
@@ -210,9 +225,12 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         )
         next_env_td = self._env.step(env_step_td)["next"]
         env_td = self.runtime.finalize_env_transition(
-            env_td, next_env_td,
-            reset_mask=reset_mask, action=action,
-            task_output=backbone_output.task, data=data,
+            env_td,
+            next_env_td,
+            reset_mask=reset_mask,
+            action=action,
+            task_output=backbone_output.task,
+            data=data,
         )
 
         terminated = env_td["terminated"].squeeze(-1)

@@ -37,6 +37,8 @@ CHANNEL_TRAJECTORY_PREVIOUS_ACTION: Final[str] = "trajectory_previous_action"
 CHANNEL_TRAJECTORY_EPISODE_START: Final[str] = "trajectory_episode_start"
 CHANNEL_TRAJECTORY_VALID_STEP: Final[str] = "trajectory_valid_step"
 CHANNEL_TRAJECTORY_LENGTH: Final[str] = "trajectory_length"
+CHANNEL_TRAJECTORY_GOAL_ROW: Final[str] = "trajectory_goal_row"
+CHANNEL_TRAJECTORY_GOAL_COL: Final[str] = "trajectory_goal_col"
 
 DUNGEON_TRAJECTORY_CHANNELS: Final[list[str]] = [
     CHANNEL_TRAJECTORY_ROW,
@@ -45,6 +47,8 @@ DUNGEON_TRAJECTORY_CHANNELS: Final[list[str]] = [
     CHANNEL_TRAJECTORY_EPISODE_START,
     CHANNEL_TRAJECTORY_VALID_STEP,
     CHANNEL_TRAJECTORY_LENGTH,
+    CHANNEL_TRAJECTORY_GOAL_ROW,
+    CHANNEL_TRAJECTORY_GOAL_COL,
 ]
 
 DUNGEON_TASK_CHANNELS: Final[list[str]] = DUNGEON_SUBSTRATE_CHANNELS + DUNGEON_TRAJECTORY_CHANNELS
@@ -57,6 +61,8 @@ _DUNGEON_TRAJECTORY_DTYPES: dict[str, np.dtype] = {
     CHANNEL_TRAJECTORY_EPISODE_START: np.dtype(bool),
     CHANNEL_TRAJECTORY_VALID_STEP: np.dtype(bool),
     CHANNEL_TRAJECTORY_LENGTH: np.dtype(np.int32),
+    CHANNEL_TRAJECTORY_GOAL_ROW: np.dtype(np.int32),
+    CHANNEL_TRAJECTORY_GOAL_COL: np.dtype(np.int32),
 }
 
 TASK_FAMILY: Final[str] = "dungeon"
@@ -127,7 +133,7 @@ def validate_dungeon_task_root(root: Path) -> dict:
             expected_dtype = _DUNGEON_TRAJECTORY_DTYPES[ch]
             if arr.dtype != expected_dtype:
                 raise ValueError(f"Trajectory channel '{ch}' in split '{split}' has dtype {arr.dtype}, " f"expected {expected_dtype}.")
-            expected_ndim = 1 if ch == CHANNEL_TRAJECTORY_LENGTH else 2
+            expected_ndim = 1 if ch in (CHANNEL_TRAJECTORY_LENGTH, CHANNEL_TRAJECTORY_GOAL_ROW, CHANNEL_TRAJECTORY_GOAL_COL) else 2
             if arr.ndim != expected_ndim:
                 raise ValueError(f"Trajectory channel '{ch}' in split '{split}' has rank {arr.ndim}, " f"expected {expected_ndim}.")
             if arr.shape[0] != n:
@@ -154,6 +160,15 @@ def _add_trajectory(
     if start_cell is None:
         raise RuntimeError(f"Empty valid mask for seed={seed}.")
 
+    # Sample a goal cell: a valid cell distinct from start_cell when possible.
+    valid_cells = np.argwhere(mask_valid.astype(bool))
+    non_start = valid_cells[(valid_cells[:, 0] != start_cell[0]) | (valid_cells[:, 1] != start_cell[1])]
+    if len(non_start) > 0:
+        goal_idx = int(rng.integers(0, len(non_start)))
+        goal_row, goal_col = int(non_start[goal_idx, 0]), int(non_start[goal_idx, 1])
+    else:
+        goal_row, goal_col = start_cell[0], start_cell[1]  # degenerate single-cell layout
+
     traj_rng = np.random.default_rng(int(rng.integers(2**31)))
     rows, cols, prev_actions = random_walk(
         mask_valid,
@@ -177,6 +192,8 @@ def _add_trajectory(
         CHANNEL_TRAJECTORY_EPISODE_START: episode_start,
         CHANNEL_TRAJECTORY_VALID_STEP: valid_step,
         CHANNEL_TRAJECTORY_LENGTH: np.array(traj_length, dtype=np.int32),
+        CHANNEL_TRAJECTORY_GOAL_ROW: np.array(goal_row, dtype=np.int32),
+        CHANNEL_TRAJECTORY_GOAL_COL: np.array(goal_col, dtype=np.int32),
     }
 
 

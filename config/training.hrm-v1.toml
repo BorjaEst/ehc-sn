@@ -22,7 +22,6 @@ val_check_interval = 1000
 # -- ACT controller -----------------------------------------------------------
 [controller]
     exploration_prob = 0.1
-    max_steps        = 16
 
 # -- Loss, optimizer, scheduler (defaults are fine; override here if needed) ---
 [objective]
