@@ -29,10 +29,11 @@ from typing import Any, Dict, List, Optional, Tuple, TypeAlias
 
 import lightning as L
 import torch
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.controllers.rl import RLController, RLControllerConfig
+from ehc_sn.adapters.mazehard.hrm.rl import HRMv2RLController, MazeHardRLRuntime
+from ehc_sn.controllers.online.actor_critic import RLControllerConfig
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.heads.rl import RLLossConfig, RLLossHead
 from ehc_sn.lightning._rollout import evaluate_rollout, update_metric_collection_from_evaluated_chunk
@@ -41,6 +42,7 @@ from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettings_V2
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
+from ehc_sn.tasks.mazehard.capabilities.deliberation import MazeHardDeliberationConfig
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
@@ -71,9 +73,16 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
         ...,
         description="Path to the model configuration TOML file that specifies the HRM v2 architecture.",
     )
-    environment: EnvConfig = Field(
-        ...,
-        description="Environment configuration (max_episode_steps, seq_length, vocab_size, halt_action).",
+    environment: Optional[EnvConfig] = Field(
+        default=None,
+        description=(
+            "Environment configuration (max_episode_steps, seq_length, vocab_size, halt_action). "
+            "If None, derived from ``deliberation`` + model config."
+        ),
+    )
+    deliberation: Optional[MazeHardDeliberationConfig] = Field(
+        default=None,
+        description="Deliberation capability config (halt_action, episode_horizon). Synthesizes ``environment`` when set.",
     )
     controller: RLControllerConfig = Field(
         ...,
@@ -81,8 +90,28 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
     )
     loss: RLLossConfig = Field(
         ...,
+        validation_alias=AliasChoices("loss", "objective"),
         description="Configuration for the RL loss head, which computes losses based on the controller outputs.",
     )
+
+    @model_validator(mode="after")
+    def _synthesize_environment(self) -> "ModelConfig_HRM_V2":
+        if self.environment is not None:
+            return self
+        if self.deliberation is None:
+            raise ValueError("Either 'environment' or 'deliberation' must be provided in ModelConfig_HRM_V2.")
+        model_settings = ModelSettings_V2.from_config(self.model_config_path)
+        object.__setattr__(
+            self,
+            "environment",
+            EnvConfig(
+                max_episode_steps=self.deliberation.episode_horizon,
+                seq_length=model_settings.pfc.seq_length,
+                vocab_size=model_settings.vocab_size,
+                halt_action=self.deliberation.halt_action,
+            ),
+        )
+        return self
 
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     optimizer_supervised: AdamATan2Config = Field(
@@ -143,7 +172,7 @@ class TrainingModel(L.LightningModule):
         model_settings = ModelSettings_V2.from_config(config.model_config_path)
         self.model = HRModelV2(model_settings)
         self.environment: MazeHardEnv | None = None  # Lazy init in setup() to avoid GPU allocation issues
-        self.controller: RLController | None = None  # Initialized in setup() after environment is ready
+        self.controller: HRMv2RLController | None = None  # Initialized in setup() after environment is ready
         self.objective: RLLossHead | None = None  # Initialized in setup() after controller is ready
         self._config = config
         self._train_runner = SingleStepRunner()
@@ -181,7 +210,9 @@ class TrainingModel(L.LightningModule):
 
         if self.environment is None:
             self.environment = MazeHardEnv(self.config.environment, batch_size=local_bs)
-        self.controller = RLController(self.model, self.environment, self.config.controller)
+        self.controller = HRMv2RLController(
+            self.model, self.environment, self.config.controller, runtime=MazeHardRLRuntime(),
+        )
         self.objective = RLLossHead(self.config.loss)
 
     def configure_optimizers(  # ------------------------------------------------------------------
@@ -318,3 +349,7 @@ class TrainingModel(L.LightningModule):
             objective_options=rl_options,
         )
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, RL_EPISODE_ROUTES)
+
+
+# Public alias so scripts can import a descriptive name without renaming the class.
+HRMV2TrainingModel = TrainingModel

@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import lightning as L
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 from torch.optim import Adam, Optimizer
 
-from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
+from ehc_sn.adapters.arena.tem.replay import TEMController
+from ehc_sn.controllers.tem import TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
 from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
@@ -55,6 +56,7 @@ class ModelConfig_TEM_V1(BaseModel, extra="forbid"):
     )
     loss: TEMLossConfig = Field(
         ...,
+        validation_alias=AliasChoices("loss", "objective"),
         description="",
     )
 
@@ -359,3 +361,7 @@ def batch_size_from_static_maze_batch(  # --------------------------------------
 ) -> int:  # fmt: skip
     """Return the leading batch dimension from the required TEM maze tensor schema."""
     return int(batch[TEM_STATIC_REQUIRED_KEYS[0]].shape[0])
+
+
+# Public alias so scripts can import a descriptive name without renaming the class.
+TEMV1TrainingModel = TrainingModel

@@ -15,13 +15,17 @@ seed              = 42
 augment           = true
 val_check_interval = 1000
 
+# -- Adapter settings --------------------------------------------------------
+[adapter]
+    # No fields required; MazeHardHRMAdapterSettings uses extra="ignore".
+
 # -- ACT controller -----------------------------------------------------------
-[act_controller]
+[controller]
     exploration_prob = 0.1
     max_steps        = 16
 
 # -- Loss, optimizer, scheduler (defaults are fine; override here if needed) ---
-[loss]
+[objective]
     function = "stablemax_cross_entropy"
 
 [optimizer]

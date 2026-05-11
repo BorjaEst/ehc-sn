@@ -22,10 +22,11 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, TypeAlias
 
 import lightning as L
 from adam_atan2_pytorch import AdamAtan2 as AdamATan2
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from torch.optim import Optimizer
 
-from ehc_sn.controllers.act import ACTController, ACTControllerConfig
+from ehc_sn.adapters.mazehard.hrm.act import HRMv1ACTController as ACTController
+from ehc_sn.controllers.act import ACTControllerConfig
 from ehc_sn.heads.act import ACTLossConfig, ACTLossHead
 from ehc_sn.lightning._rollout import evaluate_rollout, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
@@ -59,6 +60,7 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
     )
     act_controller: ACTControllerConfig = Field(
         ...,
+        validation_alias=AliasChoices("act_controller", "controller"),
         description=(
             "Configuration for the ACT controller, which manages halting and partial resets during "
             "training. "
@@ -67,6 +69,7 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
     )
     loss: ACTLossConfig = Field(
         ...,
+        validation_alias=AliasChoices("loss", "objective"),
         description="Loss config. The keys in `loss` are passed to the loss head constructor.",
     )
     optimizer: AdamATan2Config = Field(
@@ -259,3 +262,7 @@ class TrainingModel(L.LightningModule):
             objective_options=act_options,
         )
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, ACT_EPISODE_ROUTES)
+
+
+# Public alias so scripts can import a descriptive name without renaming the class.
+HRMV1TrainingModel = TrainingModel

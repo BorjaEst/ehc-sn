@@ -15,11 +15,9 @@ val_check_interval = 1000
 supervised_only_warmup_steps = 5000
 
 # -- Environment --------------------------------------------------------------
-[environment]
-    max_episode_steps = 16
-    seq_length  = 900
-    vocab_size  = 6
-    halt_action = 0
+[deliberation]
+    episode_horizon = 16
+    halt_action     = 0
 
 # -- Optimization -------------------------------------------------------------
 [optimizer_supervised]
@@ -45,7 +43,7 @@ supervised_only_warmup_steps = 5000
 [controller]
     policy.exploration_prob = 0.1
 
-[loss]
+[objective]
     function  = "stablemax_cross_entropy"
     c_actor   = 1.0
     c_critic  = 0.5

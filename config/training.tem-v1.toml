@@ -27,6 +27,10 @@ trainer_num_nodes    = 1
 trainer_precision    = "16-mixed"
 diagnostic_level     = "standard"
 
+# -- Adapter settings --------------------------------------------------------
+[adapter]
+    # No fields required; ArenaTEMAdapterSettings uses extra="ignore".
+
 # -- Optimization -------------------------------------------------------------
 [optimizer]
     lr           = 1e-4
@@ -57,7 +61,7 @@ diagnostic_level     = "standard"
     seed = 42
 
 # -- Controller & loss --------------------------------------------------------
-[loss]
+[objective]
     observation_loss = "softmax_cross_entropy"
     c_obs            = 1.0
     c_grid           = 1.0
@@ -68,11 +72,7 @@ diagnostic_level     = "standard"
     place_reg_norm   = "l1"
 
 [controller]
-    max_steps = 300
-
-[controller.policy]
-    kind = "random_walk"
-    seed = 42
+    window_size = 300
 
 [logger]
     save_dir  = "logs"

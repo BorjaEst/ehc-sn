@@ -10,7 +10,8 @@ import lightning as L
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.controllers.tem import TEMController, TEMControllerConfig
+from ehc_sn.adapters.arena.tem.replay import TEMController
+from ehc_sn.controllers.tem import TEMControllerConfig
 from ehc_sn.envs.dungeon_walk import DungeonWalk as Environment
 from ehc_sn.envs.dungeon_walk import EnvConfig as EnvironmentConfig
 from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
