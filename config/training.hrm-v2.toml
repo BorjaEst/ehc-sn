@@ -62,7 +62,3 @@ supervised_only_warmup_steps = 5000
     every_n_epochs          = 1
     save_on_train_epoch_end = false
     save_last               = true
-
-[figures]
-    enabled = true
-    figures = ["overlay", "evolution"]

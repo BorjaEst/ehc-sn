@@ -46,8 +46,3 @@ val_check_interval = 1000
     every_n_epochs          = 1
     save_on_train_epoch_end = false
     save_last               = true
-
-# -- Figures & diagnostics ----------------------------------------------------
-[figures]
-    enabled = true
-    figures = ["overlay", "evolution"]
