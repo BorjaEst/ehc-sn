@@ -149,6 +149,44 @@ class TraceTree:
             raise TypeError(f"TraceTree.attach_meta expected a mapping, got {type(meta).__name__}.")
         _merge_meta_mapping(self.attached_meta, meta, overwrite=overwrite)
 
+    def attach_dense(self, path: str, array: "np.ndarray", *, overwrite: bool = True) -> None:
+        """Attach a pre-built dense numeric array at a slash-delimited path.
+
+        Used for post-trace injection of dataset-derived figure inputs (e.g.
+        geometry-join outputs for Arena figure rendering). The array is inserted
+        as if it had been part of the original trace so that ``get(path)`` and
+        ``_trace_has_numeric_path(trace, path)`` work correctly.
+
+        Args:
+            path: Slash-delimited path string (e.g. ``"world_step/location_ids"``).
+            array: Dense numeric array to attach.
+            overwrite: If ``True`` (default), replace an existing dense leaf at
+                ``path``. If ``False``, raise ``ValueError`` on collision.
+        """
+        if self.dense_leaves is None:
+            self.finalize()
+        arr = np.asarray(array)
+        if path in self.path_to_index:
+            idx = self.path_to_index[path]
+            if not self.leaf_is_numeric[idx]:
+                raise ValueError(f"Cannot attach_dense at '{path}': existing leaf is metadata, not numeric.")
+            if not overwrite:
+                raise ValueError(f"attach_dense collision at '{path}' and overwrite=False.")
+            assert self.dense_leaves is not None
+            self.dense_leaves[idx] = arr
+            return
+        path_tuple = tuple(path.split("/"))
+        idx = len(self.leaf_is_numeric)
+        self.paths.append(path_tuple)
+        self.path_strs.append(path)
+        self.path_to_index[path] = idx
+        self.leaf_is_numeric.append(True)
+        self.buffers.append(None)
+        self.meta_first.append(None)
+        self.leaf_signatures.append(None)
+        assert self.dense_leaves is not None
+        self.dense_leaves.append(arr)
+
     def export(self, *, flatten: bool = False, sep: str = "/") -> Any:
         """Export dense trace data, optionally flattening to a path map."""
         dense = self.export_dense_tree()
