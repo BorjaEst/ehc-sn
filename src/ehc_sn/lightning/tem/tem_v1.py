@@ -17,13 +17,11 @@ from ehc_sn.heads.tem import TEMLossConfig, TEMLossHead
 from ehc_sn.lightning._rollout import (
     evaluate_rollout,
     evaluate_rollout_streaming,
-    observe_rollout_chunk,
     update_metric_collection_from_evaluated_chunk,
 )
 from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, resolve_tem_runtime
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
-from ehc_sn.metrics.traces import TEM_TRACE_FIELDS, ReplayableEnvironments, build_trace_spec
 from ehc_sn.models.tem.tem_v1 import Batch, ModelSettings_V1, TEMModelV1
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.arena.runtime import ARENA_REPLAY_REQUIRED_KEYS, batch_size_from_arena_batch, infer_arena_replay_batch_keys
@@ -121,15 +119,6 @@ class TrainingModel(L.LightningModule):
         self.train_metrics = build_train_metrics(TEM_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(TEM_EPISODE_ROUTES).clone(prefix="val/")
         self.primary_val_metric_key = f"val/{TEM_PRIMARY_VAL_ROUTE_KEY}"
-        if config.environment is None:
-            # Arena replay: location_ids are injected from the dataset by apply_arena_trace_supplements
-            # at figure time; they are not available in carry.data during the live rollout.
-            _arena_keys = {f.name for f in TEM_TRACE_FIELDS} - {"world_step/location_ids"}
-            self.trace_specs = build_trace_spec("tem", include_keys=_arena_keys)
-        else:
-            self.trace_specs = build_trace_spec("tem")
-        self._eval_trace_keys: set[str] | None = None
-
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer: FifoBuffer | None = None
         self._train_batch_assembler: PartialResetBatchAssembler | None = None
@@ -203,12 +192,6 @@ class TrainingModel(L.LightningModule):
             raise RuntimeError("TEM evaluation runtime is not initialized.")
         return self.eval_objective
 
-    def _build_trace_meta(self, controller: TEMController) -> dict[str, object]:
-        """Return out-of-band trace metadata for figure-facing evaluation traces."""
-        if self.config.environment is None:
-            return {}  # Arena replay mode: trace supplements are built from dataset at figure time.
-        return {"environments": ReplayableEnvironments(controller.environment.build_world_descriptors())}
-
     def _ensure_train_batch_assembler(  # ---------------------------------------------------------
         self, batch: Batch,
     ) -> PartialResetBatchAssembler:  # fmt: skip
@@ -276,10 +259,6 @@ class TrainingModel(L.LightningModule):
     ) -> None:  # fmt: skip
         """ """
         self.val_metrics.reset()
-
-    def set_eval_trace_keys(self, keys: set[str]) -> None:
-        """Set the semantic trace keys required for evaluation-time figure capture."""
-        self._eval_trace_keys = set(keys)
 
     def _validation_seed(self, batch_idx: int) -> int:
         """Return the explicit evaluation seed for one validation batch."""
@@ -349,17 +328,6 @@ class TrainingModel(L.LightningModule):
         eval_controller.set_evaluation_seed(self._validation_seed(batch_idx))
         step_options = {"allow_halt": True, "explore": False}
         carry0 = eval_controller.initial_state(batch)
-        trace_meta = self._build_trace_meta(eval_controller)
-
-        # Initialize carry/state on the first batch
-        if self._eval_trace_keys is None:
-            trace_specs = self.trace_specs
-        else:
-            keys = self._eval_trace_keys
-            if self._config.environment is None:
-                # Arena replay: location_ids come from dataset supplements at figure time.
-                keys = keys - {"world_step/location_ids"}
-            trace_specs = build_trace_spec("tem", include_keys=keys)
 
         evaluation = evaluate_rollout(
             runner=self._eval_runner,
@@ -371,9 +339,7 @@ class TrainingModel(L.LightningModule):
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options=step_options,
         )
-        trace = observe_rollout_chunk(evaluation.chunk, trace_specs, trace_meta=trace_meta)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES)
-        return {"trace": trace}
 
 
 # =================================================================================================

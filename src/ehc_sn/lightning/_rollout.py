@@ -25,7 +25,6 @@ from ehc_sn.rollouts import (
     StepController,
     StepRecord,
 )
-from ehc_sn.traces import TraceObserver, TraceSpec, TraceTree
 
 
 # =================================================================================================
@@ -140,27 +139,12 @@ def update_metric_collection_from_evaluated_chunk(
         update_metrics_from_step(collection, step.outputs.metrics, routes)
 
 
-def observe_rollout_chunk(
-    chunk: RolloutChunk,
-    trace_spec: TraceSpec[Any],
-    *,
-    trace_meta: Mapping[str, Any] | None = None,
-) -> TraceTree:
-    """Build a trace tree from executed steps plus optional out-of-band metadata."""
-    observer = TraceObserver(TraceTree(), trace_spec)
-    observer.observe_records(chunk.records)
-    if trace_meta is not None:
-        observer.tree.attach_meta(trace_meta)
-    return observer.tree
-
-
 # =================================================================================================
 __all__ = [
     "RolloutEvaluation",
     "RolloutObjective",
     "evaluate_rollout",
     "evaluate_rollout_streaming",
-    "observe_rollout_chunk",
     "StreamingRolloutEvaluation",
     "update_metric_collection_from_evaluated_chunk",
 ]

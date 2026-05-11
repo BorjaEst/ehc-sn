@@ -35,11 +35,10 @@ from torch.optim import Optimizer
 from ehc_sn.controllers.rl import RLController, RLControllerConfig
 from ehc_sn.envs.mazehard import EnvConfig, MazeHardEnv
 from ehc_sn.heads.rl import RLLossConfig, RLLossHead
-from ehc_sn.lightning._rollout import evaluate_rollout, observe_rollout_chunk, update_metric_collection_from_evaluated_chunk
+from ehc_sn.lightning._rollout import evaluate_rollout, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
-from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettings_V2
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
 from ehc_sn.training.buffers import FifoBuffer
@@ -157,8 +156,6 @@ class TrainingModel(L.LightningModule):
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(RL_STEP_ROUTES).clone(prefix="train/")
         self.val_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(prefix="val/")
-        self.trace_specs = build_trace_spec("rl")
-
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer = FifoBuffer(
             capacity_rows=4 * config.global_batch_size,  # or local batch size if you prefer
@@ -320,6 +317,4 @@ class TrainingModel(L.LightningModule):
             runner_options=rl_options,
             objective_options=rl_options,
         )
-        trace = observe_rollout_chunk(evaluation.chunk, self.trace_specs)
         update_metric_collection_from_evaluated_chunk(self.val_metrics, evaluation.evaluated, RL_EPISODE_ROUTES)
-        return {"trace": trace}
