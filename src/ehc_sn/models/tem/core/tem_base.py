@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 from torch import Tensor
 
@@ -44,3 +45,34 @@ class TEMTransitionPlan:
 
 
 __all__ = ["TEMTransitionPlan"]
+
+
+# =================================================================================================
+@dataclass(frozen=True)
+class PredCodes:
+    """Model-native prediction codes for the three TEM observation pathways."""
+
+    inference: list[Tensor]
+    retrieved: Optional[list[Tensor]]
+    ancestral: list[Tensor]
+
+
+@dataclass(frozen=True)
+class GridCodes:
+    """Model-native grid codes from MEC (posterior and prior)."""
+
+    posterior: list[Tensor]
+    prior: list[Tensor]
+
+
+@dataclass(frozen=True)
+class PlaceCodes:
+    """Model-native place codes from HPC (posterior, prior, retrieved, sensory)."""
+
+    posterior: list[Tensor]
+    prior: list[Tensor]
+    retrieved: Optional[list[Tensor]]
+    sensory: Optional[list[Tensor]]
+
+
+__all__ = ["TEMTransitionPlan", "PredCodes", "GridCodes", "PlaceCodes"]

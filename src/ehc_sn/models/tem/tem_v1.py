@@ -11,7 +11,7 @@ import torch
 from pydantic import BaseModel, Field, computed_field, model_validator
 from torch import Tensor, nn
 
-from ehc_sn.models.tem.core.tem_base import TEMTransitionPlan
+from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes, TEMTransitionPlan
 from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
 from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCState
 from ehc_sn.modules.hpc import SensoryRead as HPCSensoryRead
@@ -19,14 +19,28 @@ from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
-from ehc_sn.types import Device, Dtype, MemoryState
+from ehc_sn.types import Batch, Device, Dtype, MemoryState
 from ehc_sn.utils.detach import DetachMixin
 
-# Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
-Batch: TypeAlias = Dict[str, Tensor]
-ObsLogits = tuple[Tensor, Tensor, Tensor]  # (inference, retrieved, ancestral)
-GridCodes = tuple[Tensor, Tensor]  # (posterior, prior)
-PlaceCodes = tuple[Tensor, Tensor, Optional[Tensor]]  # (posterior, prior, sensory-cued retrieval)
+
+# =================================================================================================
+@dataclass(frozen=True)
+class TEMInputV1:
+    """Model-native input payload for one TEM v1 step."""
+
+    sensory_codes: list[Tensor]
+    previous_action: Tensor
+    episode_start: Optional[Tensor] = None
+    landmark_id: Optional[Tensor] = None
+
+
+@dataclass(frozen=True)
+class TEMOutputV1:
+    """Model-native output bundle for one TEM v1 step."""
+
+    pred_codes: PredCodes
+    grid_codes: GridCodes
+    place_codes: PlaceCodes
 
 
 # =================================================================================================
@@ -161,7 +175,7 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
 
 # =================================================================================================
 @dataclass
-class TEMState(DetachMixin):
+class TEMStateV1(DetachMixin):
     """Container for the full recurrent TEM state."""
 
     lec: LECState
@@ -202,23 +216,23 @@ class TEMModelV1(nn.Module):
     def init_state(  # ----------------------------------------------------------------------------
         self, batch_size: int, *, memory: Optional[MemoryState] = None,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> TEMState:  # fmt: skip
+    ) -> TEMStateV1:  # fmt: skip
         """Create an initial recurrent TEM state."""
         memory = memory if memory is not None else self.hpc.init_memory(batch_size=batch_size, device=device)
         lec_state = self.lec.init_state(batch_size, device=device)
         state_mec = self.mec.init_state(batch_size, device=device)
         hpc_state = self.hpc.init_state(batch_size, device=device, memory=memory)
-        return TEMState(lec_state, state_mec, hpc_state)
+        return TEMStateV1(lec_state, state_mec, hpc_state)
 
     def reset_state(  # ---------------------------------------------------------------------------
-        self, reset_flag: Tensor, state: TEMState,
-    ) -> TEMState:  # fmt: skip
+        self, reset_flag: Tensor, state: TEMStateV1,
+    ) -> TEMStateV1:  # fmt: skip
         """Reset flagged rows to a fresh episode state while preserving active rows."""
         reset_flag = reset_flag.to(torch.bool).view(-1)
         if not torch.any(reset_flag):
             return state
 
-        return TEMState(
+        return TEMStateV1(
             lec=self.lec.reset_state(state.lec, reset_flag),
             mec=self.mec.reset_state(state.mec, reset_flag),
             hpc=self.hpc.reset_state(state.hpc, reset_flag),
@@ -232,22 +246,21 @@ class TEMModelV1(nn.Module):
         self.hpc.set_runtime(eta=eta, hebbian_decay=hebbian_decay)
 
     def forward(  # -------------------------------------------------------------------------------
-        self, inputs: Batch, state: Optional[TEMState] = None,
-    ) -> tuple[TEMState, ObsLogits, Any, GridCodes, PlaceCodes]:  # fmt: skip
+        self, inputs: TEMInputV1, state: Optional[TEMStateV1] = None,
+    ) -> tuple[TEMOutputV1, TEMStateV1]:  # fmt: skip
         """Run one TEM step from the current payload and recurrent state.
 
         ``state`` is assumed to have already been reset for any fresh episode
         rows by the caller. When ``state`` is ``None``, a fresh full-batch state
         is allocated and the normal single-step TEM transition is executed.
         """
-        observation = inputs["observation"]
-        previous_action = inputs["previous_action"]
-        episode_start = inputs.get("episode_start")
-        landmark_id = inputs.get("landmark_id")
-        observation_embedding = self.autoencoder.encode(observation)
+        observation_embedding = inputs.sensory_codes[0]
+        previous_action = inputs.previous_action
+        episode_start = inputs.episode_start
+        landmark_id = inputs.landmark_id
 
         if state is None:
-            state = self.init_state(int(observation.shape[0]), memory=None, device=observation.device)
+            state = self.init_state(int(observation_embedding.shape[0]), memory=None, device=observation_embedding.device)
 
         # Grid transition prior from action-driven path integration.
         grid_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)
@@ -282,26 +295,32 @@ class TEMModelV1(nn.Module):
 
         # Decode observation logits for the three TEM pathways.
         lec_features_from_place_post = self.projection_lec.inverse(step.place_post)
-        obs_features_inference = self.lec.generative(lec_features_from_place_post)
-        logits_inference = self.autoencoder.decode(obs_features_inference)
-
         lec_features_from_place_retrieved = self.projection_lec.inverse(step.place_retrieved)
-        obs_features_retrieved = self.lec.generative(lec_features_from_place_retrieved)
-        logits_retrieved = self.autoencoder.decode(obs_features_retrieved)
-
         lec_features_from_place_prior = self.projection_lec.inverse(step.place_prior)
-        obs_features_ancestral = self.lec.generative(lec_features_from_place_prior)
-        logits_ancestral = self.autoencoder.decode(obs_features_ancestral)
 
-        # Return controller-compatible rollout outputs for the TEM loss head.
-        obs_logits = (logits_inference, logits_retrieved, logits_ancestral)
-        grid = (transition.grid_post, transition.grid_prior)
-        place = (step.place_post, step.place_prior, step.sensory.recall)
-        return state, obs_logits, None, grid, place  # Action=None as TEM provides no direct action outputs
+        # Build and return model-native typed output (output-first, state second).
+        pred_codes = PredCodes(
+            inference=lec_features_from_place_post,
+            retrieved=lec_features_from_place_retrieved,
+            ancestral=lec_features_from_place_prior,
+        )
+        grid_codes_out = GridCodes(
+            posterior=grid_post,
+            prior=grid_prior,
+        )
+        place_codes_out = PlaceCodes(
+            posterior=step.place_post,
+            prior=step.place_prior,
+            retrieved=step.place_retrieved,
+            sensory=sensory.recall,
+        )
+        model_output = TEMOutputV1(pred_codes=pred_codes, grid_codes=grid_codes_out, place_codes=place_codes_out)
+        return model_output, state
 
 
 # =================================================================================================
 __all__ = [
-    "ModelSettings_V1", "TEMState", "TEMModelV1",
-    "Batch", "ObsLogits", "GridCodes", "PlaceCodes",
+    "ModelSettings_V1", "TEMStateV1", "TEMStateV1", "TEMModelV1",
+    "TEMInputV1", "TEMOutputV1",
+    "Batch", "ObsLogits",
 ]  # fmt: skip
