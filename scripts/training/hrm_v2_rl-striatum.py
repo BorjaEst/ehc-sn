@@ -16,7 +16,7 @@ from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
-from ehc_sn.controllers.deliberation.actor_critic import DeliberationACControllerConfig
+from ehc_sn.controllers.online.actor_critic import RLControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v2 import HRMV2TrainingModel, ModelConfig_HRM_V2
@@ -82,8 +82,8 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Deliberation capability config (halt_action, episode_horizon) for the MazeHard deliberation path.",
     )
-    controller: DeliberationACControllerConfig = Field(
-        default_factory=DeliberationACControllerConfig,
+    controller: RLControllerConfig = Field(
+        default_factory=RLControllerConfig,
         description="Deliberation actor-critic controller configuration (policy settings).",
     )
     objective: HybridRLLossConfig = Field(

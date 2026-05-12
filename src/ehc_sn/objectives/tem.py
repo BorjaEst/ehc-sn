@@ -18,15 +18,7 @@ from typing import Any, Optional, Protocol
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.controllers.tem import (
-    GRID_REG_TERM,
-    GRID_TRANSITION_RELATION,
-    PLACE_REG_TERM,
-    PLACE_SENSORY_RELATION,
-    PLACE_TRANSITION_RELATION,
-    TEMStepOutput,
-)
-from ehc_sn.loss.consistency import LatentCode, mean_latent_norm, mse_consistency, sum_latent_terms
+from ehc_sn.loss.consistency import LatentCode, LatentRelation, mean_latent_norm, mse_consistency, sum_latent_terms
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_terms
 from ehc_sn.metrics import signals as S
@@ -55,6 +47,50 @@ from ehc_sn.objectives._variational import (
 )
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
+
+# Canonical string keys for the latent-relation dictionaries produced by the
+# Arena TEM bridge adapters and consumed by TEMLossHead.compute_losses.
+GRID_TRANSITION_RELATION: str = "grid_transition"
+PLACE_TRANSITION_RELATION: str = "place_transition"
+PLACE_SENSORY_RELATION: str = "place_sensory"
+# Canonical string keys for optional reg-term overrides from bridge adapters.
+GRID_REG_TERM: str = "grid_reg"
+PLACE_REG_TERM: str = "place_reg"
+
+
+# =================================================================================================
+class TEMStepOutput(Protocol):
+    """Structural protocol for per-step TEM bridge-adapter outputs.
+
+    Consumed by :class:`TEMLossHead`.  Only the five fields required for ELBO
+    loss computation are mandatory; ``theta_cls`` is an optional PFC/CLS
+    diagnostic handled separately via ``getattr``.
+    """
+
+    @property
+    def logits_inference(self) -> Tensor:
+        """Posterior-path observation logits."""
+        ...
+
+    @property
+    def logits_retrieved(self) -> Tensor:
+        """Sensory-recall-path observation logits."""
+        ...
+
+    @property
+    def logits_ancestral(self) -> Tensor:
+        """Structural-prior-path observation logits."""
+        ...
+
+    @property
+    def latent_relations(self) -> dict[str, LatentRelation]:
+        """Named latent consistency relations keyed by the relation constants above."""
+        ...
+
+    @property
+    def reg_terms(self) -> dict[str, LatentCode] | None:
+        """Optional named regularization-code overrides; ``None`` falls back to relation codes."""
+        ...
 
 
 # =================================================================================================
@@ -368,6 +404,13 @@ __all__ = [
     "TEMObjectiveConfig",
     "TEMObjective",
     "TEMObjectiveStep",
+    "TEMStepOutput",
+    # relation and reg-term key constants
+    "GRID_TRANSITION_RELATION",
+    "PLACE_TRANSITION_RELATION",
+    "PLACE_SENSORY_RELATION",
+    "GRID_REG_TERM",
+    "PLACE_REG_TERM",
     # backward-compatible aliases
     "TEMSupervisionBinding",
     "TEMLossConfig",

@@ -17,7 +17,7 @@ import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.controllers.act import ACTController, ACTRolloutState, ACTStepOutput, collapse_act_halt_continue_logits
+from ehc_sn.controllers.deliberation.act import ACTController, ACTRolloutState, ACTStepOutput, collapse_act_halt_continue_logits
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import ACT_LOSS_Q_CONTINUE, ACT_LOSS_Q_DONE, LOSS_LM

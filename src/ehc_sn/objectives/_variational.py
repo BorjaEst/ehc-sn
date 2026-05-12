@@ -80,10 +80,12 @@ class VariationalLossHeadBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
         self, record: StepRecord, **options: Any,
     ) -> Any:  # fmt: skip
         """Score one executed variational-family step."""
-        carry, outputs = record.carry, record.outputs
-        losses = self.compute_losses(outputs, carry, **options)
+        carry = record.carry
+        # Unwrap backbone output from any controller wrapper (e.g. ReplayStepOutput).
+        outputs = getattr(record.outputs, "backbone_output", record.outputs)
+        losses = self.compute_losses(outputs, carry, batch=record.batch, **options)
         metrics = build_variational_step_metrics(
-            self._build_metric_ratios(losses, carry=carry, outputs=outputs, batch_size=int(carry.halted.shape[0])),
+            self._build_metric_ratios(losses, carry=carry, outputs=outputs, batch_size=int(carry.halted.shape[0]), batch=record.batch),
             batch_size=int(carry.halted.shape[0]),
             like=losses.total.detach(),
         )  # fmt: skip

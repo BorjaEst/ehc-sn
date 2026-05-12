@@ -24,8 +24,9 @@ from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSetting
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.ehc.core._base import load_weights_from_checkpoint
-from ehc_sn.lightning.ehc.ehc_v1 import EHCV1TrainingModel, parse_ehc_v1_config
+from ehc_sn.lightning.ehc.ehc_v1 import EHCV1TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
+from ehc_sn.models.ehc.ehc_v1 import EHCModelSettingsV1
 from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import (
     resolve_effective_world_size,
@@ -226,6 +227,10 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
         return self
 
     @property
+    def model_config(self) -> dict:
+        return EHCModelSettingsV1.model_validate(self, from_attributes=True)
+
+    @property
     def datamodule_config(self) -> DatamoduleConfig:
         return DatamoduleConfig.model_validate(self, from_attributes=True)
 
@@ -247,7 +252,6 @@ if __name__ == "__main__":
     # Merge CLI-overridden run-level values (e.g. --mode) and any extra model-config
     # overrides captured via extra="allow" back into raw, so parse_ehc_v1_config sees them.
     _effective = {**raw, "mode": settings.mode, **settings.model_extra}
-    ehc_config = parse_ehc_v1_config(_effective)
     world_size = resolve_effective_world_size(
         settings.trainer_strategy,
         settings.trainer_devices,
@@ -295,7 +299,7 @@ if __name__ == "__main__":
     # Start training.
     # - The LightningModule wraps the EHC model family and defines the training loop.
     # - The DataModule constructs loaders for the selected processed dataset.
-    training_model = EHCV1TrainingModel(ehc_config)
+    training_model = EHCV1TrainingModel(settings.model_config)
 
     # Optional: initialize model weights from a separate checkpoint (does not restore
     # optimizer, scheduler, or trainer-progress state — use checkpoint_path for that).

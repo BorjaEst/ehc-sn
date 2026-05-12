@@ -25,9 +25,8 @@ from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 from pydantic import AliasChoices, BaseModel, Field
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.mazehard.hrm.act import HRMv1ACTController as ACTController
-from ehc_sn.adapters.mazehard.hrm.act import MazehardACTBinding
-from ehc_sn.controllers.act import ACTControllerConfig
+from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings, MazeHardHRMV1ACTTaskBinding, MazeHardHRMV1BridgeAdapter
+from ehc_sn.controllers.deliberation.act import ACTController, ACTControllerConfig
 from ehc_sn.lightning._rollout import evaluate_rollout, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
@@ -67,6 +66,10 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
             "training. "
             "The keys in `act_controller` are passed to the ACTController constructor."
         ),
+    )
+    adapter: MazeHardHRMAdapterSettings = Field(
+        ...,
+        description="MazeHard bridge adapter settings (encoder kind, vocab size).",
     )
     loss: ACTLossConfig = Field(
         ...,
@@ -127,8 +130,9 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettings_V1.from_config(config.model_config_path)
         self.model = HRModelV1(model_settings)
-        self.controller = ACTController(self.model, config.act_controller)
-        self.objective = ACTLossHead(config.loss, task_binding=MazehardACTBinding())
+        self.adapter = MazeHardHRMV1BridgeAdapter(self.model, config.adapter)
+        self.controller = ACTController(self.adapter, config.act_controller)
+        self.objective = ACTLossHead(config.loss, task_binding=MazeHardHRMV1ACTTaskBinding())
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()
@@ -167,7 +171,7 @@ class TrainingModel(L.LightningModule):
         total_steps = int(self.trainer.estimated_stepping_batches)
 
         # Optimizer for the main model parameters
-        sup_params = [p for p in self.model.parameters() if p.requires_grad]
+        sup_params = [p for p in self.adapter.parameters() if p.requires_grad]
         opt_sup = AdamATan2(sup_params, self._config.optimizer)
         sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, self.config.scheduler)
 

@@ -10,21 +10,16 @@ import lightning as L
 from pydantic import BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.arena.tem.binding import ArenaTEMBinding
-from ehc_sn.adapters.arena.tem.replay import TEMController
-from ehc_sn.controllers.tem import TEMControllerConfig
-from ehc_sn.lightning._rollout import (
-    evaluate_rollout,
-    evaluate_rollout_streaming,
-    update_metric_collection_from_evaluated_chunk,
-)
+from ehc_sn.adapters.arena.tem import ArenaTEMAdapterSettings, ArenaTEMTaskBinding, ArenaTEMV2BridgeAdapter
+from ehc_sn.controllers.replay.trajectory import ReplayTrajectoryController, ReplayTrajectoryControllerConfig
+from ehc_sn.lightning._rollout import evaluate_rollout, evaluate_rollout_streaming, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, resolve_tem_runtime
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
 from ehc_sn.models.tem.tem_v2 import Batch, ModelSettings_V2, TEMModelV2
 from ehc_sn.objectives import TEMLossConfig, TEMLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
-from ehc_sn.tasks.arena.runtime import ARENA_REPLAY_REQUIRED_KEYS, batch_size_from_arena_batch, infer_arena_replay_batch_keys
+from ehc_sn.tasks.arena.runtime import batch_size_from_arena_batch, infer_arena_replay_batch_keys
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import Adam, AdamConfig
@@ -54,9 +49,13 @@ class ModelConfig_TEM_V2(BaseModel, extra="forbid"):
             "and wire a new controller path in the adapter layer."
         ),
     )
-    controller: TEMControllerConfig = Field(
+    adapter: ArenaTEMAdapterSettings = Field(
         ...,
-        description="TEM rollout controller configuration.",
+        description="Arena bridge adapter settings (encoder kind, vocab size).",
+    )
+    controller: ReplayTrajectoryControllerConfig = Field(
+        ...,
+        description="Replay trajectory controller configuration.",
     )
     loss: TEMLossConfig = Field(
         ...,
@@ -104,11 +103,12 @@ class TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettings_V2.from_config(config.model_config_path)
         self.model = TEMModelV2(model_settings)
+        self.adapter = ArenaTEMV2BridgeAdapter(self.model, config.adapter)
         self.train_environment: None = None
-        self.train_controller: TEMController | None = None
+        self.train_controller: ReplayTrajectoryController | None = None
         self.train_objective: TEMLossHead | None = None
         self.eval_environment: None = None
-        self.eval_controller: TEMController | None = None
+        self.eval_controller: ReplayTrajectoryController | None = None
         self.eval_objective: TEMLossHead | None = None
         self._config = config
         self._train_runner = RecurrentRunner()
@@ -141,15 +141,12 @@ class TrainingModel(L.LightningModule):
         """Return the TEM TBPTT chunk length used for one optimizer update."""
         return self.config.runtime.sequence.tbptt_steps
 
-    def _build_runtime(self, *, batch_size: int) -> tuple[None, TEMController, TEMLossHead]:
+    def _build_runtime(self, *, batch_size: int) -> tuple[None, ReplayTrajectoryController, TEMLossHead]:
         """Construct one phase-local TEM arena replay runtime around the shared model."""
         from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
         replay = ArenaReplayCapability()
-        controller = TEMController(
-            self.model, None, self.config.controller,
-            replay=replay, observation_dim=self.model.config.observation_dim,
-        )
-        return None, controller, TEMLossHead(self.config.loss, task_binding=ArenaTEMBinding())
+        controller = ReplayTrajectoryController(self.adapter, self.config.controller, runtime=replay)
+        return None, controller, TEMLossHead(self.config.loss, task_binding=ArenaTEMTaskBinding())
 
     def _ensure_train_runtime(self) -> None:
         """Initialize the training runtime once per process."""
@@ -163,7 +160,7 @@ class TrainingModel(L.LightningModule):
             return
         self.eval_environment, self.eval_controller, self.eval_objective = self._build_runtime(batch_size=self._local_batch_size())
 
-    def _require_train_controller(self) -> TEMController:
+    def _require_train_controller(self) -> ReplayTrajectoryController:
         """Return the training controller, initializing the train runtime if needed."""
         self._ensure_train_runtime()
         if self.train_controller is None:
@@ -177,7 +174,7 @@ class TrainingModel(L.LightningModule):
             raise RuntimeError("TEM training runtime is not initialized.")
         return self.train_objective
 
-    def _require_eval_controller(self) -> TEMController:
+    def _require_eval_controller(self) -> ReplayTrajectoryController:
         """Return the evaluation controller, initializing the eval runtime if needed."""
         self._ensure_eval_runtime()
         if self.eval_controller is None:
@@ -221,7 +218,7 @@ class TrainingModel(L.LightningModule):
         total_steps = int(self.trainer.estimated_stepping_batches)
 
         # Optimizer for the main model parameters
-        sup_params = [p for p in self.model.parameters() if p.requires_grad]
+        sup_params = [p for p in self.adapter.parameters() if p.requires_grad]
         opt_sup = Adam(sup_params, self.config.optimizer)
         sch_sup = CosineAnnealingLRWithWarmup(opt_sup, total_steps, self.config.scheduler)
         # sch_sup = ExponentialLR(opt_sup, total_steps, self.config.scheduler)
@@ -324,7 +321,6 @@ class TrainingModel(L.LightningModule):
         self._apply_runtime(self.global_step, log_values=False)
         eval_controller = self._require_eval_controller()
         eval_objective = self._require_eval_objective()
-        eval_controller.set_evaluation_seed(self._validation_seed(batch_idx))
         step_options = {"allow_halt": True, "explore": False}
         carry0 = eval_controller.initial_state(batch)
 

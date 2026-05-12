@@ -12,15 +12,16 @@ from lightning.pytorch import Trainer, seed_everything
 from pydantic import Field
 from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
 
+from ehc_sn.adapters.arena.tem import ArenaTEMAdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
 from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
-from ehc_sn.controllers.tem import TEMControllerConfig
+from ehc_sn.controllers.replay.trajectory import ReplayTrajectoryControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.heads.tem import TEMLossConfig
 from ehc_sn.lightning.tem.tem_v2 import ModelConfig_TEM_V2, RuntimeConfig
 from ehc_sn.lightning.tem.tem_v2 import TrainingModel as TEMV2TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
+from ehc_sn.objectives import TEMLossConfig
 from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
 from ehc_sn.training.optim import AdamConfig
 from ehc_sn.training.schedules import SchedulerConfig
@@ -71,9 +72,13 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Path to the model configuration TOML file that specifies the TEM v2 architecture.",
     )
-    controller: TEMControllerConfig = Field(
-        default_factory=TEMControllerConfig,
-        description="TEM controller configuration (max_steps, policy).",
+    adapter: ArenaTEMAdapterSettings = Field(
+        ...,
+        description="Settings for the arena bridge adapter that binds TEM v2 to task inputs/outputs.",
+    )
+    controller: ReplayTrajectoryControllerConfig = Field(
+        ...,
+        description="Replay trajectory controller configuration (window_size for fixed-window TBPTT).",
     )
     loss: TEMLossConfig = Field(
         default_factory=TEMLossConfig,

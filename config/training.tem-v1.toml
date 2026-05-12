@@ -29,7 +29,8 @@ diagnostic_level     = "standard"
 
 # -- Adapter settings --------------------------------------------------------
 [adapter]
-    # No fields required; ArenaTEMAdapterSettings uses extra="ignore".
+    observation_dim = 45
+    action_count    = 5
 
 # -- Optimization -------------------------------------------------------------
 [optimizer]
