@@ -28,7 +28,7 @@ source "${SLURM_SUBMIT_DIR}/.venv/bin/activate"
 # Set environment variables for optimal performance
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
-export HRM_V1_CONFIGURATION_PATH="config/hrm-mazehard.v1.haicore.toml"
+export HRM_V1_CONFIGURATION_PATH="config/training.hrm-v1.toml"
 
 # Precision reproducibility: must be set before CUDA kernels initialise.
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
@@ -37,7 +37,7 @@ export MPLBACKEND=Agg
 
 # Run the training script with srun for proper resource allocation and binding
 srun --cpu-bind=cores \
-    python experiments/hrm_v1_baseline.py \
+    python scripts/training/hrm_v1_baseline.py \
     --trainer_strategy=ddp \
     --trainer_devices=4 \
     --trainer_num_nodes=1 \
