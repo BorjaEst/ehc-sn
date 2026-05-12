@@ -20,6 +20,23 @@ Batch: TypeAlias = Dict[str, Tensor]
 
 
 # =================================================================================================
+@dataclass(frozen=True)
+class HRMInputV1:
+    """Model-native input payload for one HRM v1 step."""
+
+    schema_tokens: Tensor
+    prefix_bias: Optional[Tensor] = None
+
+
+@dataclass(frozen=True)
+class HRMOutputV1:
+    """Model-native output bundle for one HRM v1 step."""
+
+    schema_slots: Tensor
+    q_logits: Tensor
+
+
+# =================================================================================================
 class ModelSettings_V1(BaseModel, extra="forbid"):
     """Model-level settings composing a PFC module with embedding/LM-head parameters."""
 
@@ -38,6 +55,11 @@ class ModelSettings_V1(BaseModel, extra="forbid"):
     def seq_length(self) -> int:
         """Convenience property to access sequence length from the PFC settings."""
         return self.pfc.seq_length
+
+    @property
+    def num_schema_slots(self) -> int:
+        """Compatibility alias for seq_length (MazeHard bridge adapter surface)."""
+        return self.seq_length
 
     @property
     def hidden_size(self) -> int:
@@ -72,6 +94,9 @@ class HRMState(DetachMixin):
     """Container for the full recurrent HRM state."""
 
     pfc: PFCState
+
+
+HRMStateV1 = HRMState
 
 
 # =================================================================================================
@@ -136,18 +161,19 @@ class HRModelV1(nn.Module):
         return HRMState(pfc=self.pfc.reset_state(state.pfc, reset_flag))
 
     def forward(  # -------------------------------------------------------------------------------
-        self, batch: Batch, state: Optional[HRMState] = None,
-    ) -> tuple[HRMState, tuple[Tensor, Tensor], Tensor]:  # fmt: skip
-        """Forward pass through the HRM (``ACTRolloutBackbone`` protocol)."""
-        state = state or self.init_state(batch_size=batch["input_ids"].shape[0])
-        x = self.embed_input_ids(batch["input_ids"])  # (B, S, D) — cell tokens only
+        self, inputs: HRMInputV1, state: Optional[HRMState] = None,
+    ) -> tuple[HRMOutputV1, HRMState]:  # fmt: skip
+        """Forward pass through the HRM."""
+        state = state or self.init_state(batch_size=inputs.schema_tokens.shape[0])
+        x = inputs.schema_tokens  # (B, S, D) — already embedded by adapter encoder
 
         state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H is (B, S+1, D)
         logits = self.lm_head(z_H[:, 1:])  # Strip CLS → (B, S, vocab_size)
         theta_cls = z_H[:, 0]  # (B, D) — CLS features used for ACT control and tracing
 
         new_state = HRMState(pfc=state_pfc)
-        return new_state, (logits, q_logits), theta_cls
+        model_output = HRMOutputV1(schema_slots=z_H[:, 1:], q_logits=q_logits)
+        return model_output, new_state
 
     def embed_input_ids(  # -----------------------------------------------------------------------
         self, input_ids: Tensor,
@@ -181,5 +207,7 @@ class HRModelV1(nn.Module):
 
 # =================================================================================================
 __all__ = [
-    "HRModelV1", "HRMState", "ModelSettings_V1", "Batch",
+    "HRModelV1", "HRMState", "HRMStateV1", "ModelSettings_V1",
+    "HRMInputV1", "HRMOutputV1",
+    "Batch",
 ]  # fmt: skip

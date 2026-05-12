@@ -21,6 +21,24 @@ Batch: TypeAlias = Dict[str, Tensor]
 
 
 # =================================================================================================
+@dataclass(frozen=True)
+class HRMInputV2:
+    """Model-native input payload for one HRM v2 step."""
+
+    schema_tokens: Tensor
+    prefix_bias: Optional[Tensor] = None
+
+
+@dataclass(frozen=True)
+class HRMOutputV2:
+    """Model-native output bundle for one HRM v2 step."""
+
+    schema_slots: Tensor
+    policy_logits: Tensor
+    state_value: Tensor
+
+
+# =================================================================================================
 class ModelSettings_V2(BaseModel, extra="forbid"):
     """Model-level settings for HRM v2.
 
@@ -62,6 +80,11 @@ class ModelSettings_V2(BaseModel, extra="forbid"):
         return self.pfc.seq_length
 
     @property
+    def num_schema_slots(self) -> int:
+        """Compatibility alias for seq_length (MazeHard bridge adapter surface)."""
+        return self.seq_length
+
+    @property
     def hidden_size(self) -> int:
         """Convenience property to access hidden size from the PFC settings."""
         return self.pfc.reasoning_h.cortex.embedding_dim
@@ -95,6 +118,9 @@ class HRMState(DetachMixin):
 
     pfc: PFCState  # Prefrontal Cortex state, containing working memory and reasoning module states.
     str: STRState  # STR actor-critic state, containing any recurrent state for the STR module (if needed).
+
+
+HRMStateV2 = HRMState
 
 
 # =================================================================================================
@@ -176,24 +202,11 @@ class HRModelV2(nn.Module):
         )
 
     def forward(  # -------------------------------------------------------------------------------
-        self, batch: Batch, state: Optional[HRMState] = None,
-    ) -> tuple[HRMState, tuple[Tensor, Tensor, Tensor], Tensor]:  # fmt: skip
-        """Run one model step.
-
-        Args:
-            batch: Input batch containing at least ``"input_ids"`` of shape ``(B, S)``.
-            state: Optional recurrent state to carry across steps. If ``None``, a
-                fresh state is created.
-
-        Returns:
-            ``(new_state, (logits, q_logits, r_logits), theta_cls)`` where:
-                - ``logits`` is ``(B, S, vocab_size)``
-                - ``q_logits`` is controller-specific (produced by PFC)
-                - ``r_logits`` is reward / policy output from STR
-                - ``theta_cls`` is ``(B, D)`` CLS summary vector.
-        """
-        state = state or self.init_state(batch_size=batch["input_ids"].shape[0])
-        x = self.embed_input_ids(batch["input_ids"])  # (B, S, D)
+        self, inputs: HRMInputV2, state: Optional[HRMState] = None,
+    ) -> tuple[HRMOutputV2, HRMState]:  # fmt: skip
+        """Run one model step."""
+        state = state or self.init_state(batch_size=inputs.schema_tokens.shape[0])
+        x = inputs.schema_tokens  # (B, S, D) — already embedded by adapter encoder
 
         state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H: (B, S+1, D)
         logits = self.lm_head(z_H[:, 1:])  # strip CLS → (B, S, vocab)
@@ -201,7 +214,8 @@ class HRModelV2(nn.Module):
         state_str, r_logits = self.str(theta_cls.detach(), q_logits, state.str)
 
         new_state = HRMState(pfc=state_pfc, str=state_str)
-        return new_state, (logits, q_logits, r_logits), theta_cls
+        model_output = HRMOutputV2(schema_slots=z_H[:, 1:], policy_logits=q_logits, state_value=r_logits)
+        return model_output, new_state
 
     def embed_input_ids(  # -----------------------------------------------------------------------
         self, input_ids: Tensor,
@@ -221,5 +235,7 @@ class HRModelV2(nn.Module):
 
 # =================================================================================================
 __all__ = [
-    "HRModelV2", "HRMState", "ModelSettings_V2", "Batch",
+    "HRModelV2", "HRMState", "HRMStateV2", "ModelSettings_V2",
+    "HRMInputV2", "HRMOutputV2",
+    "Batch",
 ]  # fmt: skip
