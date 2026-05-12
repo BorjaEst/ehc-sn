@@ -32,7 +32,7 @@ import torch
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 from torch.optim import Optimizer
 
-from ehc_sn.adapters.mazehard.hrm import HRMv2RLController, MazeHardRLRuntime
+from ehc_sn.adapters.mazehard.hrm import MazeHardAdapterSettings, MazeHardHRMV2BridgeAdapter, MazeHardHRMV2HybridTaskBinding
 from ehc_sn.controllers.online.actor_critic import RLController, RLControllerConfig
 from ehc_sn.lightning._rollout import evaluate_rollout, update_metric_collection_from_evaluated_chunk
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
@@ -88,7 +88,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
         ...,
         description="Configuration for the RL controller, which defines the forward pass and computes RL losses.",
     )
-    loss: RLLossConfig = Field(
+    loss: HybridRLLossConfig = Field(
         ...,
         validation_alias=AliasChoices("loss", "objective"),
         description="Configuration for the RL loss head, which computes losses based on the controller outputs.",
@@ -173,7 +173,7 @@ class TrainingModel(L.LightningModule):
         self.model = HRModelV2(model_settings)
         self.environment: MazeHardEnv | None = None  # Lazy init in setup() to avoid GPU allocation issues
         self.controller: HRMv2RLController | None = None  # Initialized in setup() after environment is ready
-        self.objective: RLLossHead | None = None  # Initialized in setup() after controller is ready
+        self.objective: HybridRLLossHead | None = None  # Initialized in setup() after controller is ready
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()
@@ -213,7 +213,7 @@ class TrainingModel(L.LightningModule):
         self.controller = HRMv2RLController(
             self.model, self.environment, self.config.controller, runtime=MazeHardRLRuntime(),
         )
-        self.objective = RLLossHead(self.config.loss)
+        self.objective = HybridRLLossHead(self.config.loss)
 
     def configure_optimizers(  # ------------------------------------------------------------------
         self,
