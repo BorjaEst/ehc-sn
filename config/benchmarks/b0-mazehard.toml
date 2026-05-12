@@ -1,0 +1,6 @@
+benchmark_id = "b0-mazehard"
+dataset_root = "data/processed/mazehard/default/v1"
+split = "test"
+manifest_path = "data/processed/mazehard/default/v1"
+compute_budget = 16
+write_sample_records = true
