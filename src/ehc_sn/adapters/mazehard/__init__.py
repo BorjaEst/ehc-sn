@@ -5,6 +5,7 @@ symbols live in ``ehc_sn.adapters.mazehard.hrm`` and
 ``ehc_sn.adapters.mazehard.ehc``.
 """
 
-from . import ehc, hrm
+# from . import ehc, hrm
+from . import hrm
 
-__all__ = ["ehc", "hrm"]
+__all__ = ["hrm"]

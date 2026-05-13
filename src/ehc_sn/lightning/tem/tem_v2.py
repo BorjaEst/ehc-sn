@@ -16,7 +16,7 @@ from ehc_sn.lightning._rollout import evaluate_rollout, evaluate_rollout_streami
 from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, resolve_tem_runtime
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
-from ehc_sn.models.tem.tem_v2 import Batch, ModelSettings_V2, TEMModelV2
+from ehc_sn.models.tem.tem_v2 import Batch, ModelSettingsV2, TEMModelV2
 from ehc_sn.objectives import TEMLossConfig, TEMLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.arena.runtime import batch_size_from_arena_batch, infer_arena_replay_batch_keys
@@ -101,7 +101,7 @@ class TrainingModel(L.LightningModule):
     ) -> None:  # fmt: skip
         """Create the Lightning module from a parsed TEM v2 training config."""
         super().__init__()
-        model_settings = ModelSettings_V2.from_config(config.model_config_path)
+        model_settings = ModelSettingsV2.from_config(config.model_config_path)
         self.model = TEMModelV2(model_settings)
         self.adapter = ArenaTEMV2BridgeAdapter(self.model, config.adapter)
         self.train_environment: None = None

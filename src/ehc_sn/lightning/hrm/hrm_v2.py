@@ -38,7 +38,7 @@ from ehc_sn.lightning._rollout import evaluate_rollout, update_metric_collection
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
-from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettings_V2
+from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettingsV2
 from ehc_sn.objectives import HybridRLLossConfig, HybridRLLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
 from ehc_sn.tasks.mazehard.capabilities.deliberation import MazeHardDeliberationConfig
@@ -58,7 +58,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
     """Configuration for the HRM v2 Lightning module.
 
     This config wires together:
-        - model settings (:class:`ModelSettings_V2`)
+        - model settings (:class:`ModelSettingsV2`)
         - environment settings (:class:`~ehc_sn.envs.mazehard.EnvConfig`)
         - RL controller and loss head configs
         - optimizer and scheduler settings
@@ -100,7 +100,7 @@ class ModelConfig_HRM_V2(BaseModel, extra="forbid"):
             return self
         if self.deliberation is None:
             raise ValueError("Either 'environment' or 'deliberation' must be provided in ModelConfig_HRM_V2.")
-        model_settings = ModelSettings_V2.from_config(self.model_config_path)
+        model_settings = ModelSettingsV2.from_config(self.model_config_path)
         object.__setattr__(
             self,
             "environment",
@@ -169,7 +169,7 @@ class TrainingModel(L.LightningModule):
         self, config: ModelConfig_HRM_V2,
     ) -> None:  # fmt: skip
         super().__init__()
-        model_settings = ModelSettings_V2.from_config(config.model_config_path)
+        model_settings = ModelSettingsV2.from_config(config.model_config_path)
         self.model = HRModelV2(model_settings)
         self.environment: MazeHardEnv | None = None  # Lazy init in setup() to avoid GPU allocation issues
         self.controller: HRMv2RLController | None = None  # Initialized in setup() after environment is ready

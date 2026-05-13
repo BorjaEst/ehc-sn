@@ -47,7 +47,7 @@ class TEMOutputV2:
 
 
 # =================================================================================================
-class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
+class ModelSettingsV2(BaseModel, extra="forbid", strict=False):
     """Canonical TEM v2 model settings.
 
     This compact schema keeps the environment-facing observation/action
@@ -75,7 +75,7 @@ class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
     )
 
     @model_validator(mode="after")
-    def validate_model(self) -> "ModelSettings_V2":
+    def validate_model(self) -> "ModelSettingsV2":
         self._validate_f_initial()
         self._validate_stage_alignment()
         self._validate_frequency_alignment()
@@ -158,7 +158,7 @@ class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
         return self.mec.n_total_freq
 
     @classmethod
-    def from_config(cls, path: Path) -> "ModelSettings_V2":
+    def from_config(cls, path: Path) -> "ModelSettingsV2":
         """Load model settings from a TOML configuration file."""
         config_map = tomllib.load(Path(path).open("rb"))
         return cls.model_validate(config_map)
@@ -178,7 +178,7 @@ class TEMModelV2(nn.Module):
     """TEM v2 backbone with a TEM v1-compatible forward contract."""
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: ModelSettings_V2, *,
+        self, config: ModelSettingsV2, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
         """Construct the TEM backbone from the resolved TEM v2 model settings."""
@@ -197,7 +197,7 @@ class TEMModelV2(nn.Module):
         self.projection_lec = ProjectionModule(self.lec, self.hpc, config.projection_lec)
 
     @property
-    def config(self) -> ModelSettings_V2:
+    def config(self) -> ModelSettingsV2:
         """Return the parsed TEM v2 model settings."""
         return self._config
 
@@ -314,7 +314,7 @@ class TEMModelV2(nn.Module):
 
 # =================================================================================================
 __all__ = [
-    "ModelSettings_V2", "TEMStateV2", "TEMStateV2", "TEMModelV2",
+    "ModelSettingsV2", "TEMStateV2", "TEMStateV2", "TEMModelV2",
     "TEMInputV2", "TEMOutputV2",
     "Batch", "ObsLogits",
 ]  # fmt: skip

@@ -1,49 +1,42 @@
-""" """
+"""TEM v1 backbone with canonical HPC-MEC-LEC architecture.
+
+This file defines the TEMModelV1 class, which implements a standard
+architecture for the Temporal Episodic Memory (TEM) model. The TEMModelV1
+class integrates three core components: the Hippocampus (HPC), the Medial
+Entorhinal Cortex (MEC), and the Lateral Entorhinal Cortex (LEC). Each
+component is implemented as a separate module with its own settings and
+state management.
+"""
 
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Dict, Optional, TypeAlias
+from typing import Optional, cast
 
 import torch
 from pydantic import BaseModel, Field, computed_field, model_validator
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes, TEMTransitionPlan
+from ehc_sn import utils
+from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes, TEMProjectionSettings, TEMTransitionPlan
 from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCState
 from ehc_sn.modules.hpc import SensoryRead as HPCSensoryRead
+from ehc_sn.modules.hpc import WritePayload
 from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
-from ehc_sn.modules.projection import ProjectionModule, ProjectionSettings
-from ehc_sn.types import Batch, Device, Dtype, MemoryState
+from ehc_sn.modules.projection import ProjectionBundle, ProjectionModule
+from ehc_sn.types import Batch, MemoryState, MultiScaleCode
 from ehc_sn.utils.detach import DetachMixin
 
 
-# =================================================================================================
-@dataclass(frozen=True)
-class TEMInputV1:
-    """Model-native input payload for one TEM v1 step."""
-
-    sensory_codes: list[Tensor]
-    previous_action: Tensor
-    episode_start: Optional[Tensor] = None
-    landmark_id: Optional[Tensor] = None
-
-
-@dataclass(frozen=True)
-class TEMOutputV1:
-    """Model-native output bundle for one TEM v1 step."""
-
-    pred_codes: PredCodes
-    grid_codes: GridCodes
-    place_codes: PlaceCodes
-
-
-# =================================================================================================
-class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
+# =============================================================================
+class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
     """Canonical TEM v1 model settings.
 
     This compact schema keeps the environment-facing observation/action
@@ -51,11 +44,16 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
     single model config without reintroducing legacy aliases.
     """
 
+    @classmethod
+    def from_config(cls, path: Path) -> "ModelSettingsV1":
+        """Load model settings from a TOML configuration file."""
+        config_map = tomllib.load(Path(path).open("rb"))
+        return cls.model_validate(config_map)
 
     transition_action_count: int = Field(
         ...,
         ge=1,
-        description="Number of discrete actions in the environment.",
+        description="Discrete actions to support for path integration in the MEC module.",
     )
     f_initial: list[float] = Field(
         default_factory=lambda: [0.99, 0.3, 0.09, 0.5, 0.4],
@@ -65,89 +63,49 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
             "Its length must match the full MEC/HPC frequency count after OVC mode resolution."
         ),
     )
+
+    hpc: HPCAttractorSettings = Field(..., description="Settings for the attractor-based hippocampal module.")
+    lec: LECSettings = Field(..., description="Settings for the LEC module, including feature filtering parameters.")
+    mec: MECSettings = Field(..., description="Settings for the MEC module, including path integration and correction parameters.")
+
+    projections: TEMProjectionSettings = Field(
+        ...,
+        description="Settings for the inter-region projection modules connecting MEC and LEC to HPC.",
+    )
     enable_sensory_recall: bool = Field(
         default=True,
         description="Whether the HPC should perform sensory-cued recall during the phase-1 TEM step.",
     )
 
-    @model_validator(mode="after")
-    def validate_model(self) -> "ModelSettings_V1":
-        self._validate_f_initial()
-        self._validate_stage_alignment()
-        self._validate_frequency_alignment()
-        return self
+    # @computed_field
+    # @property
+    # def n_stages(self) -> int:
+    #     """Return the resolved number of TEM frequency modules."""
+    #     return len(self.f_initial)
 
-    def _validate_f_initial(self) -> None:
-        if any(not (0.0 < value < 1.0) for value in self.f_initial):
-            raise ValueError("f_initial values must be strictly between 0 and 1.")
+    # @computed_field
+    # @property
+    # def n_freq(self) -> int:
+    #     """Return the total number of frequency modules."""
+    #     return len(self.f_initial)
 
-    def _validate_stage_alignment(self) -> None:
-        expected_freq = len(self.mec_shape)
-        if expected_freq != self.n_stages:
-            raise ValueError("The resolved MEC frequency count must equal len(f_initial).")
+    # @computed_field
+    # @property
+    # def lec_shape(self) -> list[int]:
+    #     """Return the resolved LEC feature shape across all frequencies."""
+    #     return [self.lec.feature_dim] * self.n_total_freq
 
-    def _validate_frequency_alignment(self) -> None:
-        if len(self.hpc.shape) != self.n_total_freq:
-            raise ValueError("len(hpc.shape) must equal the derived total MEC frequency count.")
+    # @computed_field
+    # @property
+    # def mec_shape(self) -> list[int]:
+    #     """Return the full MEC shape including optional OVC modules."""
+    #     return self.mec.mec_shape
 
-    @computed_field
-    @property
-    def n_stages(self) -> int:
-        """Return the resolved number of TEM frequency modules."""
-        return len(self.f_initial)
-
-    @computed_field
-    @property
-    def n_freq(self) -> int:
-        """Return the total number of frequency modules."""
-        return len(self.f_initial)
-
-    hpc: HPCAttractorSettings = Field(
-        ...,
-        description="Settings for the attractor-based hippocampal module.",
-    )
-    lec: LECSettings = Field(
-        ...,
-        description="Settings for the LEC module, including feature filtering parameters.",
-    )
-    mec: MECSettings = Field(
-        ...,
-        description="Settings for the MEC module, including path integration and correction parameters.",
-    )
-
-    projection_lec: ProjectionSettings = Field(
-        default_factory=lambda: ProjectionSettings(mode="tiling", learnable=False),
-        description=(
-            "Settings for the projection module between LEC and HPC. "
-            "This module projects LEC features into the format expected by HPC memory."
-        ),
-    )
-    projection_mec: ProjectionSettings = Field(
-        default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False, rank=[10, 10, 8, 6, 6]),
-        # default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False),
-        description=(
-            "Settings for the projection module between MEC and HPC. "
-            "This module projects MEC abstract location codes into the format expected by HPC memory."
-        ),
-    )
-
-    @computed_field
-    @property
-    def lec_shape(self) -> list[int]:
-        """Return the resolved LEC feature shape across all frequencies."""
-        return [self.lec.feature_dim] * self.n_total_freq
-
-    @computed_field
-    @property
-    def mec_shape(self) -> list[int]:
-        """Return the full MEC shape including optional OVC modules."""
-        return self.mec.mec_shape
-
-    @computed_field
-    @property
-    def mec_ovc_shape(self) -> list[int]:
-        """Return the appended OVC shape implied by the configured OVC mode."""
-        return self.mec.mec_ovc_shape
+    # @computed_field
+    # @property
+    # def mec_ovc_shape(self) -> list[int]:
+    #     """Return the appended OVC shape implied by the configured OVC mode."""
+    #     return self.mec.mec_ovc_shape
 
     @computed_field
     @property
@@ -155,30 +113,49 @@ class ModelSettings_V1(BaseModel, extra="forbid", strict=False):
         """Return the total number of MEC/HPC frequencies after OVC expansion."""
         return self.mec.n_total_freq
 
-    @classmethod
-    def from_config(cls, path: Path) -> "ModelSettings_V1":
-        """Load model settings from a TOML configuration file."""
-        config_map = tomllib.load(Path(path).open("rb"))
-        return cls.model_validate(config_map)
+
+# =============================================================================
+@dataclass(frozen=True)
+class TEMInputV1(DetachMixin):
+    """Task-agnostic input payload for TEM v1 forward steps."""
+
+    sensory_codes: MultiScaleCode
+    previous_action: Tensor
+    episode_start: Optional[Tensor] = None
+    landmark_id: Optional[Tensor] = None
 
 
-# =================================================================================================
+# =============================================================================
+@dataclass(frozen=True)
+class TEMOutputV1(DetachMixin):
+    """Task-agnostic output payload for TEM v1 forward steps."""
+
+    grid_codes: GridCodes
+    place_codes: PlaceCodes
+    pred_codes: PredCodes
+
+
+# =============================================================================
 @dataclass
 class TEMStateV1(DetachMixin):
     """Container for the full recurrent TEM state."""
 
-    lec: LECState
-    mec: MECState
-    hpc: HPCState
+    lec: LECState  # State of the Lateral Entorhinal Cortex
+    mec: MECState  # State of the Medial Entorhinal Cortex
+    hpc: HPCState  # State of the Hippocampus
 
 
+# =============================================================================
 class TEMModelV1(nn.Module):
     """ """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: ModelSettings_V1, *,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: ModelSettingsV1,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         """Construct the TEM backbone from the resolved TEM v1 model settings."""
         super().__init__()
         self._config = config
@@ -191,18 +168,45 @@ class TEMModelV1(nn.Module):
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
         # Projection modules
-        self.projection_mec = ProjectionModule(self.mec, self.hpc, config.projection_mec)
-        self.projection_lec = ProjectionModule(self.lec, self.hpc, config.projection_lec)
+        self.projections = ProjectionBundle.from_modules(
+            mec_to_hpc=(self.mec, self.hpc, config.projections.mec_to_hpc),
+            lec_to_hpc=(self.lec, self.hpc, config.projections.lec_to_hpc),
+        )
+
+        self.reset_parameters()
 
     @property
-    def config(self) -> ModelSettings_V1:
-        """ """
+    def config(self) -> ModelSettingsV1:
+        """Return the parsed TEM v1 model settings."""
         return self._config
 
-    def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int, *, memory: Optional[MemoryState] = None,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> TEMStateV1:  # fmt: skip
+    @property
+    def mec_to_hpc(self) -> ProjectionModule:
+        """Return the MEC-to-HPC projection edge."""
+        return cast(ProjectionModule, self.projections["mec_to_hpc"])
+
+    @property
+    def lec_to_hpc(self) -> ProjectionModule:
+        """Return the LEC-to-HPC projection edge."""
+        return cast(ProjectionModule, self.projections["lec_to_hpc"])
+
+    def reset_parameters(  # --------------------------------------------------
+        self,
+    ) -> None:
+        """Reset all model parameters."""
+        # self.hpc.reset_parameters(); already reset by the module constructor
+        # self.mec.reset_parameters(); already reset by the module constructor
+        # self.lec.reset_parameters(); already reset by the module constructor
+        self.projections.reset_parameters()
+
+    def init_state(  # --------------------------------------------------------
+        self,
+        batch_size: int,
+        *,
+        memory: Optional[MemoryState] = None,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> TEMStateV1:
         """Create an initial recurrent TEM state."""
         memory = memory if memory is not None else self.hpc.init_memory(batch_size=batch_size, device=device)
         lec_state = self.lec.init_state(batch_size, device=device)
@@ -210,9 +214,7 @@ class TEMModelV1(nn.Module):
         hpc_state = self.hpc.init_state(batch_size, device=device, memory=memory)
         return TEMStateV1(lec_state, state_mec, hpc_state)
 
-    def reset_state(  # ---------------------------------------------------------------------------
-        self, reset_flag: Tensor, state: TEMStateV1,
-    ) -> TEMStateV1:  # fmt: skip
+    def reset_state(self, reset_flag: Tensor, state: TEMStateV1,) -> TEMStateV1:  # fmt: skip  # ---------------------------------------------------------------------------
         """Reset flagged rows to a fresh episode state while preserving active rows."""
         reset_flag = reset_flag.to(torch.bool).view(-1)
         if not torch.any(reset_flag):
@@ -224,16 +226,12 @@ class TEMModelV1(nn.Module):
             hpc=self.hpc.reset_state(state.hpc, reset_flag),
         )
 
-    def set_runtime(  # ---------------------------------------------------------------------------
-        self, eta: float, hebbian_decay: float, p2g_uncertainty_offset: float,
-    ) -> None:  # fmt: skip
+    def set_runtime(self, eta: float, hebbian_decay: float, p2g_uncertainty_offset: float,) -> None:  # fmt: skip  # ---------------------------------------------------------------------------
         """ """
         self.mec.set_runtime(p2g_uncertainty_offset=p2g_uncertainty_offset)
         self.hpc.set_runtime(eta=eta, hebbian_decay=hebbian_decay)
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, inputs: TEMInputV1, state: Optional[TEMStateV1] = None,
-    ) -> tuple[TEMOutputV1, TEMStateV1]:  # fmt: skip
+    def forward(self, inputs: TEMInputV1, state: Optional[TEMStateV1] = None,) -> tuple[TEMOutputV1, TEMStateV1]:  # fmt: skip  # -------------------------------------------------------------------------------
         """Run one TEM step from the current payload and recurrent state.
 
         ``state`` is assumed to have already been reset for any fresh episode
@@ -250,11 +248,11 @@ class TEMModelV1(nn.Module):
 
         # Grid transition prior from action-driven path integration.
         grid_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)
-        place_query_from_grid_prior = self.projection_mec(grid_prior)
+        place_query_from_grid_prior = self.mec_to_hpc(grid_prior)
 
         # Sensory inference: encode observations into LEC features and query place memory from them.
         lec_features_post, state.lec = self.lec.inference(observation_embedding, state.lec)
-        place_query_from_obs = self.projection_lec(lec_features_post)
+        place_query_from_obs = self.lec_to_hpc(lec_features_post)
         sensory = self.hpc.read_sensory(
             HPCSensoryRead(
                 state=state.hpc,
@@ -266,7 +264,7 @@ class TEMModelV1(nn.Module):
 
         # Grid posterior after correcting the prior with recalled place evidence.
         grid_post, state.mec = self.mec.inference(sensory.recall, landmark_id=landmark_id, state=state.mec)  # fmt: skip
-        place_query_from_grid_post = self.projection_mec(grid_post)
+        place_query_from_grid_post = self.mec_to_hpc(grid_post)
         transition = TEMTransitionPlan(
             sensory=sensory,
             grid_prior=grid_prior,
@@ -280,9 +278,9 @@ class TEMModelV1(nn.Module):
         state.hpc = step.state
 
         # Decode observation logits for the three TEM pathways.
-        lec_features_from_place_post = self.projection_lec.inverse(step.place_post)
-        lec_features_from_place_retrieved = self.projection_lec.inverse(step.place_retrieved)
-        lec_features_from_place_prior = self.projection_lec.inverse(step.place_prior)
+        lec_features_from_place_post = self.lec_to_hpc.inverse(step.place_post)
+        lec_features_from_place_retrieved = self.lec_to_hpc.inverse(step.place_retrieved)
+        lec_features_from_place_prior = self.lec_to_hpc.inverse(step.place_prior)
 
         # Build and return model-native typed output (output-first, state second).
         pred_codes = PredCodes(
@@ -306,7 +304,7 @@ class TEMModelV1(nn.Module):
 
 # =================================================================================================
 __all__ = [
-    "ModelSettings_V1", "TEMStateV1", "TEMStateV1", "TEMModelV1",
+    "ModelSettingsV1", "TEMStateV1", "TEMStateV1", "TEMModelV1",
     "TEMInputV1", "TEMOutputV1",
     "Batch", "ObsLogits",
 ]  # fmt: skip

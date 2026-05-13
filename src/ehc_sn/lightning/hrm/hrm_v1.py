@@ -31,7 +31,7 @@ from ehc_sn.lightning._rollout import evaluate_rollout, update_metric_collection
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
-from ehc_sn.models.hrm.hrm_v1 import Batch, HRModelV1, ModelSettings_V1
+from ehc_sn.models.hrm.hrm_v1 import Batch, HRModelV1, ModelSettingsV1
 from ehc_sn.objectives import ACTLossConfig, ACTLossHead
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
 from ehc_sn.training.buffers import FifoBuffer
@@ -128,7 +128,7 @@ class TrainingModel(L.LightningModule):
             - `_train_carry` is initialized lazily from the first batch via `step_module`.
         """
         super().__init__()
-        model_settings = ModelSettings_V1.from_config(config.model_config_path)
+        model_settings = ModelSettingsV1.from_config(config.model_config_path)
         self.model = HRModelV1(model_settings)
         self.adapter = MazeHardHRMV1BridgeAdapter(self.model, config.adapter)
         self.controller = ACTController(self.adapter, config.act_controller)

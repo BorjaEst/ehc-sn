@@ -23,7 +23,7 @@ enable_sensory_recall   = true
     clamp_min   = -1.0
     clamp_max   = 1.0
 
-[projection_lec]
+[projections.lec_to_hpc]
     mode      = "tiling"
     init      = "identity"
     learnable = false
@@ -35,7 +35,7 @@ enable_sensory_recall   = true
     clamp_min  = -1.0
     clamp_max  = 1.0
 
-[projection_mec]
+[projections.mec_to_hpc]
     mode      = "low_rank"
     init      = "identity"
     learnable = false

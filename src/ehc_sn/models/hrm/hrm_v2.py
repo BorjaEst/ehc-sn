@@ -39,7 +39,7 @@ class HRMOutputV2:
 
 
 # =================================================================================================
-class ModelSettings_V2(BaseModel, extra="forbid"):
+class ModelSettingsV2(BaseModel, extra="forbid"):
     """Model-level settings for HRM v2.
 
     This settings object composes:
@@ -100,7 +100,7 @@ class ModelSettings_V2(BaseModel, extra="forbid"):
         return 1.0 / math.sqrt(self.hidden_size)
 
     @classmethod
-    def from_config(cls, path: Path) -> "ModelSettings_V2":
+    def from_config(cls, path: Path) -> "ModelSettingsV2":
         """Load model settings from a TOML configuration file."""
         config_map = tomllib.load(Path(path).open("rb"))
         return cls.model_validate(config_map)
@@ -140,7 +140,7 @@ class HRModelV2(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: ModelSettings_V2, *,
+        self, config: ModelSettingsV2, *,
         device: Optional[Device] = None, dtype: Optional[Dtype] = None,
     ) -> None:  # fmt: skip
         super().__init__()
@@ -153,7 +153,7 @@ class HRModelV2(nn.Module):
         self.reset_parameters()
 
     @property
-    def config(self) -> ModelSettings_V2:
+    def config(self) -> ModelSettingsV2:
         """Return the parsed model settings used to build this module."""
         return self._config
 
@@ -235,7 +235,7 @@ class HRModelV2(nn.Module):
 
 # =================================================================================================
 __all__ = [
-    "HRModelV2", "HRMState", "HRMStateV2", "ModelSettings_V2",
+    "HRModelV2", "HRMState", "HRMStateV2", "ModelSettingsV2",
     "HRMInputV2", "HRMOutputV2",
     "Batch",
 ]  # fmt: skip

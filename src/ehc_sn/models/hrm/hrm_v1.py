@@ -37,7 +37,7 @@ class HRMOutputV1:
 
 
 # =================================================================================================
-class ModelSettings_V1(BaseModel, extra="forbid"):
+class ModelSettingsV1(BaseModel, extra="forbid"):
     """Model-level settings composing a PFC module with embedding/LM-head parameters."""
 
     pfc: PFCSettings = Field(
@@ -82,10 +82,10 @@ class ModelSettings_V1(BaseModel, extra="forbid"):
         return self.pfc.reasoning_h.cortex.pos_encodings
 
     @classmethod
-    def from_config(cls, path: Path) -> "ModelSettings_V1":
+    def from_config(cls, path: Path) -> "ModelSettingsV1":
         """Load model settings from a TOML configuration file."""
         config_map = tomllib.load(Path(path).open("rb"))
-        return ModelSettings_V1.model_validate(config_map)
+        return ModelSettingsV1.model_validate(config_map)
 
 
 # =================================================================================================
@@ -104,7 +104,7 @@ class HRModelV1(nn.Module):
     """ """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, config: ModelSettings_V1, *,
+        self, config: ModelSettingsV1, *,
         device: Optional[Device]=None, dtype: Optional[Dtype]=None,
     ) -> None:  # fmt: skip
         """ """
@@ -122,7 +122,7 @@ class HRModelV1(nn.Module):
         self.reset_parameters()
 
     @property
-    def config(self) -> ModelSettings_V1:
+    def config(self) -> ModelSettingsV1:
         """ """
         return self._config
 
@@ -207,7 +207,7 @@ class HRModelV1(nn.Module):
 
 # =================================================================================================
 __all__ = [
-    "HRModelV1", "HRMState", "HRMStateV1", "ModelSettings_V1",
+    "HRModelV1", "HRMState", "HRMStateV1", "ModelSettingsV1",
     "HRMInputV1", "HRMOutputV1",
     "Batch",
 ]  # fmt: skip
