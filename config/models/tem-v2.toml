@@ -2,14 +2,9 @@
 # TEM v2 Architecture
 # =============================================================================
 
-observation_dim       = 45
-action_count          = 5
-enable_sensory_recall = true
-f_initial             = [0.99, 0.3, 0.09, 0.5, 0.4]
-
-[autoencoder]
-    encode_mode = "two_hot"
-    decode_mode = "mlp"
+transition_action_count = 5
+f_initial               = [0.99, 0.97, 0.91, 0.7, 0.01]
+enable_sensory_recall   = true
 
 [hpc]
     shape         = [100, 100, 80, 60, 60]
@@ -44,7 +39,7 @@ f_initial             = [0.99, 0.3, 0.09, 0.5, 0.4]
     learnable = false
 
 [mec]
-    grid_shape = [30, 24, 18, 24, 18]
+    grid_shape = [30, 30, 24, 18, 18]
     do_sample  = false
     sigma_init = 0.5
     clamp_min  = -1.0

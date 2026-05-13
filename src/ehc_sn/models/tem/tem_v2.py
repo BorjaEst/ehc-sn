@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field, computed_field, model_validator
 from torch import Tensor, nn
 
 from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes, TEMTransitionPlan
-from ehc_sn.modules.autoencoder import Autoencoder, AutoencoderSettings
 from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState
 from ehc_sn.modules.hpc import SensoryRead as HPCSensoryRead
 from ehc_sn.modules.hpc.query_policy import ReadCues, TargetRead
@@ -56,12 +55,7 @@ class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
     single model config without reintroducing legacy aliases.
     """
 
-    observation_dim: int = Field(
-        ...,
-        ge=1,
-        description="Dimensionality of raw observations from the environment.",
-    )
-    action_count: int = Field(
+    transition_action_count: int = Field(
         ...,
         ge=1,
         description="Number of discrete actions in the environment.",
@@ -122,10 +116,6 @@ class ModelSettings_V2(BaseModel, extra="forbid", strict=False):
         description="Settings for the MEC module, including path integration and correction parameters.",
     )
 
-    autoencoder: AutoencoderSettings = Field(
-        ...,
-        description="Settings for the autoencoder module used for observation compression.",
-    )
 
     projection_lec: ProjectionSettings = Field(
         default_factory=lambda: ProjectionSettings(mode="tiling", learnable=False),
@@ -194,11 +184,8 @@ class TEMModelV2(nn.Module):
         """Construct the TEM backbone from the resolved TEM v2 model settings."""
         super().__init__()
         self._config = config
-        n_freq, n_actions = config.n_total_freq, config.action_count
+        n_freq, n_actions = config.n_total_freq, config.transition_action_count
         f_initial = config.f_initial
-
-        # Autoencoder module for observation compression/decoding
-        self.autoencoder = Autoencoder(config.observation_dim, config.lec.feature_dim, config.autoencoder)
 
         # Entorhinal Hippocampal Circuit components
         self.hpc = HPCAttention(n_freq, f_initial, config.hpc, device=device, dtype=dtype)
