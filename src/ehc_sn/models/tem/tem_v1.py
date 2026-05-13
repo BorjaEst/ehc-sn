@@ -23,15 +23,13 @@ from torch import dtype as Dtype
 from torch import nn
 
 from ehc_sn import utils
-from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes, TEMProjectionSettings, TEMTransitionPlan
-from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCState
-from ehc_sn.modules.hpc import SensoryRead as HPCSensoryRead
-from ehc_sn.modules.hpc import WritePayload
+from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes, TEMProjectionSettings
+from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCState, WritePayload
 from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
 from ehc_sn.modules.projection import ProjectionBundle, ProjectionModule
-from ehc_sn.types import Batch, MemoryState, MultiScaleCode
+from ehc_sn.types import MemoryState, MultiScaleCode
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -239,64 +237,78 @@ class TEMModelV1(nn.Module):
         previous_action = inputs.previous_action
         episode_start = inputs.episode_start
         landmark_id = inputs.landmark_id
+        batch_size = int(observation_embedding[0].shape[0])
+        device = observation_embedding[0].device
 
-        if state is None:
-            state = self.init_state(int(observation_embedding[0].shape[0]), memory=None, device=observation_embedding.device)
+        # 0. Prepare the state, ensuring batch-alignment and extracting memories.
+        if state is None:  # Init state if not provided
+            state = self.init_state(batch_size, memory=None, device=device)
+        else:  # Preserve the outer-state without truncating autograd
+            state = replace(state)
 
-        # Grid transition prior from action-driven path integration.
-        grid_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)
-        place_query_from_grid_prior = self.mec_to_hpc(grid_prior)
+        # 1. Compute the grid prior by path integration:
+        g_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)
+        g_query_prior = self.mec_to_hpc(g_prior)
 
-        # Sensory inference: encode observations into LEC features and query place memory from them.
-        lec_features_post, state.lec = self.lec.inference(observation_embedding, state.lec)
-        place_query_from_obs = self.lec_to_hpc(lec_features_post)
-        sensory = self.hpc.read_sensory(
-            HPCSensoryRead(
+        # 2. Read sensory-cued place from the previous memory state.
+        x_, state.lec = self.lec.inference(observation_embedding, state.lec)
+        x_query = self.lec_to_hpc(x_)
+        p_sensory_read = None
+        if self.config.enable_sensory_recall:
+            p_sensory_read = self.hpc.recall(
+                read_cues=ReadCues(families={"x": x_query}),
                 state=state.hpc,
-                read_cues=ReadCues(families={"x": place_query_from_obs, "g": place_query_from_grid_prior}),
+                role="inference",
                 read=CueRead(kind="cue", cue="x"),
-                enable_sensory_recall=self.config.enable_sensory_recall,
             )
+
+        # 3. Read ancestral place from the grid prior:
+        p_grid_prior_read = self.hpc.recall(
+            read_cues=ReadCues(families={"g": g_query_prior}),
+            state=state.hpc,
+            role="generative",
+            read=CueRead(kind="cue", cue="g"),
         )
 
-        # Grid posterior after correcting the prior with recalled place evidence.
-        grid_post, state.mec = self.mec.inference(sensory.recall, landmark_id=landmark_id, state=state.mec)  # fmt: skip
-        place_query_from_grid_post = self.mec_to_hpc(grid_post)
-        transition = TEMTransitionPlan(
-            sensory=sensory,
-            grid_prior=grid_prior,
-            grid_query_prior=place_query_from_grid_prior,
-            grid_post=grid_post,
-            grid_query_posterior=place_query_from_grid_post,
-            generative_read=CueRead(kind="cue", cue="g"),
+        # 4. Correct the grid prior using sensory recall:
+        g_post, state.mec = self.mec.inference(
+            p_sensory_read,
+            landmark_id,
+            state=state.mec,
+            correction_error=self._sensory_correction_error(x_, p_sensory_read),
+        )
+        g_query_post = self.mec_to_hpc(g_post)
+
+        # 5. Read retrieved place from the corrected grid:
+        p_grid_post_read = self.hpc.recall(
+            read_cues=ReadCues(families={"g": g_query_post}),
+            state=state.hpc,
+            role="generative",
+            read=CueRead(kind="cue", cue="g"),
         )
 
-        step = self.hpc.transition(transition.to_hpc_transition(state.hpc))
-        state.hpc = step.state
+        # 6. Form ancestral and retrieved place beliefs from the two structural recalls.
+        p_prior, state.hpc = self.hpc.generative(p_grid_prior_read, state=state.hpc)
+        p_retrieved, state.hpc = self.hpc.generative(p_grid_post_read, state=state.hpc)
 
-        # Decode observation logits for the three TEM pathways.
-        lec_features_from_place_post = self.lec_to_hpc.inverse(step.place_post)
-        lec_features_from_place_retrieved = self.lec_to_hpc.inverse(step.place_retrieved)
-        lec_features_from_place_prior = self.lec_to_hpc.inverse(step.place_prior)
+        # 7. Infer the final grounded posterior from sensory and corrected grid cues:
+        p_post, state.hpc = self.hpc.inference(x_query, g_query_post, state=state.hpc)
 
-        # Build and return model-native typed output (output-first, state second).
-        pred_codes = PredCodes(
-            inference=lec_features_from_place_post,
-            retrieved=lec_features_from_place_retrieved,
-            ancestral=lec_features_from_place_prior,
-        )
-        grid_codes_out = GridCodes(
-            posterior=grid_post,
-            prior=grid_prior,
-        )
-        place_codes_out = PlaceCodes(
-            posterior=step.place_post,
-            prior=step.place_prior,
-            retrieved=step.place_retrieved,
-            sensory=sensory.recall,
-        )
-        model_output = TEMOutputV1(pred_codes=pred_codes, grid_codes=grid_codes_out, place_codes=place_codes_out)
-        return model_output, state
+        # 8. Update memory only after all current-step reads are complete:
+        payload = WritePayload(generative=p_retrieved, inference=p_sensory_read)
+        state.hpc = self.hpc.update(p_post, payload, state=state.hpc)
+
+        # 9. Decode the place codes back to sensory space for output:
+        x_inference = self.lec_to_hpc.inverse(p_post)
+        x_ancestral = self.lec_to_hpc.inverse(p_prior)
+        x_retrieved = self.lec_to_hpc.inverse(p_retrieved)
+
+        # Package controller-compatible latent outputs and return the new state.
+        grid_codes = GridCodes(prior=g_prior, posterior=g_post)
+        place_codes = PlaceCodes(prior=p_prior, posterior=p_post, retrieved=p_retrieved, sensory=p_sensory_read)
+        pred_codes = PredCodes(ancestral=x_ancestral, inference=x_inference, retrieved=x_retrieved)
+
+        return TEMOutputV1(grid_codes=grid_codes, place_codes=place_codes, pred_codes=pred_codes), state
 
 
 # =============================================================================
