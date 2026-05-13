@@ -24,17 +24,29 @@ trainer_accelerator  = "gpu"
 trainer_strategy     = "ddp"
 trainer_devices      = 1
 trainer_num_nodes    = 1
-trainer_precision    = "16-mixed"
+trainer_precision    = "bf16-mixed"
 diagnostic_level     = "standard"
 
-# -- Adapter settings --------------------------------------------------------
+# -- Adapter ------------------------------------------------------------------
 [adapter]
     observation_dim = 45
     action_count    = 5
 
+[adapter.encoder]
+    kind   = "two_hot"
+    layout = "replicated"
+
+[adapter.decoder]
+    kind            = "single_scale"
+    prediction_freq = 0
+
+# -- Controller ---------------------------------------------------------------
+[controller]
+    # window_size = None  # Controller sees the entire history.
+
 # -- Optimization -------------------------------------------------------------
 [optimizer]
-    lr           = 1e-4
+    lr           = 9.4e-4
     weight_decay = 1e-2
     betas        = [0.9, 0.98]
 
@@ -61,7 +73,7 @@ diagnostic_level     = "standard"
     hard_max_rollout_steps = 1000
     seed = 42
 
-# -- Controller & loss --------------------------------------------------------
+# -- Objective ----------------------------------------------------------------
 [objective]
     observation_loss = "softmax_cross_entropy"
     c_obs            = 1.0
@@ -72,9 +84,7 @@ diagnostic_level     = "standard"
     grid_reg_norm    = "l2"
     place_reg_norm   = "l1"
 
-[controller]
-    window_size = 300
-
+# -- Logs and checkpoints -----------------------------------------------------
 [logger]
     save_dir  = "logs"
     name      = "tem-v1"
