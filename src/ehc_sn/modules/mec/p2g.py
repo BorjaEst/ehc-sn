@@ -8,7 +8,7 @@ weighting.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
@@ -16,6 +16,7 @@ from scipy.stats import truncnorm
 from torch import Tensor, nn
 
 from ehc_sn import utils
+from ehc_sn.activations.softplus import bounded_positive_scale
 from ehc_sn.modules.mlp import MLP
 from ehc_sn.types import LocationBelief
 
@@ -49,8 +50,11 @@ class P2GMemory(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, n_p: list[int], mec_shape: list[int], config: P2GMemSettings,
-    ) -> None:  # fmt: skip
+        self,
+        n_p: list[int],
+        mec_shape: list[int],
+        config: P2GMemSettings,
+    ) -> None:
         """ """
         super().__init__()
         self._config = config
@@ -66,7 +70,8 @@ class P2GMemory(nn.Module):
         self.MLP_mu_g_mem.set_weights(-1, [torch.tensor(init_w(f), dtype=torch.float32) for f in range(self._n_freq)])  # fmt: skip
 
         # Uncertainty from memory quality indicators
-        self.MLP_sigma_g_mem = MLP([2 for _ in n_p], mec_shape, activation=[torch.tanh, torch.exp], hidden_dim=[2 * g for g in mec_shape])  # fmt: skip
+        mec_activation = [torch.tanh, bounded_positive_scale]
+        self.MLP_sigma_g_mem = MLP([2 for _ in n_p], mec_shape, mec_activation, hidden_dim=[2 * g for g in mec_shape])  # fmt: skip
 
     @property
     def config(self) -> P2GMemSettings:
@@ -88,13 +93,19 @@ class P2GMemory(nn.Module):
         return self._n_freq
 
     def forward(  # -------------------------------------------------------------------------------
-        self, p_x: list[Tensor], transition: LocationBelief,
-    ) -> LocationBelief:  # fmt: skip
+        self,
+        p_x: list[Tensor],
+        transition: LocationBelief,
+        *,
+        quality_error: Optional[list[Tensor]] = None,
+    ) -> LocationBelief:
         """Infer a corrected grid-code transition from place cells.
 
         Args:
             p_x: Retrieved place-cell activations per frequency.
             transition: Reference transition to correct (e.g., path integration).
+            quality_error: Optional caller-supplied correction-quality error per
+                frequency. Lower values indicate a better-supported memory cue.
 
         Returns:
             A fused `LocationBelief` after memory-based correction.
@@ -102,14 +113,15 @@ class P2GMemory(nn.Module):
         g_ref, sigma_ref = transition.mean, transition.uncertainty  # Unpack for clarity
 
         mu = self._inference_mean(p_x)
-        sigma = self._inference_uncertainty(g_ref, err=utils.squared_error(mu, g_ref))
+        sigma = self._inference_uncertainty(g_ref, err=utils.squared_error(mu, g_ref), quality_error=quality_error)
 
         correction = LocationBelief(mean=mu, uncertainty=sigma)
         return utils.inv_var_trans(transition, correction)
 
     def _inference_mean(  # -----------------------------------------------------------------------
-        self, p_x: list[Tensor],
-    ) -> list[Tensor]:  # fmt: skip
+        self,
+        p_x: list[Tensor],
+    ) -> list[Tensor]:
         """Predict grid-code means from place cells.
 
         Args:
@@ -121,20 +133,26 @@ class P2GMemory(nn.Module):
         return self.MLP_mu_g_mem(p_x)
 
     def _inference_uncertainty(  # ----------------------------------------------------------------
-        self, g: list[Tensor], err: list[Tensor],
-    ) -> list[Tensor]:  # fmt: skip
+        self,
+        g: list[Tensor],
+        err: list[Tensor],
+        quality_error: Optional[list[Tensor]] = None,
+    ) -> list[Tensor]:
         """Estimate uncertainty from grid-code magnitude and reconstruction error.
 
         Args:
             g: Reference grid-code activations per frequency.
-            err: Per-frequency reconstruction error features.
+            err: Fallback per-frequency error features derived from grid-space
+                disagreement.
+            quality_error: Optional caller-supplied per-frequency error
+                features. When present, these override the fallback error.
 
         Returns:
             Estimated uncertainty per frequency.
         """
+        sigma_err = err if quality_error is None else quality_error
         sigma_g_input = [
-            torch.cat((torch.sum(mu_f**2, dim=1, keepdim=True), torch.unsqueeze(err[f], dim=1)), dim=1)
-            for f, mu_f in enumerate(g)
+            torch.cat((torch.sum(g_f**2, dim=1, keepdim=True), torch.unsqueeze(sigma_err[f], dim=1)), dim=1) for f, g_f in enumerate(g)
         ]
         sigma = self.MLP_sigma_g_mem(sigma_g_input)
         return [sigma[f] + self.runtime.uncertainty_offset for f in range(self._n_freq)]

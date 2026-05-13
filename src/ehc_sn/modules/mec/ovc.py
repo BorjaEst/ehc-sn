@@ -10,12 +10,15 @@ from typing import Literal, Optional
 
 import torch
 from pydantic import BaseModel, Field, model_validator
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import nn
 
 from ehc_sn import utils
+from ehc_sn.activations.softplus import bounded_positive_scale
 from ehc_sn.modules.mec.layout import MECLayout, validate_ovc_shape_policy
 from ehc_sn.modules.mlp import MLP
-from ehc_sn.types import Device, LocationBelief
+from ehc_sn.types import LocationBelief
 
 
 # =================================================================================================
@@ -56,8 +59,10 @@ class OVCCorrection(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, layout: MECLayout, config: OVCSettings,
-    ) -> None:  # fmt: skip
+        self,
+        layout: MECLayout,
+        config: OVCSettings,
+    ) -> None:
         """ """
         super().__init__()
         self._config = config or OVCSettings()
@@ -69,7 +74,7 @@ class OVCCorrection(nn.Module):
         # Shiny cue → mean and uncertainty.
         hidden_dim = [self._config.hidden_dim] * self._n_freq
         self.g_shiny_mlp = MLP([1] * self._n_freq, self.shape, hidden_dim=hidden_dim)
-        self.uncertainty_mlp = MLP( [1] * self._n_freq, self.shape, [torch.tanh, torch.exp], hidden_dim=hidden_dim)  # fmt: skip
+        self.uncertainty_mlp = MLP([1] * self._n_freq, self.shape, [torch.tanh, bounded_positive_scale], hidden_dim=hidden_dim)  # fmt: skip
 
     @property
     def config(self) -> OVCSettings:
@@ -91,9 +96,7 @@ class OVCCorrection(nn.Module):
         """Return the starting frequency index of the OVC correction slice."""
         return self._ovc_start
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, landmark_id: Tensor | None, transition: LocationBelief,
-    ) -> LocationBelief:  # fmt: skip
+    def forward(self, landmark_id: Tensor | None, transition: LocationBelief,) -> LocationBelief:  # fmt: skip  # -------------------------------------------------------------------------------
         """Apply OVC correction to environments with shiny cues.
 
         Args:
@@ -114,9 +117,7 @@ class OVCCorrection(nn.Module):
         correction = self._predict_correction(shiny_input)
         return utils.inv_var_trans(transition, correction, shiny_mask, freqs)
 
-    def _identify_shiny_envs(  # ------------------------------------------------------------------
-        self, landmark_id: Tensor | None, device: Device,
-    ) -> Tensor | None:  # fmt: skip
+    def _identify_shiny_envs(self, landmark_id: Tensor | None, device: Device,) -> Tensor | None:  # fmt: skip  # ------------------------------------------------------------------
         """Return a mask selecting environments with shiny cues.
 
         Args:
@@ -134,9 +135,7 @@ class OVCCorrection(nn.Module):
             return None
         return shiny_mask.to(device=device)
 
-    def _extract_shiny_cues(  # -------------------------------------------------------------------
-        self, landmark_id: Tensor | None, shiny_mask: Tensor, device: Device,
-    ) -> list[Tensor]:  # fmt: skip
+    def _extract_shiny_cues(self, landmark_id: Tensor | None, shiny_mask: Tensor, device: Device,) -> list[Tensor]:  # fmt: skip  # -------------------------------------------------------------------
         """Extract shiny cue values as inputs for the OVC MLPs.
 
         Args:
@@ -150,14 +149,10 @@ class OVCCorrection(nn.Module):
         """
         if landmark_id is None:
             raise ValueError("landmark_id is required when shiny_mask selects OVC-corrected rows.")
-        shiny_tensor = (
-            landmark_id.squeeze(-1)[shiny_mask].to(device=device, dtype=torch.float32).unsqueeze(-1)
-        )
+        shiny_tensor = landmark_id.squeeze(-1)[shiny_mask].to(device=device, dtype=torch.float32).unsqueeze(-1)
         return [shiny_tensor] * self.n_freq
 
-    def _predict_correction(  # -------------------------------------------------------------------
-        self, shiny_input: list[Tensor],
-    ) -> LocationBelief:  # fmt: skip
+    def _predict_correction(self, shiny_input: list[Tensor],) -> LocationBelief:  # fmt: skip  # -------------------------------------------------------------------
         """Predict mean and uncertainty for the OVC correction.
 
         Args:

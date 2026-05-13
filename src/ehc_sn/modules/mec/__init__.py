@@ -15,14 +15,17 @@ from typing import Optional
 import torch
 from pydantic import BaseModel, Field
 from scipy.stats import truncnorm
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
 from ehc_sn import utils
 from ehc_sn.modules.mec.layout import MECLayout, resolve_mec_layout
 from ehc_sn.modules.mec.ovc import OVCCorrection, OVCSettings
 from ehc_sn.modules.mec.p2g import P2GMemory, P2GMemSettings
 from ehc_sn.modules.mec.path import PathIntegrator, PathSettings
-from ehc_sn.types import AbstractLocation, Device, Dtype, GroundedLocation, LocationBelief
+from ehc_sn.types import AbstractLocation, GroundedLocation, LocationBelief
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -307,7 +310,7 @@ class MECModel(nn.Module):
         return g_gen, state.new(cells_next, transition.uncertainty)
 
     def inference(  # -----------------------------------------------------------------------------
-        self, p_x: Optional[GroundedLocation], landmark_id: Tensor | None, state: MECState,
+        self, p_x: Optional[GroundedLocation], landmark_id: Tensor | None, state: MECState, *, correction_error: list[Tensor] | None = None,
     ) -> tuple[AbstractLocation, MECState]:  # fmt: skip
         """Run inference by fusing memory and OVC cues into the state.
 
@@ -315,6 +318,9 @@ class MECModel(nn.Module):
             p_x: Retrieved place-cell activations per frequency (from HPC).
             landmark_id: Optional current-cell landmark ids of shape `(batch, 1)`.
             state: Current MEC state (typically after path integration).
+            correction_error: Optional caller-supplied quality signal for p→g
+                correction. When omitted, MEC falls back to its legacy
+                grid-space disagreement feature.
 
         Returns:
             A tuple `(g_inf, new_state)` where `g_inf` is the inferred grid code
@@ -322,7 +328,7 @@ class MECModel(nn.Module):
         """
         transition: LocationBelief = state.abstract_belief
         # Step 1: Correct path integration with memory-based inference
-        transition = self.p2g_correction(p_x, transition) if p_x is not None else transition
+        transition = self.p2g_correction(p_x, transition, quality_error=correction_error) if p_x is not None else transition
         # Step 2: Apply OVC correction from shiny landmarks.
         transition = self.ovc_correction(landmark_id, transition) if self.config.ovc.mode != "off" else transition # fmt: skip
 

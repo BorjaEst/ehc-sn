@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from ehc_sn import utils
+from ehc_sn.activations.softplus import bounded_positive_scale
 from ehc_sn.modules.mlp import MLP
 from ehc_sn.types import LocationBelief
 
@@ -60,7 +61,7 @@ class PathIntegrator(nn.Module):
         self.D_no_a = nn.ParameterList([nn.Parameter(torch.zeros(m)) for m in self._mat_shape])  # fmt: skip
 
         # LocationBelief uncertainty
-        self.uncertainty_mlp = MLP(mec_shape, mec_shape, [torch.tanh, torch.exp], [2 * g for g in mec_shape])
+        self.uncertainty_mlp = MLP(mec_shape, mec_shape, [torch.tanh, bounded_positive_scale], [2 * g for g in mec_shape])
 
     @property
     def config(self) -> PathSettings:
