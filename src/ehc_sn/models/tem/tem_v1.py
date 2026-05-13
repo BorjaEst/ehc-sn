@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional, cast
 
 import torch
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import BaseModel, Field
 from torch import Tensor
 from torch import device as Device
 from torch import dtype as Dtype
@@ -77,42 +77,6 @@ class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
         description="Whether the HPC should perform sensory-cued recall during the phase-1 TEM step.",
     )
 
-    # @computed_field
-    # @property
-    # def n_stages(self) -> int:
-    #     """Return the resolved number of TEM frequency modules."""
-    #     return len(self.f_initial)
-
-    # @computed_field
-    # @property
-    # def n_freq(self) -> int:
-    #     """Return the total number of frequency modules."""
-    #     return len(self.f_initial)
-
-    # @computed_field
-    # @property
-    # def lec_shape(self) -> list[int]:
-    #     """Return the resolved LEC feature shape across all frequencies."""
-    #     return [self.lec.feature_dim] * self.n_total_freq
-
-    # @computed_field
-    # @property
-    # def mec_shape(self) -> list[int]:
-    #     """Return the full MEC shape including optional OVC modules."""
-    #     return self.mec.mec_shape
-
-    # @computed_field
-    # @property
-    # def mec_ovc_shape(self) -> list[int]:
-    #     """Return the appended OVC shape implied by the configured OVC mode."""
-    #     return self.mec.mec_ovc_shape
-
-    @computed_field
-    @property
-    def n_total_freq(self) -> int:
-        """Return the total number of MEC/HPC frequencies after OVC expansion."""
-        return self.mec.n_total_freq
-
 
 # =============================================================================
 @dataclass(frozen=True)
@@ -159,7 +123,8 @@ class TEMModelV1(nn.Module):
         """Construct the TEM backbone from the resolved TEM v1 model settings."""
         super().__init__()
         self._config = config
-        n_freq, n_actions = config.n_total_freq, config.transition_action_count
+        n_freq = len(config.hpc.shape)
+        n_actions = config.transition_action_count
         f_initial = config.f_initial
 
         # Entorhinal Hippocampal Circuit components
@@ -205,16 +170,20 @@ class TEMModelV1(nn.Module):
         *,
         memory: Optional[MemoryState] = None,
         device: Optional[Device] = None,
-        dtype: Optional[Dtype] = None,
     ) -> TEMStateV1:
         """Create an initial recurrent TEM state."""
-        memory = memory if memory is not None else self.hpc.init_memory(batch_size=batch_size, device=device)
-        lec_state = self.lec.init_state(batch_size, device=device)
-        state_mec = self.mec.init_state(batch_size, device=device)
-        hpc_state = self.hpc.init_state(batch_size, device=device, memory=memory)
-        return TEMStateV1(lec_state, state_mec, hpc_state)
+        memory = memory if memory is not None else self.hpc.init_memory(batch_size, device=device)
+        return TEMStateV1(
+            lec=self.lec.init_state(batch_size, device=device),
+            mec=self.mec.init_state(batch_size, device=device),
+            hpc=self.hpc.init_state(batch_size, device=device, memory=memory),
+        )
 
-    def reset_state(self, reset_flag: Tensor, state: TEMStateV1,) -> TEMStateV1:  # fmt: skip  # ---------------------------------------------------------------------------
+    def reset_state(  # -------------------------------------------------------
+        self,
+        reset_flag: Tensor,
+        state: TEMStateV1,
+    ) -> TEMStateV1:
         """Reset flagged rows to a fresh episode state while preserving active rows."""
         reset_flag = reset_flag.to(torch.bool).view(-1)
         if not torch.any(reset_flag):
@@ -226,12 +195,40 @@ class TEMModelV1(nn.Module):
             hpc=self.hpc.reset_state(state.hpc, reset_flag),
         )
 
-    def set_runtime(self, eta: float, hebbian_decay: float, p2g_uncertainty_offset: float,) -> None:  # fmt: skip  # ---------------------------------------------------------------------------
+    def set_runtime(  # -------------------------------------------------------
+        self,
+        eta: float,
+        hebbian_decay: float,
+        p2g_uncertainty_offset: float,
+    ) -> None:
         """ """
         self.mec.set_runtime(p2g_uncertainty_offset=p2g_uncertainty_offset)
         self.hpc.set_runtime(eta=eta, hebbian_decay=hebbian_decay)
 
-    def forward(self, inputs: TEMInputV1, state: Optional[TEMStateV1] = None,) -> tuple[TEMOutputV1, TEMStateV1]:  # fmt: skip  # -------------------------------------------------------------------------------
+    def _sensory_correction_error(
+        self,
+        sensory_features: MultiScaleCode,
+        p_sensory_read: Optional[list[Tensor]],
+    ) -> Optional[list[Tensor]]:
+        """Assemble detached p→g confidence evidence in HPC-projected sensory space.
+
+        Error is computed in HPC space (after forward projection) rather than by
+        inverting back to LEC space.  The transpose-based inverse scales by the
+        tiling factor k, so a perfect tiled match would yield (k-1)²‖x‖² instead
+        of zero.  Projecting forward keeps both sides in the same space and gives
+        zero error for an exact recall regardless of tiling factor.
+        """
+        if p_sensory_read is None:
+            return None
+
+        x_query = self.lec_to_hpc(sensory_features)
+        return [band_error.detach() for band_error in utils.squared_error(x_query, p_sensory_read)]
+
+    def forward(  # -----------------------------------------------------------
+        self,
+        inputs: TEMInputV1,
+        state: Optional[TEMStateV1] = None,
+    ) -> tuple[TEMOutputV1, TEMStateV1]:
         """Run one TEM step from the current payload and recurrent state.
 
         ``state`` is assumed to have already been reset for any fresh episode
@@ -302,9 +299,5 @@ class TEMModelV1(nn.Module):
         return model_output, state
 
 
-# =================================================================================================
-__all__ = [
-    "ModelSettingsV1", "TEMStateV1", "TEMStateV1", "TEMModelV1",
-    "TEMInputV1", "TEMOutputV1",
-    "Batch", "ObsLogits",
-]  # fmt: skip
+# =============================================================================
+__all__ = ["ModelSettingsV1", "TEMInputV1", "TEMOutputV1", "PlaceCodes", "TEMStateV1", "TEMModelV1"]
