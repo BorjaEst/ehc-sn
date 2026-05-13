@@ -35,9 +35,9 @@ class ArenaInputsEncoderV2(nn.Module):
         batch: Batch,
     ) -> TEMInputV2:
         """Encode a pre-extracted arena step payload into a TEM v2 input."""
-        sensory_codes, prev_action, episode_start, landmark_id = self.encoder(batch)
+        observation_embedding, prev_action, episode_start, landmark_id = self.encoder(batch)
         return TEMInputV2(
-            sensory_codes=sensory_codes,
+            observation_embedding=observation_embedding,
             previous_action=prev_action,
             episode_start=episode_start,
             landmark_id=landmark_id,

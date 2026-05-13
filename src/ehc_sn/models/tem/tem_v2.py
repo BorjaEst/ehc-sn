@@ -31,7 +31,7 @@ ObsLogits = tuple[Tensor, Tensor, Tensor]  # (inference, retrieved, ancestral)
 class TEMInputV2:
     """Model-native input payload for one TEM v2 step."""
 
-    sensory_codes: list[Tensor]
+    observation_embedding: list[Tensor]
     previous_action: Tensor
     episode_start: Optional[Tensor] = None
     landmark_id: Optional[Tensor] = None
@@ -242,7 +242,7 @@ class TEMModelV2(nn.Module):
         rows by the caller. When ``state`` is ``None``, a fresh full-batch state
         is allocated and the normal single-step TEM transition is executed.
         """
-        observation_embedding = inputs.sensory_codes[0]
+        observation_embedding = inputs.observation_embedding[0]
         previous_action = inputs.previous_action
         episode_start = inputs.episode_start
         landmark_id = inputs.landmark_id

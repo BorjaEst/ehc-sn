@@ -10,6 +10,7 @@ from typing import Optional
 import torch
 from torch import Tensor, nn
 
+from ehc_sn.adapters.arena.ehc import core as _core
 from ehc_sn.adapters.arena.ehc.core import (
     ArenaDecoderConfig,
     ArenaEHCAdapterSettings,
@@ -18,7 +19,6 @@ from ehc_sn.adapters.arena.ehc.core import (
     ArenaEncoderConfig,
     ArenaTwoHotEncoder,
 )
-from ehc_sn.adapters.arena.ehc import core as _core
 from ehc_sn.models.ehc.ehc_v1 import EHCInputV1, EHCModelV1, EHCOutputV1, EHCStateV1
 from ehc_sn.modules.autoencoder import MLPDecoder
 from ehc_sn.types import Batch
@@ -42,9 +42,9 @@ class ArenaInputsEncoderV1(nn.Module):
         batch: Batch,
     ) -> EHCInputV1:
         """Encode a pre-extracted arena step payload into a EHC v1 input."""
-        sensory_codes, prev_action, episode_start, landmark_id = self._core.encode(batch)
+        observation_embedding, prev_action, episode_start, landmark_id = self._core.encode(batch)
         return EHCInputV1(
-            sensory_codes=sensory_codes,
+            observation_embedding=observation_embedding,
             previous_action=prev_action,
             episode_start=episode_start,
             landmark_id=landmark_id,

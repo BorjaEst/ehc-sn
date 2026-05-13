@@ -218,13 +218,13 @@ class ArenaTwoHotEncoder(nn.Module):
         self._n_freq = n_freq
 
     def encode(self, batch: Batch) -> tuple[MultiScaleCode, Tensor, object, object]:
-        """Return ``(sensory_codes, previous_action, episode_start, landmark_id)``."""
+        """Return ``(observation_embedding, previous_action, episode_start, landmark_id)``."""
         obs_id = batch["observation_id"].view(-1).long()  # (B,)
         observation = F.one_hot(obs_id, num_classes=self._obs_dim).float()  # (B, obs_dim)
         code = self.encoder(observation)
-        sensory_codes: MultiScaleCode = [code.clone() for _ in range(self._n_freq)]
+        observation_embedding: MultiScaleCode = [code.clone() for _ in range(self._n_freq)]
         return (
-            sensory_codes,
+            observation_embedding,
             batch["previous_action"],
             batch.get("episode_start"),
             batch.get("landmark_id"),

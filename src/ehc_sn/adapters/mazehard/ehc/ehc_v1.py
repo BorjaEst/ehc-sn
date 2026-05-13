@@ -100,7 +100,7 @@ class MazeHardEHCV1Encoder(nn.Module):
         x = self.embed(input_ids).mean(dim=1)
 
         # Split into n_freq multi-scale sensory codes
-        sensory_codes = list(x.split(self._feature_dim, dim=-1))  # n_freq × (B, feature_dim)
+        observation_embedding = list(x.split(self._feature_dim, dim=-1))  # n_freq × (B, feature_dim)
 
         # Horizon-1 deliberation: no previous navigation action; treat each step as
         # a fresh episode so MEC resets its grid-prior state.
@@ -108,7 +108,7 @@ class MazeHardEHCV1Encoder(nn.Module):
         episode_start = torch.ones(B, dtype=torch.bool, device=device)
 
         return EHCInputV1(
-            sensory_codes=sensory_codes,
+            observation_embedding=observation_embedding,
             previous_action=prev_action,
             episode_start=episode_start,
         )

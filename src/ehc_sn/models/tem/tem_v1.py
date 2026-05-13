@@ -83,7 +83,7 @@ class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
 class TEMInputV1(DetachMixin):
     """Task-agnostic input payload for TEM v1 forward steps."""
 
-    sensory_codes: MultiScaleCode
+    observation_embedding: MultiScaleCode
     previous_action: Tensor
     episode_start: Optional[Tensor] = None
     landmark_id: Optional[Tensor] = None
@@ -235,7 +235,7 @@ class TEMModelV1(nn.Module):
         rows by the caller. When ``state`` is ``None``, a fresh full-batch state
         is allocated and the normal single-step TEM transition is executed.
         """
-        observation_embedding = inputs.sensory_codes
+        observation_embedding = inputs.observation_embedding
         previous_action = inputs.previous_action
         episode_start = inputs.episode_start
         landmark_id = inputs.landmark_id
