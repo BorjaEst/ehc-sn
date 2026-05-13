@@ -15,9 +15,11 @@ from typing import Literal, Optional
 import torch
 import torch.nn.functional as F
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn.types import Device, Dtype
 from ehc_sn.utils import trunc_normal_init_
 
 
@@ -250,9 +252,7 @@ def _rope_rotate(  # -----------------------------------------------------------
     half = head_dim // 2  # pairs of dimensions to rotate
 
     # Frequency for each dimension pair: 1 / (theta^(2i / head_dim)), i in [0, half).
-    freqs = 1.0 / (
-        theta ** (torch.arange(0, head_dim, 2, device=device, dtype=torch.float32) / head_dim)
-    )  # [half]
+    freqs = 1.0 / (theta ** (torch.arange(0, head_dim, 2, device=device, dtype=torch.float32) / head_dim))  # [half]
 
     # Outer product → angle per position per frequency: [seq, half]
     angles = torch.outer(torch.arange(seq_len, device=device, dtype=torch.float32), freqs)
