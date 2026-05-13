@@ -11,10 +11,13 @@ from typing import Optional, Protocol
 
 import torch
 from pydantic import BaseModel, Field, field_validator
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as DType
+from torch import nn
 
 from ehc_sn.modules.hpc.update import HebbianLayout, HebbianWriteRule
-from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, DenseMemoryStore, Device, FactorMemoryStore, FactorSlotBank, MemoryEntry
+from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, DenseMemoryStore, FactorMemoryStore, FactorSlotBank, MemoryEntry
 
 
 # =================================================================================================
@@ -60,13 +63,19 @@ class StoreBackend(Protocol):
     """Runtime backend contract for one memory-entry representation family."""
 
     def init_store(  # ---------------------------------------------------------------------------
-        self, batch_size: int, *, device: Optional[Device] = None,
-    ) -> MemoryEntry:  # fmt: skip
+        self,
+        batch_size: int,
+        *,
+        device: Optional[Device] = None,
+    ) -> MemoryEntry:
         """Return an empty memory entry for the configured representation."""
 
     def merge_rows(  # ---------------------------------------------------------------------------
-        self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
-    ) -> MemoryEntry:  # fmt: skip
+        self,
+        flag: Tensor,
+        current: MemoryEntry,
+        fresh: MemoryEntry,
+    ) -> MemoryEntry:
         """Merge backend-specific rows during partial reset."""
 
 
@@ -74,8 +83,13 @@ class HebbianStoreBackend(StoreBackend, Protocol):
     """Backend contract for Hebbian store representations."""
 
     def apply_write(  # --------------------------------------------------------------------------
-        self, store: MemoryEntry, key: Tensor, value: Tensor, *, masked: bool,
-    ) -> MemoryEntry:  # fmt: skip
+        self,
+        store: MemoryEntry,
+        key: Tensor,
+        value: Tensor,
+        *,
+        masked: bool,
+    ) -> MemoryEntry:
         """Apply one Hebbian write step to the provided store."""
 
 
@@ -83,8 +97,13 @@ class AppendStoreBackend(StoreBackend, Protocol):
     """Backend contract for append-only factor-store representations."""
 
     def append_write(  # -------------------------------------------------------------------------
-        self, store: MemoryEntry, key: Tensor, value: Tensor, *, bank_name: Optional[str] = None,
-    ) -> MemoryEntry:  # fmt: skip
+        self,
+        store: MemoryEntry,
+        key: Tensor,
+        value: Tensor,
+        *,
+        bank_name: Optional[str] = None,
+    ) -> MemoryEntry:
         """Append one value atom to the provided store."""
 
 
@@ -97,8 +116,11 @@ class DenseHebbianStoreBackend(nn.Module):
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, write_rule: HebbianWriteRule, *, layout: HebbianLayout,
-    ) -> None:  # fmt: skip
+        self,
+        write_rule: HebbianWriteRule,
+        *,
+        layout: HebbianLayout,
+    ) -> None:
         """Bind dense Hebbian allocation, write, and merge behavior to one backend."""
         super().__init__()
         self._write_rule = write_rule
@@ -106,23 +128,34 @@ class DenseHebbianStoreBackend(nn.Module):
         self.register_buffer("dense_mask", layout.dense_mask, persistent=False)
 
     def init_store(  # ---------------------------------------------------------------------------
-        self, batch_size: int, *, device: Optional[Device] = None,
-    ) -> DenseMemoryStore:  # fmt: skip
+        self,
+        batch_size: int,
+        *,
+        device: Optional[Device] = None,
+    ) -> DenseMemoryStore:
         """Allocate an empty dense Hebbian memory entry."""
         matrix = torch.zeros((batch_size, self._feature_dim, self._feature_dim), dtype=torch.float, device=device)
         return DenseMemoryStore(matrix=matrix)
 
     def merge_rows(  # ---------------------------------------------------------------------------
-        self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
-    ) -> DenseMemoryStore:  # fmt: skip
+        self,
+        flag: Tensor,
+        current: MemoryEntry,
+        fresh: MemoryEntry,
+    ) -> DenseMemoryStore:
         """Merge dense Hebbian stores during partial reset."""
         if not isinstance(current, DenseMemoryStore) or not isinstance(fresh, DenseMemoryStore):
             raise TypeError("DenseHebbianStoreBackend expected dense memory stores.")
         return current.merged_rows(flag, fresh)
 
     def apply_write(  # --------------------------------------------------------------------------
-        self, store: MemoryEntry, key: Tensor, value: Tensor, *, masked: bool,
-    ) -> DenseMemoryStore:  # fmt: skip
+        self,
+        store: MemoryEntry,
+        key: Tensor,
+        value: Tensor,
+        *,
+        masked: bool,
+    ) -> DenseMemoryStore:
         """Apply a dense Hebbian update to the provided memory entry."""
         if not isinstance(store, DenseMemoryStore):
             raise TypeError("DenseHebbianStoreBackend expected dense memory stores.")
@@ -139,16 +172,22 @@ class FactorHebbianStoreBackend:
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, write_rule: HebbianWriteRule, *, layout: HebbianLayout,
-    ) -> None:  # fmt: skip
+        self,
+        write_rule: HebbianWriteRule,
+        *,
+        layout: HebbianLayout,
+    ) -> None:
         """Bind factorized Hebbian allocation, write, and merge behavior to one backend."""
         self._write_rule = write_rule
         self._layout = layout
         self._feature_dim = int(layout.feature_dim)
 
     def init_store(  # ---------------------------------------------------------------------------
-        self, batch_size: int, *, device: Optional[Device] = None,
-    ) -> FactorMemoryStore:  # fmt: skip
+        self,
+        batch_size: int,
+        *,
+        device: Optional[Device] = None,
+    ) -> FactorMemoryStore:
         """Allocate an empty factor Hebbian memory entry."""
         return FactorMemoryStore(
             keys=torch.zeros((batch_size, 0, self._feature_dim), dtype=torch.float, device=device),
@@ -158,16 +197,24 @@ class FactorHebbianStoreBackend:
         )
 
     def merge_rows(  # ---------------------------------------------------------------------------
-        self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
-    ) -> FactorMemoryStore:  # fmt: skip
+        self,
+        flag: Tensor,
+        current: MemoryEntry,
+        fresh: MemoryEntry,
+    ) -> FactorMemoryStore:
         """Merge factor Hebbian stores during partial reset."""
         if not isinstance(current, FactorMemoryStore) or not isinstance(fresh, FactorMemoryStore):
             raise TypeError("FactorHebbianStoreBackend expected factor memory stores.")
         return current.merged_rows(flag, fresh)
 
     def apply_write(  # --------------------------------------------------------------------------
-        self, store: MemoryEntry, key: Tensor, value: Tensor, *, masked: bool,
-    ) -> FactorMemoryStore:  # fmt: skip
+        self,
+        store: MemoryEntry,
+        key: Tensor,
+        value: Tensor,
+        *,
+        masked: bool,
+    ) -> FactorMemoryStore:
         """Apply a Hebbian update and keep the resulting store in factor form."""
         if not isinstance(store, FactorMemoryStore):
             raise TypeError("FactorHebbianStoreBackend expected factor memory stores.")
@@ -193,16 +240,23 @@ class FactorAppendStoreBackend:
     """
 
     def __init__(  # ------------------------------------------------------------------------------
-        self, write_system: object, *, feature_dim: int, settings: FactorStoreSettings,
-    ) -> None:  # fmt: skip
+        self,
+        write_system: object,
+        *,
+        feature_dim: int,
+        settings: FactorStoreSettings,
+    ) -> None:
         """Bind factor allocation, append, and merge behavior to one backend."""
         self._write_system = write_system
         self._feature_dim = int(feature_dim)
         self._settings = settings
 
     def init_store(  # ---------------------------------------------------------------------------
-        self, batch_size: int, *, device: Optional[Device] = None,
-    ) -> FactorMemoryStore:  # fmt: skip
+        self,
+        batch_size: int,
+        *,
+        device: Optional[Device] = None,
+    ) -> FactorMemoryStore:
         """Allocate an empty factor store using the configured store settings."""
         capacity = 0 if self._settings.memory_capacity is None else int(self._settings.memory_capacity)
         keys = torch.zeros((batch_size, capacity, self._feature_dim), dtype=torch.float, device=device)
@@ -216,16 +270,24 @@ class FactorAppendStoreBackend:
         return FactorMemoryStore(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients, banks=banks)
 
     def merge_rows(  # ---------------------------------------------------------------------------
-        self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
-    ) -> FactorMemoryStore:  # fmt: skip
+        self,
+        flag: Tensor,
+        current: MemoryEntry,
+        fresh: MemoryEntry,
+    ) -> FactorMemoryStore:
         """Merge append-only factor stores during partial reset."""
         if not isinstance(current, FactorMemoryStore) or not isinstance(fresh, FactorMemoryStore):
             raise TypeError("FactorAppendStoreBackend expected factor memory stores.")
         return current.merged_rows(flag, fresh)
 
     def append_write(  # -------------------------------------------------------------------------
-        self, store: MemoryEntry, key: Tensor, value: Tensor, *, bank_name: Optional[str] = None,
-    ) -> FactorMemoryStore:  # fmt: skip
+        self,
+        store: MemoryEntry,
+        key: Tensor,
+        value: Tensor,
+        *,
+        bank_name: Optional[str] = None,
+    ) -> FactorMemoryStore:
         """Append a factor-memory atom to the provided memory entry."""
         if not isinstance(store, FactorMemoryStore):
             raise TypeError("FactorAppendStoreBackend expected factor memory stores.")

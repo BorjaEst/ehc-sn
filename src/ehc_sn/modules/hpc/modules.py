@@ -11,6 +11,8 @@ from typing import Optional
 
 from pydantic import Field
 from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
 
 from ehc_sn import utils
 from ehc_sn.modules.hpc._base import HPCBase, HPCCommonSettings, HPCState
@@ -18,7 +20,7 @@ from ehc_sn.modules.hpc.memory import DenseHebbianStoreBackend, FactorAppendStor
 from ehc_sn.modules.hpc.query import AttractorRead, AttractorReadSettings, FactorRead, FactorReadSettings
 from ehc_sn.modules.hpc.query_policy import MemoryRead, ReadCues
 from ehc_sn.modules.hpc.update import EpisodicWrite, EpisodicWriteSettings, HebbianWrite, HebbianWriteSettings, build_hebbian_layout
-from ehc_sn.types import Device, Dtype, MemoryEntry, MemoryState, RetrievalRole
+from ehc_sn.types import MemoryEntry, MemoryState, RetrievalRole
 
 
 # =================================================================================================

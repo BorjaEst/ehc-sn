@@ -13,9 +13,12 @@ from typing import Annotated, Literal, Optional, TypeAlias
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, Device, Dtype
+from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME
 
 CueFamily: TypeAlias = str
 """Semantic name of one retrieval cue family.
