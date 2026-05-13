@@ -240,13 +240,13 @@ class TEMModelV1(nn.Module):
         rows by the caller. When ``state`` is ``None``, a fresh full-batch state
         is allocated and the normal single-step TEM transition is executed.
         """
-        observation_embedding = inputs.sensory_codes[0]
+        observation_embedding = inputs.sensory_codes
         previous_action = inputs.previous_action
         episode_start = inputs.episode_start
         landmark_id = inputs.landmark_id
 
         if state is None:
-            state = self.init_state(int(observation_embedding.shape[0]), memory=None, device=observation_embedding.device)
+            state = self.init_state(int(observation_embedding[0].shape[0]), memory=None, device=observation_embedding.device)
 
         # Grid transition prior from action-driven path integration.
         grid_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)

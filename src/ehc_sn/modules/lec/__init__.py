@@ -17,13 +17,15 @@ from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
 from ehc_sn import utils
 from ehc_sn.modules.lec.filter import FreqFilterSettings, FrequencyFilter
 from ehc_sn.modules.lec.norm import FeatureNorm, FeatureNormSettings
-from ehc_sn.modules.lec.reconstruction import Reconstruction, ReconstructionSettings
-from ehc_sn.types import Device, Dtype, MultiScaleCode
+from ehc_sn.types import MultiScaleCode
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -54,10 +56,7 @@ class LECSettings(BaseModel, extra="forbid"):
         default_factory=FeatureNormSettings,
         description="Feature normalization module config.",
     )
-    reconstruction: ReconstructionSettings = Field(
-        default_factory=ReconstructionSettings,
-        description="Feature reconstruction module config.",
-    )
+
 
 
 # =================================================================================================
@@ -119,7 +118,6 @@ class LECModel(nn.Module):
         # Composable submodules (single responsibility each)
         self.filter = FrequencyFilter(f_initial, config.filter)
         self.norm = FeatureNorm(config.norm)
-        self.reconstruct = Reconstruction(n_features, config.reconstruction)
         self.w_f = nn.ParameterList([nn.Parameter(torch.tensor(1.0)) for _ in range(self._n_freq)])
 
         self.reset_parameters()
@@ -197,31 +195,20 @@ class LECModel(nn.Module):
         """ """
         raise NotImplementedError("LEC forward not implemented. Use generative() or inference().")
 
-    def generative(  # ----------------------------------------------------------------------------
-        self, x: list[Tensor],
-    ) -> Tensor:  # fmt: skip
-        """Reconstruct sensory input from LEC features.
-
-        Args:
-            x: Per-frequency LEC features.
-
-        Returns:
-            A reconstruction of the sensory input.
-        """
-        return self.reconstruct(x)
-
     def inference(  # -----------------------------------------------------------------------------
-        self, c: Tensor, state: LECState,
+        self, c: MultiScaleCode, state: LECState,
     ) -> tuple[list[Tensor], LECState]:  # fmt: skip
         """Run the LEC inference update.
 
         Args:
-            c: Sensory input tensor.
+            c: Multiscale sensory codes — one tensor per frequency band, each
+               of shape ``(B, feature_dim)``. Must match ``len(self.shape)``
+               bands and ``self.shape[f]`` width per band.
             state: Current LEC state.
 
         Returns:
-            A tuple `(x_inf, new_state)` where `x_inf` are the inferred
-            per-frequency features and `new_state` is the updated LEC state.
+            A tuple ``(x_inf, new_state)`` where ``x_inf`` are the inferred
+            per-frequency features and ``new_state`` is the updated LEC state.
         """
         filtered = self.filter(c, state.filtered_features)
         normalized = self.norm(filtered)
