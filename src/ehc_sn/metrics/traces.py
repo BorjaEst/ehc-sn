@@ -165,7 +165,7 @@ COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
 
 
 # =================================================================================================
-# ACT-specific — produced by ACTLossHead / ACTController
+# ACT-specific — produced by ACTObjective / ACTController
 # =================================================================================================
 
 

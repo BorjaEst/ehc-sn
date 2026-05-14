@@ -1,6 +1,6 @@
 """ACT objective for HRM v1.
 
-This module defines :class:`ACTLossHead`, which scores raw ACT execution steps
+This module defines :class:`ACTObjective`, which scores raw ACT execution steps
 through an injected task binding. The objective computes token-level
 supervision from the bound task payload, Q(done) supervision from exact
 sequence correctness, and optional auxiliary Q(continue) supervision from an
@@ -21,7 +21,7 @@ from ehc_sn.controllers.deliberation.act import ACTController, ACTRolloutState, 
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import ACT_LOSS_Q_CONTINUE, ACT_LOSS_Q_DONE, LOSS_LM
-from ehc_sn.objectives._token import AccuracyStats, TokenLossHeadBase, TokenSupervisionBinding
+from ehc_sn.objectives._token import AccuracyStats, TokenObjectiveBase, TokenSupervisionBinding
 from ehc_sn.rollouts import StepRecord
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
@@ -29,8 +29,8 @@ from ehc_sn.utils.detach import DetachMixin
 
 
 # =================================================================================================
-class ACTLossConfig(BaseModel, extra="forbid"):
-    """Configuration for :class:`ACTLossHead`."""
+class ACTObjectiveConfig(BaseModel, extra="forbid"):
+    """Configuration for :class:`ACTObjective`."""
 
     function: LossType = Field(
         default="stablemax_cross_entropy",
@@ -63,8 +63,8 @@ class Losses(DetachMixin):
 
 # =================================================================================================
 @dataclass(frozen=True)
-class ACTLossStep:
-    """A single rollout/loss step produced by :class:`ACTLossHead`."""
+class ACTObjectiveStep:
+    """A single rollout/loss step produced by :class:`ACTObjective`."""
 
     losses: Losses
     metrics: StepMetrics
@@ -83,12 +83,12 @@ class ACTLossStep:
 
 
 # =================================================================================================
-class ACTLossHead(TokenLossHeadBase[ACTLossConfig]):
+class ACTObjective(TokenObjectiveBase[ACTObjectiveConfig]):
     """Pure ACT objective scored over executed rollout chunks."""
 
     def __init__(
         self,
-        config: ACTLossConfig,
+        config: ACTObjectiveConfig,
         task_binding: ACTTaskBinding[Any],
     ) -> None:
         """Create an ACT objective from its loss configuration and task binding."""
@@ -98,12 +98,12 @@ class ACTLossHead(TokenLossHeadBase[ACTLossConfig]):
         self,
         record: StepRecord,
         **options: Any,
-    ) -> ACTLossStep:
+    ) -> ACTObjectiveStep:
         """Score one ACT rollout step and attach any objective-owned TD target."""
         loss_options = dict(options)
         controller = loss_options.pop("controller", None)
         if not isinstance(controller, ACTController):
-            raise TypeError("ACTLossHead requires controller=ACTController when scoring ACT rollout steps.")
+            raise TypeError("ACTObjective requires controller=ACTController when scoring ACT rollout steps.")
 
         td_target = bool(loss_options.pop("td_target", True))
         target_q = self._compute_td_target(controller, record) if td_target else None
@@ -123,7 +123,7 @@ class ACTLossHead(TokenLossHeadBase[ACTLossConfig]):
         """Compute supervised and halting-related losses for a step."""
         labels = getattr(targets, "labels", targets)
         if not isinstance(labels, Tensor):
-            raise TypeError("ACTLossHead expects tensor labels from the bound ACT task targets.")
+            raise TypeError("ACTObjective expects tensor labels from the bound ACT task targets.")
 
         loss_sum = self.compute_lm_loss(logits, labels, stats)
 
@@ -149,9 +149,9 @@ class ACTLossHead(TokenLossHeadBase[ACTLossConfig]):
         *,
         target_q: Tensor | None = None,
         **_: Any,
-    ) -> ACTLossStep:
-        """Wrap losses, metrics, and signals into an :class:`ACTLossStep`."""
-        return ACTLossStep(losses=losses, metrics=metrics, outputs=outputs, target_q=target_q, signals=signals)
+    ) -> ACTObjectiveStep:
+        """Wrap losses, metrics, and signals into an :class:`ACTObjectiveStep`."""
+        return ACTObjectiveStep(losses=losses, metrics=metrics, outputs=outputs, target_q=target_q, signals=signals)
 
     def _build_metric_ratios(
         self,
@@ -212,4 +212,4 @@ class ACTLossHead(TokenLossHeadBase[ACTLossConfig]):
 
 
 # =================================================================================================
-__all__ = ["ACTLossConfig", "ACTLossHead", "ACTLossStep", "ACTTaskBinding"]
+__all__ = ["ACTObjectiveConfig", "ACTObjective", "ACTObjectiveStep", "ACTTaskBinding"]

@@ -13,7 +13,7 @@ from ehc_sn.objectives._token import (
     IGNORE_LABEL_ID,
     AccuracyStats,
     TokenLosses,
-    TokenLossHeadBase,
+    TokenObjectiveBase,
     TokenSupervisionBinding,
     build_token_step_metrics,
     compute_accuracy_stats,
@@ -21,28 +21,15 @@ from ehc_sn.objectives._token import (
 )
 from ehc_sn.objectives._variational import (
     VariationalLosses,
-    VariationalLossHeadBase,
     VariationalLossStep,
+    VariationalObjectiveBase,
     build_variational_step_metrics,
     get_reg_term,
     require_latent_relation,
 )
-from ehc_sn.objectives.act import ACTLossConfig, ACTLossHead, ACTLossStep
+from ehc_sn.objectives.act import ACTObjective, ACTObjectiveConfig, ACTObjectiveStep
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLosses, HybridRLLossHead, HybridRLLossStep
-from ehc_sn.objectives.tem import TEMLossConfig, TEMLosses, TEMLossHead, TEMLossStep
-
-# ── Canonical objective aliases (preferred) ──────────────────────────────────
-# ACT
-ACTObjectiveConfig = ACTLossConfig
-ACTObjective = ACTLossHead
-ACTObjectiveStep = ACTLossStep
-# TEM
-TEMObjectiveConfig = TEMLossConfig
-TEMObjective = TEMLossHead
-TEMObjectiveStep = TEMLossStep
-# Base families
-TokenObjectiveBase = TokenLossHeadBase
-VariationalObjectiveBase = VariationalLossHeadBase
+from ehc_sn.objectives.tem import TEMLosses, TEMObjective, TEMObjectiveConfig, TEMObjectiveStep
 
 __all__ = [
     # base
@@ -52,7 +39,6 @@ __all__ = [
     # token family — implementation / compat
     "IGNORE_LABEL_ID",
     "AccuracyStats",
-    "TokenLossHeadBase",
     "TokenLosses",
     "TokenSupervisionBinding",
     "build_token_step_metrics",
@@ -61,7 +47,6 @@ __all__ = [
     # variational family — canonical
     "VariationalObjectiveBase",
     # variational family — implementation / compat
-    "VariationalLossHeadBase",
     "VariationalLosses",
     "VariationalLossStep",
     "build_variational_step_metrics",
@@ -71,10 +56,6 @@ __all__ = [
     "ACTObjectiveConfig",
     "ACTObjective",
     "ACTObjectiveStep",
-    # act — compat
-    "ACTLossConfig",
-    "ACTLossHead",
-    "ACTLossStep",
     # hybrid rl — batch-loss path (no *Objective* aliases; not a rollout scorer)
     "HybridRLLossConfig",
     "HybridRLLossHead",
@@ -84,9 +65,5 @@ __all__ = [
     "TEMObjectiveConfig",
     "TEMObjective",
     "TEMObjectiveStep",
-    # tem — compat
-    "TEMLossConfig",
-    "TEMLossHead",
     "TEMLosses",
-    "TEMLossStep",
 ]

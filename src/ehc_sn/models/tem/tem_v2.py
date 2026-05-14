@@ -11,7 +11,7 @@ import torch
 from pydantic import BaseModel, Field, computed_field, model_validator
 from torch import Tensor, nn
 
-from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes, TEMTransitionPlan
+from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes
 from ehc_sn.modules.hpc import HPCAttention, HPCAttentionSettings, HPCState
 from ehc_sn.modules.hpc import SensoryRead as HPCSensoryRead
 from ehc_sn.modules.hpc.query_policy import ReadCues, TargetRead

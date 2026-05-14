@@ -63,7 +63,7 @@ class VariationalLossStep:
 
 
 # =================================================================================================
-class VariationalLossHeadBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
+class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
     """Base class for variational-family rollout heads.
 
     Family-level output contracts should expose named semantic latent relations.
@@ -85,11 +85,11 @@ class VariationalLossHeadBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
         outputs = getattr(record.outputs, "backbone_output", record.outputs)
         losses = self.compute_losses(outputs, carry, batch=record.batch, **options)
         metrics = build_variational_step_metrics(
-            self._build_metric_ratios(losses, carry=carry, outputs=outputs, batch_size=int(carry.halted.shape[0]), batch=record.batch),
+            self._build_metric_ratios(losses, carry=carry, outputs=outputs, batch_size=int(carry.halted.shape[0]), batch=record.batch, **options),
             batch_size=int(carry.halted.shape[0]),
             like=losses.total.detach(),
         )  # fmt: skip
-        signals = self.compute_signals(record.batch, carry, outputs, losses)
+        signals = self.compute_signals(record.batch, carry, outputs, losses, **options)
         return self._build_step_output(losses, metrics, signals, outputs)
 
     def compute_losses(  # ------------------------------------------------------------------------
@@ -99,7 +99,7 @@ class VariationalLossHeadBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
         raise NotImplementedError
 
     def _build_metric_ratios(  # ------------------------------------------------------------------
-        self, losses: VariationalLosses, *, carry: Any, outputs: Any, batch_size: int,
+        self, losses: VariationalLosses, *, carry: Any, outputs: Any, batch_size: int, **_: Any,
     ) -> dict[str, RatioStat]:  # fmt: skip
         """Pack algorithm-specific ratio metrics for logging."""
         raise NotImplementedError
@@ -111,7 +111,7 @@ class VariationalLossHeadBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
         raise NotImplementedError
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, batch: Batch, carry: Any, outputs: Any, losses: VariationalLosses,
+        self, batch: Batch, carry: Any, outputs: Any, losses: VariationalLosses, **_: Any,
     ) -> dict[str, Tensor]:  # fmt: skip
         """Return detached generic variational-family diagnostic signals."""
         return {
@@ -166,6 +166,6 @@ def get_reg_term(  # -----------------------------------------------------------
 
 # =================================================================================================
 __all__ = [
-    "VariationalLosses", "VariationalLossHeadBase", "VariationalLossStep",
+    "VariationalLosses", "VariationalObjectiveBase", "VariationalLossStep",
     "build_variational_step_metrics", "get_reg_term", "require_latent_relation",
 ]  # fmt: skip

@@ -1,11 +1,11 @@
 """Shared token-supervision objective abstractions.
 
 This module defines the :class:`TokenSupervisionBinding` protocol and the
-:class:`TokenLossHeadBase` family layer (also exported as ``TokenObjectiveBase``).
+:class:`TokenObjectiveBase` family layer (also exported as ``TokenObjectiveBase``).
 Every concrete objective must supply an explicit binding; there is no generic
 default because generic code cannot know what a task payload looks like.  Bind
 task-specific extraction in the objective layer (e.g.
-:class:`~ehc_sn.objectives.act.ACTLossHead`) or in an adapter.
+:class:`~ehc_sn.objectives.act.ACTObjective`) or in an adapter.
 """
 
 from __future__ import annotations
@@ -72,7 +72,7 @@ class TokenLosses(DetachMixin):
 
 
 # =================================================================================================
-class TokenLossHeadBase[ConfigT: BaseModel](BaseObjective[ConfigT]):  # fmt: skip
+class TokenObjectiveBase[ConfigT: BaseModel](BaseObjective[ConfigT]):  # fmt: skip
     """Rollout head specialization for token-supervised loss with generic metrics."""
 
     def __init__(
@@ -103,14 +103,20 @@ class TokenLossHeadBase[ConfigT: BaseModel](BaseObjective[ConfigT]):  # fmt: ski
         return getattr(cross_entropy_module, self._config.function)
 
     def evaluate_step(  # ------------------------------------------------------------------------
-        self, record: StepRecord, **options: Any,
-    ) -> Any:  # fmt: skip
+        self,
+        record: StepRecord,
+        **options: Any,
+    ) -> Any:
         """Score one executed token-supervision step."""
         return self._run_token_step(record.batch, record.carry, record.outputs, **options)
 
     def _run_token_step(  # -----------------------------------------------------------------------
-        self, batch: Batch, carry: Any, outputs: Any, **loss_options: Any,
-    ) -> Any:  # fmt: skip
+        self,
+        batch: Batch,
+        carry: Any,
+        outputs: Any,
+        **loss_options: Any,
+    ) -> Any:
         """Execute the shared token-supervision pipeline once outputs exist."""
         targets = self.token_binding.extract_targets(batch, carry, outputs)
         logits = self.token_binding.extract_logits(batch, carry, outputs)
@@ -124,47 +130,71 @@ class TokenLossHeadBase[ConfigT: BaseModel](BaseObjective[ConfigT]):  # fmt: ski
         return self._build_step_output(losses, metrics, signals, outputs, logits=logits, targets=targets, stats=stats, **loss_options)
 
     def compute_accuracy(  # ----------------------------------------------------------------------
-        self, logits: Tensor, targets: Any,
-    ) -> AccuracyStats:  # fmt: skip
+        self,
+        logits: Tensor,
+        targets: Any,
+    ) -> AccuracyStats:
         """Compute masked token correctness statistics (out of graph)."""
         return self.token_binding.evaluate_sequences(logits, targets)
 
     def compute_lm_loss(  # -----------------------------------------------------------------------
-        self, logits_lm: Tensor, labels: Tensor, stats: AccuracyStats,
-    ) -> Tensor:  # fmt: skip
+        self,
+        logits_lm: Tensor,
+        labels: Tensor,
+        stats: AccuracyStats,
+    ) -> Tensor:
         """Compute the summed supervised token loss for a step."""
         return compute_lm_loss_sum(self.loss_fn, logits_lm, labels, stats)
 
     def compute_losses(  # ------------------------------------------------------------------------
-        self, outputs: Any, targets: Any, stats: AccuracyStats, **options: Any,
-    ) -> Any:  # fmt: skip
+        self,
+        outputs: Any,
+        targets: Any,
+        stats: AccuracyStats,
+        **options: Any,
+    ) -> Any:
         """Return algorithm-specific loss terms."""
         raise NotImplementedError
 
     def _build_metric_ratios(  # ------------------------------------------------------------------
-        self, losses: Any, *, batch_size: int,
-    ) -> dict[str, RatioStat]:  # fmt: skip
+        self,
+        losses: Any,
+        *,
+        batch_size: int,
+    ) -> dict[str, RatioStat]:
         """Pack algorithm-specific ratio metrics for logging."""
         raise NotImplementedError
 
     def _build_step_output(  # --------------------------------------------------------------------
-        self, losses: Any, metrics: Any, signals: dict, outputs: Any, **context: Any,
-    ) -> Any:  # fmt: skip
+        self,
+        losses: Any,
+        metrics: Any,
+        signals: dict,
+        outputs: Any,
+        **context: Any,
+    ) -> Any:
         """Wrap losses, metrics, and signals into the concrete step-output type."""
         raise NotImplementedError
 
     def compute_signals(  # -----------------------------------------------------------------------
-        self, batch: Batch, carry: Any, outputs: Any, losses: Any, **context: Any,
-    ) -> dict:  # fmt: skip
+        self,
+        batch: Batch,
+        carry: Any,
+        outputs: Any,
+        losses: Any,
+        **context: Any,
+    ) -> dict:
         """Return a dict of scalar diagnostic tensors for logging."""
         return {}
 
 
 # =================================================================================================
 def compute_accuracy_stats(  # --------------------------------------------------------------------
-    logits_lm: Tensor, labels: Tensor, *,
+    logits_lm: Tensor,
+    labels: Tensor,
+    *,
     ignore_label_id: int = IGNORE_LABEL_ID,
-) -> AccuracyStats:  # fmt: skip
+) -> AccuracyStats:
     """Compute masked token correctness statistics out of graph."""
     mask = labels != ignore_label_id
     is_correct = mask & (torch.argmax(logits_lm, dim=-1) == labels)
@@ -173,9 +203,13 @@ def compute_accuracy_stats(  # -------------------------------------------------
 
 # =================================================================================================
 def compute_lm_loss_sum(  # -----------------------------------------------------------------------
-    loss_fn: Any, logits_lm: Tensor, labels: Tensor, stats: AccuracyStats, *,
+    loss_fn: Any,
+    logits_lm: Tensor,
+    labels: Tensor,
+    stats: AccuracyStats,
+    *,
     ignore_label_id: int = IGNORE_LABEL_ID,
-) -> Tensor:  # fmt: skip
+) -> Tensor:
     """Compute the summed supervised LM loss over the batch."""
     loss_per_token = loss_fn(logits_lm, labels, ignore_index=ignore_label_id)
     loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
@@ -184,8 +218,11 @@ def compute_lm_loss_sum(  # ----------------------------------------------------
 
 # =================================================================================================
 def build_token_step_metrics(  # ------------------------------------------------------------------
-    steps: Tensor, completed: Tensor, stats: AccuracyStats, extras: dict[str, RatioStat],
-) -> StepMetrics:  # fmt: skip
+    steps: Tensor,
+    completed: Tensor,
+    stats: AccuracyStats,
+    extras: dict[str, RatioStat],
+) -> StepMetrics:
     """Build generic per-step token-supervision metrics."""
     eligible_mask = stats.loss_counts > 0
     completed_mask = completed & eligible_mask
@@ -227,6 +264,6 @@ def build_token_step_metrics(  # -----------------------------------------------
 
 # =================================================================================================
 __all__ = [
-    "IGNORE_LABEL_ID", "AccuracyStats", "TokenSupervisionBinding", "TokenLosses", "TokenLossHeadBase",
+    "IGNORE_LABEL_ID", "AccuracyStats", "TokenSupervisionBinding", "TokenLosses", "TokenObjectiveBase",
      "build_token_step_metrics", "compute_accuracy_stats", "compute_lm_loss_sum",
 ]  # fmt: skip

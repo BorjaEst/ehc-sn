@@ -17,7 +17,7 @@ from ehc_sn.lightning.tem.core.runtime import RuntimeConfig, TEMRuntimeState, re
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import TEM_EPISODE_ROUTES, TEM_PRIMARY_VAL_ROUTE_KEY, TEM_STEP_ROUTES
 from ehc_sn.models.tem.tem_v2 import Batch, ModelSettingsV2, TEMModelV2
-from ehc_sn.objectives import TEMLossConfig, TEMLossHead
+from ehc_sn.objectives import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.arena.runtime import batch_size_from_arena_batch, infer_arena_replay_batch_keys
 from ehc_sn.training.buffers import FifoBuffer
@@ -57,7 +57,7 @@ class ModelConfig_TEM_V2(BaseModel, extra="forbid"):
         ...,
         description="Replay trajectory controller configuration.",
     )
-    loss: TEMLossConfig = Field(
+    loss: TEMObjectiveConfig = Field(
         ...,
         description="TEM loss-head configuration.",
     )
@@ -106,10 +106,10 @@ class TrainingModel(L.LightningModule):
         self.adapter = ArenaTEMV2BridgeAdapter(self.model, config.adapter)
         self.train_environment: None = None
         self.train_controller: ReplayTrajectoryController | None = None
-        self.train_objective: TEMLossHead | None = None
+        self.train_objective: TEMObjective | None = None
         self.eval_environment: None = None
         self.eval_controller: ReplayTrajectoryController | None = None
-        self.eval_objective: TEMLossHead | None = None
+        self.eval_objective: TEMObjective | None = None
         self._config = config
         self._train_runner = RecurrentRunner()
         self._eval_runner = RecurrentRunner()
@@ -141,12 +141,12 @@ class TrainingModel(L.LightningModule):
         """Return the TEM TBPTT chunk length used for one optimizer update."""
         return self.config.runtime.sequence.tbptt_steps
 
-    def _build_runtime(self, *, batch_size: int) -> tuple[None, ReplayTrajectoryController, TEMLossHead]:
+    def _build_runtime(self, *, batch_size: int) -> tuple[None, ReplayTrajectoryController, TEMObjective]:
         """Construct one phase-local TEM arena replay runtime around the shared model."""
         from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
         replay = ArenaReplayCapability()
         controller = ReplayTrajectoryController(self.adapter, self.config.controller, runtime=replay)
-        return None, controller, TEMLossHead(self.config.loss, task_binding=ArenaTEMTaskBinding())
+        return None, controller, TEMObjective(self.config.loss, task_binding=ArenaTEMTaskBinding())
 
     def _ensure_train_runtime(self) -> None:
         """Initialize the training runtime once per process."""
@@ -167,7 +167,7 @@ class TrainingModel(L.LightningModule):
             raise RuntimeError("TEM training runtime is not initialized.")
         return self.train_controller
 
-    def _require_train_objective(self) -> TEMLossHead:
+    def _require_train_objective(self) -> TEMObjective:
         """Return the training objective, initializing the train runtime if needed."""
         self._ensure_train_runtime()
         if self.train_objective is None:
@@ -181,7 +181,7 @@ class TrainingModel(L.LightningModule):
             raise RuntimeError("TEM evaluation runtime is not initialized.")
         return self.eval_controller
 
-    def _require_eval_objective(self) -> TEMLossHead:
+    def _require_eval_objective(self) -> TEMObjective:
         """Return the evaluation objective, initializing the eval runtime if needed."""
         self._ensure_eval_runtime()
         if self.eval_objective is None:

@@ -1,6 +1,6 @@
 """Canonical signal vocabulary for diagnostic and research logging.
 
-All signal producers (:meth:`~ehc_sn.objectives.act.ACTLossHead.compute_signals`,
+All signal producers (:meth:`~ehc_sn.objectives.act.ACTObjective.compute_signals`,
 :meth:`~ehc_sn.objectives.hybrid_rl.HybridRLLossHead.compute_step`,
 :meth:`~ehc_sn.objectives.tem.TEMObjective.compute_signals`) and consumers
 (:class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback`) import from this
@@ -49,7 +49,7 @@ CROSS_PARADIGM_SIGNALS: frozenset[str] = frozenset({STEPS_MEAN, THETA_CLS_NORM})
 
 
 # =================================================================================================
-# ACT-specific — produced by ACTLossHead.compute_signals()
+# ACT-specific — produced by ACTObjective.compute_signals()
 # =================================================================================================
 
 LOSS_Q_DONE: str = "loss_q_done"

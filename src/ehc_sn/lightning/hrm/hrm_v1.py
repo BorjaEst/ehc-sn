@@ -32,7 +32,7 @@ from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v1 import Batch, HRModelV1, ModelSettingsV1
-from ehc_sn.objectives import ACTLossConfig, ACTLossHead
+from ehc_sn.objectives import ACTObjective, ACTObjectiveConfig
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource, SingleStepRunner
 from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
@@ -71,7 +71,7 @@ class ModelConfig_HRM_V1(BaseModel, extra="forbid"):
         ...,
         description="MazeHard bridge adapter settings (encoder kind, vocab size).",
     )
-    loss: ACTLossConfig = Field(
+    loss: ACTObjectiveConfig = Field(
         ...,
         validation_alias=AliasChoices("loss", "objective"),
         description="Loss config. The keys in `loss` are passed to the loss head constructor.",
@@ -132,7 +132,7 @@ class TrainingModel(L.LightningModule):
         self.model = HRModelV1(model_settings)
         self.adapter = MazeHardHRMV1BridgeAdapter(self.model, config.adapter)
         self.controller = ACTController(self.adapter, config.act_controller)
-        self.objective = ACTLossHead(config.loss, task_binding=MazeHardHRMV1ACTTaskBinding())
+        self.objective = ACTObjective(config.loss, task_binding=MazeHardHRMV1ACTTaskBinding())
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()
