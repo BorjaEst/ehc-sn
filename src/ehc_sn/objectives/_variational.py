@@ -7,6 +7,7 @@ optional regularization.
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -25,16 +26,26 @@ from ehc_sn.utils.detach import DetachMixin
 
 # =================================================================================================
 @dataclass(frozen=True)
-class VariationalLosses(DetachMixin):
-    """Shared parent loss structure for variational-family heads."""
-
-    loss_obs_nll_sum: Tensor
-    loss_reg_sum: Tensor
+class VariationalLosses(DetachMixin, ABC):
+    """Shared parent loss contract for variational-family objectives."""
 
     @property
+    @abstractmethod
+    def loss_obs_nll_sum(self) -> Tensor:
+        """Aggregate observation loss sum for the current step."""
+        ...
+
+    @property
+    @abstractmethod
     def loss_latent_sum(self) -> Tensor:
-        """Return the aggregate latent loss for the current step."""
-        raise NotImplementedError
+        """Aggregate latent loss sum for the current step."""
+        ...
+
+    @property
+    @abstractmethod
+    def loss_reg_sum(self) -> Tensor:
+        """Aggregate regularization loss sum for the current step."""
+        ...
 
     @property
     def total(self) -> Tensor:
