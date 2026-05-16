@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeAlias
 
 import torch
 from torch import Tensor
 from torch.distributions import Normal
 
-LatentCode = Tensor | Sequence[Tensor]
+LatentCode: TypeAlias = Tensor | Sequence[Tensor]
 
 
 # =================================================================================================
@@ -36,7 +36,7 @@ class LatentRelation:
 # =================================================================================================
 def iter_latent_codes(  # ------------------------------------------------------------------------
     code: LatentCode,
-) -> tuple[Tensor, ...]:  # fmt: skip
+) -> tuple[Tensor, ...]:
     """Return a tuple view over one or more latent-code blocks."""
     if isinstance(code, Tensor):
         return (code,)
@@ -45,8 +45,10 @@ def iter_latent_codes(  # ------------------------------------------------------
 
 # =================================================================================================
 def sum_latent_terms(  # -------------------------------------------------------------------------
-    loss_fn: Any, pred: LatentCode, target: LatentCode,
-) -> Tensor:  # fmt: skip
+    loss_fn: Any,
+    pred: LatentCode,
+    target: LatentCode,
+) -> Tensor:
     """Apply a flat-tensor loss over one or more latent-code blocks.
 
     Args:
@@ -60,7 +62,9 @@ def sum_latent_terms(  # -------------------------------------------------------
     pred_codes = iter_latent_codes(pred)
     target_codes = iter_latent_codes(target)
     if len(pred_codes) != len(target_codes):
-        raise ValueError("Latent code groups must have the same number of blocks.")
+        raise ValueError(
+            "Latent code groups must have the same number of blocks."
+        )
 
     total: Tensor | None = None
     for pred_code, target_code in zip(pred_codes, target_codes, strict=True):
@@ -75,16 +79,19 @@ def sum_latent_terms(  # -------------------------------------------------------
 # =================================================================================================
 def mean_latent_norm(  # -------------------------------------------------------------------------
     code: LatentCode,
-) -> Tensor:  # fmt: skip
+) -> Tensor:
     """Return the mean block-wise activation norm for diagnostics."""
-    block_means = [block.detach().norm(dim=-1).mean() for block in iter_latent_codes(code)]
+    block_means = [
+        block.detach().norm(dim=-1).mean() for block in iter_latent_codes(code)
+    ]
     return torch.stack(block_means).mean()
 
 
 # =================================================================================================
 def mse_consistency(  # --------------------------------------------------------------------------
-    pred: Tensor, target: Tensor,
-) -> Tensor:  # fmt: skip
+    pred: Tensor,
+    target: Tensor,
+) -> Tensor:
     """Return half-squared-error consistency for flat latent codes.
 
     Args:
@@ -99,8 +106,12 @@ def mse_consistency(  # --------------------------------------------------------
 
 # =================================================================================================
 def nll_consistency(  # --------------------------------------------------------------------------
-    pred: Tensor, mean: Tensor, std: Tensor, *, min_std: float = 1e-6,
-) -> Tensor:  # fmt: skip
+    pred: Tensor,
+    mean: Tensor,
+    std: Tensor,
+    *,
+    min_std: float = 1e-6,
+) -> Tensor:
     """Return Gaussian negative log-likelihood consistency for flat latent codes.
 
     Args:
@@ -119,6 +130,11 @@ def nll_consistency(  # --------------------------------------------------------
 
 # =================================================================================================
 __all__ = [
-    "LatentCode", "LatentRelation", "iter_latent_codes", "mean_latent_norm", "mse_consistency",
-    "nll_consistency", "sum_latent_terms",
-]  # fmt: skip
+    "LatentCode",
+    "LatentRelation",
+    "iter_latent_codes",
+    "mean_latent_norm",
+    "mse_consistency",
+    "nll_consistency",
+    "sum_latent_terms",
+]

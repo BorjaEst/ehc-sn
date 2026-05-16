@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, Field, model_validator
 
 
+# =============================================================================
 class MemoryRuntimeConfig(BaseModel, extra="forbid"):
     """Step-based runtime schedule for TEM memory dynamics."""
 
@@ -31,18 +32,19 @@ class MemoryRuntimeConfig(BaseModel, extra="forbid"):
     )
 
 
+# =============================================================================
 class UncertaintyRuntimeConfig(BaseModel, extra="forbid"):
-    """Step-based runtime schedule for MEC uncertainty correction."""
+    """Step-based runtime schedule for the shared p->g gate and uncertainty correction."""
 
     p2g_sig_half_it: int = Field(
         default=400,
         ge=0,
-        description="Sigmoid midpoint for the p->g uncertainty offset schedule.",
+        description="Sigmoid midpoint for the shared p->g gate schedule.",
     )
     p2g_sig_scale_it: int = Field(
         default=200,
         ge=1,
-        description="Sigmoid scale for the p->g uncertainty offset schedule.",
+        description="Sigmoid scale for the shared p->g gate schedule.",
     )
     offset_min: float = Field(
         default=0.0,
@@ -56,10 +58,13 @@ class UncertaintyRuntimeConfig(BaseModel, extra="forbid"):
     @model_validator(mode="after")
     def validate_offset_range(self) -> "UncertaintyRuntimeConfig":
         if self.offset_max < self.offset_min:
-            raise ValueError("offset_max must be greater than or equal to offset_min.")
+            raise ValueError(
+                "offset_max must be greater than or equal to offset_min."
+            )
         return self
 
 
+# =============================================================================
 class SequenceRuntimeConfig(BaseModel, extra="forbid"):
     """Sequence-level training settings for TEM chunked TBPTT."""
 
@@ -70,6 +75,7 @@ class SequenceRuntimeConfig(BaseModel, extra="forbid"):
     )
 
 
+# =============================================================================
 class ValidationRuntimeConfig(BaseModel, extra="forbid"):
     """Runner-owned safety limits for TEM validation rollouts."""
 
@@ -90,6 +96,7 @@ class ValidationRuntimeConfig(BaseModel, extra="forbid"):
     )
 
 
+# =============================================================================
 class RuntimeConfig(BaseModel, extra="forbid"):
     """Step-based runtime schedules for TEM training dynamics and validation safety."""
 
@@ -111,16 +118,22 @@ class RuntimeConfig(BaseModel, extra="forbid"):
     )
 
 
+# =============================================================================
 @dataclass(frozen=True)
 class TEMRuntimeState:
     """Resolved TEM runtime values for the current optimizer step."""
 
     eta: float
     hebbian_decay: float
+    p2g_use: float
     p2g_uncertainty_offset: float
 
 
-def resolve_tem_runtime(step: int, config: RuntimeConfig) -> TEMRuntimeState:
+# =============================================================================
+def resolve_tem_runtime(  # ---------------------------------------------------
+    step: int,
+    config: RuntimeConfig,
+) -> TEMRuntimeState:
     """Resolve TEM runtime values from the current global training step."""
     if step < 0:
         raise ValueError(f"step must be non-negative, got {step}.")
@@ -129,16 +142,30 @@ def resolve_tem_runtime(step: int, config: RuntimeConfig) -> TEMRuntimeState:
     uncertainty = config.uncertainty
     progress_eta = min((step + 1) / float(memory.eta_it), 1.0)
     progress_decay = min((step + 1) / float(memory.lambda_it), 1.0)
-    p2g_scale = 1.0 / (1.0 + math.exp((step - uncertainty.p2g_sig_half_it) / uncertainty.p2g_sig_scale_it))
-    p2g_uncertainty_offset = uncertainty.offset_min + (uncertainty.offset_max - uncertainty.offset_min) * p2g_scale
+
+    # One shared logistic gate drives both p->g loss weighting and uncertainty relaxation.
+    p2g_inactive = 1.0 / (
+        1.0
+        + math.exp(
+            (step - uncertainty.p2g_sig_half_it) / uncertainty.p2g_sig_scale_it
+        )
+    )
+    p2g_use = 1.0 - p2g_inactive
+    p2g_uncertainty_offset = (
+        uncertainty.offset_min
+        + (uncertainty.offset_max - uncertainty.offset_min)
+        * p2g_inactive
+    )  # fmt: skip
 
     return TEMRuntimeState(
         eta=progress_eta * memory.eta,
         hebbian_decay=progress_decay * memory.hebbian_decay,
+        p2g_use=p2g_use,
         p2g_uncertainty_offset=p2g_uncertainty_offset,
     )
 
 
+# =============================================================================
 __all__ = [
     "MemoryRuntimeConfig",
     "RuntimeConfig",

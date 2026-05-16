@@ -70,13 +70,13 @@
     ehc_sn = ["py.typed", "**/*.yaml", "**/*.yml"]
 
 [tool.black]
-    line-length    = 140
+    line-length    = 80
     target-version = ["py312"]
     include        = '\.pyi?$'
 
 [tool.isort]
     profile           = "black"
-    line_length       = 140
+    line_length       = 80
     known_first_party = ["ehc_sn"]
 
 [tool.mypy]

@@ -6,8 +6,6 @@ and estimates transition uncertainty.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
@@ -18,7 +16,7 @@ from ehc_sn.modules.mlp import MLP
 from ehc_sn.types import LocationBelief
 
 
-# =================================================================================================
+# =============================================================================
 class PathSettings(BaseModel, extra="forbid"):
     """Settings for path integration modules."""
 
@@ -29,7 +27,7 @@ class PathSettings(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 class PathIntegrator(nn.Module):
     """Action-conditioned grid-code transition model.
 
@@ -38,10 +36,14 @@ class PathIntegrator(nn.Module):
     transition (`D_no_a`) via `no_direc_mask`.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, n_actions: int, mec_shape: list[int], f_initial: list[float], config: PathSettings,
-    ) -> None:  # fmt: skip
-        """ """
+    def __init__(  # ----------------------------------------------------------
+        self,
+        n_actions: int,
+        mec_shape: list[int],
+        f_initial: list[float],
+        config: PathSettings,
+    ) -> None:
+        """Initialize the path integrator module."""
         super().__init__()
         self._config = config
         self._n_actions = n_actions
@@ -49,19 +51,43 @@ class PathIntegrator(nn.Module):
         self._n_freq = len(mec_shape)
 
         self._connections = conn = utils.connections(f_initial)
-        self._conn_indices = [[f_from for f_from in range(self._n_freq) if conn[f_to][f_from]] for f_to in range(self._n_freq)]  # fmt: skip
-        self._in_dims = [sum(mec_shape[f_from] for f_from in self._conn_indices[f_to]) for f_to in range(self._n_freq)]  # fmt: skip
-        self._mat_shape = [(self._in_dims[f_to], mec_shape[f_to]) for f_to in range(self._n_freq)]
-        self._flat_mat_dims = [in_dim * out_dim for in_dim, out_dim in self._mat_shape]
+        self._conn_indices = [
+            [f_from for f_from in range(self._n_freq) if conn[f_to][f_from]]
+            for f_to in range(self._n_freq)
+        ]
+        self._in_dims = [
+            sum(mec_shape[f_from] for f_from in self._conn_indices[f_to])
+            for f_to in range(self._n_freq)
+        ]
+        self._mat_shape = [
+            (self._in_dims[f_to], mec_shape[f_to])
+            for f_to in range(self._n_freq)
+        ]
+        self._flat_mat_dims = [
+            in_dim * out_dim for in_dim, out_dim in self._mat_shape
+        ]
 
         # LocationBelief weights (action-conditioned)
         hidden_dim = [config.hidden_dim] * self._n_freq
-        self.MLP_D_a = MLP([n_actions] * self._n_freq, self._flat_mat_dims, [torch.tanh, None], hidden_dim, bias=[True, False])  # fmt: skip
+        self.MLP_D_a = MLP(
+            [n_actions] * self._n_freq,
+            self._flat_mat_dims,
+            [torch.tanh, None],
+            hidden_dim,
+            bias=[True, False],
+        )
         self.MLP_D_a.set_weights(1, 0.0)
-        self.D_no_a = nn.ParameterList([nn.Parameter(torch.zeros(m)) for m in self._mat_shape])  # fmt: skip
+        self.D_no_a = nn.ParameterList(
+            [nn.Parameter(torch.zeros(m)) for m in self._mat_shape]
+        )
 
         # LocationBelief uncertainty
-        self.uncertainty_mlp = MLP(mec_shape, mec_shape, [torch.tanh, bounded_positive_scale], [2 * g for g in mec_shape])
+        self.uncertainty_mlp = MLP(
+            mec_shape,
+            mec_shape,
+            [torch.tanh, bounded_positive_scale],
+            [2 * g for g in mec_shape],
+        )
 
     @property
     def config(self) -> PathSettings:
@@ -78,9 +104,12 @@ class PathIntegrator(nn.Module):
         """Return the number of MEC frequency modules."""
         return self._n_freq
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, action_ids: Tensor, g_prev: list[Tensor], no_direc_mask: Tensor | None = None,
-    ) -> LocationBelief:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        action_ids: Tensor,
+        g_prev: list[Tensor],
+        no_direc_mask: Tensor | None = None,
+    ) -> LocationBelief:
         """Compute the transition distribution for a single step.
 
         Args:
@@ -96,9 +125,12 @@ class PathIntegrator(nn.Module):
         sigma = self.uncertainty_mlp(g_prev)
         return LocationBelief(mean=mu, uncertainty=sigma)
 
-    def mean(  # ----------------------------------------------------------------------------------
-        self, action_ids: Tensor, g: list[Tensor], no_direc_mask: Tensor | None,
-    ) -> list[Tensor]:  # fmt: skip
+    def mean(  # --------------------------------------------------------------
+        self,
+        action_ids: Tensor,
+        g: list[Tensor],
+        no_direc_mask: Tensor | None,
+    ) -> list[Tensor]:
         """Compute the mean transition update.
 
         Args:
@@ -114,17 +146,25 @@ class PathIntegrator(nn.Module):
 
         # Build input by concatenating connected frequencies
         g_in = [
-            torch.cat([g[f_from] for f_from in self._conn_indices[f_to]], dim=1).unsqueeze(1)
+            torch.cat(
+                [g[f_from] for f_from in self._conn_indices[f_to]], dim=1
+            ).unsqueeze(1)
             for f_to in range(self.n_freq)
         ]
 
         # Apply transition via batch matrix multiply
-        delta = [torch.bmm(g_in_f, mat_f).squeeze(1) for g_in_f, mat_f in zip(g_in, mats)]
-        return [g_f + delta_f for g_f, delta_f in zip(g, delta)]
+        delta = [
+            torch.bmm(g_in_f, mat_f).squeeze(1)
+            for g_in_f, mat_f in zip(g_in, mats)
+        ]
+        pre_activation = [g_f + delta_f for g_f, delta_f in zip(g, delta)]
+        return _grid_activation(pre_activation)
 
-    def _transition_matrices(  # ------------------------------------------------------------------
-        self, action_ids: Tensor, no_direc_mask: Tensor | None,
-    ) -> list[Tensor]:  # fmt: skip
+    def _transition_matrices(  # ----------------------------------------------
+        self,
+        action_ids: Tensor,
+        no_direc_mask: Tensor | None,
+    ) -> list[Tensor]:
         """Build per-frequency transition matrices.
 
         Args:
@@ -137,7 +177,9 @@ class PathIntegrator(nn.Module):
         """
         a = self._encode_action_ids(action_ids)
         d_flat = self.MLP_D_a([a] * self.n_freq)
-        mats = [d.reshape(-1, *self._mat_shape[f]) for f, d in enumerate(d_flat)]
+        mats = [
+            d.reshape(-1, *self._mat_shape[f]) for f, d in enumerate(d_flat)
+        ]
 
         if no_direc_mask is not None and torch.any(no_direc_mask):
             # Replace where the no-direction mask is active
@@ -148,15 +190,30 @@ class PathIntegrator(nn.Module):
 
         return mats
 
-    def _encode_action_ids(self, action_ids: Tensor) -> Tensor:
+    def _encode_action_ids(  # ------------------------------------------------
+        self,
+        action_ids: Tensor,
+    ) -> Tensor:
         """Convert discrete action ids to one-hot features after validation."""
         encoded_ids = action_ids.squeeze(-1).to(torch.int64)
         invalid = (encoded_ids < 0) | (encoded_ids >= self._n_actions)
         if torch.any(invalid):
             bad_ids = encoded_ids[invalid].unique(sorted=True)
-            raise ValueError(f"Action ids must be in [0, {self._n_actions}), got {bad_ids.tolist()}.")
-        return torch.nn.functional.one_hot(encoded_ids, num_classes=self._n_actions).to(torch.float32)
+            raise ValueError(
+                f"Action ids must be in [0, {self._n_actions}), got {bad_ids.tolist()}.",
+            )
+        return torch.nn.functional.one_hot(
+            encoded_ids, num_classes=self._n_actions
+        ).to(torch.float32)
 
 
-# =================================================================================================
+# =============================================================================
+def _grid_activation(
+    code: list[Tensor],
+) -> list[Tensor]:
+    """Apply the legacy TEM grid-path activation to each frequency module."""
+    return [torch.clamp(block, min=-1.0, max=1.0) for block in code]
+
+
+# =============================================================================
 __all__ = ["PathSettings", "PathIntegrator"]

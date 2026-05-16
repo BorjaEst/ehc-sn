@@ -8,23 +8,29 @@ optional regularization.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Optional
 
 import torch
 from torch import Tensor
 
+import ehc_sn.loss.consistency as consistency_module
 import ehc_sn.loss.cross_entropy as cross_entropy_module
 from ehc_sn.loss.consistency import LatentCode, LatentRelation
-from ehc_sn.metrics import signals as S
 from ehc_sn.objectives._base import BaseObjective
 from ehc_sn.rollouts import StepRecord
-from ehc_sn.training.types import RatioStat, RolloutAgg, StepMetrics, TokenAgg, TransitionAgg
-from ehc_sn.types import Batch
+from ehc_sn.training.types import (
+    RatioStat,
+    RolloutAgg,
+    StepMetrics,
+    TokenAgg,
+    TransitionAgg,
+)
 from ehc_sn.utils.detach import DetachMixin
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class VariationalLosses(DetachMixin, ABC):
     """Shared parent loss contract for variational-family objectives."""
@@ -53,7 +59,7 @@ class VariationalLosses(DetachMixin, ABC):
         return self.loss_obs_nll_sum + self.loss_latent_sum + self.loss_reg_sum
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class VariationalLossStep:
     """A single rollout/loss step produced by a variational-family head."""
@@ -73,8 +79,31 @@ class VariationalLossStep:
         return self.losses.total
 
 
-# =================================================================================================
-class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
+# =============================================================================
+@dataclass(frozen=True)
+class VariationalTerms:
+    """ """
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class VariationalContext:
+    """Shared context for variational-family loss computation and metric extraction."""
+
+    targets: Any
+    protocol_mask: Tensor
+    latent_relations: dict[str, LatentRelation]
+    reg_terms: Optional[dict[str, LatentCode]] = None
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class VariationalOutputs:
+    """ """
+
+
+# =============================================================================
+class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):
     """Base class for variational-family rollout heads.
 
     Family-level output contracts should expose named semantic latent relations.
@@ -83,100 +112,151 @@ class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):  # fmt: skip
     """
 
     @property
-    def loss_fn(self) -> Any:
+    def obs_loss_fn(self) -> Any:
         """Return the configured observation loss primitive."""
         return getattr(cross_entropy_module, self.config.observation_loss)
 
-    def evaluate_step(  # ------------------------------------------------------------------------
-        self, record: StepRecord, **options: Any,
-    ) -> Any:  # fmt: skip
-        """Score one executed variational-family step."""
-        carry = record.carry
-        # Unwrap backbone output from any controller wrapper (e.g. ReplayStepOutput).
-        outputs = getattr(record.outputs, "backbone_output", record.outputs)
-        losses = self.compute_losses(outputs, carry, batch=record.batch, **options)
-        metrics = build_variational_step_metrics(
-            self._build_metric_ratios(losses, carry=carry, outputs=outputs, batch_size=int(carry.halted.shape[0]), batch=record.batch, **options),
-            batch_size=int(carry.halted.shape[0]),
-            like=losses.total.detach(),
-        )  # fmt: skip
-        signals = self.compute_signals(record.batch, carry, outputs, losses, **options)
-        return self._build_step_output(losses, metrics, signals, outputs)
+    @property
+    def latent_term_fn(self) -> Any:
+        """Return the configured latent consistency primitive."""
+        return getattr(consistency_module, self.config.latent_loss)
 
-    def compute_losses(  # ------------------------------------------------------------------------
-        self, outputs: Any, carry: Any, **options: Any,
-    ) -> VariationalLosses:  # fmt: skip
+    def evaluate_step(  # -----------------------------------------------------
+        self,
+        record: StepRecord,
+        **options: Any,
+    ) -> Any:
+        """Score one executed variational-family step."""
+        step_output = record.outputs  # original controller output
+        outputs = getattr(step_output, "backbone_output", step_output)
+
+        # --- single scored-step computation ---
+        context = self.build_context(record, outputs, **options)
+        terms = self.compute_terms(outputs, context, **options)
+        losses = self.compute_losses(terms, context, **options)
+
+        # --- metrics from precomputed losses/terms ---
+        metrics = self.evaluate_metrics(record, context, terms, **options)
+
+        # --- signals from precomputed losses/context (no re-extraction) ---
+        signals = self.compute_signals(outputs, losses, **options)
+
+        return self.build_output(losses, metrics, signals, outputs)
+
+    def build_context(  # -----------------------------------------------------
+        self,
+        record: StepRecord,
+        outputs: VariationalOutputs,
+        **options: Any,
+    ) -> VariationalContext:
+        """Extract a variational context from the current step."""
+        raise NotImplementedError
+
+    def compute_terms(  # -----------------------------------------------------
+        self,
+        outputs: VariationalOutputs,
+        context: VariationalContext,
+        **options: Any,
+    ) -> dict[str, Any]:
+        """Extract variational-family loss terms from the current step."""
+        raise NotImplementedError
+
+    def compute_losses(  # ----------------------------------------------------
+        self,
+        terms: VariationalTerms,
+        context: VariationalContext,
+        **options: Any,
+    ) -> VariationalLosses:
         """Return variational-family losses for the current step."""
         raise NotImplementedError
 
-    def _build_metric_ratios(  # ------------------------------------------------------------------
-        self, losses: VariationalLosses, *, carry: Any, outputs: Any, batch_size: int, **_: Any,
-    ) -> dict[str, RatioStat]:  # fmt: skip
-        """Pack algorithm-specific ratio metrics for logging."""
+    def evaluate_metrics(  # --------------------------------------------------
+        self,
+        record: StepRecord,
+        context: VariationalContext,
+        terms: VariationalTerms,
+        **options: Any,
+    ) -> StepMetrics:
+        """Return variational-family metrics for the current step."""
         raise NotImplementedError
 
-    def _build_step_output(  # --------------------------------------------------------------------
-        self, losses: VariationalLosses, metrics: StepMetrics, signals: dict[str, Any], outputs: Any,
-    ) -> Any:  # fmt: skip
+    def compute_signals(  # ---------------------------------------------------
+        self,
+        outputs: VariationalOutputs,
+        losses: VariationalLosses,
+        **options: Any,
+    ) -> dict[str, Tensor]:
+        """Return detached generic variational-family diagnostic signals."""
+        raise NotImplementedError
+
+    def build_output(  # ------------------------------------------------------
+        self,
+        losses: VariationalLosses,
+        metrics: StepMetrics,
+        signals: dict[str, Tensor],
+        outputs: VariationalOutputs,
+    ) -> Any:
         """Wrap losses, metrics, and signals into the concrete step-output type."""
         raise NotImplementedError
 
-    def compute_signals(  # -----------------------------------------------------------------------
-        self, batch: Batch, carry: Any, outputs: Any, losses: VariationalLosses, **_: Any,
-    ) -> dict[str, Tensor]:  # fmt: skip
-        """Return detached generic variational-family diagnostic signals."""
-        return {
-            S.STEPS_MEAN: carry.steps.float().mean().detach(),
-            S.LOSS_TOTAL: losses.total.detach(),
-            S.LOSS_OBS_NLL: losses.loss_obs_nll_sum.detach(),
-            S.LOSS_LATENT: losses.loss_latent_sum.detach(),
-            S.LOSS_REG: losses.loss_reg_sum.detach(),
-        }
 
-# =================================================================================================
-def build_variational_step_metrics(  # -----------------------------------------------------------
-    extras: dict[str, RatioStat], *, batch_size: int, like: Tensor,
-) -> StepMetrics:  # fmt: skip
-    """Build generic metrics for a variational step.
-
-    Variational heads do not currently report token or rollout accuracy, so
-    those aggregates are zero-filled while loss ratios live in ``extras``.
-    """
-    zero = like.new_zeros(())
-    batch_count = like.new_tensor(batch_size, dtype=torch.float32)
-    return StepMetrics(
-        episode=RolloutAgg(completed_count=zero, eligible_count=zero, accuracy_sum=zero, exact_sum=zero, steps_sum=zero),
-        episode_tokens=TokenAgg(token_correct_sum=zero, token_count_sum=zero),
-        step=TransitionAgg(evaluated_count=batch_count, eligible_count=batch_count, accuracy_sum=zero, exact_sum=zero, steps_sum=zero),
-        step_tokens=TokenAgg(token_correct_sum=zero, token_count_sum=zero),
-        extras=extras,
-    )  # fmt: skip
-
-
-# =================================================================================================
-def require_latent_relation(  # ------------------------------------------------------------------
-    latent_relations: dict[str, LatentRelation], name: str,
-) -> LatentRelation:  # fmt: skip
-    """Return a required latent relation by name with a clear error on absence."""
+# =============================================================================
+def require_latent_relation(  # -----------------------------------------------
+    relations: dict[str, LatentRelation],
+    key: str,
+) -> LatentRelation:
+    """Return the relation for *key*, raising ``KeyError`` with context if absent."""
     try:
-        return latent_relations[name]
-    except KeyError as exc:
-        available = ", ".join(sorted(latent_relations)) or "<none>"
-        raise KeyError(f"Required latent relation '{name}' is missing. Available: {available}.") from exc
+        return relations[key]
+    except KeyError:
+        available = ", ".join(sorted(relations.keys()))
+        raise KeyError(
+            f"Latent relation {key!r} not found. Available: {available}"
+        ) from None
 
 
-# =================================================================================================
-def get_reg_term(  # -----------------------------------------------------------------------------
-    reg_terms: dict[str, LatentCode] | None, name: str,
-) -> LatentCode | None:  # fmt: skip
-    """Return an optional named regularization term when present."""
-    if reg_terms is None:
-        return None
-    return reg_terms.get(name)
+# =============================================================================
+def get_reg_term(  # ----------------------------------------------------------
+    reg_terms: dict[str, LatentCode] | None,
+    latent_relations: dict[str, LatentRelation],
+    *,
+    key: str,
+    fallback: str,
+) -> LatentCode:
+    """Return the explicit reg code for *key* or fall back to the lhs of *fallback*."""
+    if reg_terms is not None and key in reg_terms:
+        return reg_terms[key]
+    fallback_relation = require_latent_relation(latent_relations, fallback)
+    return fallback_relation.lhs
 
 
-# =================================================================================================
+# =============================================================================
+def build_variational_step_metrics(  # ----------------------------------------
+    extras: Mapping[str, RatioStat],
+) -> StepMetrics:
+    """Build a :class:`StepMetrics` from a variational-family extras mapping."""
+    first = next(iter(extras.values()), None)
+    zero = (
+        first.numerator_sum.new_zeros(())
+        if first is not None
+        else torch.zeros(())
+    )
+    return StepMetrics(
+        episode=RolloutAgg(zero, zero, zero, zero, zero),
+        episode_tokens=TokenAgg(zero, zero),
+        step=TransitionAgg(zero, zero, zero, zero, zero),
+        step_tokens=TokenAgg(zero, zero),
+        extras=extras,
+    )
+
+
+# =============================================================================
 __all__ = [
-    "VariationalLosses", "VariationalObjectiveBase", "VariationalLossStep",
-    "build_variational_step_metrics", "get_reg_term", "require_latent_relation",
-]  # fmt: skip
+    "VariationalLosses",
+    "VariationalObjectiveBase",
+    "VariationalLossStep",
+    "VariationalContext",
+    "build_variational_step_metrics",
+    "get_reg_term",
+    "require_latent_relation",
+]

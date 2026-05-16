@@ -7,35 +7,36 @@ shape ``(B,)``.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, TypeAlias
 
 from torch import Tensor
 
 from ehc_sn.loss.consistency import LatentCode, iter_latent_codes
 
-RegularizationNorm = Literal["none", "l1", "l2"]
+RegularizationNorm: TypeAlias = Literal["none", "l1", "l2"]
 
 
-# =================================================================================================
-def l1_penalty(  # --------------------------------------------------------------------------------
+# =============================================================================
+def l1_penalty(  # ------------------------------------------------------------
     code: Tensor,
-) -> Tensor:  # fmt: skip
+) -> Tensor:
     """Return per-example L1 penalty for a flat code tensor."""
     return code.abs().sum(dim=-1)
 
 
-# =================================================================================================
-def l2_penalty(  # --------------------------------------------------------------------------------
+# =============================================================================
+def l2_penalty(  # ------------------------------------------------------------
     code: Tensor,
-) -> Tensor:  # fmt: skip
+) -> Tensor:
     """Return per-example squared L2 penalty for a flat code tensor."""
     return code.pow(2).sum(dim=-1)
 
 
-# =================================================================================================
-def sum_regularization_terms(  # -----------------------------------------------------------------
-    code: LatentCode, norm: RegularizationNorm,
-) -> Tensor:  # fmt: skip
+# =============================================================================
+def sum_regularization_terms(  # ----------------------------------------------
+    code: LatentCode,
+    norm: RegularizationNorm,
+) -> Tensor:
     """Return per-example regularization over one or more latent-code blocks."""
     code_blocks = iter_latent_codes(code)
     if not code_blocks:
@@ -55,5 +56,10 @@ def sum_regularization_terms(  # -----------------------------------------------
     return total
 
 
-# =================================================================================================
-__all__ = ["RegularizationNorm", "l1_penalty", "l2_penalty", "sum_regularization_terms"]
+# =============================================================================
+__all__ = [
+    "RegularizationNorm",
+    "l1_penalty",
+    "l2_penalty",
+    "sum_regularization_terms",
+]

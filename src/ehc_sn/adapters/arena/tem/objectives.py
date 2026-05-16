@@ -24,7 +24,12 @@ from ehc_sn.metrics.keys import (
 )
 from ehc_sn.objectives.tem import TEMStepOutput
 from ehc_sn.tasks.arena.contracts import ArenaTargets
-from ehc_sn.tasks.arena.evaluation import build_arena_step_score, coerce_observation_ids, coerce_revisit_mask
+from ehc_sn.tasks.arena.evaluation import (
+    ArenaStepScore,
+    build_arena_step_score,
+    coerce_observation_ids,
+    coerce_revisit_mask,
+)
 from ehc_sn.tasks.arena.runtime import coerce_arena_targets
 from ehc_sn.training.types import RatioStat
 from ehc_sn.types import Batch
@@ -41,7 +46,7 @@ class ArenaTEMTaskBinding:
     results to the established TEM metric keys.
     """
 
-    def extract_targets(
+    def extract_targets(  # ---------------------------------------------------
         self,
         batch: Batch,
         carry: Any,
@@ -59,25 +64,35 @@ class ArenaTEMTaskBinding:
         _ = carry, step_output
         return coerce_arena_targets(batch)
 
-    def extract_observation_id(
+    def extract_observation_id(  # --------------------------------------------
         self,
-        targets: ArenaTargets,
+        batch: Batch,
+        carry: Any,
+        step_output: Any,
     ) -> Tensor:
-        """Return the current-step observation id tensor from ``targets``."""
+        """Return the current-step observation id tensor from the executed step payload."""
+        _ = carry, step_output
+        targets = coerce_arena_targets(batch)
         return coerce_observation_ids(targets.observation_id)
 
-    def extract_protocol_mask(
+    def extract_protocol_mask(  # ----------------------------------------------
         self,
-        targets: ArenaTargets,
+        batch: Batch,
+        carry: Any,
+        step_output: Any,
     ) -> Tensor:
         """Return the revisit-eligibility mask for protocol supervision."""
+        _ = carry, step_output
+        targets = coerce_arena_targets(batch)
         is_revisit = targets.is_revisit
         if is_revisit is None:
-            raise KeyError("Arena carry data must provide 'is_revisit' for protocol-gated TEM supervision.")
+            raise KeyError(
+                "Arena carry data must provide 'is_revisit' for protocol-gated TEM supervision.",
+            )
         result = coerce_revisit_mask(is_revisit, device=is_revisit.device)
         return result.to(dtype=torch.bool)  # type: ignore[union-attr]
 
-    def evaluate_observation_metrics(
+    def evaluate_observation_metrics(  # --------------------------------------
         self,
         step_output: TEMStepOutput,
         targets: ArenaTargets,
@@ -87,24 +102,48 @@ class ArenaTEMTaskBinding:
         m_ret = build_arena_step_score(step_output.logits_retrieved, targets)
         m_anc = build_arena_step_score(step_output.logits_ancestral, targets)
 
-        batch_count = m_inf.is_correct.new_tensor(float(m_inf.is_correct.shape[0]), dtype=torch.float32)
-        protocol_count = m_inf.is_revisit.sum().float() if m_inf.is_revisit is not None else m_inf.is_correct.new_zeros(())
+        batch_count = m_inf.is_correct.new_tensor(
+            float(m_inf.is_correct.shape[0]), dtype=torch.float32
+        )
+        protocol_count = (
+            m_inf.is_revisit.sum().float()
+            if m_inf.is_revisit is not None
+            else m_inf.is_correct.new_zeros(())
+        )
 
-        def _correct(m: "ArenaStepScore") -> Tensor:
+        def _correct(m: ArenaStepScore) -> Tensor:
             return m.is_correct.sum().float()
 
-        def _correct_revisit(m: "ArenaStepScore") -> Tensor:
+        def _correct_revisit(m: ArenaStepScore) -> Tensor:
             if m.is_revisit is None:
                 return m.is_correct.new_zeros(())
             return (m.is_correct & m.is_revisit).sum().float()
 
         return {
-            TEM_ACC_OBS_INFERENCE_REVISIT: RatioStat(_correct_revisit(m_inf), protocol_count),
-            TEM_ACC_OBS_RETRIEVED_REVISIT: RatioStat(_correct_revisit(m_ret), protocol_count),
-            TEM_ACC_OBS_ANCESTRAL_REVISIT: RatioStat(_correct_revisit(m_anc), protocol_count),
-            TEM_ACC_OBS_INFERENCE_ALL: RatioStat(_correct(m_inf), batch_count),
-            TEM_ACC_OBS_RETRIEVED_ALL: RatioStat(_correct(m_ret), batch_count),
-            TEM_ACC_OBS_ANCESTRAL_ALL: RatioStat(_correct(m_anc), batch_count),
+            TEM_ACC_OBS_INFERENCE_REVISIT: RatioStat(
+                numerator_sum=_correct_revisit(m_inf),
+                denominator_sum=protocol_count,
+            ),
+            TEM_ACC_OBS_RETRIEVED_REVISIT: RatioStat(
+                numerator_sum=_correct_revisit(m_ret),
+                denominator_sum=protocol_count,
+            ),
+            TEM_ACC_OBS_ANCESTRAL_REVISIT: RatioStat(
+                numerator_sum=_correct_revisit(m_anc),
+                denominator_sum=protocol_count,
+            ),
+            TEM_ACC_OBS_INFERENCE_ALL: RatioStat(
+                numerator_sum=_correct(m_inf),
+                denominator_sum=batch_count,
+            ),
+            TEM_ACC_OBS_RETRIEVED_ALL: RatioStat(
+                numerator_sum=_correct(m_ret),
+                denominator_sum=batch_count,
+            ),
+            TEM_ACC_OBS_ANCESTRAL_ALL: RatioStat(
+                numerator_sum=_correct(m_anc),
+                denominator_sum=batch_count,
+            ),
         }
 
 

@@ -13,15 +13,24 @@ task-agnostic.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import Any, ClassVar, Optional, Protocol
+from dataclasses import dataclass
+from typing import Any, Optional, Protocol
 
+import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.loss.consistency import LatentCode, LatentRelation, mean_latent_norm, mse_consistency, sum_latent_terms
+from ehc_sn.loss.consistency import (
+    LatentCode,
+    LatentRelation,
+    mean_latent_norm,
+    sum_latent_terms,
+)
 from ehc_sn.loss.cross_entropy import LossType
-from ehc_sn.loss.regularization import RegularizationNorm, sum_regularization_terms
+from ehc_sn.loss.regularization import (
+    RegularizationNorm,
+    sum_regularization_terms,
+)
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import (
     TEM_LOSS_GRID_KL_ALL,
@@ -43,9 +52,11 @@ from ehc_sn.objectives._variational import (
     VariationalLosses,
     VariationalLossStep,
     VariationalObjectiveBase,
+    build_variational_step_metrics,
     get_reg_term,
     require_latent_relation,
 )
+from ehc_sn.rollouts import StepRecord
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
 
@@ -59,7 +70,7 @@ GRID_REG_TERM: str = "grid_reg"
 PLACE_REG_TERM: str = "place_reg"
 
 
-# =================================================================================================
+# =============================================================================
 class TEMStepOutput(Protocol):
     """Objective-facing output contract for TEM-family rollout steps."""
 
@@ -85,11 +96,11 @@ class TEMStepOutput(Protocol):
 
     @property
     def reg_terms(self) -> dict[str, LatentCode] | None:
-        """Optional named regularization-code overrides; ``None`` falls back to relation codes."""
+        """Optional named regularization-code overrides; `None` falls back to relation codes."""
         ...
 
 
-# =================================================================================================
+# =============================================================================
 class TEMObjectiveBinding[TargetsT](Protocol):
     """Canonical task-binding protocol for the TEM objective.
 
@@ -102,19 +113,38 @@ class TEMObjectiveBinding[TargetsT](Protocol):
     (e.g. :class:`~ehc_sn.tasks.arena.contracts.ArenaTargets`).
     """
 
-    def extract_targets(self, batch: Batch, carry: Any, step_output: Any) -> TargetsT:
+    def extract_targets(  # ---------------------------------------------------
+        self,
+        batch: Batch,
+        carry: Any,
+        step_output: Any,
+    ) -> TargetsT:
         """Return the task-owned supervision targets for the current step."""
         ...
 
-    def extract_observation_id(self, targets: TargetsT) -> Tensor:
-        """Return the integer observation-id tensor ``(B,)`` from ``targets``."""
+    def extract_observation_id(  # --------------------------------------------
+        self,
+        batch: Batch,
+        carry: Any,
+        step_output: Any,
+    ) -> Tensor:
+        """Return the integer observation-id tensor ``(B,)`` for the current step."""
         ...
 
-    def extract_protocol_mask(self, targets: TargetsT) -> Tensor:
-        """Return the boolean protocol-eligibility mask ``(B,)`` from ``targets``."""
+    def extract_protocol_mask(  # ---------------------------------------------
+        self,
+        batch: Batch,
+        carry: Any,
+        step_output: Any,
+    ) -> Tensor:
+        """Return the boolean protocol-eligibility mask ``(B,)`` for the current step."""
         ...
 
-    def evaluate_observation_metrics(self, step_output: Any, targets: TargetsT) -> dict[str, RatioStat]:
+    def evaluate_observation_metrics(  # --------------------------------------
+        self,
+        step_output: Any,
+        targets: TargetsT,
+    ) -> dict[str, RatioStat]:
         """Return task-owned count-bearing accuracy metrics for one step.
 
         The values are :class:`~ehc_sn.training.types.RatioStat` numerator/
@@ -124,7 +154,7 @@ class TEMObjectiveBinding[TargetsT](Protocol):
         ...
 
 
-# =================================================================================================
+# =============================================================================
 class TEMObjectiveConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`TEMObjective`."""
 
@@ -137,6 +167,11 @@ class TEMObjectiveConfig(BaseModel, extra="forbid"):
         ge=0.0,
         description="Observation loss coefficient.",
     )
+
+    latent_loss: str = Field(
+        default="mse_consistency",
+        description="Latent consistency primitive from ehc_sn.loss.consistency.",
+    )
     c_grid: float = Field(
         default=1.0,
         ge=0.0,
@@ -147,24 +182,27 @@ class TEMObjectiveConfig(BaseModel, extra="forbid"):
         ge=0.0,
         description="Place consistency coefficient.",
     )
+
+    grid_reg_norm: RegularizationNorm = Field(
+        default="l2",
+        description="Regularization norm for grid codes.",
+    )
     c_grid_reg: float = Field(
         default=0.01,
         ge=0.0,
         description="Grid regularization coefficient.",
+    )
+
+    place_reg_norm: RegularizationNorm = Field(
+        default="l1",
+        description="Regularization norm for place codes.",
     )
     c_place_reg: float = Field(
         default=0.02,
         ge=0.0,
         description="Place regularization coefficient.",
     )
-    grid_reg_norm: RegularizationNorm = Field(
-        default="l2",
-        description="Regularization norm for grid codes.",
-    )
-    place_reg_norm: RegularizationNorm = Field(
-        default="l1",
-        description="Regularization norm for place codes.",
-    )
+
     # Schedule fields (original TEM training dynamics)
     temp_it: int = Field(
         default=2000,
@@ -193,7 +231,7 @@ class TEMObjectiveConfig(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class TEMLosses(VariationalLosses):
     """TEM loss bundle with explicit latent groups and per-pathway observation sums.
@@ -210,8 +248,12 @@ class TEMLosses(VariationalLosses):
 
     @property
     def loss_obs_nll_sum(self) -> Tensor:
-        """Return the aggregate observation negative log-likelihood sum for the current TEM step."""
-        return self.loss_obs_inference_sum + self.loss_obs_retrieved_sum + self.loss_obs_ancestral_sum
+        """Return the aggregate observation negative for the current TEM step."""
+        return (
+            self.loss_obs_inference_sum
+            + self.loss_obs_retrieved_sum
+            + self.loss_obs_ancestral_sum
+        )
 
     # Per-component place-consistency sums (masked, weighted by c_place * temp)
     loss_place_transition_sum: Tensor
@@ -240,7 +282,49 @@ class TEMLosses(VariationalLosses):
         return self.loss_grid_reg_sum + self.loss_place_reg_sum
 
 
-# =================================================================================================
+# =============================================================================
+@dataclass(frozen=True)
+class TEMTerms:
+    """Scored per-example TEM loss terms shared across projections."""
+
+    # Per-pathway observation terms (unmasked, unaggregated, weighted by c_obs)
+    obs_inference: Tensor
+    obs_retrieved: Tensor
+    obs_ancestral: Tensor
+
+    @property
+    def obs_nll(self) -> Tensor:
+        """Return the aggregate per-example observation loss across all pathways."""
+        return self.obs_inference + self.obs_retrieved + self.obs_ancestral
+
+    # Place-consistency terms (unmasked, unaggregated, weighted by c_place * temp)
+    place_transition: Tensor
+    place_sensory: Tensor
+
+    @property
+    def place_consistency(self) -> Tensor:
+        """Return the aggregate per-example place-consistency term."""
+        return self.place_transition + self.place_sensory
+
+    # Grid-consistency term (unmasked, unaggregated, weighted by c_grid * temp)
+    grid_kl: Tensor
+
+    @property
+    def latent(self) -> Tensor:
+        """Return the aggregate per-example latent loss across all relations."""
+        return self.place_consistency + self.grid_kl
+
+    # Regularization terms (unmasked, unaggregated, weighted by c_*_reg)
+    grid_reg: Tensor
+    place_reg: Tensor
+
+    @property
+    def reg(self) -> Tensor:
+        """Return the aggregate per-example regularization term."""
+        return self.grid_reg + self.place_reg
+
+
+# =============================================================================
 @dataclass(frozen=True)
 class TEMObjectiveStep(VariationalLossStep):
     """A single rollout/loss step produced by :class:`TEMObjective`."""
@@ -251,7 +335,22 @@ class TEMObjectiveStep(VariationalLossStep):
     signals: dict[str, Any] | None = None
 
 
-# =================================================================================================
+# =============================================================================
+@dataclass(frozen=True)
+class TEMContext:
+    """Shared objective-scoring context resolved once per TEM consumer."""
+
+    targets: Any
+    labels: Tensor
+    protocol_mask: Tensor
+    grid_relation: LatentRelation
+    place_transition_relation: LatentRelation
+    place_sensory_relation: LatentRelation | None
+    grid_reg_code: LatentCode
+    place_reg_code: LatentCode
+
+
+# =============================================================================
 class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
     """TEM objective scored over executed rollout chunks.
 
@@ -280,6 +379,8 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
     def runtime_loss_options(  # ----------------------------------------------
         self,
         step: int,
+        *,
+        p2g_use: float = 1.0,
     ) -> dict[str, float]:
         """Derive per-step schedule scalars from the current step for use in loss computation."""
         if step < 0:
@@ -287,242 +388,388 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
 
         return {
             "temp": min((step + 1) / float(self.config.temp_it), 1.0),
-            "p2g_use": 1.0 / (1.0 + math.exp(-(step - self.config.p2g_use_it) / self.config.p2g_scale)),
-            "g_cell_reg": 1.0 - min((step + 1) / float(self.config.g_reg_it), 1.0),
-            "p_cell_reg": 1.0 - min((step + 1) / float(self.config.p_reg_it), 1.0),
+            "p2g_use": p2g_use,
+            "g_cell_reg": 1.0 - min((step + 1) / float(self.config.g_reg_it), 1.0),  # fmt: skip
+            "p_cell_reg": 1.0 - min((step + 1) / float(self.config.p_reg_it), 1.0),  # fmt: skip
         }
+
+    def build_context(  # -----------------------------------------------------
+        self,
+        record: StepRecord,
+        outputs: TEMStepOutput,
+        **_: Any,
+    ) -> TEMContext:
+        """Resolve task targets, protocol masks, relations, and reg fallbacks."""
+        return TEMContext(
+            # Task-specific target extraction and protocol masking are delegated to the binding
+            targets=self._task_binding.extract_targets(
+                batch=record.batch,
+                carry=record.carry,
+                step_output=record.outputs,
+            ),
+            labels=self._task_binding.extract_observation_id(
+                batch=record.batch,
+                carry=record.carry,
+                step_output=record.outputs,
+            ),
+            protocol_mask=self._task_binding.extract_protocol_mask(
+                batch=record.batch,
+                carry=record.carry,
+                step_output=record.outputs,
+            ),
+            # Relation extraction is delegated to the binding
+            grid_relation=require_latent_relation(
+                outputs.latent_relations,
+                GRID_TRANSITION_RELATION,
+            ),
+            place_transition_relation=require_latent_relation(
+                outputs.latent_relations,
+                PLACE_TRANSITION_RELATION,
+            ),
+            place_sensory_relation=outputs.latent_relations.get(
+                PLACE_SENSORY_RELATION,
+            ),
+            # Regularization-code extraction first looks for explicit reg-term overrides
+            grid_reg_code=get_reg_term(
+                outputs.reg_terms,
+                outputs.latent_relations,
+                key=GRID_REG_TERM,
+                fallback=GRID_TRANSITION_RELATION,
+            ),
+            place_reg_code=get_reg_term(
+                outputs.reg_terms,
+                outputs.latent_relations,
+                key=PLACE_REG_TERM,
+                fallback=PLACE_TRANSITION_RELATION,
+            ),
+        )
+
+    def compute_terms(  # ----------------------------------------------------
+        self,
+        outputs: TEMStepOutput,
+        context: TEMContext,
+        *,
+        temp: float = 1.0,
+        p2g_use: float = 1.0,
+        g_cell_reg: float = 1.0,
+        p_cell_reg: float = 1.0,
+        **_: Any,
+    ) -> TEMTerms:
+        """Return scored per-example TEM loss terms for one step."""
+
+        return TEMTerms(
+            # Compute the per-example observation loss terms for each pathway.
+            obs_inference=self.obs_loss_fn(
+                logits=outputs.logits_inference,
+                labels=context.labels,
+            )
+            * self.config.c_obs,
+            obs_retrieved=self.obs_loss_fn(
+                logits=outputs.logits_retrieved,
+                labels=context.labels,
+            )
+            * self.config.c_obs,
+            obs_ancestral=self.obs_loss_fn(
+                logits=outputs.logits_ancestral,
+                labels=context.labels,
+            )
+            * self.config.c_obs,
+            # Grid and place consistency terms under the current config and schedules.
+            grid_kl=self.latent_loss_fn(
+                relation=context.grid_relation,
+            )
+            * self.config.c_grid
+            * temp,
+            place_transition=self.latent_loss_fn(
+                relation=context.place_transition_relation,
+            )
+            * self.config.c_place
+            * temp,
+            place_sensory=self.latent_loss_fn(
+                relation=context.place_sensory_relation,
+                zeros_like=context.labels,
+            )
+            * self.config.c_place
+            * temp
+            * p2g_use,
+            # Regularization terms for grid and place codes.
+            grid_reg=self.greg_loss_fn(
+                code=context.grid_reg_code,
+            )
+            * self.config.c_grid_reg
+            * g_cell_reg,
+            place_reg=self.preg_loss_fn(
+                code=context.place_reg_code,
+            )
+            * self.config.c_place_reg
+            * p_cell_reg,
+        )
+
+    def obs_loss_fn(  # -------------------------------------------------------
+        self,
+        logits: Tensor,
+        labels: Tensor,
+    ) -> Tensor:
+        """Compute the per-example observation negative log-likelihood under the current config."""
+        return super().obs_loss_fn(logits, labels)
+
+    def latent_loss_fn(  # ----------------------------------------------------
+        self,
+        relation: Optional[LatentRelation],
+        *,
+        zeros_like: Tensor | None = None,
+    ) -> Tensor:
+        """Compute the per-example latent loss for one relation under the current config."""
+        if relation is None:
+            if zeros_like is None:
+                raise ValueError("zeros_like is required when relation is None")
+            return zeros_like.new_zeros(zeros_like.shape[0])
+        return sum_latent_terms(self.latent_term_fn, relation.lhs, relation.rhs)
+
+    def greg_loss_fn(  # ------------------------------------------------------
+        self,
+        code: LatentCode,
+    ) -> Tensor:
+        """Compute the per-example grid-code regularization under the current config."""
+        return _regularization_terms(code, self.config.grid_reg_norm)
+
+    def preg_loss_fn(  # ------------------------------------------------------
+        self,
+        code: LatentCode,
+    ) -> Tensor:
+        """Compute the per-example place-code regularization under the current config."""
+        return _regularization_terms(code, self.config.place_reg_norm)
 
     def compute_losses(  # ----------------------------------------------------
         self,
-        outputs: TEMStepOutput,
-        carry: Any,
-        batch: Any = None,
-        step_output: Any = None,
-        temp: float = 1.0,
-        p2g_use: float = 1.0,
-        g_cell_reg: float = 1.0,
-        p_cell_reg: float = 1.0,
+        terms: TEMTerms,
+        context: TEMContext,
         **_: Any,
     ) -> TEMLosses:
         """Compute TEM losses for a single step under the current config and schedules."""
-        targets = self._task_binding.extract_targets(batch, carry, step_output)
-        labels = self._task_binding.extract_observation_id(targets)
-        protocol_mask = self._task_binding.extract_protocol_mask(targets)
-        grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
-        place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)
-
-        # Observation negative log-likelihoods for the three pathways, weighted by c_obs in the sums below.
-        loss_obs_inference = self.loss_fn(outputs.logits_inference, labels)
-        loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels)
-        loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels)
-
-        # Latent losses for the transition relations.
-        grid_mse = sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs)
-        grid_mse = temp * grid_mse
-        place_transition = sum_latent_terms(mse_consistency, place_transition_relation.lhs, place_transition_relation.rhs)
-        place_transition = temp * place_transition
-
-        # The place-sensory relation is optional since some adapter implementations may not have a sensory pathway
-        place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
-        if place_sensory_relation is not None:
-            place_sensory = sum_latent_terms(mse_consistency, place_sensory_relation.lhs, place_sensory_relation.rhs)
-        else:
-            place_sensory = place_transition.new_zeros(place_transition.shape)
-        place_sensory = temp * p2g_use * place_sensory
-
-        # Regularization for the grid codes
-        grid_reg_code = get_reg_term(outputs.reg_terms, GRID_REG_TERM)
-        if grid_reg_code is None:
-            grid_reg_code = grid_relation.lhs
-        grid_reg = self._regularization_terms(grid_reg_code, self.config.grid_reg_norm, g_cell_reg)
-
-        # Regularization for the place codes
-        place_reg_code = get_reg_term(outputs.reg_terms, PLACE_REG_TERM)
-        if place_reg_code is None:
-            place_reg_code = place_transition_relation.lhs
-        place_reg = self._regularization_terms(place_reg_code, self.config.place_reg_norm, p_cell_reg)
-
         return TEMLosses(
-            # Per-pathway observation sums for metric logging and diagnostics.
-            loss_obs_inference_sum=self.config.c_obs * self._masked_sum(loss_obs_inference, protocol_mask),
-            loss_obs_retrieved_sum=self.config.c_obs * self._masked_sum(loss_obs_retrieved, protocol_mask),
-            loss_obs_ancestral_sum=self.config.c_obs * self._masked_sum(loss_obs_ancestral, protocol_mask),
-            # Per-component place-consistency sums for metric logging and diagnostics.
-            loss_place_transition_sum=self.config.c_place * self._masked_sum(place_transition, protocol_mask),
-            loss_place_sensory_sum=self.config.c_place * self._masked_sum(place_sensory, protocol_mask),
-            # Aggregate latent and denominator.
-            loss_grid_kl_sum=self.config.c_grid * self._masked_sum(grid_mse, protocol_mask),
-            # Regularization sum for metric logging and diagnostics.
-            loss_grid_reg_sum=self.config.c_grid_reg * self._masked_sum(grid_reg, protocol_mask),
-            loss_place_reg_sum=self.config.c_place_reg * self._masked_sum(place_reg, protocol_mask),
+            loss_obs_inference_sum=_masked_mean(
+                values=terms.obs_inference,
+                mask=context.protocol_mask,
+            ),
+            loss_obs_retrieved_sum=_masked_mean(
+                values=terms.obs_retrieved,
+                mask=context.protocol_mask,
+            ),
+            loss_obs_ancestral_sum=_masked_mean(
+                values=terms.obs_ancestral,
+                mask=context.protocol_mask,
+            ),
+            loss_place_transition_sum=_masked_mean(
+                values=terms.place_transition,
+                mask=context.protocol_mask,
+            ),
+            loss_place_sensory_sum=_masked_mean(
+                values=terms.place_sensory,
+                mask=context.protocol_mask,
+            ),
+            loss_grid_kl_sum=_masked_mean(
+                values=terms.grid_kl,
+                mask=context.protocol_mask,
+            ),
+            loss_grid_reg_sum=_masked_mean(
+                values=terms.grid_reg,
+                mask=context.protocol_mask,
+            ),
+            loss_place_reg_sum=_masked_mean(
+                values=terms.place_reg,
+                mask=context.protocol_mask,
+            ),
         )
 
-    def _build_metric_ratios(  # ----------------------------------------------
+    def evaluate_metrics(  # ----------------------------------------------------
         self,
-        losses: TEMLosses,
-        *,
-        carry: Any,
-        outputs: TEMStepOutput,
-        batch_size: int,
-        batch: Any = None,
-        step_output: Any = None,
-        temp: float = 1.0,
-        p2g_use: float = 1.0,
-        g_cell_reg: float = 1.0,
-        p_cell_reg: float = 1.0,
+        record: StepRecord,
+        context: TEMContext,
+        terms: TEMTerms,
         **_: Any,
-    ) -> dict[str, RatioStat]:
-        """Build detached TEM ratio metrics for logging.
+    ) -> StepMetrics:
+        """Evaluate TEM metrics for one step from precomputed losses and terms."""
+        step_outputs = getattr(
+            record.outputs, "backbone_output", record.outputs
+        )
+        acc_extras = self._task_binding.evaluate_observation_metrics(
+            step_outputs, context.targets
+        )
 
-        Accuracy metrics come from the task-owned binding so this objective
-        does not recompute argmax correctness locally.  Loss ratio metrics are
-        assembled here from the loss bundle computed in :meth:`compute_losses`.
-        """
-        targets = self._task_binding.extract_targets(batch, carry, step_output)
-        labels = self._task_binding.extract_observation_id(targets)
-        protocol_mask = self._task_binding.extract_protocol_mask(targets)
-        protocol_count = protocol_mask.to(dtype=losses.total.dtype).sum()
-        batch_count = losses.total.new_tensor(batch_size, dtype=losses.total.dtype)
-        all_loss_sums = self._all_step_loss_sums(outputs, labels)
-        # Per-pathway detached losses for the revisit-split and all-step breakdowns.
-        loss_inf = self.loss_fn(outputs.logits_inference, labels).detach()
-        loss_ret = self.loss_fn(outputs.logits_retrieved, labels).detach()
-        loss_anc = self.loss_fn(outputs.logits_ancestral, labels).detach()
-        pmask = protocol_mask.to(dtype=loss_inf.dtype)
-        # Accuracy metrics are owned by the task; the binding delegates to the task evaluator.
-        acc_metrics = self._task_binding.evaluate_observation_metrics(outputs, targets)
-        return {
-            **acc_metrics,
-            TEM_LOSS_OBS_NLL_REVISIT: RatioStat(losses.loss_obs_nll_sum.detach(), protocol_count),
-            TEM_LOSS_OBS_INFERENCE_REVISIT: RatioStat((loss_inf * pmask).sum(), protocol_count),
-            TEM_LOSS_OBS_RETRIEVED_REVISIT: RatioStat((loss_ret * pmask).sum(), protocol_count),
-            TEM_LOSS_OBS_ANCESTRAL_REVISIT: RatioStat((loss_anc * pmask).sum(), protocol_count),
-            TEM_LOSS_GRID_KL_REVISIT: RatioStat(losses.loss_grid_kl_sum.detach(), protocol_count),
-            TEM_LOSS_PLACE_CONSISTENCY_REVISIT: RatioStat(losses.loss_place_consistency_sum.detach(), protocol_count),
-            TEM_LOSS_REG_REVISIT: RatioStat(losses.loss_reg_sum.detach(), protocol_count),
-            TEM_LOSS_OBS_NLL_ALL: RatioStat(all_loss_sums["loss_obs_nll_sum"], batch_count),
-            TEM_LOSS_OBS_INFERENCE_ALL: RatioStat(loss_inf.sum(), batch_count),
-            TEM_LOSS_OBS_RETRIEVED_ALL: RatioStat(loss_ret.sum(), batch_count),
-            TEM_LOSS_OBS_ANCESTRAL_ALL: RatioStat(loss_anc.sum(), batch_count),
-            TEM_LOSS_GRID_KL_ALL: RatioStat(all_loss_sums["loss_grid_kl_sum"], batch_count),
-            TEM_LOSS_PLACE_CONSISTENCY_ALL: RatioStat(all_loss_sums["loss_place_consistency_sum"], batch_count),
-            TEM_LOSS_REG_ALL: RatioStat(all_loss_sums["loss_reg_sum"], batch_count),
-        }  # fmt: skip
+        revisit = context.protocol_mask.float()
+        revisit_count = revisit.sum().detach()
+        batch_count = revisit.new_tensor(float(revisit.shape[0]))
 
-    def _build_step_output(
+        def _rev_sum(t: Tensor) -> Tensor:
+            return (t * revisit).sum().detach()
+
+        def _all_sum(t: Tensor) -> Tensor:
+            return t.sum().detach()
+
+        loss_extras = {
+            TEM_LOSS_OBS_NLL_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.obs_nll),
+                denominator_sum=revisit_count,
+            ),
+            TEM_LOSS_OBS_NLL_ALL: RatioStat(
+                numerator_sum=_all_sum(terms.obs_nll),
+                denominator_sum=batch_count,
+            ),
+            TEM_LOSS_OBS_INFERENCE_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.obs_inference),
+                denominator_sum=revisit_count,
+            ),
+            TEM_LOSS_OBS_INFERENCE_ALL: RatioStat(
+                numerator_sum=_all_sum(terms.obs_inference),
+                denominator_sum=batch_count,
+            ),
+            TEM_LOSS_OBS_RETRIEVED_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.obs_retrieved),
+                denominator_sum=revisit_count,
+            ),
+            TEM_LOSS_OBS_RETRIEVED_ALL: RatioStat(
+                numerator_sum=_all_sum(terms.obs_retrieved),
+                denominator_sum=batch_count,
+            ),
+            TEM_LOSS_OBS_ANCESTRAL_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.obs_ancestral),
+                denominator_sum=revisit_count,
+            ),
+            TEM_LOSS_OBS_ANCESTRAL_ALL: RatioStat(
+                numerator_sum=_all_sum(terms.obs_ancestral),
+                denominator_sum=batch_count,
+            ),
+            TEM_LOSS_GRID_KL_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.grid_kl),
+                denominator_sum=revisit_count,
+            ),
+            TEM_LOSS_GRID_KL_ALL: RatioStat(
+                numerator_sum=_all_sum(terms.grid_kl),
+                denominator_sum=batch_count,
+            ),
+            TEM_LOSS_PLACE_CONSISTENCY_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.place_consistency),
+                denominator_sum=revisit_count,
+            ),
+            TEM_LOSS_PLACE_CONSISTENCY_ALL: RatioStat(
+                numerator_sum=_all_sum(terms.place_consistency),
+                denominator_sum=batch_count,
+            ),
+            TEM_LOSS_REG_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.reg),
+                denominator_sum=revisit_count,
+            ),
+            TEM_LOSS_REG_ALL: RatioStat(
+                numerator_sum=_all_sum(terms.reg),
+                denominator_sum=batch_count,
+            ),
+        }
+        return build_variational_step_metrics({**acc_extras, **loss_extras})
+
+    def compute_signals(  # ---------------------------------------------------
+        self,
+        outputs: TEMStepOutput,
+        losses: TEMLosses,
+        **_: Any,
+    ) -> dict[str, Tensor]:
+        """Compute TEM signals for one step from precomputed losses and context."""
+        grid_rel = outputs.latent_relations.get(GRID_TRANSITION_RELATION)
+        place_rel = outputs.latent_relations.get(PLACE_TRANSITION_RELATION)
+        _zero = losses.loss_grid_kl_sum.new_zeros(())
+
+        if grid_rel is not None:
+            grid_post_norm = mean_latent_norm(grid_rel.lhs).detach()
+        else:
+            grid_post_norm = _zero
+        if grid_rel is not None:
+            grid_prior_norm = mean_latent_norm(grid_rel.rhs).detach()
+        else:
+            grid_prior_norm = _zero
+        if place_rel is not None:
+            place_post_norm = mean_latent_norm(place_rel.lhs).detach()
+        else:
+            place_post_norm = _zero
+        if place_rel is not None:
+            place_prior_norm = mean_latent_norm(place_rel.rhs).detach()
+        else:
+            place_prior_norm = _zero
+
+        signals = {
+            #  Raw loss sums for logging and potential control flow;
+            S.LOSS_TOTAL: losses.total.detach(),
+            S.LOSS_OBS_NLL: losses.loss_obs_nll_sum.detach(),
+            S.LOSS_LATENT: losses.loss_latent_sum.detach(),
+            S.LOSS_REG: losses.loss_reg_sum.detach(),
+            # Per-relation latent norms for diagnosing collapse or explosion;
+            S.LATENT_POST_NORM: grid_post_norm,
+            S.LATENT_PRIOR_NORM: grid_prior_norm,
+            # Per-pathway and per-component loss sums for fine-grained diagnostics;
+            S.LOSS_GRID_KL: losses.loss_grid_kl_sum.detach(),
+            S.LOSS_PLACE_CONSISTENCY: losses.loss_place_consistency_sum.detach(),
+            # Observation loss components for diagnosing pathway-specific failures;
+            S.LOSS_OBS_INFER: losses.loss_obs_inference_sum.detach(),
+            S.LOSS_OBS_RETRIEVED: losses.loss_obs_retrieved_sum.detach(),
+            S.LOSS_OBS_ANCESTRAL: losses.loss_obs_ancestral_sum.detach(),
+            # Place-consistency components for diagnosing relation-specific failures.
+            S.LOSS_PLACE_TRANSITION: losses.loss_place_transition_sum.detach(),
+            S.LOSS_PLACE_SENSORY: losses.loss_place_sensory_sum.detach(),
+            # Regularization components for diagnosing under- or over-regularization.
+            S.GRID_POST_NORM: grid_post_norm,
+            S.GRID_PRIOR_NORM: grid_prior_norm,
+            # Place-consistency components for diagnosing relation-specific failures.
+            S.PLACE_POST_NORM: place_post_norm,
+            S.PLACE_PRIOR_NORM: place_prior_norm,
+        }
+
+        if any(torch.tensor(list(signals.values())) > 1e6):
+            print(f"Large signal values detected: { {k: v.item() for k, v in signals.items()} }")  # fmt: skip
+        if any(torch.isnan(v) for v in signals.values()):
+            print(f"NaN signal values detected: { {k: v.item() for k, v in signals.items()} }")  # fmt: skip
+
+        return signals
+
+    def build_output(  # ------------------------------------------------------
         self,
         losses: TEMLosses,
         metrics: StepMetrics,
-        signals: dict[str, Any],
-        outputs: Any,
-    ) -> TEMObjectiveStep:
-        """Wrap losses, metrics, and signals into a :class:`TEMObjectiveStep`."""
-        return TEMObjectiveStep(losses=losses, metrics=metrics, outputs=outputs, signals=signals)
-
-    def compute_signals(
-        self,
-        batch: Batch,
-        carry: Any,
+        signals: dict[str, Tensor],
         outputs: TEMStepOutput,
-        losses: TEMLosses,
-        step_output: Any = None,
         **_: Any,
-    ) -> dict[str, Tensor]:
-        """Compute detached TEM diagnostics and ELBO-style scalar signals."""
-        targets = self._task_binding.extract_targets(batch, carry, step_output)
-        labels = self._task_binding.extract_observation_id(targets)
-        grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
-        place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
-        place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
-        signals = super().compute_signals(batch, carry, outputs, losses)
-
-        loss_obs_inference = self.loss_fn(outputs.logits_inference, labels).sum().detach()
-        loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels).sum().detach()
-        loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels).sum().detach()
-        place_transition = sum_latent_terms(mse_consistency, place_transition_relation.lhs, place_transition_relation.rhs).sum().detach()  # fmt: skip
-        if place_sensory_relation is not None:
-            place_sensory = sum_latent_terms(mse_consistency, place_sensory_relation.lhs, place_sensory_relation.rhs).sum().detach()  # fmt: skip
-        else:
-            place_sensory = losses.loss_place_consistency_sum.new_zeros(())
-
-        signals.update(
-            {
-                S.LOSS_GRID_KL: losses.loss_grid_kl_sum.detach(),
-                S.LOSS_PLACE_CONSISTENCY: losses.loss_place_consistency_sum.detach(),
-                S.LOSS_OBS_INFER: loss_obs_inference,
-                S.LOSS_OBS_RETRIEVED: loss_obs_retrieved,
-                S.LOSS_OBS_ANCESTRAL: loss_obs_ancestral,
-                S.LOSS_PLACE_TRANSITION: place_transition,
-                S.LOSS_PLACE_SENSORY: place_sensory,
-                S.GRID_POST_NORM: mean_latent_norm(grid_relation.lhs),
-                S.GRID_PRIOR_NORM: mean_latent_norm(grid_relation.rhs),
-                S.PLACE_POST_NORM: mean_latent_norm(place_transition_relation.lhs),
-                S.PLACE_PRIOR_NORM: mean_latent_norm(place_transition_relation.rhs),
-            }
+    ) -> TEMObjectiveStep:
+        """Assemble the final TEMObjectiveStep output for one step."""
+        return TEMObjectiveStep(
+            losses=losses,
+            metrics=metrics,
+            signals=signals,
+            outputs=outputs,
         )
-        return signals
-
-    @staticmethod
-    def _masked_sum(
-        values: Tensor,
-        mask: Tensor,
-    ) -> Tensor:
-        """Return the scalar sum over values selected by a boolean batch mask."""
-        return (values * mask.to(dtype=values.dtype)).sum()
-
-    def _all_step_loss_sums(
-        self,
-        outputs: TEMStepOutput,
-        labels: Tensor,
-    ) -> dict[str, Tensor]:
-        """Return detached all-step TEM loss sums for diagnostics and metric logging."""
-        grid_relation = require_latent_relation(outputs.latent_relations, GRID_TRANSITION_RELATION)
-        place_transition_relation = require_latent_relation(outputs.latent_relations, PLACE_TRANSITION_RELATION)  # fmt: skip
-        place_sensory_relation = outputs.latent_relations.get(PLACE_SENSORY_RELATION)
-
-        loss_obs_inference = self.loss_fn(outputs.logits_inference, labels)
-        loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels)
-        loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels)
-        loss_obs_nll_sum = self.config.c_obs * (loss_obs_inference + loss_obs_retrieved + loss_obs_ancestral).sum()
-
-        place_transition = sum_latent_terms(mse_consistency, place_transition_relation.lhs, place_transition_relation.rhs)  # fmt: skip
-        if place_sensory_relation is not None:
-            place_sensory = sum_latent_terms(mse_consistency, place_sensory_relation.lhs, place_sensory_relation.rhs)  # fmt: skip
-        else:
-            place_sensory = place_transition.new_zeros(place_transition.shape)
-
-        grid_reg_code = get_reg_term(outputs.reg_terms, GRID_REG_TERM)
-        if grid_reg_code is None:
-            grid_reg_code = grid_relation.lhs
-
-        place_reg_code = get_reg_term(outputs.reg_terms, PLACE_REG_TERM)
-        if place_reg_code is None:
-            place_reg_code = place_transition_relation.lhs
-
-        grid_reg = self._regularization_terms(grid_reg_code, self.config.grid_reg_norm, self.config.c_grid_reg)
-        place_reg = self._regularization_terms(place_reg_code, self.config.place_reg_norm, self.config.c_place_reg)  # fmt: skip
-
-        return {
-            "loss_obs_nll_sum": loss_obs_nll_sum.detach(),
-            "loss_grid_kl_sum": (self.config.c_grid * sum_latent_terms(mse_consistency, grid_relation.lhs, grid_relation.rhs).sum()).detach(),  # fmt: skip
-            "loss_place_consistency_sum": (self.config.c_place * (place_transition + place_sensory).sum()).detach(),
-            "loss_reg_sum": (grid_reg.sum() + place_reg.sum()).detach(),
-        }
-
-    def _regularization_terms(
-        self,
-        code: LatentCode,
-        norm: RegularizationNorm,
-        coefficient: float,
-    ) -> Tensor:
-        """Return weighted per-example regularization for one latent group."""
-        if coefficient == 0.0 or norm == "none":
-            first_block = code if isinstance(code, Tensor) else next(iter(code))
-            return first_block.new_zeros((first_block.shape[0],))
-        return coefficient * sum_regularization_terms(code, norm)
 
 
-# =================================================================================================
+# =============================================================================
+def _regularization_terms(  # -------------------------------------------------
+    code: LatentCode,
+    norm: RegularizationNorm,
+) -> Tensor:
+    """Return weighted per-example regularization for one latent group."""
+    if norm == "none":
+        first_block = code if isinstance(code, Tensor) else next(iter(code))
+        return first_block.new_zeros((first_block.shape[0],))
+    return sum_regularization_terms(code, norm)
+
+
+# =============================================================================
+def _masked_mean(  # ----------------------------------------------------------
+    values: Tensor,
+    mask: Tensor,
+) -> Tensor:
+    """Return the scalar mean over values selected by a boolean batch mask."""
+    weights = mask.to(dtype=values.dtype)
+    denom = weights.sum().clamp_min(1)
+    return (values * weights).sum() / denom
+
+
+# =============================================================================
 __all__ = [
     # canonical names
     "TEMObjectiveBinding",

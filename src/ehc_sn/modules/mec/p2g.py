@@ -21,26 +21,32 @@ from ehc_sn.modules.mlp import MLP
 from ehc_sn.types import LocationBelief
 
 
-# =================================================================================================
+# =============================================================================
 class P2GMemSettings(BaseModel, extra="forbid"):
     """Settings for MEC memory inference modules."""
 
     sigma_init: float = Field(
         default=0.1,
         frozen=True,
-        description="Standard deviation to initialise hidden to output layer of MLP for inferring new abstract location",
+        description=(
+            "Standard deviation to initialise hidden to output layer of MLP"
+            "for inferring new abstract location"
+        ),
     )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
 class Runtime:
-    """ """
+    """
+    Runtime values for MEC memory inference modules. These are intended to be
+    updated dynamically during training according to the `RuntimeConfig` schedules.
+    """
 
     uncertainty_offset: float = 0.0
 
 
-# =================================================================================================
+# =============================================================================
 class P2GMemory(nn.Module):
     """Infer grid-cell code from retrieved place-cell activity.
 
@@ -49,13 +55,13 @@ class P2GMemory(nn.Module):
     `LocationBelief` (typically from path integration).
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
+    def __init__(  # ----------------------------------------------------------
         self,
         n_p: list[int],
         mec_shape: list[int],
         config: P2GMemSettings,
     ) -> None:
-        """ """
+        """Initialize the P2G memory module."""
         super().__init__()
         self._config = config
         self._runtime = Runtime()
@@ -63,15 +69,36 @@ class P2GMemory(nn.Module):
         self._n_freq = len(mec_shape)
 
         # Mean prediction from place cells
-        self.MLP_mu_g_mem = MLP(n_p, mec_shape, hidden_dim=[2 * g for g in mec_shape])
+        self.MLP_mu_g_mem = MLP(
+            n_p,
+            mec_shape,
+            hidden_dim=[2 * g for g in mec_shape],
+        )
 
         # Initialize last layer with truncated normal (legacy parity)
-        init_w = lambda f: truncnorm.rvs(-2, 2, size=list(self.MLP_mu_g_mem.w[f][-1].weight.shape), loc=0, scale=config.sigma_init)  # fmt: skip
-        self.MLP_mu_g_mem.set_weights(-1, [torch.tensor(init_w(f), dtype=torch.float32) for f in range(self._n_freq)])  # fmt: skip
+        init_w = lambda f: truncnorm.rvs(
+            -2,
+            2,
+            size=list(self.MLP_mu_g_mem.w[f][-1].weight.shape),
+            loc=0,
+            scale=config.sigma_init,
+        )
+        self.MLP_mu_g_mem.set_weights(
+            -1,
+            [
+                torch.tensor(init_w(f), dtype=torch.float32)
+                for f in range(self._n_freq)
+            ],
+        )
 
         # Uncertainty from memory quality indicators
         mec_activation = [torch.tanh, bounded_positive_scale]
-        self.MLP_sigma_g_mem = MLP([2 for _ in n_p], mec_shape, mec_activation, hidden_dim=[2 * g for g in mec_shape])  # fmt: skip
+        self.MLP_sigma_g_mem = MLP(
+            [2 for _ in n_p],
+            mec_shape,
+            mec_activation,
+            hidden_dim=[2 * g for g in mec_shape],
+        )
 
     @property
     def config(self) -> P2GMemSettings:
@@ -92,7 +119,7 @@ class P2GMemory(nn.Module):
         """Return the number of MEC frequency modules."""
         return self._n_freq
 
-    def forward(  # -------------------------------------------------------------------------------
+    def forward(  # -----------------------------------------------------------
         self,
         p_x: list[Tensor],
         transition: LocationBelief,
@@ -110,15 +137,22 @@ class P2GMemory(nn.Module):
         Returns:
             A fused `LocationBelief` after memory-based correction.
         """
-        g_ref, sigma_ref = transition.mean, transition.uncertainty  # Unpack for clarity
+        g_ref, sigma_ref = (
+            transition.mean,
+            transition.uncertainty,
+        )  # Unpack for clarity
 
         mu = self._inference_mean(p_x)
-        sigma = self._inference_uncertainty(g_ref, err=utils.squared_error(mu, g_ref), quality_error=quality_error)
+        sigma = self._inference_uncertainty(
+            g_ref,
+            err=utils.squared_error(mu, g_ref),
+            quality_error=quality_error,
+        )
 
         correction = LocationBelief(mean=mu, uncertainty=sigma)
         return utils.inv_var_trans(transition, correction)
 
-    def _inference_mean(  # -----------------------------------------------------------------------
+    def _inference_mean(  # ---------------------------------------------------
         self,
         p_x: list[Tensor],
     ) -> list[Tensor]:
@@ -132,7 +166,7 @@ class P2GMemory(nn.Module):
         """
         return self.MLP_mu_g_mem(p_x)
 
-    def _inference_uncertainty(  # ----------------------------------------------------------------
+    def _inference_uncertainty(  # --------------------------------------------
         self,
         g: list[Tensor],
         err: list[Tensor],
@@ -152,11 +186,22 @@ class P2GMemory(nn.Module):
         """
         sigma_err = err if quality_error is None else quality_error
         sigma_g_input = [
-            torch.cat((torch.sum(g_f**2, dim=1, keepdim=True), torch.unsqueeze(sigma_err[f], dim=1)), dim=1) for f, g_f in enumerate(g)
+            torch.cat(
+                (
+                    torch.sum(g_f**2, dim=1, keepdim=True),
+                    torch.unsqueeze(sigma_err[f], dim=1),
+                ),
+                dim=1,
+            )
+            for f, g_f in enumerate(g)
         ]
         sigma = self.MLP_sigma_g_mem(sigma_g_input)
-        return [sigma[f] + self.runtime.uncertainty_offset for f in range(self._n_freq)]
+        sigma_with_offset = [
+            sigma[f] + self.runtime.uncertainty_offset
+            for f in range(self._n_freq)
+        ]
+        return sigma_with_offset
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["P2GMemory", "P2GMemSettings"]

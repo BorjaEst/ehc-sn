@@ -23,8 +23,18 @@ from torch import dtype as Dtype
 from torch import nn
 
 from ehc_sn import utils
-from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes, TEMProjectionSettings
-from ehc_sn.modules.hpc import HPCAttractor, HPCAttractorSettings, HPCState, WritePayload
+from ehc_sn.models.tem.core.tem_base import (
+    GridCodes,
+    PlaceCodes,
+    PredCodes,
+    TEMProjectionSettings,
+)
+from ehc_sn.modules.hpc import (
+    HPCAttractor,
+    HPCAttractorSettings,
+    HPCState,
+    WritePayload,
+)
 from ehc_sn.modules.hpc.query_policy import CueRead, ReadCues
 from ehc_sn.modules.lec import LECModel, LECSettings, LECState
 from ehc_sn.modules.mec import MECModel, MECSettings, MECState
@@ -62,9 +72,18 @@ class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
         ),
     )
 
-    hpc: HPCAttractorSettings = Field(..., description="Settings for the attractor-based hippocampal module.")
-    lec: LECSettings = Field(..., description="Settings for the LEC module, including feature filtering parameters.")
-    mec: MECSettings = Field(..., description="Settings for the MEC module, including path integration and correction parameters.")
+    hpc: HPCAttractorSettings = Field(
+        ...,
+        description="Settings for the attractor-based hippocampal module.",
+    )
+    lec: LECSettings = Field(
+        ...,
+        description="Settings for the LEC module, including feature filtering parameters.",
+    )
+    mec: MECSettings = Field(
+        ...,
+        description="Settings for the MEC module, including path integration and correction parameters.",
+    )
 
     projections: TEMProjectionSettings = Field(
         ...,
@@ -126,8 +145,8 @@ class TEMModelV1(nn.Module):
         f_initial = config.f_initial
 
         # Entorhinal Hippocampal Circuit components
-        self.hpc = HPCAttractor(n_freq, f_initial, config.hpc, device=device, dtype=dtype)
-        self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)
+        self.hpc = HPCAttractor(n_freq, f_initial, config.hpc, device=device, dtype=dtype)  # fmt: skip
+        self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)  # fmt: skip
         self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
 
         # Projection modules
@@ -170,7 +189,7 @@ class TEMModelV1(nn.Module):
         device: Optional[Device] = None,
     ) -> TEMStateV1:
         """Create an initial recurrent TEM state."""
-        memory = memory if memory is not None else self.hpc.init_memory(batch_size, device=device)
+        memory = memory if memory is not None else self.hpc.init_memory(batch_size, device=device)  # fmt: skip
         return TEMStateV1(
             lec=self.lec.init_state(batch_size, device=device),
             mec=self.mec.init_state(batch_size, device=device),
@@ -220,7 +239,8 @@ class TEMModelV1(nn.Module):
             return None
 
         x_query = self.lec_to_hpc(sensory_features)
-        return [band_error.detach() for band_error in utils.squared_error(x_query, p_sensory_read)]
+        quality_error = utils.squared_error(x_query, p_sensory_read)
+        return [band_error.detach() for band_error in quality_error]
 
     def forward(  # -----------------------------------------------------------
         self,
@@ -247,7 +267,7 @@ class TEMModelV1(nn.Module):
             state = replace(state)
 
         # 1. Compute the grid prior by path integration:
-        g_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)
+        g_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)  # fmt: skip
         g_query_prior = self.mec_to_hpc(g_prior)
 
         # 2. Read sensory-cued place from the previous memory state.
@@ -288,11 +308,17 @@ class TEMModelV1(nn.Module):
         )
 
         # 6. Form ancestral and retrieved place beliefs from the two structural recalls.
-        p_prior, state.hpc = self.hpc.generative(p_grid_prior_read, state=state.hpc)
-        p_retrieved, state.hpc = self.hpc.generative(p_grid_post_read, state=state.hpc)
+        p_prior, state.hpc = self.hpc.generative(
+            p_grid_prior_read, state=state.hpc
+        )
+        p_retrieved, state.hpc = self.hpc.generative(
+            p_grid_post_read, state=state.hpc
+        )
 
         # 7. Infer the final grounded posterior from sensory and corrected grid cues:
-        p_post, state.hpc = self.hpc.inference(x_query, g_query_post, state=state.hpc)
+        p_post, state.hpc = self.hpc.inference(
+            x_query, g_query_post, state=state.hpc
+        )
 
         # 8. Update memory only after all current-step reads are complete:
         payload = WritePayload(generative=p_retrieved, inference=p_sensory_read)
@@ -305,11 +331,32 @@ class TEMModelV1(nn.Module):
 
         # Package controller-compatible latent outputs and return the new state.
         grid_codes = GridCodes(prior=g_prior, posterior=g_post)
-        place_codes = PlaceCodes(prior=p_prior, posterior=p_post, retrieved=p_retrieved, sensory=p_sensory_read)
-        pred_codes = PredCodes(ancestral=x_ancestral, inference=x_inference, retrieved=x_retrieved)
+        place_codes = PlaceCodes(
+            prior=p_prior,
+            posterior=p_post,
+            retrieved=p_retrieved,
+            sensory=p_sensory_read,
+        )
+        pred_codes = PredCodes(
+            ancestral=x_ancestral, inference=x_inference, retrieved=x_retrieved
+        )
 
-        return TEMOutputV1(grid_codes=grid_codes, place_codes=place_codes, pred_codes=pred_codes), state
+        return (
+            TEMOutputV1(
+                grid_codes=grid_codes,
+                place_codes=place_codes,
+                pred_codes=pred_codes,
+            ),
+            state,
+        )
 
 
 # =============================================================================
-__all__ = ["ModelSettingsV1", "TEMInputV1", "TEMOutputV1", "PlaceCodes", "TEMStateV1", "TEMModelV1"]
+__all__ = [
+    "ModelSettingsV1",
+    "TEMInputV1",
+    "TEMOutputV1",
+    "PlaceCodes",
+    "TEMStateV1",
+    "TEMModelV1",
+]
