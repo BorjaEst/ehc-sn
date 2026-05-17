@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from ehc_sn.metrics.signals import STANDARD_SIGNALS
 
 
-# =================================================================================================
+# =============================================================================
 class DiagnosticsSettings(BaseModel, extra="forbid"):
     """Settings controlling which diagnostic signals are logged."""
 
@@ -37,19 +37,27 @@ class DiagnosticsSettings(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 class DiagnosticsCallback(pl.Callback):
     """Logs step-level diagnostic signals emitted by the training step."""
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, settings: DiagnosticsSettings,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        settings: DiagnosticsSettings,
+    ) -> None:
+        """Initialize the callback with the given settings."""
         super().__init__()
         self.settings = settings
 
-    def on_train_batch_end(  # --------------------------------------------------------------------
-        self, trainer: Trainer, pl_module: LightningModule, outputs: Any, batch: Any, batch_idx: int,
-    ) -> None:  # fmt: skip
+    def on_train_batch_end(  # -------------------------------------------------
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        outputs: Any,
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        """Log diagnostic signals emitted by the training step, if present."""
         if not isinstance(outputs, dict):
             return
         signals: dict | None = outputs.get("signals")
@@ -58,10 +66,20 @@ class DiagnosticsCallback(pl.Callback):
 
         level = self.settings.diagnostic_level
         prefix = self.settings.signal_prefix
-        keys = signals.keys() if level == "research" else (k for k in signals if k in STANDARD_SIGNALS)
+        keys = (
+            signals.keys()
+            if level == "research"
+            else (k for k in signals if k in STANDARD_SIGNALS)
+        )
         for key in keys:
-            pl_module.log(f"{prefix}{key}", signals[key], on_step=True, on_epoch=False, logger=True)
+            pl_module.log(
+                f"{prefix}{key}",
+                signals[key],
+                on_step=True,
+                on_epoch=False,
+                logger=True,
+            )
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["DiagnosticsSettings", "DiagnosticsCallback"]
