@@ -57,7 +57,9 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
-CONFIGURATION_PATH = os.environ.get("TEM_V1_CONFIGURATION_PATH", "config/training.tem-v1.toml")  #fmt: skip
+CONFIGURATION_PATH = os.environ.get(
+    "TEM_V1_CONFIGURATION_PATH", "config/training.tem-v1.toml"
+)
 
 
 # =============================================================================
@@ -323,7 +325,9 @@ if __name__ == "__main__":
         callbacks=callbacks_list if callbacks_list else None,
         # Lightning Trainer kwargs (extracted from config)
         accelerator=settings.trainer_accelerator,
-        strategy=resolve_trainer_strategy(settings.trainer_strategy, world_size, find_unused_parameters=True),  # fmt: skip
+        strategy=resolve_trainer_strategy(
+            settings.trainer_strategy, world_size, find_unused_parameters=True
+        ),
         devices=settings.trainer_devices,
         num_nodes=settings.trainer_num_nodes,
         precision=settings.trainer_precision,
@@ -334,7 +338,7 @@ if __name__ == "__main__":
         limit_val_batches=settings.limit_val_batches,
         log_every_n_steps=settings.log_every_n_steps,
         enable_progress_bar=settings.enable_progress_bar,
-    )  # fmt: skip
+    )
 
     # Start training.
     # - The LightningModule wraps the TEM model and defines the training loop.
@@ -343,7 +347,7 @@ if __name__ == "__main__":
         # Lightning module: training step, optimizer and schedule setup.
         model=TEMV1TrainingModel(settings.tem_config),
         # Data module: dataset + DataLoader construction.
-        datamodule=Datamodule(settings.datamodule, transform=None),  # fmt: skip
+        datamodule=Datamodule(settings.datamodule, transform=None),
         # Optional: resume training from a checkpoint.
         ckpt_path=settings.checkpoint_path,
     )

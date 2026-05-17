@@ -50,11 +50,13 @@ class HPCCommonSettings(BaseModel, extra="forbid"):
     )
     common_memory: bool = Field(
         default=False,
-        description="Whether the g-cued and x-cued memories share the same underlying store.",
+        description="Whether the g-cued and x-cued memories share the same "
+        "underlying store.",
     )
     do_sample: bool = Field(
         default=False,
-        description="Whether to sample from grounded-location beliefs or use their means.",
+        description="Whether to sample from grounded-location beliefs or use "
+        "their means.",
     )
     location: PlaceInferenceSettings = Field(
         default_factory=PlaceInferenceSettings,
@@ -76,10 +78,13 @@ class HPCState(DetachMixin):
     grounded_belief: LocationBelief
     _memory: MemoryState
 
-    def new(  # -----------------------------------------------------------------------------------
-        self, cells: list[Tensor], uncertainty: Optional[list[Tensor]], *,
+    def new(  # ---------------------------------------------------------------
+        self,
+        cells: list[Tensor],
+        uncertainty: Optional[list[Tensor]],
+        *,
         memory: Optional[MemoryState] = None,
-    ) -> "HPCState":  # fmt: skip
+    ) -> "HPCState":
         """Return a copy with updated grounded belief and optional memory.
 
         Args:
@@ -113,11 +118,14 @@ class HPCState(DetachMixin):
         """Return the cue-indexed memory entries carried by this state."""
         return self._memory
 
-    def replace_rows(  # --------------------------------------------------------------------------
-        self, flag: Tensor, fresh: "HPCState", *,
-        merge_memory_rows: Callable[[Tensor, MemoryEntry, MemoryEntry], MemoryEntry],
+    def replace_rows(  # ------------------------------------------------------
+        self,
+        flag: Tensor,
+        fresh: "HPCState",
+        *,
+        merge_fn: Callable[[Tensor, MemoryEntry, MemoryEntry], MemoryEntry],
         common_memory: bool = False,
-    ) -> "HPCState":  # fmt: skip
+    ) -> "HPCState":
         """Return a state where flagged batch rows are replaced from ``fresh``.
 
         This owner-internal helper supports module reset logic by row-wise
@@ -125,13 +133,15 @@ class HPCState(DetachMixin):
         """
         uncertainty = None
         if self.uncertainty is not None and fresh.uncertainty is not None:
-            uncertainty = utils.merge_multiscale_rows(flag, self.uncertainty, fresh.uncertainty)
+            uncertainty = utils.merge_multiscale_rows(
+                flag, self.uncertainty, fresh.uncertainty
+            )
 
-        merged_g_cued = merge_memory_rows(flag, self.memory.g_cued, fresh.memory.g_cued)
+        merged_g_cued = merge_fn(flag, self.memory.g_cued, fresh.memory.g_cued)
         if common_memory:
             merged_x_cued = merged_g_cued
         else:
-            merged_x_cued = merge_memory_rows(flag, self.memory.x_cued, fresh.memory.x_cued)
+            merged_x_cued = merge_fn(flag, self.memory.x_cued, fresh.memory.x_cued)  # fmt: skip
 
         return self.new(
             cells=utils.merge_multiscale_rows(flag, self.cells, fresh.cells),
@@ -232,10 +242,13 @@ class HPCBase(nn.Module, ABC):
     and the TEM-compatible two-phase step choreography.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: HPCCommonSettings, *,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: HPCCommonSettings,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         """Initialize the shared HPC orchestration layer.
 
         Args:
@@ -247,8 +260,12 @@ class HPCBase(nn.Module, ABC):
         self._config = config
         self._shape = list(config.shape)
         self._n_freq = len(config.shape)
-        self.place_inference = PlaceInference(self._shape, config.location, device=device, dtype=dtype)
-        self.read_composer = build_read_composer(self._shape, device=device, dtype=dtype)
+        self.place_inference = PlaceInference(
+            self._shape, config.location, device=device, dtype=dtype
+        )
+        self.read_composer = build_read_composer(
+            self._shape, device=device, dtype=dtype
+        )
 
     @property
     def config(self) -> HPCCommonSettings:
@@ -265,10 +282,14 @@ class HPCBase(nn.Module, ABC):
         """Return the number of HPC frequency modules."""
         return self._n_freq
 
-    def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int, *, memory: Optional[MemoryState] = None,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> HPCState:  # fmt: skip
+    def init_state(  # --------------------------------------------------------
+        self,
+        batch_size: int,
+        *,
+        memory: Optional[MemoryState] = None,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> HPCState:
         """Create an initial ``HPCState`` for one batch.
 
         Args:
@@ -280,14 +301,20 @@ class HPCBase(nn.Module, ABC):
         Returns:
             A fresh state whose grounded-location mean is zero-initialized.
         """
-        p_init = [torch.zeros((batch_size, n), device=device) for n in self.shape]
+        p_init = [
+            torch.zeros((batch_size, n), device=device) for n in self.shape
+        ]
         grounded_belief = LocationBelief(mean=p_init, uncertainty=None)
-        memory = memory or self.init_memory(batch_size=batch_size, device=device)
+        memory = memory or self.init_memory(
+            batch_size=batch_size, device=device
+        )
         return HPCState(grounded_belief=grounded_belief, _memory=memory)
 
-    def reset_state(  # ---------------------------------------------------------------------------
-        self, state: HPCState, reset_flag: Tensor,
-    ) -> HPCState:  # fmt: skip
+    def reset_state(  # -------------------------------------------------------
+        self,
+        state: HPCState,
+        reset_flag: Tensor,
+    ) -> HPCState:
         """Reset flagged HPC rows to a fresh episode state.
 
         Args:
@@ -303,64 +330,97 @@ class HPCBase(nn.Module, ABC):
         if not torch.any(reset_flag):
             return state
 
-        fresh = self.init_state(int(reset_flag.shape[0]), device=device, memory=None)
+        fresh = self.init_state(
+            int(reset_flag.shape[0]), device=device, memory=None
+        )
         return state.replace_rows(
             reset_flag,
             fresh,
-            merge_memory_rows=self.merge_memory_rows,
+            merge_fn=self.merge_fn,
             common_memory=self.config.common_memory,
         )
 
-    def _flatten_memory_code(  # ------------------------------------------------------------------
-        self, code: list[Tensor],
-    ) -> Tensor:  # fmt: skip
+    def _flatten_memory_code(  # ----------------------------------------------
+        self,
+        code: list[Tensor],
+    ) -> Tensor:
         """Return a flattened `(B, S)` view of a multi-scale memory-space code."""
         if len(code) != self.n_freq:
-            raise ValueError(f"Expected {self.n_freq} frequency tensors, got {len(code)}.")
+            raise ValueError(
+                f"Expected {self.n_freq} frequency tensors, got {len(code)}."
+            )
 
         batch_size: int | None = None
-        for index, (tensor, width) in enumerate(zip(code, self.shape, strict=True)):
+        for index, (tensor, width) in enumerate(
+            zip(code, self.shape, strict=True)
+        ):
             if tensor.ndim != 2:
-                raise ValueError(f"code[{index}] must be rank-2 `(B, {width})`, got shape {tuple(tensor.shape)}.")
+                raise ValueError(
+                    f"code[{index}] must be rank-2 `(B, {width})`, "
+                    f"got shape {tuple(tensor.shape)}."
+                )
             if int(tensor.shape[1]) != width:
-                raise ValueError(f"code[{index}] must have width {width}, got {int(tensor.shape[1])}.")
+                raise ValueError(
+                    f"code[{index}] must have width {width}, "
+                    f"got {int(tensor.shape[1])}."
+                )
             if batch_size is None:
                 batch_size = int(tensor.shape[0])
             elif int(tensor.shape[0]) != batch_size:
-                raise ValueError("All frequency tensors must have the same batch size.")
+                raise ValueError(
+                    "All frequency tensors must have the same batch size.",
+                )
 
         return torch.cat(code, dim=1)
 
-    def _unflatten_memory_code(  # ----------------------------------------------------------------
-        self, flat_code: Tensor,
-    ) -> list[Tensor]:  # fmt: skip
+    def _unflatten_memory_code(  # --------------------------------------------
+        self,
+        flat_code: Tensor,
+    ) -> list[Tensor]:
         """Return the multi-scale view of a flattened memory-space tensor `(B, S)`."""
         if flat_code.ndim != 2:
-            raise ValueError(f"flat_code must be rank-2 `(B, S)`, got shape {tuple(flat_code.shape)}.")
+            raise ValueError(
+                f"flat_code must be rank-2 `(B, S)`, "
+                f"got shape {tuple(flat_code.shape)}."
+            )
 
         feature_dim = sum(self.shape)
         if int(flat_code.shape[1]) != feature_dim:
-            raise ValueError(f"flat_code must have width {feature_dim}, got {int(flat_code.shape[1])}.")
+            raise ValueError(
+                f"flat_code must have width {feature_dim}, "
+                f"got {int(flat_code.shape[1])}."
+            )
 
-        return list(torch.split(flat_code, split_size_or_sections=self.shape, dim=1))
+        return list(
+            torch.split(flat_code, split_size_or_sections=self.shape, dim=1)
+        )
 
-    def init_memory(  # ---------------------------------------------------------------------------
-        self, batch_size: int, *,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> MemoryState:  # fmt: skip
+    def init_memory(  # -------------------------------------------------------
+        self,
+        batch_size: int,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> MemoryState:
         """Initialize the concrete memory state for one batch."""
         del dtype
         return self._init_memory_impl(batch_size=batch_size, device=device)
 
     @abstractmethod
-    def _init_memory_impl(  # ---------------------------------------------------------------------
-        self, batch_size: int, *, device: Optional[Device] = None,
-    ) -> MemoryState:  # fmt: skip
+    def _init_memory_impl(  # -------------------------------------------------
+        self,
+        batch_size: int,
+        *,
+        device: Optional[Device] = None,
+    ) -> MemoryState:
         """Initialize the concrete memory representation for a batch."""
 
-    def set_runtime(  # ---------------------------------------------------------------------------
-        self, *, eta: float, hebbian_decay: float,
-    ) -> None:  # fmt: skip
+    def set_runtime(  # -------------------------------------------------------
+        self,
+        *,
+        eta: float,
+        hebbian_decay: float,
+    ) -> None:
         """Apply runtime parameters required by the concrete memory system.
 
         Some implementations consume both values directly, while others ignore
@@ -369,15 +429,22 @@ class HPCBase(nn.Module, ABC):
         self._set_runtime_impl(eta=eta, hebbian_decay=hebbian_decay)
 
     @abstractmethod
-    def _set_runtime_impl(  # ---------------------------------------------------------------------
-        self, *, eta: float, hebbian_decay: float,
-    ) -> None:  # fmt: skip
+    def _set_runtime_impl(  # -------------------------------------------------
+        self,
+        *,
+        eta: float,
+        hebbian_decay: float,
+    ) -> None:
         """Apply runtime write parameters to the concrete memory system."""
 
-    def recall(  # --------------------------------------------------------------------------------
-        self, *,
-        read_cues: ReadCues, state: HPCState, role: RetrievalRole, read: MemoryRead,
-    ) -> list[Tensor]:  # fmt: skip
+    def recall(  # ------------------------------------------------------------
+        self,
+        *,
+        read_cues: ReadCues,
+        state: HPCState,
+        role: RetrievalRole,
+        read: MemoryRead,
+    ) -> list[Tensor]:
         """Retrieve a grounded-location code from the concrete memory system.
 
         The base implementation supports cue-resolved reads only. Implementations
@@ -386,20 +453,30 @@ class HPCBase(nn.Module, ABC):
         memory = state.memory.for_role(role)
         prepared_read = self.prepare_read(read_cues=read_cues, read=read)
         if not isinstance(prepared_read, PreparedCueRead):
-            raise TypeError(f"{type(self).__name__} only supports resolved read requests.")
-        recalled = self._recall_flat_impl(prepared_read.query, memory, role=role)
+            raise TypeError(
+                f"{type(self).__name__} only supports resolved read requests."
+            )
+        recalled = self._recall_flat_impl(
+            prepared_read.query, memory, role=role
+        )
         return self._unflatten_memory_code(recalled)
 
     @abstractmethod
-    def _recall_flat_impl(  # ---------------------------------------------------------------------
-        self, query: Tensor, memory: MemoryEntry, *, role: RetrievalRole,
-    ) -> Tensor:  # fmt: skip
+    def _recall_flat_impl(  # -------------------------------------------------
+        self,
+        query: Tensor,
+        memory: MemoryEntry,
+        *,
+        role: RetrievalRole,
+    ) -> Tensor:
         """Return a flattened recalled code with shape ``(B, S)``."""
 
-    def update(  # --------------------------------------------------------------------------------
-        self, key: list[Tensor], write: WritePayload,
+    def update(  # ------------------------------------------------------------
+        self,
+        key: list[Tensor],
+        write: WritePayload,
         state: HPCState,
-    ) -> HPCState:  # fmt: skip
+    ) -> HPCState:
         """Write one TEM step into the concrete memory state.
 
         Args:
@@ -410,48 +487,68 @@ class HPCBase(nn.Module, ABC):
         Returns:
             A new ``HPCState`` with unchanged grounded belief and updated memory.
         """
-        named_writes = {name: self._flatten_memory_code(value) for name, value in write.named_writes.items()}
+        named_writes = {
+            name: self._flatten_memory_code(value)
+            for name, value in write.named_writes.items()
+        }
         memory = self._update_memory_impl(
             state.memory,
             self._flatten_memory_code(key),
             self._flatten_memory_code(write.generative),
-            None if write.inference is None else self._flatten_memory_code(write.inference),
+            (
+                None
+                if write.inference is None
+                else self._flatten_memory_code(write.inference)
+            ),
             named_writes,
         )
         return HPCState(state.grounded_belief, _memory=memory)
 
     @abstractmethod
-    def _update_memory_impl(  # -------------------------------------------------------------------
-        self, memory: MemoryState, key: Tensor,
-        g_value: Tensor, x_value: Optional[Tensor], named_writes: dict[str, Tensor],
-    ) -> MemoryState:  # fmt: skip
+    def _update_memory_impl(  # -----------------------------------------------
+        self,
+        memory: MemoryState,
+        key: Tensor,
+        g_value: Tensor,
+        x_value: Optional[Tensor],
+        named_writes: dict[str, Tensor],
+    ) -> MemoryState:
         """Write one TEM step into the concrete memory state.
 
         All tensors are flattened memory-space tensors with shape ``(B, S)``.
         """
 
-    def merge_memory_rows(  # ---------------------------------------------------------------------
-        self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
-    ) -> MemoryEntry:  # fmt: skip
+    def merge_fn(  # -------------------------------------------------
+        self,
+        flag: Tensor,
+        current: MemoryEntry,
+        fresh: MemoryEntry,
+    ) -> MemoryEntry:
         """Merge concrete memory rows during partial reset."""
         return self._merge_memory_rows_impl(flag, current, fresh)
 
     @abstractmethod
-    def _merge_memory_rows_impl(  # ---------------------------------------------------------------
-        self, flag: Tensor, current: MemoryEntry, fresh: MemoryEntry,
-    ) -> MemoryEntry:  # fmt: skip
+    def _merge_memory_rows_impl(  # -------------------------------------------
+        self,
+        flag: Tensor,
+        current: MemoryEntry,
+        fresh: MemoryEntry,
+    ) -> MemoryEntry:
         """Merge representation-specific memory rows during partial reset."""
 
-    def prepare_read(  # -------------------------------------------------------------------------
-        self, *,
-        read_cues: ReadCues, read: MemoryRead,
-    ) -> PreparedRead:  # fmt: skip
+    def prepare_read(  # ------------------------------------------------------
+        self,
+        *,
+        read_cues: ReadCues,
+        read: MemoryRead,
+    ) -> PreparedRead:
         """Compose structured retrieval evidence before backend-specific recall."""
         return self.read_composer.compose(read_cues=read_cues, read=read)
 
-    def read_sensory(  # -------------------------------------------------------------------------
-        self, sensory_read: SensoryRead,
-    ) -> SensoryReadResult:  # fmt: skip
+    def read_sensory(  # ------------------------------------------------------
+        self,
+        sensory_read: SensoryRead,
+    ) -> SensoryReadResult:
         """Resolve the phase-1 observation-cued recall used by MEC inference."""
         sensory_recall = None
         if sensory_read.enable_sensory_recall:
@@ -461,11 +558,14 @@ class HPCBase(nn.Module, ABC):
                 role="inference",
                 read=sensory_read.read,
             )
-        return SensoryReadResult(read_cues=sensory_read.read_cues, recall=sensory_recall)
+        return SensoryReadResult(
+            read_cues=sensory_read.read_cues, recall=sensory_recall
+        )
 
-    def transition(  # ---------------------------------------------------------------------------
-        self, transition: HPCTransition,
-    ) -> HPCTransitionResult:  # fmt: skip
+    def transition(  # --------------------------------------------------------
+        self,
+        transition: HPCTransition,
+    ) -> HPCTransitionResult:
         """Run phase 2 of the TEM-compatible HPC transition.
 
         Phase 2 recalls place codes from prior and posterior structural cues,
@@ -488,8 +588,16 @@ class HPCBase(nn.Module, ABC):
 
         place_retrieved, state = self.generative(grid_posterior_recall, state)
         place_prior, state = self.generative(grid_prior_recall, state)
-        place_post, state = self.inference(transition.inference_sensory_query, transition.inference_structural_query, state)
-        payload = WritePayload(generative=place_retrieved, inference=transition.sensory.recall, named_writes=transition.named_writes)
+        place_post, state = self.inference(
+            transition.inference_sensory_query,
+            transition.inference_structural_query,
+            state,
+        )
+        payload = WritePayload(
+            generative=place_retrieved,
+            inference=transition.sensory.recall,
+            named_writes=transition.named_writes,
+        )
         state = self.update(place_post, payload, state)
 
         return HPCTransitionResult(
@@ -502,29 +610,48 @@ class HPCBase(nn.Module, ABC):
             state=state,
         )
 
-    def generative(  # ----------------------------------------------------------------------------
-        self, p_g: list[Tensor], state: HPCState,
-    ) -> tuple[list[Tensor], HPCState]:  # fmt: skip
+    def generative(  # --------------------------------------------------------
+        self,
+        p_g: list[Tensor],
+        state: HPCState,
+    ) -> tuple[list[Tensor], HPCState]:
         """Return a generative grounded-location sample or mean.
 
         The provided ``p_g`` is interpreted as the mean of a grounded-location
         belief whose uncertainty is inherited from the current state.
         """
         transition = LocationBelief(mean=p_g, uncertainty=state.uncertainty)
-        p_gen = utils.sample_diag_gaussian(transition) if self.config.do_sample else transition.mean
+        p_gen = (
+            utils.sample_diag_gaussian(transition)
+            if self.config.do_sample
+            else transition.mean
+        )
         return p_gen, state.new(p_gen, state.uncertainty)
 
-    def inference(  # -----------------------------------------------------------------------------
-        self, x_: list[Tensor], g_: list[Tensor], state: HPCState,
-    ) -> tuple[list[Tensor], HPCState]:  # fmt: skip
+    def inference(  # ---------------------------------------------------------
+        self,
+        x_: list[Tensor],
+        g_: list[Tensor],
+        state: HPCState,
+    ) -> tuple[list[Tensor], HPCState]:
         """Infer grounded location from projected sensory and structural cues."""
         transition = self.place_inference(x_, g_)
-        p_inf = utils.sample_diag_gaussian(transition) if self.config.do_sample else transition.mean
+        p_inf = (
+            utils.sample_diag_gaussian(transition)
+            if self.config.do_sample
+            else transition.mean
+        )
         return p_inf, state.new(p_inf, transition.uncertainty)
 
 
 # =============================================================================
 __all__ = [
-    "HPCCommonSettings", "SensoryRead", "SensoryReadResult", "HPCBase",
-    "HPCState", "HPCTransition", "HPCTransitionResult", "WritePayload",
-]  # fmt: skip
+    "HPCCommonSettings",
+    "SensoryRead",
+    "SensoryReadResult",
+    "HPCBase",
+    "HPCState",
+    "HPCTransition",
+    "HPCTransitionResult",
+    "WritePayload",
+]

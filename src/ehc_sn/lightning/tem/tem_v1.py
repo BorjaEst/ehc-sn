@@ -100,13 +100,19 @@ class TEMV1ModelConfig(BaseModel, extra="forbid"):
 
 # =============================================================================
 class TEMV1TrainingModel(L.LightningModule):
-    """ """
+    """LightningModule encapsulating the TEM v1 model, training and evaluation
+    runtimes, and optimization logic for training on arena replay data.
+    """
 
     def __init__(  # ----------------------------------------------------------
         self,
         config: TEMV1ModelConfig,
     ) -> None:
-        """ """
+        """Initialize the TEM v1 training model with the given configuration,
+        setting up the shared model, adapter, and placeholders for the
+        train/eval runtimes and objectives which will be lazily initialized on
+        setup.
+        """
         super().__init__()
         model_settings = ModelSettingsV1.from_config(config.model_config_path)
         self.model = TEMModelV1(model_settings)
@@ -258,7 +264,6 @@ class TEMV1TrainingModel(L.LightningModule):
         sch_sup = CosineAnnealingLRWithWarmup(
             opt_sup, total_steps, self.config.scheduler
         )
-        # sch_sup = ExponentialLR(opt_sup, total_steps, self.config.scheduler)
 
         return [opt_sup], [sch_sup]
 

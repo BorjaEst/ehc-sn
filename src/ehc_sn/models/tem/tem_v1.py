@@ -61,23 +61,33 @@ class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
     transition_action_count: int = Field(
         ...,
         ge=1,
-        description="Discrete actions to support for path integration in the MEC module.",
+        description="Discrete actions to support for path integration in the "
+        "MEC module.",
     )
     f_initial: list[float] = Field(
         default_factory=lambda: [0.99, 0.3, 0.09, 0.5, 0.4],
         min_length=1,
-        description="Initial feature frequencies resolved across MEC and HPC modules.",
+        description="Initial feature frequencies resolved across MEC and "
+        "HPC modules.",
     )
 
     hpc: HPCAttractorSettings = Field(
-        ..., description="Settings for the HPC attractor module."
+        ...,
+        description="Settings for the HPC attractor module.",
     )
-    lec: LECSettings = Field(..., description="Settings for the LEC module.")
-    mec: MECSettings = Field(..., description="Settings for the MEC module.")
+    lec: LECSettings = Field(
+        ...,
+        description="Settings for the LEC module.",
+    )
+    mec: MECSettings = Field(
+        ...,
+        description="Settings for the MEC module.",
+    )
 
     projections: TEMProjectionSettings = Field(
         ...,
-        description="Settings for the inter-region projection modules connecting MEC and LEC to HPC.",
+        description="Settings for the inter-region projection modules "
+        "connecting MEC and LEC to HPC.",
     )
 
     hpc: HPCAttractorSettings = Field(
@@ -86,20 +96,24 @@ class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
     )
     lec: LECSettings = Field(
         ...,
-        description="Settings for the LEC module, including feature filtering parameters.",
+        description="Settings for the LEC module, including feature filtering "
+        "parameters.",
     )
     mec: MECSettings = Field(
         ...,
-        description="Settings for the MEC module, including path integration and correction parameters.",
+        description="Settings for the MEC module, including path integration "
+        "and correction parameters.",
     )
 
     projections: TEMProjectionSettings = Field(
         ...,
-        description="Settings for the inter-region projection modules connecting MEC and LEC to HPC.",
+        description="Settings for the inter-region projection modules "
+        "connecting MEC and LEC to HPC.",
     )
     enable_sensory_recall: bool = Field(
         default=True,
-        description="Whether the HPC should perform sensory-cued recall during the phase-1 TEM step.",
+        description="Whether the HPC should perform sensory-cued recall "
+        "during the phase-1 TEM step.",
     )
 
 
@@ -136,14 +150,11 @@ class TEMStateV1(DetachMixin):
 
 # =============================================================================
 class TEMModelV1(nn.Module):
-    """ """
+    """TEM v1 backbone with a TEM v1-compatible forward contract."""
 
     def __init__(  # ----------------------------------------------------------
         self,
         config: ModelSettingsV1,
-        *,
-        device: Optional[Device] = None,
-        dtype: Optional[Dtype] = None,
     ) -> None:
         """Construct the TEM backbone from the resolved TEM v1 model settings."""
         super().__init__()
@@ -153,9 +164,9 @@ class TEMModelV1(nn.Module):
         f_initial = config.f_initial
 
         # Entorhinal Hippocampal Circuit components
-        self.hpc = HPCAttractor(n_freq, f_initial, config.hpc, device=device, dtype=dtype)  # fmt: skip
-        self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec, device=device, dtype=dtype)  # fmt: skip
-        self.lec = LECModel(f_initial, config.lec, device=device, dtype=dtype)
+        self.hpc = HPCAttractor(n_freq, f_initial, config.hpc)
+        self.mec = MECModel(n_actions, config.hpc.shape, f_initial, config.mec)
+        self.lec = LECModel(f_initial, config.lec)
 
         # Projection modules
         self.projections = ProjectionBundle.from_modules(
@@ -232,7 +243,7 @@ class TEMModelV1(nn.Module):
         self.mec.set_runtime(p2g_uncertainty_offset=p2g_uncertainty_offset)
         self.hpc.set_runtime(eta=eta, hebbian_decay=hebbian_decay)
 
-    def _sensory_correction_error(
+    def _sensory_correction_error(  # -----------------------------------------
         self,
         sensory_features: MultiScaleCode,
         p_sensory_read: Optional[list[Tensor]],
@@ -277,7 +288,9 @@ class TEMModelV1(nn.Module):
             state = replace(state)
 
         # 1. Compute the grid prior by path integration:
-        g_prior, state.mec = self.mec.generative(previous_action, episode_start, landmark_id, state.mec)  # fmt: skip
+        g_prior, state.mec = self.mec.generative(
+            previous_action, episode_start, landmark_id, state.mec
+        )
         g_query_prior = self.mec_to_hpc(g_prior)
 
         # 2. Read sensory-cued place from the previous memory state.

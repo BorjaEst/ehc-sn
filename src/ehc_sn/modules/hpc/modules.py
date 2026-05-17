@@ -253,6 +253,7 @@ class HPCAttention(HPCBase):
         return MemoryState(g_cued=g_cued, x_cued=x_cued)
 
     def _set_runtime_impl(  # -------------------------------------------------
+        self,
         *,
         eta: float,
         hebbian_decay: float,

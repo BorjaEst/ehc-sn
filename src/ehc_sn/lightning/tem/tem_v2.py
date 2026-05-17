@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from itertools import repeat
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import lightning as L
-from pydantic import BaseModel, Field, model_validator
-from torch.optim import Optimizer
+from pydantic import AliasChoices, BaseModel, Field
+from torch.optim import Adam, Optimizer
 
 from ehc_sn.adapters.arena.tem import (
     ArenaTEMAdapterSettings,
@@ -35,7 +34,7 @@ from ehc_sn.metrics.routes import (
     TEM_PRIMARY_VAL_ROUTE_KEY,
     TEM_STEP_ROUTES,
 )
-from ehc_sn.models.tem.tem_v2 import Batch, ModelSettingsV2, TEMModelV2
+from ehc_sn.models.tem.tem_v2 import ModelSettingsV2, TEMModelV2
 from ehc_sn.objectives import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
@@ -51,30 +50,24 @@ from ehc_sn.training.schedules import (
     SchedulerConfig,
     SequentialLR,
 )
+from ehc_sn.types import Batch
 
-# Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
+# Community-standard map-style batch: plain dict returned by DataLoader.
 TEM_STATIC_REQUIRED_KEYS = ("topology", "observations", "mask_valid")
 TEM_STATIC_OPTIONAL_KEYS = ("regions", "start", "goals", "landmarks")
+TEM_V2_NONFINITE_DEBUG_ENV = "EHC_TEM_V2_FAILFAST_NONFINITE"
+TEM_NONFINITE_DETAIL_LIMIT = 12
 
 
 # =============================================================================
-# =============================================================================
-class ModelConfig_TEM_V2(BaseModel, extra="forbid"):
+class TEMV2ModelConfig(BaseModel, extra="forbid"):
     """Top-level TEM v2 training config."""
 
-    # -------------------------------------------------------------------------
-    # Model architecture
     model_config_path: Path = Field(
         ...,
-        description="Path to the model configuration TOML file that specifies the TEM v2 architecture.",
-    )
-    environment: None = Field(
-        default=None,
         description=(
-            "Must be None. TEM live environment mode is not implemented; "
-            "the current baseline is arena replay only. "
-            "To add live mode, implement the task environment in tasks/arena/environment.py "
-            "and wire a new controller path in the adapter layer."
+            "Path to the model configuration TOML file that specifies the TEM "
+            "v2 architecture."
         ),
     )
     adapter: ArenaTEMAdapterSettings = Field(
@@ -87,58 +80,45 @@ class ModelConfig_TEM_V2(BaseModel, extra="forbid"):
     )
     loss: TEMObjectiveConfig = Field(
         ...,
-        description="TEM loss-head configuration.",
+        validation_alias=AliasChoices("loss", "objective"),
+        description="",
     )
 
-    # -------------------------------------------------------------------------
-    # Optimizers & scheduling
     optimizer: AdamConfig = Field(
         default_factory=AdamConfig,
-        description="Optimizer configuration for TEM v2 training.",
+        description="",
     )
     scheduler: SchedulerConfig = Field(
         default_factory=SchedulerConfig,
-        description="Learning-rate scheduler configuration.",
+        description="",
     )
     runtime: RuntimeConfig = Field(
         default_factory=RuntimeConfig,
-        description="Runtime schedules applied during training.",
+        description="",
     )
-
-    # -------------------------------------------------------------------------
-    # Extra
-    global_batch_size: int = Field(
-        ...,
-        description="Global batch size across all devices.",
-    )  # TODO: consider moving to BufferSettings or similar
-
-    @model_validator(mode="after")
-    def validate_environment_contract(self) -> "ModelConfig_TEM_V2":
-        if self.environment is not None:
-            raise ValueError(
-                "TEM live environment mode is not implemented. "
-                "Set environment = null / omit the [environment] section to use arena replay mode."
-            )
-        return self
 
 
 # =============================================================================
-class TrainingModel(L.LightningModule):
-    """Lightning wrapper for TEM v2 training and evaluation."""
+class TEMV2TrainingModel(L.LightningModule):
+    """LightningModule encapsulating the TEM v2 model, training and evaluation
+    runtimes, and optimization logic for training on arena replay data.
+    """
 
     def __init__(  # ----------------------------------------------------------
         self,
-        config: ModelConfig_TEM_V2,
+        config: TEMV2ModelConfig,
     ) -> None:
-        """Create the Lightning module from a parsed TEM v2 training config."""
+        """Initialize the TEM v2 training model with the given configuration,
+        setting up the shared model, adapter, and placeholders for the
+        train/eval runtimes and objectives which will be lazily initialized on
+        setup.
+        """
         super().__init__()
         model_settings = ModelSettingsV2.from_config(config.model_config_path)
         self.model = TEMModelV2(model_settings)
         self.adapter = ArenaTEMV2BridgeAdapter(self.model, config.adapter)
-        self.train_environment: None = None
         self.train_controller: ReplayTrajectoryController | None = None
         self.train_objective: TEMObjective | None = None
-        self.eval_environment: None = None
         self.eval_controller: ReplayTrajectoryController | None = None
         self.eval_objective: TEMObjective | None = None
         self._config = config
@@ -162,77 +142,82 @@ class TrainingModel(L.LightningModule):
         self._train_batch_assembler: PartialResetBatchAssembler | None = None
 
     @property
-    def config(self) -> ModelConfig_TEM_V2:
+    def config(self) -> TEMV2ModelConfig:
         """Return the parsed configuration used by this LightningModule."""
         return self._config
 
-    def _local_batch_size(self) -> int:
-        """Return the per-rank batch size used by train and evaluation runtimes."""
-        trainer = getattr(self, "_trainer", None)
-        world_size = max(getattr(trainer, "world_size", 1), 1)
-        return max(self.config.global_batch_size // world_size, 1)
-
-    def _train_chunk_steps(self) -> int:
-        """Return the TEM TBPTT chunk length used for one optimizer update."""
+    def _train_chunk_steps(  # ------------------------------------------------
+        self,
+    ) -> int:
+        """Return the TBPTT chunk length used for one optimizer update."""
+        if self.config.controller.window_size is not None:
+            return self.config.controller.window_size
         return self.config.runtime.sequence.tbptt_steps
 
     def _build_runtime(  # ----------------------------------------------------
         self,
-        *,
-        batch_size: int,
-    ) -> tuple[None, ReplayTrajectoryController, TEMObjective]:
+    ) -> tuple[ReplayTrajectoryController, TEMObjective]:
         """Construct one phase-local TEM arena replay runtime around the shared model."""
         replay = ArenaReplayCapability()
         controller = ReplayTrajectoryController(
-            self.adapter, self.config.controller, runtime=replay
+            backbone=self.adapter,
+            config=self.config.controller,
+            runtime=replay,
         )
         return (
-            None,
             controller,
             TEMObjective(self.config.loss, task_binding=ArenaTEMTaskBinding()),
         )
 
-    def _ensure_train_runtime(self) -> None:
+    def _ensure_train_runtime(  # ---------------------------------------------
+        self,
+    ) -> None:
         """Initialize the training runtime once per process."""
         if (
             self.train_controller is not None
             and self.train_objective is not None
         ):
             return
-        self.train_environment, self.train_controller, self.train_objective = (
-            self._build_runtime(batch_size=self._local_batch_size())
-        )
+        self.train_controller, self.train_objective = self._build_runtime()
 
-    def _ensure_eval_runtime(self) -> None:
+    def _ensure_eval_runtime(  # ----------------------------------------------
+        self,
+    ) -> None:
         """Initialize the evaluation runtime once per process."""
         if self.eval_controller is not None and self.eval_objective is not None:
             return
-        self.eval_environment, self.eval_controller, self.eval_objective = (
-            self._build_runtime(batch_size=self._local_batch_size())
-        )
+        self.eval_controller, self.eval_objective = self._build_runtime()
 
-    def _require_train_controller(self) -> ReplayTrajectoryController:
+    def _require_train_controller(  # -----------------------------------------
+        self,
+    ) -> ReplayTrajectoryController:
         """Return the training controller, initializing the train runtime if needed."""
         self._ensure_train_runtime()
         if self.train_controller is None:
             raise RuntimeError("TEM training runtime is not initialized.")
         return self.train_controller
 
-    def _require_train_objective(self) -> TEMObjective:
+    def _require_train_objective(  # ------------------------------------------
+        self,
+    ) -> TEMObjective:
         """Return the training objective, initializing the train runtime if needed."""
         self._ensure_train_runtime()
         if self.train_objective is None:
             raise RuntimeError("TEM training runtime is not initialized.")
         return self.train_objective
 
-    def _require_eval_controller(self) -> ReplayTrajectoryController:
+    def _require_eval_controller(  # ------------------------------------------
+        self,
+    ) -> ReplayTrajectoryController:
         """Return the evaluation controller, initializing the eval runtime if needed."""
         self._ensure_eval_runtime()
         if self.eval_controller is None:
             raise RuntimeError("TEM evaluation runtime is not initialized.")
         return self.eval_controller
 
-    def _require_eval_objective(self) -> TEMObjective:
+    def _require_eval_objective(  # -------------------------------------------
+        self,
+    ) -> TEMObjective:
         """Return the evaluation objective, initializing the eval runtime if needed."""
         self._ensure_eval_runtime()
         if self.eval_objective is None:
@@ -247,15 +232,12 @@ class TrainingModel(L.LightningModule):
         if self._train_batch_assembler is not None:
             return self._train_batch_assembler
 
-        keys = (
-            infer_arena_replay_batch_keys(batch)
-            if self.config.environment is None
-            else infer_tem_static_batch_keys(batch)
-        )
-        capacity_rows = 4 * self.config.global_batch_size
+        keys = infer_arena_replay_batch_keys(batch)
+        capacity_rows = 4 * batch_size_from_arena_batch(batch)
         self._train_buffer = FifoBuffer(capacity_rows, keys, pin_memory=True)
         self._train_batch_assembler = PartialResetBatchAssembler(
-            buffer=self._train_buffer, keys=keys
+            buffer=self._train_buffer,
+            keys=keys,
         )
         return self._train_batch_assembler
 
@@ -298,7 +280,8 @@ class TrainingModel(L.LightningModule):
         )
 
         if log_values:
-            self.log( "train/runtime/eta", runtime.eta,
+            self.log(
+                "train/runtime/eta", runtime.eta,
                 on_step=True, on_epoch=False, logger=True,
             )  # fmt: skip
             self.log(
@@ -319,7 +302,11 @@ class TrainingModel(L.LightningModule):
     def on_train_epoch_start(  # ----------------------------------------------
         self,
     ) -> None:
-        """Reset training carry and metric state at the start of each epoch."""
+        """
+        Reset the partial-reset carry and buffer at the start of each training
+        epoch to prevent cross-epoch state leakage. Metrics are also reset here
+        to align with epoch-level logging.
+        """
         self._train_carry = None
         if self._train_buffer is not None:
             self._train_buffer.clear()
@@ -328,13 +315,15 @@ class TrainingModel(L.LightningModule):
     def on_validation_epoch_start(  # -----------------------------------------
         self,
     ) -> None:
-        """Reset validation metrics at the start of each validation epoch."""
+        """
+        Reset the evaluation metrics at the start of each validation epoch to
+        ensure clean aggregation of episode-level metrics across the validation set.
+        Validation runtime is not reset here since it is resolved dynamically
+        at each step from the global step count.
+        """
         self.val_metrics.reset()
 
-    def _validation_seed(  # --------------------------------------------------
-        self,
-        batch_idx: int,
-    ) -> int:
+    def _validation_seed(self, batch_idx: int) -> int:
         """Return the explicit evaluation seed for one validation batch."""
         seed = self.config.runtime.validation.seed
         if seed is None:
@@ -343,18 +332,17 @@ class TrainingModel(L.LightningModule):
             )
         return int(seed) + int(batch_idx)
 
-    def training_step(  # -----------------------------------------------------
+    def training_step(  # ------------------------------------------------------
         self,
         batch: Batch,
         batch_idx: int,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         """Run one TEM chunked-TBPTT optimizer update through the recurrent runner."""
         runtime = self._apply_runtime(self.global_step, log_values=True)
         train_controller = self._require_train_controller()
         train_objective = self._require_train_objective()
         batch_assembler = self._ensure_train_batch_assembler(batch)
 
-        # Initialize carry/state on the first batch
         if self._train_carry is None:
             self._train_carry = train_controller.initial_state(batch)
 
@@ -375,30 +363,45 @@ class TrainingModel(L.LightningModule):
             metric_routes=TEM_STEP_ROUTES,
             objective_options=objective_options,
         )
-        self._train_carry = evaluation.execution.final_carry.detach()
-
+        next_carry = evaluation.execution.final_carry.detach()
+        self._train_carry = next_carry
         loss = evaluation.loss
         loss = (
             loss / self._train_chunk_steps()
-        )  # Average loss across the chunk for smoother gradients.
+        )  # Further normalize by chunk length for stability.
 
         optimizers = self.optimizers()
-        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
+        optimizer_handles = (
+            list(optimizers) if isinstance(optimizers, list) else [optimizers]
+        )
+        for opt in optimizer_handles:
             opt.zero_grad(set_to_none=True)  # type: ignore
 
         self.manual_backward(loss)
 
-        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
+        for opt in optimizer_handles:
             opt.step()  # type: ignore
 
         scheduler = self.lr_schedulers()
         for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
             sch.step()  # type: ignore
 
+        # Commit detached carry so the next chunk resumes from where this one ended.
+        self._train_carry = evaluation.execution.final_carry.detach()
+        final_carry = evaluation.execution.final_carry
+
         # Log the accumulated chunk loss to TensorBoard.
         self.log(
             "train/loss", loss.detach(),
             on_step=True, on_epoch=False, prog_bar=True, logger=True,
+        )  # fmt: skip
+        self.log(
+            "train/fit_path/halted_fraction", final_carry.halted.float().mean(),
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
+        self.log(
+            "train/fit_path/max_cursor", final_carry.cursor.max().float(),
+            on_step=True, on_epoch=False, logger=True,
         )  # fmt: skip
 
         return {
@@ -406,11 +409,11 @@ class TrainingModel(L.LightningModule):
             "signals": evaluation.last_step.outputs.signals,
         }
 
-    def validation_step(  # -----------------------------------------------------------------------
+    def validation_step(  # ---------------------------------------------------
         self,
         batch: Batch,
         batch_idx: int,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         """Run a full TEM rollout through the recurrent runner and trace observer."""
         runtime = self._apply_runtime(self.global_step, log_values=False)
         eval_controller = self._require_eval_controller()
@@ -433,28 +436,13 @@ class TrainingModel(L.LightningModule):
             objective_options=objective_options,
         )
         update_metric_collection_from_evaluated_chunk(
-            self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES
+            collection=self.val_metrics,
+            evaluated=evaluation.evaluated,
+            routes=TEM_EPISODE_ROUTES,
         )
+
+        return {}
 
 
 # =============================================================================
-def infer_tem_static_batch_keys(  # -------------------------------------------
-    batch: Batch,
-) -> tuple[str, ...]:
-    """Return the static maze keys that must move together through partial reset."""
-    missing = [key for key in TEM_STATIC_REQUIRED_KEYS if key not in batch]
-    if missing:
-        raise KeyError(
-            f"TEM batch is missing required static maze keys: {', '.join(missing)}."
-        )
-    return TEM_STATIC_REQUIRED_KEYS + tuple(
-        key for key in TEM_STATIC_OPTIONAL_KEYS if key in batch
-    )
-
-
-# =============================================================================
-def batch_size_from_static_maze_batch(  # -------------------------------------
-    batch: Batch,
-) -> int:
-    """Return the leading batch dimension from the required TEM maze tensor schema."""
-    return int(batch[TEM_STATIC_REQUIRED_KEYS[0]].shape[0])
+__all__ = ["TEMV2ModelConfig", "TEMV2TrainingModel"]
