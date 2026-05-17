@@ -7,7 +7,7 @@ from typing import Iterable, Sequence
 import numpy as np
 from matplotlib.colors import Normalize
 
-from ehc_sn.rollouts.analysis import aggregate_rate_map
+from ehc_sn.figures.utils.spatial import aggregate_rate_map
 
 
 def build_shared_norm(arrays: Iterable[np.ndarray]) -> Normalize:

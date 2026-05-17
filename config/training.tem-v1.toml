@@ -67,7 +67,7 @@ diagnostic_level     = "standard"
     offset_max       = 10000.0
 
 [runtime.sequence]
-    tbptt_steps = 25
+    tbptt_steps = 75
 
 [runtime.validation]
     hard_max_rollout_steps = 1000

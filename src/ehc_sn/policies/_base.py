@@ -13,7 +13,7 @@ from typing import Any, Protocol
 from torch import Tensor
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class PolicyInput:
     """Typed rollout-state view consumed by action policies.
@@ -41,7 +41,7 @@ class PolicyInput:
     metadata: dict[str, Any] | None = None
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class PolicyDecision:
     """Action-selection result returned by a policy.
@@ -63,15 +63,18 @@ class PolicyDecision:
     diagnostics: dict[str, Any] | None = None
 
 
-# =================================================================================================
+# =============================================================================
 class ActionPolicy(Protocol):
     """Public protocol for reusable action-selection policies."""
 
-    def __call__(  # ------------------------------------------------------------------------------
-        self, policy_input: PolicyInput, *, explore: bool = True,
-    ) -> PolicyDecision:  # fmt: skip
+    def __call__(  # ----------------------------------------------------------
+        self,
+        policy_input: PolicyInput,
+        *,
+        explore: bool = True,
+    ) -> PolicyDecision:
         """Select an action from a typed rollout-state view."""
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["ActionPolicy", "PolicyDecision", "PolicyInput"]

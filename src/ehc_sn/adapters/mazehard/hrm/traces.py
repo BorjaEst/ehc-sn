@@ -28,9 +28,9 @@ from ehc_sn.adapters.mazehard.hrm.core import O_ID
 from ehc_sn.traces import TraceField, TraceValue
 from ehc_sn.types import Batch
 
-# =================================================================================================
+# =============================================================================
 # Minimal typed context for MazeHard+HRM ACT trace getters
-# =================================================================================================
+# =============================================================================
 
 
 class _MazeHardTaskLogits(Protocol):
@@ -66,9 +66,9 @@ class _MazeHardHRMActorCriticTraceContext(Protocol):
     outputs: _MazeHardHRMActorCriticTraceOutputs
 
 
-# =================================================================================================
+# =============================================================================
 # Getter function
-# =================================================================================================
+# =============================================================================
 
 
 def _solution_overlay_from_task_logits(task_logits: Tensor) -> TraceValue:
@@ -77,16 +77,22 @@ def _solution_overlay_from_task_logits(task_logits: Tensor) -> TraceValue:
     return (pred == O_ID).to(torch.uint8)
 
 
-def _get_maze_hard_solution_overlay_act(ctx: _MazeHardHRMACTTraceContext) -> TraceValue:
+def _get_maze_hard_solution_overlay_act(
+    ctx: _MazeHardHRMACTTraceContext,
+) -> TraceValue:
     """Read MazeHard solution-overlay traces from ACT backbone task logits."""
-    return _solution_overlay_from_task_logits(ctx.outputs.backbone_output.task.task_logits)
+    return _solution_overlay_from_task_logits(
+        ctx.outputs.backbone_output.task.task_logits
+    )
 
 
 def _get_maze_hard_solution_overlay_actor_critic(
     ctx: _MazeHardHRMActorCriticTraceContext,
 ) -> TraceValue:
     """Read MazeHard solution-overlay traces from actor-critic task output logits."""
-    return _solution_overlay_from_task_logits(ctx.outputs.task_output.task_logits)
+    return _solution_overlay_from_task_logits(
+        ctx.outputs.task_output.task_logits
+    )
 
 
 def build_mazehard_hrm_trace_meta(batch: Batch) -> dict[str, object]:
@@ -99,26 +105,30 @@ def build_mazehard_hrm_trace_meta(batch: Batch) -> dict[str, object]:
     }
 
 
-# =================================================================================================
+# =============================================================================
 # Named field objects
-# =================================================================================================
+# =============================================================================
 
 MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY = TraceField(
     name="pred/solution_overlay",
     get=_get_maze_hard_solution_overlay_act,
 )
 
-MAZE_HARD_HRM_ACT_TRACE_FIELDS: tuple[TraceField, ...] = (MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY,)
+MAZE_HARD_HRM_ACT_TRACE_FIELDS: tuple[TraceField, ...] = (
+    MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY,
+)
 
 _MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC = TraceField(
     name="pred/solution_overlay",
     get=_get_maze_hard_solution_overlay_actor_critic,
 )
 
-MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS: tuple[TraceField, ...] = (_MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC,)
+MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS: tuple[TraceField, ...] = (
+    _MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC,
+)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "build_mazehard_hrm_trace_meta",
     "MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS",

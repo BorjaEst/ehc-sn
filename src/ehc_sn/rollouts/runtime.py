@@ -16,7 +16,7 @@ from torch import Tensor
 from ehc_sn.types import Batch
 
 
-# =================================================================================================
+# =============================================================================
 class StopReason(str, Enum):
     """Canonical reasons a runner can stop normal execution."""
 
@@ -26,17 +26,26 @@ class StopReason(str, Enum):
     STEP_LIMIT_REACHED = "step_limit_reached"
 
 
-# =================================================================================================
+# =============================================================================
 class ExecutionHaltError(RuntimeError):
     """Raised when a runner hits a hard execution limit before halting cleanly."""
 
-    def __init__(self, *, hard_max_rollout_steps: int, executed_steps: int) -> None:
-        super().__init__(f"Runner exceeded hard rollout step limit {hard_max_rollout_steps} after {executed_steps} executed steps.")
+    def __init__(  # ----------------------------------------------------------
+        self,
+        *,
+        hard_max_rollout_steps: int,
+        executed_steps: int,
+    ) -> None:
+        """Initialize the error with the hard limit and executed step count."""
+        super().__init__(
+            f"Runner exceeded hard rollout step limit {hard_max_rollout_steps} "
+            f"after {executed_steps} executed steps."
+        )
         self.hard_max_rollout_steps = hard_max_rollout_steps
         self.executed_steps = executed_steps
 
 
-# =================================================================================================
+# =============================================================================
 class HaltedCarry(Protocol):
     """Minimal carry surface required by rollout sources.
 
@@ -53,12 +62,13 @@ CarryT = TypeVar("CarryT", bound=HaltedCarry)
 ControllerOutputT = TypeVar("ControllerOutputT")
 
 
-# =================================================================================================
+# =============================================================================
 class ObjectiveStepOutput(Protocol):
     """Minimal scored-step output exposed outside objective modules."""
 
     @property
-    def loss(self) -> Tensor: ...
+    def loss(self) -> Tensor:
+        """Return the scalar loss tensor for this step."""
 
     metrics: object
     signals: Mapping[str, object]
@@ -67,7 +77,7 @@ class ObjectiveStepOutput(Protocol):
 ScoredOutputT = TypeVar("ScoredOutputT", bound=ObjectiveStepOutput)
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class CarrySnapshot:
     """ """
@@ -80,7 +90,7 @@ class CarrySnapshot:
     env_td: Any = None
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class StepRecord(Generic[ControllerOutputT]):
     """Executed controller step.
@@ -119,7 +129,7 @@ class StepRecord(Generic[ControllerOutputT]):
         return self.snapshot
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class RolloutExecution(Generic[CarryT]):
     """Recordless execution summary returned when a runner skips capture."""
@@ -135,7 +145,7 @@ class RolloutExecution(Generic[CarryT]):
         return self.executed_steps
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class RolloutChunk(Generic[CarryT, ControllerOutputT]):
     """Record-bearing executed rollout fragment produced by a runner."""
@@ -159,7 +169,7 @@ class RolloutChunk(Generic[CarryT, ControllerOutputT]):
         return self.records[-1]
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class ObservedStep(Generic[ScoredOutputT]):
     """Objective-scored step context consumed by metrics and trace observers.
@@ -188,7 +198,7 @@ class ObservedStep(Generic[ScoredOutputT]):
         return self.snapshot
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class EvaluatedChunk(Generic[CarryT, ScoredOutputT]):
     """Objective-scored rollout fragment returned by a pure objective."""
@@ -206,7 +216,7 @@ class EvaluatedChunk(Generic[CarryT, ScoredOutputT]):
         return self.steps[-1]
 
 
-# =================================================================================================
+# =============================================================================
 class Source(Protocol):
     """Passive rollout batch supplier used by runners.
 
@@ -224,27 +234,41 @@ class Source(Protocol):
         ...
 
 
-# =================================================================================================
+# =============================================================================
 class StepController(Protocol[CarryT, ControllerOutputT]):
     """Controller protocol required by rollout runners."""
 
-    def initial_state(self, batch_sample: Batch) -> CarryT: ...
+    def initial_state(  # -----------------------------------------------------
+        self,
+        batch_sample: Batch,
+    ) -> CarryT:
+        """Return the initial carry state for the given source batch sample."""
 
-    def step(self, state: CarryT, batch: Batch, **options: object) -> tuple[CarryT, ControllerOutputT]: ...
+    def step(  # --------------------------------------------------------------
+        self,
+        state: CarryT,
+        batch: Batch,
+        **options: object,
+    ) -> tuple[CarryT, ControllerOutputT]:
+        """Execute one step of the controller and return new carry and outputs."""
 
 
-# =================================================================================================
+# =============================================================================
 class RolloutRecordObserver(Protocol[ControllerOutputT]):
     """Passive per-step consumer used during runner execution."""
 
-    def __call__(self, record: StepRecord[ControllerOutputT]) -> None: ...
+    def __call__(  # ----------------------------------------------------------
+        self,
+        record: StepRecord[ControllerOutputT],
+    ) -> None:
+        """Observe a single executed step record during rollout execution."""
 
 
-# =================================================================================================
+# =============================================================================
 class Runner(Protocol[CarryT, ControllerOutputT]):
     """Executed rollout driver."""
 
-    def run(
+    def run(  # ---------------------------------------------------------------
         self,
         *,
         source: Source,
@@ -255,11 +279,16 @@ class Runner(Protocol[CarryT, ControllerOutputT]):
         options: Optional[Mapping[str, object]] = None,
         record_observer: RolloutRecordObserver[ControllerOutputT] | None = None,
         capture_records: bool = True,
-    ) -> RolloutChunk[CarryT, ControllerOutputT] | RolloutExecution[CarryT]: ...
+    ) -> RolloutChunk[CarryT, ControllerOutputT] | RolloutExecution[CarryT]:
+        """Execute a rollout and return a chunk of step records or an execution summary."""
 
 
-# =================================================================================================
-def _snapshot_value(value: Any, *, path: str) -> Any:
+# =============================================================================
+def _snapshot_value(  # -------------------------------------------------------
+    value: Any,
+    *,
+    path: str,
+) -> Any:
     """Return a structural clone suitable for frozen rollout records.
 
     The snapshot preserves tensor/device semantics while avoiding generic
@@ -279,64 +308,106 @@ def _snapshot_value(value: Any, *, path: str) -> Any:
             return clone()
         except TypeError as exc:
             raise TypeError(
-                f"Unsupported snapshot value at {path}: {type(value).__name__} exposes clone() but it "
+                f"Unsupported snapshot value at {path}: {type(value).__name__} "
+                " exposes clone() but it "
                 "cannot be called without arguments."
             ) from exc
 
     if isinstance(value, SimpleNamespace):
-        return SimpleNamespace(**{name: _snapshot_value(item, path=f"{path}.{name}") for name, item in vars(value).items()})
+        return SimpleNamespace(
+            **{
+                name: _snapshot_value(item, path=f"{path}.{name}")
+                for name, item in vars(value).items()
+            }
+        )
     if isinstance(value, dict):
-        return {name: _snapshot_value(item, path=f"{path}[{name!r}]") for name, item in value.items()}
+        return {
+            name: _snapshot_value(item, path=f"{path}[{name!r}]")
+            for name, item in value.items()
+        }
     if isinstance(value, tuple):
-        return tuple(_snapshot_value(item, path=f"{path}[{idx}]") for idx, item in enumerate(value))
+        return tuple(
+            _snapshot_value(item, path=f"{path}[{idx}]")
+            for idx, item in enumerate(value)
+        )
     if isinstance(value, list):
-        return [_snapshot_value(item, path=f"{path}[{idx}]") for idx, item in enumerate(value)]
+        return [
+            _snapshot_value(item, path=f"{path}[{idx}]")
+            for idx, item in enumerate(value)
+        ]
     if isinstance(value, set):
-        return {_snapshot_value(item, path=f"{path}[{idx}]") for idx, item in enumerate(value)}
+        return {
+            _snapshot_value(item, path=f"{path}[{idx}]")
+            for idx, item in enumerate(value)
+        }
     if is_dataclass(value):
         return replace(
             value,
-            **{field.name: _snapshot_value(getattr(value, field.name), path=f"{path}.{field.name}") for field in fields(value)},
+            **{
+                field.name: _snapshot_value(
+                    getattr(value, field.name), path=f"{path}.{field.name}"
+                )
+                for field in fields(value)
+            },
         )
     raise TypeError(
-        f"Unsupported snapshot value at {path}: {type(value).__name__}. Snapshot-compatible values "
-        "must be tensors, scalars, dataclasses, SimpleNamespace, standard containers, or expose clone()."
+        f"Unsupported snapshot value at {path}: {type(value).__name__}. "
+        "Snapshot-compatible values must be tensors, scalars, dataclasses, "
+        "SimpleNamespace, standard containers, or expose clone()."
     )
 
 
-# =================================================================================================
-def _snapshot_carry(carry: HaltedCarry) -> CarrySnapshot:
+# =============================================================================
+def _snapshot_carry(  # -------------------------------------------------------
+    carry: HaltedCarry,
+) -> CarrySnapshot:
     """Return the closed post-step carry snapshot stored in rollout records."""
     return CarrySnapshot(
         halted=_snapshot_value(carry.halted, path="carry.halted"),
-        steps=_snapshot_value(getattr(carry, "steps", None), path="carry.steps"),
+        steps=_snapshot_value(
+            getattr(carry, "steps", None), path="carry.steps"
+        ),
         data=_snapshot_value(getattr(carry, "data", None), path="carry.data"),
-        static_data=_snapshot_value(getattr(carry, "static_data", None), path="carry.static_data"),
-        model_state=_snapshot_value(getattr(carry, "model_state", None), path="carry.model_state"),
-        env_td=_snapshot_value(getattr(carry, "env_td", None), path="carry.env_td"),
+        static_data=_snapshot_value(
+            getattr(carry, "static_data", None), path="carry.static_data"
+        ),
+        model_state=_snapshot_value(
+            getattr(carry, "model_state", None), path="carry.model_state"
+        ),
+        env_td=_snapshot_value(
+            getattr(carry, "env_td", None), path="carry.env_td"
+        ),
     )
 
 
-# =================================================================================================
-def _validate_limit(name: str, limit: int | None) -> None:
+# =============================================================================
+def _validate_limit(  # -------------------------------------------------------
+    name: str,
+    limit: int | None,
+) -> None:
     """Validate that an optional runner limit is strictly positive."""
     if limit is not None and limit <= 0:
         raise ValueError(f"{name} must be positive when provided, got {limit}.")
 
 
-# =================================================================================================
-def _validate_single_step_limit(name: str, limit: int | None) -> None:
+# =============================================================================
+def _validate_single_step_limit(  # -------------------------------------------
+    name: str,
+    limit: int | None,
+) -> None:
     """Validate that single-step runners only accept unit pacing limits."""
     _validate_limit(name, limit)
     if limit is not None and limit != 1:
-        raise ValueError(f"{name} must be 1 or None for SingleStepRunner, got {limit}.")
+        raise ValueError(
+            f"{name} must be 1 or None for SingleStepRunner, got {limit}."
+        )
 
 
-# =================================================================================================
+# =============================================================================
 class SingleStepRunner:
     """Execute exactly one controller step from a passive source."""
 
-    def run(
+    def run(  # ---------------------------------------------------------------
         self,
         *,
         source: Source,
@@ -350,12 +421,16 @@ class SingleStepRunner:
     ) -> RolloutChunk[CarryT, ControllerOutputT] | RolloutExecution[CarryT]:
         """Return a one-step rollout chunk."""
         _validate_single_step_limit("max_rollout_steps", max_rollout_steps)
-        _validate_single_step_limit("hard_max_rollout_steps", hard_max_rollout_steps)
+        _validate_single_step_limit(
+            "hard_max_rollout_steps", hard_max_rollout_steps
+        )
         options_dict = dict(options or {})
         try:
             batch = next(source)
         except StopIteration as exc:
-            raise ValueError("SingleStepRunner source produced no batch.") from exc
+            raise ValueError(
+                "SingleStepRunner source produced no batch."
+            ) from exc
 
         carry, outputs = controller.step(carry, batch, **options_dict)
         snapshot = _snapshot_carry(carry)
@@ -374,7 +449,11 @@ class SingleStepRunner:
         )
         if record_observer is not None:
             record_observer(record)
-        stop_reason = StopReason.ALL_HALTED if record.all_halted else StopReason.SINGLE_STEP_COMPLETED
+        stop_reason = (
+            StopReason.ALL_HALTED
+            if record.all_halted
+            else StopReason.SINGLE_STEP_COMPLETED
+        )
         if not capture_records:
             return RolloutExecution(
                 final_carry=carry,
@@ -391,11 +470,11 @@ class SingleStepRunner:
         )
 
 
-# =================================================================================================
+# =============================================================================
 class RecurrentRunner:
     """Execute a finite recurrent rollout chunk from a passive source."""
 
-    def run(
+    def run(  # ---------------------------------------------------------------
         self,
         *,
         source: Source,
@@ -417,7 +496,10 @@ class RecurrentRunner:
         step_idx = 0
 
         while True:
-            if hard_max_rollout_steps is not None and step_idx >= hard_max_rollout_steps:
+            if (
+                hard_max_rollout_steps is not None
+                and step_idx >= hard_max_rollout_steps
+            ):
                 raise ExecutionHaltError(
                     hard_max_rollout_steps=hard_max_rollout_steps,
                     executed_steps=step_idx,
@@ -475,7 +557,7 @@ class RecurrentRunner:
         )
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "CarrySnapshot",
     "EvaluatedChunk",

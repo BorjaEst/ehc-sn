@@ -12,10 +12,11 @@ from lightning.pytorch.strategies import DDPStrategy
 from torch import Tensor
 
 
-# =================================================================================================
-def normalize_loss_for_backward(  # --------------------------------------------------------------
-    total_loss: Tensor, local_bs: int,
-) -> Tensor:  # fmt: skip
+# =============================================================================
+def normalize_loss_for_backward(  # -------------------------------------------
+    total_loss: Tensor,
+    local_bs: int,
+) -> Tensor:
     """Normalize the total loss by the local batch size for distributed training.
 
     In distributed training (for example DDP), each rank computes gradients on its
@@ -34,12 +35,12 @@ def normalize_loss_for_backward(  # --------------------------------------------
     return total_loss / float(local_bs)
 
 
-# =================================================================================================
-def resolve_effective_world_size(  # --------------------------------------------------------------
+# =============================================================================
+def resolve_effective_world_size(  # ------------------------------------------
     trainer_strategy: str,
     trainer_devices: int,
     trainer_num_nodes: int,
-) -> int:  # fmt: skip
+) -> int:
     """Resolve the effective distributed world size.
 
     Args:
@@ -50,34 +51,44 @@ def resolve_effective_world_size(  # -------------------------------------------
     Returns:
         Effective world size used for batch-size validation and strategy resolution.
     """
-    configured_world_size = max(int(trainer_devices) * int(trainer_num_nodes), 1)
+    configured_world_size = max(
+        int(trainer_devices) * int(trainer_num_nodes), 1
+    )
 
     if os.environ.get("SLURM_JOB_ID"):
-        return max(int(os.environ.get("SLURM_NTASKS", str(configured_world_size))), 1)
+        return max(
+            int(os.environ.get("SLURM_NTASKS", str(configured_world_size))), 1
+        )
     if trainer_strategy == "ddp":
         return configured_world_size
     return 1
 
 
-# =================================================================================================
-def validate_batch_size_divisibility(  # ----------------------------------------------------------
+# =============================================================================
+def validate_batch_size_divisibility(  # --------------------------------------
     global_batch_size: int,
     world_size: int,
-) -> None:  # fmt: skip
+) -> None:
     """Validate that the global batch size is divisible by the effective world size."""
     if world_size <= 0:
-        raise ValueError("World size must be a positive integer.")
+        raise ValueError(
+            "World size must be a positive integer.",
+        )
     if global_batch_size % world_size != 0:
-        raise ValueError(f"global_batch_size must be divisible by world_size. Got global_batch_size={global_batch_size}, world_size={world_size}.")  # fmt: skip
+        raise ValueError(
+            "global_batch_size must be divisible by world_size. "
+            f"Got global_batch_size={global_batch_size}, "
+            f"world_size={world_size}.",
+        )
 
 
-# =================================================================================================
-def resolve_trainer_strategy(  # ------------------------------------------------------------------
+# =============================================================================
+def resolve_trainer_strategy(  # ----------------------------------------------
     trainer_strategy: str,
     world_size: int,
     *,
     find_unused_parameters: bool = False,
-) -> str | DDPStrategy:  # fmt: skip
+) -> str | DDPStrategy:
     """Return the effective Lightning Trainer strategy.
 
     Requested DDP is downgraded to ``auto`` when the effective world size is 1,
@@ -90,7 +101,7 @@ def resolve_trainer_strategy(  # -----------------------------------------------
     return DDPStrategy(find_unused_parameters=find_unused_parameters)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "normalize_loss_for_backward",
     "resolve_effective_world_size",

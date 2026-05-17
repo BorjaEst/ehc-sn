@@ -20,11 +20,11 @@ from torch.utils.data import DataLoader
 
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
-from ehc_sn.lightning.eval.contracts import EvaluationCaseBatch, EvaluationSourceProvider
+from ehc_sn.lightning.eval.contracts import EvaluationCaseBatch
 from ehc_sn.tasks.countwalk.traces import CountwalkEvaluationSourceContext
 
 
-# =================================================================================================
+# =============================================================================
 class CountwalkReplayDiagnosticProvider:
     """Countwalk-task-owned provider for processed replay diagnostics.
 
@@ -46,7 +46,7 @@ class CountwalkReplayDiagnosticProvider:
       ``0`` means use all episodes in the split.
     """
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         *,
         dataset_path: str,
@@ -59,7 +59,10 @@ class CountwalkReplayDiagnosticProvider:
         self._batch_size = batch_size
         self._n_cases = n_cases
 
-    def provide_cases(self, max_batches: int = 0) -> Iterator[EvaluationCaseBatch]:
+    def provide_cases(  # -----------------------------------------------------
+        self,
+        max_batches: int = 0,
+    ) -> Iterator[EvaluationCaseBatch]:
         """Yield batched countwalk replay cases from the configured split.
 
         Args:
@@ -92,7 +95,10 @@ class CountwalkReplayDiagnosticProvider:
 
             first_key = next(iter(batch))
             n_in_batch = batch[first_key].shape[0]
-            ids_in_batch = [entries[batch_idx * self._batch_size + i].id for i in range(n_in_batch)]
+            ids_in_batch = [
+                entries[batch_idx * self._batch_size + i].id
+                for i in range(n_in_batch)
+            ]
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"countwalk-{self._split}-{batch_idx:04d}",
@@ -104,7 +110,9 @@ class CountwalkReplayDiagnosticProvider:
                 ),
             )
 
-    def description(self) -> str:
+    def description(  # -------------------------------------------------------
+        self,
+    ) -> str:
         """Return a human-readable description for logging."""
         return (
             f"CountwalkReplayDiagnosticProvider("
@@ -115,7 +123,7 @@ class CountwalkReplayDiagnosticProvider:
         )
 
 
-# =================================================================================================
+# =============================================================================
 class CountwalkFixedProbeProvider:
     """Countwalk-task-owned provider that evaluates a fixed, explicitly-named set of episodes.
 
@@ -143,7 +151,7 @@ class CountwalkFixedProbeProvider:
         KeyError: From :meth:`provide_cases` if any requested id is absent from the index.
     """
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         *,
         dataset_path: str,
@@ -152,16 +160,24 @@ class CountwalkFixedProbeProvider:
         batch_size: int = 1,
     ) -> None:
         if not sample_ids:
-            raise ValueError("CountwalkFixedProbeProvider: sample_ids must not be empty")
+            raise ValueError(
+                "CountwalkFixedProbeProvider: sample_ids must not be empty",
+            )
         if len(sample_ids) != len(set(sample_ids)):
             duplicates = [s for s in sample_ids if sample_ids.count(s) > 1]
-            raise ValueError(f"CountwalkFixedProbeProvider: sample_ids contains duplicates: {sorted(set(duplicates))}")
+            raise ValueError(
+                "CountwalkFixedProbeProvider: sample_ids contains duplicates: "
+                f"{sorted(set(duplicates))}"
+            )
         self._dataset_path = Path(dataset_path)
         self._split = split
         self._sample_ids = sample_ids
         self._batch_size = batch_size
 
-    def provide_cases(self, max_batches: int = 0) -> Iterator[EvaluationCaseBatch]:
+    def provide_cases(  # -----------------------------------------------------
+        self,
+        max_batches: int = 0,
+    ) -> Iterator[EvaluationCaseBatch]:
         """Yield deterministic evaluation case batches for the configured sample ids.
 
         Samples are loaded in the exact order of ``sample_ids``.  If a requested id
@@ -185,10 +201,15 @@ class CountwalkFixedProbeProvider:
 
         missing = [sid for sid in self._sample_ids if sid not in by_id]
         if missing:
-            raise KeyError(f"CountwalkFixedProbeProvider: sample_ids not found in split {self._split!r}: {missing}")
+            raise KeyError(
+                "CountwalkFixedProbeProvider: sample_ids not found in split "
+                f"{self._split!r}: {missing}"
+            )
 
         ordered_entries = [by_id[sid] for sid in self._sample_ids]
-        dataset = ProcessedDataset(ordered_entries, self._dataset_path / self._split)
+        dataset = ProcessedDataset(
+            ordered_entries, self._dataset_path / self._split
+        )
         loader: DataLoader[dict[str, Any]] = DataLoader(
             dataset,
             batch_size=self._batch_size,
@@ -203,7 +224,10 @@ class CountwalkFixedProbeProvider:
 
             first_key = next(iter(batch))
             n_in_batch = batch[first_key].shape[0]
-            ids_in_batch = self._sample_ids[batch_idx * self._batch_size : batch_idx * self._batch_size + n_in_batch]
+            ids_in_batch = self._sample_ids[
+                batch_idx * self._batch_size : batch_idx * self._batch_size
+                + n_in_batch
+            ]
 
             if self._batch_size == 1:
                 case_id = ids_in_batch[0]
@@ -221,7 +245,9 @@ class CountwalkFixedProbeProvider:
                 ),
             )
 
-    def description(self) -> str:
+    def description(  # -------------------------------------------------------
+        self,
+    ) -> str:
         """Return a human-readable description for logging."""
         n = len(self._sample_ids)
         preview = self._sample_ids[:3]
@@ -237,5 +263,5 @@ class CountwalkFixedProbeProvider:
         )
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["CountwalkReplayDiagnosticProvider", "CountwalkFixedProbeProvider"]

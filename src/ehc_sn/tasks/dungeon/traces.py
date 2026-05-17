@@ -25,7 +25,7 @@ from pathlib import Path
 from ehc_sn.traces.trace_tree import TraceTree
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class DungeonEvaluationSourceContext:
     """Typed, frozen provider-side context for a Dungeon evaluation case batch.
@@ -45,13 +45,16 @@ class DungeonEvaluationSourceContext:
     def __post_init__(self) -> None:
         if self.task_family != "dungeon":
             raise ValueError(
-                f"DungeonEvaluationSourceContext.task_family must be 'dungeon', got {self.task_family!r}"
+                "DungeonEvaluationSourceContext.task_family must be 'dungeon', "
+                f"got {self.task_family!r}"
             )
         if not self.sample_ids:
-            raise ValueError("DungeonEvaluationSourceContext.sample_ids must not be empty")
+            raise ValueError(
+                "DungeonEvaluationSourceContext.sample_ids must not be empty",
+            )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class DungeonTraceSupplements:
     """Canonical supplement content for Dungeon traces.
@@ -61,8 +64,8 @@ class DungeonTraceSupplements:
     """
 
 
-# =================================================================================================
-def build_dungeon_trace_supplements(
+# =============================================================================
+def build_dungeon_trace_supplements(  # ---------------------------------------
     source_context: DungeonEvaluationSourceContext,
     trace_length: int,
 ) -> DungeonTraceSupplements:
@@ -82,8 +85,8 @@ def build_dungeon_trace_supplements(
     return DungeonTraceSupplements()
 
 
-# =================================================================================================
-def apply_dungeon_trace_supplements(
+# =============================================================================
+def apply_dungeon_trace_supplements(  # ---------------------------------------
     trace: TraceTree,
     supplements: DungeonTraceSupplements,
 ) -> None:
@@ -98,7 +101,7 @@ def apply_dungeon_trace_supplements(
     """
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "DungeonEvaluationSourceContext",
     "DungeonTraceSupplements",

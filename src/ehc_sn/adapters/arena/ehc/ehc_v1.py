@@ -19,7 +19,12 @@ from ehc_sn.adapters.arena.ehc.core import (
     ArenaEncoderConfig,
     ArenaTwoHotEncoder,
 )
-from ehc_sn.models.ehc.ehc_v1 import EHCInputV1, EHCModelV1, EHCOutputV1, EHCStateV1
+from ehc_sn.models.ehc.ehc_v1 import (
+    EHCInputV1,
+    EHCModelV1,
+    EHCOutputV1,
+    EHCStateV1,
+)
 from ehc_sn.modules.autoencoder import MLPDecoder
 from ehc_sn.types import Batch
 
@@ -42,7 +47,9 @@ class ArenaInputsEncoderV1(nn.Module):
         batch: Batch,
     ) -> EHCInputV1:
         """Encode a pre-extracted arena step payload into a EHC v1 input."""
-        observation_embedding, prev_action, episode_start, landmark_id = self._core.encode(batch)
+        observation_embedding, prev_action, episode_start, landmark_id = (
+            self._core.encode(batch)
+        )
         return EHCInputV1(
             observation_embedding=observation_embedding,
             previous_action=prev_action,
@@ -100,7 +107,10 @@ class ArenaOutputsDecoderV1(nn.Module):
 class ArenaEHCV1BridgeAdapter(nn.Module):
     """Arena plus EHC v1 bridge adapter implementing RolloutBackbone."""
 
-    def __init__(self, model: EHCModelV1, config: ArenaEHCAdapterSettings) -> None:
+    def __init__(  # ----------------------------------------------------------
+        self, model: EHCModelV1, config: ArenaEHCAdapterSettings
+    ) -> None:
+        """Initializes the adapter with the given EHC v1 model and arena adapter settings."""
         super().__init__()
         self._config = config
         self.model = model
@@ -111,19 +121,35 @@ class ArenaEHCV1BridgeAdapter(nn.Module):
     def config(self) -> ArenaEHCAdapterSettings:
         return self._config
 
-    def init_state(self, batch_size: int, *, device: Optional[torch.device] = None) -> EHCStateV1:
+    def init_state(  # --------------------------------------------------------
+        self, batch_size: int, *, device: Optional[torch.device] = None
+    ) -> EHCStateV1:
+        """Initializes the EHC state for a new episode."""
         return self.model.init_state(batch_size, device=device)
 
-    def reset_state(self, reset_flag: Tensor, state: EHCStateV1) -> EHCStateV1:
+    def reset_state(  # -------------------------------------------------------
+        self,
+        reset_flag: Tensor,
+        state: EHCStateV1,
+    ) -> EHCStateV1:
+        """Resets the EHC state for episodes indicated by the reset_flag."""
         return self.model.reset_state(reset_flag, state)
 
-    def prepare_inputs(self, batch: Batch) -> EHCInputV1:
+    def prepare_inputs(  # ----------------------------------------------------
+        self,
+        batch: Batch,
+    ) -> EHCInputV1:
+        """Prepares the EHC v1 input from the arena step batch."""
         return self._encoder(batch)
 
-    def postprocess(self, model_output: EHCOutputV1) -> ArenaEHCBridgeOutput:
+    def postprocess(  # -------------------------------------------------------
+        self,
+        model_output: EHCOutputV1,
+    ) -> ArenaEHCBridgeOutput:
+        """Postprocesses the EHC v1 output into the arena bridge output."""
         return self._decoder(model_output)
 
-    def forward(
+    def forward(  # -----------------------------------------------------------
         self,
         batch: Batch,
         state: EHCStateV1 | None = None,
@@ -135,7 +161,11 @@ class ArenaEHCV1BridgeAdapter(nn.Module):
 
 
 # =============================================================================
-def _build_encoder_v1(model: EHCModelV1, config: ArenaEHCAdapterSettings) -> ArenaInputsEncoderV1:
+def _build_encoder_v1(  # -----------------------------------------------------
+    model: EHCModelV1,
+    config: ArenaEHCAdapterSettings,
+) -> ArenaInputsEncoderV1:
+    """Builds the arena inputs encoder for EHC v1."""
     return ArenaInputsEncoderV1(
         observation_dim=config.observation_dim,
         feature_dim=model.config.lec.feature_dim,
@@ -143,19 +173,29 @@ def _build_encoder_v1(model: EHCModelV1, config: ArenaEHCAdapterSettings) -> Are
     )
 
 
-def _build_decoder_v1(model: EHCModelV1, config: ArenaEHCAdapterSettings) -> ArenaOutputsDecoderV1:
+# =============================================================================
+def _build_decoder_v1(  # -----------------------------------------------------
+    model: EHCModelV1,
+    config: ArenaEHCAdapterSettings,
+) -> ArenaOutputsDecoderV1:
+    """Builds the arena outputs decoder for EHC v1."""
     feature_dim = model.config.lec.feature_dim
     n_freq = len(model.config.hpc.shape)
     if config.decoder.kind == "single_scale":
         freq = config.decoder.prediction_freq
         if not (0 <= freq < n_freq):
-            raise ValueError(f"prediction_freq={freq} is out of range for hpc.shape with {n_freq} bands " f"(valid: 0..{n_freq - 1}).")
+            raise ValueError(
+                f"prediction_freq={freq} is out of range for hpc.shape with {n_freq} bands "
+                f"(valid: 0..{n_freq - 1})."
+            )
         return ArenaOutputsDecoderV1(
             observation_dim=config.observation_dim,
             latent_dim=feature_dim,
             single_freq=freq,
         )
-    raise NotImplementedError("Multi-scale decoding is not implemented for ArenaEHCV1BridgeAdapter.")
+    raise NotImplementedError(
+        "Multi-scale decoding is not implemented for ArenaEHCV1BridgeAdapter."
+    )
 
 
 # =============================================================================

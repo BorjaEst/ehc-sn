@@ -1,20 +1,67 @@
-"""Static plotting utilities, typically tools for evaluation"""
+"""Figures package — public API.
 
-from ehc_sn.figures.modules import (
-    dataset,
-    dummy,
-    evolution,
-    hpc_cells,
-    hpc_summary,
-    lec_pipeline,
-    lec_summary,
-    mec_cells,
-    mec_summary,
-    overlay,
-)
+Usage::
 
-# =================================================================================================
+    from ehc_sn.figures import render, REGISTRY, FigureContext, FigureSpec, list_figures
+
+The root public API (``list_figures`` and ``render``) auto-registers built-in
+figures on first call, so an explicit ``register_builtin_figures()`` call is
+not required when going through the root API.
+"""
+
+from __future__ import annotations
+
+import matplotlib.figure as mpl_figure
+
+from ehc_sn.figures.registry import REGISTRY, FigureContext, FigureSpec, _validate_figure_requirements
+from ehc_sn.figures.register import register_builtin_figures
+from ehc_sn.traces.trace_tree import TraceTree
+
+_registered = False
+
+
+def _ensure_registered() -> None:
+    """Register built-in figures on first use of the root API."""
+    global _registered
+    if not _registered:
+        register_builtin_figures()
+        _registered = True
+
+
+def list_figures(*, kind: str | None = None) -> list[str]:
+    """Return registered figure names, optionally filtered by kind."""
+    _ensure_registered()
+    return REGISTRY.list(kind=kind)  # type: ignore[arg-type]
+
+
+def render(name: str, trace: TraceTree, ctx: FigureContext | None = None) -> mpl_figure.Figure:
+    """Look up a registered figure by name and render it.
+
+    Validates that the trace satisfies the numeric and metadata key requirements
+    declared by the spec before plotting.  Built-in figures are auto-registered
+    on first call.
+
+    Args:
+        name: Registered figure name.
+        trace: Rollout trace (``TraceTree``).
+        ctx: Optional figure context; defaults to ``FigureContext()``.
+
+    Returns:
+        Matplotlib ``Figure``.
+    """
+    _ensure_registered()
+    if ctx is None:
+        ctx = FigureContext()
+    spec = REGISTRY.get(name)
+    _validate_figure_requirements(trace, spec)
+    return spec.plot(trace, ctx)
+
+
 __all__ = [
-	"dataset", "dummy", "evolution", "lec_pipeline", "mec_cells", "hpc_summary", "lec_summary",
-	"mec_summary", "overlay", "hpc_cells",
-]  # fmt: skip
+    "FigureContext",
+    "FigureSpec",
+    "REGISTRY",
+    "list_figures",
+    "register_builtin_figures",
+    "render",
+]

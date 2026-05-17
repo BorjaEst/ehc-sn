@@ -66,10 +66,18 @@ class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
     f_initial: list[float] = Field(
         default_factory=lambda: [0.99, 0.3, 0.09, 0.5, 0.4],
         min_length=1,
-        description=(
-            "List of initial feature frequencies for the model's resolved modules. "
-            "Its length must match the full MEC/HPC frequency count after OVC mode resolution."
-        ),
+        description="Initial feature frequencies resolved across MEC and HPC modules.",
+    )
+
+    hpc: HPCAttractorSettings = Field(
+        ..., description="Settings for the HPC attractor module."
+    )
+    lec: LECSettings = Field(..., description="Settings for the LEC module.")
+    mec: MECSettings = Field(..., description="Settings for the MEC module.")
+
+    projections: TEMProjectionSettings = Field(
+        ...,
+        description="Settings for the inter-region projection modules connecting MEC and LEC to HPC.",
     )
 
     hpc: HPCAttractorSettings = Field(

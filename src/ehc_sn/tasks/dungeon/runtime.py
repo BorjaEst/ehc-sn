@@ -15,7 +15,7 @@ from .contracts import DungeonTaskInput
 
 
 # =============================================================================
-def coerce_dungeon_task_input(
+def coerce_dungeon_task_input(  # ---------------------------------------------
     data: Mapping[str, Tensor],
 ) -> DungeonTaskInput:
     """Coerce a step payload mapping to a typed :class:`DungeonTaskInput`.
@@ -30,10 +30,18 @@ def coerce_dungeon_task_input(
     Raises:
         KeyError: If any required field is absent.
     """
-    required = ("observation", "observation_id", "previous_action", "location_id")
+    required = (
+        "observation",
+        "observation_id",
+        "previous_action",
+        "location_id",
+    )
     missing = [k for k in required if k not in data]
     if missing:
-        raise KeyError(f"Dungeon task-input payload is missing required fields: {', '.join(missing)}.")
+        raise KeyError(
+            "Dungeon task-input payload is missing required fields: "
+            f"{', '.join(missing)}."
+        )
     return DungeonTaskInput(
         observation=data["observation"],
         observation_id=data["observation_id"],

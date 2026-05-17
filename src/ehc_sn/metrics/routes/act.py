@@ -6,7 +6,12 @@ produced by :class:`~ehc_sn.objectives.act.ACTObjective`.
 """
 
 from ehc_sn.metrics.adapter import Route
-from ehc_sn.metrics.keys import ACT_LOSS_Q_CONTINUE, ACT_LOSS_Q_DONE, LOSS_LM, extra_ratio_paths
+from ehc_sn.metrics.keys import (
+    ACT_LOSS_Q_CONTINUE,
+    ACT_LOSS_Q_DONE,
+    LOSS_LM,
+    extra_ratio_paths,
+)
 
 
 def _with_namespace(namespace: str, routes: tuple[Route, ...]) -> tuple[Route, ...]:

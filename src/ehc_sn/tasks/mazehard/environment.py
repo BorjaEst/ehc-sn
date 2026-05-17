@@ -1,15 +1,13 @@
 """Mazehard mechanical environment kernel (TorchRL).
 
-This module is the canonical task-owned live-environment shell for MazeHard
-live RL rollouts via :class:`~ehc_sn.controllers.online.actor_critic.RLController`.
-It is a low-level env scaffold: static token tape, step count, and
-halt/truncation transitions only.
+This module is a low-level env scaffold: static token tape, step count, and
+halt/truncation transitions only. It is **not** the canonical task surface and
+**not** the active HRM v2 deliberation training path.
 
-The active HRM v2 training path uses
-:class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationACController`
+The active HRM v2 path uses :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationACController`
 injected with :class:`~ehc_sn.tasks.mazehard.capabilities.deliberation.MazeHardDeliberationCapability`
 as the :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationStepFinalizer`.
-That deliberation path does not step through this env.
+That path does not step through this env.
 
 MazeHard supervision labels, accuracy tracking, and reward shaping are
 task-owned; they belong in the capability/finalizer layer, not here.
@@ -36,7 +34,7 @@ from torchrl.data import Categorical, Composite, Unbounded
 from torchrl.envs import EnvBase
 
 
-# =================================================================================================
+# =============================================================================
 class EnvConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`MazeHardEnv`."""
 
@@ -65,7 +63,7 @@ class EnvConfig(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 class MazeHardEnv(EnvBase):
     """Mechanical env kernel for MazeHard (TorchRL, batch-locked).
 
@@ -85,7 +83,12 @@ class MazeHardEnv(EnvBase):
     batch_locked = True
     SPATIAL_GEOMETRY = "maze"
 
-    def __init__(self, config: EnvConfig, batch_size: int, device: Device | str | None = None,) -> None:  # fmt: skip  # ------------------------------------------------------------------------------
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: EnvConfig,
+        batch_size: int,
+        device: Device | str | None = None,
+    ) -> None:
         super().__init__(batch_size=[batch_size], device=device)
         self._config = config
         self._make_specs()
@@ -100,7 +103,9 @@ class MazeHardEnv(EnvBase):
         """Return the declared spatial geometry for this environment."""
         return self.SPATIAL_GEOMETRY
 
-    def _make_specs(self,) -> None:  # fmt: skip  # ---------------------------------------------------------------------------
+    def _make_specs(  # -------------------------------------------------------
+        self,
+    ) -> None:
         S = self._config.seq_length
         bs = self.batch_size  # torch.Size([B])
 
@@ -116,13 +121,18 @@ class MazeHardEnv(EnvBase):
         )
         self.reward_spec = Unbounded(shape=(*bs, 1), dtype=torch.float32)
 
-    def _reset(self, tensordict: TensorDictBase | None,) -> TensorDictBase:  # fmt: skip  # -------------------------------------------------------------------------------
+    def _reset(  # ------------------------------------------------------------
+        self,
+        tensordict: TensorDictBase | None,
+    ) -> TensorDictBase:
         """Initialise episode state from external data.
 
         The controller injects ``input_ids`` from the dataloader.
         """
         if tensordict is None or tensordict.is_empty():
-            raise ValueError("MazeHardEnv._reset requires tensordict with 'input_ids'.")
+            raise ValueError(
+                "MazeHardEnv._reset requires tensordict with 'input_ids'."
+            )
 
         B = self.batch_size[0]
         kw = {"device": self.device}
@@ -136,7 +146,10 @@ class MazeHardEnv(EnvBase):
         )
 
     @torch.no_grad()
-    def _step(self, tensordict: TensorDictBase,) -> TensorDictBase:  # fmt: skip  # --------------------------------------------------------------------------------
+    def _step(  # -------------------------------------------------------------
+        self,
+        tensordict: TensorDictBase,
+    ) -> TensorDictBase:
         """Advance the mechanical env state from the current action.
 
         Owns only halt/truncation transitions. Emits a zero reward placeholder;
@@ -152,7 +165,9 @@ class MazeHardEnv(EnvBase):
 
         return TensorDict(
             {
-                "input_ids": tensordict["input_ids"],  # static — carry unchanged
+                "input_ids": tensordict[
+                    "input_ids"
+                ],  # static — carry unchanged
                 "step_count": step_count + 1,
                 "reward": reward,
                 "terminated": terminated,
@@ -163,10 +178,13 @@ class MazeHardEnv(EnvBase):
             device=self.device,
         )
 
-    def _set_seed(self, seed: int | None) -> None:  # --------------------------------------------
+    def _set_seed(  # ---------------------------------------------------------
+        self,
+        seed: int | None,
+    ) -> None:
         """No-op: all randomness lives in the dataloader."""
         pass
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["EnvConfig", "MazeHardEnv"]

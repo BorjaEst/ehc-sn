@@ -20,14 +20,18 @@ from ehc_sn.tasks.mazehard.runtime import (
     WALL_ID,
 )
 
-# =================================================================================================
+# =============================================================================
 PAD_ID: int = 0
 MAZE_CHARSET: str = "# SG"
-MAZE_CHAR_TO_ID: dict[str, int] = {ch: idx + 1 for idx, ch in enumerate(MAZE_CHARSET)}
-MAZE_ID_TO_CHAR: dict[int, str] = {idx: ch for ch, idx in MAZE_CHAR_TO_ID.items()}
+MAZE_CHAR_TO_ID: dict[str, int] = {
+    ch: idx + 1 for idx, ch in enumerate(MAZE_CHARSET)
+}
+MAZE_ID_TO_CHAR: dict[int, str] = {
+    idx: ch for ch, idx in MAZE_CHAR_TO_ID.items()
+}
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "MAZE_CHARSET",
     "MAZE_CHAR_TO_ID",

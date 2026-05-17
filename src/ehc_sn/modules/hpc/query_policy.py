@@ -28,7 +28,7 @@ grid-derived queries.
 """
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class ReadCues:
     """Named multi-scale cues available to one memory read.
@@ -83,7 +83,7 @@ class ReadCues:
         return ReadCues(families=families)
 
 
-# =================================================================================================
+# =============================================================================
 class CueRead(BaseModel, extra="forbid"):
     """Request a read resolved directly from one cue family.
 
@@ -96,7 +96,7 @@ class CueRead(BaseModel, extra="forbid"):
     read_bank: str = DEFAULT_FACTOR_BANK_NAME
 
 
-# =================================================================================================
+# =============================================================================
 class TargetRead(BaseModel, extra="forbid"):
     """Request a targeted read from source families into one target family.
 
@@ -112,12 +112,12 @@ class TargetRead(BaseModel, extra="forbid"):
     read_bank: str = DEFAULT_FACTOR_BANK_NAME
 
 
-# =================================================================================================
+# =============================================================================
 MemoryRead: TypeAlias = Annotated[CueRead | TargetRead, Field(discriminator="kind")]
 """Discriminated union of model-level memory read operators."""
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class PreparedCueRead:
     """Prepared backend input for one resolved cue read.
@@ -132,7 +132,7 @@ class PreparedCueRead:
     read_bank: str = DEFAULT_FACTOR_BANK_NAME
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class PreparedTargetRead:
     """Prepared backend input for one targeted read request.
@@ -152,7 +152,7 @@ class PreparedTargetRead:
     initial_target_query: Optional[Tensor] = None
 
 
-# =================================================================================================
+# =============================================================================
 PreparedRead: TypeAlias = PreparedCueRead | PreparedTargetRead
 """Backend-ready evidence payload returned by a read composer."""
 
@@ -227,7 +227,7 @@ class _BaseQueryComposer(nn.Module):
             self._validate_family(read.target_init, label="read.target_init")
 
 
-# =================================================================================================
+# =============================================================================
 class ReadComposer(_BaseQueryComposer):
     """Canonical composer that resolves typed read operators into tensors.
 
@@ -305,7 +305,7 @@ class ReadComposer(_BaseQueryComposer):
         return torch.stack(list(source_queries), dim=0).mean(dim=0)
 
 
-# =================================================================================================
+# =============================================================================
 def build_read_composer(  # -----------------------------------------------------------------------
     shape: list[int], *,
     device: Optional[Device] = None, dtype: Optional[Dtype] = None,
@@ -314,7 +314,7 @@ def build_read_composer(  # ----------------------------------------------------
     return ReadComposer(shape, device=device, dtype=dtype)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "ReadCues", "ReadComposer", "PreparedRead", "MemoryRead", "TargetRead", "CueRead",
     "PreparedCueRead", "PreparedTargetRead", "build_read_composer",

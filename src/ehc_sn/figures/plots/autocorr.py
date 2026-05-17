@@ -9,7 +9,7 @@ import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
-from ehc_sn.figures.plots.ratemap import PreparedRateMap
+from ehc_sn.figures._contracts import PreparedRateMap
 
 DEFAULT_SPATIAL_AUTOCORRELOGRAM_MIN_OVERLAP = 4
 DEFAULT_SPATIAL_AUTOCORRELOGRAM_DISPLAY_LAG_RADIUS_WORLD = 4.0

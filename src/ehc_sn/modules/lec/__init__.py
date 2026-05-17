@@ -29,7 +29,7 @@ from ehc_sn.types import MultiScaleCode
 from ehc_sn.utils.detach import DetachMixin
 
 
-# =================================================================================================
+# =============================================================================
 class LECSettings(BaseModel, extra="forbid"):
     """Settings for LEC modules."""
 
@@ -58,8 +58,7 @@ class LECSettings(BaseModel, extra="forbid"):
     )
 
 
-
-# =================================================================================================
+# =============================================================================
 @dataclass
 class LECState(DetachMixin):
     """Container for LEC state.
@@ -82,21 +81,30 @@ class LECState(DetachMixin):
         """Backward-compatible alias for unweighted filtered features."""
         return self.filtered_features
 
-    def new(  # -----------------------------------------------------------------------------------
-        self, *, features: MultiScaleCode, filtered_features: MultiScaleCode,
-    ) -> LECState:  # fmt: skip
+    def new(  # ---------------------------------------------------------------
+        self,
+        *,
+        features: MultiScaleCode,
+        filtered_features: MultiScaleCode,
+    ) -> LECState:
         """Return a copy with updated feature tensors."""
-        return replace(self, features=features, filtered_features=filtered_features)
+        return replace(
+            self, features=features, filtered_features=filtered_features
+        )
 
     def replace_rows(self, flag: Tensor, fresh: "LECState") -> "LECState":
         """Merge flagged rows from ``fresh`` for module-owned reset logic."""
         return self.new(
-            features=utils.merge_multiscale_rows(flag, self.features, fresh.features),
-            filtered_features=utils.merge_multiscale_rows(flag, self.filtered_features, fresh.filtered_features),
-        )  # fmt: skip
+            features=utils.merge_multiscale_rows(
+                flag, self.features, fresh.features
+            ),
+            filtered_features=utils.merge_multiscale_rows(
+                flag, self.filtered_features, fresh.filtered_features
+            ),
+        )
 
 
-# =================================================================================================
+# =============================================================================
 class LECModel(nn.Module):
     """LEC orchestrator: filter + normalize + reconstruct.
 
@@ -104,10 +112,13 @@ class LECModel(nn.Module):
     generative and inference interfaces.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, f_initial: list[float], config: LECSettings,
-        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        f_initial: list[float],
+        config: LECSettings,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         """ """
         super().__init__()
         self._config = config
@@ -118,7 +129,9 @@ class LECModel(nn.Module):
         # Composable submodules (single responsibility each)
         self.filter = FrequencyFilter(f_initial, config.filter)
         self.norm = FeatureNorm(config.norm)
-        self.w_f = nn.ParameterList([nn.Parameter(torch.tensor(1.0)) for _ in range(self._n_freq)])
+        self.w_f = nn.ParameterList(
+            [nn.Parameter(torch.tensor(1.0)) for _ in range(self._n_freq)]
+        )
 
         self.reset_parameters()
 
@@ -137,16 +150,18 @@ class LECModel(nn.Module):
         """Return the number of LEC frequency modules."""
         return self._n_freq
 
-    def reset_parameters(  # ----------------------------------------------------------------------
+    def reset_parameters(  # --------------------------------------------------
         self,
-    ) -> None:  # fmt: skip
+    ) -> None:
         """Initialize parameters and buffers."""
         pass
 
-    def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int, *,
+    def init_state(  # --------------------------------------------------------
+        self,
+        batch_size: int,
+        *,
         device: Optional[Device] = None,
-    ) -> LECState:  # fmt: skip
+    ) -> LECState:
         """Create an initial LEC state.
 
         Args:
@@ -159,9 +174,11 @@ class LECModel(nn.Module):
         x0 = [torch.zeros((batch_size, n), device=device) for n in self.shape]
         return LECState(features=x0, filtered_features=x0)
 
-    def reset_state(  # ---------------------------------------------------------------------------
-        self, state: LECState, reset_flag: Tensor,
-    ) -> LECState:  # fmt: skip
+    def reset_state(  # -------------------------------------------------------
+        self,
+        state: LECState,
+        reset_flag: Tensor,
+    ) -> LECState:
         """Reset flagged LEC rows to a fresh episode state.
 
         Args:
@@ -180,24 +197,31 @@ class LECModel(nn.Module):
         fresh = self.init_state(int(reset_flag.shape[0]), device=device)
         return state.replace_rows(reset_flag, fresh)
 
-    def set_runtime(  # ---------------------------------------------------------------------------
-        self, **_,
-    ) -> None:  # fmt: skip
+    def set_runtime(  # -------------------------------------------------------
+        self,
+        **_,
+    ) -> None:
         """Set runtime hyperparameters.
 
         This module currently does not use runtime parameters.
         """
         pass
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, *, state: LECState,
-    ) -> tuple[list[Tensor], LECState]:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        *,
+        state: LECState,
+    ) -> tuple[list[Tensor], LECState]:
         """ """
-        raise NotImplementedError("LEC forward not implemented. Use generative() or inference().")
+        raise NotImplementedError(
+            "LEC forward not implemented. Use generative() or inference()."
+        )
 
-    def inference(  # -----------------------------------------------------------------------------
-        self, c: MultiScaleCode, state: LECState,
-    ) -> tuple[list[Tensor], LECState]:  # fmt: skip
+    def inference(  # ---------------------------------------------------------
+        self,
+        c: MultiScaleCode,
+        state: LECState,
+    ) -> tuple[list[Tensor], LECState]:
         """Run the LEC inference update.
 
         Args:
@@ -212,9 +236,12 @@ class LECModel(nn.Module):
         """
         filtered = self.filter(c, state.filtered_features)
         normalized = self.norm(filtered)
-        x_inf = next_cells = [torch.sigmoid(self.w_f[f]) * normalized[f] for f in range(self.n_freq)]
+        x_inf = next_cells = [
+            torch.sigmoid(self.w_f[f]) * normalized[f]
+            for f in range(self.n_freq)
+        ]
         return x_inf, state.new(features=next_cells, filtered_features=filtered)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["LECModel", "LECState"]

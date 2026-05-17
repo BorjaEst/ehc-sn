@@ -27,9 +27,9 @@ from ehc_sn.types import Batch
 TARGET_SOLUTION_OVERLAY_META_KEY = "target/solution_overlay"
 
 
-# =================================================================================================
+# =============================================================================
 # Minimal typed context for MazeHard+EHC actor-critic trace getters
-# =================================================================================================
+# =============================================================================
 
 
 class _MazeHardTaskLogits(Protocol):
@@ -44,9 +44,9 @@ class _MazeHardEHCActorCriticTraceContext(Protocol):
     outputs: _MazeHardEHCActorCriticTraceOutputs
 
 
-# =================================================================================================
+# =============================================================================
 # Getter functions
-# =================================================================================================
+# =============================================================================
 
 
 def _solution_overlay_from_task_logits(task_logits: Tensor) -> TraceValue:
@@ -57,7 +57,9 @@ def _solution_overlay_from_task_logits(task_logits: Tensor) -> TraceValue:
 def _get_maze_hard_solution_overlay_actor_critic(
     ctx: _MazeHardEHCActorCriticTraceContext,
 ) -> TraceValue:
-    return _solution_overlay_from_task_logits(ctx.outputs.task_output.task_logits)
+    return _solution_overlay_from_task_logits(
+        ctx.outputs.task_output.task_logits
+    )
 
 
 def build_mazehard_ehc_trace_meta(batch: Batch) -> dict[str, object]:
@@ -70,19 +72,21 @@ def build_mazehard_ehc_trace_meta(batch: Batch) -> dict[str, object]:
     }
 
 
-# =================================================================================================
+# =============================================================================
 # Named field objects
-# =================================================================================================
+# =============================================================================
 
 _MAZE_HARD_EHC_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC = TraceField(
     name="pred/solution_overlay",
     get=_get_maze_hard_solution_overlay_actor_critic,
 )
 
-MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS: tuple[TraceField, ...] = (_MAZE_HARD_EHC_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC,)
+MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS: tuple[TraceField, ...] = (
+    _MAZE_HARD_EHC_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC,
+)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "build_mazehard_ehc_trace_meta",
     "MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS",

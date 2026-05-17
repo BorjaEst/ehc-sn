@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from ehc_sn.policies._base import PolicyDecision, PolicyInput
 
 
-# =================================================================================================
+# =============================================================================
 class StayPolicyConfig(BaseModel, extra="forbid"):
     """Configuration for deterministic stay / no-op policies."""
 
@@ -21,22 +21,29 @@ class StayPolicyConfig(BaseModel, extra="forbid"):
     stay_action: int = Field(
         default=0,
         ge=0,
-        description="Action index emitted by this policy. Defaults to 0 (STAY in canonical movement ontology).",
+        description="Action index emitted by this policy. "
+        "Defaults to 0 (STAY in canonical movement ontology).",
     )
 
 
-# =================================================================================================
+# =============================================================================
 class StayPolicy:
     """Always emit the configured stay action."""
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, *, action: int,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        *,
+        action: int,
+    ) -> None:
+        """Initialize the policy with the given configuration."""
         self._action = int(action)
 
-    def __call__(  # ------------------------------------------------------------------------------
-        self, policy_input: PolicyInput, *, explore: bool = True,
-    ) -> PolicyDecision:  # fmt: skip
+    def __call__(  # ----------------------------------------------------------
+        self,
+        policy_input: PolicyInput,
+        *,
+        explore: bool = True,
+    ) -> PolicyDecision:
         """Return the stay action for every batch row."""
         _ = explore
         batch_shape = policy_input.valid_action_mask.shape[:-1]
@@ -49,5 +56,5 @@ class StayPolicy:
         return PolicyDecision(action=action)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["StayPolicyConfig", "StayPolicy"]

@@ -34,7 +34,7 @@ import torch
 from torch import nn
 
 
-# =================================================================================================
+# =============================================================================
 @runtime_checkable
 class SupportsDetach(Protocol):
     """Protocol for objects that expose a ``detach()`` method.
@@ -48,10 +48,10 @@ class SupportsDetach(Protocol):
         ...
 
 
-# =================================================================================================
-def _supports_detach(  # --------------------------------------------------------------------------
+# =============================================================================
+def _supports_detach(  # ------------------------------------------------------
     x: object,
-) -> TypeGuard[SupportsDetach]:  # fmt: skip
+) -> TypeGuard[SupportsDetach]:
     """Return True if *x* looks like it supports ``detach()``.
 
     This is intentionally structural (duck-typing). It is used solely to narrow
@@ -61,10 +61,10 @@ def _supports_detach(  # -------------------------------------------------------
     return hasattr(x, "detach") and callable(getattr(x, "detach"))
 
 
-# =================================================================================================
-def detach_any(  # --------------------------------------------------------------------------------
+# =============================================================================
+def detach_any(  # ------------------------------------------------------------
     x: Any,
-) -> Any:  # fmt: skip
+) -> Any:
     """Recursively detach tensors inside *x*.
 
     Supported inputs:
@@ -109,20 +109,29 @@ def detach_any(  # -------------------------------------------------------------
     return x
 
 
-# =================================================================================================
+# =============================================================================
 class DetachMixin:
-    def detach(  # --------------------------------------------------------------------------------
+    """Dataclass mixin providing a typed ``detach()`` method. The method
+    returns a copy of the dataclass with all tensor-like fields detached.
+    """
+
+    def detach(  # ------------------------------------------------------------
         self: Self,
-    ) -> Self:  # fmt: skip
+    ) -> Self:
         """Return a copy of this dataclass with all tensor-like fields detached.
 
         Raises:
             TypeError: If the mixin is used on a non-dataclass type.
         """
         if not is_dataclass(self):
-            raise TypeError(f"{type(self).__name__} must be a dataclass to use DetachMixin")
-        updates = {f.name: detach_any(getattr(self, f.name)) for f in fields(self)}
+            raise TypeError(
+                f"{type(self).__name__} must be a dataclass to use DetachMixin",
+            )
+        updates = {
+            f.name: detach_any(getattr(self, f.name)) for f in fields(self)
+        }
         return cast(Self, replace(self, **updates))
 
 
+# =============================================================================
 __all__ = ["DetachMixin", "SupportsDetach", "detach_any"]

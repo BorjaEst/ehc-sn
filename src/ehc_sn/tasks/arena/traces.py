@@ -36,7 +36,7 @@ from ehc_sn.data.manifest import read_manifest
 from ehc_sn.traces.trace_tree import TraceTree
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class ArenaEvaluationSourceContext:
     """Typed, frozen provider-side context for an Arena evaluation case batch.
@@ -58,12 +58,17 @@ class ArenaEvaluationSourceContext:
 
     def __post_init__(self) -> None:
         if self.task_family != "arena":
-            raise ValueError(f"ArenaEvaluationSourceContext.task_family must be 'arena', got {self.task_family!r}")
+            raise ValueError(
+                "ArenaEvaluationSourceContext.task_family must be 'arena', got "
+                f"{self.task_family!r}"
+            )
         if not self.sample_ids:
-            raise ValueError("ArenaEvaluationSourceContext.sample_ids must not be empty")
+            raise ValueError(
+                "ArenaEvaluationSourceContext.sample_ids must not be empty",
+            )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class ArenaTraceSupplements:
     """Canonical world/context supplement content for Arena traces.
@@ -85,7 +90,7 @@ class ArenaTraceSupplements:
     observation_onehot: np.ndarray  # (T, B, V) float32
 
 
-# =================================================================================================
+# =============================================================================
 def build_arena_trace_supplements(
     source_context: ArenaEvaluationSourceContext,
     trace_length: int,
@@ -119,7 +124,9 @@ def build_arena_trace_supplements(
     parent_substrate_rel: str = arena_manifest["parent_substrate"]
 
     # ── 2. Resolve parent substrate root ─────────────────────────────────────
-    resolved_repo_root = repo_root if repo_root is not None else _find_repo_root(dataset_path)
+    resolved_repo_root = (
+        repo_root if repo_root is not None else _find_repo_root(dataset_path)
+    )
     parent_root = resolved_repo_root / parent_substrate_rel
 
     # ── 3. Load Arena index → sample order and parent_sample_id mapping ───────
@@ -128,7 +135,10 @@ def build_arena_trace_supplements(
 
     missing = [sid for sid in sample_ids if sid not in arena_by_id]
     if missing:
-        raise ValueError(f"build_arena_trace_supplements: sample ids not found in Arena index: {missing}")
+        raise ValueError(
+            "build_arena_trace_supplements: sample ids not found in Arena "
+            f"index: {missing}"
+        )
 
     ordered_entries = [arena_by_id[sid] for sid in sample_ids]
     split = ordered_entries[0].split
@@ -142,10 +152,13 @@ def build_arena_trace_supplements(
     parent_split_entries = [e for e in parent_all if e.split == split]
     parent_split_pos = {e.id: i for i, e in enumerate(parent_split_entries)}
 
-    missing_parent = [pid for pid in parent_sample_ids if pid not in parent_split_pos]
+    missing_parent = [
+        pid for pid in parent_sample_ids if pid not in parent_split_pos
+    ]
     if missing_parent:
         raise ValueError(
-            f"build_arena_trace_supplements: parent sample ids not found in parent index " f"(split={split!r}): {missing_parent}"
+            "build_arena_trace_supplements: parent sample ids not found in "
+            f"parent index (split={split!r}): {missing_parent}"
         )
     parent_positions = [parent_split_pos[pid] for pid in parent_sample_ids]
 
@@ -157,9 +170,15 @@ def build_arena_trace_supplements(
 
     # ── 6. Load Arena trajectory arrays (mmap, sliced per sample) ────────────
     arena_split_dir = dataset_path / split
-    traj_row_all = np.load(arena_split_dir / "trajectory_row.npy", mmap_mode="r")
-    traj_col_all = np.load(arena_split_dir / "trajectory_col.npy", mmap_mode="r")
-    traj_obs_all = np.load(arena_split_dir / "trajectory_observation_id.npy", mmap_mode="r")
+    traj_row_all = np.load(
+        arena_split_dir / "trajectory_row.npy", mmap_mode="r"
+    )
+    traj_col_all = np.load(
+        arena_split_dir / "trajectory_col.npy", mmap_mode="r"
+    )
+    traj_obs_all = np.load(
+        arena_split_dir / "trajectory_observation_id.npy", mmap_mode="r"
+    )
     t_max = traj_row_all.shape[1]
 
     B = len(sample_ids)
@@ -183,11 +202,15 @@ def build_arena_trace_supplements(
 
         valid_mask = (obs_seq >= 0) & (obs_seq < V)
         safe_obs = np.where(valid_mask, obs_seq, 0)
-        observation_onehot_buf[b, np.arange(T), safe_obs] = np.where(valid_mask, 1.0, 0.0)
+        observation_onehot_buf[b, np.arange(T), safe_obs] = np.where(
+            valid_mask, 1.0, 0.0
+        )
 
     # Transpose to (T, B) / (T, B, V) for trace convention.
     location_ids = location_ids_buf.T.copy()  # (T, B) int32
-    observation_onehot = observation_onehot_buf.transpose(1, 0, 2).copy()  # (T, B, V) float32
+    observation_onehot = observation_onehot_buf.transpose(
+        1, 0, 2
+    ).copy()  # (T, B, V) float32
 
     return ArenaTraceSupplements(
         worlds=worlds,
@@ -196,8 +219,8 @@ def build_arena_trace_supplements(
     )
 
 
-# =================================================================================================
-def apply_arena_trace_supplements(
+# =============================================================================
+def apply_arena_trace_supplements(  # -----------------------------------------
     trace: TraceTree,
     supplements: ArenaTraceSupplements,
 ) -> None:
@@ -212,17 +235,21 @@ def apply_arena_trace_supplements(
         trace: The :class:`~ehc_sn.traces.trace_tree.TraceTree` to modify in-place.
         supplements: The supplement content to attach.
     """
-    trace.attach_dense("world_step/location_ids", supplements.location_ids, overwrite=True)
-    trace.attach_dense("world_step/observation", supplements.observation_onehot, overwrite=True)
+    trace.attach_dense(
+        "world_step/location_ids", supplements.location_ids, overwrite=True
+    )
+    trace.attach_dense(
+        "world_step/observation", supplements.observation_onehot, overwrite=True
+    )
     trace.attach_meta({"environments": supplements.worlds}, overwrite=True)
 
 
-# =================================================================================================
-# Internal helpers
-# =================================================================================================
-
-
-def _build_world(mask_valid: np.ndarray, h: int, w: int) -> dict[str, Any]:
+# =============================================================================
+def _build_world(  # ----------------------------------------------------------
+    mask_valid: np.ndarray,
+    h: int,
+    w: int,
+) -> dict[str, Any]:
     """Build a world dict for a single parent-substrate sample."""
     locations: list[dict[str, Any]] = []
     for row in range(h):
@@ -241,7 +268,10 @@ def _build_world(mask_valid: np.ndarray, h: int, w: int) -> dict[str, Any]:
     }
 
 
-def _find_repo_root(start: Path) -> Path:
+# =============================================================================
+def _find_repo_root(  # -------------------------------------------------------
+    start: Path,
+) -> Path:
     """Walk up from ``start`` to find the repo root (directory with pyproject.toml)."""
     current = start.resolve()
     for _ in range(20):
@@ -251,7 +281,7 @@ def _find_repo_root(start: Path) -> Path:
     return Path.cwd()
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "ArenaEvaluationSourceContext",
     "ArenaTraceSupplements",

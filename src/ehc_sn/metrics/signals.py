@@ -35,9 +35,9 @@ Structure
 
 from __future__ import annotations
 
-# =================================================================================================
+# =============================================================================
 # Cross-paradigm — valid for any training regime
-# =================================================================================================
+# =============================================================================
 
 STEPS_MEAN: str = "steps_mean"
 """Mean deliberation steps per slot."""
@@ -48,9 +48,9 @@ THETA_CLS_NORM: str = "theta_cls_norm"
 CROSS_PARADIGM_SIGNALS: frozenset[str] = frozenset({STEPS_MEAN, THETA_CLS_NORM})
 
 
-# =================================================================================================
+# =============================================================================
 # ACT-specific — produced by ACTObjective.compute_signals()
-# =================================================================================================
+# =============================================================================
 
 LOSS_Q_DONE: str = "loss_q_done"
 """Q-done binary cross-entropy loss (ACT)."""
@@ -61,12 +61,14 @@ TARGET_Q_MEAN: str = "target_q_mean"
 TARGET_Q_STD: str = "target_q_std"
 """TD(0) bootstrap Q-target standard deviation (ACT)."""
 
-ACT_SIGNALS: frozenset[str] = frozenset({LOSS_Q_DONE, TARGET_Q_MEAN, TARGET_Q_STD})
+ACT_SIGNALS: frozenset[str] = frozenset(
+    {LOSS_Q_DONE, TARGET_Q_MEAN, TARGET_Q_STD}
+)
 
 
-# =================================================================================================
+# =============================================================================
 # RL-specific — produced by HybridRLLossHead.compute_step()
-# =================================================================================================
+# =============================================================================
 
 
 REWARD_MEAN: str = "reward_mean"
@@ -102,9 +104,9 @@ RL_SIGNALS: frozenset[str] = frozenset(
 )  # fmt: skip
 
 
-# =================================================================================================
+# =============================================================================
 # Latent variational signals — shared base for TEM-family objectives
-# =================================================================================================
+# =============================================================================
 
 LOSS_TOTAL: str = "loss_total"
 """Total VAR loss sum for this step."""
@@ -124,12 +126,21 @@ LATENT_POST_NORM: str = "latent_post_norm"
 LATENT_PRIOR_NORM: str = "latent_prior_norm"
 """Mean activation norm of prior latent block(s)."""
 
-VAR_SIGNALS: frozenset[str] = frozenset({LOSS_TOTAL, LOSS_OBS_NLL, LOSS_LATENT, LOSS_REG, LATENT_POST_NORM, LATENT_PRIOR_NORM})
+VAR_SIGNALS: frozenset[str] = frozenset(
+    {
+        LOSS_TOTAL,
+        LOSS_OBS_NLL,
+        LOSS_LATENT,
+        LOSS_REG,
+        LATENT_POST_NORM,
+        LATENT_PRIOR_NORM,
+    }
+)
 
 
-# =================================================================================================
+# =============================================================================
 # TEM-specific — produced by TEMObjective.compute_signals() (canonical: TEMObjective)
-# =================================================================================================
+# =============================================================================
 
 LOSS_GRID_KL: str = "loss_grid_kl"
 """Grid latent consistency loss sum (TEM)."""
@@ -192,11 +203,17 @@ TEM_SIGNALS: frozenset[str] = VAR_SIGNALS | frozenset(
 )  # fmt: skip
 
 
-# =================================================================================================
+# =============================================================================
 # T2 standard set — re-used by DiagnosticsCallback
-# =================================================================================================
+# =============================================================================
 
-STANDARD_SIGNALS: frozenset[str] = CROSS_PARADIGM_SIGNALS | ACT_SIGNALS | RL_SIGNALS | VAR_SIGNALS | TEM_SIGNALS
+STANDARD_SIGNALS: frozenset[str] = (
+    CROSS_PARADIGM_SIGNALS
+    | ACT_SIGNALS
+    | RL_SIGNALS
+    | VAR_SIGNALS
+    | TEM_SIGNALS
+)
 """All signals that are logged at the ``"standard"`` diagnostic tier.
 
 A :class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback` configured with
@@ -204,7 +221,7 @@ A :class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback` configured with
 set.  All other signals require ``diagnostic_level="research"``.
 """
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     # Cross-paradigm
     "STEPS_MEAN", "THETA_CLS_NORM", "CROSS_PARADIGM_SIGNALS",

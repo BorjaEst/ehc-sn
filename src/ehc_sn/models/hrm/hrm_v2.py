@@ -1,26 +1,30 @@
-""" """
+"""HRM v2 core contracts over a task-agnostic recurrent substrate."""
 
-import math
+from __future__ import annotations
+
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, TypeAlias
+from typing import Optional
 
-import torch
 from pydantic import BaseModel, Field, field_validator
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
 from ehc_sn.modules.pfc import PFCModel, PFCSettings, PFCState
+from ehc_sn.modules.pfc.workspace import (
+    SlotFamily,
+    WorkspaceLayout,
+    WorkspaceSchema,
+)
 from ehc_sn.modules.str import STRModelLinear, STRSettings, STRState
-from ehc_sn.types import Device, Dtype
-from ehc_sn.utils import trunc_normal_init_
+from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
-# Community-standard map-style batch: plain dict returned by MazeDataset / DataLoader.
-Batch: TypeAlias = Dict[str, Tensor]
 
-
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class HRMInputV2:
     """Model-native input payload for one HRM v2 step."""
@@ -38,118 +42,120 @@ class HRMOutputV2:
     state_value: Tensor
 
 
-# =================================================================================================
+# =============================================================================
 class ModelSettingsV2(BaseModel, extra="forbid"):
     """Model-level settings for HRM v2.
 
     This settings object composes:
         - PFC settings (recurrent reasoning core)
         - STR settings (actor-critic / reward head)
-        - token vocabulary size
+        - schema-slot width and count inherited from PFC settings
 
     Notes:
         HRM v2 currently requires RoPE positional encodings inside the PFC modules
         for legacy parity and to match the environment tokenization.
     """
 
-    pfc: PFCSettings = Field(
-        ...,
-        description="Settings for the core PFC model architecture.",
-    )
-    str: STRSettings = Field(
-        ...,
-        description="Settings for the STR actor-critic architecture.",
-    )
-
-    @field_validator("pfc", mode="after")
-    def validate_pfc(cls, v: PFCSettings) -> PFCSettings:
-        """Ensure that the PFC settings have a valid reasoning module configuration."""
-        if v.cortex.pos_encodings != "rope":
-            raise ValueError("PFC reasoning modules must use RoPE positional encodings")
-        return v
-
-    vocab_size: int = Field(
-        ...,
-        ge=1,
-        description="Vocabulary size for token embeddings and LM head.",
-    )
-
-    @property
-    def seq_length(self) -> int:
-        """Convenience property to access sequence length from the PFC settings."""
-        return self.pfc.seq_length
-
-    @property
-    def num_schema_slots(self) -> int:
-        """Compatibility alias for seq_length (MazeHard bridge adapter surface)."""
-        return self.seq_length
-
-    @property
-    def hidden_size(self) -> int:
-        """Convenience property to access hidden size from the PFC settings."""
-        return self.pfc.reasoning_h.cortex.embedding_dim
-
-    @property
-    def embedding_scale(self) -> float:
-        """Base embedding scale applied to token embeddings."""
-        return math.sqrt(self.hidden_size)
-
-    @property
-    def init_std(self) -> float:
-        """Convenience property for standard deviation of truncated normal initialization."""
-        return 1.0 / math.sqrt(self.hidden_size)
-
     @classmethod
-    def from_config(cls, path: Path) -> "ModelSettingsV2":
+    def from_config(cls, path: str | Path) -> "ModelSettingsV2":
         """Load model settings from a TOML configuration file."""
         config_map = tomllib.load(Path(path).open("rb"))
         return cls.model_validate(config_map)
 
+    pfc: PFCSettings = Field(
+        ..., description="Settings for the core PFC model architecture."
+    )
+    str: STRSettings = Field(
+        ..., description="Settings for the STR actor-critic architecture."
+    )
 
-# =================================================================================================
+    @property
+    def num_schema_slots(self) -> int:
+        """Return the number of schema slots owned by the HRM core."""
+        return self.pfc.seq_length
+
+    @property
+    def schema_layout(self) -> WorkspaceLayout:
+        """Return the body-only schema layout."""
+        return WorkspaceLayout.from_schema(
+            WorkspaceSchema(
+                fixed=(),
+                families=(SlotFamily("schema", self.num_schema_slots),),
+            )
+        )
+
+    @property
+    def body_schema(self) -> WorkspaceSchema:
+        """Return the body-only schema (no controller)."""
+        return self.schema_layout.schema
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class HRMInputV2:
+    """Task-agnostic schema payload consumed by the HRM v2 core."""
+
+    schema_tokens: Tensor
+    prefix_bias: Tensor | None = None
+
+    @property
+    def batch_size(self) -> int:
+        """Return the leading batch size."""
+        return int(self.schema_tokens.shape[0])
+
+
+# =============================================================================
 @dataclass
-class HRMState(DetachMixin):
-    """Recurrent state carried across steps for HRM v2.
+class HRMStateV2(DetachMixin):
+    """Recurrent state carried across steps for HRM v2."""
 
-    Attributes:
-        pfc: PFC recurrent state.
-        str: STR recurrent state.
-    """
-
-    pfc: PFCState  # Prefrontal Cortex state, containing working memory and reasoning module states.
-    str: STRState  # STR actor-critic state, containing any recurrent state for the STR module (if needed).
+    pfc: PFCState  # Prefrontal Cortex state
+    str: STRState  # STR actor-critic state
 
 
-HRMStateV2 = HRMState
+# =============================================================================
+@dataclass(frozen=True)
+class HRMOutputV2:
+    """Architecture-native HRM v2 output."""
+
+    theta_summary: (
+        Tensor  # (B, D) summary readout from the PFC backbone (e.g., CLS token)
+    )
+    schema_slots: Tensor  # (B, S, D) schema-slot tokens from the PFC workspace
+    policy_logits: Tensor  # (B, A) actor-head logits; used for action selection and actor loss
+    state_value: (
+        Tensor  # (B, 1) critic state value; used for value regression loss
+    )
 
 
-# =================================================================================================
+# =============================================================================
 class HRModelV2(nn.Module):
     """Core HRM v2 model.
 
     The model consists of:
-        - token embedding table
-        - PFC recurrent reasoning module producing per-token logits and a CLS summary
+        - PFC recurrent reasoning module over schema-slot tokens
         - STR actor-critic module consuming the CLS summary and PFC Q logits
-        - language-model head predicting per-token labels
 
     The forward pass returns:
+        - architecture-native output bundle with schema slots, policy logits, and value
         - updated recurrent state
-        - tuple of logits ``(token_logits, q_logits, r_logits)``
-        - CLS feature vector (used by the controller / tracing)
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: ModelSettingsV2, *,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: ModelSettingsV2,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         super().__init__()
         self._config = config
-
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, device=device, dtype=dtype)
-        self.pfc = PFCModel(config.pfc, device=device, dtype=dtype)  # Reasoning module with embedded inputs
-        self.str = STRModelLinear(config.str, device=device, dtype=dtype)  # Reward estimator
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, device=device, dtype=dtype)
+        self.pfc = PFCModel(
+            config.pfc, device=device, dtype=dtype
+        )  # Reasoning module with embedded inputs
+        self.str = STRModelLinear(
+            config.str, device=device, dtype=dtype
+        )  # Critic over PFC summary + q values
         self.reset_parameters()
 
     @property
@@ -157,85 +163,94 @@ class HRModelV2(nn.Module):
         """Return the parsed model settings used to build this module."""
         return self._config
 
-    def reset_parameters(self) -> None:  # -------------------------------------------------------
-        """Initialize parameters.
+    def reset_parameters(  # --------------------------------------------------
+        self,
+    ) -> None:
+        """Reset all learnable parameters owned by the core."""
+        self.pfc.reset_parameters()
+        # self.str.reset_parameters()
 
-        Uses truncated normal initialization with ``std = 1/sqrt(hidden_size)`` for
-        token embeddings and the LM head to keep initial activation scales stable.
-        """
-        init_std = self.config.init_std
-        trunc_normal_init_(self.embed_tokens.weight, std=init_std)
-        trunc_normal_init_(self.lm_head.weight, std=init_std)
-
-    def init_state(  # ---------------------------------------------------------------------------
-        self, batch_size: int,
-    ) -> HRMState:  # fmt: skip
-        """Create a fresh recurrent state.
-
-        Args:
-            batch_size: Number of parallel environments / sequences.
-
-        Returns:
-            A new :class:`HRMState` with initialized PFC and STR states.
-        """
-        return HRMState(
-            pfc=self.pfc.init_state(batch_size),
+    def init_state(  # --------------------------------------------------------
+        self,
+        batch_size: int,
+    ) -> HRMStateV2:
+        """Allocate a fresh recurrent state for the given batch size."""
+        return HRMStateV2(
+            pfc=self.pfc.init_state(
+                batch_size, body_schema=self.config.body_schema
+            ),
             str=self.str.init_state(batch_size),
         )
 
-    def reset_state(  # --------------------------------------------------------------------------
-        self, reset_flag: Tensor, state: HRMState,
-    ) -> HRMState:  # fmt: skip
-        """Selectively reset rows of the recurrent state.
-
-        Args:
-            reset_flag: Boolean / 0-1 tensor of shape ``(B,)`` indicating which
-                batch rows should be reset.
-            state: Current recurrent state.
-
-        Returns:
-            New state with flagged rows reset for both PFC and STR.
-        """
-        return HRMState(
+    def reset_state(  # -------------------------------------------------------
+        self,
+        reset_flag: Tensor,
+        state: HRMStateV2,
+    ) -> HRMStateV2:
+        """Selectively reset recurrent state rows according to the given boolean mask."""
+        return HRMStateV2(
             pfc=self.pfc.reset_state(state.pfc, reset_flag),
             str=self.str.reset_state(state.str, reset_flag),
         )
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, inputs: HRMInputV2, state: Optional[HRMState] = None,
-    ) -> tuple[HRMOutputV2, HRMState]:  # fmt: skip
-        """Run one model step."""
-        state = state or self.init_state(batch_size=inputs.schema_tokens.shape[0])
-        x = inputs.schema_tokens  # (B, S, D) — already embedded by adapter encoder
-
-        state_pfc, z_H, q_logits = self.pfc(x, state=state.pfc)  # z_H: (B, S+1, D)
-        logits = self.lm_head(z_H[:, 1:])  # strip CLS → (B, S, vocab)
-        theta_cls = z_H[:, 0]  # (B, D) — theta/CLS summary
-        state_str, r_logits = self.str(theta_cls.detach(), q_logits, state.str)
-
-        new_state = HRMState(pfc=state_pfc, str=state_str)
-        model_output = HRMOutputV2(schema_slots=z_H[:, 1:], policy_logits=q_logits, state_value=r_logits)
-        return model_output, new_state
-
-    def embed_input_ids(  # -----------------------------------------------------------------------
-        self, input_ids: Tensor,
-    ) -> Tensor:  # fmt: skip
-        """Embed token ids into a scaled representation.
+    def step(  # --------------------------------------------------------------
+        self,
+        payload: HRMInputV2,
+        state: Optional[HRMStateV2] = None,
+    ) -> tuple[HRMOutputV2, HRMStateV2]:
+        """Run one model step over task-agnostic schema tokens.
 
         Args:
-            input_ids: Token ids of shape ``(B, S)``.
+            payload: Schema-slot tokens with shape ``(B, S, D)`` plus optional prefix bias.
+            state: Optional recurrent state to carry across steps. If ``None``, a
+                fresh state is created.
 
         Returns:
-            Embedded inputs of shape ``(B, S, D)`` scaled by ``sqrt(D)``.
+            ``(output, next_state)`` where ``output`` exposes controller-facing
+            architecture-native readouts for the current step.
         """
-        token_embeddings = self.embed_tokens(input_ids.to(torch.int32))
-        # Scale embeddings to keep activations in a reasonable range.
-        return self.config.embedding_scale * token_embeddings
+        if state is None:
+            state = self.init_state(payload.batch_size)
+        else:
+            state = state.detach()
+
+        # Step the PFC core with the schema tokens bound to the workspace layout
+        pfc_out, state.pfc = self.pfc.step(
+            self.config.schema_layout.bind(payload.schema_tokens),
+            state=state.pfc,
+            prefix_bias=payload.prefix_bias,
+        )
+
+        # Step the STR actor-critic module with the PFC summary and Q values as input
+        state.str, state_value = self.str(
+            features=pfc_out.summary,
+            q_values=pfc_out.q_values,
+            state=state.str,
+        )
+
+        # Extract architecture-native readouts for the current step
+        output = HRMOutputV2(
+            theta_summary=pfc_out.summary,
+            schema_slots=pfc_out.workspace.family("schema"),
+            policy_logits=pfc_out.q_values,  # PFC q_values are the actor policy logits
+            state_value=state_value.unsqueeze(-1),
+        )
+        return output, state
+
+    def forward(  # -----------------------------------------------------------
+        self,
+        payload: HRMInputV2,
+        state: Optional[HRMStateV2] = None,
+    ) -> tuple[HRMOutputV2, HRMStateV2]:
+        """Compatibility wrapper over :meth:`step` for module-call users."""
+        return self.step(payload, state=state)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
-    "HRModelV2", "HRMState", "HRMStateV2", "ModelSettingsV2",
-    "HRMInputV2", "HRMOutputV2",
-    "Batch",
-]  # fmt: skip
+    "ModelSettingsV2",
+    "HRMInputV2",
+    "HRMOutputV2",
+    "HRMStateV2",
+    "HRModelV2",
+]

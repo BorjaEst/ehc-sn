@@ -19,12 +19,13 @@ from typing import Literal, Optional
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn.types import Device, Dtype
 
-
-# =================================================================================================
+# =============================================================================
 class QEstimatorSettings(BaseModel, extra="forbid"):
     """Configuration for :class:`QValueEstimator` (vmPFC analogue).
 
@@ -35,7 +36,10 @@ class QEstimatorSettings(BaseModel, extra="forbid"):
     hidden_size: int = Field(
         ...,
         ge=1,
-        description="Dimensionality of the input feature vector (must match backbone output).",
+        description=(
+            "Dimensionality of the input feature vector "
+            "(must match backbone output)."
+        ),
     )
     n_actions: int = Field(
         default=2,
@@ -54,7 +58,10 @@ class QEstimatorSettings(BaseModel, extra="forbid"):
     pool_index: int = Field(
         default=0,
         ge=0,
-        description="Position index to select when pool_mode='first'. Legacy default: 0.",
+        description=(
+            "Position index to select when pool_mode='first'. "
+            "Legacy default: 0."
+        ),
     )
     hidden_layers: list[int] = Field(
         default_factory=list,
@@ -72,7 +79,7 @@ class QEstimatorSettings(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 class QValueEstimator(nn.Module):
     """Q-value head mapping dlPFC features to per-action value estimates.
 
@@ -83,10 +90,13 @@ class QValueEstimator(nn.Module):
     When given 3-D input, applies the configured pooling strategy first.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: QEstimatorSettings, *,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: QEstimatorSettings,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         super().__init__()
         self._config = config
 
@@ -94,13 +104,17 @@ class QValueEstimator(nn.Module):
         layers: list[nn.Module] = []
         in_dim = config.hidden_size
         for h_dim in config.hidden_layers:
-            layers.append(nn.Linear(in_dim, h_dim, bias=False, device=device, dtype=dtype))
+            layers.append(
+                nn.Linear(in_dim, h_dim, bias=False, device=device, dtype=dtype)
+            )
             layers.append(nn.SiLU())
             in_dim = h_dim
         self.trunk = nn.Sequential(*layers) if layers else nn.Identity()
 
         # Final projection to Q-values
-        self.head = nn.Linear(in_dim, config.n_actions, bias=True, device=device, dtype=dtype)
+        self.head = nn.Linear(
+            in_dim, config.n_actions, bias=True, device=device, dtype=dtype
+        )
         self.reset_parameters()
 
     def reset_parameters(self) -> None:
@@ -117,7 +131,11 @@ class QValueEstimator(nn.Module):
     def config(self) -> QEstimatorSettings:
         return self._config
 
-    def _pool(self, z_H: Tensor, z_L) -> Tensor:
+    def _pool(  # -------------------------------------------------------------
+        self,
+        z_H: Tensor,
+        z_L,
+    ) -> Tensor:
         """Reduce (B, S, D) → (B, D) using the configured strategy."""
         mode = self._config.pool_mode
         if mode == "first":
@@ -128,7 +146,11 @@ class QValueEstimator(nn.Module):
             return z_H.mean(dim=1)
         raise ValueError(f"Unknown pool_mode: {mode!r}")
 
-    def forward(self, z_H: Tensor, z_L: Tensor) -> Tensor:
+    def forward(  # -----------------------------------------------------------
+        self,
+        z_H: Tensor,
+        z_L: Tensor,
+    ) -> Tensor:
         """Estimate Q-values from dlPFC features.
 
         Args:
@@ -143,4 +165,5 @@ class QValueEstimator(nn.Module):
         return self.head(x)
 
 
+# =============================================================================
 __all__ = ["QEstimatorSettings", "QValueEstimator"]

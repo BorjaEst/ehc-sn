@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,16 +8,13 @@ from matplotlib.collections import PatchCollection
 from matplotlib.colors import Normalize
 from numpy.typing import NDArray
 
+from ehc_sn.figures._contracts import AnyWorld
 from ehc_sn.figures.utils.actions import action_patch
-from ehc_sn.figures.utils.axes import (
-    _environment_locations,
-    _environment_n_locations,
-    configure_environment_axes,
-)
+from ehc_sn.figures.utils.axes import _environment_locations, _environment_n_locations, configure_environment_axes
 
 
 def plot_map(
-    environment,
+    environment: AnyWorld,
     values: NDArray,
     ax: Optional[plt.Axes] = None,
     vmin: Optional[float] = None,
@@ -85,10 +82,10 @@ def plot_map(
         _, ax = plt.subplots()
     ax = configure_environment_axes(ax, environment=environment, radius=radius, invert_y=True)
 
-    location_patches: List = []
-    nan_patches: List = []
-    action_patches: List = []
-    outline_patches: List = []
+    location_patches: list = []
+    nan_patches: list = []
+    action_patches: list = []
+    outline_patches: list = []
 
     # Draw locations
     for i, location in enumerate(locations):
@@ -187,7 +184,7 @@ def _default_radius(n_locations: int) -> float:
     return 2 * (0.01 + 1 / (10 * np.sqrt(n_locations)))
 
 
-def _location_valid_mask(locations: List[dict]) -> NDArray[np.bool_]:
+def _location_valid_mask(locations: list[dict]) -> NDArray[np.bool_]:
     """Return the canonical occupancy mask for environment locations.
 
     When location metadata provides a ``valid`` field, invalid cells are treated

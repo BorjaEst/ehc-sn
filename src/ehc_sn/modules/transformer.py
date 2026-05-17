@@ -12,7 +12,7 @@ from ehc_sn.modules.mlp import MLPConfig, SwiGLU
 from ehc_sn.utils.norms import rms_norm
 
 
-# =================================================================================================
+# =============================================================================
 class TransformerBlockConfig(BaseModel, extra="forbid"):
     """Configuration for a single Transformer-style block.
 
@@ -81,7 +81,7 @@ class TransformerBlockConfig(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 class TransformerBlock(nn.Module):
     """A minimal Transformer block with RMSNorm residuals.
 
@@ -96,10 +96,13 @@ class TransformerBlock(nn.Module):
         - RMSNorm is applied *after* the residual add ("post-norm" style).
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: TransformerBlockConfig, *, 
-        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
-    ) -> None:  # fmt: skip
+    def __init__(  # -----------------------------------------------------------
+        self,
+        config: TransformerBlockConfig,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         super().__init__()
         self._config = config
 
@@ -111,8 +114,11 @@ class TransformerBlock(nn.Module):
         """Return the parsed block configuration."""
         return self._config
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, x: Tensor, *, attn_mask: Optional[Tensor] = None,
+    def forward(  # ------------------------------------------------------------
+        self,
+        x: Tensor,
+        *,
+        attn_mask: Optional[Tensor] = None,
     ) -> Tensor:
         """Apply self-attention and MLP sublayers with post-norm residuals."""
         attention = self.self_attn(x, attn_mask=attn_mask)
@@ -121,6 +127,7 @@ class TransformerBlock(nn.Module):
         return x
 
 
+# =============================================================================
 class TransformerSequenceSummaryConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`TransformerSequenceSummary`.
 
@@ -149,6 +156,7 @@ class TransformerSequenceSummaryConfig(BaseModel, extra="forbid"):
         return [self.block for _ in range(self.n_layers)]
 
 
+# =============================================================================
 class TransformerSequenceSummary(nn.Module):
     """Summarize embedded sequences into one CLS-pooled hidden vector.
 
@@ -157,7 +165,7 @@ class TransformerSequenceSummary(nn.Module):
     the caller rather than the shared transformer layer.
     """
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         config: TransformerSequenceSummaryConfig,
         *,
@@ -167,8 +175,15 @@ class TransformerSequenceSummary(nn.Module):
         super().__init__()
         self._config = config
         hidden_size = config.hidden_size
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, hidden_size, device=device, dtype=dtype))
-        self.blocks = nn.ModuleList([TransformerBlock(layer, device=device, dtype=dtype) for layer in config.layers])
+        self.cls_token = nn.Parameter(
+            torch.zeros(1, 1, hidden_size, device=device, dtype=dtype)
+        )
+        self.blocks = nn.ModuleList(
+            [
+                TransformerBlock(layer, device=device, dtype=dtype)
+                for layer in config.layers
+            ]
+        )
         self.reset_parameters()
 
     @property
@@ -181,17 +196,30 @@ class TransformerSequenceSummary(nn.Module):
         self.cls_token.data.zero_()
 
     @staticmethod
-    def _prepare_attn_mask(attn_mask: Optional[Tensor], *, batch_size: int, seq_len: int, device: torch.device) -> Optional[Tensor]:
+    def _prepare_attn_mask(  # ------------------------------------------------
+        attn_mask: Optional[Tensor],
+        *,
+        batch_size: int,
+        seq_len: int,
+        device: torch.device,
+    ) -> Optional[Tensor]:
         """Convert a token mask for non-CLS inputs into an SDPA-ready mask."""
         if attn_mask is None:
             return None
         if attn_mask.shape != (batch_size, seq_len):
-            raise ValueError(f"attn_mask must have shape ({batch_size}, {seq_len}), got {tuple(attn_mask.shape)}.")
+            raise ValueError(
+                f"attn_mask must have shape ({batch_size}, {seq_len}), got {tuple(attn_mask.shape)}."
+            )
         attn_mask = attn_mask.to(device=device, dtype=torch.bool)
         cls_mask = torch.ones((batch_size, 1), dtype=torch.bool, device=device)
         return torch.cat([cls_mask, attn_mask], dim=1).unsqueeze(1).unsqueeze(1)
 
-    def forward(self, x: Tensor, *, attn_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(  # -----------------------------------------------------------
+        self,
+        x: Tensor,
+        *,
+        attn_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         """Return one pooled summary vector per embedded sequence.
 
         Args:
@@ -203,40 +231,59 @@ class TransformerSequenceSummary(nn.Module):
             Tensor of shape ``(B, D)`` containing the pooled CLS summaries.
         """
         if x.ndim != 3:
-            raise ValueError(f"x must have shape (B, S, D), got {tuple(x.shape)}.")
+            raise ValueError(
+                f"x must have shape (B, S, D), got {tuple(x.shape)}."
+            )
         if int(x.shape[-1]) != self.config.hidden_size:
             raise ValueError(
                 "x last dimension must match the summary hidden size, got "
                 f"{int(x.shape[-1])} and {self.config.hidden_size}."
-            )  # fmt: skip
+            )
 
-        prepared_mask = self._prepare_attn_mask(attn_mask, batch_size=int(x.shape[0]), seq_len=int(x.shape[1]), device=x.device)
-        hidden = torch.cat([self.cls_token.expand(x.shape[0], -1, -1), x], dim=1)
+        prepared_mask = self._prepare_attn_mask(
+            attn_mask,
+            batch_size=int(x.shape[0]),
+            seq_len=int(x.shape[1]),
+            device=x.device,
+        )
+        hidden = torch.cat(
+            [self.cls_token.expand(x.shape[0], -1, -1), x], dim=1
+        )
         for block in self.blocks:
             hidden = block(hidden, attn_mask=prepared_mask)
         return hidden[:, 0]
 
 
+# =============================================================================
 class TransformerStack(nn.Module):
     """
     A sequential stack of Transformer blocks that integrates an
     injected input into a running state via a residual connection.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, layers: list[TransformerBlockConfig], *,
-        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
-    ) -> None:  # fmt: skip
+    def __init__(  # -----------------------------------------------------------
+        self,
+        layers: list[TransformerBlockConfig],
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
+        """Initialize the stack with a list of block configurations."""
         super().__init__()
 
         # List comprehension to instantiate blocks from configurations
-        modules = [TransformerBlock(config, device=device, dtype=dtype) for config in layers]
+        modules = [
+            TransformerBlock(config, device=device, dtype=dtype)
+            for config in layers
+        ]
         # ModuleList is required so PyTorch tracks the parameters of each layer
         self.layers = nn.ModuleList(modules)
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, x: Tensor, residual: Tensor,
-    ) -> Tensor:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        x: Tensor,
+        residual: Tensor,
+    ) -> Tensor:
         """
         Applies a residual injection followed by sequential transformer transformations.
 
@@ -255,3 +302,13 @@ class TransformerStack(nn.Module):
             x = layer(x)
 
         return x
+
+
+# =============================================================================
+__all__ = [
+    "TransformerBlockConfig",
+    "TransformerBlock",
+    "TransformerSequenceSummaryConfig",
+    "TransformerSequenceSummary",
+    "TransformerStack",
+]

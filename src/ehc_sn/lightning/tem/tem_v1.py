@@ -6,7 +6,7 @@ import os
 from dataclasses import fields, is_dataclass
 from itertools import repeat
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import lightning as L
 from pydantic import AliasChoices, BaseModel, Field, model_validator
@@ -64,7 +64,10 @@ class TEMV1ModelConfig(BaseModel, extra="forbid"):
 
     model_config_path: Path = Field(
         ...,
-        description="Path to the model configuration TOML file that specifies the TEM v1 architecture.",
+        description=(
+            "Path to the model configuration TOML file that specifies the TEM "
+            "v1 architecture."
+        ),
     )
     environment: None = Field(
         default=None,
@@ -142,7 +145,7 @@ class TEMV1TrainingModel(L.LightningModule):
 
         # Manual optimization: explicit backward + opt step (legacy parity + dual-opt clarity).
         self.automatic_optimization = False
-        self._train_carry = None
+        self._fit_path_carry = None
 
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(TEM_STEP_ROUTES).clone(
@@ -161,14 +164,10 @@ class TEMV1TrainingModel(L.LightningModule):
         """Return the parsed configuration used by this LightningModule."""
         return self._config
 
-    def _local_batch_size(self) -> int:
-        """Return the per-rank batch size used by train and evaluation runtimes."""
-        trainer = getattr(self, "_trainer", None)
-        world_size = max(getattr(trainer, "world_size", 1), 1)
-        return max(self.config.global_batch_size // world_size, 1)
-
     def _train_chunk_steps(self) -> int:
-        """Return the TEM TBPTT chunk length used for one optimizer update."""
+        """Return the TBPTT chunk length used for one optimizer update."""
+        if self.config.controller.window_size is not None:
+            return self.config.controller.window_size
         return self.config.runtime.sequence.tbptt_steps
 
     def _build_runtime(
@@ -350,16 +349,15 @@ class TEMV1TrainingModel(L.LightningModule):
         self,
         batch: Batch,
         batch_idx: int,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         """Run one TEM chunked-TBPTT optimizer update through the recurrent runner."""
         runtime = self._apply_runtime(self.global_step, log_values=True)
         train_controller = self._require_train_controller()
         train_objective = self._require_train_objective()
-        batch_assembler = self._ensure_train_batch_assembler(batch)
+        batch_assembler = self._ensure_fit_path_batch_assembler(batch)
 
-        # Initialize carry/state on the first batch
-        if self._train_carry is None:
-            self._train_carry = train_controller.initial_state(batch)
+        if self._fit_path_carry is None:
+            self._fit_path_carry = train_controller.initial_state(batch)
 
         source = PartialResetSource(
             incoming=batch, assembler=batch_assembler, carry0=self._train_carry
@@ -371,7 +369,7 @@ class TEMV1TrainingModel(L.LightningModule):
             runner=self._train_runner,
             source=source,
             controller=train_controller,
-            carry=self._train_carry,
+            carry=self._fit_path_carry,
             objective=train_objective,
             max_rollout_steps=self._train_chunk_steps(),
             metric_collection=self.train_metrics,
@@ -386,27 +384,55 @@ class TEMV1TrainingModel(L.LightningModule):
         )  # Further normalize by chunk length for stability.
 
         optimizers = self.optimizers()
-        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
+        optimizer_handles = (
+            list(optimizers) if isinstance(optimizers, list) else [optimizers]
+        )
+        for opt in optimizer_handles:
             opt.zero_grad(set_to_none=True)  # type: ignore
 
         self.manual_backward(loss)
 
-        for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
+        for opt in optimizer_handles:
             opt.step()  # type: ignore
 
         scheduler = self.lr_schedulers()
         for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
             sch.step()  # type: ignore
 
+        # Commit detached carry so the next chunk resumes from where this one ended.
+        self._fit_path_carry = evaluation.execution.final_carry.detach()
+        protocol_count = evaluation.last_step.outputs.losses.protocol_count
+
+        # Fit-path diagnostics.
+        final_carry = evaluation.execution.final_carry
+        valid_prev = prev_trajectory_id >= 0
+        reused = (final_carry.trajectory_id == prev_trajectory_id) & valid_prev
+        self.log(
+            "train/fit_path/max_cursor", final_carry.cursor.max().float(),
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
+        self.log(
+            "train/fit_path/min_cursor", final_carry.cursor.min().float(),
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
+        self.log(
+            "train/fit_path/halted_fraction", final_carry.halted.float().mean(),
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
+        self.log(
+            "train/fit_path/reused_trajectory_fraction", reused.float().mean(),
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
+        self.log(
+            "train/fit_path/protocol_count", protocol_count.float(),
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
+
         # Log the accumulated chunk loss to TensorBoard.
         self.log(
-            "train/loss",
-            loss.detach(),
-            on_step=True,
-            on_epoch=False,
-            prog_bar=True,
-            logger=True,
-        )
+            "train/loss", loss.detach(),
+            on_step=True, on_epoch=False, prog_bar=True, logger=True,
+        )  # fmt: skip
 
         return {
             "loss": loss.detach(),
@@ -417,7 +443,7 @@ class TEMV1TrainingModel(L.LightningModule):
         self,
         batch: Batch,
         batch_idx: int,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         """Run a full TEM rollout through the recurrent runner and trace observer."""
         runtime = self._apply_runtime(self.global_step, log_values=False)
         eval_controller = self._require_eval_controller()
@@ -467,3 +493,7 @@ def batch_size_from_static_maze_batch(  # -------------------------------------
 ) -> int:
     """Return the leading batch dimension from the required TEM maze tensor schema."""
     return int(batch[TEM_STATIC_REQUIRED_KEYS[0]].shape[0])
+
+
+# =============================================================================
+__all__ = ["TEMV1ModelConfig", "TEMV1TrainingModel"]

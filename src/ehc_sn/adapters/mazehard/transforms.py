@@ -17,7 +17,7 @@ _CHANNEL_TOPOLOGY: str = "topology"
 """Canonical topology channel name (matches ehc_sn.data.substrate.grid2d.CHANNEL_TOPOLOGY)."""
 
 
-# =================================================================================================
+# =============================================================================
 def channels_to_grid(channels: Channels) -> Channels:
     """Merge structural channels into a single canonical semantic grid.
 
@@ -46,5 +46,5 @@ def channels_to_grid(channels: Channels) -> Channels:
     return {**channels, "grid": grid}
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["channels_to_grid"]

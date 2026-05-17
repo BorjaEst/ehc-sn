@@ -23,7 +23,7 @@ from torch import nn
 from ehc_sn.utils import trunc_normal_init_
 
 
-# =================================================================================================
+# =============================================================================
 class AttentionConfig(BaseModel, extra="forbid"):
     """Configuration for the :class:`Attention` module.
 
@@ -51,7 +51,9 @@ class AttentionConfig(BaseModel, extra="forbid"):
     def _check_embed_dim(cls, v: int, info: ValidationInfo) -> int:
         num_heads = info.data.get("num_heads")
         if num_heads is not None and v % num_heads != 0:
-            raise ValueError(f"embedding_dim ({v}) must be divisible by num_heads ({num_heads}).")
+            raise ValueError(
+                f"embedding_dim ({v}) must be divisible by num_heads ({num_heads}).",
+            )
         return v
 
     num_kv_heads: Optional[int] = Field(
@@ -63,7 +65,9 @@ class AttentionConfig(BaseModel, extra="forbid"):
 
     @field_validator("num_kv_heads", mode="before")
     @classmethod
-    def _resolve_num_kv_heads(cls, v: int | None, info: ValidationInfo) -> int | None:
+    def _resolve_num_kv_heads(
+        cls, v: int | None, info: ValidationInfo
+    ) -> int | None:
         if v is not None:
             return v
         num_heads = info.data.get("num_heads")
@@ -71,16 +75,22 @@ class AttentionConfig(BaseModel, extra="forbid"):
 
     @field_validator("num_kv_heads", mode="after")
     @classmethod
-    def _validate_num_kv_heads(cls, v: int | None, info: ValidationInfo) -> int | None:
+    def _validate_num_kv_heads(
+        cls, v: int | None, info: ValidationInfo
+    ) -> int | None:
         if v is None:
             return v  # shouldn’t happen if num_heads was present, but keeps this validator total
         num_heads = info.data.get("num_heads")
         if num_heads is None:
             return v
         if v > num_heads:
-            raise ValueError(f"num_kv_heads ({v}) must be <= num_heads ({num_heads}).")
+            raise ValueError(
+                f"num_kv_heads ({v}) must be <= num_heads ({num_heads}).",
+            )
         if num_heads % v != 0:
-            raise ValueError(f"num_heads ({num_heads}) must be divisible by num_kv_heads ({v}).")
+            raise ValueError(
+                f"num_heads ({num_heads}) must be divisible by num_kv_heads ({v}).",
+            )
         return v
 
     @field_validator("num_kv_heads", mode="before")
@@ -88,19 +98,25 @@ class AttentionConfig(BaseModel, extra="forbid"):
     def _set_num_kv_heads(cls, v, info: ValidationInfo):
         return v if v is not None else info.data.get("num_heads")
 
-    is_causal: bool = Field(default=False, description="Apply causal masking in attention.")
+    is_causal: bool = Field(
+        default=False, description="Apply causal masking in attention."
+    )
 
     pos_encodings: Literal["learned", "rope"] = Field(
         default="learned",
         description=(
-            "Positional encoding strategy. 'rope' applies rotary embeddings to Q/K inside every "
-            "attention call, enabling persistent positional awareness across recurrent reasoning "
-            "cycles. 'learned' relies on additive position embeddings added once at the input."
+            "Positional encoding strategy. 'rope' applies rotary embeddings to "
+            "Q/K inside every attention call, enabling persistent positional "
+            "awareness across recurrent reasoning cycles. 'learned' relies on "
+            "additive position embeddings added once at the input."
         ),
     )
     rope_theta: float = Field(
         default=10000.0,
-        description="Base period for RoPE frequency bands. Ignored when pos_encodings='learned'.",
+        description=(
+            "Base period for RoPE frequency bands. "
+            "Ignored when pos_encodings='learned'."
+        ),
     )
 
     @property
@@ -114,7 +130,7 @@ class AttentionConfig(BaseModel, extra="forbid"):
         return self.head_dim * self.num_heads
 
 
-# =================================================================================================
+# =============================================================================
 class Attention(nn.Module):
     """Multi-head attention with grouped-query attention support.
 
@@ -123,35 +139,58 @@ class Attention(nn.Module):
     `torch.nn.functional.scaled_dot_product_attention`.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: AttentionConfig, device: Optional[Device]=None, dtype: Optional[Dtype]=None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: AttentionConfig,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         self._config = config
         super().__init__()
 
-        self._qkv_head_count = config.num_heads + 2 * (config.num_kv_heads or config.num_heads)
+        self._qkv_head_count = config.num_heads + 2 * (
+            config.num_kv_heads or config.num_heads
+        )
         self._qkv_proj_out_dim = self._qkv_head_count * config.head_dim
-        self.in_proj = nn.Linear(config.embedding_dim, self._qkv_proj_out_dim, bias=False, device=device, dtype=dtype)  # fmt: skip
-        self.out_proj = nn.Linear(config.output_size, config.embedding_dim, bias=False, device=device, dtype=dtype)  # fmt: skip
+        self.in_proj = nn.Linear(
+            config.embedding_dim,
+            self._qkv_proj_out_dim,
+            bias=False,
+            device=device,
+            dtype=dtype,
+        )
+        self.out_proj = nn.Linear(
+            config.output_size,
+            config.embedding_dim,
+            bias=False,
+            device=device,
+            dtype=dtype,
+        )
         self.reset_parameters()
 
-    def reset_parameters(self) -> None:  # -------------------------------------------------------
-        """Initialize projection weights with truncated normal matching legacy ``CastedLinear``.
+    def reset_parameters(self) -> None:  # ------------------------------------
+        """Initialize projection weights with truncated normal matching legacy
+        ``CastedLinear``.
 
         Std formulas (fan_in = input dimension of each projection):
             - ``in_proj``:  ``std = 1 / sqrt(embedding_dim)``
             - ``out_proj``: ``std = 1 / sqrt(output_size)``
         """
-        trunc_normal_init_(self.in_proj.weight, std=1.0 / math.sqrt(self._config.embedding_dim))
-        trunc_normal_init_(self.out_proj.weight, std=1.0 / math.sqrt(self._config.output_size))
+        trunc_normal_init_(
+            self.in_proj.weight, std=1.0 / math.sqrt(self._config.embedding_dim)
+        )
+        trunc_normal_init_(
+            self.out_proj.weight, std=1.0 / math.sqrt(self._config.output_size)
+        )
 
     @property
     def config(self) -> AttentionConfig:
         return self._config
 
-    def _compute_qkv(  # --------------------------------------------------------------------------
-        self, x: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor]:  # fmt: skip
+    def _compute_qkv(  # ------------------------------------------------------
+        self,
+        x: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor]:
         """Project and split inputs into q, k, and v tensors.
 
         Args:
@@ -177,9 +216,11 @@ class Attention(nn.Module):
         v = qkv[:, :, config.num_heads + config.num_kv_heads :]  # type: ignore[assignment]
         return q, k, v
 
-    def _expand_kv_heads(  # ----------------------------------------------------------------------
-        self, k: Tensor, v: Tensor,
-    ) -> tuple[Tensor, Tensor]:  # fmt: skip
+    def _expand_kv_heads(  # --------------------------------------------------
+        self,
+        k: Tensor,
+        v: Tensor,
+    ) -> tuple[Tensor, Tensor]:
         """Repeat k/v heads for grouped-query attention when needed.
 
         SDPA expects matching head counts for Q/K/V. When `num_kv_heads < num_heads`,
@@ -193,9 +234,12 @@ class Attention(nn.Module):
         v = v.repeat_interleave(repeat, dim=1)
         return k, v
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, x: Tensor, *, attn_mask: Optional[Tensor] = None,
-    ) -> Tensor:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        x: Tensor,
+        *,
+        attn_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         """Compute attention outputs for a batch of sequences.
 
         Args:
@@ -215,24 +259,32 @@ class Attention(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        # Apply RoPE to Q and K before KV-head expansion (position info is per token, not per head copy).
+        # Apply RoPE to Q and K before KV-head expansion
+        # (position info per token, not per head copy).
         if config.pos_encodings == "rope":
             q = _rope_rotate(q, config.rope_theta)
             k = _rope_rotate(k, config.rope_theta)
 
         k, v = self._expand_kv_heads(k, v)
 
-        # `is_causal` is handled by SDPA; `attn_mask` is optional and may embed_inputs
-        # padding, block masks, etc.
-        attn = F.scaled_dot_product_attention(q, k, v, attn_mask, is_causal=config.is_causal)
-        attn = attn.transpose(1, 2).contiguous().view(batch_size, seq_len, config.output_size)
+        # `is_causal` is handled by SDPA; `attn_mask` is optional and may
+        # embed_inputs padding, block masks, etc.
+        attn = F.scaled_dot_product_attention(
+            q, k, v, attn_mask, is_causal=config.is_causal
+        )
+        attn = (
+            attn.transpose(1, 2)
+            .contiguous()
+            .view(batch_size, seq_len, config.output_size)
+        )
         return self.out_proj(attn)
 
 
-# =================================================================================================
-def _rope_rotate(  # ------------------------------------------------------------------------------
-    x: Tensor, theta: float,
-) -> Tensor:  # fmt: skip
+# =============================================================================
+def _rope_rotate(  # ----------------------------------------------------------
+    x: Tensor,
+    theta: float,
+) -> Tensor:
     """Apply Rotary Position Embeddings (RoPE) to a query or key tensor.
 
     Rotates consecutive dimension pairs (first-half / second-half split) by
@@ -252,10 +304,18 @@ def _rope_rotate(  # -----------------------------------------------------------
     half = head_dim // 2  # pairs of dimensions to rotate
 
     # Frequency for each dimension pair: 1 / (theta^(2i / head_dim)), i in [0, half).
-    freqs = 1.0 / (theta ** (torch.arange(0, head_dim, 2, device=device, dtype=torch.float32) / head_dim))  # [half]
+    freqs = 1.0 / (
+        theta
+        ** (
+            torch.arange(0, head_dim, 2, device=device, dtype=torch.float32)
+            / head_dim
+        )
+    )  # [half]
 
     # Outer product → angle per position per frequency: [seq, half]
-    angles = torch.outer(torch.arange(seq_len, device=device, dtype=torch.float32), freqs)
+    angles = torch.outer(
+        torch.arange(seq_len, device=device, dtype=torch.float32), freqs
+    )
     cos = angles.cos().view(1, 1, seq_len, half)  # [1, 1, S, half]
     sin = angles.sin().view(1, 1, seq_len, half)
 
@@ -264,3 +324,7 @@ def _rope_rotate(  # -----------------------------------------------------------
     x1, x2 = x_f[..., :half], x_f[..., half:]  # each [B, H, S, half]
     rotated = torch.cat([x1 * cos - x2 * sin, x1 * sin + x2 * cos], dim=-1)
     return rotated.to(orig_dtype)
+
+
+# =============================================================================
+__all__ = ["AttentionConfig", "Attention"]

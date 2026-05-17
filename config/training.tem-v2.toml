@@ -6,8 +6,8 @@
 model_config_path = "config/models/tem-v2.toml"
 
 # -- General settings ---------------------------------------------------------
-dataset_path         = "temp/benchmark-dungeons-smoke"
-global_batch_size    = 32
+dataset_path         = "data/processed/arena/default/v1"
+global_batch_size    = 10
 max_epochs           = 100
 seed                 = 42
 augment              = true
@@ -24,15 +24,25 @@ trainer_accelerator  = "gpu"
 trainer_strategy     = "ddp"
 trainer_devices      = 1
 trainer_num_nodes    = 1
-trainer_precision    = "16-mixed"
+trainer_precision    = "b16-mixed"
 diagnostic_level     = "standard"
 
-# -- Environment --------------------------------------------------------------
-[environment]
-    max_episode_steps = 300
-    observation_dim   = 45
-    action_count      = 5
-    use_start_channel = true
+# -- Adapter ------------------------------------------------------------------
+[adapter]
+    observation_dim = 28
+    action_count    = 5
+
+[adapter.encoder]
+    kind   = "two_hot"
+    layout = "replicated"
+
+[adapter.decoder]
+    kind            = "single_scale"
+    prediction_freq = 0
+
+# -- Controller ---------------------------------------------------------------
+[controller]
+    # window_size = None  # Controller sees the entire history.
 
 # -- Optimization -------------------------------------------------------------
 [optimizer]
@@ -57,14 +67,14 @@ diagnostic_level     = "standard"
     offset_max       = 10000.0
 
 [runtime.sequence]
-    tbptt_steps = 25
+    tbptt_steps = 75
 
 [runtime.validation]
-    hard_max_rollout_steps = 300
+    hard_max_rollout_steps = 1000
     seed = 42
 
-# -- Controller & loss --------------------------------------------------------
-[loss]
+# -- Objective ----------------------------------------------------------------
+[objective]
     observation_loss = "softmax_cross_entropy"
     c_obs            = 1.0
     c_grid           = 1.0
@@ -73,14 +83,13 @@ diagnostic_level     = "standard"
     c_place_reg      = 0.02
     grid_reg_norm    = "l2"
     place_reg_norm   = "l1"
+    temp_it          = 2000
+    p2g_use_it       = 0.0
+    p2g_scale        = 200.0
+    g_reg_it         = 40000000
+    p_reg_it         = 4000
 
-[controller]
-    max_steps = 300
-
-[controller.policy]
-    kind = "random_walk"
-    seed = 42
-
+# -- Figures & diagnostics ----------------------------------------------------
 [logger]
     save_dir  = "logs"
     name      = "tem-v2"

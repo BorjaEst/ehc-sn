@@ -9,7 +9,7 @@ import numpy as np
 from torch.utils import _pytree as pytree
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class FlattenedPyTree:
     """Flattened pytree payload with aligned leaf paths."""
@@ -19,38 +19,40 @@ class FlattenedPyTree:
     paths: list[tuple[str, ...]]
 
 
-# =================================================================================================
-def tree_flatten(  # ------------------------------------------------------------------------------
+# =============================================================================
+def tree_flatten(  # ----------------------------------------------------------
     value: Any,
-) -> tuple[list[Any], Any]:  # fmt: skip
+) -> tuple[list[Any], Any]:
     """Flatten a pytree into leaves and a TreeSpec."""
 
     leaves, spec = pytree.tree_flatten(value)
     return list(leaves), spec
 
 
-# =================================================================================================
-def tree_unflatten(  # -----------------------------------------------------------------------------
-    leaves: list[Any], spec: Any,
-) -> Any:  # fmt: skip
+# =============================================================================
+def tree_unflatten(  # --------------------------------------------------------
+    leaves: list[Any],
+    spec: Any,
+) -> Any:
     """Rebuild a pytree from leaves and a TreeSpec."""
 
     return pytree.tree_unflatten(leaves, spec)
 
 
-# =================================================================================================
-def spec_equal(  # ---------------------------------------------------------------------------------
-    left: Any, right: Any,
-) -> bool:  # fmt: skip
+# =============================================================================
+def spec_equal(  # ------------------------------------------------------------
+    left: Any,
+    right: Any,
+) -> bool:
     """Return True if two TreeSpecs are equal."""
 
     return left == right
 
 
-# =================================================================================================
-def flatten_with_paths(  # ------------------------------------------------------------------------
+# =============================================================================
+def flatten_with_paths(  # ----------------------------------------------------
     value: Any,
-) -> tuple[list[Any], Any, list[tuple[str, ...]]]:  # fmt: skip
+) -> tuple[list[Any], Any, list[tuple[str, ...]]]:
     """Flatten a pytree and return leaves, spec, and leaf paths."""
 
     leaves, spec = tree_flatten(value)
@@ -62,10 +64,11 @@ def flatten_with_paths(  # -----------------------------------------------------
     return leaves, spec, paths
 
 
-# =================================================================================================
-def _paths_from_spec(  # --------------------------------------------------------------------------
-    spec: Any, count: int,
-) -> list[tuple[str, ...]]:  # fmt: skip
+# =============================================================================
+def _paths_from_spec(  # ------------------------------------------------------
+    spec: Any,
+    count: int,
+) -> list[tuple[str, ...]]:
     """Reconstruct leaf paths from a TreeSpec using index unflattening."""
 
     if count == 0:
@@ -97,10 +100,10 @@ def _paths_from_spec(  # -------------------------------------------------------
     return [path for path in paths if path is not None]
 
 
-# =================================================================================================
-def to_numeric_array(  # --------------------------------------------------------------------------
+# =============================================================================
+def to_numeric_array(  # ------------------------------------------------------
     value: Any,
-) -> Optional[np.ndarray]:  # fmt: skip
+) -> Optional[np.ndarray]:
     """Convert a value to a numeric NumPy array if possible."""
 
     if value is None:

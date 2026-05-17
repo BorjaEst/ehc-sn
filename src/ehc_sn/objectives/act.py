@@ -17,18 +17,27 @@ import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.controllers.deliberation.act import ACTController, ACTRolloutState, ACTStepOutput, collapse_act_halt_continue_logits
+from ehc_sn.controllers.deliberation.act import (
+    ACTController,
+    ACTRolloutState,
+    ACTStepOutput,
+    collapse_act_halt_continue_logits,
+)
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import ACT_LOSS_Q_CONTINUE, ACT_LOSS_Q_DONE, LOSS_LM
-from ehc_sn.objectives._token import AccuracyStats, TokenObjectiveBase, TokenSupervisionBinding
+from ehc_sn.objectives._token import (
+    AccuracyStats,
+    TokenObjectiveBase,
+    TokenSupervisionBinding,
+)
 from ehc_sn.rollouts import StepRecord
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
 
-# =================================================================================================
+# =============================================================================
 class ACTObjectiveConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`ACTObjective`."""
 
@@ -38,12 +47,12 @@ class ACTObjectiveConfig(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 class ACTTaskBinding[TargetsT](TokenSupervisionBinding[TargetsT], Protocol):
     """Task-binding seam used by ACT objectives."""
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class Losses(DetachMixin):
     """Bundle of ACT loss terms (summed over batch)."""
@@ -58,10 +67,12 @@ class Losses(DetachMixin):
         q_continue_loss_sum = self.loss_q_continue_sum
         if q_continue_loss_sum is None:
             q_continue_loss_sum = torch.tensor(0.0, device=self.loss_sum.device)
-        return self.loss_sum + 0.5 * (self.loss_q_done_sum + q_continue_loss_sum)
+        return self.loss_sum + 0.5 * (
+            self.loss_q_done_sum + q_continue_loss_sum
+        )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class ACTObjectiveStep:
     """A single rollout/loss step produced by :class:`ACTObjective`."""
@@ -82,11 +93,11 @@ class ACTObjectiveStep:
         return self.losses.total
 
 
-# =================================================================================================
+# =============================================================================
 class ACTObjective(TokenObjectiveBase[ACTObjectiveConfig]):
     """Pure ACT objective scored over executed rollout chunks."""
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         config: ACTObjectiveConfig,
         task_binding: ACTTaskBinding[Any],
@@ -94,7 +105,7 @@ class ACTObjective(TokenObjectiveBase[ACTObjectiveConfig]):
         """Create an ACT objective from its loss configuration and task binding."""
         super().__init__(config=config, token_binding=task_binding)
 
-    def evaluate_step(
+    def evaluate_step(  # -----------------------------------------------------
         self,
         record: StepRecord,
         **options: Any,
@@ -103,13 +114,19 @@ class ACTObjective(TokenObjectiveBase[ACTObjectiveConfig]):
         loss_options = dict(options)
         controller = loss_options.pop("controller", None)
         if not isinstance(controller, ACTController):
-            raise TypeError("ACTObjective requires controller=ACTController when scoring ACT rollout steps.")
+            raise TypeError(
+                "ACTObjective requires controller=ACTController when scoring ACT rollout steps."
+            )
 
         td_target = bool(loss_options.pop("td_target", True))
-        target_q = self._compute_td_target(controller, record) if td_target else None
-        return super().evaluate_step(record, controller=controller, target_q=target_q, **loss_options)
+        target_q = (
+            self._compute_td_target(controller, record) if td_target else None
+        )
+        return super().evaluate_step(
+            record, controller=controller, target_q=target_q, **loss_options
+        )
 
-    def compute_losses(
+    def compute_losses(  # ----------------------------------------------------
         self,
         outputs: ACTStepOutput,
         targets: Any,
@@ -123,7 +140,9 @@ class ACTObjective(TokenObjectiveBase[ACTObjectiveConfig]):
         """Compute supervised and halting-related losses for a step."""
         labels = getattr(targets, "labels", targets)
         if not isinstance(labels, Tensor):
-            raise TypeError("ACTObjective expects tensor labels from the bound ACT task targets.")
+            raise TypeError(
+                "ACTObjective expects tensor labels from the bound ACT task targets."
+            )
 
         loss_sum = self.compute_lm_loss(logits, labels, stats)
 
@@ -131,16 +150,22 @@ class ACTObjective(TokenObjectiveBase[ACTObjectiveConfig]):
         q_logits = outputs.backbone_output.control.q_logits
         q_done_logits = q_logits[..., done_action]
         done_target = stats.seq_is_correct.to(q_done_logits.dtype)
-        q_done_loss = F.binary_cross_entropy_with_logits(q_done_logits, done_target, reduction="sum")
+        q_done_loss = F.binary_cross_entropy_with_logits(
+            q_done_logits, done_target, reduction="sum"
+        )
 
         q_continue_loss: Tensor | None = None
         if target_q is not None:
-            scores = collapse_act_halt_continue_logits(q_logits, done_action=done_action)
-            q_continue_loss = F.binary_cross_entropy_with_logits(scores.continue_logit, target_q, reduction="sum")
+            scores = collapse_act_halt_continue_logits(
+                q_logits, done_action=done_action
+            )
+            q_continue_loss = F.binary_cross_entropy_with_logits(
+                scores.continue_logit, target_q, reduction="sum"
+            )
 
         return Losses(loss_sum, q_done_loss, q_continue_loss)
 
-    def _build_step_output(
+    def _build_step_output(  # ------------------------------------------------
         self,
         losses: Losses,
         metrics: Any,
@@ -151,27 +176,39 @@ class ACTObjective(TokenObjectiveBase[ACTObjectiveConfig]):
         **_: Any,
     ) -> ACTObjectiveStep:
         """Wrap losses, metrics, and signals into an :class:`ACTObjectiveStep`."""
-        return ACTObjectiveStep(losses=losses, metrics=metrics, outputs=outputs, target_q=target_q, signals=signals)
+        return ACTObjectiveStep(
+            losses=losses,
+            metrics=metrics,
+            outputs=outputs,
+            target_q=target_q,
+            signals=signals,
+        )
 
-    def _build_metric_ratios(
+    def _build_metric_ratios(  # ----------------------------------------------
         self,
         losses: Losses,
         *,
         batch_size: int,
     ) -> dict[str, RatioStat]:
         """Build detached ratio metrics for logging."""
-        batch_count = losses.loss_sum.new_tensor(batch_size, dtype=torch.float32)
+        batch_count = losses.loss_sum.new_tensor(
+            batch_size, dtype=torch.float32
+        )
         q_continue_loss_sum = losses.loss_q_continue_sum
         if q_continue_loss_sum is None:
             q_continue_loss_sum = losses.loss_sum.new_zeros(())
 
         return {
             LOSS_LM: RatioStat(losses.loss_sum.detach(), batch_count),
-            ACT_LOSS_Q_DONE: RatioStat(losses.loss_q_done_sum.detach(), batch_count),
-            ACT_LOSS_Q_CONTINUE: RatioStat(q_continue_loss_sum.detach(), batch_count),
+            ACT_LOSS_Q_DONE: RatioStat(
+                losses.loss_q_done_sum.detach(), batch_count
+            ),
+            ACT_LOSS_Q_CONTINUE: RatioStat(
+                q_continue_loss_sum.detach(), batch_count
+            ),
         }
 
-    def compute_signals(
+    def compute_signals(  # ---------------------------------------------------
         self,
         batch: Batch,
         state: ACTRolloutState,
@@ -193,13 +230,17 @@ class ACTObjective(TokenObjectiveBase[ACTObjectiveConfig]):
         return signals
 
     @staticmethod
-    def _compute_td_target(controller: ACTController, record: StepRecord) -> Tensor:
+    def _compute_td_target(  # ------------------------------------------------
+        controller: ACTController, record: StepRecord
+    ) -> Tensor:
         """Compute the TD bootstrap target from executed carry state."""
         data = record.carry.data
         model_state = record.carry.model_state
         steps = record.carry.steps
         if data is None or model_state is None or steps is None:
-            raise ValueError("ACT TD target requires carry.data, carry.model_state, and carry.steps.")
+            raise ValueError(
+                "ACT TD target requires carry.data, carry.model_state, and carry.steps."
+            )
         del steps  # no longer used for forced-halt boundary; kept for carry validation only
 
         with torch.no_grad():
@@ -207,9 +248,16 @@ class ACTObjective(TokenObjectiveBase[ACTObjectiveConfig]):
             next_q = backbone_output.control.q_logits
 
         done_action = controller.config.done_action
-        scores = collapse_act_halt_continue_logits(next_q, done_action=done_action)
+        scores = collapse_act_halt_continue_logits(
+            next_q, done_action=done_action
+        )
         return torch.sigmoid(scores.continue_logit)
 
 
-# =================================================================================================
-__all__ = ["ACTObjectiveConfig", "ACTObjective", "ACTObjectiveStep", "ACTTaskBinding"]
+# =============================================================================
+__all__ = [
+    "ACTObjectiveConfig",
+    "ACTObjective",
+    "ACTObjectiveStep",
+    "ACTTaskBinding",
+]

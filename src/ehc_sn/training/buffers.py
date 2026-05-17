@@ -15,7 +15,7 @@ from torch import Tensor
 from ehc_sn.types import Batch
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
 class _Chunk:
     """Internal storage unit for :class:`FifoBuffer`.
@@ -28,7 +28,7 @@ class _Chunk:
     start: int = 0  # how many rows already consumed
 
 
-# =================================================================================================
+# =============================================================================
 class FifoBuffer:
     """FIFO buffer storing complete batch rows on CPU.
 
@@ -36,10 +36,13 @@ class FifoBuffer:
     pushed into the buffer and later popped to refill a step batch.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, capacity_rows: int, keys: Sequence[str], *, 
+    def __init__(  # ----------------------------------------------------------
+        self,
+        capacity_rows: int,
+        keys: Sequence[str],
+        *,
         pin_memory: bool = True,
-    ) -> None:  # fmt: skip
+    ) -> None:
         """Create a FIFO buffer.
 
         Args:
@@ -53,27 +56,31 @@ class FifoBuffer:
         self._chunks: Deque[_Chunk] = deque()
         self._size_rows = 0
 
-    def __len__(  # -------------------------------------------------------------------------------
+    def __len__(  # -----------------------------------------------------------
         self,
-    ) -> int:  # fmt: skip
+    ) -> int:
         """Number of rows currently stored in the buffer."""
         return self._size_rows
 
-    def clear(  # ---------------------------------------------------------------------------------
+    def clear(  # -------------------------------------------------------------
         self,
-    ) -> None:  # fmt: skip
+    ) -> None:
         self._chunks.clear()
         self._size_rows = 0
 
-    def push_rows(  # -----------------------------------------------------------------------------
-        self, batch: Batch, row_indices: Tensor,
-    ) -> None:  # fmt: skip
+    def push_rows(  # ---------------------------------------------------------
+        self,
+        batch: Batch,
+        row_indices: Tensor,
+    ) -> None:
         """Takes rows from (likely GPU) batch, stores them on CPU as one chunk."""
         if row_indices.numel() == 0:
             return
 
         # select + detach
-        rows = {k: batch[k].index_select(0, row_indices).detach() for k in self.keys}
+        rows = {
+            k: batch[k].index_select(0, row_indices).detach() for k in self.keys
+        }
 
         # move to CPU (whole rows per key)
         rows = {k: v.to("cpu") for k, v in rows.items()}
@@ -86,9 +93,10 @@ class FifoBuffer:
         self._size_rows += n
         self._trim_to_capacity()
 
-    def pop(  # -----------------------------------------------------------------------------------
-        self, n: int,
-    ) -> dict[str, Tensor]:  # fmt: skip
+    def pop(  # ---------------------------------------------------------------
+        self,
+        n: int,
+    ) -> dict[str, Tensor]:
         """Pop up to n rows (CPU tensors)."""
         n = min(n, self._size_rows)
         out: dict[str, list[Tensor]] = {k: [] for k in self.keys}
@@ -115,9 +123,9 @@ class FifoBuffer:
             return {k: torch.empty((0,), dtype=torch.int32) for k in self.keys}
         return {k: torch.cat(v, dim=0) for k, v in out.items()}
 
-    def _trim_to_capacity(  # ---------------------------------------------------------------------
+    def _trim_to_capacity(  # -------------------------------------------------
         self,
-    ) -> None:  # fmt: skip
+    ) -> None:
         """Simple policy: drop oldest chunks until within capacity."""
         while self._size_rows > self.capacity_rows and self._chunks:
             ch = self._chunks.popleft()
@@ -125,5 +133,5 @@ class FifoBuffer:
             self._size_rows -= n
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["FifoBuffer"]

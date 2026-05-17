@@ -16,12 +16,12 @@ class ValidationRuntimeConfig(BaseModel, extra="forbid"):
     hard_max_rollout_steps: int | None = Field(
         default=None,
         ge=1,
-        description="Defensive runner cap for validation rollouts. Separate from semantic model max_steps.",
+        description="Defensive runner cap for validation rollouts. Separate from the task-owned episode_horizon.",
     )
 
 
 class RuntimeConfig(BaseModel, extra="forbid"):
-    """HRM runtime settings owned by the learner surface."""
+    """ """
 
     validation: ValidationRuntimeConfig = Field(
         default_factory=ValidationRuntimeConfig,

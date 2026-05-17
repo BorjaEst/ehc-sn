@@ -139,11 +139,17 @@ class ArenaTEMDiagnostics(DetachMixin):
     def latent_relations(self) -> dict[str, LatentRelation]:
         """Named latent consistency relations expected by :class:`~ehc_sn.objectives.tem.TEMObjective`."""
         relations: dict[str, LatentRelation] = {
-            GRID_TRANSITION_RELATION: LatentRelation(lhs=self.grid_codes.posterior, rhs=self.grid_codes.prior),
-            PLACE_TRANSITION_RELATION: LatentRelation(lhs=self.place_codes.posterior, rhs=self.place_codes.retrieved),
+            GRID_TRANSITION_RELATION: LatentRelation(
+                lhs=self.grid_codes.posterior, rhs=self.grid_codes.prior
+            ),
+            PLACE_TRANSITION_RELATION: LatentRelation(
+                lhs=self.place_codes.posterior, rhs=self.place_codes.retrieved
+            ),
         }
         if self.place_codes.sensory is not None:
-            relations[PLACE_SENSORY_RELATION] = LatentRelation(lhs=self.place_codes.posterior, rhs=self.place_codes.sensory)
+            relations[PLACE_SENSORY_RELATION] = LatentRelation(
+                lhs=self.place_codes.posterior, rhs=self.place_codes.sensory
+            )
         return relations
 
     @property
@@ -221,7 +227,9 @@ class ArenaTwoHotEncoder(nn.Module):
         """Map Arena's absent-cue sentinel to the model-facing no-cue value."""
         if landmark_id is None or not torch.any(landmark_id < 0):
             return landmark_id
-        return torch.where(landmark_id < 0, torch.zeros_like(landmark_id), landmark_id)
+        return torch.where(
+            landmark_id < 0, torch.zeros_like(landmark_id), landmark_id
+        )
 
     def forward(  # -----------------------------------------------------------
         self,
@@ -229,9 +237,13 @@ class ArenaTwoHotEncoder(nn.Module):
     ) -> tuple[MultiScaleCode, Tensor, object, object]:
         """Return ``(observation_embedding, previous_action, episode_start, landmark_id)``."""
         obs_id = batch["observation_id"].view(-1).long()  # (B,)
-        observation = F.one_hot(obs_id, num_classes=self._obs_dim).float()  # (B, obs_dim)
+        observation = F.one_hot(
+            obs_id, num_classes=self._obs_dim
+        ).float()  # (B, obs_dim)
         code = self.encoder(observation)
-        observation_embedding: MultiScaleCode = [code.clone() for _ in range(self._n_freq)]
+        observation_embedding: MultiScaleCode = [
+            code.clone() for _ in range(self._n_freq)
+        ]
         landmark_id = self._normalize_landmark_id(batch.get("landmark_id"))
         return (
             observation_embedding,

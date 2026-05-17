@@ -49,6 +49,7 @@ from ehc_sn.metrics.keys import (
     TEM_LOSS_REG_REVISIT,
 )
 from ehc_sn.objectives._variational import (
+    HEAD,
     VariationalLosses,
     VariationalLossStep,
     VariationalObjectiveBase,
@@ -202,7 +203,6 @@ class TEMObjectiveConfig(BaseModel, extra="forbid"):
         ge=0.0,
         description="Place regularization coefficient.",
     )
-
     # Schedule fields (original TEM training dynamics)
     temp_it: int = Field(
         default=2000,

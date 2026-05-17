@@ -1,12 +1,12 @@
 # =============================================================================
-# HRM v2 RL-Striatum — Default Configuration
+# HRM v2 Deliberation Actor-Critic — Default Configuration
 # =============================================================================
 
 # -- Model architecture -------------------------------------------------------
 model_config_path = "config/models/hrm-v2.toml"
 
 # -- Dataset & training -------------------------------------------------------
-dataset_path       = "data/processed/maze-30x30-hard-1k"
+dataset_path       = "data/processed/mazehard/default/v1"
 global_batch_size  = 16
 max_epochs         = 100
 seed               = 42
@@ -14,12 +14,27 @@ augment            = true
 val_check_interval = 1000
 supervised_only_warmup_steps = 5000
 
-# -- Environment --------------------------------------------------------------
-[deliberation]
-    episode_horizon = 16
-    halt_action     = 0
+# -- Adapter settings ---------------------------------------------------------
+[adapter]
+    encoder_kind = "rope"  # "learned" or "rope"
+    vocab_size = 6  # 5 canonical SEM IDs + O_ID (solution-path token)
 
-# -- Optimization -------------------------------------------------------------
+# -- Deliberation AC controller -----------------------------------------------
+[controller]
+
+# -- Deliberation capability config ------------------------------------------
+[deliberation]
+    halt_action      = 0
+    episode_horizon  = 16
+
+# -- Objective, optimizer, scheduler (defaults are fine; override here if needed) ---
+[objective]
+    function  = "stablemax_cross_entropy"
+    c_actor   = 1.0
+    c_critic  = 0.5
+    c_entropy = 0.01
+    c_q_value = 0.5
+
 [optimizer_supervised]
     lr           = 1e-4
     weight_decay = 1e-2
@@ -39,17 +54,7 @@ supervised_only_warmup_steps = 5000
 [runtime.validation]
     hard_max_rollout_steps = 16
 
-# -- Controller & loss --------------------------------------------------------
-[controller]
-    policy.exploration_prob = 0.1
-
-[objective]
-    function  = "stablemax_cross_entropy"
-    c_actor   = 1.0
-    c_critic  = 0.5
-    c_entropy = 0.01
-    c_q_value = 0.5
-
+# -- Logs and checkpoints -----------------------------------------------------
 [logger]
     save_dir  = "logs"
     name      = "hrm-v2"

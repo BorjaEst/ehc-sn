@@ -12,7 +12,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-# =================================================================================================
+# =============================================================================
 class DatasetIndexEntry(BaseModel, extra="forbid"):
     """One sample entry in a shared-substrate or task-corpus index.
 
@@ -21,25 +21,39 @@ class DatasetIndexEntry(BaseModel, extra="forbid"):
     Topology and spatial geometry are owned by the root manifest and family validators.
     """
 
-    id: str = Field(..., description="Unique sample identifier within the versioned processed root")
-    source: str = Field(..., description="Source family or task corpus that materialized the sample")
-    split: str = Field(..., description="Canonical split name recorded for the sample")
+    id: str = Field(
+        ...,
+        description="Unique sample identifier within the versioned processed root",
+    )
+    source: str = Field(
+        ...,
+        description="Source family or task corpus that materialized the sample",
+    )
+    split: str = Field(
+        ..., description="Canonical split name recorded for the sample"
+    )
     source_record_id: str | None = Field(
         default=None,
-        description="Stable raw-source record identity (e.g. 'train:12345' for MazeHard puzzle_index). "
-        "Used by task builders to recover task-owned channels by source identity, "
-        "not by split-local position.",
+        description="Stable raw-source record identity (e.g. 'train:12345' "
+        "for MazeHard puzzle_index). Used by task builders to recover "
+        "task-owned channels by source identity, not by split-local position.",
     )
-    channels: list[str] = Field(..., description="Canonical processed channel names materialized for the sample")
+    channels: list[str] = Field(
+        ...,
+        description="Canonical processed channel names materialized for the sample",
+    )
     task_metadata: dict[str, Any] | None = Field(
         default=None,
-        description="Optional task-owned per-sample provenance object. Structure is task-defined; "
-        "tasks document the schema in their corpus spec section. Null unless the task builder supplies it.",
+        description="Optional task-owned per-sample provenance object. "
+        "Structure is task-defined; tasks document the schema in their corpus "
+        "spec section. Null unless the task builder supplies it.",
     )
 
 
-# =================================================================================================
-def read_index(path: Path,) -> list[DatasetIndexEntry]:  # fmt: skip  # --------------------------------------------------------------------------------
+# =============================================================================
+def read_index(  # ------------------------------------------------------------
+    path: Path,
+) -> list[DatasetIndexEntry]:
     """Read all entries from a JSONL index file.
 
     Args:
@@ -52,11 +66,18 @@ def read_index(path: Path,) -> list[DatasetIndexEntry]:  # fmt: skip  # --------
         FileNotFoundError: If *path* does not exist.
     """
     with path.open() as f:
-        return [DatasetIndexEntry.model_validate_json(line) for line in f if line.strip()]
+        return [
+            DatasetIndexEntry.model_validate_json(line)
+            for line in f
+            if line.strip()
+        ]
 
 
-# =================================================================================================
-def write_index(entries: list[DatasetIndexEntry], path: Path,) -> None:  # fmt: skip  # -------------------------------------------------------------------------------
+# =============================================================================
+def write_index(  # -----------------------------------------------------------
+    entries: list[DatasetIndexEntry],
+    path: Path,
+) -> None:
     """Write entries to a JSONL index file.
 
     Args:
@@ -69,10 +90,13 @@ def write_index(entries: list[DatasetIndexEntry], path: Path,) -> None:  # fmt: 
             f.write(entry.model_dump_json() + "\n")
 
 
-# =================================================================================================
-def filter_index(entries: list[DatasetIndexEntry], *, split: str | None = None, source: (
-    str | None
-) = None,) -> list[DatasetIndexEntry]:  # fmt: skip  # ------------------------------------------------------------------------------
+# =============================================================================
+def filter_index(  # ----------------------------------------------------------
+    entries: list[DatasetIndexEntry],
+    *,
+    split: str | None = None,
+    source: str | None = None,
+) -> list[DatasetIndexEntry]:
     """Filter index entries by metadata predicates.
 
     Args:
@@ -91,5 +115,5 @@ def filter_index(entries: list[DatasetIndexEntry], *, split: str | None = None, 
     return result
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["DatasetIndexEntry", "read_index", "write_index", "filter_index"]

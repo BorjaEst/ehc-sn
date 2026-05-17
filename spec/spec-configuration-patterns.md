@@ -40,7 +40,7 @@ Core ownership and validation rules remain in `spec/spec-architecture.md`,
   - Scope: optimizer, scheduler, buffers, and trainer-local execution
     settings.
   - Lives in: `lightning/**/*.py`.
-  - Example: `ModelConfig_HRM_V1`.
+  - Example: `HRMV1ModelConfig`.
 - **Data config**
   - Base class: `pydantic.BaseModel(extra="forbid")`
   - Scope: dataset paths, batch size, workers.

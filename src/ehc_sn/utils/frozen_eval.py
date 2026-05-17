@@ -8,18 +8,27 @@ import torch
 from torch import Tensor
 
 
-# =================================================================================================
+# =============================================================================
 class FrozenEvalMutationError(RuntimeError):
     """Raised when frozen-weight benchmark evaluation mutates model state."""
 
-    def __init__(self, message: str, *, seed: int, mutated_key: str) -> None:
+    def __init__(  # ----------------------------------------------------------
+        self,
+        message: str,
+        *,
+        seed: int,
+        mutated_key: str,
+    ) -> None:
+        """Initialize the error with mutation details."""
         super().__init__(message)
         self.seed = seed
         self.mutated_key = mutated_key
 
 
-# =================================================================================================
-def snapshot_state_dict(model: Any) -> dict[str, Tensor]:
+# =============================================================================
+def snapshot_state_dict(  # ---------------------------------------------------
+    model: Any,
+) -> dict[str, Tensor]:
     """Clone floating tensors from ``model.state_dict()`` for mutation checks."""
     snapshot: dict[str, Tensor] = {}
     for key, value in model.state_dict().items():
@@ -28,8 +37,10 @@ def snapshot_state_dict(model: Any) -> dict[str, Tensor]:
     return snapshot
 
 
-# =================================================================================================
-def snapshot_optimizer_steps(optimizer: Any | None) -> tuple[int, ...] | None:
+# =============================================================================
+def snapshot_optimizer_steps(  # ----------------------------------------------
+    optimizer: Any | None,
+) -> tuple[int, ...] | None:
     """Capture optimizer step counters when an optimizer object is available."""
     if optimizer is None:
         return None
@@ -45,7 +56,9 @@ def snapshot_optimizer_steps(optimizer: Any | None) -> tuple[int, ...] | None:
     return tuple(steps)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
-    "FrozenEvalMutationError", "snapshot_optimizer_steps", "snapshot_state_dict",
-]  # fmt: skip
+    "FrozenEvalMutationError",
+    "snapshot_optimizer_steps",
+    "snapshot_state_dict",
+]

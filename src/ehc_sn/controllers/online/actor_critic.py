@@ -24,7 +24,7 @@ Canonical import path::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Any, Optional, Protocol, cast
 
 import torch
 from pydantic import BaseModel, Field
@@ -43,7 +43,11 @@ from ehc_sn.controllers.contracts.actor_critic import (
     OnlineBootstrapCarry,
 )
 from ehc_sn.policies._base import PolicyDecision
-from ehc_sn.policies.categorical import CategoricalPolicy, CategoricalPolicyConfig, PolicyInput
+from ehc_sn.policies.categorical import (
+    CategoricalPolicy,
+    CategoricalPolicyConfig,
+    PolicyInput,
+)
 from ehc_sn.types import Batch
 
 
@@ -134,7 +138,9 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         batch_sample: Batch,
     ) -> RLRolloutState[ModelState]:
         """Build an initial rollout state from a batch sample."""
-        reset_td, env_td = initial_env_reset(batch_sample, self.runtime.build_reset_td, self._env)
+        reset_td, env_td = initial_env_reset(
+            batch_sample, self.runtime.build_reset_td, self._env
+        )
         slots = self.initial_slots(batch_sample)
         return RLRolloutState(
             model_state=slots.model_state,
@@ -172,7 +178,13 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         terminated = env_td["terminated"].squeeze(-1)
         truncated = env_td["truncated"].squeeze(-1)
 
-        state = RLRolloutState(model_state=model_state, steps=steps, halted=done, data=data, env_td=env_td)
+        state = RLRolloutState(
+            model_state=model_state,
+            steps=steps,
+            halted=done,
+            data=data,
+            env_td=env_td,
+        )
         record = ActorCriticInteractionRecord(
             observation_used_for_decision=data,
             policy_logits=backbone_output.policy.policy_logits,
@@ -205,8 +217,14 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
 
         policy_step_count = env_td.get("step_count")
         if policy_step_count is not None and torch.any(reset_mask):
-            step_mask = reset_mask.view((-1,) + (1,) * (policy_step_count.ndim - 1))
-            policy_step_count = torch.where(step_mask, torch.zeros_like(policy_step_count), policy_step_count)
+            step_mask = reset_mask.view(
+                (-1,) + (1,) * (policy_step_count.ndim - 1)
+            )
+            policy_step_count = torch.where(
+                step_mask,
+                torch.zeros_like(policy_step_count),
+                policy_step_count,
+            )
 
         policy_input = PolicyInput(
             valid_action_mask=valid_action_mask,

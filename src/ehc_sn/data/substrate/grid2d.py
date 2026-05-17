@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-# =================================================================================================
+# =============================================================================
 TOPOLOGY_KIND: str = "grid2d"
 """Canonical topology kind string for 2-D grid substrates."""
 
@@ -49,8 +49,10 @@ CHANNEL_DTYPES: dict[str, np.dtype] = {
 _SPATIAL_CHANNELS: frozenset[str] = frozenset(CHANNEL_DTYPES.keys())
 
 
-# =================================================================================================
-def validate_grid2d_sample(data: dict[str, np.ndarray],) -> None:  # fmt: skip  # -------------------------------------------------------------------
+# =============================================================================
+def validate_grid2d_sample(  # ------------------------------------------------
+    data: dict[str, np.ndarray],
+) -> None:
     """Validate that *data* conforms to the grid2d shared-substrate sample contract.
 
     Accepts both single-sample arrays (H, W) and stacked arrays (N, H, W).
@@ -68,24 +70,32 @@ def validate_grid2d_sample(data: dict[str, np.ndarray],) -> None:  # fmt: skip  
     """
     missing = MANDATORY_CHANNELS - data.keys()
     if missing:
-        raise ValueError(f"grid2d sample missing mandatory channels: {sorted(missing)}")
+        raise ValueError(
+            f"grid2d sample missing mandatory channels: {sorted(missing)}"
+        )
 
     shapes: dict[str, tuple[int, ...]] = {}
     for name, arr in data.items():
         if name in CHANNEL_DTYPES and arr.dtype != CHANNEL_DTYPES[name]:
-            raise ValueError(f"Channel '{name}' has dtype {arr.dtype}, expected {CHANNEL_DTYPES[name]}.")
+            raise ValueError(
+                f"Channel '{name}' has dtype {arr.dtype}, expected {CHANNEL_DTYPES[name]}."
+            )
         if name in _SPATIAL_CHANNELS:
             if arr.ndim not in (2, 3):
-                raise ValueError(f"Channel '{name}' has invalid rank {arr.ndim}; expected 2 (H, W) or 3 (N, H, W).")
+                raise ValueError(
+                    f"Channel '{name}' has invalid rank {arr.ndim}; expected 2 (H, W) or 3 (N, H, W)."
+                )
             shapes[name] = arr.shape[-2:]
 
     unique = set(shapes.values())
     if len(unique) > 1:
         detail = ", ".join(f"'{k}': {v}" for k, v in shapes.items())
-        raise ValueError(f"All grid2d spatial channels must share the same (H, W) shape. Got: {detail}.")
+        raise ValueError(
+            f"All grid2d spatial channels must share the same (H, W) shape. Got: {detail}."
+        )
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "TOPOLOGY_KIND",
     "CHANNEL_TOPOLOGY",

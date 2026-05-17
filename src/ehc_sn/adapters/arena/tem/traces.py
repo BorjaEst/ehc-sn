@@ -29,7 +29,7 @@ from ehc_sn.tasks.arena.evaluation import coerce_observation_ids
 from ehc_sn.traces import TraceField, TraceValue
 
 
-# =================================================================================================
+# =============================================================================
 class _ArenaTEMCarryData(Protocol):
     def __getitem__(self, key: str) -> Tensor: ...
     def get(self, key: str, default: Tensor | None = None) -> Tensor | None: ...
@@ -53,7 +53,7 @@ class _ArenaTEMTraceContext(Protocol):
     batch: Mapping[str, Tensor]
 
 
-# =================================================================================================
+# =============================================================================
 def _get_world_observation_id(ctx: _ArenaTEMTraceContext) -> TraceValue:
     obs_id: Tensor = ctx.batch["observation_id"]
     return coerce_observation_ids(obs_id).detach()
@@ -78,7 +78,7 @@ def _get_pred_obs_id_ancestral(ctx: _ArenaTEMTraceContext) -> TraceValue:
     return ctx.outputs.backbone_output.obs_logits[2].detach().argmax(dim=-1)
 
 
-# =================================================================================================
+# =============================================================================
 ARENA_TEM_TRACE_WORLD_OBS_ID = TraceField(
     name="world_step/observation_id",
     get=_get_world_observation_id,
@@ -114,7 +114,7 @@ ARENA_TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
 """All Arena TEM trace fields in canonical order."""
 
 
-# =================================================================================================
+# =============================================================================
 def select_arena_tem_trace_fields(
     include_keys: Iterable[str] | None,
 ) -> tuple[TraceField, ...]:
@@ -125,7 +125,7 @@ def select_arena_tem_trace_fields(
     return tuple(f for f in ARENA_TEM_TRACE_FIELDS if f.name in requested)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "ARENA_TEM_TRACE_FIELDS",
     "ARENA_TEM_TRACE_WORLD_OBS_ID",

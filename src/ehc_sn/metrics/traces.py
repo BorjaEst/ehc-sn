@@ -33,7 +33,7 @@ from ehc_sn.traces import TraceField, TraceSpec, TraceValue
 from ehc_sn.types import MemoryEntry
 
 
-# =================================================================================================
+# =============================================================================
 class _CommonTraceCarry(Protocol):
     """Minimal carry surface shared across executed-step trace fields."""
 
@@ -95,7 +95,7 @@ class _TEMTraceContext(_CommonTraceContext, Protocol):
     carry: _TEMTraceCarry
 
 
-# =================================================================================================
+# =============================================================================
 class ReplayableEnvironments:
     """Non-pytree wrapper for replayable environment metadata."""
 
@@ -112,9 +112,9 @@ class ReplayableEnvironments:
         return self._items[index]
 
 
-# =================================================================================================
+# =============================================================================
 # Common — usable in any executed rollout paradigm
-# =================================================================================================
+# =============================================================================
 
 
 def _get_halted(ctx: _CommonTraceContext) -> TraceValue:
@@ -164,14 +164,16 @@ COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
 )
 
 
-# =================================================================================================
+# =============================================================================
 # ACT-specific — produced by ACTObjective / ACTController
-# =================================================================================================
+# =============================================================================
 
 
 def _get_q_logits_act(ctx: _ACTTraceContext) -> TraceValue:
     """Q-logits over halt/continue actions from the raw ACT controller step."""
-    logits_q: Tensor = ctx.outputs.backbone_output.control.q_logits  # (B, n_actions)
+    logits_q: Tensor = (
+        ctx.outputs.backbone_output.control.q_logits
+    )  # (B, n_actions)
     return logits_q.detach()
 
 
@@ -183,9 +185,9 @@ TRACE_Q_LOGITS_ACT = TraceField(
 ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_Q_LOGITS_ACT,)
 
 
-# =================================================================================================
+# =============================================================================
 # RL-specific — produced by HybridRLLossHead.compute_step() via HRMV2ValidationScorer
-# =================================================================================================
+# =============================================================================
 
 
 def _get_q_logits_rl(ctx: _RLTraceContext) -> TraceValue:
@@ -271,7 +273,11 @@ def _get_lec_alpha_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
     value = ctx.carry.data.get("lec_alpha_sigmoid")
     if value is None:
         static_data = getattr(ctx.carry, "static_data", None)
-        value = None if static_data is None else static_data.get("lec_alpha_sigmoid")
+        value = (
+            None
+            if static_data is None
+            else static_data.get("lec_alpha_sigmoid")
+        )
     return None if value is None else value.detach()
 
 
@@ -280,7 +286,9 @@ def _get_lec_w_f_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
     value = ctx.carry.data.get("lec_w_f_sigmoid")
     if value is None:
         static_data = getattr(ctx.carry, "static_data", None)
-        value = None if static_data is None else static_data.get("lec_w_f_sigmoid")
+        value = (
+            None if static_data is None else static_data.get("lec_w_f_sigmoid")
+        )
     return None if value is None else value.detach()
 
 
@@ -352,9 +360,9 @@ RL_TRACE_FIELDS: tuple[TraceField, ...] = (
 )
 
 
-# =================================================================================================
+# =============================================================================
 # TEM-specific — TEM uses only the rollout-safe baseline fields for now.
-# =================================================================================================
+# =============================================================================
 
 
 TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
@@ -372,10 +380,11 @@ TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
 )
 
 
-# =================================================================================================
-def _select_trace_fields(  # ----------------------------------------------------------------------
-    fields: tuple[TraceField, ...], include_keys: Iterable[str] | None,
-) -> tuple[TraceField, ...]:  # fmt: skip
+# =============================================================================
+def _select_trace_fields(  # --------------------------------------------------
+    fields: tuple[TraceField, ...],
+    include_keys: Iterable[str] | None,
+) -> tuple[TraceField, ...]:
     """Return the selected trace fields for a requested public key set."""
     if include_keys is None:
         return fields
@@ -383,13 +392,13 @@ def _select_trace_fields(  # ---------------------------------------------------
     return tuple(field for field in fields if field.name in requested)
 
 
-# =================================================================================================
-def build_trace_spec(  # --------------------------------------------------------------------------
+# =============================================================================
+def build_trace_spec(  # ------------------------------------------------------
     paradigm: Literal["act", "rl", "tem", "ehc"],
     *,
     include_keys: Iterable[str] | None = None,
     extra_fields: Iterable[TraceField] | None = None,
-) -> TraceSpec:  # fmt: skip
+) -> TraceSpec:
     """Build a :class:`~ehc_sn.traces.TraceSpec` for a training paradigm.
 
     Returns common fields plus paradigm-specific fields.  Pass the returned
@@ -409,23 +418,32 @@ def build_trace_spec(  # -------------------------------------------------------
         ValueError: If *paradigm* is not ``"act"``, ``"rl"``, ``"tem"``, or ``"ehc"``.
     """
     if paradigm == "act":
-        fields = _select_trace_fields(COMMON_TRACE_FIELDS + ACT_TRACE_FIELDS, include_keys)
+        fields = _select_trace_fields(
+            COMMON_TRACE_FIELDS + ACT_TRACE_FIELDS, include_keys
+        )
     elif paradigm == "rl":
-        fields = _select_trace_fields(COMMON_TRACE_FIELDS + RL_TRACE_FIELDS, include_keys)
+        fields = _select_trace_fields(
+            COMMON_TRACE_FIELDS + RL_TRACE_FIELDS, include_keys
+        )
     elif paradigm == "tem":
         fields = _select_trace_fields(TEM_TRACE_FIELDS, include_keys)
     elif paradigm == "ehc":
         fields = _select_trace_fields(TEM_TRACE_FIELDS, include_keys)
     else:
-        raise ValueError(f"Unknown paradigm: {paradigm!r}. Expected 'act', 'rl', 'tem', or 'ehc'.")
+        raise ValueError(
+            f"Unknown paradigm: {paradigm!r}. Expected 'act', 'rl', 'tem', or 'ehc'."
+        )
     if extra_fields is not None:
         fields = fields + tuple(extra_fields)
     return TraceSpec(fields=list(fields))
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "ReplayableEnvironments",
-    "COMMON_TRACE_FIELDS", "ACT_TRACE_FIELDS", "RL_TRACE_FIELDS", TEM_TRACE_FIELDS,
+    "COMMON_TRACE_FIELDS",
+    "ACT_TRACE_FIELDS",
+    "RL_TRACE_FIELDS",
+    TEM_TRACE_FIELDS,
     "build_trace_spec",
-]  # fmt: skip
+]

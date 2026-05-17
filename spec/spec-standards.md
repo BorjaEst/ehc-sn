@@ -12,8 +12,8 @@ other specs and are referenced here rather than restated.
 ### 1.1 Formatting
 
 - **PEP 8** naming and layout conventions.
-- **Black** formatter: `line-length = 140`, `target-version = ["py312"]`.
-- **isort**: `profile = "black"`, `line_length = 140`,
+- **Black** formatter: `line-length = 80`, `target-version = ["py312"]`.
+- **isort**: `profile = "black"`, `line_length = 80`,
   `known_first_party = ["ehc_sn"]`.
 - `pyproject.toml` is the executable source of truth for tool settings. If a
   setting in this file conflicts with `pyproject.toml`, update this file in the

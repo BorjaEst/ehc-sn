@@ -27,25 +27,33 @@ from typing import Optional, Tuple
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn.types import Device, Dtype
 from ehc_sn.utils.detach import DetachMixin
 
 
-# =================================================================================================
+# =============================================================================
 class STRSettings(BaseModel, extra="forbid"):
     """Configuration for STR (striatum) modules."""
 
     n_features: int = Field(
         ...,
         ge=1,
-        description="Dimensionality of STR's internal feature representation (cortical features).",
+        description=(
+            "Dimensionality of STR's internal feature representation "
+            "(cortical features)."
+        ),
     )
     n_actions: int = Field(
         ...,
         ge=1,
-        description="Number of possible actions in the environment (for prediction logits).",
+        description=(
+            "Number of possible actions in the environment "
+            "(for prediction logits)."
+        ),
     )
     hidden_size: int = Field(
         default=64,
@@ -54,7 +62,7 @@ class STRSettings(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
 class STRState(DetachMixin):
     """Recurrent state for STR.
@@ -67,14 +75,17 @@ class STRState(DetachMixin):
     dummy_placeholder: int = 0  # TODO: STRState currently has no internal state
 
 
-# =================================================================================================
+# =============================================================================
 class STRModelLinear(nn.Module):
     """STR actor-critic with simple linear layers."""
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: STRSettings, *,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: STRSettings,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         """Create a linear STR reward/value estimator.
 
         Args:
@@ -84,31 +95,51 @@ class STRModelLinear(nn.Module):
         """
         super().__init__()
         self._config = config
-        in_dim = config.n_features + config.n_actions  # cortical features + q_values
+        in_dim = config.n_features + config.n_actions
         self.reward_head = nn.Sequential(
-            nn.Linear(in_dim, config.hidden_size, bias=False, device=device, dtype=dtype),
+            nn.Linear(
+                in_dim,
+                config.hidden_size,
+                bias=False,
+                device=device,
+                dtype=dtype,
+            ),
             nn.SiLU(),
-            nn.Linear(config.hidden_size, 1, bias=True, device=device, dtype=dtype),
+            nn.Linear(
+                config.hidden_size,
+                1,
+                bias=True,
+                device=device,
+                dtype=dtype,
+            ),
         )
 
-    def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int, *, device=None,
-    ) -> STRState:  # fmt: skip
+    def init_state(  # --------------------------------------------------------
+        self,
+        batch_size: int,
+        *,
+        device=None,
+    ) -> STRState:
         """Create an initial STR state."""
         return STRState()
 
-    def reset_state(  # ---------------------------------------------------------------------------
-        self, state: STRState, reset_flag: Tensor,
-    ) -> STRState:  # fmt: skip
+    def reset_state(  # -------------------------------------------------------
+        self,
+        state: STRState,
+        reset_flag: Tensor,
+    ) -> STRState:
         """Reset the STR state for flagged rows.
 
         The linear STR implementation is stateless; this returns a shallow copy.
         """
         return replace(state)
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, features: Tensor, q_values: Tensor, state: STRState,
-    ) -> tuple[STRState, Tensor]:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        features: Tensor,
+        q_values: Tensor,
+        state: STRState,
+    ) -> tuple[STRState, Tensor]:
         """Predict reward/value from features and Q-values.
 
         Args:
@@ -117,60 +148,84 @@ class STRModelLinear(nn.Module):
             state: STR state.
 
         Returns:
-            ``(new_state, reward_hat)`` where ``reward_hat`` has shape ``(B,)``.
+            ``(new_state, state_value)`` where ``state_value`` has shape ``(B,)``.
         """
-        x = torch.cat([features.to(torch.float32), q_values.to(torch.float32)], dim=-1)
+        x = torch.cat(
+            [features.to(torch.float32), q_values.to(torch.float32)], dim=-1
+        )
         reward_hat = self.reward_head(x).squeeze(-1)  # (B,)
-        new_state = STRState()  # Placeholder for Linear STR since it has no internal state
+        new_state = STRState()  # Placeholder for Linear STR
         return new_state, reward_hat
 
 
+# =============================================================================
 class STRModelGRU(nn.Module):
     """STR actor-critic with GRU recurrence."""
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: STRSettings, *,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: STRSettings,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         raise NotImplementedError("STRModelGRU is not implemented yet.")
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, features: Tensor, q_values: Tensor, state: STRState,
-    ) -> tuple[STRState, Tensor]:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        features: Tensor,
+        q_values: Tensor,
+        state: STRState,
+    ) -> tuple[STRState, Tensor]:
         """Forward pass (not implemented)."""
-        raise NotImplementedError("STRModelGRU.forward() is not implemented yet.")
+        raise NotImplementedError("STRModelGRU.forward() not implemented yet.")
 
 
+# =============================================================================
 class STRModelLSTM(nn.Module):
     """STR actor-critic with LSTM recurrence."""
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: STRSettings, *,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: STRSettings,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         raise NotImplementedError("STRModelLSTM is not implemented yet.")
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, features: Tensor, q_values: Tensor, state: STRState,
-    ) -> tuple[STRState, Tensor]:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        features: Tensor,
+        q_values: Tensor,
+        state: STRState,
+    ) -> tuple[STRState, Tensor]:
         """Forward pass (not implemented)."""
-        raise NotImplementedError("STRModelLSTM.forward() is not implemented yet.")
+        raise NotImplementedError("STRModelLSTM.forward() not implemented yet.")
 
 
+# =============================================================================
 class STRModelGoNoGo(nn.Module):
     """STR actor-critic with separate Go/NoGo pathways."""
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: STRSettings, *,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: STRSettings,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         raise NotImplementedError("STRModelGoNoGo is not implemented yet.")
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, features: Tensor, q_values: Tensor, state: STRState,
-    ) -> tuple[STRState, Tensor]:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        features: Tensor,
+        q_values: Tensor,
+        state: STRState,
+    ) -> tuple[STRState, Tensor]:
         """Forward pass (not implemented)."""
-        raise NotImplementedError("STRModelGoNoGo.forward() is not implemented yet.")
+        raise NotImplementedError("STRModelGoNoGo.forward() not implemented.")
 
 
+# =============================================================================
 __all__ = ["STRSettings", "STRState", "STRModelLinear"]

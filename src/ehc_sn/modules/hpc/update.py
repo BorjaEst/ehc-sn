@@ -17,10 +17,14 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.types import DEFAULT_FACTOR_BANK_NAME, FactorMemoryStore, FactorSlotBank
+from ehc_sn.types import (
+    DEFAULT_FACTOR_BANK_NAME,
+    FactorMemoryStore,
+    FactorSlotBank,
+)
 
 
-# =================================================================================================
+# =============================================================================
 class HebbianWriteSettings(BaseModel, extra="forbid"):
     """Static configuration for dense Hebbian-memory updates."""
 
@@ -34,7 +38,7 @@ class HebbianWriteSettings(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 class EpisodicWriteSettings(BaseModel, extra="forbid"):
     """Static configuration for append-only factor-memory writes."""
 
@@ -56,7 +60,7 @@ class EpisodicWriteSettings(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
 class HebbianWriteRuntime:
     """Mutable runtime hyperparameters for dense Hebbian memory."""
@@ -65,12 +69,12 @@ class HebbianWriteRuntime:
     hebbian_decay: float = 0.9999
 
 
-# =================================================================================================
+# =============================================================================
 HebbianBlockPair = tuple[int, int, slice, slice]
 """One allowed block pair in the hierarchical Hebbian write layout."""
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class HebbianLayout:
     """Canonical masked Hebbian write layout shared by dense and factor stores.
@@ -116,7 +120,7 @@ class HebbianLayout:
         return FactorMemoryStore(keys=keys, values=values, valid_mask=valid_mask, coefficients=coefficients)
 
 
-# =================================================================================================
+# =============================================================================
 class HebbianWriteRule(Protocol):
     """Explicit collaborator contract required by Hebbian store backends."""
 
@@ -134,7 +138,7 @@ class HebbianWriteRule(Protocol):
         """Clamp one dense memory tensor to the configured numeric range."""
 
 
-# =================================================================================================
+# =============================================================================
 def _hebbian_allow_matrix(  # ---------------------------------------------------------------------
     n_stages: int, shape: list[int], f_initial: list[float],
 ) -> Tensor:  # fmt: skip
@@ -153,7 +157,7 @@ def _hebbian_allow_matrix(  # --------------------------------------------------
     return (~same_type) | low_to_high
 
 
-# =================================================================================================
+# =============================================================================
 def _hebbian_offsets(  # --------------------------------------------------------------------------
     shape: list[int],
 ) -> list[int]:  # fmt: skip
@@ -164,7 +168,7 @@ def _hebbian_offsets(  # -------------------------------------------------------
     return offsets
 
 
-# =================================================================================================
+# =============================================================================
 def build_hebbian_layout(  # ----------------------------------------------------------------------
     n_stages: int, shape: list[int], f_initial: list[float],
 ) -> HebbianLayout:  # fmt: skip
@@ -187,7 +191,7 @@ def build_hebbian_layout(  # ---------------------------------------------------
     return HebbianLayout(dense_mask=dense_mask, block_pairs=tuple(block_pairs), feature_dim=feature_dim)
 
 
-# =================================================================================================
+# =============================================================================
 def _validate_hebbian_codes(  # -------------------------------------------------------------------
     p_inf: Tensor, p_gen: Tensor, *, feature_dim: Optional[int] = None,
 ) -> None:  # fmt: skip
@@ -200,7 +204,7 @@ def _validate_hebbian_codes(  # ------------------------------------------------
         raise ValueError(f"Expected flattened code width {feature_dim}, got {int(p_inf.shape[1])}.")
 
 
-# =================================================================================================
+# =============================================================================
 def _compile_hebbian_factors_unmasked(  # ---------------------------------------------------------
     p_inf: Tensor, p_gen: Tensor, *, eta: float
 ) -> FactorMemoryStore:  # fmt: skip
@@ -214,7 +218,7 @@ def _compile_hebbian_factors_unmasked(  # --------------------------------------
     return FactorMemoryStore(keys=a_t.unsqueeze(1), values=b_t.unsqueeze(1), valid_mask=valid_mask, coefficients=coefficients)
 
 
-# =================================================================================================
+# =============================================================================
 class HebbianWrite(nn.Module):
     """Dense Hebbian write/update logic for grounded-location memory.
 
@@ -304,7 +308,7 @@ class HebbianWrite(nn.Module):
         return torch.clamp(memory, min=self._config.clamp_min, max=self._config.clamp_max)
 
 
-# =================================================================================================
+# =============================================================================
 class EpisodicWrite:
     """Append-only factor-store write policy with optional novelty gating."""
 
@@ -400,7 +404,7 @@ class EpisodicWrite:
         return similarity.max(dim=1).values >= self.config.novelty_threshold
 
 
-# =================================================================================================
+# =============================================================================
 def compile_hebbian_factors(  # ------------------------------------------------------------------
     p_inf: Tensor, p_gen: Tensor, *, eta: float,
 ) -> FactorMemoryStore:  # fmt: skip
@@ -408,7 +412,7 @@ def compile_hebbian_factors(  # ------------------------------------------------
     return _compile_hebbian_factors_unmasked(p_inf, p_gen, eta=eta)
 
 
-# =================================================================================================
+# =============================================================================
 def hebbian_block_pairs(  # ----------------------------------------------------------------------
     n_stages: int, shape: list[int], f_initial: list[float],
 ) -> list[tuple[int, int, slice, slice]]:  # fmt: skip
@@ -416,7 +420,7 @@ def hebbian_block_pairs(  # ----------------------------------------------------
     return list(build_hebbian_layout(n_stages, shape, f_initial).block_pairs)
 
 
-# =================================================================================================
+# =============================================================================
 def compile_masked_hebbian_factors(  # ------------------------------------------------------------
     p_inf: Tensor, p_gen: Tensor, *,
     eta: float, n_stages: int, shape: list[int], f_initial: list[float],
@@ -426,7 +430,7 @@ def compile_masked_hebbian_factors(  # -----------------------------------------
     return layout.compile_factors(p_inf, p_gen, eta=eta, masked=True)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "EpisodicWrite", "EpisodicWriteSettings",
     "HebbianBlockPair", "HebbianLayout", "HebbianWriteRule",

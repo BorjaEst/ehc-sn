@@ -23,8 +23,15 @@ import torch
 from torch import Tensor, nn
 
 from ehc_sn.adapters.mazehard.ehc.core import MazeHardEHCAdapterSettings
-from ehc_sn.adapters.mazehard.ehc.objectives import MazeHardEHCV1HybridTaskBinding
-from ehc_sn.models.ehc.ehc_v1 import EHCInputV1, EHCModelV1, EHCOutputV1, EHCStateV1
+from ehc_sn.adapters.mazehard.ehc.objectives import (
+    MazeHardEHCV1HybridTaskBinding,
+)
+from ehc_sn.models.ehc.ehc_v1 import (
+    EHCInputV1,
+    EHCModelV1,
+    EHCOutputV1,
+    EHCStateV1,
+)
 from ehc_sn.tasks.mazehard.contracts import MazeHardTaskOutput
 from ehc_sn.types import Batch
 
@@ -88,7 +95,9 @@ class MazeHardEHCV1Encoder(nn.Module):
         super().__init__()
         self._n_freq = n_freq
         self._feature_dim = feature_dim
-        self.embed = nn.Embedding(vocab_size, n_freq * feature_dim, device=device, dtype=dtype)
+        self.embed = nn.Embedding(
+            vocab_size, n_freq * feature_dim, device=device, dtype=dtype
+        )
 
     def forward(self, batch: Batch) -> EHCInputV1:
         """Encode a MazeHard batch into an EHCInputV1 payload."""
@@ -100,7 +109,9 @@ class MazeHardEHCV1Encoder(nn.Module):
         x = self.embed(input_ids).mean(dim=1)
 
         # Split into n_freq multi-scale sensory codes
-        observation_embedding = list(x.split(self._feature_dim, dim=-1))  # n_freq × (B, feature_dim)
+        observation_embedding = list(
+            x.split(self._feature_dim, dim=-1)
+        )  # n_freq × (B, feature_dim)
 
         # Horizon-1 deliberation: no previous navigation action; treat each step as
         # a fresh episode so MEC resets its grid-prior state.
@@ -135,7 +146,9 @@ class MazeHardEHCV1TaskDecoder(nn.Module):
         dtype=None,
     ) -> None:
         super().__init__()
-        self.lm_head = nn.Linear(hidden_size, vocab_size, bias=False, device=device, dtype=dtype)
+        self.lm_head = nn.Linear(
+            hidden_size, vocab_size, bias=False, device=device, dtype=dtype
+        )
 
     def forward(self, output: EHCOutputV1) -> MazeHardTaskOutput:
         """Decode PFC body workspace to MazeHard token-prediction logits."""
@@ -216,9 +229,13 @@ class MazeHardEHCV1BridgeAdapter(nn.Module):
         """Split one EHC step output into task, policy, and critic surfaces."""
         return MazeHardEHCV1BridgeOutput(
             task=self._decoder(output),
-            policy=MazeHardEHCV1PolicyOutput(policy_logits=output.control.control_logits),
+            policy=MazeHardEHCV1PolicyOutput(
+                policy_logits=output.control.control_logits
+            ),
             # STR scalar V(s) re-exposed as the canonical critic surface.
-            critic=MazeHardEHCV1CriticOutput(state_value=output.control.reward_prediction.unsqueeze(-1)),
+            critic=MazeHardEHCV1CriticOutput(
+                state_value=output.control.reward_prediction.unsqueeze(-1)
+            ),
         )
 
     def forward(

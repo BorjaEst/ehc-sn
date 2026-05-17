@@ -6,10 +6,10 @@ from ehc_sn.metrics.adapter import Route, update_metrics_from_step
 from ehc_sn.metrics.torchmetrics import LastRatioMetric, RatioMetric
 
 
-# =================================================================================================
-def build_train_metrics(  # -----------------------------------------------------------------------
+# =============================================================================
+def build_train_metrics(  # ---------------------------------------------------
     routes: Sequence[Route],
-) -> MetricCollection:  # fmt: skip
+) -> MetricCollection:
     """Build a MetricCollection for training metrics (non-accumulated, direct step ratios).
 
     Args:
@@ -25,13 +25,15 @@ def build_train_metrics(  # ----------------------------------------------------
         :func:`update_metrics_from_step` with the same *routes*.
     """
     keys = [r.key for r in routes]
-    return MetricCollection({k: LastRatioMetric() for k in keys}, compute_groups=[keys])
+    return MetricCollection(
+        {k: LastRatioMetric() for k in keys}, compute_groups=[keys]
+    )
 
 
-# =================================================================================================
-def build_val_metrics(  # -------------------------------------------------------------------------
+# =============================================================================
+def build_val_metrics(  # -----------------------------------------------------
     routes: Sequence[Route],
-) -> MetricCollection:  # fmt: skip
+) -> MetricCollection:
     """Build a MetricCollection for validation metrics (accumulated over the epoch).
 
     Args:
@@ -47,11 +49,17 @@ def build_val_metrics(  # ------------------------------------------------------
         :func:`update_metrics_from_step` with the same *routes*.
     """
     keys = [r.key for r in routes]
-    return MetricCollection({k: RatioMetric() for k in keys}, compute_groups=[keys])
+    return MetricCollection(
+        {k: RatioMetric() for k in keys}, compute_groups=[keys]
+    )
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
-    "Route", "RatioMetric", "LastRatioMetric", "update_metrics_from_step", "build_train_metrics",
+    "Route",
+    "RatioMetric",
+    "LastRatioMetric",
+    "update_metrics_from_step",
+    "build_train_metrics",
     "build_val_metrics",
-]  # fmt: skip
+]

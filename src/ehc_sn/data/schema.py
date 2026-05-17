@@ -32,11 +32,11 @@ O_ID: int = 5
 """Solution-path overlay token ID.
 
 Used by HRM tokenization to mark solution-path cells in the label grid.
-Canonical vocab layout: 0–4 are the five structural SEM IDs; 5 (O_ID) is the
+Canonical vocab layout: 0-4 are the five structural SEM IDs; 5 (O_ID) is the
 solution-path token. Matches ``vocab_size=6`` in HRM model configs.
 """
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "TOPOLOGY_KIND_GRID2D",
     "TOPOLOGY_KIND_LINE1D",

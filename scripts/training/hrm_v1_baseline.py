@@ -10,20 +10,31 @@ from typing import Literal, Optional
 import torch
 from lightning.pytorch import Trainer, seed_everything
 from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
+from pydantic_settings import (
+    BaseSettings,
+    CliSettingsSource,
+    PydanticBaseSettingsSource,
+)
 
 from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
-from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
+from ehc_sn.callbacks.diagnostics import (
+    DiagnosticsCallback,
+    DiagnosticsSettings,
+)
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
-from ehc_sn.lightning.hrm.hrm_v1 import HRMV1TrainingModel, ModelConfig_HRM_V1
+from ehc_sn.lightning.hrm.hrm_v1 import HRMV1ModelConfig, HRMV1TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.objectives import ACTObjectiveConfig
 from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
-from ehc_sn.training.distributed import resolve_effective_world_size, resolve_trainer_strategy, validate_batch_size_divisibility
+from ehc_sn.training.distributed import (
+    resolve_effective_world_size,
+    resolve_trainer_strategy,
+    validate_batch_size_divisibility,
+)
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
 
@@ -35,17 +46,19 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
-CONFIGURATION_PATH = os.environ.get("HRM_V1_CONFIGURATION_PATH", "config/training.hrm-v1.toml")
+CONFIGURATION_PATH = os.environ.get(
+    "HRM_V1_CONFIGURATION_PATH", "config/training.hrm-v1.toml"
+)
 
 
-# =================================================================================================
+# =============================================================================
 # Settings Model
-# =================================================================================================
+# =============================================================================
 class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     """Common training script arguments. Mode-specific model settings are read from TOML."""
 
     @classmethod
-    def settings_customise_sources(  # ------------------------------------------------------------
+    def settings_customise_sources(  # ---------------------------------------
         cls,
         settings_cls,
         init_settings,
@@ -58,23 +71,32 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         Pydantic Settings supports multiple value sources; we explicitly place
         the CLI first so that command-line overrides always win.
         """
-        extra = [init_settings, env_settings, dotenv_settings, file_secret_settings]
+        extra = [
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            file_secret_settings,
+        ]
         return CliSettingsSource(settings_cls), *extra
 
-    # ---------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Names and tracking
     project_name: Optional[str] = Field(
         default=None,
-        description=("Project name. If not set, it defaults to the capitalized name of the dataset " "(e.g. `MATH` -> `Math ACT-torch`)."),
+        description=(
+            "Project name. If not set, it defaults to the capitalized name of the dataset "
+            "(e.g. `MATH` -> `Math ACT-torch`)."
+        ),
     )
     run_name: Optional[str] = Field(
         default=None,
         description=(
-            "Run name. If not set, it defaults to `<arch_name> <random_slug>` " "(e.g. `HrmV1 2x128 4L 16H 0.1D ACT-torch cool-slug`)."
+            "Run name. If not set, it defaults to `<arch_name> <random_slug>` "
+            "(e.g. `HrmV1 2x128 4L 16H 0.1D ACT-torch cool-slug`)."
         ),
     )
 
-    # ---------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Model architecture and data
     model_config_path: Path = Field(
         ...,
@@ -100,7 +122,8 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     optimizer: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
         description=(
-            "Main optimizer config for model parameters (e.g. Adam). " "The keys in `optim_main` are passed to the optimizer constructor."
+            "Main optimizer config for model parameters (e.g. Adam). "
+            "The keys in `optim_main` are passed to the optimizer constructor."
         ),
     )
     scheduler: SchedulerConfig = Field(
@@ -115,7 +138,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         description="HRM runtime-owned validation safety settings.",
     )
 
-    # ---------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Data settings (flat fields composed into DatamoduleConfig)
     dataset_path: Path = Field(
         ...,
@@ -132,7 +155,8 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     global_batch_size: int = Field(
         ...,
         description=(
-            "Global batch size across all devices. " "The per-device batch size is computed as `global_batch_size // world_size`."
+            "Global batch size across all devices. "
+            "The per-device batch size is computed as `global_batch_size // world_size`."
         ),
     )
     num_workers: int = Field(
@@ -152,14 +176,14 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         description="Whether to keep DataLoader workers alive between epochs.",
     )
 
-    # ---------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Training control settings (passed as top-level settings for ease of CLI overrides)
     max_epochs: int = Field(
         ...,
         description="Total number of epochs to train.",
     )
 
-    # ---------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Core settings for model, data, and training configuration (passed as configs to modules)
     logger: Optional[LoggerSettings] = Field(
         default_factory=LoggerSettings,
@@ -178,7 +202,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ),
     )
 
-    # ---------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Training control settings (passed as kwargs to Lightning Trainer)
     max_steps: int = Field(
         default=200000,
@@ -204,7 +228,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         description="Show progress bar during training.",
     )
 
-    # ---------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Distributed training settings (explicitly passed to Lightning Trainer)
     trainer_accelerator: Literal["auto", "gpu", "cpu"] = Field(
         default="gpu",
@@ -225,15 +249,19 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     trainer_precision: str = Field(
         default="16-mixed",
         description=(
-            "Lightning Trainer precision. '32-true' = full fp32 (paper-parity default). " "Use 'bf16-mixed' for throughput on Ampere+."
+            "Lightning Trainer precision. '32-true' = full fp32 (paper-parity default). "
+            "Use 'bf16-mixed' for throughput on Ampere+."
         ),
     )
 
-    # ---------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Checkpointing and evaluation settings (passed as kwargs to Trainer and Checkpoint callback)
     checkpoint_path: Optional[str] = Field(
         default=None,
-        description=("Path to save checkpoints and logs. " "If not set, it defaults to `checkpoints/<project_name>/<run_name>`."),
+        description=(
+            "Path to save checkpoints and logs. "
+            "If not set, it defaults to `checkpoints/<project_name>/<run_name>`."
+        ),
     )
     checkpoint_every_eval: bool = Field(
         default=False,
@@ -248,12 +276,12 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         description="Evaluation output keys saved as tensors in the checkpoint directory.",
     )
 
-    # ---------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Aggregate settings (compose leaf settings for modules)
     @property
-    def hrm_config(self) -> ModelConfig_HRM_V1:
-        """Compose ModelConfig_HRM_V1 from leaf settings."""
-        return ModelConfig_HRM_V1.model_validate(self, from_attributes=True)
+    def hrm_config(self) -> HRMV1ModelConfig:
+        """Compose HRMV1ModelConfig from leaf settings."""
+        return HRMV1ModelConfig.model_validate(self, from_attributes=True)
 
     @property
     def datamodule(self) -> DatamoduleConfig:
@@ -266,9 +294,9 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         return DiagnosticsSettings.model_validate(self, from_attributes=True)
 
 
-# =================================================================================================
+# =============================================================================
 # Main Entrypoint
-# =================================================================================================
+# =============================================================================
 if __name__ == "__main__":
     # Load defaults from TOML, then parse settings.
     # CLI arguments override TOML values; Pydantic defaults fill in anything missing.
@@ -299,7 +327,7 @@ if __name__ == "__main__":
         callbacks=callbacks_list if callbacks_list else None,
         # Lightning Trainer kwargs (extracted from config)
         accelerator=settings.trainer_accelerator,
-        strategy=resolve_trainer_strategy(settings.trainer_strategy, world_size),
+        strategy=resolve_trainer_strategy(settings.trainer_strategy, world_size),  # fmt: skip
         devices=settings.trainer_devices,
         num_nodes=settings.trainer_num_nodes,
         precision=settings.trainer_precision,
@@ -319,7 +347,7 @@ if __name__ == "__main__":
         # Lightning module: training step, optimizer and schedule setup.
         model=HRMV1TrainingModel(settings.hrm_config),
         # Data module: dataset + DataLoader construction.
-        datamodule=Datamodule(settings.datamodule, transform=coerce_maze_hard_batch),
+        datamodule=Datamodule(settings.datamodule, transform=coerce_maze_hard_batch),  # fmt: skip
         # Optional: resume training from a checkpoint.
         ckpt_path=settings.checkpoint_path,
     )

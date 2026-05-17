@@ -27,10 +27,25 @@ from ehc_sn.objectives._variational import (
     get_reg_term,
     require_latent_relation,
 )
-from ehc_sn.objectives.act import ACTObjective, ACTObjectiveConfig, ACTObjectiveStep
-from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLLosses, HybridRLLossHead, HybridRLLossStep
-from ehc_sn.objectives.tem import TEMLosses, TEMObjective, TEMObjectiveConfig, TEMObjectiveStep
+from ehc_sn.objectives.act import (
+    ACTObjective,
+    ACTObjectiveConfig,
+    ACTObjectiveStep,
+)
+from ehc_sn.objectives.hybrid_rl import (
+    HybridRLLossConfig,
+    HybridRLLosses,
+    HybridRLLossHead,
+    HybridRLLossStep,
+)
+from ehc_sn.objectives.tem import (
+    TEMLosses,
+    TEMObjective,
+    TEMObjectiveConfig,
+    TEMObjectiveStep,
+)
 
+# =============================================================================
 __all__ = [
     # base
     "BaseObjective",

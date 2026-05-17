@@ -12,7 +12,7 @@ import lightning.pytorch as pl
 from lightning.pytorch import LightningModule, Trainer
 
 
-# =================================================================================================
+# =============================================================================
 class TrainingMetricsCallback(pl.Callback):
     """Logs train/val metric collections from a LightningModule.
 
@@ -21,32 +21,56 @@ class TrainingMetricsCallback(pl.Callback):
         - ``val_metrics`` with a ``compute()`` method
     """
 
-    def on_train_batch_end(  # --------------------------------------------------------------------
-        self, trainer: Trainer, pl_module: LightningModule, outputs: Any, batch: Any, batch_idx: int,
-    ) -> None:  # fmt: skip
+    def on_train_batch_end(  # ------------------------------------------------
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        outputs: Any,
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        """Logs training metrics at the end of each training batch."""
         if not hasattr(pl_module, "train_metrics"):
             return
         if (trainer.global_step + 1) % trainer.log_every_n_steps != 0:
             return
-        pl_module.log_dict(pl_module.train_metrics.compute(), on_step=True, on_epoch=False, logger=True)
+        pl_module.log_dict(
+            pl_module.train_metrics.compute(),
+            on_step=True,
+            on_epoch=False,
+            logger=True,
+        )
 
-    def on_validation_epoch_end(  # ---------------------------------------------------------------
-        self, trainer: Trainer, pl_module: LightningModule,
-    ) -> None:  # fmt: skip
+    def on_validation_epoch_end(  # -------------------------------------------
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+    ) -> None:
+        """Logs validation metrics at the end of each validation epoch."""
         if not hasattr(pl_module, "val_metrics"):
             return
         vals = pl_module.val_metrics.compute()
-        pl_module.log_dict(vals, on_step=False, on_epoch=True, logger=True, sync_dist=True)
+        pl_module.log_dict(
+            vals, 
+            on_step=False, on_epoch=True, logger=True, sync_dist=True
+        )  # fmt: skip
 
         # Forward the primary accuracy to the progress bar.
         acc_key = getattr(pl_module, "primary_val_metric_key", None)
         if acc_key is not None and acc_key not in vals:
-            raise KeyError(f"primary_val_metric_key '{acc_key}' was not found in computed validation metrics: {sorted(vals)}")
+            raise KeyError(
+                f"primary_val_metric_key '{acc_key}' was not found in computed validation metrics: {sorted(vals)}"
+            )
         if acc_key is None:
-            acc_key = next((k for k in vals if k.endswith("/all/accuracy")), None)
+            acc_key = next(
+                (k for k in vals if k.endswith("/all/accuracy")), None
+            )
         if acc_key is not None:
-            pl_module.log("val/accuracy", vals[acc_key], prog_bar=True, logger=True, sync_dist=True)
+            pl_module.log(
+                "val/accuracy", vals[acc_key],
+                prog_bar=True, logger=True, sync_dist=True,
+            )  # fmt: skip
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["TrainingMetricsCallback"]
