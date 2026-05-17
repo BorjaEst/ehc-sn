@@ -29,4 +29,9 @@
         "sudo": false,
     },
     "python.analysis.autoImportCompletions": true,
+    "editor.rulers": [
+        80,
+        100,
+        130
+    ],
 }
