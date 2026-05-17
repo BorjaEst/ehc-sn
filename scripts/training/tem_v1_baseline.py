@@ -323,7 +323,7 @@ if __name__ == "__main__":
         callbacks=callbacks_list if callbacks_list else None,
         # Lightning Trainer kwargs (extracted from config)
         accelerator=settings.trainer_accelerator,
-        strategy=resolve_trainer_strategy(settings.trainer_strategy, world_size, find_unused_parameters=True),
+        strategy=resolve_trainer_strategy(settings.trainer_strategy, world_size, find_unused_parameters=True),  # fmt: skip
         devices=settings.trainer_devices,
         num_nodes=settings.trainer_num_nodes,
         precision=settings.trainer_precision,
@@ -343,7 +343,7 @@ if __name__ == "__main__":
         # Lightning module: training step, optimizer and schedule setup.
         model=TEMV1TrainingModel(settings.tem_config),
         # Data module: dataset + DataLoader construction.
-        datamodule=Datamodule(settings.datamodule, transform=None),
+        datamodule=Datamodule(settings.datamodule, transform=None),  # fmt: skip
         # Optional: resume training from a checkpoint.
         ckpt_path=settings.checkpoint_path,
     )

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from torch import Tensor
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class RatioStat:
     """A single aggregated ratio statistic.
@@ -28,7 +28,7 @@ class RatioStat:
     denominator_sum: Tensor
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class RolloutAgg:
     """Lifecycle aggregates over completed sequences on the current step."""
@@ -40,7 +40,7 @@ class RolloutAgg:
     steps_sum: Tensor
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class TokenAgg:
     """Token-level aggregates over a selected subset of sequences."""
@@ -49,7 +49,7 @@ class TokenAgg:
     token_count_sum: Tensor
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class TransitionAgg:
     """Aggregates over all evaluated sequences on the current step."""
@@ -61,7 +61,7 @@ class TransitionAgg:
     steps_sum: Tensor
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class StepMetrics:
     """Aggregated per-step metrics used for logging and control flow.
@@ -77,5 +77,11 @@ class StepMetrics:
     extras: Mapping[str, RatioStat]
 
 
-# =================================================================================================
-__all__ = ["RatioStat", "RolloutAgg", "StepMetrics", "TokenAgg", "TransitionAgg"]
+# =============================================================================
+__all__ = [
+    "RatioStat",
+    "RolloutAgg",
+    "StepMetrics",
+    "TokenAgg",
+    "TransitionAgg",
+]

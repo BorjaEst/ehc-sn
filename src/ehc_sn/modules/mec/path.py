@@ -33,7 +33,7 @@ class PathIntegrator(nn.Module):
 
     The model predicts per-frequency transition matrices conditioned on the
     agent action. Optionally, a subset of environments can use a non-directional
-    transition (`D_no_a`) via `no_direc_mask`.
+    transition (`D_no_a`) via `no_direct_mask`.
     """
 
     def __init__(  # ----------------------------------------------------------
@@ -108,20 +108,20 @@ class PathIntegrator(nn.Module):
         self,
         action_ids: Tensor,
         g_prev: list[Tensor],
-        no_direc_mask: Tensor | None = None,
+        no_direct_mask: Tensor | None = None,
     ) -> LocationBelief:
         """Compute the transition distribution for a single step.
 
         Args:
             action_ids: Discrete action ids of shape `(batch,)` or `(batch, 1)`.
             g_prev: Previous grid-code activations per frequency.
-            no_direc_mask: Optional boolean mask of shape `(batch,)` indicating
+            no_direct_mask: Optional boolean mask of shape `(batch,)` indicating
                 environments that should use the non-directional transition.
 
         Returns:
             A `LocationBelief` with mean and uncertainty per frequency.
         """
-        mu = self.mean(action_ids, g_prev, no_direc_mask)
+        mu = self.mean(action_ids, g_prev, no_direct_mask)
         sigma = self.uncertainty_mlp(g_prev)
         return LocationBelief(mean=mu, uncertainty=sigma)
 
@@ -129,20 +129,20 @@ class PathIntegrator(nn.Module):
         self,
         action_ids: Tensor,
         g: list[Tensor],
-        no_direc_mask: Tensor | None,
+        no_direct_mask: Tensor | None,
     ) -> list[Tensor]:
         """Compute the mean transition update.
 
         Args:
             action_ids: Discrete action ids of shape `(batch,)` or `(batch, 1)`.
             g: Current grid-code activations per frequency.
-            no_direc_mask: Optional boolean mask selecting environments that
+            no_direct_mask: Optional boolean mask selecting environments that
                 should use the non-directional transition.
 
         Returns:
             Mean grid-code activations after applying the transition.
         """
-        mats = self._transition_matrices(action_ids, no_direc_mask)
+        mats = self._transition_matrices(action_ids, no_direct_mask)
 
         # Build input by concatenating connected frequencies
         g_in = [
@@ -163,13 +163,13 @@ class PathIntegrator(nn.Module):
     def _transition_matrices(  # ----------------------------------------------
         self,
         action_ids: Tensor,
-        no_direc_mask: Tensor | None,
+        no_direct_mask: Tensor | None,
     ) -> list[Tensor]:
         """Build per-frequency transition matrices.
 
         Args:
             action_ids: Discrete action ids of shape `(batch,)` or `(batch, 1)`.
-            no_direc_mask: Optional boolean mask selecting environments that
+            no_direct_mask: Optional boolean mask selecting environments that
                 should use `D_no_a`.
 
         Returns:
@@ -181,9 +181,9 @@ class PathIntegrator(nn.Module):
             d.reshape(-1, *self._mat_shape[f]) for f, d in enumerate(d_flat)
         ]
 
-        if no_direc_mask is not None and torch.any(no_direc_mask):
+        if no_direct_mask is not None and torch.any(no_direct_mask):
             # Replace where the no-direction mask is active
-            mask = no_direc_mask.view(-1, 1, 1)
+            mask = no_direct_mask.view(-1, 1, 1)
             for f_to in range(self.n_freq):
                 d_no_a = self.D_no_a[f_to].unsqueeze(0).expand_as(mats[f_to])
                 mats[f_to] = torch.where(mask, d_no_a, mats[f_to])
@@ -208,7 +208,7 @@ class PathIntegrator(nn.Module):
 
 
 # =============================================================================
-def _grid_activation(
+def _grid_activation(  # ------------------------------------------------------
     code: list[Tensor],
 ) -> list[Tensor]:
     """Apply the legacy TEM grid-path activation to each frequency module."""

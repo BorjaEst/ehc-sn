@@ -28,7 +28,7 @@ from ehc_sn.modules.mlp import MLP
 from ehc_sn.types import Activation, LocationBelief
 
 
-# =================================================================================================
+# =============================================================================
 class PlaceInferenceSettings(BaseModel, extra="forbid"):
     """Static configuration for grounded-location inference.
 
@@ -52,7 +52,7 @@ class PlaceInferenceSettings(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 class PlaceInference(nn.Module):
     """Infer grounded-location beliefs from sensory and abstract-location cues.
 
@@ -61,10 +61,13 @@ class PlaceInference(nn.Module):
     ``LocationBelief`` over grounded, place-like codes.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, shape: list[int], config: PlaceInferenceSettings,
-        device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        shape: list[int],
+        config: PlaceInferenceSettings,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         """Initialize grounded-location inference.
 
         Args:
@@ -80,7 +83,12 @@ class PlaceInference(nn.Module):
         self._activation_fn = utils.activation_from_str(self._config.activation)
 
         # Predict uncertainty directly from the inferred grounded-location mean.
-        self.uncertainty_mlp = MLP(shape, shape, [torch.tanh, bounded_positive_scale], [2 * n for n in shape])
+        self.uncertainty_mlp = MLP(
+            shape,
+            shape,
+            [torch.tanh, bounded_positive_scale],
+            [2 * n for n in shape],
+        )
 
     @property
     def config(self) -> PlaceInferenceSettings:
@@ -97,9 +105,11 @@ class PlaceInference(nn.Module):
         """Return the number of grounded-location frequency modules."""
         return self._n_freq
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, x_: list[Tensor], g_: list[Tensor],
-    ) -> LocationBelief:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        x_: list[Tensor],
+        g_: list[Tensor],
+    ) -> LocationBelief:
         """Infer grounded-location mean and uncertainty.
 
         Args:
@@ -116,9 +126,10 @@ class PlaceInference(nn.Module):
         sigma_p = self.uncertainty_mlp(mu_p)
         return LocationBelief(mean=mu_p, uncertainty=sigma_p)
 
-    def activation(  # ----------------------------------------------------------------------------
-        self, p: Tensor,
-    ) -> Tensor:  # fmt: skip
+    def activation(  # --------------------------------------------------------
+        self,
+        p: Tensor,
+    ) -> Tensor:
         """Clamp and activate one grounded-location tensor.
 
         Args:
@@ -132,5 +143,5 @@ class PlaceInference(nn.Module):
         return self._activation_fn(p)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["PlaceInferenceSettings", "PlaceInference"]

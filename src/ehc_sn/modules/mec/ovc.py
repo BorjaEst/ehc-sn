@@ -21,7 +21,7 @@ from ehc_sn.modules.mlp import MLP
 from ehc_sn.types import LocationBelief
 
 
-# =================================================================================================
+# =============================================================================
 class OVCSettings(BaseModel, extra="forbid"):
     """Settings for OVC modules."""
 
@@ -29,8 +29,8 @@ class OVCSettings(BaseModel, extra="forbid"):
         default="merged",
         description=(
             "OVC mode. If 'off', no OVC correction is applied. "
-            "If 'merged', shiny correction is fused into the existing MEC frequencies in place. "
-            "If 'separate', OVC frequencies are appended as explicit modules with sizes specified by `shape`."
+            "If 'merged', shiny correction is fused into frequencies. "
+            "If 'separate', OVC frequencies are appended."
         ),
     )
     shape: Optional[list[int]] = Field(
@@ -50,7 +50,7 @@ class OVCSettings(BaseModel, extra="forbid"):
         return self
 
 
-# =================================================================================================
+# =============================================================================
 class OVCCorrection(nn.Module):
     """Fuse shiny landmark cues into selected frequency modules.
 
@@ -58,12 +58,12 @@ class OVCCorrection(nn.Module):
     combined using inverse-variance weighting.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
+    def __init__(  # ----------------------------------------------------------
         self,
         layout: MECLayout,
         config: OVCSettings,
     ) -> None:
-        """ """
+        """Initialize the OVC correction module."""
         super().__init__()
         self._config = config or OVCSettings()
         self._ovc_start = layout.ovc_correction_start
@@ -73,8 +73,15 @@ class OVCCorrection(nn.Module):
 
         # Shiny cue → mean and uncertainty.
         hidden_dim = [self._config.hidden_dim] * self._n_freq
-        self.g_shiny_mlp = MLP([1] * self._n_freq, self.shape, hidden_dim=hidden_dim)
-        self.uncertainty_mlp = MLP([1] * self._n_freq, self.shape, [torch.tanh, bounded_positive_scale], hidden_dim=hidden_dim)  # fmt: skip
+        self.g_shiny_mlp = MLP(
+            [1] * self._n_freq, self.shape, hidden_dim=hidden_dim
+        )
+        self.uncertainty_mlp = MLP(
+            [1] * self._n_freq,
+            self.shape,
+            [torch.tanh, bounded_positive_scale],
+            hidden_dim=hidden_dim,
+        )
 
     @property
     def config(self) -> OVCSettings:
@@ -96,7 +103,11 @@ class OVCCorrection(nn.Module):
         """Return the starting frequency index of the OVC correction slice."""
         return self._ovc_start
 
-    def forward(self, landmark_id: Tensor | None, transition: LocationBelief,) -> LocationBelief:  # fmt: skip  # -------------------------------------------------------------------------------
+    def forward(  # -----------------------------------------------------------
+        self,
+        landmark_id: Tensor | None,
+        transition: LocationBelief,
+    ) -> LocationBelief:
         """Apply OVC correction to environments with shiny cues.
 
         Args:
@@ -107,17 +118,25 @@ class OVCCorrection(nn.Module):
             A corrected `LocationBelief`. If no shiny cues are present, returns the
             input transition unchanged.
         """
-        shiny_mask = self._identify_shiny_envs(landmark_id, transition.mean[0].device)
+        shiny_mask = self._identify_shiny_envs(
+            landmark_id, transition.mean[0].device
+        )
         if shiny_mask is None:  # No shiny envs present
             return transition
 
-        shiny_input = self._extract_shiny_cues(landmark_id, shiny_mask, transition.mean[0].device)
+        shiny_input = self._extract_shiny_cues(
+            landmark_id, shiny_mask, transition.mean[0].device
+        )
         freqs = range(self.ovc_start, self.ovc_start + self.n_freq)
 
         correction = self._predict_correction(shiny_input)
         return utils.inv_var_trans(transition, correction, shiny_mask, freqs)
 
-    def _identify_shiny_envs(self, landmark_id: Tensor | None, device: Device,) -> Tensor | None:  # fmt: skip  # ------------------------------------------------------------------
+    def _identify_shiny_envs(  # ----------------------------------------------
+        self,
+        landmark_id: Tensor | None,
+        device: Device,
+    ) -> Tensor | None:
         """Return a mask selecting environments with shiny cues.
 
         Args:
@@ -135,7 +154,12 @@ class OVCCorrection(nn.Module):
             return None
         return shiny_mask.to(device=device)
 
-    def _extract_shiny_cues(self, landmark_id: Tensor | None, shiny_mask: Tensor, device: Device,) -> list[Tensor]:  # fmt: skip  # -------------------------------------------------------------------
+    def _extract_shiny_cues(  # -----------------------------------------------
+        self,
+        landmark_id: Tensor | None,
+        shiny_mask: Tensor,
+        device: Device,
+    ) -> list[Tensor]:
         """Extract shiny cue values as inputs for the OVC MLPs.
 
         Args:
@@ -148,11 +172,20 @@ class OVCCorrection(nn.Module):
             `(n_shiny, 1)`.
         """
         if landmark_id is None:
-            raise ValueError("landmark_id is required when shiny_mask selects OVC-corrected rows.")
-        shiny_tensor = landmark_id.squeeze(-1)[shiny_mask].to(device=device, dtype=torch.float32).unsqueeze(-1)
+            raise ValueError(
+                "landmark_id is required when shiny_mask selects OVC-corrected rows."
+            )
+        shiny_tensor = (
+            landmark_id.squeeze(-1)[shiny_mask]
+            .to(device=device, dtype=torch.float32)
+            .unsqueeze(-1)
+        )
         return [shiny_tensor] * self.n_freq
 
-    def _predict_correction(self, shiny_input: list[Tensor],) -> LocationBelief:  # fmt: skip  # -------------------------------------------------------------------
+    def _predict_correction(  # -----------------------------------------------
+        self,
+        shiny_input: list[Tensor],
+    ) -> LocationBelief:
         """Predict mean and uncertainty for the OVC correction.
 
         Args:
@@ -163,7 +196,10 @@ class OVCCorrection(nn.Module):
         """
         # Predict mean with legacy nonlinearity (abs → leaky_relu)
         mu_g = [torch.abs(mu) for mu in self.g_shiny_mlp(shiny_input)]
-        mu_g_shiny = [utils.leaky_relu(torch.clamp(g_f, min=-1.0, max=1.0)) for g_f in mu_g]
+        mu_g_shiny = [
+            utils.leaky_relu(torch.clamp(g_f, min=-1.0, max=1.0))
+            for g_f in mu_g
+        ]
 
         # Predict uncertainty
         sigma_g_shiny = self.uncertainty_mlp(shiny_input)
@@ -171,5 +207,5 @@ class OVCCorrection(nn.Module):
         return LocationBelief(mean=mu_g_shiny, uncertainty=sigma_g_shiny)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["OVCCorrection", "OVCSettings"]

@@ -10,21 +10,21 @@ from ehc_sn import utils
 from ehc_sn.modules.mlp import MLP
 
 
-# =================================================================================================
+# =============================================================================
 class AutoencoderSettings(BaseModel, extra="forbid"):
     """Settings for autoencoder modules."""
 
     encode_mode: Literal["two_hot"] = Field(
-        "two_hot",
+        default="two_hot",
         description="Compression mode for observations (e.g., 'two_hot')",
     )
     decode_mode: Literal["mlp"] = Field(
-        "mlp",
+        default="mlp",
         description="Decompression mode for observations (e.g., 'nnet')",
     )
 
 
-# =================================================================================================
+# =============================================================================
 class Autoencoder(nn.Module):
     """Encode observations into features and decode them back.
 
@@ -32,7 +32,13 @@ class Autoencoder(nn.Module):
     on :class:`AutoencoderSettings`.
     """
 
-    def __init__(self, n_o: int, n_c: int, settings: AutoencoderSettings):
+    def __init__(  # ----------------------------------------------------------
+        self,
+        n_o: int,
+        n_c: int,
+        settings: AutoencoderSettings,
+    ) -> None:
+        """Initialize the autoencoder with specified encoder/decoder settings."""
         super().__init__()
         self.encoder = _select_encoder(settings, n_o, n_c)
         self.decoder = _select_decoder(settings, n_c, n_o)
@@ -40,23 +46,28 @@ class Autoencoder(nn.Module):
 
     @property
     def n_observations(self) -> int:
+        """Number of observation dimensions."""
         return self.encoder.n_o
 
     @property
     def n_features(self) -> int:
+        """Number of feature dimensions."""
         return self.encoder.n_c
 
     def forward(self, *args, **kwds) -> Tensor:
+        """Forward pass is not implemented for the autoencoder wrapper."""
         raise NotImplementedError("Use encoder and decoder methods separately.")
 
     def encode(self, x_o: Tensor) -> Tensor:
+        """Encode one-hot observations into features."""
         return self.encoder(x_o)
 
     def decode(self, c: Tensor) -> Tensor:
+        """Decode features back into observation logits."""
         return self.decoder(c)
 
 
-# =================================================================================================
+# =============================================================================
 class TwoHotEncoder(nn.Module):
     """Two-hot encoder.
 
@@ -64,7 +75,12 @@ class TwoHotEncoder(nn.Module):
     using a precomputed lookup table.
     """
 
-    def __init__(self, n_o: int, n_c: int):
+    def __init__(  # ----------------------------------------------------------
+        self,
+        n_o: int,
+        n_c: int,
+    ) -> None:
+        """Initialize the two-hot encoder."""
         super(TwoHotEncoder, self).__init__()
         self.n_o = n_o
         self.n_c = n_c
@@ -72,36 +88,63 @@ class TwoHotEncoder(nn.Module):
         two_hot_tensor = utils.create_encoding_table(n_o, n_c, n_hot=2)
         self.register_buffer("two_hot_table", two_hot_tensor)
 
-    def forward(self, o: Tensor) -> Tensor:
+    def forward(  # -----------------------------------------------------------
+        self,
+        o: Tensor,
+    ) -> Tensor:
+        """Encode one-hot observations into two-hot features."""
         # Extract indices from one-hot and lookup two-hot encoding
         indices = torch.argmax(o, dim=1)
         return torch.stack([self.two_hot_table[i] for i in indices], dim=0)
 
 
-# =================================================================================================
+# =============================================================================
 class MLPDecoder(nn.Module):
     """MLP-based decoder from features to observation logits."""
 
-    def __init__(self, n_c: int, n_o: int):
+    def __init__(  # ----------------------------------------------------------
+        self,
+        n_c: int,
+        n_o: int,
+    ) -> None:
+        """Initialize the MLP decoder."""
         super(MLPDecoder, self).__init__()
         self.n_c = n_c
         self.n_o = n_o
         # MLP for decompressing features to observations
         self.MLP_c_star = MLP(self.n_c, self.n_o, hidden_dim=20 * self.n_c)
 
-    def forward(self, c: Tensor) -> Tensor:
+    def forward(  # -----------------------------------------------------------
+        self,
+        c: Tensor,
+    ) -> Tensor:
+        """Decode features back into observation logits using the MLP."""
         return self.MLP_c_star(c)
 
 
-# =================================================================================================
-def _select_encoder(settings: AutoencoderSettings, n_o: int, n_c: int) -> nn.Module:
+# =============================================================================
+def _select_encoder(  # -------------------------------------------------------
+    settings: AutoencoderSettings,
+    n_o: int,
+    n_c: int,
+) -> nn.Module:
+    """Select and initialize the encoder based on settings."""
     if settings.encode_mode == "two_hot":
         return TwoHotEncoder(n_o, n_c)
     raise ValueError(f"Unsupported encode_mode: {settings.encode_mode}")
 
 
-# =================================================================================================
-def _select_decoder(settings: AutoencoderSettings, n_c: int, n_o: int) -> nn.Module:
+# =============================================================================
+def _select_decoder(  # -------------------------------------------------------
+    settings: AutoencoderSettings,
+    n_c: int,
+    n_o: int,
+) -> nn.Module:
+    """Select and initialize the decoder based on settings."""
     if settings.decode_mode == "mlp":
         return MLPDecoder(n_c, n_o)
     raise ValueError(f"Unsupported decode_mode: {settings.decode_mode}")
+
+
+# =============================================================================
+__all__ = ["AutoencoderSettings", "Autoencoder"]

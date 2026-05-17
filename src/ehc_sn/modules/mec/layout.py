@@ -14,7 +14,7 @@ from ehc_sn import utils
 OVCMode = Literal["off", "merged", "separate"]
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class MECLayout:
     """Resolved MEC layout facts derived from grid and OVC config.
@@ -50,18 +50,28 @@ class MECLayout:
         return len(self.full_shape)
 
 
-# =================================================================================================
-def validate_ovc_shape_policy(mode: OVCMode, shape: Optional[Sequence[int]]) -> None:
+# =============================================================================
+def validate_ovc_shape_policy(
+    mode: OVCMode,
+    shape: Optional[Sequence[int]],
+) -> None:
     """Validate whether an explicit OVC shape is allowed for the given mode."""
     if mode == "separate" and not shape:
-        raise ValueError("mec.ovc.shape is required when mec.ovc.mode='separate'.")
+        raise ValueError(
+            "mec.ovc.shape is required when mec.ovc.mode='separate'."
+        )
     if mode != "separate" and shape is not None:
-        raise ValueError("mec.ovc.shape is only allowed when mec.ovc.mode='separate'.")
+        raise ValueError(
+            "mec.ovc.shape is only allowed when mec.ovc.mode='separate'."
+        )
 
 
-# =================================================================================================
+# =============================================================================
 def resolve_mec_layout(
-    grid_shape: Sequence[int], *, ovc_mode: OVCMode, ovc_shape: Optional[Sequence[int]]
+    grid_shape: Sequence[int],
+    *,
+    ovc_mode: OVCMode,
+    ovc_shape: Optional[Sequence[int]],
 ) -> MECLayout:
     """Resolve MEC shape expansion and OVC correction layout from config values."""
     validate_ovc_shape_policy(ovc_mode, ovc_shape)
@@ -77,7 +87,9 @@ def resolve_mec_layout(
     else:
         n_freq_ovc = len(appended_ovc_shape)
 
-    ovc_correction_start, ovc_correction_count = utils.resolve_ovc_slice(len(full_shape), n_freq_ovc)
+    ovc_correction_start, ovc_correction_count = utils.resolve_ovc_slice(
+        len(full_shape), n_freq_ovc
+    )
     return MECLayout(
         grid_shape=grid_shape_resolved,
         full_shape=full_shape,
@@ -87,5 +99,5 @@ def resolve_mec_layout(
     )
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["MECLayout", "resolve_mec_layout", "validate_ovc_shape_policy"]

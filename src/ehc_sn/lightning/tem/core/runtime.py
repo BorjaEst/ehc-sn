@@ -82,17 +82,20 @@ class ValidationRuntimeConfig(BaseModel, extra="forbid"):
     max_rollout_steps: int | None = Field(
         default=None,
         ge=1,
-        description="Normal runner-owned rollout bound for validation execution.",
+        description="Normal runner-owned rollout bound for validation "
+        "execution.",
     )
     hard_max_rollout_steps: int | None = Field(
         default=None,
         ge=1,
-        description="Defensive runner cap for validation rollouts. Separate from semantic model max_steps.",
+        description="Defensive runner cap for validation rollouts. Separate "
+        "from semantic model max_steps.",
     )
     seed: int | None = Field(
         default=None,
         ge=0,
-        description="Explicit evaluation seed used to make validation rollouts reproducible.",
+        description="Explicit evaluation seed used to make validation "
+        "rollouts reproducible.",
     )
 
 
@@ -153,9 +156,8 @@ def resolve_tem_runtime(  # ---------------------------------------------------
     p2g_use = 1.0 - p2g_inactive
     p2g_uncertainty_offset = (
         uncertainty.offset_min
-        + (uncertainty.offset_max - uncertainty.offset_min)
-        * p2g_inactive
-    )  # fmt: skip
+        + (uncertainty.offset_max - uncertainty.offset_min) * p2g_inactive
+    )
 
     return TEMRuntimeState(
         eta=progress_eta * memory.eta,

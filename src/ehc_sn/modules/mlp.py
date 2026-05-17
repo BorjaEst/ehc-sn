@@ -13,7 +13,7 @@ from torch import nn
 from ehc_sn.utils import find_multiple, trunc_normal_init_
 
 
-# =================================================================================================
+# =============================================================================
 class MLPConfig(BaseModel, extra="forbid"):
     """Configuration for the MLP (feed-forward) block used in HRM transformer layers."""
 
@@ -30,7 +30,7 @@ class MLPConfig(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 class SwiGLU(nn.Module):
     """SwiGLU feed-forward (MLP) block with a gated activation.
 
@@ -45,9 +45,12 @@ class SwiGLU(nn.Module):
     to a multiple of 256 for efficiency.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: MLPConfig, device: Optional[Device]=None, dtype: Optional[Dtype]=None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: MLPConfig,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         """Initialize the SwiGLU block.
 
         Args:
@@ -59,29 +62,48 @@ class SwiGLU(nn.Module):
         super().__init__()
         self._config = config
 
-        inter = find_multiple(round(config.expansion * config.hidden_size * 2 / 3), 256)
-        self.gate_up_proj = nn.Linear(config.hidden_size, inter * 2, bias=False, device=device, dtype=dtype)
-        self.down_proj = nn.Linear(inter, config.hidden_size, bias=False, device=device, dtype=dtype)
+        inter = find_multiple(
+            round(config.expansion * config.hidden_size * 2 / 3), 256
+        )
+        self.gate_up_proj = nn.Linear(
+            config.hidden_size,
+            inter * 2,
+            bias=False,
+            device=device,
+            dtype=dtype,
+        )
+        self.down_proj = nn.Linear(
+            inter, config.hidden_size, bias=False, device=device, dtype=dtype
+        )
         self.reset_parameters()
 
-    def reset_parameters(self) -> None:  # -------------------------------------------------------
+    def reset_parameters(  # --------------------------------------------------
+        self,
+    ) -> None:
         """Initialize projection weights with truncated normal matching legacy ``CastedLinear``.
 
         Std formulas (fan_in = input dimension of each projection):
             - ``gate_up_proj``: ``std = 1 / sqrt(hidden_size)``
             - ``down_proj``:    ``std = 1 / sqrt(inter)``  (recovered via ``in_features``)
         """
-        trunc_normal_init_(self.gate_up_proj.weight, std=1.0 / math.sqrt(self._config.hidden_size))
-        trunc_normal_init_(self.down_proj.weight, std=1.0 / math.sqrt(self.down_proj.in_features))
+        trunc_normal_init_(
+            self.gate_up_proj.weight,
+            std=1.0 / math.sqrt(self._config.hidden_size),
+        )
+        trunc_normal_init_(
+            self.down_proj.weight,
+            std=1.0 / math.sqrt(self.down_proj.in_features),
+        )
 
     @property
     def config(self) -> MLPConfig:
         """Configuration of the SwiGLU block."""
         return self._config
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, x: Tensor,
-    ) -> Tensor:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        x: Tensor,
+    ) -> Tensor:
         """Apply the SwiGLU transformation.
 
         Args:
@@ -99,7 +121,7 @@ class SwiGLU(nn.Module):
         return self.down_proj(F.silu(gate) * up)
 
 
-# =================================================================================================
+# =============================================================================
 class MLP(torch.nn.Module):
     """Simple 2-layer MLP (legacy utility).
 
@@ -129,9 +151,11 @@ class MLP(torch.nn.Module):
             hidden_dim: Hidden dimension(s). If None, uses mean of in/out.
             bias: Tuple indicating whether each layer uses bias.
         """
-        # First call super class init function to set up torch.nn.Module style model and inherit it's functionality
+        # First call super class init function to set up torch.nn.Module style
+        # model and inherit it's functionality
         super(MLP, self).__init__()
-        # Check if this network consists of module: are input and output dimensions lists? If not, make them (but remember it wasn't)
+        # Check if this network consists of module: are input and output
+        # dimensions lists? If not, make them (but remember it wasn't)
         if type(in_dim) is list:
             self.is_list = True
         else:
@@ -169,7 +193,11 @@ class MLP(torch.nn.Module):
                     if bias[from_layer]:
                         self.w[n][from_layer].bias.fill_(0.0)
 
-    def set_weights(self, from_layer, value):
+    def set_weights(  # -------------------------------------------------------
+        self,
+        from_layer,
+        value,
+    ) -> None:
         """Set the weights of one layer for all modules.
 
         Args:
@@ -192,7 +220,10 @@ class MLP(torch.nn.Module):
                 else:
                     self.w[n][from_layer].weight.fill_(input_value[n])
 
-    def forward(self, data):
+    def forward(  # -----------------------------------------------------------
+        self,
+        data: Tensor,
+    ) -> Tensor:
         """Apply the MLP to the provided input(s)."""
         # Make input data into list, if this network doesn't consist of modules
         if self.is_list:
@@ -219,4 +250,7 @@ class MLP(torch.nn.Module):
             output = output[0]
         # And return output
         return output
-        return output
+
+
+# =============================================================================
+__all__ = ["MLP", "SwiGLU"]  # Expose only the main classes from this module

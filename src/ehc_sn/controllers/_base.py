@@ -13,40 +13,29 @@ from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
 
-def batch_anchor_tensor(batch: Batch) -> Tensor:
-    """Return one representative batch tensor used to infer batch size and device.
-
-    The generic controller layer must not assume a semantic key such as
-    ``"observation"`` or ``"input_ids"``. It only requires a non-empty mapping
-    of tensor-valued batch entries that share the leading batch dimension.
-    """
-    for value in batch.values():
-        if isinstance(value, Tensor):
-            return value
-    raise ValueError("Batch must contain at least one tensor-valued entry.")
-
-
-# =================================================================================================
+# =============================================================================
 class RolloutBackbone[ModelState, ModelOutput](Protocol):
-    """ """
+    """Protocol for the backbone model wrapped by a rollout controller."""
 
-    def init_state(  # ----------------------------------------------------------------------------
-        self, batch_size: int,
-    ) -> ModelState:  # fmt: skip
-        ...  # fmt: skip
+    def init_state(  # ---------------------------------------------------------
+        self,
+        batch_size: int,
+    ) -> ModelState: ...
 
-    def reset_state(  # ---------------------------------------------------------------------------
-        self, reset_flag: Tensor, state: ModelState,
-    ) -> ModelState:  # fmt: skip
-        ...  # fmt: skip
+    def reset_state(  # --------------------------------------------------------
+        self,
+        reset_flag: Tensor,
+        state: ModelState,
+    ) -> ModelState: ...
 
-    def __call__(  # ------------------------------------------------------------------------------
-        self, batch: Batch, state: ModelState | None = None,
-    ) -> tuple[ModelOutput, ModelState]:  # fmt: skip
-        ...  # fmt: skip
+    def __call__(  # -----------------------------------------------------------
+        self,
+        batch: Batch,
+        state: ModelState | None = None,
+    ) -> tuple[ModelOutput, ModelState]: ...
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
 class RolloutState[ModelState](DetachMixin):
     """Per-slot rollout state carried across controller steps.
@@ -69,7 +58,7 @@ class RolloutState[ModelState](DetachMixin):
     data: dict[str, Tensor]
 
 
-# =================================================================================================
+# =============================================================================
 class BaseController[ModelState, ConfigT: BaseModel]:
     """Shared infrastructure for slot-based rollout controllers.
 
@@ -110,9 +99,11 @@ class BaseController[ModelState, ConfigT: BaseModel]:
         infer batch size and device.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, backbone: RolloutBackbone[ModelState], config: ConfigT,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        backbone: RolloutBackbone[ModelState],
+        config: ConfigT,
+    ) -> None:
         self._backbone = backbone
         self._config = config
 
@@ -126,9 +117,10 @@ class BaseController[ModelState, ConfigT: BaseModel]:
         """Return the controller configuration."""
         return self._config
 
-    def initial_slots(  # -------------------------------------------------------------------------
-        self, batch_sample: Batch,
-    ) -> RolloutState[ModelState]:  # fmt: skip
+    def initial_slots(  # -----------------------------------------------------
+        self,
+        batch_sample: Batch,
+    ) -> RolloutState[ModelState]:
         """Allocate the initial per-slot rollout buffers from a batch sample.
 
         All slots start as halted (``halted=True``, ``steps=0``), so the first
@@ -150,26 +142,57 @@ class BaseController[ModelState, ConfigT: BaseModel]:
         )
 
     @staticmethod
-    def make_empty_slot_data(  # ----------------------------------------------------------------------
+    def make_empty_slot_data(  # ----------------------------------------------
         batch_sample: Batch,
-    ) -> dict[str, Tensor]:  # fmt: skip
+    ) -> dict[str, Tensor]:
         """Allocate per-slot buffers matching an example batch."""
-        return {key: torch.empty_like(value) for key, value in batch_sample.items()}
+        return {
+            key: torch.empty_like(value) for key, value in batch_sample.items()
+        }
 
-    def refresh_slot_data(  # ---------------------------------------------------------------------
-        self, batch: Batch, state: RolloutState[ModelState],
-    ) -> dict[str, Tensor]:  # fmt: skip
+    def refresh_slot_data(  # -------------------------------------------------
+        self,
+        batch: Batch,
+        state: RolloutState[ModelState],
+    ) -> dict[str, Tensor]:
         """Refresh slot buffers for halted rows."""
         batch, halted, data = batch, state.halted, state.data
-        return {key: torch.where(halted.view((-1,) + (1,) * (value.ndim - 1)), value, data[key]) for key, value in batch.items()}
+        return {
+            key: torch.where(
+                halted.view((-1,) + (1,) * (value.ndim - 1)), value, data[key]
+            )
+            for key, value in batch.items()
+        }
 
-    def advance_steps(  # -------------------------------------------------------------------------
-        self, state: RolloutState[ModelState],
-    ) -> Tensor:  # fmt: skip
+    def advance_steps(  # -----------------------------------------------------
+        self,
+        state: RolloutState[ModelState],
+    ) -> Tensor:
         """Advance per-slot step counters using halted rows as reset points."""
         steps, halted = state.steps, state.halted
         return torch.where(halted, torch.zeros_like(steps), steps) + 1
 
 
-# =================================================================================================
-__all__ = ["BaseController", "RolloutBackbone", "RolloutState", "batch_anchor_tensor"]
+# =============================================================================
+def batch_anchor_tensor(  # ---------------------------------------------------
+    batch: Batch,
+) -> Tensor:
+    """Return one representative batch tensor used to infer batch size and device.
+
+    The generic controller layer must not assume a semantic key such as
+    ``"observation"`` or ``"input_ids"``. It only requires a non-empty mapping
+    of tensor-valued batch entries that share the leading batch dimension.
+    """
+    for value in batch.values():
+        if isinstance(value, Tensor):
+            return value
+    raise ValueError("Batch must contain at least one tensor-valued entry.")
+
+
+# =============================================================================
+__all__ = [
+    "BaseController",
+    "RolloutBackbone",
+    "RolloutState",
+    "batch_anchor_tensor",
+]

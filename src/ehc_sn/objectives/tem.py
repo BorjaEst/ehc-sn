@@ -202,7 +202,6 @@ class TEMObjectiveConfig(BaseModel, extra="forbid"):
         ge=0.0,
         description="Place regularization coefficient.",
     )
-
     # Schedule fields (original TEM training dynamics)
     temp_it: int = Field(
         default=2000,

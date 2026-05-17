@@ -70,23 +70,10 @@ _DEFAULT_MAX_STEPS = 600
 app = typer.Typer(add_completion=False, help=__doc__)
 
 
-def _require_shared_substrate(shared_root: Path) -> None:
-    """Fail fast with an actionable error when the parent substrate is missing."""
-    if not shared_root.exists():
-        typer.echo(
-            f"Error: parent shared substrate not found at {shared_root}.\n"
-            "Build it first with:\n"
-            "    python scripts/data-gen/build-dungeongen.py build-all\n"
-            "or:\n"
-            f"    python scripts/data-gen/build-dungeongen.py materialize-shared",
-            err=True,
-        )
-        raise typer.Exit(code=1)
 
-
-# ---------------------------------------------------------------------------
+# =============================================================================
 @app.command("materialize-task")
-def materialize_task(
+def materialize_task(  # ------------------------------------------------------
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
     start_policy: Annotated[str, typer.Option("--start-policy")] = _DEFAULT_START_POLICY,
     walk_policy: Annotated[str, typer.Option("--walk-policy")] = _DEFAULT_WALK_POLICY,
@@ -100,7 +87,7 @@ def materialize_task(
     shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
     version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
-) -> None:
+) -> None:  # fmt: skip
     """Build the Arena task corpus (v1, topology-free) over a dungeongen shared substrate."""
     shared_root = Path(f"data/processed/{SHARED_FAMILY}/v{shared_version}")
     task_root = Path(f"data/processed/arena/{corpus}/v{version}")
@@ -122,11 +109,11 @@ def materialize_task(
     )
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 @app.command("validate")
-def validate(
+def validate(  # --------------------------------------------------------------
     root: Annotated[Path, typer.Argument(help="Arena task-corpus root to validate.")],
-) -> None:
+) -> None:  # fmt: skip
     """Validate an Arena task-corpus version root.
 
     Raises an error if the root is not a valid Arena task_corpus.
@@ -157,9 +144,9 @@ def validate(
     typer.echo(f"    observation_vocab_size : {manifest.get('observation_vocab_size')}")
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 @app.command("build-all")
-def build_all(
+def build_all(  # -------------------------------------------------------------
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
     start_policy: Annotated[str, typer.Option("--start-policy")] = _DEFAULT_START_POLICY,
     walk_policy: Annotated[str, typer.Option("--walk-policy")] = _DEFAULT_WALK_POLICY,
@@ -173,7 +160,7 @@ def build_all(
     shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
     version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
-) -> None:
+) -> None:  # fmt: skip
     """Build the Arena task corpus (alias for materialize-task).
 
     Requires the parent dungeongen shared substrate to exist.  Build it first::
@@ -197,5 +184,23 @@ def build_all(
     )
 
 
+# =============================================================================
+def _require_shared_substrate(  # ---------------------------------------------
+    shared_root: Path,
+) -> None:  # fmt: skip
+    """Fail fast with an actionable error when the parent substrate is missing."""
+    if not shared_root.exists():
+        typer.echo(
+            f"Error: parent shared substrate not found at {shared_root}.\n"
+            "Build it first with:\n"
+            "    python scripts/data-gen/build-dungeongen.py build-all\n"
+            "or:\n"
+            f"    python scripts/data-gen/build-dungeongen.py materialize-shared",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
+# =============================================================================
 if __name__ == "__main__":
     app()

@@ -1,9 +1,4 @@
-"""Lightning-local helpers for rollout execution and scoring.
-
-These helpers keep learner modules focused on optimizer and scheduler control
-while centralizing the repeated runner/objective/observer wiring shared across
-Lightning training surfaces.
-"""
+""" """
 
 from __future__ import annotations
 
@@ -27,16 +22,24 @@ from ehc_sn.rollouts import (
 )
 
 
-# =================================================================================================
+# =============================================================================
 class RolloutObjective(Protocol):
     """Protocol for pure objectives that score executed rollout chunks."""
 
-    def __call__(self, chunk: RolloutChunk, **options: Any) -> EvaluatedChunk: ...
+    def __call__(  # ----------------------------------------------------------
+        self,
+        chunk: RolloutChunk,
+        **options: Any,
+    ) -> EvaluatedChunk: ...
 
-    def evaluate_step(self, record: StepRecord, **options: Any) -> ObjectiveStepOutput: ...
+    def evaluate_step(  # -----------------------------------------------------
+        self,
+        record: StepRecord,
+        **options: Any,
+    ) -> ObjectiveStepOutput: ...
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class RolloutEvaluation:
     """Pair an executed rollout chunk with its objective-scored result."""
@@ -45,7 +48,7 @@ class RolloutEvaluation:
     evaluated: EvaluatedChunk
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class StreamingRolloutEvaluation:
     """Streaming rollout evaluation without full-step materialization."""
@@ -55,8 +58,8 @@ class StreamingRolloutEvaluation:
     last_step: ObservedStep
 
 
-# =================================================================================================
-def evaluate_rollout(
+# =============================================================================
+def evaluate_rollout(  # ------------------------------------------------------
     *,
     runner: Runner,
     source: Source,
@@ -78,13 +81,16 @@ def evaluate_rollout(
         options=dict(runner_options or {}),
     )
     if not isinstance(executed, RolloutChunk):
-        raise TypeError("Rollout evaluation requires captured step records, but the runner returned a recordless execution summary.")
+        raise TypeError(
+            "Rollout evaluation requires captured step records, but the "
+            "runner returned a recordless execution summary."
+        )
     evaluated = objective(executed, **dict(objective_options or {}))
     return RolloutEvaluation(chunk=executed, evaluated=evaluated)
 
 
-# =================================================================================================
-def evaluate_rollout_streaming(
+# =============================================================================
+def evaluate_rollout_streaming(  # --------------------------------------------
     *,
     runner: Runner,
     source: Source,
@@ -107,9 +113,27 @@ def evaluate_rollout_streaming(
         nonlocal total_loss, last_step
         step_output = objective.evaluate_step(record, **objective_options_dict)
         if metric_collection is not None:
-            update_metrics_from_step(metric_collection, step_output.metrics, metric_routes)
-        last_step = ObservedStep(index=record.index, batch=record.batch, snapshot=record.snapshot, outputs=step_output)
-        total_loss = step_output.loss if total_loss is None else total_loss + step_output.loss
+            update_metrics_from_step(
+                metric_collection, step_output.metrics, metric_routes
+            )
+        executed = (
+            record.executed_frame
+            if record.executed_frame is not None
+            else record.batch
+        )
+        last_step = ObservedStep(
+            index=record.index,
+            batch=executed,
+            executed_frame=executed,
+            sampled_input=record.sampled_input,
+            snapshot=record.snapshot,
+            outputs=step_output,
+        )
+        total_loss = (
+            step_output.loss
+            if total_loss is None
+            else total_loss + step_output.loss
+        )
 
     executed = runner.run(
         source=source,
@@ -122,14 +146,21 @@ def evaluate_rollout_streaming(
         capture_records=False,
     )
     if isinstance(executed, RolloutChunk):
-        raise TypeError("Streaming rollout evaluation expects a recordless execution summary, but the runner returned a captured chunk.")
+        raise TypeError(
+            "Streaming rollout evaluation expects a recordless execution "
+            "summary, but the runner returned a captured chunk."
+        )
     if total_loss is None or last_step is None:
-        raise ValueError("Streaming rollout evaluation received no executed steps.")
-    return StreamingRolloutEvaluation(execution=executed, loss=total_loss, last_step=last_step)
+        raise ValueError(
+            "Streaming rollout evaluation received no executed steps."
+        )
+    return StreamingRolloutEvaluation(
+        execution=executed, loss=total_loss, last_step=last_step
+    )
 
 
-# =================================================================================================
-def update_metric_collection_from_evaluated_chunk(
+# =============================================================================
+def update_metric_collection_from_evaluated_chunk(  # -------------------------
     collection: MetricCollection,
     evaluated: EvaluatedChunk,
     routes: list[Route] | tuple[Route, ...],
@@ -139,7 +170,7 @@ def update_metric_collection_from_evaluated_chunk(
         update_metrics_from_step(collection, step.outputs.metrics, routes)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "RolloutEvaluation",
     "RolloutObjective",

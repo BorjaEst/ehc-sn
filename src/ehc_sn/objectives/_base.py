@@ -12,10 +12,15 @@ from typing import Any
 from pydantic import BaseModel
 from torch import Tensor, nn
 
-from ehc_sn.rollouts import EvaluatedChunk, ObservedStep, RolloutChunk, StepRecord
+from ehc_sn.rollouts import (
+    EvaluatedChunk,
+    ObservedStep,
+    RolloutChunk,
+    StepRecord,
+)
 
 
-# =================================================================================================
+# =============================================================================
 class BaseObjective[ConfigT: BaseModel](nn.Module):
     """Minimal wiring base for all rollout objectives.
 
@@ -24,7 +29,11 @@ class BaseObjective[ConfigT: BaseModel](nn.Module):
     one scored step result per executed step.
     """
 
-    def __init__(self, config: ConfigT) -> None:
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: ConfigT,
+    ) -> None:
+        """Initialize the objective with the given configuration."""
         super().__init__()
         self._config = config
 
@@ -33,15 +42,37 @@ class BaseObjective[ConfigT: BaseModel](nn.Module):
         """Return the objective configuration."""
         return self._config
 
-    def forward(self, chunk: RolloutChunk, **options: Any) -> EvaluatedChunk:
+    def forward(  # -----------------------------------------------------------
+        self,
+        chunk: RolloutChunk,
+        **options: Any,
+    ) -> EvaluatedChunk:
         """Score an executed rollout chunk and return one observed step per record."""
         observed_steps: list[ObservedStep] = []
         total_loss: Tensor | None = None
 
         for record in chunk.records:
             step_output = self.evaluate_step(record, **options)
-            observed_steps.append(ObservedStep(index=record.index, batch=record.batch, snapshot=record.snapshot, outputs=step_output))
-            total_loss = step_output.loss if total_loss is None else total_loss + step_output.loss
+            executed = (
+                record.executed_frame
+                if record.executed_frame is not None
+                else record.batch
+            )
+            observed_steps.append(
+                ObservedStep(
+                    index=record.index,
+                    batch=executed,
+                    executed_frame=executed,
+                    sampled_input=record.sampled_input,
+                    snapshot=record.snapshot,
+                    outputs=step_output,
+                )
+            )
+            total_loss = (
+                step_output.loss
+                if total_loss is None
+                else total_loss + step_output.loss
+            )
 
         if total_loss is None:
             raise ValueError("Objective received an empty rollout chunk.")
@@ -53,10 +84,14 @@ class BaseObjective[ConfigT: BaseModel](nn.Module):
             source_exhausted=chunk.source_exhausted,
         )
 
-    def evaluate_step(self, record: StepRecord, **options: Any) -> Any:
+    def evaluate_step(  # -----------------------------------------------------
+        self,
+        record: StepRecord,
+        **options: Any,
+    ) -> Any:
         """Score one executed rollout step."""
         raise NotImplementedError
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["BaseObjective"]

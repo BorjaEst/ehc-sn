@@ -22,12 +22,18 @@ from torch import nn
 
 from ehc_sn import utils
 from ehc_sn.modules.hpc.location import PlaceInference, PlaceInferenceSettings
-from ehc_sn.modules.hpc.query_policy import MemoryRead, PreparedCueRead, PreparedRead, ReadCues, build_read_composer
+from ehc_sn.modules.hpc.query_policy import (
+    MemoryRead,
+    PreparedCueRead,
+    PreparedRead,
+    ReadCues,
+    build_read_composer,
+)
 from ehc_sn.types import LocationBelief, MemoryEntry, MemoryState, RetrievalRole
 from ehc_sn.utils.detach import DetachMixin
 
 
-# =================================================================================================
+# =============================================================================
 class HPCCommonSettings(BaseModel, extra="forbid"):
     """Settings shared by all hippocampal memory implementations.
 
@@ -56,7 +62,7 @@ class HPCCommonSettings(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
 class HPCState(DetachMixin):
     """Recurrent HPC state carried between TEM steps.
@@ -134,7 +140,7 @@ class HPCState(DetachMixin):
         )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class SensoryRead:
     """Operator inputs for the phase-1 sensory-cued memory read.
@@ -149,7 +155,7 @@ class SensoryRead:
     enable_sensory_recall: bool = True
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
 class SensoryReadResult:
     """Results produced by the phase-1 sensory-cued memory read.
@@ -162,7 +168,7 @@ class SensoryReadResult:
     recall: Optional[list[Tensor]]
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class WritePayload:
     """Projected values written to hippocampal memory for one TEM step.
@@ -178,7 +184,7 @@ class WritePayload:
     named_writes: dict[str, list[Tensor]] = field(default_factory=dict)
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class HPCTransition:
     """Inputs for the full phase-2 hippocampal transition.
@@ -198,7 +204,7 @@ class HPCTransition:
     named_writes: dict[str, list[Tensor]] = field(default_factory=dict)
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
 class HPCTransitionResult:
     """Outputs produced by the full phase-2 hippocampal transition.
@@ -216,7 +222,7 @@ class HPCTransitionResult:
     state: HPCState
 
 
-# =================================================================================================
+# =============================================================================
 class HPCBase(nn.Module, ABC):
     """Shared orchestration for hippocampal memory modules.
 
@@ -517,7 +523,7 @@ class HPCBase(nn.Module, ABC):
         return p_inf, state.new(p_inf, transition.uncertainty)
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "HPCCommonSettings", "SensoryRead", "SensoryReadResult", "HPCBase",
     "HPCState", "HPCTransition", "HPCTransitionResult", "WritePayload",

@@ -17,19 +17,21 @@ from torch import nn
 from ehc_sn import utils
 
 
-# =================================================================================================
+# =============================================================================
 class FeatureNormSettings(BaseModel, extra="forbid"):
     """Settings for LEC normalization modules."""
 
 
-# =================================================================================================
+# =============================================================================
 class FeatureNorm(nn.Module):
     """Normalize per-frequency feature vectors."""
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: FeatureNormSettings,
-        device: Optional[Device]=None, dtype: Optional[Dtype]=None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: FeatureNormSettings,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         """Initialize the normalization module.
 
         Args:
@@ -43,9 +45,10 @@ class FeatureNorm(nn.Module):
         """Return the normalization config."""
         return self._config
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, x: list[Tensor],
-    ) -> list[Tensor]:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        x: list[Tensor],
+    ) -> list[Tensor]:
         """Normalize features.
 
         Args:
@@ -62,5 +65,5 @@ class FeatureNorm(nn.Module):
         ]
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["FeatureNorm", "FeatureNormSettings"]

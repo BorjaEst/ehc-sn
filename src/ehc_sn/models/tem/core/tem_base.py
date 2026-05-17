@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from pydantic import BaseModel, Field
-from torch import Tensor
 
-from ehc_sn.modules.hpc import HPCState, HPCTransition, SensoryReadResult
-from ehc_sn.modules.hpc.query_policy import CueRead, MemoryRead
 from ehc_sn.modules.projection import ProjectionSettings
 from ehc_sn.types import AbstractLocation, GroundedLocation
 
@@ -74,11 +71,15 @@ class TEMProjectionSettings(BaseModel, extra="forbid", strict=False):
     """Inter-region projection settings for TEM backbones."""
 
     lec_to_hpc: ProjectionSettings = Field(
-        default_factory=lambda: ProjectionSettings(mode="tiling", learnable=False),
+        default_factory=lambda: ProjectionSettings(
+            mode="tiling", learnable=False
+        ),
         description="Projection settings mapping LEC features into hippocampal query space.",
     )
     mec_to_hpc: ProjectionSettings = Field(
-        default_factory=lambda: ProjectionSettings(mode="low_rank", learnable=False, rank=[10, 10, 8, 6, 6]),
+        default_factory=lambda: ProjectionSettings(
+            mode="low_rank", learnable=False, rank=[10, 10, 8, 6, 6]
+        ),
         description="Projection settings mapping MEC codes into hippocampal query space.",
     )
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# =================================================================================================
+# =============================================================================
 LOSS_LM: str = "loss_lm"
 
 ACT_LOSS_Q_DONE: str = "loss_q_done"
@@ -55,31 +55,60 @@ EHC_ACC_OBS_ANCESTRAL_REVISIT: str = "ehc_accuracy_obs_ancestral_revisit"
 EHC_ACC_OBS_ANCESTRAL_ALL: str = "ehc_accuracy_obs_ancestral_all"
 
 
-# =================================================================================================
-def extra_ratio_paths(key: str,) -> tuple[str, str]:  # fmt: skip  # -------------------------------------------------------------------------
+# =============================================================================
+def extra_ratio_paths(  # -----------------------------------------------------
+    key: str,
+) -> tuple[str, str]:
     """Return numerator/denominator paths for a keyed extra ratio metric."""
     base_path = f"extras.{key}"
     return f"{base_path}.numerator_sum", f"{base_path}.denominator_sum"
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
-    "ACT_LOSS_Q_CONTINUE", "ACT_LOSS_Q_DONE", "LOSS_LM", "RL_LOSS_ACTOR", "RL_LOSS_CRITIC",
-    "RL_LOSS_ENTROPY", "RL_LOSS_Q_VALUE", "EHC_ACC_OBS_ANCESTRAL_ALL",
-    "EHC_ACC_OBS_ANCESTRAL_REVISIT", "EHC_ACC_OBS_INFERENCE_ALL",
-    "EHC_ACC_OBS_INFERENCE_REVISIT", "EHC_ACC_OBS_RETRIEVED_ALL",
-    "EHC_ACC_OBS_RETRIEVED_REVISIT", "EHC_LOSS_GRID_KL_ALL",
-    "EHC_LOSS_GRID_KL_REVISIT", "EHC_LOSS_OBS_NLL_ALL", "EHC_LOSS_OBS_NLL_REVISIT",
-    "EHC_LOSS_PLACE_CONSISTENCY_ALL", "EHC_LOSS_PLACE_CONSISTENCY_REVISIT",
-    "EHC_LOSS_REG_ALL", "EHC_LOSS_REG_REVISIT", "TEM_ACC_OBS_ANCESTRAL_ALL",
-    "TEM_ACC_OBS_ANCESTRAL_REVISIT", "TEM_ACC_OBS_INFERENCE_ALL",
-    "TEM_ACC_OBS_INFERENCE_REVISIT", "TEM_ACC_OBS_RETRIEVED_ALL",
-    "TEM_ACC_OBS_RETRIEVED_REVISIT", "TEM_LOSS_GRID_KL_ALL",
-    "TEM_LOSS_GRID_KL_REVISIT", "TEM_LOSS_OBS_NLL_ALL", "TEM_LOSS_OBS_NLL_REVISIT",
-    "TEM_LOSS_PLACE_CONSISTENCY_ALL", "TEM_LOSS_PLACE_CONSISTENCY_REVISIT",
-    "TEM_LOSS_REG_ALL", "TEM_LOSS_REG_REVISIT",
-    "TEM_LOSS_OBS_INFERENCE_REVISIT", "TEM_LOSS_OBS_RETRIEVED_REVISIT", "TEM_LOSS_OBS_ANCESTRAL_REVISIT",
-    "TEM_LOSS_OBS_INFERENCE_ALL", "TEM_LOSS_OBS_RETRIEVED_ALL", "TEM_LOSS_OBS_ANCESTRAL_ALL",
-    "VAR_LOSS_LATENT", "VAR_LOSS_OBS_NLL",
-    "VAR_LOSS_REG", "extra_ratio_paths",
-]  # fmt: skip
+    "ACT_LOSS_Q_CONTINUE",
+    "ACT_LOSS_Q_DONE",
+    "LOSS_LM",
+    "RL_LOSS_ACTOR",
+    "RL_LOSS_CRITIC",
+    "RL_LOSS_ENTROPY",
+    "RL_LOSS_Q_VALUE",
+    "EHC_ACC_OBS_ANCESTRAL_ALL",
+    "EHC_ACC_OBS_ANCESTRAL_REVISIT",
+    "EHC_ACC_OBS_INFERENCE_ALL",
+    "EHC_ACC_OBS_INFERENCE_REVISIT",
+    "EHC_ACC_OBS_RETRIEVED_ALL",
+    "EHC_ACC_OBS_RETRIEVED_REVISIT",
+    "EHC_LOSS_GRID_KL_ALL",
+    "EHC_LOSS_GRID_KL_REVISIT",
+    "EHC_LOSS_OBS_NLL_ALL",
+    "EHC_LOSS_OBS_NLL_REVISIT",
+    "EHC_LOSS_PLACE_CONSISTENCY_ALL",
+    "EHC_LOSS_PLACE_CONSISTENCY_REVISIT",
+    "EHC_LOSS_REG_ALL",
+    "EHC_LOSS_REG_REVISIT",
+    "TEM_ACC_OBS_ANCESTRAL_ALL",
+    "TEM_ACC_OBS_ANCESTRAL_REVISIT",
+    "TEM_ACC_OBS_INFERENCE_ALL",
+    "TEM_ACC_OBS_INFERENCE_REVISIT",
+    "TEM_ACC_OBS_RETRIEVED_ALL",
+    "TEM_ACC_OBS_RETRIEVED_REVISIT",
+    "TEM_LOSS_GRID_KL_ALL",
+    "TEM_LOSS_GRID_KL_REVISIT",
+    "TEM_LOSS_OBS_NLL_ALL",
+    "TEM_LOSS_OBS_NLL_REVISIT",
+    "TEM_LOSS_PLACE_CONSISTENCY_ALL",
+    "TEM_LOSS_PLACE_CONSISTENCY_REVISIT",
+    "TEM_LOSS_REG_ALL",
+    "TEM_LOSS_REG_REVISIT",
+    "TEM_LOSS_OBS_INFERENCE_REVISIT",
+    "TEM_LOSS_OBS_RETRIEVED_REVISIT",
+    "TEM_LOSS_OBS_ANCESTRAL_REVISIT",
+    "TEM_LOSS_OBS_INFERENCE_ALL",
+    "TEM_LOSS_OBS_RETRIEVED_ALL",
+    "TEM_LOSS_OBS_ANCESTRAL_ALL",
+    "VAR_LOSS_LATENT",
+    "VAR_LOSS_OBS_NLL",
+    "VAR_LOSS_REG",
+    "extra_ratio_paths",
+]

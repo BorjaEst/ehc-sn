@@ -8,7 +8,7 @@ from typing import NamedTuple
 from torchmetrics import MetricCollection
 
 
-# =================================================================================================
+# =============================================================================
 class Route(NamedTuple):
     """Mapping from a metric key to dotted attribute paths on a step-metrics object.
 
@@ -33,10 +33,12 @@ def _get(obj: object, path: str) -> object:
     return obj
 
 
-# =================================================================================================
-def update_metrics_from_step(  # ------------------------------------------------------------------
-    collection: MetricCollection, step: object, routes: Sequence[Route],
-) -> None:  # fmt: skip
+# =============================================================================
+def update_metrics_from_step(  # ----------------------------------------------
+    collection: MetricCollection,
+    step: object,
+    routes: Sequence[Route],
+) -> None:
     """Update a metrics collection from aggregated step metrics.
 
     Routes each field of *step* to the corresponding :class:`~torchmetrics.Metric`
@@ -66,5 +68,5 @@ def update_metrics_from_step(  # -----------------------------------------------
             )
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["Route", "update_metrics_from_step"]

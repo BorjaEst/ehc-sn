@@ -11,8 +11,18 @@ import torch
 from torch import Tensor, nn
 
 from ehc_sn.adapters.arena.tem import core
-from ehc_sn.adapters.arena.tem.core import ArenaDecoderConfig, ArenaEncoderConfig, ArenaTEMAdapterSettings, ArenaTEMBridgeOutput
-from ehc_sn.models.tem.tem_v1 import TEMInputV1, TEMModelV1, TEMOutputV1, TEMStateV1
+from ehc_sn.adapters.arena.tem.core import (
+    ArenaDecoderConfig,
+    ArenaEncoderConfig,
+    ArenaTEMAdapterSettings,
+    ArenaTEMBridgeOutput,
+)
+from ehc_sn.models.tem.tem_v1 import (
+    TEMInputV1,
+    TEMModelV1,
+    TEMOutputV1,
+    TEMStateV1,
+)
 from ehc_sn.modules.autoencoder import MLPDecoder
 from ehc_sn.types import Batch
 
@@ -28,14 +38,18 @@ class ArenaInputsEncoderV1(nn.Module):
         n_freq: int,
     ) -> None:
         super().__init__()
-        self.encoder = core.ArenaTwoHotEncoder(observation_dim, feature_dim, n_freq)
+        self.encoder = core.ArenaTwoHotEncoder(
+            observation_dim, feature_dim, n_freq
+        )
 
     def forward(  # -----------------------------------------------------------
         self,
         batch: Batch,
     ) -> TEMInputV1:
         """Encode a pre-extracted arena step payload into a TEM v1 input."""
-        observation_embedding, prev_action, episode_start, landmark_id = self.encoder(batch)
+        observation_embedding, prev_action, episode_start, landmark_id = (
+            self.encoder(batch)
+        )
         return TEMInputV1(
             observation_embedding=observation_embedding,
             previous_action=prev_action,
@@ -58,8 +72,12 @@ class ArenaOutputsDecoderV1(nn.Module):
         super().__init__()
         self._obs_dim = observation_dim
         self._single_freq = single_freq
-        self.w_x = torch.nn.Parameter(torch.tensor(1.0))  # For reconstructing c from x
-        self.b_x = torch.nn.Parameter(torch.zeros(latent_dim))  # Bias for reconstructing c from x
+        self.w_x = torch.nn.Parameter(
+            torch.tensor(1.0)
+        )  # For reconstructing c from x
+        self.b_x = torch.nn.Parameter(
+            torch.zeros(latent_dim)
+        )  # Bias for reconstructing c from x
         self.decoder = MLPDecoder(latent_dim, observation_dim)
 
     def _decode(  # -----------------------------------------------------------
@@ -85,7 +103,9 @@ class ArenaOutputsDecoderV1(nn.Module):
 
         ol = (obs_inference, obs_retrieved, obs_ancestral)
         task = core.ArenaTaskOutput(obs_logits=obs_inference)
-        tem = core.ArenaTEMDiagnostics(obs_logits=ol, grid_codes=gc, place_codes=pc, pred_codes=xc)
+        tem = core.ArenaTEMDiagnostics(
+            obs_logits=ol, grid_codes=gc, place_codes=pc, pred_codes=xc
+        )
         return core.ArenaTEMBridgeOutput(task=task, tem=tem)
 
 
@@ -108,7 +128,9 @@ class ArenaTEMV1BridgeAdapter(nn.Module):
     def config(self) -> ArenaTEMAdapterSettings:
         return self._config
 
-    def init_state(self, batch_size: int, *, device: Optional[torch.device] = None) -> TEMStateV1:
+    def init_state(
+        self, batch_size: int, *, device: Optional[torch.device] = None
+    ) -> TEMStateV1:
         return self.model.init_state(batch_size, device=device)
 
     def reset_state(self, reset_flag: Tensor, state: TEMStateV1) -> TEMStateV1:
@@ -155,14 +177,19 @@ def _build_decoder_v1(  # -----------------------------------------------------
     if config.decoder.kind == "single_scale":
         freq = config.decoder.prediction_freq
         if not (0 <= freq < n_freq):
-            raise ValueError(f"prediction_freq={freq} is out of range for hpc.shape with {n_freq} bands " f"(valid: 0..{n_freq - 1}).")
+            raise ValueError(
+                f"prediction_freq={freq} is out of range for hpc.shape with {n_freq} bands "
+                f"(valid: 0..{n_freq - 1})."
+            )
         return ArenaOutputsDecoderV1(
             observation_dim=config.observation_dim,
             latent_dim=feature_dim,
             single_freq=freq,
         )
     if config.decoder.kind == "multi_scale":
-        raise NotImplementedError("Multi-scale decoding is not yet implemented for ArenaTEMV1BridgeAdapter.")
+        raise NotImplementedError(
+            "Multi-scale decoding is not yet implemented for ArenaTEMV1BridgeAdapter."
+        )
     raise ValueError(f"Unsupported decoder kind: {config.decoder.kind}")
 
 
