@@ -1,8 +1,8 @@
 """Canonical public surface for rollout-scoring objective modules.
 
 For the ACT and TEM families the canonical names follow the ``*Objective*``
-vocabulary; the legacy ``*LossHead*`` names are preserved as backward-compatible
-aliases. The hybrid RL family uses ``*LossHead*`` names directly — it is a
+vocabulary; the legacy ``*Objective*`` names are preserved as backward-compatible
+aliases. The hybrid RL family uses ``*Objective*`` names directly — it is a
 learner-owned batch-loss path, not a rollout-scoring objective.
 
 Prefer ``from ehc_sn.objectives import ...`` over any sub-module import.
@@ -12,8 +12,6 @@ from ehc_sn.objectives._base import BaseObjective
 from ehc_sn.objectives._token import (
     IGNORE_LABEL_ID,
     AccuracyStats,
-    TokenLosses,
-    TokenObjectiveBase,
     TokenSupervisionBinding,
     build_token_step_metrics,
     compute_accuracy_stats,
@@ -21,40 +19,42 @@ from ehc_sn.objectives._token import (
 )
 from ehc_sn.objectives._variational import (
     VariationalLosses,
-    VariationalLossStep,
     VariationalObjectiveBase,
+    VariationalObjectiveStep,
     build_variational_step_metrics,
     get_reg_term,
     require_latent_relation,
 )
 from ehc_sn.objectives.act import (
+    ACTLosses,
     ACTObjective,
+    ACTObjectiveBinding,
     ACTObjectiveConfig,
     ACTObjectiveStep,
+    ACTStepOutput,
 )
 from ehc_sn.objectives.hybrid_rl import (
     HybridRLLossConfig,
     HybridRLLosses,
-    HybridRLLossHead,
-    HybridRLLossStep,
+    HybridRLObjective,
+    HybridRLObjectiveStep,
 )
 from ehc_sn.objectives.tem import (
     TEMLosses,
     TEMObjective,
+    TEMObjectiveBinding,
     TEMObjectiveConfig,
     TEMObjectiveStep,
+    TEMStepOutput,
 )
 
 # =============================================================================
 __all__ = [
     # base
     "BaseObjective",
-    # token family — canonical
-    "TokenObjectiveBase",
     # token family — implementation / compat
     "IGNORE_LABEL_ID",
     "AccuracyStats",
-    "TokenLosses",
     "TokenSupervisionBinding",
     "build_token_step_metrics",
     "compute_accuracy_stats",
@@ -63,7 +63,7 @@ __all__ = [
     "VariationalObjectiveBase",
     # variational family — implementation / compat
     "VariationalLosses",
-    "VariationalLossStep",
+    "VariationalObjectiveStep",
     "build_variational_step_metrics",
     "get_reg_term",
     "require_latent_relation",
@@ -71,14 +71,19 @@ __all__ = [
     "ACTObjectiveConfig",
     "ACTObjective",
     "ACTObjectiveStep",
+    "ACTLosses",
+    "ACTObjectiveBinding",
+    "ACTStepOutput",
     # hybrid rl — batch-loss path (no *Objective* aliases; not a rollout scorer)
     "HybridRLLossConfig",
-    "HybridRLLossHead",
+    "HybridRLObjective",
     "HybridRLLosses",
-    "HybridRLLossStep",
+    "HybridRLObjectiveStep",
     # tem — canonical
     "TEMObjectiveConfig",
     "TEMObjective",
     "TEMObjectiveStep",
     "TEMLosses",
+    "TEMObjectiveBinding",
+    "TEMStepOutput",
 ]

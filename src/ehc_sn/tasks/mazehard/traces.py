@@ -25,7 +25,7 @@ from pathlib import Path
 from ehc_sn.traces.trace_tree import TraceTree
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class MazeHardEvaluationSourceContext:
     """Typed, frozen provider-side context for a MazeHard evaluation case batch.
@@ -45,24 +45,28 @@ class MazeHardEvaluationSourceContext:
     def __post_init__(self) -> None:
         if self.task_family != "mazehard":
             raise ValueError(
-                f"MazeHardEvaluationSourceContext.task_family must be 'mazehard', got {self.task_family!r}"
+                "MazeHardEvaluationSourceContext.task_family must be 'mazehard', "
+                f"got {self.task_family!r}"
             )
         if not self.sample_ids:
-            raise ValueError("MazeHardEvaluationSourceContext.sample_ids must not be empty")
+            raise ValueError(
+                "MazeHardEvaluationSourceContext.sample_ids must not be empty",
+            )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class MazeHardTraceSupplements:
     """Canonical supplement content for MazeHard traces.
 
     MazeHard does not currently produce spatial geometry supplements.
-    This dataclass is intentionally empty and serves as the typed seam for future work.
+    This dataclass is intentionally empty and serves as the typed seam for
+    future work.
     """
 
 
-# =================================================================================================
-def build_mazehard_trace_supplements(
+# =============================================================================
+def build_mazehard_trace_supplements(  # --------------------------------------
     source_context: MazeHardEvaluationSourceContext,
     trace_length: int,
 ) -> MazeHardTraceSupplements:
@@ -82,8 +86,8 @@ def build_mazehard_trace_supplements(
     return MazeHardTraceSupplements()
 
 
-# =================================================================================================
-def apply_mazehard_trace_supplements(
+# =============================================================================
+def apply_mazehard_trace_supplements(  # --------------------------------------
     trace: TraceTree,
     supplements: MazeHardTraceSupplements,
 ) -> None:
@@ -98,7 +102,7 @@ def apply_mazehard_trace_supplements(
     """
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "MazeHardEvaluationSourceContext",
     "MazeHardTraceSupplements",

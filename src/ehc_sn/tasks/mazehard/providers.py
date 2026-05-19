@@ -26,12 +26,12 @@ from torch.utils.data import DataLoader
 
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
-from ehc_sn.lightning.eval.contracts import EvaluationCaseBatch, EvaluationSourceProvider
+from ehc_sn.lightning.eval.contracts import EvaluationCaseBatch
 from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.tasks.mazehard.traces import MazeHardEvaluationSourceContext
 
 
-# =================================================================================================
+# =============================================================================
 class MazeHardReplayDiagnosticProvider:
     """MazeHard-task-owned provider for processed replay diagnostics.
 
@@ -55,7 +55,7 @@ class MazeHardReplayDiagnosticProvider:
       ``0`` means use all entries in the split.
     """
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         *,
         dataset_path: str,
@@ -63,12 +63,16 @@ class MazeHardReplayDiagnosticProvider:
         batch_size: int = 1,
         n_cases: int = 0,
     ) -> None:
+        """Initialize the provider with dataset path, split, batch size, and case limit."""
         self._dataset_path = Path(dataset_path)
         self._split = split
         self._batch_size = batch_size
         self._n_cases = n_cases
 
-    def provide_cases(self, max_batches: int = 0) -> Iterator[EvaluationCaseBatch]:
+    def provide_cases(  # -----------------------------------------------------
+        self,
+        max_batches: int = 0,
+    ) -> Iterator[EvaluationCaseBatch]:
         """Yield batched MazeHard replay cases from the configured split.
 
         Args:
@@ -86,7 +90,9 @@ class MazeHardReplayDiagnosticProvider:
         if self._n_cases > 0:
             entries = entries[: self._n_cases]
 
-        dataset = ProcessedDataset(entries, data_root / self._split, transform=coerce_maze_hard_batch)
+        dataset = ProcessedDataset(
+            entries, data_root / self._split, transform=coerce_maze_hard_batch
+        )
         loader: DataLoader[dict[str, Any]] = DataLoader(
             dataset,
             batch_size=self._batch_size,
@@ -101,7 +107,10 @@ class MazeHardReplayDiagnosticProvider:
 
             first_key = next(iter(batch))
             n_in_batch = batch[first_key].shape[0]
-            ids_in_batch = [entries[batch_idx * self._batch_size + i].id for i in range(n_in_batch)]
+            ids_in_batch = [
+                entries[batch_idx * self._batch_size + i].id
+                for i in range(n_in_batch)
+            ]
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"mazehard-{self._split}-{batch_idx:04d}",
@@ -113,7 +122,9 @@ class MazeHardReplayDiagnosticProvider:
                 ),
             )
 
-    def description(self) -> str:
+    def description(  # -------------------------------------------------------
+        self,
+    ) -> str:
         """Return a human-readable description for logging."""
         return (
             f"MazeHardReplayDiagnosticProvider("
@@ -124,7 +135,7 @@ class MazeHardReplayDiagnosticProvider:
         )
 
 
-# =================================================================================================
+# =============================================================================
 class MazeHardFixedProbeProvider:
     """MazeHard-task-owned provider that evaluates a fixed, explicitly-named set of mazes.
 
@@ -152,7 +163,7 @@ class MazeHardFixedProbeProvider:
         KeyError: From :meth:`provide_cases` if any requested id is absent from the index.
     """
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         *,
         dataset_path: str,
@@ -160,17 +171,26 @@ class MazeHardFixedProbeProvider:
         sample_ids: list[str],
         batch_size: int = 1,
     ) -> None:
+        """Initialize the provider with dataset path, split, sample ids, and batch size."""
         if not sample_ids:
-            raise ValueError("MazeHardFixedProbeProvider: sample_ids must not be empty")
+            raise ValueError(
+                "MazeHardFixedProbeProvider: sample_ids must not be empty",
+            )
         if len(sample_ids) != len(set(sample_ids)):
             duplicates = [s for s in sample_ids if sample_ids.count(s) > 1]
-            raise ValueError(f"MazeHardFixedProbeProvider: sample_ids contains duplicates: {sorted(set(duplicates))}")
+            raise ValueError(
+                "MazeHardFixedProbeProvider: sample_ids contains duplicates: "
+                f"{sorted(set(duplicates))}"
+            )
         self._dataset_path = Path(dataset_path)
         self._split = split
         self._sample_ids = sample_ids
         self._batch_size = batch_size
 
-    def provide_cases(self, max_batches: int = 0) -> Iterator[EvaluationCaseBatch]:
+    def provide_cases(  # -----------------------------------------------------
+        self,
+        max_batches: int = 0,
+    ) -> Iterator[EvaluationCaseBatch]:
         """Yield deterministic evaluation case batches for the configured sample ids.
 
         Samples are loaded in the exact order of ``sample_ids``.  If a requested id
@@ -193,10 +213,17 @@ class MazeHardFixedProbeProvider:
 
         missing = [sid for sid in self._sample_ids if sid not in by_id]
         if missing:
-            raise KeyError(f"MazeHardFixedProbeProvider: sample_ids not found in split {self._split!r}: {missing}")
+            raise KeyError(
+                "MazeHardFixedProbeProvider: sample_ids not found in split "
+                f"{self._split!r}: {missing}"
+            )
 
         ordered_entries = [by_id[sid] for sid in self._sample_ids]
-        dataset = ProcessedDataset(ordered_entries, self._dataset_path / self._split, transform=coerce_maze_hard_batch)
+        dataset = ProcessedDataset(
+            ordered_entries,
+            self._dataset_path / self._split,
+            transform=coerce_maze_hard_batch,
+        )
         loader: DataLoader[dict[str, Any]] = DataLoader(
             dataset,
             batch_size=self._batch_size,
@@ -211,7 +238,10 @@ class MazeHardFixedProbeProvider:
 
             first_key = next(iter(batch))
             n_in_batch = batch[first_key].shape[0]
-            ids_in_batch = self._sample_ids[batch_idx * self._batch_size : batch_idx * self._batch_size + n_in_batch]
+            ids_in_batch = self._sample_ids[
+                batch_idx * self._batch_size : batch_idx * self._batch_size
+                + n_in_batch
+            ]
 
             if self._batch_size == 1:
                 case_id = ids_in_batch[0]
@@ -229,7 +259,9 @@ class MazeHardFixedProbeProvider:
                 ),
             )
 
-    def description(self) -> str:
+    def description(  # -------------------------------------------------------
+        self,
+    ) -> str:
         """Return a human-readable description for logging."""
         n = len(self._sample_ids)
         preview = self._sample_ids[:3]
@@ -245,5 +277,5 @@ class MazeHardFixedProbeProvider:
         )
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["MazeHardReplayDiagnosticProvider", "MazeHardFixedProbeProvider"]

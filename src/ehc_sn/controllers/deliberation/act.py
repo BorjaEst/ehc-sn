@@ -3,7 +3,7 @@
 Canonical import path::
 
     from ehc_sn.controllers.deliberation.act import (
-        ACTController, ACTControllerConfig, ACTRolloutState, ACTStepOutput,
+        ACTController, ACTControllerConfig, ACTRolloutState, ACTControllerStepOutput,
     )
 """
 
@@ -16,7 +16,11 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.controllers._base import BaseController, RolloutBackbone, RolloutState
+from ehc_sn.controllers._base import (
+    BaseController,
+    RolloutBackbone,
+    RolloutState,
+)
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
@@ -54,7 +58,9 @@ class ACTBackboneOutput(Protocol):
 
 
 # =============================================================================
-class ACTRolloutBackbone[ModelState](RolloutBackbone[ModelState, ACTBackboneOutput], Protocol):
+class ACTRolloutBackbone[ModelState](
+    RolloutBackbone[ModelState, ACTBackboneOutput], Protocol
+):
     """Backbone protocol expected by :class:`ACTController`."""
 
 
@@ -99,17 +105,25 @@ def collapse_act_halt_continue_logits(
         :class:`ACTHaltContinueScores` with ``halt_logit`` and ``continue_logit``.
     """
     if q_logits.ndim != 2:
-        raise ValueError(f"collapse_act_halt_continue_logits expects shape (B, A), got {tuple(q_logits.shape)}.")
+        raise ValueError(
+            f"collapse_act_halt_continue_logits expects shape (B, A), got {tuple(q_logits.shape)}."
+        )
     n_actions = q_logits.shape[-1]
     if n_actions < 2:
-        raise ValueError(f"collapse_act_halt_continue_logits requires at least 2 actions, got {n_actions}.")
+        raise ValueError(
+            f"collapse_act_halt_continue_logits requires at least 2 actions, got {n_actions}."
+        )
     if done_action < 0 or done_action >= n_actions:
-        raise ValueError(f"done_action={done_action} is out of range for {n_actions} actions.")
+        raise ValueError(
+            f"done_action={done_action} is out of range for {n_actions} actions."
+        )
 
     non_done = [i for i in range(n_actions) if i != done_action]
     halt_logit = q_logits[..., done_action]
     continue_logit = q_logits[..., non_done].max(dim=-1).values
-    return ACTHaltContinueScores(halt_logit=halt_logit, continue_logit=continue_logit)
+    return ACTHaltContinueScores(
+        halt_logit=halt_logit, continue_logit=continue_logit
+    )
 
 
 # =============================================================================
@@ -132,20 +146,35 @@ def maybe_flip_halt_decision(
     if not explore or exploration_prob <= 0.0:
         return greedy_halt
 
-    flip = torch.rand(greedy_halt.shape, device=greedy_halt.device) < exploration_prob
+    flip = (
+        torch.rand(greedy_halt.shape, device=greedy_halt.device)
+        < exploration_prob
+    )
     return greedy_halt ^ flip
 
 
 # =============================================================================
 @dataclass(frozen=True)
-class ACTStepOutput(DetachMixin):
+class ACTControllerStepOutput(DetachMixin):
     """Raw execution output produced by a single ACT controller step."""
 
     backbone_output: ACTBackboneOutput
 
+    @property
+    def task(self) -> object:
+        """Return the task payload for objective-facing ACT contracts."""
+        return self.backbone_output.task
+
+    @property
+    def q_logits(self) -> Tensor:
+        """Return Q logits for objective-facing ACT contracts."""
+        return self.backbone_output.control.q_logits
+
 
 # =============================================================================
-class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig]):
+class ACTController[ModelState](
+    BaseController[ModelState, ACTControllerConfig]
+):
     """One-step masked recurrent transition primitive for ACT rollouts."""
 
     def __init__(
@@ -181,7 +210,7 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         allow_halt: bool = True,
         explore: bool = True,
         **options: Any,
-    ) -> tuple[ACTRolloutState[ModelState], ACTStepOutput]:
+    ) -> tuple[ACTRolloutState[ModelState], ACTControllerStepOutput]:
         """Advance the controller by one recurrent step.
 
         ``allow_halt=False`` disables learned halting for this step.
@@ -192,10 +221,14 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
         backbone_output, model_state = self.backbone(data, model_state)
 
         steps = self.advance_steps(state)
-        done = self._compute_done(backbone_output, steps, allow_halt=allow_halt, explore=explore)
+        done = self._compute_done(
+            backbone_output, steps, allow_halt=allow_halt, explore=explore
+        )
 
-        next_state = ACTRolloutState(model_state=model_state, steps=steps, halted=done, data=data)
-        output = ACTStepOutput(backbone_output=backbone_output)
+        next_state = ACTRolloutState(
+            model_state=model_state, steps=steps, halted=done, data=data
+        )
+        output = ACTControllerStepOutput(backbone_output=backbone_output)
         return next_state, output
 
     def _compute_done(
@@ -208,7 +241,9 @@ class ACTController[ModelState](BaseController[ModelState, ACTControllerConfig])
     ) -> Tensor:
         """Derive the halted mask from q_logits using the shared collapse contract."""
         q_logits = backbone_output.control.q_logits.detach()
-        scores = collapse_act_halt_continue_logits(q_logits, done_action=self.config.done_action)
+        scores = collapse_act_halt_continue_logits(
+            q_logits, done_action=self.config.done_action
+        )
 
         if allow_halt:
             halt = maybe_flip_halt_decision(
@@ -228,8 +263,8 @@ __all__ = [
     "ACTControlOutput",
     "ACTController",
     "ACTControllerConfig",
+    "ACTControllerStepOutput",
     "ACTHaltContinueScores",
-    "ACTStepOutput",
     "ACTRolloutBackbone",
     "ACTRolloutState",
     "collapse_act_halt_continue_logits",

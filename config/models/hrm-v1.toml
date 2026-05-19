@@ -1,15 +1,19 @@
-vocab_size                 = 6 # 5 canonical SEM IDs + O_ID (solution-path token)
-pfc.seq_length             = 900 # 30 × 30 for mazehard puzzle
-pfc.value_head.hidden_size = 512 # Should match the PFC reasoning module's embedding_dim
-pfc.value_head.n_actions   = 2
-pfc.value_head.pool_mode   = "first"
-pfc.value_head.pool_index  = 0 # Reads the CLS summary slot (position 0), not a maze cell
-pfc.value_head.init_bias   = -5.0
-pfc.cortex.embedding_dim   = 512
-pfc.cortex.num_heads       = 8
-pfc.cortex.pos_encodings   = "rope"
-pfc.cortex.rope_theta      = 10000.0
-pfc.layers_h               = 4
-pfc.cycles_h               = 2
-pfc.layers_l               = 4
-pfc.cycles_l               = 2
+# =============================================================================
+# HRM v1 Architecture
+# =============================================================================
+
+[pfc]
+    seq_length             = 900 # 30 × 30 for mazehard puzzle
+    value_head.hidden_size = 512 # Should match the PFC reasoning module's embedding_dim
+    value_head.n_actions   = 2
+    value_head.pool_mode   = "first"
+    value_head.pool_index  = 0 # Reads the CLS summary slot (position 0), not a maze cell
+    value_head.init_bias   = -5.0
+    cortex.embedding_dim   = 512
+    cortex.num_heads       = 8
+    cortex.pos_encodings   = "rope"
+    cortex.rope_theta      = 10000.0
+    layers_h               = 4
+    cycles_h               = 2
+    layers_l               = 4
+    cycles_l               = 2

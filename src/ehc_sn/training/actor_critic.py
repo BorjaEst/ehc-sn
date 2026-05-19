@@ -12,18 +12,18 @@ Training path — online (TD(0) with live bootstrap)::
 
     source -> controller.step() -> ActorCriticInteractionRecord
     -> TD0ActorCriticBatchBuilder.build_ac_batch()  (TD(0) + V(s_{t+1}) bootstrap)
-    -> HybridRLLossHead.compute_step(batch) -> loss
+    -> HybridRLObjective.compute_step(batch) -> loss
 
 Training path — deliberation (zero bootstrap)::
 
     source -> controller.step() -> ActorCriticInteractionRecord
     -> TD0ActorCriticBatchBuilder.build_deliberation_ac_batch()  (TD(0), bootstrap=0)
-    -> HybridRLLossHead.compute_step(batch) -> loss
+    -> HybridRLObjective.compute_step(batch) -> loss
 
 Validation path (zero bootstrap)::
 
     RolloutChunk -> ZeroBootstrapActorCriticValidationScorer(chunk)
-    -> HybridRLLossHead.compute_step(zero-bootstrap batch) -> HybridRLLossStep
+    -> HybridRLObjective.compute_step(zero-bootstrap batch) -> HybridRLObjectiveStep
 
 Both zero-bootstrap paths share :func:`_zero_bootstrap_batch`.
 """
@@ -44,8 +44,8 @@ from ehc_sn.controllers.contracts.actor_critic import (
 )
 from ehc_sn.objectives.hybrid_rl import (
     HybridActorCriticBatch,
-    HybridRLLossHead,
-    HybridRLLossStep,
+    HybridRLObjective,
+    HybridRLObjectiveStep,
 )
 from ehc_sn.rollouts import (
     EvaluatedChunk,
@@ -305,7 +305,7 @@ class ZeroBootstrapActorCriticValidationScorer:
     must be an :class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord`)
     into a :class:`~ehc_sn.objectives.hybrid_rl.HybridActorCriticBatch` with zero
     bootstrap values via :func:`_zero_bootstrap_batch`, then calls
-    :meth:`HybridRLLossHead.compute_step`.
+    :meth:`HybridRLObjective.compute_step`.
 
     Bootstrap value is zeroed; returns equal the immediate reward only.
     This is the same canonical construction path used by
@@ -316,7 +316,7 @@ class ZeroBootstrapActorCriticValidationScorer:
 
     def __init__(  # ----------------------------------------------------------
         self,
-        objective: HybridRLLossHead,
+        objective: HybridRLObjective,
         task_binding: HybridActorCriticTaskBinding,
     ) -> None:
         """Initialize the scorer with a loss head for step-wise loss
@@ -362,7 +362,7 @@ class ZeroBootstrapActorCriticValidationScorer:
         self,
         record: StepRecord,
         **options: Any,
-    ) -> HybridRLLossStep:
+    ) -> HybridRLObjectiveStep:
         """Score one executed rollout step with zero bootstrap.
 
         Delegates to :func:`_zero_bootstrap_batch` — the same canonical
@@ -370,7 +370,7 @@ class ZeroBootstrapActorCriticValidationScorer:
         :meth:`TD0ActorCriticBatchBuilder.build_deliberation_ac_batch`.
 
         Returns:
-            :class:`~ehc_sn.objectives.hybrid_rl.HybridRLLossStep` with
+            :class:`~ehc_sn.objectives.hybrid_rl.HybridRLObjectiveStep` with
             zero-bootstrap RL diagnostics.
 
         Raises:

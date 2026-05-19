@@ -10,18 +10,19 @@ This file contains:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Generator, List, Optional, cast
+from typing import Generator, Optional, cast
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn import utils
 from ehc_sn.modules.transformer import TransformerBlockConfig, TransformerStack
-from ehc_sn.types import Activation, Device, Dtype, Matrix, MemoryState, MultiScaleCode
 
 
-# =================================================================================================
+# =============================================================================
 class ReasoningSettings(BaseModel, extra="forbid"):
     """Settings for a single reasoning module (high or low level)."""
 
@@ -47,7 +48,7 @@ class ReasoningSettings(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass
 class WorkingMemory:
     """Working memory state for the PFC reasoning stack.
@@ -65,7 +66,7 @@ class WorkingMemory:
         return WorkingMemory(self.z_H.detach(), self.z_L.detach())
 
 
-# =================================================================================================
+# =============================================================================
 class ReasoningModule(nn.Module):
     """Base class for reasoning modules.
 
@@ -73,14 +74,23 @@ class ReasoningModule(nn.Module):
     persistent reset vector used to initialize and reset memory.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: ReasoningSettings, device: Optional[Device] = None, dtype: Optional[Dtype] = None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: ReasoningSettings,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         super().__init__()
         self._config = config
 
-        self.cortex = TransformerStack(config.layers, device=device, dtype=dtype)
-        self.register_buffer("reset_vector", torch.empty((config.cortex.hidden_size,)), persistent=True)
+        self.cortex = TransformerStack(
+            config.layers, device=device, dtype=dtype
+        )
+        self.register_buffer(
+            "reset_vector",
+            torch.empty((config.cortex.hidden_size,)),
+            persistent=True,
+        )
         self.reset_vector = cast(Tensor, self.reset_vector)
 
     @property
@@ -89,34 +99,41 @@ class ReasoningModule(nn.Module):
         return self._config
 
 
-# =================================================================================================
+# =============================================================================
 class HighLvRModule(ReasoningModule):
     """High-level reasoning module (anterior dlPFC)."""
 
-    def forward(  # ----------------------------------------------------------------------------------
-        self, x: Tensor, memory: WorkingMemory,
-    ) -> WorkingMemory:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        x: Tensor,
+        memory: WorkingMemory,
+    ) -> WorkingMemory:
         """Update the high-level state given current low-level state."""
         z_H = self.cortex(memory.z_H, memory.z_L)
         return WorkingMemory(z_H, memory.z_L)
 
 
-# =================================================================================================
+# =============================================================================
 class LowLvRModule(ReasoningModule):
     """Low-level reasoning module (posterior dlPFC)."""
 
-    def forward(  # ----------------------------------------------------------------------------------
-        self, x: Tensor, memory: WorkingMemory,
-    ) -> WorkingMemory:  # fmt: skip
+    def forward(  # -----------------------------------------------------------
+        self,
+        x: Tensor,
+        memory: WorkingMemory,
+    ) -> WorkingMemory:
         """Update the low-level state given high-level state and inputs."""
         z_L = self.cortex(memory.z_L, memory.z_H + x)
         return WorkingMemory(memory.z_H, z_L)
 
 
-# ==================================================================================================
-def reasoning_gen(  # ----------------------------------------------------------------------------------
-    x: Tensor, memory: WorkingMemory, high_module: HighLvRModule, low_module: LowLvRModule,
-) -> Generator[WorkingMemory]:  # fmt: skip
+# =============================================================================
+def reasoning_gen(  # ---------------------------------------------------------
+    x: Tensor,
+    memory: WorkingMemory,
+    high_module: HighLvRModule,
+    low_module: LowLvRModule,
+) -> Generator[WorkingMemory]:
     """Yield successive working-memory updates for one full reasoning episode.
 
     The schedule is nested: for each high-level cycle, run ``n_cycles`` low-level
@@ -130,21 +147,31 @@ def reasoning_gen(  # ----------------------------------------------------------
         yield memory
 
 
-# ==================================================================================================
-def init_memory(  # ----------------------------------------------------------------------------------
-    batch_size: int, seq_length: int,  high_module: HighLvRModule, low_module: LowLvRModule,
-) -> WorkingMemory:  # fmt: skip
+# =============================================================================
+def init_memory(  # -----------------------------------------------------------
+    batch_size: int,
+    seq_length: int,
+    high_module: HighLvRModule,
+    low_module: LowLvRModule,
+) -> WorkingMemory:
     """Initialize working memory using the modules' reset vectors."""
     return WorkingMemory(
-        z_H=high_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1).clone(),
-        z_L=low_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1).clone(),
+        z_H=high_module.reset_vector.view(1, 1, -1)
+        .expand(batch_size, seq_length, -1)
+        .clone(),
+        z_L=low_module.reset_vector.view(1, 1, -1)
+        .expand(batch_size, seq_length, -1)
+        .clone(),
     )
 
 
-# ==================================================================================================
-def reset_memory(  # ----------------------------------------------------------------------------------
-    memory: WorkingMemory, reset_flag: Tensor, high_module: HighLvRModule, low_module: LowLvRModule,
-) -> WorkingMemory:  # fmt: skip
+# =============================================================================
+def reset_memory(  # ----------------------------------------------------------
+    memory: WorkingMemory,
+    reset_flag: Tensor,
+    high_module: HighLvRModule,
+    low_module: LowLvRModule,
+) -> WorkingMemory:
     """Reset selected rows of working memory.
 
     Args:
@@ -157,8 +184,12 @@ def reset_memory(  # -----------------------------------------------------------
         New working memory with reset rows replaced by reset vectors.
     """
     batch_size, seq_length, _ = memory.z_H.shape
-    init_H = high_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1)
-    init_L = low_module.reset_vector.view(1, 1, -1).expand(batch_size, seq_length, -1)
+    init_H = high_module.reset_vector.view(1, 1, -1).expand(
+        batch_size, seq_length, -1
+    )
+    init_L = low_module.reset_vector.view(1, 1, -1).expand(
+        batch_size, seq_length, -1
+    )
     mask = reset_flag.view(-1, 1, 1)
     return WorkingMemory(
         z_H=torch.where(mask, init_H, memory.z_H),

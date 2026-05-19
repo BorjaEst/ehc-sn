@@ -1,23 +1,30 @@
-import itertools
-import math
+"""PFC module public surface: PFCSettings, PFCState, PFCModel, and workspace types."""
+
+from __future__ import annotations
+
 from dataclasses import dataclass
-from itertools import islice
-from typing import List, Literal, Optional, Tuple, cast
+from typing import Optional
 
 import torch
 from pydantic import BaseModel, Field
-from torch import Tensor, nn
+from torch import Tensor
+from torch import device as Device
+from torch import dtype as Dtype
+from torch import nn
 
-from ehc_sn import utils
 from ehc_sn.modules.pfc import reasoning as r
 from ehc_sn.modules.pfc.reasoning import HighLvRModule, LowLvRModule, ReasoningSettings, WorkingMemory
 from ehc_sn.modules.pfc.values import QEstimatorSettings, QValueEstimator
-from ehc_sn.modules.transformer import TransformerBlockConfig, TransformerStack
-from ehc_sn.types import Activation, Device, Dtype, Matrix, MemoryState, MultiScaleCode
+from ehc_sn.modules.pfc.workspace import FixedSlot, SlotFamily, Workspace, WorkspaceLayout, WorkspaceSchema
+from ehc_sn.modules.transformer import TransformerBlockConfig
 from ehc_sn.utils import trunc_normal_init_
 
+# PFC-internal controller slot name.  Position 0 of z_H is the CLS token; it is
+# exposed in the public workspace under this name.
+_CONTROLLER = "controller"
 
-# =================================================================================================
+
+# =============================================================================
 class PFCSettings(BaseModel, extra="forbid"):
     """Configuration for :class:`PFCModel`.
 
@@ -25,18 +32,17 @@ class PFCSettings(BaseModel, extra="forbid"):
     with an auxiliary value head (vmPFC analogue).
 
     Attributes:
-        seq_length: Number of tokens per example (without the CLS prefix).
+        seq_length: Number of body (schema) tokens per step (controller not counted).
         value_head: Settings for the auxiliary Q/value estimator.
         cortex: Base transformer block configuration reused across reasoning modules.
         layers_h/cycles_h: Depth and recurrence cycles for the high-level module.
         layers_l/cycles_l: Depth and recurrence cycles for the low-level module.
     """
 
-    # Model parameters for features
     seq_length: int = Field(
         ...,
         ge=1,
-        description="Sequence length for the model (number of tokens per example).",
+        description="Number of body (schema) tokens per step (controller not counted).",
     )
     value_head: QEstimatorSettings = Field(
         ...,
@@ -49,96 +55,148 @@ class PFCSettings(BaseModel, extra="forbid"):
 
     @property
     def hidden_size(self) -> int:
-        """Convenience property to access the hidden size from the cortex config."""
+        """Return the hidden size from the cortex config."""
         return self.cortex.embedding_dim
 
-    # High-level reasoning module parameters (anterior dlPFC analogue)
     layers_h: int = Field(
         default=4,
         ge=1,
-        description="Number of layers in the high-level reasoning module.",
+        description="Layers in the high-level reasoning module.",
     )
     cycles_h: int = Field(
         default=2,
         ge=1,
-        description="Number of cycles to reason in the high-level reasoning module.",
+        description="Cycles in the high-level reasoning module.",
     )
 
     @property
     def reasoning_h(self) -> ReasoningSettings:
-        """Convenience property to access the high-level reasoning config."""
-        return ReasoningSettings(cortex=self.cortex, n_layers=self.layers_h, n_cycles=self.cycles_h)
+        """High-level reasoning config."""
+        return ReasoningSettings(
+            cortex=self.cortex,
+            n_layers=self.layers_h,
+            n_cycles=self.cycles_h,
+        )
 
-    # Low-level reasoning module parameters (posterior dlPFC analogue)
     layers_l: int = Field(
         default=4,
         ge=1,
-        description="Number of layers in the low-level reasoning module.",
+        description="Layers in the low-level reasoning module.",
     )
     cycles_l: int = Field(
         default=2,
         ge=1,
-        description="Number of cycles to reason in the low-level reasoning module.",
+        description="Cycles in the low-level reasoning module.",
     )
 
     @property
     def reasoning_l(self) -> ReasoningSettings:
-        """Convenience property to access the low-level reasoning config."""
-        return ReasoningSettings(cortex=self.cortex, n_layers=self.layers_l, n_cycles=self.cycles_l)
+        """Low-level reasoning config."""
+        return ReasoningSettings(
+            cortex=self.cortex,
+            n_layers=self.layers_l,
+            n_cycles=self.cycles_l,
+        )
 
 
-# =================================================================================================
-@dataclass
-class PFCState:
-    """Recurrent state for :class:`PFCModel`.
+# =============================================================================
+@dataclass(frozen=True)
+class PFCScratchState:
+    """Internal tensor-first carry used by the recurrent PFC updater."""
 
-    The state is represented as a :class:`~ehc_sn.modules.pfc.reasoning.WorkingMemory`
-    holding the high-level and low-level activation tensors.
-    """
-
-    # Working memory state of the PFC, containing the theta and gamma cell activations.
     memory: WorkingMemory
 
-    @property
-    def theta_cells(self) -> Tensor:
-        """Return the theta cells from the low-level state.
-        Biologically ($4-8$ Hz): These represent the Sequence and Context.
-        Theta acts as the "metronome" that organizes the Gamma bursts into a logical order.
-        """
-        return self.memory.z_H
+    def detach(self) -> "PFCScratchState":
+        """Return a detached copy."""
+        return PFCScratchState(memory=self.memory.detach())
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class PFCState:
+    """Canonical public PFC state.
+
+    The full z_H tensor is exposed as a named :class:`Workspace` that includes
+    the controller slot at position 0 and all caller-declared body slots after it.
+    Internal recurrent carry (z_H and z_L) remains accessible only through
+    ``scratch`` for continuation.
+
+    Attributes:
+        workspace: Full public workspace view over z_H (controller + body).
+        scratch: Internal recurrent carry; detach before storing as episode state.
+    """
+
+    workspace: Workspace
+    scratch: PFCScratchState
+
+    def __post_init__(self) -> None:
+        B, S, D = self.workspace.tokens.shape
+        z_H, z_L = self.scratch.memory.z_H, self.scratch.memory.z_L
+        if tuple(z_H.shape) != (B, S, D):
+            raise ValueError(f"PFC scratch z_H must have shape {(B, S, D)}, got {tuple(z_H.shape)}.")
+        if tuple(z_L.shape) != (B, S, D):
+            raise ValueError(f"PFC scratch z_L must have shape {(B, S, D)}, got {tuple(z_L.shape)}.")
 
     @property
-    def gamma_cells(self) -> Tensor:
-        """Return the gamma cells from the high-level state.
-        Biologically ($>30$ Hz): These represent the Active Content.
-        If you are holding a specific rule in your head that rule is "loaded" into Gamma bursts.
-        """
-        return self.memory.z_L
+    def summary(self) -> Tensor:
+        """Controller summary token (compatibility alias for ``workspace.slot('controller')``)."""
+        return self.workspace.slot(_CONTROLLER)
+
+    @property
+    def tokens(self) -> Tensor:
+        """Full token view of the current state (shape ``(B, S+1, D)``)."""
+        return self.workspace.tokens
 
     def detach(self) -> "PFCState":
-        """Return a detached copy of the state."""
-        return PFCState(self.memory.detach())
+        """Return a detached copy of the public state."""
+        return PFCState(
+            workspace=self.workspace.layout.bind(self.workspace.tokens.detach()),
+            scratch=self.scratch.detach(),
+        )
 
 
-# =================================================================================================
+# =============================================================================
+@dataclass(frozen=True)
+class PFCOutput:
+    """Output of one :class:`PFCModel` step.
+
+    Attributes:
+        workspace: Full public workspace view over z_H (controller + body).
+        q_values: Auxiliary Q-value estimates from the value head. Shape ``(B, n_actions)``.
+    """
+
+    workspace: Workspace
+    q_values: Tensor
+
+    @property
+    def summary(self) -> Tensor:
+        """Controller summary token (alias for ``workspace.slot('controller')``)."""
+        return self.workspace.slot(_CONTROLLER)
+
+    @property
+    def tokens(self) -> Tensor:
+        """Full token tensor from the workspace. Shape ``(B, S+1, D)``."""
+        return self.workspace.tokens
+
+
+# =============================================================================
 class PFCModel(nn.Module):
     """Prefrontal Cortex (PFC) reasoning module.
 
-    This module implements a two-level recurrent reasoning process:
-        - high level (theta-like) state update
-        - low level (gamma-like) state update
+    Implements a two-level recurrent reasoning process (high-level / low-level)
+    with an auxiliary value estimator (vmPFC analogue).
 
-    It also includes an auxiliary estimator (vmPFC analogue) that predicts values
-    from the current working memory.
-
-    Notes:
-        The forward pass intentionally detaches the returned carry state while
-        keeping the main outputs differentiable.
+    The PFC-internal CLS token is always mapped to the ``controller`` fixed slot
+    at position 0 of the output workspace.  All other slots are caller-declared
+    body slots.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, config: PFCSettings, device: Optional[Device]=None, dtype: Optional[Dtype]=None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: PFCSettings,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> None:
         super().__init__()
         self._config = config
 
@@ -146,7 +204,16 @@ class PFCModel(nn.Module):
         self.low_level = LowLvRModule(config.reasoning_l, device=device, dtype=dtype)
         self.estimator = QValueEstimator(config.value_head, device=device, dtype=dtype)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, config.hidden_size, device=device, dtype=dtype))
-        self.optimizer = None  # Placeholder for optimizer future dACC reward-based updates
+
+        # Default schema layout (body-only) used by forward().
+        self._default_schema_layout = WorkspaceLayout.from_schema(
+            WorkspaceSchema(
+                fixed=(),
+                families=(SlotFamily("body", config.seq_length),),
+            )
+        )
+
+        self.optimizer = None  # Placeholder for future dACC reward-based updates
         self.reset_parameters()
 
     @property
@@ -154,81 +221,180 @@ class PFCModel(nn.Module):
         """PFC module settings."""
         return self._config
 
-    def reset_parameters(  # ----------------------------------------------------------------------
+    def reset_parameters(  # --------------------------------------------------
         self,
-    ) -> None:  # fmt: skip
+    ) -> None:
         """Initialize parameters and buffers."""
         trunc_normal_init_(self.high_level.reset_vector, std=1)
         trunc_normal_init_(self.low_level.reset_vector, std=1)
-        self.cls_token.data.zero_()  # Legacy parity: puzzle prefix initialized to zero
+        self.cls_token.data.zero_()
 
-    def init_state(  # ---------------------------------------------------------------------------
-        self, batch_size: int, 
-    ) -> PFCState:  # fmt: skip
+    def init_state(  # --------------------------------------------------------
+        self,
+        batch_size: int,
+        body_schema: Optional[WorkspaceSchema] = None,
+        *,
+        device: Optional[Device] = None,
+        dtype: Optional[Dtype] = None,
+    ) -> PFCState:
         """Create a fresh PFC recurrent state.
+
+        The caller supplies only the body schema it owns.  The controller fixed
+        slot is prepended internally by :class:`PFCModel`; callers must not
+        include it.
 
         Args:
             batch_size: Number of parallel sequences.
+            body_schema: Body-only :class:`WorkspaceSchema` (no ``controller``
+                slot).  When ``None`` the default ``body`` family schema is used.
 
         Returns:
-            Initialized :class:`PFCState`.
+            Initialized :class:`PFCState` whose workspace exposes the full
+            z_H surface: controller at position 0 followed by all body slots.
         """
-        # seq_length + 1: CLS prefix occupies position 0; cell tokens fill positions 1..S.
-        memory = r.init_memory(batch_size, self.config.seq_length + 1, self.high_level, self.low_level)
-        return PFCState(memory=memory)
+        schema = body_schema if body_schema is not None else self._default_schema_layout.schema
+        full_layout = _body_to_full_layout(WorkspaceLayout.from_schema(schema))
+        self._validate_full_layout(full_layout)
+        memory = r.init_memory(batch_size, full_layout.size, self.high_level, self.low_level)
+        return _build_state_from_memory(memory, full_layout, detach=False)
 
-    def reset_state(  # --------------------------------------------------------------------------
-        self, state: PFCState, reset_flag: Tensor,
-    ) -> PFCState:  # fmt: skip
-        """Selectively reset rows of the PFC state.
+    def _validate_full_layout(  # ---------------------------------------------
+        self,
+        layout: WorkspaceLayout,
+    ) -> None:
+        """Validate that *layout* (controller + body) is compatible with this PFC configuration."""
+        expected_size = self.config.seq_length + 1
+        if layout.size != expected_size:
+            raise ValueError(f"Full workspace layout size must be seq_length + 1 = {expected_size}, got {layout.size}.")
+        try:
+            ctrl_pos = layout.slot(_CONTROLLER)
+        except KeyError:
+            raise ValueError(f"Full workspace layout must declare a '{_CONTROLLER}' fixed slot at position 0.") from None
+        if ctrl_pos != 0:
+            raise ValueError(f"Full workspace layout '{_CONTROLLER}' fixed slot must be at position 0, got {ctrl_pos}.")
+
+    def reset_state(  # -------------------------------------------------------
+        self,
+        state: PFCState,
+        reset_flag: Tensor,
+    ) -> PFCState:
+        """Selectively reset rows of the PFC state."""
+        memory = r.reset_memory(state.scratch.memory, reset_flag, self.high_level, self.low_level)
+        return _build_state_from_memory(memory, state.workspace.layout, detach=False)
+
+    def step(  # --------------------------------------------------------------
+        self,
+        workspace: Workspace,
+        state: Optional[PFCState] = None,
+        prefix_bias: Optional[Tensor] = None,
+    ) -> tuple[PFCOutput, PFCState]:
+        """Run one PFC step over a body workspace.
+
+        The ``workspace`` carries body/schema tokens only — the ``controller`` slot is
+        PFC-internal and is prepended during reasoning.  The returned :class:`PFCOutput`
+        exposes the full public workspace (controller at position 0 plus all
+        caller-declared body slots).
+
+        Build the input workspace with ``layout.bind(tokens)``.
 
         Args:
-            state: Current state.
-            reset_flag: Boolean / 0-1 tensor of shape ``(B,)`` indicating which
-                rows should be reset.
+            workspace: Body workspace of shape ``(B, seq_length, D)``.
+            state: Optional prior recurrent state.  Its full workspace layout must be
+                consistent with the layout derived from ``workspace``; a mismatch
+                raises :class:`ValueError`.
+            prefix_bias: Optional additive bias applied to the internal CLS token.
 
         Returns:
-            New state with flagged rows reset.
+            ``(output, next_state)`` — output first, state second (canonical backbone
+            seam ordering).  ``output.workspace`` and ``next_state.workspace`` expose
+            the same public z_H surface; ``output.q_values`` carries auxiliary Q logits.
         """
-        memory = r.reset_memory(state.memory, reset_flag, self.high_level, self.low_level)
-        return PFCState(memory=memory)
+        if workspace.layout.size != self.config.seq_length:
+            raise ValueError(f"workspace size must equal seq_length {self.config.seq_length}, " f"got {workspace.layout.size}.")
+        full_layout = _body_to_full_layout(workspace.layout)
+        if state is not None and state.workspace.layout != full_layout:
+            raise ValueError(
+                "workspace layout does not match the layout of the provided prior state. "
+                "Ensure init_state and step are called with consistent layouts."
+            )
 
-    def forward(  # -------------------------------------------------------------------------------
-        self, x: Tensor, state: Optional[PFCState] = None,
-    ) -> tuple[PFCState, Tensor, Tensor]:  # fmt: skip
-        """Run recurrent reasoning and compute auxiliary value estimates.
+        if state is None:
+            state = self.init_state(int(workspace.tokens.shape[0]), body_schema=workspace.layout.schema)
 
-        Args:
-            x: Embedded inputs of shape ``(B, S, D)`` (cell tokens only; no CLS).
-            state: Optional carry state. If ``None``, a fresh state is created.
+        # Prepend CLS (controller) to body tokens: (B, seq_length, D) → (B, seq_length+1, D).
+        batch_size = int(workspace.tokens.shape[0])
+        cls_token = self.cls_token.expand(batch_size, -1, -1)
+        if prefix_bias is not None:
+            cls_token = cls_token + prefix_bias.unsqueeze(1).to(dtype=cls_token.dtype)
+        x = torch.cat([cls_token, workspace.tokens], dim=1)
 
-        Returns:
-            ``(new_state, z_H, q_estimation)`` where:
-                - ``new_state`` is detached carry state
-                - ``z_H`` is the high-level activation tensor (includes CLS)
-                - ``q_estimation`` are value/Q predictions from the estimator
-        """
-        state = state or self.init_state(batch_size=x.shape[0])
+        # Run the internal tensor-first reasoning core.  The last two steps run
+        # with gradient tracking for value estimation; all prior steps are detached.
         total_steps = self.config.reasoning_h.n_cycles * (self.config.reasoning_l.n_cycles + 1)
-
-        # Prepend CLS to cell embeddings: (B, S, D) → (B, S+1, D).
-        # Reasoning modules are CLS-agnostic; they see a uniform sequence.
-        x = torch.cat([self.cls_token.expand(x.shape[0], -1, -1), x], dim=1)
-
-        # Forward iterations without grad for memory efficiency.
-        # The final update at each level is executed with gradients below.
-        memory_gen = r.reasoning_gen(x, state.memory, self.high_level, self.low_level)
+        memory_gen = r.reasoning_gen(x, state.scratch.memory, self.high_level, self.low_level)
         with torch.no_grad():
-            for _ in range(total_steps - 2):  # Last 2 steps need gradients
+            for _ in range(total_steps - 2):
                 memory = next(memory_gen)
+        memory = next(memory_gen)  # step N-2: with gradients
+        memory = next(memory_gen)  # step N-1: with gradients
+        q_values = self.estimator(memory.z_H, memory.z_L)
 
-        # One-step grad: provide a training signal while keeping memory bounded.
-        memory = next(memory_gen)  # N-2 step to update low-level state with gradients
-        memory = next(memory_gen)  # N-1 step to update high-level state with gradients
+        new_state = _build_state_from_memory(memory, full_layout, detach=False)
+        output = PFCOutput(workspace=new_state.workspace, q_values=q_values)
+        return output, new_state
 
-        # Estimate Q-values from the updated state.
-        q_estimation = self.estimator(memory.z_H, memory.z_L)
+    def forward(  # -----------------------------------------------------------
+        self,
+        x: Tensor,
+        state: Optional[PFCState] = None,
+        schema_layout: Optional[WorkspaceLayout] = None,
+        prefix_bias: Optional[Tensor] = None,
+    ) -> tuple[PFCOutput, PFCState]:
+        """Tensor path — prefer :meth:`step` with ``layout.bind(tokens)``.
 
-        # Important: detach only the carry, not the outputs used for supervised learning.
-        # Downstream heads (LM head, value head) must see tensors that keep gradients.
-        return PFCState(memory=memory.detach()), memory.z_H, q_estimation
+        Args:
+            x: Body token inputs of shape ``(B, seq_length, D)``.
+            state: Optional prior recurrent state.
+            schema_layout: Body-only layout.  When ``None`` the default ``body`` family
+                layout is used.
+            prefix_bias: Optional additive bias for the internal CLS token.
+
+        Returns:
+            ``(output, next_state)`` — output first, state second.
+        """
+        if x.ndim != 3:
+            raise ValueError(f"PFC token inputs must have shape (B, S, D), got {tuple(x.shape)}.")
+        layout = schema_layout if schema_layout is not None else self._default_schema_layout
+        return self.step(layout.bind(x), state=state, prefix_bias=prefix_bias)
+
+
+# =============================================================================
+def _build_state_from_memory(  # ----------------------------------------------
+    memory: WorkingMemory,
+    full_layout: WorkspaceLayout,
+    *,
+    detach: bool,
+) -> PFCState:
+    """Bind a WorkingMemory to a full workspace layout via :meth:`WorkspaceLayout.bind`."""
+    tokens = memory.z_H.detach() if detach else memory.z_H
+    carry = memory.detach() if detach else memory
+    return PFCState(
+        workspace=full_layout.bind(tokens),
+        scratch=PFCScratchState(memory=carry),
+    )
+
+
+# =============================================================================
+def _body_to_full_layout(  # --------------------------------------------------
+    body_layout: WorkspaceLayout,
+) -> WorkspaceLayout:
+    """Prepend the internal controller fixed slot to a caller-owned body layout."""
+    full_schema = WorkspaceSchema(
+        fixed=(FixedSlot(_CONTROLLER), *body_layout.schema.fixed),
+        families=body_layout.schema.families,
+    )
+    return WorkspaceLayout.from_schema(full_schema)
+
+
+# =============================================================================
+__all__ = ["PFCModel", "PFCOutput", "PFCScratchState", "PFCSettings", "PFCState"]

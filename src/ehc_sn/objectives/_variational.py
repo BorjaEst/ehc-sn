@@ -61,7 +61,7 @@ class VariationalLosses(DetachMixin, ABC):
 
 # =============================================================================
 @dataclass(frozen=True)
-class VariationalLossStep:
+class VariationalObjectiveStep:
     """A single rollout/loss step produced by a variational-family head."""
 
     losses: VariationalLosses
@@ -136,10 +136,14 @@ class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):
         losses = self.compute_losses(terms, context, **options)
 
         # --- metrics from precomputed losses/terms ---
-        metrics = self.evaluate_metrics(record, context, terms, **options)
+        metrics = self.evaluate_metrics(
+            record, outputs, context, terms, losses, **options
+        )
 
         # --- signals from precomputed losses/context (no re-extraction) ---
-        signals = self.compute_signals(outputs, losses, **options)
+        signals = self.compute_signals(
+            record, outputs, context, terms, losses, **options
+        )
 
         return self.build_output(losses, metrics, signals, outputs)
 
@@ -173,8 +177,10 @@ class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):
     def evaluate_metrics(  # --------------------------------------------------
         self,
         record: StepRecord,
+        outputs: VariationalOutputs,
         context: VariationalContext,
         terms: VariationalTerms,
+        losses: VariationalLosses,
         **options: Any,
     ) -> StepMetrics:
         """Return variational-family metrics for the current step."""
@@ -182,7 +188,10 @@ class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):
 
     def compute_signals(  # ---------------------------------------------------
         self,
+        record: StepRecord,
         outputs: VariationalOutputs,
+        context: VariationalContext,
+        terms: VariationalTerms,
         losses: VariationalLosses,
         **options: Any,
     ) -> dict[str, Tensor]:
@@ -254,7 +263,7 @@ def build_variational_step_metrics(  # ----------------------------------------
 __all__ = [
     "VariationalLosses",
     "VariationalObjectiveBase",
-    "VariationalLossStep",
+    "VariationalObjectiveStep",
     "VariationalContext",
     "build_variational_step_metrics",
     "get_reg_term",

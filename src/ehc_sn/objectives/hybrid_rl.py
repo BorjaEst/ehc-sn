@@ -21,13 +21,24 @@ from torch import Tensor, nn
 import ehc_sn.loss.cross_entropy as cross_entropy_module
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
-from ehc_sn.metrics.keys import LOSS_LM, RL_LOSS_ACTOR, RL_LOSS_CRITIC, RL_LOSS_ENTROPY, RL_LOSS_Q_VALUE
-from ehc_sn.objectives._token import AccuracyStats, build_token_step_metrics, compute_accuracy_stats, compute_lm_loss_sum
+from ehc_sn.metrics.keys import (
+    LOSS_LM,
+    RL_LOSS_ACTOR,
+    RL_LOSS_CRITIC,
+    RL_LOSS_ENTROPY,
+    RL_LOSS_Q_VALUE,
+)
+from ehc_sn.objectives._token import (
+    AccuracyStats,
+    build_token_step_metrics,
+    compute_accuracy_stats,
+    compute_lm_loss_sum,
+)
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.utils.detach import DetachMixin
 
 
-# =================================================================================================
+# =============================================================================
 class HybridRLLossConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`HybridRLLossHead`.
 
@@ -72,7 +83,7 @@ class HybridRLLossConfig(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class HybridActorCriticBatch:
     """Fully materialized actor-critic batch consumed by :class:`HybridRLLossHead`.
@@ -85,44 +96,46 @@ class HybridActorCriticBatch:
     Shapes assume ``B`` batch slots and ``S`` sequence length.
     """
 
-    actions: Tensor  # (B,)      sampled action indices
-    policy_logits: Tensor  # (B, A)    raw actor-head logits
-    rewards: Tensor  # (B,)      immediate scalar reward
-    done: Tensor  # (B,)      combined done flag (terminated | truncated | max_steps)
-    terminated: Tensor  # (B,)      episode terminated flag
-    truncated: Tensor  # (B,)      episode truncated flag
-    value_estimates: Tensor  # (B,)      V(s_t) from the critic
-    action_log_prob: Tensor  # (B,)      log pi(a_t | s_t)
-    action_entropy: Tensor  # (B,)      H[pi(. | s_t)]
+    actions: Tensor  # (B,) sampled action indices
+    policy_logits: Tensor  # (B, A) raw actor-head logits
+    rewards: Tensor  # (B,) immediate scalar reward
+    done: Tensor  # (B,) combined done flag (terminated | truncated | max_steps)
+    terminated: Tensor  # (B,) episode terminated flag
+    truncated: Tensor  # (B,) episode truncated flag
+    value_estimates: Tensor  # (B,) V(s_t) from the critic
+    action_log_prob: Tensor  # (B,) log pi(a_t | s_t)
+    action_entropy: Tensor  # (B,) H[pi(. | s_t)]
     task_logits: Tensor  # (B, S, V) token-prediction logits for LM loss
-    labels: Tensor  # (B, S)    supervision targets for LM loss
-    bootstrap_value: Tensor  # (B,)      V(s_{t+1}) used for TD(0) target
-    returns: Tensor  # (B,)      TD(0) return: r + gamma * V(s_{t+1}) * (1 - done)
-    advantages: Tensor  # (B,)      detached advantage: returns - V(s_t)
-    steps: Tensor  # (B,)      per-slot step counters after this step
-    halted: Tensor  # (B,)      per-slot done flags (used for episode metrics)
+    labels: Tensor  # (B, S) supervision targets for LM loss
+    bootstrap_value: Tensor  # (B,) V(s_{t+1}) used for TD(0) target
+    returns: Tensor  # (B,) TD(0) return: r + gamma * V(s_{t+1}) * (1 - done)
+    advantages: Tensor  # (B,) detached advantage: returns - V(s_t)
+    steps: Tensor  # (B,) per-slot step counters after this step
+    halted: Tensor  # (B,) per-slot done flags (used for episode metrics)
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class HybridRLLosses(DetachMixin):
     """Bundle of per-step loss terms for the hybrid RL objective (summed over batch)."""
 
-    loss_lm_sum: Tensor  # Supervised LM loss sum over the batch for the current step
-    loss_q_value_sum: Tensor  # Auxiliary Q-value regression loss sum over the batch for the current step
-    loss_actor_sum: Tensor  # Policy gradient (actor) loss sum over the batch for the current step
-    loss_critic_sum: Tensor  # Value regression (critic) loss sum over the batch for the current step
-    loss_entropy_sum: Tensor  # Entropy regularization loss sum over the batch for the current step
+    loss_lm_sum: Tensor
+    loss_q_value_sum: Tensor
+    loss_actor_sum: Tensor
+    loss_critic_sum: Tensor
+    loss_entropy_sum: Tensor
 
     @property
     def total(self) -> Tensor:
         """Total scalar loss for the step."""
-        loss_rl = self.loss_actor_sum + self.loss_critic_sum + self.loss_entropy_sum
+        loss_rl = (
+            self.loss_actor_sum + self.loss_critic_sum + self.loss_entropy_sum
+        )
         loss_m = self.loss_lm_sum + self.loss_q_value_sum
         return loss_rl + loss_m
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class HybridRLLossStep:
     """A single rollout/loss step produced by :class:`HybridRLLossHead`."""
@@ -141,7 +154,7 @@ class HybridRLLossStep:
         return self.losses.total
 
 
-# =================================================================================================
+# =============================================================================
 class HybridRLLossHead(nn.Module):
     """Hybrid RL batch-loss module: token-supervised LM loss plus actor-critic.
 
@@ -157,7 +170,10 @@ class HybridRLLossHead(nn.Module):
     Used by the ``maze_hard`` HRM v2 training path.
     """
 
-    def __init__(self, config: HybridRLLossConfig) -> None:
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: HybridRLLossConfig,
+    ) -> None:
         """Create the batch-loss module from its configuration."""
         super().__init__()
         self._config = config
@@ -167,20 +183,21 @@ class HybridRLLossHead(nn.Module):
         """Return the batch-loss configuration."""
         return self._config
 
-    # -- Loss function accessor -----------------------------------------------------------------
-
     @property
     def loss_fn(self) -> Any:
         """Return the configured token-level loss function."""
         return getattr(cross_entropy_module, self._config.function)
 
-    def compute_lm_loss(self, logits_lm: Tensor, labels: Tensor, stats: AccuracyStats) -> Tensor:
+    def compute_lm_loss(  # ---------------------------------------------------
+        self,
+        logits_lm: Tensor,
+        labels: Tensor,
+        stats: AccuracyStats,
+    ) -> Tensor:
         """Compute the summed supervised token loss for a step."""
         return compute_lm_loss_sum(self.loss_fn, logits_lm, labels, stats)
 
-    # -- Primary training entry point -----------------------------------------------------------
-
-    def compute_step(  # -----------------------------------------------------------------------
+    def compute_step(  # ------------------------------------------------------
         self,
         batch: HybridActorCriticBatch,
         *,
@@ -194,17 +211,23 @@ class HybridRLLossHead(nn.Module):
         """
         stats = compute_accuracy_stats(batch.task_logits, batch.labels)
         losses = self.compute_losses(batch, stats, is_warmup=is_warmup)
-        extras = self._build_metric_ratios(losses, batch_size=int(batch.rewards.shape[0]))
+        extras = self._build_metric_ratios(
+            losses, batch_size=int(batch.rewards.shape[0])
+        )
         steps = (
-            batch.steps if batch.steps is not None else torch.zeros(batch.rewards.shape[0], dtype=torch.long, device=batch.rewards.device)
+            batch.steps
+            if batch.steps is not None
+            else torch.zeros(
+                batch.rewards.shape[0],
+                dtype=torch.long,
+                device=batch.rewards.device,
+            )
         )
         metrics = build_token_step_metrics(steps, batch.halted, stats, extras)
         signals = self.compute_signals(batch, losses)
         return HybridRLLossStep(losses=losses, metrics=metrics, signals=signals)
 
-    # -- Pure loss and signal computation -------------------------------------------------------
-
-    def compute_losses(  # ---------------------------------------------------------------------
+    def compute_losses(  # ----------------------------------------------------
         self,
         batch: HybridActorCriticBatch,
         stats: AccuracyStats,
@@ -218,13 +241,21 @@ class HybridRLLossHead(nn.Module):
         log-probabilities, or compute advantages. All precomputed fields are
         consumed directly from ``batch``.
         """
-        loss_lm_sum = self.compute_lm_loss(batch.task_logits, batch.labels, stats)
+        loss_lm_sum = self.compute_lm_loss(
+            batch.task_logits, batch.labels, stats
+        )
         if not is_warmup:
             loss_actor = -(batch.action_log_prob * batch.advantages).sum()
-            loss_critic = F.mse_loss(batch.value_estimates, batch.returns, reduction="sum")
+            loss_critic = F.mse_loss(
+                batch.value_estimates, batch.returns, reduction="sum"
+            )
             loss_entropy = -batch.action_entropy.sum()
-            q_a = batch.policy_logits.gather(1, batch.actions.unsqueeze(-1)).squeeze(-1)
-            loss_q_value = F.mse_loss(q_a, batch.returns.detach(), reduction="sum")
+            q_a = batch.policy_logits.gather(
+                1, batch.actions.unsqueeze(-1)
+            ).squeeze(-1)
+            loss_q_value = F.mse_loss(
+                q_a, batch.returns.detach(), reduction="sum"
+            )
         else:
             zero = batch.task_logits.new_zeros(())
             loss_actor = zero
@@ -239,20 +270,33 @@ class HybridRLLossHead(nn.Module):
             loss_q_value_sum=self.config.c_q_value * loss_q_value,
         )
 
-    def _build_metric_ratios(  # ---------------------------------------------------------------
-        self, losses: HybridRLLosses, *, batch_size: int,
-    ) -> dict[str, RatioStat]:  # fmt: skip
+    def _build_metric_ratios(  # ----------------------------------------------
+        self,
+        losses: HybridRLLosses,
+        *,
+        batch_size: int,
+    ) -> dict[str, RatioStat]:
         """Pack hybrid RL loss terms into detached generic ratio metrics."""
-        batch_count = losses.loss_lm_sum.new_tensor(batch_size, dtype=torch.float32)
+        batch_count = losses.loss_lm_sum.new_tensor(
+            batch_size, dtype=torch.float32
+        )
         return {
             LOSS_LM: RatioStat(losses.loss_lm_sum.detach(), batch_count),
-            RL_LOSS_ACTOR: RatioStat(losses.loss_actor_sum.detach(), batch_count),
-            RL_LOSS_CRITIC: RatioStat(losses.loss_critic_sum.detach(), batch_count),
-            RL_LOSS_ENTROPY: RatioStat(losses.loss_entropy_sum.detach(), batch_count),
-            RL_LOSS_Q_VALUE: RatioStat(losses.loss_q_value_sum.detach(), batch_count),
+            RL_LOSS_ACTOR: RatioStat(
+                losses.loss_actor_sum.detach(), batch_count
+            ),
+            RL_LOSS_CRITIC: RatioStat(
+                losses.loss_critic_sum.detach(), batch_count
+            ),
+            RL_LOSS_ENTROPY: RatioStat(
+                losses.loss_entropy_sum.detach(), batch_count
+            ),
+            RL_LOSS_Q_VALUE: RatioStat(
+                losses.loss_q_value_sum.detach(), batch_count
+            ),
         }
 
-    def compute_signals(  # --------------------------------------------------------------------
+    def compute_signals(  # ---------------------------------------------------
         self,
         batch: HybridActorCriticBatch,
         losses: HybridRLLosses,
@@ -272,7 +316,7 @@ class HybridRLLossHead(nn.Module):
         }  # fmt: skip
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "HybridActorCriticBatch",
     "HybridRLLossConfig",

@@ -70,6 +70,8 @@ def evaluate_rollout(  # ------------------------------------------------------
     hard_max_rollout_steps: int | None = None,
     runner_options: Mapping[str, object] | None = None,
     objective_options: Mapping[str, object] | None = None,
+    metric_collection: MetricCollection | None = None,
+    metric_routes: list[Route] | tuple[Route, ...] = (),
 ) -> RolloutEvaluation:
     """Execute a rollout chunk and score it with a pure objective."""
     executed = runner.run(
@@ -86,6 +88,10 @@ def evaluate_rollout(  # ------------------------------------------------------
             "runner returned a recordless execution summary."
         )
     evaluated = objective(executed, **dict(objective_options or {}))
+    if metric_collection is not None:
+        update_metric_collection_from_evaluated_chunk(
+            metric_collection, evaluated, metric_routes
+        )
     return RolloutEvaluation(chunk=executed, evaluated=evaluated)
 
 
