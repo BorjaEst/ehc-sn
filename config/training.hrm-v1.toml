@@ -38,7 +38,7 @@ val_check_interval = 1000
     min_ratio    = 1.00
 
 [runtime.validation]
-    hard_max_rollout_steps = 16
+    max_rollout_steps = 16
 
 # -- Logs and checkpoints -----------------------------------------------------
 [logger]

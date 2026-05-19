@@ -52,7 +52,7 @@ supervised_only_warmup_steps = 5000
     min_ratio    = 0.01
 
 [runtime.validation]
-    hard_max_rollout_steps = 16
+    max_rollout_steps = 16
 
 # -- Logs and checkpoints -----------------------------------------------------
 [logger]
