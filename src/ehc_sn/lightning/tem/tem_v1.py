@@ -21,7 +21,6 @@ from ehc_sn.controllers.replay.trajectory import (
 from ehc_sn.lightning._rollout import (
     evaluate_rollout,
     evaluate_rollout_streaming,
-    update_metric_collection_from_evaluated_chunk,
 )
 from ehc_sn.lightning.tem.core.runtime import (
     RuntimeConfig,
@@ -78,9 +77,8 @@ class TEMV1ModelConfig(BaseModel, extra="forbid"):
         ...,
         description="Replay trajectory controller configuration.",
     )
-    loss: TEMObjectiveConfig = Field(
+    objective: TEMObjectiveConfig = Field(
         ...,
-        validation_alias=AliasChoices("loss", "objective"),
         description="",
     )
 
@@ -146,101 +144,6 @@ class TEMV1TrainingModel(L.LightningModule):
         """Return the parsed configuration used by this LightningModule."""
         return self._config
 
-    def _train_chunk_steps(  # ------------------------------------------------
-        self,
-    ) -> int:
-        """Return the TBPTT chunk length used for one optimizer update."""
-        if self.config.controller.window_size is not None:
-            return self.config.controller.window_size
-        return self.config.runtime.sequence.tbptt_steps
-
-    def _build_runtime(  # ----------------------------------------------------
-        self,
-    ) -> tuple[ReplayTrajectoryController, TEMObjective]:
-        """Construct one phase-local TEM arena replay runtime around the shared model."""
-        replay = ArenaReplayCapability()
-        controller = ReplayTrajectoryController(
-            backbone=self.adapter,
-            config=self.config.controller,
-            runtime=replay,
-        )
-        return (
-            controller,
-            TEMObjective(self.config.loss, task_binding=ArenaTEMTaskBinding()),
-        )
-
-    def _ensure_train_runtime(  # ---------------------------------------------
-        self,
-    ) -> None:
-        """Initialize the training runtime once per process."""
-        if (
-            self.train_controller is not None
-            and self.train_objective is not None
-        ):
-            return
-        self.train_controller, self.train_objective = self._build_runtime()
-
-    def _ensure_eval_runtime(  # ----------------------------------------------
-        self,
-    ) -> None:
-        """Initialize the evaluation runtime once per process."""
-        if self.eval_controller is not None and self.eval_objective is not None:
-            return
-        self.eval_controller, self.eval_objective = self._build_runtime()
-
-    def _require_train_controller(  # -----------------------------------------
-        self,
-    ) -> ReplayTrajectoryController:
-        """Return the training controller, initializing the train runtime if needed."""
-        self._ensure_train_runtime()
-        if self.train_controller is None:
-            raise RuntimeError("TEM training runtime is not initialized.")
-        return self.train_controller
-
-    def _require_train_objective(  # ------------------------------------------
-        self,
-    ) -> TEMObjective:
-        """Return the training objective, initializing the train runtime if needed."""
-        self._ensure_train_runtime()
-        if self.train_objective is None:
-            raise RuntimeError("TEM training runtime is not initialized.")
-        return self.train_objective
-
-    def _require_eval_controller(  # ------------------------------------------
-        self,
-    ) -> ReplayTrajectoryController:
-        """Return the evaluation controller, initializing the eval runtime if needed."""
-        self._ensure_eval_runtime()
-        if self.eval_controller is None:
-            raise RuntimeError("TEM evaluation runtime is not initialized.")
-        return self.eval_controller
-
-    def _require_eval_objective(  # -------------------------------------------
-        self,
-    ) -> TEMObjective:
-        """Return the evaluation objective, initializing the eval runtime if needed."""
-        self._ensure_eval_runtime()
-        if self.eval_objective is None:
-            raise RuntimeError("TEM evaluation runtime is not initialized.")
-        return self.eval_objective
-
-    def _ensure_train_batch_assembler(  # -------------------------------------
-        self,
-        batch: Batch,
-    ) -> PartialResetBatchAssembler:
-        """Create the partial-reset buffer lazily from the observed static maze schema."""
-        if self._train_batch_assembler is not None:
-            return self._train_batch_assembler
-
-        keys = infer_arena_replay_batch_keys(batch)
-        capacity_rows = 4 * batch_size_from_arena_batch(batch)
-        self._train_buffer = FifoBuffer(capacity_rows, keys, pin_memory=True)
-        self._train_batch_assembler = PartialResetBatchAssembler(
-            buffer=self._train_buffer,
-            keys=keys,
-        )
-        return self._train_batch_assembler
-
     def setup(  # -------------------------------------------------------------
         self,
         stage: Optional[str] = None,
@@ -266,38 +169,6 @@ class TEMV1TrainingModel(L.LightningModule):
         )
 
         return [opt_sup], [sch_sup]
-
-    def _apply_runtime(  # ----------------------------------------------------
-        self,
-        step: int,
-        *,
-        log_values: bool,
-    ) -> TEMRuntimeState:
-        """Resolve and apply TEM runtime dynamics for the current global step."""
-        runtime = resolve_tem_runtime(step, self.config.runtime)
-        self.model.set_runtime(
-            runtime.eta, runtime.hebbian_decay, runtime.p2g_uncertainty_offset
-        )
-
-        if log_values:
-            self.log(
-                "train/runtime/eta", runtime.eta,
-                on_step=True, on_epoch=False, logger=True,
-            )  # fmt: skip
-            self.log(
-                "train/runtime/hebbian_decay", runtime.hebbian_decay,
-                on_step=True, on_epoch=False, logger=True,
-            )  # fmt: skip
-            self.log(
-                "train/runtime/p2g_use", runtime.p2g_use,
-                on_step=True, on_epoch=False, logger=True,
-            )  # fmt: skip
-            self.log(
-                "train/runtime/p2g_uncertainty_offset", runtime.p2g_uncertainty_offset,
-                on_step=True, on_epoch=False, logger=True,
-            )  # fmt: skip
-
-        return runtime
 
     def on_train_epoch_start(  # ----------------------------------------------
         self,
@@ -418,12 +289,11 @@ class TEMV1TrainingModel(L.LightningModule):
         runtime = self._apply_runtime(self.global_step, log_values=False)
         eval_controller = self._require_eval_controller()
         eval_objective = self._require_eval_objective()
-        step_options = {"allow_halt": True, "explore": False}
         carry0 = eval_controller.initial_state(batch)
+
         objective_options = eval_objective.runtime_loss_options(
             self.global_step, p2g_use=runtime.p2g_use
         )
-
         evaluation = evaluate_rollout(
             runner=self._eval_runner,
             source=RepeatSource(batch),
@@ -432,16 +302,143 @@ class TEMV1TrainingModel(L.LightningModule):
             objective=eval_objective,
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
-            runner_options=step_options,
+            runner_options={"allow_halt": True, "explore": False},
             objective_options=objective_options,
-        )
-        update_metric_collection_from_evaluated_chunk(
-            collection=self.val_metrics,
-            evaluated=evaluation.evaluated,
-            routes=TEM_EPISODE_ROUTES,
+            metric_collection=self.val_metrics,
+            metric_routes=TEM_EPISODE_ROUTES,
         )
 
         return {}
+
+    def _apply_runtime(  # ----------------------------------------------------
+        self,
+        step: int,
+        *,
+        log_values: bool,
+    ) -> TEMRuntimeState:
+        """Resolve and apply TEM runtime dynamics for the current global step."""
+        runtime = resolve_tem_runtime(step, self.config.runtime)
+        self.model.set_runtime(
+            runtime.eta, runtime.hebbian_decay, runtime.p2g_uncertainty_offset
+        )
+
+        if log_values:
+            self.log(
+                "train/runtime/eta", runtime.eta,
+                on_step=True, on_epoch=False, logger=True,
+            )  # fmt: skip
+            self.log(
+                "train/runtime/hebbian_decay", runtime.hebbian_decay,
+                on_step=True, on_epoch=False, logger=True,
+            )  # fmt: skip
+            self.log(
+                "train/runtime/p2g_use", runtime.p2g_use,
+                on_step=True, on_epoch=False, logger=True,
+            )  # fmt: skip
+            self.log(
+                "train/runtime/p2g_uncertainty_offset", runtime.p2g_uncertainty_offset,
+                on_step=True, on_epoch=False, logger=True,
+            )  # fmt: skip
+
+        return runtime
+
+    def _train_chunk_steps(  # ------------------------------------------------
+        self,
+    ) -> int:
+        """Return the TBPTT chunk length used for one optimizer update."""
+        if self.config.controller.window_size is not None:
+            return self.config.controller.window_size
+        return self.config.runtime.sequence.tbptt_steps
+
+    def _build_runtime(  # ----------------------------------------------------
+        self,
+    ) -> tuple[ReplayTrajectoryController, TEMObjective]:
+        """Construct one phase-local TEM arena replay runtime around the shared
+        model.
+        """
+        replay = ArenaReplayCapability()
+        controller = ReplayTrajectoryController(
+            backbone=self.adapter,
+            config=self.config.controller,
+            runtime=replay,
+        )
+        objective = TEMObjective(
+            config=self.config.objective,
+            task_binding=ArenaTEMTaskBinding(),
+        )
+        return controller, objective
+
+    def _ensure_train_runtime(  # ---------------------------------------------
+        self,
+    ) -> None:
+        """Initialize the training runtime once per process."""
+        if (
+            self.train_controller is not None
+            and self.train_objective is not None
+        ):
+            return
+        self.train_controller, self.train_objective = self._build_runtime()
+
+    def _ensure_eval_runtime(  # ----------------------------------------------
+        self,
+    ) -> None:
+        """Initialize the evaluation runtime once per process."""
+        if self.eval_controller is not None and self.eval_objective is not None:
+            return
+        self.eval_controller, self.eval_objective = self._build_runtime()
+
+    def _require_train_controller(  # -----------------------------------------
+        self,
+    ) -> ReplayTrajectoryController:
+        """Return the training controller, initializing the train runtime if needed."""
+        self._ensure_train_runtime()
+        if self.train_controller is None:
+            raise RuntimeError("TEM training runtime is not initialized.")
+        return self.train_controller
+
+    def _require_train_objective(  # ------------------------------------------
+        self,
+    ) -> TEMObjective:
+        """Return the training objective, initializing the train runtime if needed."""
+        self._ensure_train_runtime()
+        if self.train_objective is None:
+            raise RuntimeError("TEM training runtime is not initialized.")
+        return self.train_objective
+
+    def _require_eval_controller(  # ------------------------------------------
+        self,
+    ) -> ReplayTrajectoryController:
+        """Return the evaluation controller, initializing the eval runtime if needed."""
+        self._ensure_eval_runtime()
+        if self.eval_controller is None:
+            raise RuntimeError("TEM evaluation runtime is not initialized.")
+        return self.eval_controller
+
+    def _require_eval_objective(  # -------------------------------------------
+        self,
+    ) -> TEMObjective:
+        """Return the evaluation objective, initializing the eval runtime if needed."""
+        self._ensure_eval_runtime()
+        if self.eval_objective is None:
+            raise RuntimeError("TEM evaluation runtime is not initialized.")
+        return self.eval_objective
+
+    def _ensure_train_batch_assembler(  # -------------------------------------
+        self,
+        batch: Batch,
+    ) -> PartialResetBatchAssembler:
+        """Create the partial-reset buffer lazily from the observed static maze schema."""
+        if self._train_batch_assembler is not None:
+            return self._train_batch_assembler
+
+        keys = infer_arena_replay_batch_keys(batch)
+        capacity_rows = 4 * batch_size_from_arena_batch(batch)
+        self._train_buffer = FifoBuffer(capacity_rows, keys, pin_memory=True)
+        self._train_batch_assembler = PartialResetBatchAssembler(
+            buffer=self._train_buffer,
+            keys=keys,
+        )
+        return self._train_batch_assembler
 
 
 # =============================================================================

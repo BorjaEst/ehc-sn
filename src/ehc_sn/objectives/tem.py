@@ -50,13 +50,13 @@ from ehc_sn.metrics.keys import (
 )
 from ehc_sn.objectives._variational import (
     VariationalLosses,
-    VariationalLossStep,
     VariationalObjectiveBase,
+    VariationalObjectiveStep,
     build_variational_step_metrics,
     get_reg_term,
     require_latent_relation,
 )
-from ehc_sn.rollouts import StepRecord
+from ehc_sn.rollouts import CarrySnapshot, StepRecord
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
 
@@ -68,90 +68,6 @@ PLACE_SENSORY_RELATION: str = "place_sensory"
 # Canonical string keys for optional reg-term overrides from bridge adapters.
 GRID_REG_TERM: str = "grid_reg"
 PLACE_REG_TERM: str = "place_reg"
-
-
-# =============================================================================
-class TEMStepOutput(Protocol):
-    """Objective-facing output contract for TEM-family rollout steps."""
-
-    @property
-    def logits_inference(self) -> Tensor:
-        """Return posterior-path observation logits of shape ``(B, V)``."""
-        ...
-
-    @property
-    def logits_retrieved(self) -> Tensor:
-        """Return sensory-recall-path observation logits of shape ``(B, V)``."""
-        ...
-
-    @property
-    def logits_ancestral(self) -> Tensor:
-        """Return structural-prior-path observation logits of shape ``(B, V)``."""
-        ...
-
-    @property
-    def latent_relations(self) -> dict[str, LatentRelation]:
-        """Named latent consistency relations keyed by the relation constants above."""
-        ...
-
-    @property
-    def reg_terms(self) -> dict[str, LatentCode] | None:
-        """Optional named regularization-code overrides; `None` falls back to relation codes."""
-        ...
-
-
-# =============================================================================
-class TEMObjectiveBinding[TargetsT](Protocol):
-    """Canonical task-binding protocol for the TEM objective.
-
-    Implemented in the adapter layer so that :class:`TEMObjective` stays
-    task-agnostic.  The binding owns all task-specific target extraction and
-    observation-correctness evaluation; the objective owns only loss math and
-    metric assembly.
-
-    Type parameter ``TargetsT`` is the task-owned supervision-target dataclass
-    (e.g. :class:`~ehc_sn.tasks.arena.contracts.ArenaTargets`).
-    """
-
-    def extract_targets(  # ---------------------------------------------------
-        self,
-        batch: Batch,
-        carry: Any,
-        step_output: Any,
-    ) -> TargetsT:
-        """Return the task-owned supervision targets for the current step."""
-        ...
-
-    def extract_observation_id(  # --------------------------------------------
-        self,
-        batch: Batch,
-        carry: Any,
-        step_output: Any,
-    ) -> Tensor:
-        """Return the integer observation-id tensor ``(B,)`` for the current step."""
-        ...
-
-    def extract_protocol_mask(  # ---------------------------------------------
-        self,
-        batch: Batch,
-        carry: Any,
-        step_output: Any,
-    ) -> Tensor:
-        """Return the boolean protocol-eligibility mask ``(B,)`` for the current step."""
-        ...
-
-    def evaluate_observation_metrics(  # --------------------------------------
-        self,
-        step_output: Any,
-        targets: TargetsT,
-    ) -> dict[str, RatioStat]:
-        """Return task-owned count-bearing accuracy metrics for one step.
-
-        The values are :class:`~ehc_sn.training.types.RatioStat` numerator/
-        denominator pairs (counts, not yet reduced to ratios).  Keys must align
-        with the TEM metric-key constants in :mod:`ehc_sn.metrics.keys`.
-        """
-        ...
 
 
 # =============================================================================
@@ -228,6 +144,95 @@ class TEMObjectiveConfig(BaseModel, extra="forbid"):
         ge=1,
         description="Steps over which the place regularizer decays to zero.",
     )
+
+
+# =============================================================================
+class TEMStepOutput(Protocol):
+    """Objective-facing output contract for TEM-family rollout steps."""
+
+    @property
+    def logits_inference(self) -> Tensor:
+        """Return posterior-path observation logits of shape ``(B, V)``."""
+        ...
+
+    @property
+    def logits_retrieved(self) -> Tensor:
+        """Return sensory-recall-path observation logits of shape ``(B, V)``."""
+        ...
+
+    @property
+    def logits_ancestral(self) -> Tensor:
+        """Return structural-prior-path observation logits of shape ``(B, V)``."""
+        ...
+
+    @property
+    def latent_relations(self) -> dict[str, LatentRelation]:
+        """Named latent consistency relations keyed by the relation constants above."""
+        ...
+
+    @property
+    def reg_terms(self) -> dict[str, LatentCode] | None:
+        """Optional named regularization-code overrides; `None` falls back to relation codes."""
+        ...
+
+
+# =============================================================================
+class TEMObjectiveBinding[TargetsT](Protocol):
+    """Canonical task-binding protocol for the TEM objective.
+
+    Implemented in the adapter layer so that :class:`TEMObjective` stays
+    task-agnostic.  The binding owns all task-specific target extraction and
+    observation-correctness evaluation; the objective owns only loss math and
+    metric assembly.
+
+    Type parameter ``TargetsT`` is the task-owned supervision-target dataclass
+    (e.g. :class:`~ehc_sn.tasks.arena.contracts.ArenaTargets`).
+
+    The ``executed_batch`` input is the executed-step payload (``record.batch``)
+    and is authoritative for current-step supervision. The ``snapshot`` input
+    is a frozen post-step snapshot that should only provide continuity facts or
+    lightweight post-step projections.
+    """
+
+    def extract_targets(  # ---------------------------------------------------
+        self,
+        executed_batch: Batch,
+        snapshot: CarrySnapshot,
+        step_output: Any,
+    ) -> TargetsT:
+        """Return the task-owned supervision targets for the current step."""
+        ...
+
+    def extract_observation_id(  # --------------------------------------------
+        self,
+        executed_batch: Batch,
+        snapshot: CarrySnapshot,
+        step_output: Any,
+    ) -> Tensor:
+        """Return the integer observation-id tensor ``(B,)`` for the current step."""
+        ...
+
+    def extract_protocol_mask(  # ---------------------------------------------
+        self,
+        executed_batch: Batch,
+        snapshot: CarrySnapshot,
+        step_output: Any,
+    ) -> Tensor:
+        """Return the boolean protocol-eligibility mask ``(B,)`` for the current step."""
+        ...
+
+    def evaluate_observation_metrics(  # --------------------------------------
+        self,
+        step_output: Any,
+        targets: TargetsT,
+    ) -> dict[str, RatioStat]:
+        """Return task-owned count-bearing accuracy metrics for one step.
+
+        The values are :class:`~ehc_sn.training.types.RatioStat` numerator/
+        denominator pairs (counts, not yet reduced to ratios).  Keys must align
+        with the TEM metric-key constants in :mod:`ehc_sn.metrics.keys`.
+        """
+        ...
 
 
 # =============================================================================
@@ -325,7 +330,7 @@ class TEMTerms:
 
 # =============================================================================
 @dataclass(frozen=True)
-class TEMObjectiveStep(VariationalLossStep):
+class TEMObjectiveStep(VariationalObjectiveStep):
     """A single rollout/loss step produced by :class:`TEMObjective`."""
 
     losses: TEMLosses
@@ -584,16 +589,16 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
     def evaluate_metrics(  # ----------------------------------------------------
         self,
         record: StepRecord,
+        outputs: TEMStepOutput,
         context: TEMContext,
         terms: TEMTerms,
+        losses: TEMLosses,
         **_: Any,
     ) -> StepMetrics:
         """Evaluate TEM metrics for one step from precomputed losses and terms."""
-        step_outputs = getattr(
-            record.outputs, "backbone_output", record.outputs
-        )
+        _ = record, losses
         acc_extras = self._task_binding.evaluate_observation_metrics(
-            step_outputs, context.targets
+            outputs, context.targets
         )
 
         revisit = context.protocol_mask.float()
@@ -668,11 +673,15 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
 
     def compute_signals(  # ---------------------------------------------------
         self,
+        record: StepRecord,
         outputs: TEMStepOutput,
+        context: TEMContext,
+        terms: TEMTerms,
         losses: TEMLosses,
         **_: Any,
     ) -> dict[str, Tensor]:
         """Compute TEM signals for one step from precomputed losses and context."""
+        _ = record, context, terms
         grid_rel = outputs.latent_relations.get(GRID_TRANSITION_RELATION)
         place_rel = outputs.latent_relations.get(PLACE_TRANSITION_RELATION)
         _zero = losses.loss_grid_kl_sum.new_zeros(())
@@ -722,9 +731,15 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
         }
 
         if any(torch.tensor(list(signals.values())) > 1e6):
-            print(f"Large signal values detected: { {k: v.item() for k, v in signals.items()} }")  # fmt: skip
+            print(
+                "Large signal values detected: "
+                f"{ {k: v.item() for k, v in signals.items()} }",
+            )
         if any(torch.isnan(v) for v in signals.values()):
-            print(f"NaN signal values detected: { {k: v.item() for k, v in signals.items()} }")  # fmt: skip
+            print(
+                "NaN signal values detected: "
+                f"{ {k: v.item() for k, v in signals.items()} }",
+            )
 
         return signals
 

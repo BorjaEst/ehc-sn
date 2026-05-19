@@ -80,7 +80,15 @@ ScoredOutputT = TypeVar("ScoredOutputT", bound=ObjectiveStepOutput)
 # =============================================================================
 @dataclass(frozen=True)
 class CarrySnapshot:
-    """ """
+    """Frozen post-step projection of controller carry.
+
+    Snapshots are lean, frozen views of continuity state after the step finishes.
+    They are not the authoritative current-step payload; use
+    ``StepRecord.executed_frame`` (or the backward-compatible ``record.batch``)
+    when step-truth tensors are required. Snapshot fields are limited to
+    lightweight continuity facts and current-step extracts and must exclude
+    resident per-trajectory payloads.
+    """
 
     halted: Tensor
     steps: Tensor | None = None
