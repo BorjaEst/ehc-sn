@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, cast
 
+import torch
 from torch import Tensor
 
 from ehc_sn.controllers.contracts.actor_critic import (
@@ -27,6 +28,7 @@ from ehc_sn.tasks.mazehard.contracts import (
     MAZE_HARD_IGNORE_LABEL_ID,
     MazeHardTargets,
 )
+from ehc_sn.tasks.mazehard.runtime import PATH_ID
 from ehc_sn.training.actor_critic import HybridActorCriticTaskBinding
 from ehc_sn.types import Batch
 
@@ -60,9 +62,7 @@ class MazeHardHRMV1ACTTaskBinding(ACTObjectiveBinding[MazeHardTargets]):
     ) -> Tensor:
         """Return token logits from the MazeHard task payload."""
         _ = executed_batch, snapshot
-        return _extract_act_task_logits(
-            cast(_HasTaskPayload, step_output)
-        )
+        return _extract_act_task_logits(cast(_HasTaskPayload, step_output))
 
     def extract_targets(  # ---------------------------------------------------
         self,
@@ -86,6 +86,10 @@ class MazeHardHRMV1ACTTaskBinding(ACTObjectiveBinding[MazeHardTargets]):
         return compute_accuracy_stats(
             logits, targets.labels, ignore_label_id=MAZE_HARD_IGNORE_LABEL_ID
         )
+
+    def build_token_weights(self, labels: Tensor) -> Tensor:
+        """Return per-token LM weights that emphasize MazeHard PATH labels."""
+        return _build_mazehard_token_weights(labels)
 
 
 # =============================================================================
@@ -120,6 +124,13 @@ class MazeHardHRMV2HybridTaskBinding:
             )
         return record.observation_used_for_decision["labels"]
 
+    def extract_token_weights(
+        self, record: ActorCriticInteractionRecord
+    ) -> Tensor:
+        """Return per-token LM weights that emphasize MazeHard PATH labels."""
+        labels = self.extract_labels(record)
+        return _build_mazehard_token_weights(labels)
+
 
 # make the type-checker confirm the protocol is satisfied
 _: HybridActorCriticTaskBinding = MazeHardHRMV2HybridTaskBinding()
@@ -145,6 +156,25 @@ def _extract_record_task_logits(  # -------------------------------------------
             "The controller must attach a task payload with task_logits."
         )
     return task_output.task_logits
+
+
+# =============================================================================
+def _build_mazehard_token_weights(  # -----------------------------------------
+    labels: Tensor,
+) -> Tensor:
+    """Build per-token weights that upweight PATH labels during LM loss."""
+    weights = torch.ones_like(labels, dtype=torch.float32)
+    weights = torch.where(
+        labels == PATH_ID,
+        torch.full_like(weights, 2.0),
+        weights,
+    )
+    weights = torch.where(
+        labels == MAZE_HARD_IGNORE_LABEL_ID,
+        torch.zeros_like(weights),
+        weights,
+    )
+    return weights
 
 
 # =============================================================================

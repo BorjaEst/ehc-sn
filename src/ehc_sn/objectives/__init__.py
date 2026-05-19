@@ -15,7 +15,7 @@ from ehc_sn.objectives._token import (
     TokenSupervisionBinding,
     build_token_step_metrics,
     compute_accuracy_stats,
-    compute_lm_loss_sum,
+    compute_token_loss_sum,
 )
 from ehc_sn.objectives._variational import (
     VariationalLosses,
@@ -58,7 +58,7 @@ __all__ = [
     "TokenSupervisionBinding",
     "build_token_step_metrics",
     "compute_accuracy_stats",
-    "compute_lm_loss_sum",
+    "compute_token_loss_sum",
     # variational family — canonical
     "VariationalObjectiveBase",
     # variational family — implementation / compat

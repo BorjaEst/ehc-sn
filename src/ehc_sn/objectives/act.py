@@ -9,8 +9,8 @@ objective-owned TD bootstrap target.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from dataclasses import dataclass, field
+from typing import Any, Optional, Protocol, cast
 
 import torch
 import torch.nn.functional as F
@@ -24,13 +24,12 @@ from ehc_sn.controllers.deliberation.act import (
 )
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics import signals as S
-from ehc_sn.metrics.keys import ACT_LOSS_Q_CONTINUE, ACT_LOSS_Q_DONE, LOSS_LM
+from ehc_sn.metrics.keys import ACT_LOSS_Q_CONTINUE, ACT_LOSS_Q_DONE, LOSS_TOKEN
 from ehc_sn.objectives._base import BaseObjective
 from ehc_sn.objectives._token import (
     IGNORE_LABEL_ID,
     AccuracyStats,
     build_token_step_metrics,
-    compute_lm_loss_sum,
 )
 from ehc_sn.rollouts import CarrySnapshot, StepRecord
 from ehc_sn.training.types import RatioStat, StepMetrics
@@ -42,7 +41,7 @@ from ehc_sn.utils.detach import DetachMixin
 class ACTObjectiveConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`ACTObjective`."""
 
-    function: LossType = Field(
+    token_loss: LossType = Field(
         default="stablemax_cross_entropy",
         description="The loss function to use for the modeling loss.",
     )
@@ -54,6 +53,7 @@ class ACTStepOutput(Protocol):
 
     task: object
     q_logits: Tensor
+    done_action: int
 
 
 # =============================================================================
@@ -95,13 +95,29 @@ class ACTObjectiveBinding[TargetsT](Protocol):
 
 
 # =============================================================================
+class _TokenWeightBinding(Protocol):
+    """Optional task binding surface for per-token LM weights."""
+
+    def build_token_weights(  # -----------------------------------------------
+        self,
+        labels: Tensor,
+    ) -> Tensor:
+        """Return per-token loss weights aligned with LM labels."""
+
+
+# =============================================================================
 @dataclass(frozen=True)
 class ACTLosses(DetachMixin):
     """Bundle of ACT loss terms (summed over batch)."""
 
-    loss_sum: Tensor
+    loss_token_sum: Tensor
     loss_q_done_sum: Tensor
     loss_q_continue_sum: Optional[Tensor]
+
+    @property
+    def loss_sum(self) -> Tensor:
+        """Return the summed token-supervision loss for the step."""
+        return self.loss_token_sum
 
     @property
     def total(self) -> Tensor:
@@ -119,30 +135,13 @@ class ACTLosses(DetachMixin):
 class ACTTerms:
     """Per-example ACT loss terms scored for one executed step."""
 
-    loss_lm: Tensor
+    loss_token: Tensor
     loss_q_done: Tensor
     loss_q_continue: Tensor | None
 
-    @property
-    def loss_sum(self) -> Tensor:
-        """Return the aggregate summed token loss."""
-        return self.loss_lm.sum()
-
-    @property
-    def loss_q_done_sum(self) -> Tensor:
-        """Return the aggregate summed q(done) loss."""
-        return self.loss_q_done.sum()
-
-    @property
-    def loss_q_continue_sum(self) -> Tensor | None:
-        """Return the aggregate summed q(continue) loss if present."""
-        if self.loss_q_continue is None:
-            return None
-        return self.loss_q_continue.sum()
-
 
 # =============================================================================
-@dataclass(frozen=True)
+@dataclass
 class ACTContext:
     """Shared objective-scoring context resolved once per ACT step."""
 
@@ -152,8 +151,13 @@ class ACTContext:
     targets: Any
     logits: Tensor
     stats: AccuracyStats
-    done_action: int
+    token_weights: Tensor | None
     target_q: Tensor | None
+
+    terms: ACTTerms | None = field(default=None, init=False)
+    losses: ACTLosses | None = field(default=None, init=False)
+    metrics: StepMetrics | None = field(default=None, init=False)
+    signals: dict[str, Tensor] = field(default_factory=dict, init=False)
 
 
 # =============================================================================
@@ -191,101 +195,89 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
         self._task_binding = task_binding
 
     @property
-    def loss_fn(self) -> Any:
+    def _token_loss_fn(self) -> Any:
         """Return the configured token-level loss function."""
-        return getattr(cross_entropy_module, self._config.function)
+        return getattr(cross_entropy_module, self.config.token_loss)
 
     def evaluate_step(  # -----------------------------------------------------
         self,
         record: StepRecord,
+        controller: ACTController | None = None,
+        td_target: bool = False,
         **options: Any,
     ) -> ACTObjectiveStep:
         """Score one ACT rollout step and attach any objective-owned TD target."""
-        loss_options = dict(options)
-        controller = loss_options.pop("controller", None)
-        if not isinstance(controller, ACTController):
-            raise TypeError(
-                "ACTObjective requires controller=ACTController when scoring ACT rollout steps."
-            )
 
-        td_target = bool(loss_options.pop("td_target", True))
-        target_q = (
-            self._compute_td_target(controller, record) if td_target else None
-        )
+        target_q = options.pop("target_q", None)
+        if td_target:
+            if controller is None:
+                raise ValueError(
+                    "ACTObjective: td_target=True requires a controller."
+                )
+            target_q = self._compute_td_target(controller, record)
 
-        step_output = record.outputs
-        context = self.build_context(
-            record,
-            step_output,
-            controller=controller,
-            target_q=target_q,
-            **loss_options,
-        )
-        terms = self.compute_terms(context, **loss_options)
-        losses = self.compute_losses(terms)
-        metrics = self._build_step_metrics(
-            context.stats,
-            losses,
-            batch_size=int(context.logits.shape[0]),
-            steps=context.snapshot.steps,
-            completed=context.snapshot.halted,
-        )
-        signals = self.compute_signals(
-            context.executed_batch,
-            context.snapshot,
-            step_output,
-            losses,
-            target_q=target_q,
-            **loss_options,
-        )
-        return self._build_step_output(
-            losses,
-            metrics,
-            signals,
-            step_output,
-            target_q=target_q,
-        )
+        # --- single scored-step computation ---
+        context = self.build_context(record, target_q=target_q, **options)
+        context.terms = self.compute_terms(context)
+        context.losses = self.compute_losses(context)
 
-    def compute_lm_loss(  # ---------------------------------------------------
-        self,
-        logits_lm: Tensor,
-        labels: Tensor,
-        stats: AccuracyStats,
-    ) -> Tensor:
-        """Compute the summed supervised token loss for a step."""
-        return compute_lm_loss_sum(self.loss_fn, logits_lm, labels, stats)
+        # --- metrics from precomputed losses/terms ---
+        context.metrics = self.evaluate_metrics(context)
+
+        # --- signals from precomputed losses/context (no re-extraction) ---
+        context.signals = self.compute_signals(context)
+
+        return self.build_output(context)
 
     def build_context(  # -----------------------------------------------------
         self,
         record: StepRecord,
-        outputs: ACTStepOutput,
         *,
-        controller: ACTController,
         target_q: Tensor | None = None,
+        use_token_weights: bool = False,
         **_: Any,
     ) -> ACTContext:
         """Resolve task targets, logits, and sequence stats for one ACT step."""
-        executed_batch = record.batch
-        snapshot = record.carry
+
+        outputs = cast(ACTStepOutput, record.outputs)
+
+        # Extract supervised logits and targets from the task binding.
         logits = self._task_binding.extract_logits(
-            executed_batch=executed_batch,
-            snapshot=snapshot,
+            executed_batch=record.batch,
+            snapshot=record.carry,
             step_output=outputs,
         )
         targets = self._task_binding.extract_targets(
-            executed_batch=executed_batch,
-            snapshot=snapshot,
+            executed_batch=record.batch,
+            snapshot=record.carry,
             step_output=outputs,
         )
+
+        # Compute sequence-level correctness stats for the step from the task
+        # binding.
         stats = self._task_binding.evaluate_sequences(logits, targets)
+
+        # Optional token weights for token loss scaling (e.g., for mazehard).
+        token_weights = None
+        if use_token_weights:
+            if not hasattr(self._task_binding, "build_token_weights"):
+                raise RuntimeError(
+                    "ACTObjective: use_token_weights=True but the task binding "
+                    "does not implement build_token_weights."
+                )
+            labels = self._require_labels(targets)
+            token_weight_binding = cast(_TokenWeightBinding, self._task_binding)
+            token_weights = token_weight_binding.build_token_weights(labels)
+
+        # Return a bundled context for the step.
         return ACTContext(
-            executed_batch=executed_batch,
-            snapshot=snapshot,
+            executed_batch=record.batch,
+            snapshot=record.carry,
             outputs=outputs,
             targets=targets,
             logits=logits,
             stats=stats,
-            done_action=controller.config.done_action,
+            token_weights=token_weights,
             target_q=target_q,
         )
 
@@ -295,61 +287,187 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
         **_: Any,
     ) -> ACTTerms:
         """Score per-example ACT loss terms for one executed step."""
+        outputs = context.outputs
+        logits_q_done = outputs.q_logits[..., outputs.done_action]
         labels = self._require_labels(context.targets)
-        loss_lm = self._compute_lm_loss_per_seq(
-            context.logits, labels, context.stats
-        )
-
-        q_logits = context.outputs.q_logits
-        q_done_logits = q_logits[..., context.done_action]
-        done_target = context.stats.seq_is_correct.to(q_done_logits.dtype)
-        loss_q_done = F.binary_cross_entropy_with_logits(
-            q_done_logits, done_target, reduction="none"
-        )
-
-        loss_q_continue: Tensor | None = None
-        if context.target_q is not None:
-            scores = collapse_act_halt_continue_logits(
-                q_logits, done_action=context.done_action
-            )
-            loss_q_continue = F.binary_cross_entropy_with_logits(
-                scores.continue_logit, context.target_q, reduction="none"
-            )
 
         return ACTTerms(
-            loss_lm=loss_lm,
-            loss_q_done=loss_q_done,
-            loss_q_continue=loss_q_continue,
+            # Compute the token loss per sequence
+            loss_token=self.token_loss_fn(
+                logits_token=context.logits,
+                labels=labels,
+                stats=context.stats,
+                token_weights=context.token_weights,
+            ),
+            # Compute the Q(done) loss per sequence
+            loss_q_done=self.q_done_loss_fn(
+                logits_q_done=logits_q_done,
+                done_target=context.stats.seq_is_correct,
+            ),
+            # Compute the Q(continue) loss per sequence
+            loss_q_continue=(
+                self.q_continue_loss_fn(
+                    logits_q_done=outputs.q_logits,
+                    done_action=outputs.done_action,
+                    continue_target=context.target_q,
+                )
+                if context.target_q is not None
+                else None
+            ),
+        )
+
+    def token_loss_fn(  # -----------------------------------------------------
+        self,
+        logits_token: Tensor,
+        labels: Tensor,
+        stats: AccuracyStats,
+        token_weights: Tensor | None = None,
+    ) -> Tensor:
+        """Compute per-sequence supervised token loss for a step."""
+        loss_per_token = self._token_loss_fn(
+            logits_token, labels, ignore_index=IGNORE_LABEL_ID
+        )
+        if token_weights is not None:
+            if token_weights.shape != labels.shape:
+                raise ValueError(
+                    "token_weights must match labels shape for LM loss "
+                    "weighting."
+                )
+            loss_per_token = loss_per_token * token_weights.to(
+                loss_per_token.dtype
+            )
+        return loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
+
+    def q_done_loss_fn(  # ----------------------------------------------------
+        self,
+        logits_q_done: Tensor,
+        done_target: Tensor,
+    ) -> Tensor:
+        """Compute per-sequence Q(done) loss for a step."""
+        return F.binary_cross_entropy_with_logits(
+            input=logits_q_done,
+            target=done_target.to(logits_q_done.dtype),
+            reduction="none",
+        )
+
+    def q_continue_loss_fn(  # ------------------------------------------------
+        self,
+        logits_q_done: Tensor,
+        done_action: int,
+        continue_target: Tensor,
+    ) -> Tensor:
+        """Compute per-sequence Q(continue) loss for a step."""
+        scores = collapse_act_halt_continue_logits(
+            logits_q_done, done_action=done_action
+        )
+        return F.binary_cross_entropy_with_logits(
+            input=scores.continue_logit,
+            target=continue_target,
+            reduction="none",
+        )
+
+    def _require_labels(self, targets: Any) -> Tensor:
+        """Return raw label tensors from task-owned targets."""
+        if isinstance(targets, Tensor):
+            return targets
+        if isinstance(targets, dict) and "labels" in targets:
+            labels = targets["labels"]
+            if isinstance(labels, Tensor):
+                return labels
+        labels = getattr(targets, "labels", None)
+        if isinstance(labels, Tensor):
+            return labels
+        raise TypeError(
+            "ACTObjective expected token labels as a Tensor or as a 'labels' "
+            "field on the task targets."
         )
 
     def compute_losses(  # ----------------------------------------------------
         self,
-        terms: ACTTerms,
+        context: ACTContext,
+        **_: Any,
     ) -> ACTLosses:
         """Aggregate per-example terms into summed ACT losses."""
+        terms = context.terms
+        if terms is None:
+            raise ValueError(
+                "ACTContext.terms must be set before computing losses."
+            )
         return ACTLosses(
-            terms.loss_sum,
-            terms.loss_q_done_sum,
-            terms.loss_q_continue_sum,
+            loss_token_sum=terms.loss_token.sum(),
+            loss_q_done_sum=terms.loss_q_done.sum(),
+            loss_q_continue_sum=_maybe_sum(terms.loss_q_continue),
         )
 
-    def _build_step_output(  # ------------------------------------------------
+    def evaluate_metrics(  # --------------------------------------------------
         self,
-        losses: ACTLosses,
-        metrics: Any,
-        signals: dict[str, Any],
-        outputs: ACTStepOutput,
-        *,
-        target_q: Tensor | None = None,
+        context: ACTContext,
+        **_: Any,
+    ) -> StepMetrics:
+        """Assemble per-step token metrics for the current ACT step."""
+        losses = context.losses
+        if losses is None:
+            raise ValueError(
+                "ACTContext.losses must be set before evaluating metrics."
+            )
+        stats = context.stats
+        batch_size = int(context.logits.shape[0])
+        extras = self._build_metric_ratios(losses, batch_size=batch_size)
+        steps = context.snapshot.steps
+        if steps is None:
+            steps = losses.loss_sum.new_zeros((batch_size,), dtype=torch.long)
+        completed = context.snapshot.halted
+        return build_token_step_metrics(steps, completed, stats, extras)
+
+    def compute_signals(  # ---------------------------------------------------
+        self,
+        context: ACTContext,
+        **_: Any,
+    ) -> dict[str, Tensor]:
+        """Compute lightweight diagnostic signals for logging."""
+        losses = context.losses
+        if losses is None:
+            raise ValueError(
+                "ACTContext.losses must be set before computing signals."
+            )
+        steps = context.snapshot.steps
+        if steps is None:
+            steps = losses.loss_sum.new_zeros((1,))
+
+        signals: dict[str, Tensor] = {
+            S.STEPS_MEAN: steps.float().mean().detach(),
+            S.LOSS_Q_DONE: losses.loss_q_done_sum.detach(),
+        }
+        target_q = context.target_q
+        if target_q is not None:
+            signals[S.TARGET_Q_MEAN] = target_q.mean().detach()
+            signals[S.TARGET_Q_STD] = target_q.std(unbiased=False).detach()
+        return signals
+
+    def build_output(  # ------------------------------------------------------
+        self,
+        context: ACTContext,
         **_: Any,
     ) -> ACTObjectiveStep:
         """Wrap losses, metrics, and signals into an :class:`ACTObjectiveStep`."""
+        if context.losses is None:
+            raise ValueError(
+                "ACTContext.losses must be set before building output."
+            )
+        if context.metrics is None:
+            raise ValueError(
+                "ACTContext.metrics must be set before building output."
+            )
+        if context.signals is None:
+            raise ValueError(
+                "ACTContext.signals must be set before building output."
+            )
         return ACTObjectiveStep(
-            losses=losses,
-            metrics=metrics,
-            outputs=outputs,
-            target_q=target_q,
-            signals=signals,
+            losses=context.losses,
+            metrics=context.metrics,
+            outputs=context.outputs,
+            target_q=context.target_q,
+            signals=context.signals,
         )
 
     def _build_metric_ratios(  # ----------------------------------------------
@@ -367,7 +485,7 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
             q_continue_loss_sum = losses.loss_sum.new_zeros(())
 
         return {
-            LOSS_LM: RatioStat(losses.loss_sum.detach(), batch_count),
+            LOSS_TOKEN: RatioStat(losses.loss_sum.detach(), batch_count),
             ACT_LOSS_Q_DONE: RatioStat(
                 losses.loss_q_done_sum.detach(), batch_count
             ),
@@ -375,67 +493,6 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
                 q_continue_loss_sum.detach(), batch_count
             ),
         }
-
-    def compute_signals(  # ---------------------------------------------------
-        self,
-        batch: Batch,
-        state: CarrySnapshot,
-        outputs: ACTStepOutput,
-        losses: ACTLosses,
-        *,
-        target_q: Tensor | None = None,
-        **_: Any,
-    ) -> dict[str, Tensor]:
-        """Compute lightweight diagnostic signals for logging."""
-        _ = batch, outputs
-        steps = state.steps
-        if steps is None:
-            steps = losses.loss_sum.new_zeros((1,))
-
-        signals: dict[str, Tensor] = {
-            S.STEPS_MEAN: steps.float().mean().detach(),
-            S.LOSS_Q_DONE: losses.loss_q_done_sum.detach(),
-        }
-        if target_q is not None:
-            signals[S.TARGET_Q_MEAN] = target_q.mean().detach()
-            signals[S.TARGET_Q_STD] = target_q.std(unbiased=False).detach()
-        return signals
-
-    def _build_step_metrics(  # ----------------------------------------------
-        self,
-        stats: AccuracyStats,
-        losses: ACTLosses,
-        *,
-        batch_size: int,
-        steps: Tensor | None,
-        completed: Tensor,
-    ) -> StepMetrics:
-        """Assemble per-step token metrics for the current ACT step."""
-        extras = self._build_metric_ratios(losses, batch_size=batch_size)
-        if steps is None:
-            steps = losses.loss_sum.new_zeros((batch_size,), dtype=torch.long)
-        return build_token_step_metrics(steps, completed, stats, extras)
-
-    @staticmethod
-    def _require_labels(targets: Any) -> Tensor:
-        labels = getattr(targets, "labels", targets)
-        if not isinstance(labels, Tensor):
-            raise TypeError(
-                "ACTObjective expects tensor labels from the bound ACT task targets."
-            )
-        return labels
-
-    def _compute_lm_loss_per_seq(  # -----------------------------------------
-        self,
-        logits_lm: Tensor,
-        labels: Tensor,
-        stats: AccuracyStats,
-    ) -> Tensor:
-        """Compute per-sequence supervised token loss for a step."""
-        loss_per_token = self.loss_fn(
-            logits_lm, labels, ignore_index=IGNORE_LABEL_ID
-        )
-        return loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
 
     @staticmethod
     def _compute_td_target(  # ------------------------------------------------
@@ -447,19 +504,36 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
         steps = record.carry.steps
         if data is None or model_state is None or steps is None:
             raise ValueError(
-                "ACT TD target requires carry.data, carry.model_state, and carry.steps."
+                "ACT TD target requires carry.data, carry.model_state, and "
+                "carry.steps."
             )
-        del steps  # no longer used for forced-halt boundary; kept for carry validation only
 
         with torch.no_grad():
             backbone_output, _ = controller.backbone(data, model_state)
             next_q = backbone_output.control.q_logits
 
         done_action = controller.config.done_action
+        max_halt_steps = controller.config.max_halt_steps
         scores = collapse_act_halt_continue_logits(
             next_q, done_action=done_action
         )
-        return torch.sigmoid(scores.continue_logit)
+        is_last_step = steps >= max_halt_steps
+        target_q = torch.where(
+            is_last_step,
+            scores.halt_logit,
+            torch.maximum(scores.halt_logit, scores.continue_logit),
+        )
+        return torch.sigmoid(target_q)
+
+
+# =============================================================================
+def _maybe_sum(  # ----------------------------------------------------------
+    tensor: Tensor | None,
+) -> Tensor | None:
+    """Sum a tensor if it's not None, otherwise return None."""
+    if tensor is not None:
+        return tensor.sum()
+    return None
 
 
 # =============================================================================

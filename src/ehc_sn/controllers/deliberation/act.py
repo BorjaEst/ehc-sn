@@ -29,11 +29,20 @@ from ehc_sn.utils.detach import DetachMixin
 class ACTControllerConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`ACTController`."""
 
+    max_halt_steps: int = Field(
+        ...,
+        ge=1,
+        description=(
+            "Training-only per-slot step budget; slots are forced to halt once "
+            "steps reach this value."
+        ),
+    )
     exploration_prob: float = Field(
         ...,
         ge=0.0,
         le=1.0,
-        description="Probability of flipping the greedy halt decision during exploration.",
+        description="Probability of delaying a greedy halt decision during "
+        "exploration.",
     )
     done_action: int = Field(
         default=0,
@@ -90,7 +99,7 @@ class ACTHaltContinueScores:
 
 
 # =============================================================================
-def collapse_act_halt_continue_logits(
+def collapse_act_halt_continue_logits(  # -------------------------------------
     q_logits: Tensor,
     *,
     done_action: int,
@@ -106,16 +115,18 @@ def collapse_act_halt_continue_logits(
     """
     if q_logits.ndim != 2:
         raise ValueError(
-            f"collapse_act_halt_continue_logits expects shape (B, A), got {tuple(q_logits.shape)}."
+            "collapse_act_halt_continue_logits expects shape (B, A), "
+            f"got {tuple(q_logits.shape)}."
         )
     n_actions = q_logits.shape[-1]
     if n_actions < 2:
         raise ValueError(
-            f"collapse_act_halt_continue_logits requires at least 2 actions, got {n_actions}."
+            "collapse_act_halt_continue_logits requires at least 2 actions, "
+            f"got {n_actions}."
         )
     if done_action < 0 or done_action >= n_actions:
         raise ValueError(
-            f"done_action={done_action} is out of range for {n_actions} actions."
+            f"done_action={done_action} out of range for {n_actions} actions."
         )
 
     non_done = [i for i in range(n_actions) if i != done_action]
@@ -127,30 +138,44 @@ def collapse_act_halt_continue_logits(
 
 
 # =============================================================================
-def maybe_flip_halt_decision(
+def maybe_flip_halt_decision(  # ----------------------------------------------
     greedy_halt: Tensor,
     *,
+    steps: Tensor,
     explore: bool,
     exploration_prob: float,
+    max_halt_steps: int,
 ) -> Tensor:
-    """Optionally flip the halt boolean with probability ``exploration_prob``.
+    """Optionally delay greedy halts until a sampled minimum step.
 
     Args:
         greedy_halt: Bool tensor of shape ``(B,)``.
+        steps: Per-slot step counters of shape ``(B,)``.
         explore: Whether exploration is active.
         exploration_prob: Per-slot probability of flipping the halt decision.
+        max_halt_steps: Forced halt step budget.
 
     Returns:
-        Bool tensor of shape ``(B,)`` with some decisions flipped.
+        Bool tensor of shape ``(B,)`` with greedy halts optionally delayed.
     """
-    if not explore or exploration_prob <= 0.0:
+    if not explore or exploration_prob <= 0.0 or max_halt_steps <= 1:
         return greedy_halt
 
-    flip = (
+    explore_mask = (
         torch.rand(greedy_halt.shape, device=greedy_halt.device)
         < exploration_prob
     )
-    return greedy_halt ^ flip
+    sampled_min = torch.randint(
+        low=2,
+        high=max_halt_steps + 1,
+        size=steps.shape,
+        device=steps.device,
+        dtype=steps.dtype,
+    )
+    min_halt_steps = torch.where(
+        explore_mask, sampled_min, torch.zeros_like(steps)
+    )
+    return greedy_halt & (steps >= min_halt_steps)
 
 
 # =============================================================================
@@ -159,6 +184,7 @@ class ACTControllerStepOutput(DetachMixin):
     """Raw execution output produced by a single ACT controller step."""
 
     backbone_output: ACTBackboneOutput
+    done_action: int
 
     @property
     def task(self) -> object:
@@ -177,7 +203,7 @@ class ACTController[ModelState](
 ):
     """One-step masked recurrent transition primitive for ACT rollouts."""
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         backbone: ACTRolloutBackbone[ModelState],
         config: ACTControllerConfig,
@@ -190,7 +216,7 @@ class ACTController[ModelState](
         """Return the wrapped ACT backbone typed to the local protocol."""
         return cast(ACTRolloutBackbone[ModelState], super().backbone)
 
-    def initial_state(
+    def initial_state(  # -----------------------------------------------------
         self,
         batch_sample: Batch,
     ) -> ACTRolloutState[ModelState]:
@@ -203,7 +229,7 @@ class ACTController[ModelState](
             data=slots.data,
         )
 
-    def step(
+    def step(  # --------------------------------------------------------------
         self,
         state: ACTRolloutState[ModelState],
         batch: Batch,
@@ -228,10 +254,13 @@ class ACTController[ModelState](
         next_state = ACTRolloutState(
             model_state=model_state, steps=steps, halted=done, data=data
         )
-        output = ACTControllerStepOutput(backbone_output=backbone_output)
+        output = ACTControllerStepOutput(
+            backbone_output=backbone_output,
+            done_action=self.config.done_action,
+        )
         return next_state, output
 
-    def _compute_done(
+    def _compute_done(  # -----------------------------------------------------
         self,
         backbone_output: ACTBackboneOutput,
         steps: Tensor,
@@ -239,7 +268,9 @@ class ACTController[ModelState](
         allow_halt: bool,
         explore: bool,
     ) -> Tensor:
-        """Derive the halted mask from q_logits using the shared collapse contract."""
+        """Derive the halted mask from q_logits using the shared collapse
+        contract.
+        """
         q_logits = backbone_output.control.q_logits.detach()
         scores = collapse_act_halt_continue_logits(
             q_logits, done_action=self.config.done_action
@@ -248,9 +279,12 @@ class ACTController[ModelState](
         if allow_halt:
             halt = maybe_flip_halt_decision(
                 scores.greedy_halt,
+                steps=steps,
                 explore=explore,
                 exploration_prob=self.config.exploration_prob,
+                max_halt_steps=self.config.max_halt_steps,
             )
+            halt = halt | (steps >= self.config.max_halt_steps)
         else:
             halt = torch.zeros_like(scores.greedy_halt, dtype=torch.bool)
 

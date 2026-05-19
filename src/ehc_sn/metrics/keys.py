@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 # =============================================================================
-LOSS_LM: str = "loss_lm"
+LOSS_TOKEN: str = "loss_token"
 
 ACT_LOSS_Q_DONE: str = "loss_q_done"
 ACT_LOSS_Q_CONTINUE: str = "loss_q_continue"
@@ -68,7 +68,7 @@ def extra_ratio_paths(  # -----------------------------------------------------
 __all__ = [
     "ACT_LOSS_Q_CONTINUE",
     "ACT_LOSS_Q_DONE",
-    "LOSS_LM",
+    "LOSS_TOKEN",
     "RL_LOSS_ACTOR",
     "RL_LOSS_CRITIC",
     "RL_LOSS_ENTROPY",

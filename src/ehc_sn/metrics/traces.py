@@ -50,15 +50,9 @@ class _CommonTraceContext(Protocol):
 
 
 class _ACTTraceOutputs(Protocol):
-    """Raw ACTStepOutput surface accessed by ACT trace fields."""
+    """Raw ACT controller-step output surface accessed by ACT trace fields."""
 
-    class _Control(Protocol):
-        q_logits: Tensor
-
-    class _Backbone(Protocol):
-        control: "_ACTTraceOutputs._Control"
-
-    backbone_output: _Backbone
+    q_logits: Tensor
 
 
 class _ACTTraceContext(_CommonTraceContext, Protocol):
@@ -171,9 +165,7 @@ COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
 
 def _get_q_logits_act(ctx: _ACTTraceContext) -> TraceValue:
     """Q-logits over halt/continue actions from the raw ACT controller step."""
-    logits_q: Tensor = (
-        ctx.outputs.backbone_output.control.q_logits
-    )  # (B, n_actions)
+    logits_q: Tensor = ctx.outputs.q_logits  # (B, n_actions)
     return logits_q.detach()
 
 
@@ -186,7 +178,7 @@ ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_Q_LOGITS_ACT,)
 
 
 # =============================================================================
-# RL-specific — produced by HybridRLLossHead.compute_step() via HRMV2ValidationScorer
+# RL-specific — produced by HybridRLObjective.compute_step() via HRMV2ValidationScorer
 # =============================================================================
 
 

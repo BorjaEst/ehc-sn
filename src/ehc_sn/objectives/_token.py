@@ -85,28 +85,35 @@ class AccuracyStats:
 
 # =============================================================================
 def compute_accuracy_stats(  # ------------------------------------------------
-    logits_lm: Tensor,
+    logits_token: Tensor,
     labels: Tensor,
     *,
     ignore_label_id: int = IGNORE_LABEL_ID,
 ) -> AccuracyStats:
     """Compute masked token correctness statistics out of graph."""
     mask = labels != ignore_label_id
-    is_correct = mask & (torch.argmax(logits_lm, dim=-1) == labels)
+    is_correct = mask & (torch.argmax(logits_token, dim=-1) == labels)
     return AccuracyStats(mask=mask, is_correct=is_correct)
 
 
 # =============================================================================
-def compute_lm_loss_sum(  # ---------------------------------------------------
+def compute_token_loss_sum(  # ---------------------------------------------------
     loss_fn: Any,
-    logits_lm: Tensor,
+    logits_token: Tensor,
     labels: Tensor,
     stats: AccuracyStats,
     *,
     ignore_label_id: int = IGNORE_LABEL_ID,
+    token_weights: Tensor | None = None,
 ) -> Tensor:
     """Compute the summed supervised LM loss over the batch."""
-    loss_per_token = loss_fn(logits_lm, labels, ignore_index=ignore_label_id)
+    loss_per_token = loss_fn(logits_token, labels, ignore_index=ignore_label_id)
+    if token_weights is not None:
+        if token_weights.shape != labels.shape:
+            raise ValueError(
+                "token_weights must match labels shape for LM loss weighting.",
+            )
+        loss_per_token = loss_per_token * token_weights.to(loss_per_token.dtype)
     loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
     return loss_per_seq.sum()
 
@@ -164,5 +171,5 @@ __all__ = [
     "TokenSupervisionBinding",
     "build_token_step_metrics",
     "compute_accuracy_stats",
-    "compute_lm_loss_sum",
+    "compute_token_loss_sum",
 ]

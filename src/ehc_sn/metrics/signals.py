@@ -1,7 +1,7 @@
 """Canonical signal vocabulary for diagnostic and research logging.
 
 All signal producers (:meth:`~ehc_sn.objectives.act.ACTObjective.compute_signals`,
-:meth:`~ehc_sn.objectives.hybrid_rl.HybridRLLossHead.compute_step`,
+:meth:`~ehc_sn.objectives.hybrid_rl.HybridRLObjective.compute_step`,
 :meth:`~ehc_sn.objectives.tem.TEMObjective.compute_signals`) and consumers
 (:class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback`) import from this
 module rather than using string literals. This ensures that renaming a signal
@@ -67,7 +67,7 @@ ACT_SIGNALS: frozenset[str] = frozenset(
 
 
 # =============================================================================
-# RL-specific — produced by HybridRLLossHead.compute_step()
+# RL-specific — produced by HybridRLObjective.compute_step()
 # =============================================================================
 
 

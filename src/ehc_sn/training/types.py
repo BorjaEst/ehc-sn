@@ -67,7 +67,7 @@ class StepMetrics:
     """Aggregated per-step metrics used for logging and control flow.
 
     ``extras`` stores algorithm-specific ratio metrics keyed by a stable internal
-    name such as ``"loss_lm"`` or ``"loss_actor"``.
+    name such as ``"loss_token"`` or ``"loss_actor"``.
     """
 
     episode: RolloutAgg

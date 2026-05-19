@@ -264,18 +264,17 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     # Checkpointing and evaluation settings
     checkpoint_path: Optional[str] = Field(
         default=None,
-        description=(
-            "Path to save checkpoints and logs. "
-            "If not set, it defaults to `checkpoints/<project_name>/<run_name>`."
-        ),
+        description="Path to save checkpoints and logs. If not set, it "
+        "defaults to `checkpoints/<project_name>/<run_name>`.",
     )
     checkpoint_every_eval: bool = Field(
         default=False,
         description="Whether to checkpoint the model after every evaluation.",
     )
-    limit_val_batches: int = Field(
-        default=1,
-        description="Cap validation to N batches per validation run.",
+    limit_val_batches: float = Field(
+        default=1.0,
+        description="Fraction of validation batches to run. Use 1.0 for full "
+        "validation coverage; values < 1.0 cap the run.",
     )
     eval_save_outputs: list[str] = Field(
         default_factory=list,

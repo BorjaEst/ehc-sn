@@ -98,8 +98,8 @@ class VariationalContext:
 
 # =============================================================================
 @dataclass(frozen=True)
-class VariationalOutputs:
-    """ """
+class VariationalStepOutput:
+    """Raw execution output produced by a single variational-family step."""
 
 
 # =============================================================================
@@ -150,7 +150,7 @@ class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):
     def build_context(  # -----------------------------------------------------
         self,
         record: StepRecord,
-        outputs: VariationalOutputs,
+        outputs: VariationalStepOutput,
         **options: Any,
     ) -> VariationalContext:
         """Extract a variational context from the current step."""
@@ -158,10 +158,10 @@ class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):
 
     def compute_terms(  # -----------------------------------------------------
         self,
-        outputs: VariationalOutputs,
+        outputs: VariationalStepOutput,
         context: VariationalContext,
         **options: Any,
-    ) -> dict[str, Any]:
+    ) -> VariationalTerms:
         """Extract variational-family loss terms from the current step."""
         raise NotImplementedError
 
@@ -177,7 +177,7 @@ class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):
     def evaluate_metrics(  # --------------------------------------------------
         self,
         record: StepRecord,
-        outputs: VariationalOutputs,
+        outputs: VariationalStepOutput,
         context: VariationalContext,
         terms: VariationalTerms,
         losses: VariationalLosses,
@@ -189,7 +189,7 @@ class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):
     def compute_signals(  # ---------------------------------------------------
         self,
         record: StepRecord,
-        outputs: VariationalOutputs,
+        outputs: VariationalStepOutput,
         context: VariationalContext,
         terms: VariationalTerms,
         losses: VariationalLosses,
@@ -203,7 +203,7 @@ class VariationalObjectiveBase[ConfigT](BaseObjective[ConfigT]):
         losses: VariationalLosses,
         metrics: StepMetrics,
         signals: dict[str, Tensor],
-        outputs: VariationalOutputs,
+        outputs: VariationalStepOutput,
     ) -> Any:
         """Wrap losses, metrics, and signals into the concrete step-output type."""
         raise NotImplementedError

@@ -86,7 +86,9 @@ class HybridActorCriticTaskBinding(Protocol):
 class _TokenWeightBinding(Protocol):
     """Optional task binding surface for per-token LM weights."""
 
-    def extract_token_weights(self, record: ActorCriticInteractionRecord) -> Tensor:
+    def extract_token_weights(
+        self, record: ActorCriticInteractionRecord
+    ) -> Tensor:
         """Return per-token loss weights aligned with LM labels."""
 
 
@@ -201,9 +203,7 @@ class TD0ActorCriticBatchBuilder:
                     "TD0ActorCriticBatchBuilder: use_token_weights=True but the "
                     "task binding does not implement extract_token_weights."
                 )
-            token_weight_binding = cast(
-                _TokenWeightBinding, self._task_binding
-            )
+            token_weight_binding = cast(_TokenWeightBinding, self._task_binding)
             token_weights = token_weight_binding.extract_token_weights(record)
 
         return HybridActorCriticBatch(

@@ -49,11 +49,12 @@ from ehc_sn.metrics.keys import (
 )
 from ehc_sn.objectives._variational import (
     VariationalLosses,
-    VariationalLossHeadBase,
-    VariationalLossStep,
+    VariationalObjectiveBase,
+    VariationalObjectiveStep,
     get_reg_term,
     require_latent_relation,
 )
+from ehc_sn.rollouts import CarrySnapshot, StepRecord
 from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.types import Batch
 
@@ -101,12 +102,18 @@ class EHCStepOutput(Protocol):
 
 # =============================================================================
 class EHCObjectiveBinding[TargetsT](Protocol):
-    """Canonical task-binding protocol for the EHC objective."""
+    """Canonical task-binding protocol for the EHC objective.
+
+    The ``executed_batch`` input is the executed-step payload (``record.batch``)
+    and is authoritative for current-step supervision. The ``snapshot`` input
+    is a frozen post-step snapshot that should only provide continuity facts or
+    lightweight post-step projections.
+    """
 
     def extract_targets(  # ---------------------------------------------------
         self,
-        batch: Batch,
-        carry: Any,
+        executed_batch: Batch,
+        snapshot: CarrySnapshot,
         step_output: Any,
     ) -> TargetsT:
         """Return the task-owned supervision targets for the current step."""
@@ -231,7 +238,7 @@ class EHCLosses(VariationalLosses):
 
 # =============================================================================
 @dataclass(frozen=True)
-class EHCObjectiveStep(VariationalLossStep):
+class EHCObjectiveStep(VariationalObjectiveStep):
     """A single rollout/loss step produced by :class:`EHCObjective`."""
 
     losses: EHCLosses
@@ -241,7 +248,7 @@ class EHCObjectiveStep(VariationalLossStep):
 
 
 # =============================================================================
-class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
+class EHCObjective(VariationalObjectiveBase[EHCObjectiveConfig]):
     """EHC objective scored over executed rollout chunks."""
 
     def __init__(  # ----------------------------------------------------------
@@ -267,7 +274,9 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
         **_: Any,
     ) -> EHCLosses:
         """Compute ELBO-style EHC losses for a single step."""
-        targets = self._task_binding.extract_targets(batch, carry, step_output)
+        targets = self._task_binding.extract_targets(
+            executed_batch=batch, snapshot=carry, step_output=step_output
+        )
         labels = self._task_binding.extract_observation_id(targets)
         protocol_mask = self._task_binding.extract_protocol_mask(targets)
         grid_relation = require_latent_relation(
@@ -371,7 +380,9 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
         **_: Any,
     ) -> dict[str, RatioStat]:
         """Build detached EHC ratio metrics for logging."""
-        targets = self._task_binding.extract_targets(batch, carry, step_output)
+        targets = self._task_binding.extract_targets(
+            executed_batch=batch, snapshot=carry, step_output=step_output
+        )
         labels = self._task_binding.extract_observation_id(targets)
         protocol_mask = self._task_binding.extract_protocol_mask(targets)
         protocol_count = protocol_mask.to(dtype=losses.total.dtype).sum()
@@ -417,7 +428,7 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
             ),
         }
 
-    def _build_step_output(  # ------------------------------------------------
+    def build_output(  # ------------------------------------------------
         self,
         losses: EHCLosses,
         metrics: StepMetrics,
@@ -431,15 +442,21 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
 
     def compute_signals(  # ---------------------------------------------------
         self,
-        batch: Batch,
-        carry: Any,
+        record: StepRecord,
         outputs: EHCStepOutput,
+        context: Any,
+        terms: Any,
         losses: EHCLosses,
-        step_output: Any = None,
         **_: Any,
     ) -> dict[str, Tensor]:
         """Compute detached EHC diagnostics and ELBO-style scalar signals."""
-        targets = self._task_binding.extract_targets(batch, carry, step_output)
+        _ = context, terms
+        step_output = record.outputs
+        targets = self._task_binding.extract_targets(
+            executed_batch=record.batch,
+            snapshot=record.carry,
+            step_output=step_output,
+        )
         labels = self._task_binding.extract_observation_id(targets)
         grid_relation = require_latent_relation(
             outputs.latent_relations, GRID_TRANSITION_RELATION
@@ -451,7 +468,9 @@ class EHCObjective(VariationalLossHeadBase[EHCObjectiveConfig]):
             PLACE_SENSORY_RELATION
         )
         denom = losses.protocol_count.detach().clamp_min(1.0)
-        signals = super().compute_signals(batch, carry, outputs, losses)
+        signals = super().compute_signals(
+            record, outputs, context, terms, losses
+        )
 
         loss_obs_inference = (
             self.loss_fn(outputs.logits_inference, labels).sum().detach()

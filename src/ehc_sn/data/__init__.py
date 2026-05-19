@@ -14,25 +14,25 @@ Public sub-namespaces:
 """
 
 from ehc_sn.data import (
-	datamodules,
-	datasets,
-	diagnostics,
-	index,
-	lifecycle,
-	manifest,
-	schema,
-	substrate,
-	transforms,
+    datamodules,
+    datasets,
+    diagnostics,
+    index,
+    lifecycle,
+    manifest,
+    schema,
+    substrate,
+    transforms,
 )
 
 __all__ = [
-	"schema",
-	"manifest",
-	"index",
-	"datasets",
-	"datamodules",
-	"transforms",
-	"lifecycle",
-	"substrate",
-	"diagnostics",
+    "schema",
+    "manifest",
+    "index",
+    "datasets",
+    "datamodules",
+    "transforms",
+    "lifecycle",
+    "substrate",
+    "diagnostics",
 ]
