@@ -20,7 +20,7 @@ from ehc_sn.types import Channels
 from ehc_sn.utils.symmetry import dihedral_transform
 
 
-# =================================================================================================
+# =============================================================================
 class Compose:
     """Chain multiple channel transforms sequentially.
 
@@ -40,32 +40,40 @@ class Compose:
         adapter packages.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, transforms: Sequence[Callable[[Channels], Channels] | None],
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        transforms: Sequence[Callable[[Channels], Channels] | None],
+    ) -> None:
+        """Initialize the Compose transform."""
         self.transforms = []
         for transform in transforms:
             if transform is None:
                 continue
             if not callable(transform):
-                raise TypeError(f"Compose transforms must be callable or None, got {type(transform).__name__}.")  # fmt: skip
+                raise TypeError(
+                    "Compose transforms must be callable or None, got "
+                    f"{type(transform).__name__}.",
+                )
             self.transforms.append(transform)
 
-    def __call__(  # -----------------------------------------------------------------------------
-        self, channels: Channels,
-    ) -> Channels:  # fmt: skip
+    def __call__(  # ----------------------------------------------------------
+        self,
+        channels: Channels,
+    ) -> Channels:
+        """Apply the sequence of transforms to the input channels."""
         for t in self.transforms:
             channels = t(channels)
         return channels
 
-    def __repr__(  # ------------------------------------------------------------------------------
+    def __repr__(  # ----------------------------------------------------------
         self,
-    ) -> str:  # fmt: skip
+    ) -> str:
+        """Return a string representation of the Compose transform."""
         steps = ", ".join(repr(t) for t in self.transforms)
         return f"{type(self).__name__}([{steps}])"
 
 
-# =================================================================================================
+# =============================================================================
 class RandomDihedral:
     """Apply a random dihedral symmetry to all channels consistently.
 
@@ -87,31 +95,40 @@ class RandomDihedral:
         channel sets.
     """
 
-    def __init__(  # ------------------------------------------------------------------------------
-        self, rng: np.random.Generator | None = None,
-    ) -> None:  # fmt: skip
+    def __init__(  # ----------------------------------------------------------
+        self,
+        rng: np.random.Generator | None = None,
+    ) -> None:
+        """Initialize the RandomDihedral transform."""
         self._rng = rng if rng is not None else np.random.default_rng()
 
-    def __call__(  # ------------------------------------------------------------------------------
+    def __call__(  # ----------------------------------------------------------
         self, channels: Channels
-    ) -> Channels:  # fmt: skip
+    ) -> Channels:
+        """Apply a random dihedral transformation to the input channels."""
         first_channel = next(iter(channels.values()))
         if first_channel.ndim != 2:
             return channels
 
         h, w = first_channel.shape
-        if any(channel.ndim != 2 or channel.shape != (h, w) for channel in channels.values()):
+        if any(
+            channel.ndim != 2 or channel.shape != (h, w)
+            for channel in channels.values()
+        ):
             return channels
 
         valid_tids = (0, 1, 2, 3, 4, 5, 6, 7) if h == w else (0, 2, 4, 5)
         tid = int(valid_tids[int(self._rng.integers(len(valid_tids)))])
-        return {name: dihedral_transform(arr, tid) for name, arr in channels.items()}
+        return {
+            name: dihedral_transform(arr, tid) for name, arr in channels.items()
+        }
 
-    def __repr__(  # ------------------------------------------------------------------------------
+    def __repr__(  # ----------------------------------------------------------
         self,
-    ) -> str:  # fmt: skip
+    ) -> str:
+        """Return a string representation of the RandomDihedral transform."""
         return f"{type(self).__name__}()"
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["Channels", "Compose", "RandomDihedral"]

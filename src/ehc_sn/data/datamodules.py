@@ -19,7 +19,7 @@ from ehc_sn.data.index import filter_index, read_index
 from ehc_sn.data.transforms import Compose, RandomDihedral
 
 
-# =================================================================================================
+# =============================================================================
 class DatamoduleConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`Datamodule` (LightningDataModule)."""
 
@@ -57,7 +57,7 @@ class DatamoduleConfig(BaseModel, extra="forbid"):
     )
 
 
-# =================================================================================================
+# =============================================================================
 class Datamodule(L.LightningDataModule):
     """Lightning DataModule for processed datasets.
 
@@ -65,7 +65,11 @@ class Datamodule(L.LightningDataModule):
     per-split channel arrays. Optionally applies training-time augmentation.
     """
 
-    def __init__(self, config: DatamoduleConfig, transform: Callable | None = None,) -> None:  # fmt: skip  # ------------------------------------------------------------------------------
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: DatamoduleConfig,
+        transform: Callable | None = None,
+    ) -> None:
         """Create the data module.
 
         Args:
@@ -88,7 +92,11 @@ class Datamodule(L.LightningDataModule):
     def train_transform(self) -> list[Callable]:
         """Transforms applied to training samples."""
         return [
-            RandomDihedral(rng=np.random.default_rng(self.config.seed)) if self.config.augment else None,
+            (
+                RandomDihedral(rng=np.random.default_rng(self.config.seed))
+                if self.config.augment
+                else None
+            ),
             self._adapter,
         ]
 
@@ -99,7 +107,10 @@ class Datamodule(L.LightningDataModule):
             self._adapter,
         ]
 
-    def setup(self, stage: str,) -> None:  # fmt: skip  # ---------------------------------------------------------------------------------
+    def setup(  # -------------------------------------------------------------
+        self,
+        stage: str,
+    ) -> None:
         """Load datasets for the given stage(s)."""
         data_root = self.config.dataset_path
         all_entries = read_index(data_root / "index.jsonl")
@@ -112,50 +123,78 @@ class Datamodule(L.LightningDataModule):
         # We rely on the DataLoader workers to apply the transforms
         if stage in ("fit", "validate"):
             entries = filter_index(all_entries, split="train")
-            self._train = ProcessedDataset(entries, data_root / "train", transform=train_transform)
+            self._train = ProcessedDataset(
+                entries, data_root / "train", transform=train_transform
+            )
             entries = filter_index(all_entries, split="val")
-            self._val = ProcessedDataset(entries, data_root / "val", transform=eval_transform)
+            self._val = ProcessedDataset(
+                entries, data_root / "val", transform=eval_transform
+            )
         if stage == "test":
             entries = filter_index(all_entries, split="test")
-            self._test = ProcessedDataset(entries, data_root / "test", transform=eval_transform)
+            self._test = ProcessedDataset(
+                entries, data_root / "test", transform=eval_transform
+            )
 
-    def _per_gpu_batch_size(self,) -> int:  # fmt: skip
+    def _per_gpu_batch_size(  # -----------------------------------------------
+        self,
+    ) -> int:
         """Compute per-device batch size from the global value."""
-        world_size = max(self.trainer.world_size if self.trainer is not None else 1, 1)
+        world_size = max(
+            self.trainer.world_size if self.trainer is not None else 1, 1
+        )
         return max(self.config.global_batch_size // world_size, 1)
 
-    def _make_loader(self, dataset: ProcessedDataset, *, shuffle: bool,) -> DataLoader:  # fmt: skip  # --------------------------------------------------------------------------
+    def _make_loader(  # ------------------------------------------------------
+        self,
+        dataset: ProcessedDataset,
+        *,
+        shuffle: bool,
+    ) -> DataLoader:
         """Construct a DataLoader for the given dataset and settings."""
         return DataLoader(
             dataset,
             batch_size=self._per_gpu_batch_size(),
             shuffle=shuffle,  # Shuffle to ensure all data is seen during training (halt buffer)
             num_workers=self.config.num_workers,
-            prefetch_factor=self.config.prefetch_factor if self.config.num_workers > 0 else None,
+            prefetch_factor=(
+                self.config.prefetch_factor
+                if self.config.num_workers > 0
+                else None
+            ),
             pin_memory=self.config.pin_memory,
-            persistent_workers=self.config.persistent_workers and self.config.num_workers > 0,
+            persistent_workers=self.config.persistent_workers
+            and self.config.num_workers > 0,
             drop_last=True,  # Drop last batch to ensure consistent batch size
         )
 
-    def train_dataloader(self,) -> DataLoader:  # fmt: skip  # ----------------------------------------------------------------------
+    def train_dataloader(  # --------------------------------------------------
+        self,
+    ) -> DataLoader:
         """Return the training DataLoader."""
         if self._train is None:
             raise RuntimeError("Call setup('fit') before train_dataloader()")
         return self._make_loader(self._train, shuffle=True)
 
-    def val_dataloader(self,) -> DataLoader:  # fmt: skip  # ------------------------------------------------------------------------
+    def val_dataloader(  # ----------------------------------------------------
+        self,
+    ) -> DataLoader:
         """Return the validation DataLoader."""
         if self._val is None:
-            raise RuntimeError("Call setup('fit') or setup('validate') before val_dataloader()")
+            raise RuntimeError(
+                "Call setup('fit') or setup('validate') before val_dataloader()"
+            )
         return self._make_loader(self._val, shuffle=False)
 
-    def test_dataloader(self,) -> DataLoader:  # fmt: skip  # -----------------------------------------------------------------------
+    def test_dataloader(  # ---------------------------------------------------
+        self,
+    ) -> DataLoader:
         """Return the test DataLoader."""
         if self._test is None:
             raise RuntimeError("Call setup('test') before test_dataloader()")
         return self._make_loader(self._test, shuffle=False)
 
-    def val_sample_ids_for_batch(
+    def val_sample_ids_for_batch(  # ------------------------------------------
         self,
         batch_idx: int,
         batch_size: int,
@@ -203,5 +242,5 @@ class Datamodule(L.LightningDataModule):
         return [entries[i].id for i in local_indices[start:end]]
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = ["Datamodule", "DatamoduleConfig"]
