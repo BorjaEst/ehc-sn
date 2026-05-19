@@ -275,6 +275,7 @@
         "pydantic",
         "pytest",
         "pythonpath",
+        "pyupgrade",
         "Quirke",
         "Quoc",
         "Rager",

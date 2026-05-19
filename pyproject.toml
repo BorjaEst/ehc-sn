@@ -48,7 +48,15 @@
     ]
 
 [project.optional-dependencies]
-    dev = ["pytest", "black", "flake8", "mypy"]
+    dev = [
+        "pytest",
+        "black",
+        "isort",
+        "flake8",
+        "mypy",
+        "ruff",
+        "pyupgrade",
+    ]
 
 [project.urls]
     "Homepage"      = "https://github.com/BorjaEst/ehc-sn"
