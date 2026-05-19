@@ -150,6 +150,7 @@ class Datamodule(L.LightningDataModule):
         dataset: ProcessedDataset,
         *,
         shuffle: bool,
+        drop_last: bool,
     ) -> DataLoader:
         """Construct a DataLoader for the given dataset and settings."""
         return DataLoader(
@@ -165,7 +166,7 @@ class Datamodule(L.LightningDataModule):
             pin_memory=self.config.pin_memory,
             persistent_workers=self.config.persistent_workers
             and self.config.num_workers > 0,
-            drop_last=True,  # Drop last batch to ensure consistent batch size
+            drop_last=drop_last,  # Drop last batch only for training
         )
 
     def train_dataloader(  # --------------------------------------------------
@@ -174,7 +175,7 @@ class Datamodule(L.LightningDataModule):
         """Return the training DataLoader."""
         if self._train is None:
             raise RuntimeError("Call setup('fit') before train_dataloader()")
-        return self._make_loader(self._train, shuffle=True)
+        return self._make_loader(self._train, shuffle=True, drop_last=True)
 
     def val_dataloader(  # ----------------------------------------------------
         self,
@@ -184,7 +185,7 @@ class Datamodule(L.LightningDataModule):
             raise RuntimeError(
                 "Call setup('fit') or setup('validate') before val_dataloader()"
             )
-        return self._make_loader(self._val, shuffle=False)
+        return self._make_loader(self._val, shuffle=False, drop_last=False)
 
     def test_dataloader(  # ---------------------------------------------------
         self,
@@ -192,7 +193,7 @@ class Datamodule(L.LightningDataModule):
         """Return the test DataLoader."""
         if self._test is None:
             raise RuntimeError("Call setup('test') before test_dataloader()")
-        return self._make_loader(self._test, shuffle=False)
+        return self._make_loader(self._test, shuffle=False, drop_last=False)
 
     def val_sample_ids_for_batch(  # ------------------------------------------
         self,
@@ -204,7 +205,7 @@ class Datamodule(L.LightningDataModule):
         """Return ordered sample IDs for a validation batch on the given process.
 
         Simulates ``DistributedSampler(shuffle=False, drop_last=False)`` plus
-        sequential ``DataLoader(drop_last=True)`` batching — the same
+        sequential ``DataLoader(drop_last=False)`` batching — the same
         distribution that PyTorch Lightning applies to the val dataloader in
         DDP mode.  For ``world_size == 1`` this reduces to simple sequential
         batching.
@@ -218,8 +219,8 @@ class Datamodule(L.LightningDataModule):
         Returns:
             Ordered list of :attr:`~ehc_sn.data.index.DatasetIndexEntry.id`
             values for the requested batch.  Returns an empty list when
-            the datamodule has not been set up or the batch falls outside the
-            available samples (i.e. would have been dropped by ``drop_last``).
+            the datamodule has not been set up. Partial final batches are
+            returned when present.
         """
         if self._val is None:
             return []
@@ -237,9 +238,8 @@ class Datamodule(L.LightningDataModule):
         local_indices = all_indices[rank:total_size:world_size]
         start = batch_idx * batch_size
         end = start + batch_size
-        if end > len(local_indices):
-            return []  # incomplete batch; would be dropped by drop_last=True
-        return [entries[i].id for i in local_indices[start:end]]
+        sliced = local_indices[start : min(end, len(local_indices))]
+        return [entries[i].id for i in sliced]
 
 
 # =============================================================================

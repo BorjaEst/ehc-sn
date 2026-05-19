@@ -21,16 +21,29 @@ Path written: ``data/processed/mazehard/<corpus>/v<version>/``
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import numpy as np
 
-from ehc_sn.data.lifecycle import extract_version, staging_root, validate_version_root, write_index_at_root, write_split
+from ehc_sn.data.lifecycle import (
+    extract_version,
+    staging_root,
+    validate_version_root,
+    write_index_at_root,
+    write_split,
+)
 from ehc_sn.data.manifest import write_manifest
-from ehc_sn.data.substrate.maze_nd import SHARED_CHANNELS as MAZE_ND_SUBSTRATE_CHANNELS
+from ehc_sn.data.substrate.maze_nd import (
+    SHARED_CHANNELS as MAZE_ND_SUBSTRATE_CHANNELS,
+)
 from ehc_sn.data.substrate.maze_nd import SHARED_FAMILY as MAZE_ND_SHARED_FAMILY
-from ehc_sn.data.substrate.maze_nd import read_source_record_index
-from ehc_sn.data.substrate.reader import iter_substrate_entries_and_samples, load_substrate_manifest
+from ehc_sn.data.substrate.maze_nd import (
+    read_source_record_index,
+)
+from ehc_sn.data.substrate.reader import (
+    iter_substrate_entries_and_samples,
+    load_substrate_manifest,
+)
 from ehc_sn.tasks.mazehard._source_record import source_record_to_task_channels
 
 # =============================================================================
@@ -74,19 +87,30 @@ def validate_mazehard_task_sample(data: dict[str, np.ndarray]) -> None:
     """
     missing = set(MAZEHARD_TASK_CHANNELS) - data.keys()
     if missing:
-        raise ValueError(f"MazeHard task sample missing channels: {sorted(missing)}")
+        raise ValueError(
+            f"MazeHard task sample missing channels: {sorted(missing)}"
+        )
 
     shapes: dict[str, tuple[int, ...]] = {}
     for name, arr in data.items():
-        if name in MAZEHARD_TASK_CHANNEL_DTYPES and arr.dtype != MAZEHARD_TASK_CHANNEL_DTYPES[name]:
-            raise ValueError(f"Channel '{name}' has dtype {arr.dtype}, expected {MAZEHARD_TASK_CHANNEL_DTYPES[name]}.")
+        if (
+            name in MAZEHARD_TASK_CHANNEL_DTYPES
+            and arr.dtype != MAZEHARD_TASK_CHANNEL_DTYPES[name]
+        ):
+            raise ValueError(
+                f"Channel '{name}' has dtype {arr.dtype}, expected "
+                f"{MAZEHARD_TASK_CHANNEL_DTYPES[name]}."
+            )
         if name in MAZEHARD_TASK_CHANNEL_DTYPES and arr.ndim >= 2:
             shapes[name] = arr.shape[-2:]
 
     unique = set(shapes.values())
     if len(unique) > 1:
         detail = ", ".join(f"'{k}': {v}" for k, v in shapes.items())
-        raise ValueError(f"All MazeHard task channels must share (H, W) shape. Got: {detail}.")
+        raise ValueError(
+            "All MazeHard task channels must share (H, W) shape. "
+            f"Got: {detail}."
+        )
 
 
 def validate_mazehard_task_root(root: Path) -> dict:
@@ -106,7 +130,9 @@ def validate_mazehard_task_root(root: Path) -> dict:
     if manifest.get("dataset_class") != "task_corpus":
         raise ValueError("Root is not a task_corpus.")
     if manifest.get("task") != TASK_FAMILY:
-        raise ValueError(f"Root task is {manifest.get('task')!r}, expected {TASK_FAMILY!r}.")
+        raise ValueError(
+            f"Root task is {manifest.get('task')!r}, expected {TASK_FAMILY!r}."
+        )
 
     for split, n in manifest["n_samples"].items():
         split_dir = root / split
@@ -114,16 +140,34 @@ def validate_mazehard_task_root(root: Path) -> dict:
         for ch in MAZEHARD_TASK_CHANNELS:
             ch_file = split_dir / f"{ch}.npy"
             if not ch_file.exists():
-                raise FileNotFoundError(f"Missing task channel '{ch}' in {split_dir}.")
+                raise FileNotFoundError(
+                    f"Missing task channel '{ch}' in {split_dir}."
+                )
             arrays[ch] = np.load(ch_file, mmap_mode="r")
             if arrays[ch].shape[0] != n:
-                raise ValueError(f"Task channel '{ch}' in split '{split}' has {arrays[ch].shape[0]} samples, " f"manifest declares {n}.")
+                raise ValueError(
+                    f"Task channel '{ch}' in split '{split}' "
+                    f"has {arrays[ch].shape[0]} samples, manifest declares {n}."
+                )
 
         for i in range(n):
             sample = {ch: arrays[ch][i] for ch in MAZEHARD_TASK_CHANNELS}
             validate_mazehard_task_sample(sample)
 
     return manifest
+
+
+def _sample_entry_pairs(
+    pairs: list[tuple[Any, dict[str, np.ndarray]]],
+    n: int,
+    rng: np.random.Generator,
+) -> list[tuple[Any, dict[str, np.ndarray]]]:
+    if n == 0:
+        return []
+    if n == len(pairs):
+        return list(pairs)
+    indices = rng.choice(len(pairs), size=n, replace=False)
+    return [pairs[int(i)] for i in indices]
 
 
 # =============================================================================
@@ -143,7 +187,8 @@ def build_mazehard_task_corpus(
     Reads topology and mask_valid from the parent maze-nd shared substrate by
     stable source identity (``source_record_id`` in the substrate index), then
     joins with the corresponding interim records to recover start, goals, and
-    solution channels.  Writes a versioned, immutable task corpus.
+    solution channels.  Writes a versioned, immutable task corpus with per-sample
+    provenance retained in the task index.
 
     The version integer is derived from the ``v<N>`` leaf of *version_root*;
     there is no separate ``version`` parameter.
@@ -159,7 +204,7 @@ def build_mazehard_task_corpus(
         n_train: Number of training samples (capped by substrate split size).
         n_val: Number of validation samples (capped by substrate split size).
         n_test: Number of test samples (capped by substrate split size).
-        seed: Reserved for downstream compatibility.
+        seed: Deterministic sampling seed for task corpus membership.
 
     Raises:
         FileExistsError: When *version_root* already exists (immutable root).
@@ -174,7 +219,8 @@ def build_mazehard_task_corpus(
 
     if parent_manifest.get("family") != MAZE_ND_SHARED_FAMILY:
         raise ValueError(
-            f"MazeHard task corpus requires a {MAZE_ND_SHARED_FAMILY!r} shared substrate, " f"got family={parent_manifest.get('family')!r}."
+            f"MazeHard task corpus requires a {MAZE_ND_SHARED_FAMILY!r} shared "
+            f"substrate, got family={parent_manifest.get('family')!r}."
         )
 
     split_counts = {"train": n_train, "val": n_val, "test": n_test}
@@ -182,7 +228,10 @@ def build_mazehard_task_corpus(
     for split, n in split_counts.items():
         avail = parent_n.get(split, 0)
         if n > avail:
-            raise ValueError(f"Requested {n} {split!r} samples but parent substrate only has {avail}.")
+            raise ValueError(
+                f"Requested {n} {split!r} samples "
+                f"but parent substrate only has {avail}."
+            )
     parent_extent: list[int] = parent_manifest["extent"]
     parent_topology_kind: str = parent_manifest["topology_kind"]
     parent_n_states: int = parent_manifest["n_states"]
@@ -197,24 +246,61 @@ def build_mazehard_task_corpus(
         "seed": seed,
         "parent_version": parent_manifest["version"],
     }
-    canonical_parent = f"data/processed/{parent_manifest['family']}/v{parent_manifest['version']}"
+    canonical_parent = (
+        f"data/processed/{parent_manifest['family']}/"
+        f"v{parent_manifest['version']}"
+    )
+
+    seed_seq = np.random.SeedSequence(seed)
+    split_rngs = dict(
+        zip(
+            _SPLITS,
+            [np.random.default_rng(s) for s in seed_seq.spawn(len(_SPLITS))],
+        )
+    )
 
     with staging_root(version_root) as tmp:
         all_entries = []
         for split in _SPLITS:
             n = split_counts[split]
-            entry_sample_pairs = list(iter_substrate_entries_and_samples(parent_substrate, split, _SUBSTRATE_CHANNELS))[:n]
+            entry_sample_pairs = list(
+                iter_substrate_entries_and_samples(
+                    parent_substrate, split, _SUBSTRATE_CHANNELS
+                )
+            )
+            entry_sample_pairs = _sample_entry_pairs(
+                entry_sample_pairs,
+                n,
+                split_rngs[split],
+            )
 
             samples = []
+            per_sample_extra = []
             for entry, substrate_sample in entry_sample_pairs:
                 if not entry.source_record_id:
-                    raise ValueError(f"Substrate entry {entry.id!r} has no source_record_id. " "Rebuild the parent substrate.")
+                    raise ValueError(
+                        f"Substrate entry {entry.id!r} has no source_record_id. "
+                        "Rebuild the parent substrate."
+                    )
                 raw_record = raw_by_id.get(entry.source_record_id)
                 if raw_record is None:
-                    raise ValueError(f"source_record_id {entry.source_record_id!r} not found in interim at {interim_root}.")
+                    raise ValueError(
+                        f"source_record_id {entry.source_record_id!r} "
+                        f"not found in interim at {interim_root}."
+                    )
                 task_channels = source_record_to_task_channels(raw_record)
                 sample = {**substrate_sample, **task_channels}
                 samples.append(sample)
+                per_sample_extra.append(
+                    {
+                        "source_record_id": entry.source_record_id,
+                        "task_metadata": {
+                            "puzzle_index": raw_record["puzzle_index"],
+                            "group_index": raw_record["group_index"],
+                            "raw_split": raw_record["set"],
+                        },
+                    }
+                )
 
             entries = write_split(
                 tmp,
@@ -226,6 +312,7 @@ def build_mazehard_task_corpus(
                 n_states=parent_n_states,
                 extent=parent_extent,
                 index_kwargs={},
+                per_sample_extra=per_sample_extra,
                 sample_validator=validate_mazehard_task_sample,
             )
             all_entries.extend(entries)
@@ -256,7 +343,9 @@ def build_mazehard_task_corpus(
         )
 
     n_total = n_train + n_val + n_test
-    print(f"MazeHard task corpus written to {version_root}  ({n_total} samples.)")
+    print(
+        f"MazeHard task corpus written to {version_root}  ({n_total} samples.)"
+    )
 
 
 __all__ = [

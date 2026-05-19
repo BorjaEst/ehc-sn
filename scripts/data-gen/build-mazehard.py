@@ -36,9 +36,14 @@ from typing import Annotated
 import typer
 
 from ehc_sn.data.lifecycle import validate_version_root
-from ehc_sn.data.substrate.maze_nd import SHARED_FAMILY, build_shared_substrate
+from ehc_sn.data.substrate.maze_nd import (
+    SHARED_FAMILY,
+    build_shared_substrate,
+)
 from ehc_sn.data.substrate.maze_nd import ensure_raw as _ensure_raw_corpus
-from ehc_sn.data.substrate.maze_nd import prepare_interim as _prepare_mazehard_interim
+from ehc_sn.data.substrate.maze_nd import (
+    prepare_interim as _prepare_mazehard_interim,
+)
 from ehc_sn.tasks.mazehard import build_mazehard_task_corpus
 
 # ---------------------------------------------------------------------------
@@ -65,7 +70,9 @@ def fetch_raw(
 @app.command("prepare-interim")
 def prepare_interim(
     raw_root: Annotated[Path, typer.Option("--raw-root")] = _DEFAULT_RAW_ROOT,
-    interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
+    interim_root: Annotated[
+        Path, typer.Option("--interim-root")
+    ] = _DEFAULT_INTERIM_ROOT,
 ) -> None:
     """Normalize raw corpus to a deterministic interim artifact under data/interim/."""
     _prepare_mazehard_interim(raw_root.resolve(), interim_root.resolve())
@@ -75,11 +82,15 @@ def prepare_interim(
 # ---------------------------------------------------------------------------
 @app.command("materialize-shared")
 def materialize_shared(
-    interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
+    interim_root: Annotated[
+        Path, typer.Option("--interim-root")
+    ] = _DEFAULT_INTERIM_ROOT,
     n_train: Annotated[int, typer.Option("--n-train")] = 200,
     n_val: Annotated[int, typer.Option("--n-val")] = 40,
     n_test: Annotated[int, typer.Option("--n-test")] = 40,
-    version: Annotated[int, typer.Option("--version")] = _DEFAULT_SHARED_VERSION,
+    version: Annotated[
+        int, typer.Option("--version")
+    ] = _DEFAULT_SHARED_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
 ) -> None:
     """Build the maze-nd shared substrate."""
@@ -97,12 +108,16 @@ def materialize_shared(
 # ---------------------------------------------------------------------------
 @app.command("materialize-task")
 def materialize_task(
-    interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
+    interim_root: Annotated[
+        Path, typer.Option("--interim-root")
+    ] = _DEFAULT_INTERIM_ROOT,
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
     n_train: Annotated[int, typer.Option("--n-train")] = 200,
     n_val: Annotated[int, typer.Option("--n-val")] = 40,
     n_test: Annotated[int, typer.Option("--n-test")] = 40,
-    shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
+    shared_version: Annotated[
+        int, typer.Option("--shared-version")
+    ] = _DEFAULT_SHARED_VERSION,
     version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
 ) -> None:
@@ -144,12 +159,16 @@ def validate(
 @app.command("build-all")
 def build_all(
     raw_root: Annotated[Path, typer.Option("--raw-root")] = _DEFAULT_RAW_ROOT,
-    interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
+    interim_root: Annotated[
+        Path, typer.Option("--interim-root")
+    ] = _DEFAULT_INTERIM_ROOT,
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
-    n_train: Annotated[int, typer.Option("--n-train")] = 200,
-    n_val: Annotated[int, typer.Option("--n-val")] = 40,
-    n_test: Annotated[int, typer.Option("--n-test")] = 40,
-    shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
+    n_train: Annotated[int, typer.Option("--n-train")] = 1000,
+    n_val: Annotated[int, typer.Option("--n-val")] = 100,
+    n_test: Annotated[int, typer.Option("--n-test")] = 10,
+    shared_version: Annotated[
+        int, typer.Option("--shared-version")
+    ] = _DEFAULT_SHARED_VERSION,
     version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
 ) -> None:

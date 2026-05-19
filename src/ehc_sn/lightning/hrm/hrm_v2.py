@@ -417,7 +417,9 @@ class HRMV2TrainingModel(L.LightningModule):
             )
 
         ac_batch = self.learner.build_deliberation_ac_batch(
-            record.outputs, record.snapshot
+            record.outputs,
+            record.snapshot,
+            use_token_weights=True,
         )
         step_output = self.objective.compute_step(ac_batch, is_warmup=is_warmup)
 

@@ -30,7 +30,7 @@ Both zero-bootstrap paths share :func:`_zero_bootstrap_batch`.
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import torch
 from torch import Tensor
@@ -81,6 +81,13 @@ class HybridActorCriticTaskBinding(Protocol):
         record: ActorCriticInteractionRecord,
     ) -> Tensor:
         """Return supervision labels from the interaction record."""
+
+
+class _TokenWeightBinding(Protocol):
+    """Optional task binding surface for per-token LM weights."""
+
+    def extract_token_weights(self, record: ActorCriticInteractionRecord) -> Tensor:
+        """Return per-token loss weights aligned with LM labels."""
 
 
 # =============================================================================
@@ -152,6 +159,8 @@ class TD0ActorCriticBatchBuilder:
         record: ActorCriticInteractionRecord,
         snapshot: ActorCriticExecutionSnapshot,
         bootstrap_value: Tensor,
+        *,
+        use_token_weights: bool = False,
     ) -> HybridActorCriticBatch:
         """Assemble a fully materialised TD(0) actor-critic batch.
 
@@ -185,6 +194,18 @@ class TD0ActorCriticBatchBuilder:
         returns = reward + self._gamma * bootstrap_value * (1.0 - done)
         advantages = (returns - value_est).detach()
 
+        token_weights = None
+        if use_token_weights:
+            if not hasattr(self._task_binding, "extract_token_weights"):
+                raise RuntimeError(
+                    "TD0ActorCriticBatchBuilder: use_token_weights=True but the "
+                    "task binding does not implement extract_token_weights."
+                )
+            token_weight_binding = cast(
+                _TokenWeightBinding, self._task_binding
+            )
+            token_weights = token_weight_binding.extract_token_weights(record)
+
         return HybridActorCriticBatch(
             actions=record.sampled_action,
             policy_logits=record.policy_logits,
@@ -197,6 +218,7 @@ class TD0ActorCriticBatchBuilder:
             action_entropy=record.policy_decision.entropy,
             task_logits=self._task_binding.extract_task_logits(record),
             labels=self._task_binding.extract_labels(record),
+            token_weights=token_weights,
             bootstrap_value=bootstrap_value,
             returns=returns,
             advantages=advantages,
@@ -208,6 +230,8 @@ class TD0ActorCriticBatchBuilder:
         self,
         record: ActorCriticInteractionRecord,
         carry: OnlineBootstrapCarry,
+        *,
+        use_token_weights: bool = False,
     ) -> HybridActorCriticBatch:
         """Build a fully materialised actor-critic batch from an online rollout carry.
 
@@ -225,12 +249,19 @@ class TD0ActorCriticBatchBuilder:
                 "ActorCriticInteractionRecord."
             )
         bootstrap_value = self.compute_bootstrap_value(carry)
-        return self.assemble_batch(record, carry, bootstrap_value)
+        return self.assemble_batch(
+            record,
+            carry,
+            bootstrap_value,
+            use_token_weights=use_token_weights,
+        )
 
     def build_deliberation_ac_batch(  # ---------------------------------------
         self,
         record: ActorCriticInteractionRecord,
         snapshot: ActorCriticExecutionSnapshot,
+        *,
+        use_token_weights: bool = False,
     ) -> HybridActorCriticBatch:
         """Build a TD(0) batch with zero bootstrap value.
 
@@ -253,7 +284,11 @@ class TD0ActorCriticBatchBuilder:
                 "requires a non-None task_output on ActorCriticInteractionRecord."
             )
         return _zero_bootstrap_batch(
-            record, snapshot.steps, snapshot.halted, self._task_binding
+            record,
+            snapshot.steps,
+            snapshot.halted,
+            self._task_binding,
+            use_token_weights=use_token_weights,
         )
 
 
@@ -263,6 +298,8 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
     steps: Tensor,
     halted: Tensor,
     task_binding: HybridActorCriticTaskBinding,
+    *,
+    use_token_weights: bool = False,
 ) -> HybridActorCriticBatch:
     """Canonical zero-bootstrap TD(0) batch assembly.
 
@@ -277,6 +314,16 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
     value_est = ir.value_estimate.squeeze(-1)
     returns = reward  # zero bootstrap collapses the discount term
     advantages = (returns - value_est).detach()
+    token_weights = None
+    if use_token_weights:
+        if not hasattr(task_binding, "extract_token_weights"):
+            raise RuntimeError(
+                "Zero-bootstrap batch: use_token_weights=True but the task "
+                "binding does not implement extract_token_weights."
+            )
+        token_weight_binding = cast(_TokenWeightBinding, task_binding)
+        token_weights = token_weight_binding.extract_token_weights(ir)
+
     return HybridActorCriticBatch(
         actions=ir.sampled_action,
         policy_logits=ir.policy_logits,
@@ -289,6 +336,7 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
         action_entropy=ir.policy_decision.entropy,
         task_logits=task_binding.extract_task_logits(ir),
         labels=task_binding.extract_labels(ir),
+        token_weights=token_weights,
         bootstrap_value=torch.zeros_like(reward),
         returns=returns,
         advantages=advantages,
@@ -405,7 +453,11 @@ class ZeroBootstrapActorCriticValidationScorer:
             )
 
         ac_batch = _zero_bootstrap_batch(
-            ir, steps, record.snapshot.halted, self._task_binding
+            ir,
+            steps,
+            record.snapshot.halted,
+            self._task_binding,
+            use_token_weights=bool(options.get("use_token_weights", False)),
         )
         is_warmup = bool(options.get("is_warmup", False))
         return self._objective.compute_step(ac_batch, is_warmup=is_warmup)

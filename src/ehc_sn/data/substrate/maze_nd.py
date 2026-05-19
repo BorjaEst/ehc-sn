@@ -111,6 +111,19 @@ def _iter_interim_records(interim_root: Path, split: str):
             yield json.loads(line)
 
 
+def _sample_records(
+    records: list[dict],
+    n: int,
+    rng: np.random.Generator,
+) -> list[dict]:
+    if n == 0:
+        return []
+    if n == len(records):
+        return list(records)
+    indices = rng.choice(len(records), size=n, replace=False)
+    return [records[int(i)] for i in indices]
+
+
 def read_source_record_index(interim_root: Path) -> dict[str, MazeNdSourceRecord]:
     """Return a dict mapping source_record_id to :class:`MazeNdSourceRecord`.
 
@@ -150,9 +163,10 @@ def build_shared_substrate(
     :func:`prepare_interim`) and writes a versioned, immutable dataset root
     containing only the shared-substrate channels (``topology``, ``mask_valid``).
 
-    The raw source provides ``train`` and ``test`` splits only.  ``n_val``
-    records are carved from the tail of the first ``n_train + n_val`` interim
-    training records.
+    The raw source provides ``train`` and ``test`` splits only. ``n_train``
+    records are sampled deterministically from the training population.
+    ``n_val`` and ``n_test`` are sampled deterministically from the raw test
+    population as non-overlapping partitions.
 
     The version integer is derived from the ``v<N>`` leaf of *version_root*;
     there is no separate ``version`` parameter.
@@ -172,35 +186,35 @@ def build_shared_substrate(
         RuntimeError: When the interim does not have enough records.
     """
     version = extract_version(version_root)
-    raw_train_needed = n_train + n_val
-    raw_train_records: list[dict] = []
-    for record in _iter_interim_records(interim_root, "train"):
-        raw_train_records.append(record)
-        if len(raw_train_records) >= raw_train_needed:
-            break
+    train_population = list(_iter_interim_records(interim_root, "train"))
+    test_population = list(_iter_interim_records(interim_root, "test"))
 
-    if len(raw_train_records) < raw_train_needed:
+    if len(train_population) < n_train:
         raise RuntimeError(
-            f"Interim maze-nd train split has only {len(raw_train_records)} records, "
-            f"need {raw_train_needed} (n_train={n_train} + n_val={n_val})."
+            f"Interim maze-nd train split has only {len(train_population)} records, "
+            f"need {n_train} (n_train={n_train})."
+        )
+    raw_test_needed = n_val + n_test
+    if len(test_population) < raw_test_needed:
+        raise RuntimeError(
+            f"Interim maze-nd test split has only {len(test_population)} records, "
+            f"need {raw_test_needed} (n_val={n_val} + n_test={n_test})."
         )
 
-    raw_val_records = raw_train_records[n_train:]
-    raw_train_records = raw_train_records[:n_train]
+    seed_seq = np.random.SeedSequence(seed)
+    train_seq, test_seq = seed_seq.spawn(2)
+    train_rng = np.random.default_rng(train_seq)
+    test_rng = np.random.default_rng(test_seq)
 
-    raw_test_records: list[dict] = []
-    for record in _iter_interim_records(interim_root, "test"):
-        raw_test_records.append(record)
-        if len(raw_test_records) >= n_test:
-            break
-
-    if len(raw_test_records) < n_test:
-        raise RuntimeError(f"Interim maze-nd test split has only {len(raw_test_records)} records, need {n_test}.")
+    raw_train_records = _sample_records(train_population, n_train, train_rng)
+    val_test_records = _sample_records(test_population, raw_test_needed, test_rng)
+    raw_val_records = val_test_records[:n_val]
+    raw_test_records = val_test_records[n_val:]
 
     raw_by_split: dict[str, list[dict]] = {
         "train": raw_train_records,
         "val": raw_val_records,
-        "test": raw_test_records[:n_test],
+        "test": raw_test_records,
     }
 
     first_normalized = normalize_raw_record(raw_train_records[0])
@@ -213,7 +227,7 @@ def build_shared_substrate(
         all_entries = []
         for split, records in raw_by_split.items():
             samples = [{ch: normalize_raw_record(r)[ch] for ch in SHARED_CHANNELS} for r in records]
-            raw_split = "test" if split == "test" else "train"
+            raw_split = "test" if split in ("val", "test") else "train"
             per_sample_extra = [{"source_record_id": f"{raw_split}:{r['puzzle_index']}"} for r in records]
             entries = write_split(
                 tmp,

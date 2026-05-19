@@ -265,7 +265,11 @@ class HRMV1TrainingModel(L.LightningModule):
             carry=self._train_carry,
             objective=self.objective,
             runner_options={"allow_halt": True, "explore": True},
-            objective_options={"controller": self.controller, "td_target": True},  # fmt: skip
+            objective_options={
+                "controller": self.controller,
+                "td_target": True,
+                "use_token_weights": True,
+            },
             metric_collection=self.train_metrics,
             metric_routes=ACT_STEP_ROUTES,
         )
