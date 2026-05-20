@@ -3,8 +3,8 @@
 The ACT binding reads from the objective-owned ACT step output protocol
 (``ACTStepOutput.task``).
 The hybrid RL binding reads task-specific fields from
-:class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord` for
-the actor-critic path.
+:class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord` for
+the value-control path.
 
 Mirrors the pattern used by
 :class:`~ehc_sn.adapters.arena.tem.objectives.ArenaTEMTaskBinding`
@@ -18,8 +18,8 @@ from typing import Any, Protocol, cast
 import torch
 from torch import Tensor
 
-from ehc_sn.controllers.contracts.actor_critic import (
-    ActorCriticInteractionRecord,
+from ehc_sn.controllers.contracts.value_control import (
+    ValueControlInteractionRecord,
 )
 from ehc_sn.objectives._token import AccuracyStats, compute_accuracy_stats
 from ehc_sn.objectives.act import ACTObjectiveBinding
@@ -29,7 +29,7 @@ from ehc_sn.tasks.mazehard.contracts import (
     MazeHardTargets,
 )
 from ehc_sn.tasks.mazehard.runtime import PATH_ID
-from ehc_sn.training.actor_critic import HybridActorCriticTaskBinding
+from ehc_sn.training.actor_critic import HybridValueTaskBinding
 from ehc_sn.types import Batch
 
 
@@ -94,9 +94,9 @@ class MazeHardHRMV1ACTTaskBinding(ACTObjectiveBinding[MazeHardTargets]):
 
 # =============================================================================
 class MazeHardHRMV2HybridTaskBinding:
-    """MazeHard-specific extraction for the hybrid RL actor-critic batch path.
+    """MazeHard-specific extraction for the hybrid RL value-control batch path.
 
-    Implements :class:`~ehc_sn.training.actor_critic.HybridActorCriticTaskBinding`
+    Implements :class:`~ehc_sn.training.actor_critic.HybridValueTaskBinding`
     for the HRM v2 + MazeHard pairing.  Extracts token logits from the
     task output on the interaction record and supervision labels from the
     observation dict used for the decision.
@@ -107,14 +107,14 @@ class MazeHardHRMV2HybridTaskBinding:
     """
 
     def extract_task_logits(  # -----------------------------------------------
-        self, record: ActorCriticInteractionRecord
+        self, record: ValueControlInteractionRecord
     ) -> Tensor:
         """Return token-prediction logits from ``record.task_output.task_logits``."""
         return _extract_record_task_logits(record)
 
     def extract_labels(  # -------------------------------------------------------------
         self,
-        record: ActorCriticInteractionRecord,
+        record: ValueControlInteractionRecord,
     ) -> Tensor:
         """Return supervision labels from ``record.observation_used_for_decision``."""
         if "labels" not in record.observation_used_for_decision:
@@ -125,7 +125,7 @@ class MazeHardHRMV2HybridTaskBinding:
         return record.observation_used_for_decision["labels"]
 
     def extract_token_weights(
-        self, record: ActorCriticInteractionRecord
+        self, record: ValueControlInteractionRecord
     ) -> Tensor:
         """Return per-token LM weights that emphasize MazeHard PATH labels."""
         labels = self.extract_labels(record)
@@ -133,7 +133,7 @@ class MazeHardHRMV2HybridTaskBinding:
 
 
 # make the type-checker confirm the protocol is satisfied
-_: HybridActorCriticTaskBinding = MazeHardHRMV2HybridTaskBinding()
+_: HybridValueTaskBinding = MazeHardHRMV2HybridTaskBinding()
 
 
 # =============================================================================
@@ -146,9 +146,9 @@ def _extract_act_task_logits(  # ----------------------------------------------
 
 # =============================================================================
 def _extract_record_task_logits(  # -------------------------------------------
-    record: ActorCriticInteractionRecord,
+    record: ValueControlInteractionRecord,
 ) -> Tensor:
-    """Return task logits from any actor-critic record with task payload."""
+    """Return task logits from any value-control record with task payload."""
     task_output = cast(_HasTaskLogits | None, record.task_output)
     if task_output is None:
         raise RuntimeError(

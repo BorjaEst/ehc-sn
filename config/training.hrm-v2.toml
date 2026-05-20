@@ -29,10 +29,8 @@ supervised_only_warmup_steps = 5000
 
 # -- Objective, optimizer, scheduler (defaults are fine; override here if needed) ---
 [objective]
-    function  = "stablemax_cross_entropy"
-    c_actor   = 1.0
-    c_critic  = 0.5
-    c_entropy = 0.01
+    token_loss  = "stablemax_cross_entropy"
+    c_state_value = 0.5
     c_q_value = 0.5
 
 [optimizer_supervised]

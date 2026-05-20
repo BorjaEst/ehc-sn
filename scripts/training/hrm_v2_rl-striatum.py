@@ -22,10 +22,6 @@ from ehc_sn.callbacks.diagnostics import (
     DiagnosticsCallback,
     DiagnosticsSettings,
 )
-from ehc_sn.callbacks.eval_regimes import (
-    EvaluationRegimesCallback,
-    EvaluationRegimesCallbackSettings,
-)
 from ehc_sn.callbacks.metrics import TrainingMetricsCallback
 from ehc_sn.controllers.deliberation.actor_critic import (
     DeliberationACControllerConfig,
@@ -119,8 +115,8 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Deliberation capability config (halt_action, episode_horizon) for the MazeHard deliberation path.",
     )
-    controller: RLControllerConfig = Field(
-        default_factory=RLControllerConfig,
+    controller: DeliberationACControllerConfig = Field(
+        default_factory=DeliberationACControllerConfig,
         description="Deliberation actor-critic controller configuration (policy settings).",
     )
     objective: HybridRLLossConfig = Field(
@@ -288,9 +284,12 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         default=False,
         description="Whether to checkpoint the model after every evaluation.",
     )
-    limit_val_batches: int = Field(
-        default=10,
-        description="Cap validation to N batches per validation run.",
+    limit_val_batches: float = Field(
+        default=1.0,
+        description=(
+            "Fraction of validation batches to run. Use 1.0 for full validation "
+            "coverage; values < 1.0 cap the run."
+        ),
     )
     eval_save_outputs: list[str] = Field(
         default_factory=list,

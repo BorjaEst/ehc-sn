@@ -1,23 +1,26 @@
-"""Capability-generic actor-critic training helpers.
+"""Capability-generic value-control training helpers.
 
 These primitives implement TD(0) batch assembly and zero-bootstrap validation
-scoring for any model that emits a compatible actor-critic output.  They are
+scoring for any model that emits a compatible value-control output.  They are
 model-agnostic, task-agnostic, and controller-family-agnostic: no concrete
 controller state type is imported here.
 
 Task-specific field extraction is delegated to an injected
-:class:`HybridActorCriticTaskBinding`.
+:class:`HybridValueTaskBinding`.
 
 Training path — online (TD(0) with live bootstrap)::
 
-    source -> controller.step() -> ActorCriticInteractionRecord
+    source -> controller.step() -> ValueControlInteractionRecord
     -> TD0ActorCriticBatchBuilder.build_ac_batch()  (TD(0) + V(s_{t+1}) bootstrap)
     -> HybridRLObjective.compute_step(batch) -> loss
 
-Training path — deliberation (zero bootstrap)::
+Training path — deliberation (optional bootstrap)::
 
-    source -> controller.step() -> ActorCriticInteractionRecord
-    -> TD0ActorCriticBatchBuilder.build_deliberation_ac_batch()  (TD(0), bootstrap=0)
+    source -> controller.step() -> ValueControlInteractionRecord
+    -> TD0ActorCriticBatchBuilder.build_deliberation_ac_batch(
+           next_obs=..., carry=...  # optional
+       )
+       (TD(0), bootstrap = V(s_{t+1}) when provided)
     -> HybridRLObjective.compute_step(batch) -> loss
 
 Validation path (zero bootstrap)::
@@ -36,16 +39,18 @@ import torch
 from torch import Tensor
 
 from ehc_sn.controllers.contracts.actor_critic import (
-    ActorCriticExecutionSnapshot,
-    ActorCriticInteractionRecord,
-    ActorCriticRolloutBackbone,
     OnlineBootstrapCarry,
     OnlineBootstrapRuntime,
 )
+from ehc_sn.controllers.contracts.value_control import (
+    ValueControlExecutionSnapshot,
+    ValueControlInteractionRecord,
+    ValueControlRolloutBackbone,
+)
 from ehc_sn.objectives.hybrid_rl import (
-    HybridActorCriticBatch,
     HybridRLObjective,
     HybridRLObjectiveStep,
+    HybridValueBatch,
 )
 from ehc_sn.rollouts import (
     EvaluatedChunk,
@@ -57,9 +62,9 @@ from ehc_sn.types import Batch
 
 
 # =============================================================================
-class HybridActorCriticTaskBinding(Protocol):
-    """Adapter-owned extraction of task-specific fields from an
-    :class:`ActorCriticInteractionRecord`.
+class HybridValueTaskBinding(Protocol):
+    """Adapter-owned extraction of task-specific fields from a
+    :class:`ValueControlInteractionRecord`.
 
     Implement this protocol in the adapter layer so that the generic
     :class:`TD0ActorCriticBatchBuilder` and
@@ -72,13 +77,13 @@ class HybridActorCriticTaskBinding(Protocol):
 
     def extract_task_logits(  # -----------------------------------------------
         self,
-        record: ActorCriticInteractionRecord,
+        record: ValueControlInteractionRecord,
     ) -> Tensor:
         """Return token-prediction logits from the task output on ``record``."""
 
     def extract_labels(  # ----------------------------------------------------
         self,
-        record: ActorCriticInteractionRecord,
+        record: ValueControlInteractionRecord,
     ) -> Tensor:
         """Return supervision labels from the interaction record."""
 
@@ -87,7 +92,7 @@ class _TokenWeightBinding(Protocol):
     """Optional task binding surface for per-token LM weights."""
 
     def extract_token_weights(
-        self, record: ActorCriticInteractionRecord
+        self, record: ValueControlInteractionRecord
     ) -> Tensor:
         """Return per-token loss weights aligned with LM labels."""
 
@@ -108,10 +113,10 @@ class TD0ActorCriticBatchBuilder:
 
     def __init__(  # ----------------------------------------------------------
         self,
-        backbone: ActorCriticRolloutBackbone,
+        backbone: ValueControlRolloutBackbone,
         runtime: OnlineBootstrapRuntime | None,
         gamma: float,
-        task_binding: HybridActorCriticTaskBinding,
+        task_binding: HybridValueTaskBinding,
     ) -> None:
         """Initialize the batch builder with a backbone for bootstrap value
         computation, a runtime for bootstrap value extraction, a discount
@@ -156,15 +161,30 @@ class TD0ActorCriticBatchBuilder:
         output, _ = self._backbone(next_obs, carry.model_state)
         return output.critic.state_value.squeeze(-1)
 
+    @torch.no_grad()
+    def compute_deliberation_bootstrap_value(  # ------------------------------
+        self,
+        next_obs: Batch,
+        carry: OnlineBootstrapCarry,
+    ) -> Tensor:
+        """Run the backbone on deliberation next-step observations.
+
+        Deliberation path: callers provide the next-step observations directly
+        (no runtime), along with the post-step carry holding the recurrent
+        model state.
+        """
+        output, _ = self._backbone(next_obs, carry.model_state)
+        return output.critic.state_value.squeeze(-1)
+
     def assemble_batch(  # ----------------------------------------------------
         self,
-        record: ActorCriticInteractionRecord,
-        snapshot: ActorCriticExecutionSnapshot,
+        record: ValueControlInteractionRecord,
+        snapshot: ValueControlExecutionSnapshot,
         bootstrap_value: Tensor,
         *,
         use_token_weights: bool = False,
-    ) -> HybridActorCriticBatch:
-        """Assemble a fully materialised TD(0) actor-critic batch.
+    ) -> HybridValueBatch:
+        """Assemble a fully materialised TD(0) value-control batch.
 
         Generic: depends only on the neutral actor-critic record, a minimal
         execution snapshot (``steps`` and ``halted``), and a pre-computed
@@ -172,29 +192,13 @@ class TD0ActorCriticBatchBuilder:
 
         TD(0) formulas::
 
-            return    = r + gamma * bootstrap_value * (1 - done)
-            advantage = (return - V(s_t)).detach()
-
-        Raises:
-            RuntimeError: If required ``policy_decision`` fields are ``None``.
+            return = r + gamma * bootstrap_value * (1 - done)
         """
-        if record.policy_decision.log_prob is None:
-            raise RuntimeError(
-                "TD0ActorCriticBatchBuilder.assemble_batch: "
-                "policy_decision.log_prob is None."
-            )
-        if record.policy_decision.entropy is None:
-            raise RuntimeError(
-                "TD0ActorCriticBatchBuilder.assemble_batch: "
-                "policy_decision.entropy is None."
-            )
-
         reward = record.reward.squeeze(-1)
         done = record.done.float()
-        value_est = record.value_estimate.squeeze(-1)
+        state_values = record.state_value.squeeze(-1)
 
         returns = reward + self._gamma * bootstrap_value * (1.0 - done)
-        advantages = (returns - value_est).detach()
 
         token_weights = None
         if use_token_weights:
@@ -206,34 +210,31 @@ class TD0ActorCriticBatchBuilder:
             token_weight_binding = cast(_TokenWeightBinding, self._task_binding)
             token_weights = token_weight_binding.extract_token_weights(record)
 
-        return HybridActorCriticBatch(
+        return HybridValueBatch(
             actions=record.sampled_action,
-            policy_logits=record.policy_logits,
+            q_values=record.q_values,
             rewards=reward,
             done=record.done,
             terminated=record.terminated,
             truncated=record.truncated,
-            value_estimates=value_est,
-            action_log_prob=record.policy_decision.log_prob,
-            action_entropy=record.policy_decision.entropy,
+            state_values=state_values,
             task_logits=self._task_binding.extract_task_logits(record),
             labels=self._task_binding.extract_labels(record),
             token_weights=token_weights,
             bootstrap_value=bootstrap_value,
             returns=returns,
-            advantages=advantages,
             steps=snapshot.steps,
             halted=snapshot.halted,
         )
 
     def build_ac_batch(  # ----------------------------------------------------
         self,
-        record: ActorCriticInteractionRecord,
+        record: ValueControlInteractionRecord,
         carry: OnlineBootstrapCarry,
         *,
         use_token_weights: bool = False,
-    ) -> HybridActorCriticBatch:
-        """Build a fully materialised actor-critic batch from an online rollout carry.
+    ) -> HybridValueBatch:
+        """Build a fully materialised value-control batch from an online rollout carry.
 
         Online-specific orchestrator: calls :meth:`compute_bootstrap_value`
         (which requires a non-None :class:`OnlineBootstrapRuntime`) then
@@ -258,18 +259,20 @@ class TD0ActorCriticBatchBuilder:
 
     def build_deliberation_ac_batch(  # ---------------------------------------
         self,
-        record: ActorCriticInteractionRecord,
-        snapshot: ActorCriticExecutionSnapshot,
+        record: ValueControlInteractionRecord,
+        snapshot: ValueControlExecutionSnapshot,
+        next_obs: Batch | None = None,
+        carry: OnlineBootstrapCarry | None = None,
         *,
         use_token_weights: bool = False,
-    ) -> HybridActorCriticBatch:
-        """Build a TD(0) batch with zero bootstrap value.
+    ) -> HybridValueBatch:
+        """Build a TD(0) batch for deliberation rollouts.
 
         Canonical path for any deliberation or static-observation training
-        context where no live environment provides ``V(s_{t+1})``.
-        Accepts any :class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticExecutionSnapshot`
-        (concrete controller states such as ``DeliberationACRolloutState``
-        satisfy this protocol automatically).
+        context where no live environment provides ``V(s_{t+1})``. When
+        ``next_obs`` and ``carry`` are provided, the next-step critic value
+        is computed from the backbone and used for bootstrap.
+        Accepts any :class:`~ehc_sn.controllers.contracts.value_control.ValueControlExecutionSnapshot`.
 
         Args:
             record: Interaction record from the controller step.
@@ -283,6 +286,16 @@ class TD0ActorCriticBatchBuilder:
                 "TD0ActorCriticBatchBuilder.build_deliberation_ac_batch "
                 "requires a non-None task_output on ActorCriticInteractionRecord."
             )
+        if next_obs is not None and carry is not None:
+            bootstrap_value = self.compute_deliberation_bootstrap_value(
+                next_obs, carry
+            )
+            return self.assemble_batch(
+                record,
+                snapshot,
+                bootstrap_value,
+                use_token_weights=use_token_weights,
+            )
         return _zero_bootstrap_batch(
             record,
             snapshot.steps,
@@ -294,26 +307,24 @@ class TD0ActorCriticBatchBuilder:
 
 # =============================================================================
 def _zero_bootstrap_batch(  # -------------------------------------------------
-    ir: ActorCriticInteractionRecord,
+    ir: ValueControlInteractionRecord,
     steps: Tensor,
     halted: Tensor,
-    task_binding: HybridActorCriticTaskBinding,
+    task_binding: HybridValueTaskBinding,
     *,
     use_token_weights: bool = False,
-) -> HybridActorCriticBatch:
+) -> HybridValueBatch:
     """Canonical zero-bootstrap TD(0) batch assembly.
 
     Shared by :meth:`TD0ActorCriticBatchBuilder.build_deliberation_ac_batch`
     and :class:`ZeroBootstrapActorCriticValidationScorer`.
 
     With zero bootstrap: ``returns = reward + gamma * 0 * (1 - done) = reward``.
-    Advantages are ``(reward - V(s_t)).detach()`` — consistent with the online TD(0)
-    formula; only the bootstrap term is zeroed.
+    Only the bootstrap term is zeroed.
     """
     reward = ir.reward.squeeze(-1)
-    value_est = ir.value_estimate.squeeze(-1)
+    state_values = ir.state_value.squeeze(-1)
     returns = reward  # zero bootstrap collapses the discount term
-    advantages = (returns - value_est).detach()
     token_weights = None
     if use_token_weights:
         if not hasattr(task_binding, "extract_token_weights"):
@@ -324,22 +335,19 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
         token_weight_binding = cast(_TokenWeightBinding, task_binding)
         token_weights = token_weight_binding.extract_token_weights(ir)
 
-    return HybridActorCriticBatch(
+    return HybridValueBatch(
         actions=ir.sampled_action,
-        policy_logits=ir.policy_logits,
+        q_values=ir.q_values,
         rewards=reward,
         done=ir.done,
         terminated=ir.terminated,
         truncated=ir.truncated,
-        value_estimates=value_est,
-        action_log_prob=ir.policy_decision.log_prob,
-        action_entropy=ir.policy_decision.entropy,
+        state_values=state_values,
         task_logits=task_binding.extract_task_logits(ir),
         labels=task_binding.extract_labels(ir),
         token_weights=token_weights,
         bootstrap_value=torch.zeros_like(reward),
         returns=returns,
-        advantages=advantages,
         steps=steps,
         halted=halted,
     )
@@ -347,11 +355,11 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
 
 # =============================================================================
 class ZeroBootstrapActorCriticValidationScorer:
-    """Zero-bootstrap validation scorer for actor-critic models.
+    """Zero-bootstrap validation scorer for value-control models.
 
     Adapts a :class:`~ehc_sn.rollouts.StepRecord` (whose ``outputs`` field
-    must be an :class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord`)
-    into a :class:`~ehc_sn.objectives.hybrid_rl.HybridActorCriticBatch` with zero
+    must be a :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`)
+    into a :class:`~ehc_sn.objectives.hybrid_rl.HybridValueBatch` with zero
     bootstrap values via :func:`_zero_bootstrap_batch`, then calls
     :meth:`HybridRLObjective.compute_step`.
 
@@ -365,7 +373,7 @@ class ZeroBootstrapActorCriticValidationScorer:
     def __init__(  # ----------------------------------------------------------
         self,
         objective: HybridRLObjective,
-        task_binding: HybridActorCriticTaskBinding,
+        task_binding: HybridValueTaskBinding,
     ) -> None:
         """Initialize the scorer with a loss head for step-wise loss
         computation and a task binding for task-specific field extraction.
@@ -422,28 +430,20 @@ class ZeroBootstrapActorCriticValidationScorer:
             zero-bootstrap RL diagnostics.
 
         Raises:
-            TypeError: If ``record.outputs`` is not an ``ActorCriticInteractionRecord``.
-            RuntimeError: If ``record.outputs.task_output`` is ``None`` or
-                required ``policy_decision`` fields are ``None``.
+            TypeError: If ``record.outputs`` is not a
+                ``ValueControlInteractionRecord``.
+            RuntimeError: If ``record.outputs.task_output`` is ``None``.
         """
-        ir: ActorCriticInteractionRecord = record.outputs
-        if not isinstance(ir, ActorCriticInteractionRecord):
+        ir: ValueControlInteractionRecord = record.outputs
+        if not isinstance(ir, ValueControlInteractionRecord):
             raise TypeError(
-                f"ZeroBootstrapActorCriticValidationScorer expects ActorCriticInteractionRecord, "
+                f"ZeroBootstrapActorCriticValidationScorer expects ValueControlInteractionRecord, "
                 f"got {type(ir).__name__}."
             )
         if ir.task_output is None:
             raise RuntimeError(
                 "ZeroBootstrapActorCriticValidationScorer requires a non-None "
-                "task_output on ActorCriticInteractionRecord."
-            )
-        if ir.policy_decision.log_prob is None:
-            raise RuntimeError(
-                "ZeroBootstrapActorCriticValidationScorer: policy_decision.log_prob is None."
-            )
-        if ir.policy_decision.entropy is None:
-            raise RuntimeError(
-                "ZeroBootstrapActorCriticValidationScorer: policy_decision.entropy is None."
+                "task_output on ValueControlInteractionRecord."
             )
 
         steps = record.snapshot.steps
@@ -465,7 +465,7 @@ class ZeroBootstrapActorCriticValidationScorer:
 
 # =============================================================================
 __all__ = [
-    "HybridActorCriticTaskBinding",
+    "HybridValueTaskBinding",
     "OnlineBootstrapCarry",
     "OnlineBootstrapRuntime",
     "TD0ActorCriticBatchBuilder",

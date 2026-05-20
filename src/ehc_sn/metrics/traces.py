@@ -64,8 +64,8 @@ class _ACTTraceContext(_CommonTraceContext, Protocol):
 class _RLTraceOutputs(Protocol):
     """Output surface required by RL trace fields (matches InteractionRecord)."""
 
-    policy_logits: Tensor
-    value_estimate: Tensor
+    q_values: Tensor
+    state_value: Tensor
     reward: Tensor
     sampled_action: Tensor
 
@@ -178,23 +178,23 @@ ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_Q_LOGITS_ACT,)
 
 
 # =============================================================================
-# RL-specific — produced by HybridRLObjective.compute_step() via HRMV2ValidationScorer
+# RL-specific — produced by HybridRLObjective.compute_step() via validation scorer
 # =============================================================================
 
 
 def _get_q_logits_rl(ctx: _RLTraceContext) -> TraceValue:
-    """Actor policy logits over actions from the RL controller."""
-    return ctx.outputs.policy_logits.detach()
+    """Value-control Q-values over actions from the RL controller."""
+    return ctx.outputs.q_values.detach()
 
 
 def _require_state_value(ctx: _RLTraceContext) -> Tensor:
     """Return the critic state value from the interaction record."""
-    return ctx.outputs.value_estimate
+    return ctx.outputs.state_value
 
 
 def _get_state_value_rl(ctx: _RLTraceContext) -> TraceValue:
-    """Critic state-value estimates V(s) from the actor-critic head."""
-    return ctx.outputs.value_estimate.detach()
+    """Critic state-value estimates V(s) from the value head."""
+    return ctx.outputs.state_value.detach()
 
 
 def _get_reward_env(ctx: _RLTraceContext) -> TraceValue:
@@ -210,7 +210,7 @@ def _get_action(ctx: _RLTraceContext) -> TraceValue:
 def _get_rpe(ctx: _RLTraceContext) -> TraceValue:
     """Reward prediction error: reward − V(s)."""
     reward: Tensor = ctx.outputs.reward.squeeze(-1)
-    value: Tensor = ctx.outputs.value_estimate.squeeze(-1)
+    value: Tensor = ctx.outputs.state_value.squeeze(-1)
     return (reward - value).detach()
 
 
@@ -285,7 +285,7 @@ def _get_lec_w_f_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
 
 
 TRACE_Q_LOGITS_RL = TraceField(
-    name="value/policy_logits",
+    name="value/q_values",
     get=_get_q_logits_rl,
 )
 TRACE_STATE_VALUE_RL = TraceField(

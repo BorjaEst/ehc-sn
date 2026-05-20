@@ -1,11 +1,11 @@
-"""Deliberation actor-critic rollout controller — canonical owner.
+"""Deliberation value-control rollout controller — canonical owner.
 
 This controller drives an actor-critic backbone through slot-based deliberation
 steps without an environment.  Reward and termination finalization are delegated
 to an injected :class:`DeliberationStepFinalizer`, keeping the controller
 generic over task semantics.
 
-Emits one :class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord`
+Emits one :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`
 per step.  No ``env_td``, no :class:`~ehc_sn.controllers.online.actor_critic.RLTaskRuntime`,
 no TorchRL dependency.
 
@@ -27,9 +27,13 @@ from pydantic import BaseModel, Field
 from torch import Tensor
 
 from ehc_sn.controllers._base import BaseController, RolloutState
-from ehc_sn.controllers.contracts.actor_critic import (
-    ActorCriticInteractionRecord,
-    ActorCriticRolloutBackbone,
+from ehc_sn.controllers.contracts.value_control import (
+    ValueControlInteractionRecord,
+    ValueControlRolloutBackbone,
+)
+from ehc_sn.controllers.deliberation.act import (
+    collapse_act_halt_continue_logits,
+    maybe_flip_halt_decision,
 )
 from ehc_sn.policies.categorical import (
     CategoricalPolicy,
@@ -131,21 +135,21 @@ class DeliberationACRolloutState[ModelState](RolloutState[ModelState]):
 class DeliberationACController[ModelState](
     BaseController[ModelState, DeliberationACControllerConfig]
 ):
-    """Policy-driven deliberation actor-critic controller without an environment.
+    """Policy-driven deliberation value-control controller without an environment.
 
     The controller:
         - maintains per-slot buffers across steps via the inherited slot lifecycle
         - resets backbone state for halted slots
-        - samples actions from ``policy_logits`` via :class:`~ehc_sn.policies.categorical.CategoricalPolicy`
+        - samples actions from ``q_values`` via :class:`~ehc_sn.policies.categorical.CategoricalPolicy`
         - delegates reward and termination to the injected :class:`DeliberationStepFinalizer`
-        - emits one :class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord` per step
+        - emits one :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord` per step
 
     No TorchRL environment, no ``env_td``, no :class:`~ehc_sn.controllers.online.actor_critic.RLTaskRuntime`.
     """
 
     def __init__(
         self,
-        backbone: ActorCriticRolloutBackbone[ModelState],
+        backbone: ValueControlRolloutBackbone[ModelState],
         config: DeliberationACControllerConfig,
         finalizer: DeliberationStepFinalizer,
     ) -> None:
@@ -155,9 +159,9 @@ class DeliberationACController[ModelState](
         self._finalizer = finalizer
 
     @property
-    def backbone(self) -> ActorCriticRolloutBackbone[ModelState]:
-        """Return the wrapped backbone typed to the actor-critic protocol."""
-        return cast(ActorCriticRolloutBackbone[ModelState], super().backbone)
+    def backbone(self) -> ValueControlRolloutBackbone[ModelState]:
+        """Return the wrapped backbone typed to the value-control protocol."""
+        return cast(ValueControlRolloutBackbone[ModelState], super().backbone)
 
     @property
     def finalizer(self) -> DeliberationStepFinalizer:
@@ -187,9 +191,9 @@ class DeliberationACController[ModelState](
         *,
         allow_halt: bool = True,
         explore: bool = True,
-        **_: Any,
+        **options: Any,
     ) -> tuple[
-        DeliberationACRolloutState[ModelState], ActorCriticInteractionRecord
+        DeliberationACRolloutState[ModelState], ValueControlInteractionRecord
     ]:
         """Advance the controller by one step.
 
@@ -200,7 +204,7 @@ class DeliberationACController[ModelState](
             4. Sample an action via :class:`~ehc_sn.policies.categorical.CategoricalPolicy`.
             5. Call :meth:`DeliberationStepFinalizer.finalize_step` for reward/termination.
             6. Compute ``done`` as ``(terminated | truncated)``.
-            7. Emit :class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord`.
+            7. Emit :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`.
 
         Args:
             state: Current rollout state.
@@ -210,6 +214,10 @@ class DeliberationACController[ModelState](
                 closing slots.  Task-owned ``truncated`` from the finalizer always
                 passes through regardless of this flag.
             explore: Passed to the categorical policy.
+            halt_action: Optional action index treated as the halt action when
+                applying ACT-style halt/continue semantics.
+            max_halt_steps: Optional per-slot step budget used by ACT-style halt
+                semantics to force halting.
 
         Returns:
             ``(new_state, record)``.
@@ -221,13 +229,40 @@ class DeliberationACController[ModelState](
         steps = self.advance_steps(state)
 
         policy = backbone_output.policy
-        logits = policy.policy_logits
+        q_values = policy.q_values
         valid_action_mask = policy.valid_action_mask
         if valid_action_mask is None:
-            valid_action_mask = torch.ones_like(logits, dtype=torch.bool)
+            valid_action_mask = torch.ones_like(q_values, dtype=torch.bool)
+
+        halt_action = options.get("halt_action")
+        max_halt_steps = options.get("max_halt_steps")
+        if halt_action is not None and max_halt_steps is not None:
+            scores = collapse_act_halt_continue_logits(
+                q_values, done_action=halt_action
+            )
+            if allow_halt:
+                exploration_prob = self.config.policy.exploration_prob or 0.0
+                halt = maybe_flip_halt_decision(
+                    scores.greedy_halt,
+                    steps=steps,
+                    explore=explore,
+                    exploration_prob=exploration_prob,
+                    max_halt_steps=max_halt_steps,
+                )
+                halt = halt | (steps >= max_halt_steps)
+            else:
+                halt = torch.zeros_like(scores.greedy_halt, dtype=torch.bool)
+
+            non_halt_mask = valid_action_mask.clone()
+            non_halt_mask[:, halt_action] = False
+            halt_only_mask = torch.zeros_like(valid_action_mask)
+            halt_only_mask[:, halt_action] = True
+            valid_action_mask = torch.where(
+                halt.unsqueeze(-1), halt_only_mask, non_halt_mask
+            )
 
         policy_input = PolicyInput(
-            logits=logits, valid_action_mask=valid_action_mask
+            logits=q_values, valid_action_mask=valid_action_mask
         )
         policy_decision = self._policy(policy_input, explore=explore)
         action = policy_decision.action.to(torch.int64)
@@ -258,16 +293,15 @@ class DeliberationACController[ModelState](
             data=data,
             runtime_state=step_result.next_runtime_state,
         )
-        record = ActorCriticInteractionRecord(
+        record = ValueControlInteractionRecord(
             observation_used_for_decision=data,
-            policy_logits=logits,
+            q_values=q_values,
             sampled_action=action,
             reward=step_result.reward,
             done=done,
             terminated=terminated,
             truncated=truncated,
-            value_estimate=backbone_output.critic.state_value,
-            policy_decision=policy_decision,
+            state_value=backbone_output.critic.state_value,
             task_output=backbone_output.task,
         )
         return new_state, record

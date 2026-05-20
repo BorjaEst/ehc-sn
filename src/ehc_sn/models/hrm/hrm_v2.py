@@ -25,24 +25,6 @@ from ehc_sn.utils.detach import DetachMixin
 
 
 # =============================================================================
-@dataclass(frozen=True)
-class HRMInputV2:
-    """Model-native input payload for one HRM v2 step."""
-
-    schema_tokens: Tensor
-    prefix_bias: Optional[Tensor] = None
-
-
-@dataclass(frozen=True)
-class HRMOutputV2:
-    """Model-native output bundle for one HRM v2 step."""
-
-    schema_slots: Tensor
-    policy_logits: Tensor
-    state_value: Tensor
-
-
-# =============================================================================
 class ModelSettingsV2(BaseModel, extra="forbid"):
     """Model-level settings for HRM v2.
 
@@ -110,7 +92,7 @@ class HRMStateV2(DetachMixin):
     """Recurrent state carried across steps for HRM v2."""
 
     pfc: PFCState  # Prefrontal Cortex state
-    str: STRState  # STR actor-critic state
+    str: STRState  # STR state-value state
 
 
 # =============================================================================
@@ -118,14 +100,10 @@ class HRMStateV2(DetachMixin):
 class HRMOutputV2:
     """Architecture-native HRM v2 output."""
 
-    theta_summary: (
-        Tensor  # (B, D) summary readout from the PFC backbone (e.g., CLS token)
-    )
+    theta_summary: Tensor  # (B, D) summary readout from the PFC backbone
     schema_slots: Tensor  # (B, S, D) schema-slot tokens from the PFC workspace
-    policy_logits: Tensor  # (B, A) actor-head logits; used for action selection and actor loss
-    state_value: (
-        Tensor  # (B, 1) critic state value; used for value regression loss
-    )
+    q_values: Tensor  # (B, A) PFC value scores over halt/continue actions
+    state_value: Tensor  # (B, 1) STR state-value estimate for TD bootstrap
 
 
 # =============================================================================
@@ -221,7 +199,7 @@ class HRModelV2(nn.Module):
             prefix_bias=payload.prefix_bias,
         )
 
-        # Step the STR actor-critic module with the PFC summary and Q values as input
+        # Step the STR value head with the PFC summary and Q values as input
         state.str, state_value = self.str(
             features=pfc_out.summary,
             q_values=pfc_out.q_values,
@@ -232,7 +210,7 @@ class HRModelV2(nn.Module):
         output = HRMOutputV2(
             theta_summary=pfc_out.summary,
             schema_slots=pfc_out.workspace.family("schema"),
-            policy_logits=pfc_out.q_values,  # PFC q_values are the actor policy logits
+            q_values=pfc_out.q_values,
             state_value=state_value.unsqueeze(-1),
         )
         return output, state

@@ -78,29 +78,23 @@ REWARD_STD: str = "reward_std"
 """Standard deviation of environment reward across the batch."""
 
 Q_MEAN: str = "q_mean"
-"""Mean policy-logit value across the batch (actor head)."""
+"""Mean Q-value across the batch."""
 
 Q_STD: str = "q_std"
-"""Standard deviation of policy-logit values across the batch (actor head)."""
+"""Standard deviation of Q-values across the batch."""
 
 RPE_MAGNITUDE: str = "rpe_magnitude"
 """Mean absolute reward prediction error (|reward - V(s)|)."""
 
-ACTION_ENTROPY: str = "action_entropy"
-"""Mean policy entropy over the action distribution."""
+LOSS_STATE_VALUE: str = "loss_state_value"
+"""State-value regression loss sum for this step."""
 
-LOSS_ACTOR: str = "loss_actor"
-"""Actor (policy gradient) loss sum for this step."""
-
-LOSS_CRITIC: str = "loss_critic"
-"""Critic (value MSE) loss sum for this step."""
-
-LOSS_ENTROPY: str = "loss_entropy"
-"""Entropy regularization loss sum for this step."""
+LOSS_Q_VALUE: str = "loss_q_value"
+"""Q-value regression loss sum for this step."""
 
 RL_SIGNALS: frozenset[str] = frozenset(
-    {REWARD_MEAN, REWARD_STD, Q_MEAN, Q_STD, RPE_MAGNITUDE, ACTION_ENTROPY,
-     LOSS_ACTOR, LOSS_CRITIC, LOSS_ENTROPY}
+    {REWARD_MEAN, REWARD_STD, Q_MEAN, Q_STD, RPE_MAGNITUDE,
+     LOSS_STATE_VALUE, LOSS_Q_VALUE}
 )  # fmt: skip
 
 
@@ -228,8 +222,8 @@ __all__ = [
     # ACT
     "LOSS_Q_DONE", "TARGET_Q_MEAN", "TARGET_Q_STD", "ACT_SIGNALS",
     # RL
-    "REWARD_MEAN", "REWARD_STD", "Q_MEAN", "Q_STD", "RPE_MAGNITUDE", "ACTION_ENTROPY",
-    "LOSS_ACTOR", "LOSS_CRITIC", "LOSS_ENTROPY", "RL_SIGNALS",
+    "REWARD_MEAN", "REWARD_STD", "Q_MEAN", "Q_STD", "RPE_MAGNITUDE",
+    "LOSS_STATE_VALUE", "LOSS_Q_VALUE", "RL_SIGNALS",
     # VAR
     "LOSS_TOTAL", "LOSS_OBS_NLL", "LOSS_LATENT", "LOSS_REG", "LATENT_POST_NORM",
     "LATENT_PRIOR_NORM", "VAR_SIGNALS",

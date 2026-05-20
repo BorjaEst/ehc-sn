@@ -184,8 +184,7 @@ class HRMV1TrainingModel(L.LightningModule):
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer = FifoBuffer(
-            capacity_rows=4
-            * config.global_batch_size,  # or local batch size if you prefer
+            capacity_rows=4 * config.global_batch_size,
             keys=("input_ids", "labels"),
             pin_memory=True,
         )
@@ -223,8 +222,8 @@ class HRMV1TrainingModel(L.LightningModule):
     ) -> None:
         """Reset per-epoch training state.
 
-        Clears the training carry and the FIFO buffer so that partial-reset state does not leak
-        across epochs.
+        Clears the training carry and the FIFO buffer so that partial-reset
+        state does not leak across epochs.
         """
         self._train_carry = None
         self._train_buffer.clear()
@@ -243,11 +242,14 @@ class HRMV1TrainingModel(L.LightningModule):
     ) -> dict[str, object]:
         """Run one training step with manual optimization.
 
-        The training logic uses partial reset to replace halted slots with fresh examples.
+        The training logic uses partial reset to replace halted slots with fresh
+        examples.
 
         Notes:
-            - Horizon is effectively 1: we run exactly one rollout step per mini-batch.
-            - Loss is normalized by the local batch size; DDP averages gradients across ranks.
+            - Horizon is effectively 1: we run exactly one rollout step per
+              mini-batch.
+            - Loss is normalized by the local batch size; DDP averages gradients
+              across ranks.
         """
         # Initialize carry/state on the first batch
         if self._train_carry is None:

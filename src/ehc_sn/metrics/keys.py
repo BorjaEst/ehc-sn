@@ -8,9 +8,7 @@ LOSS_TOKEN: str = "loss_token"
 ACT_LOSS_Q_DONE: str = "loss_q_done"
 ACT_LOSS_Q_CONTINUE: str = "loss_q_continue"
 
-RL_LOSS_ACTOR: str = "loss_actor"
-RL_LOSS_CRITIC: str = "loss_critic"
-RL_LOSS_ENTROPY: str = "loss_entropy"
+RL_LOSS_STATE_VALUE: str = "loss_state_value"
 RL_LOSS_Q_VALUE: str = "loss_q_value"
 
 VAR_LOSS_OBS_NLL: str = "loss_obs_nll"
@@ -69,9 +67,7 @@ __all__ = [
     "ACT_LOSS_Q_CONTINUE",
     "ACT_LOSS_Q_DONE",
     "LOSS_TOKEN",
-    "RL_LOSS_ACTOR",
-    "RL_LOSS_CRITIC",
-    "RL_LOSS_ENTROPY",
+    "RL_LOSS_STATE_VALUE",
     "RL_LOSS_Q_VALUE",
     "EHC_ACC_OBS_ANCESTRAL_ALL",
     "EHC_ACC_OBS_ANCESTRAL_REVISIT",

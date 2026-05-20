@@ -16,7 +16,12 @@ from ehc_sn.adapters.mazehard.hrm.core import (
     build_token_decoder,
     build_token_encoder,
 )
-from ehc_sn.models.hrm.hrm_v2 import HRMInputV2, HRModelV2, HRMOutputV2, HRMStateV2
+from ehc_sn.models.hrm.hrm_v2 import (
+    HRMInputV2,
+    HRModelV2,
+    HRMOutputV2,
+    HRMStateV2,
+)
 from ehc_sn.tasks.mazehard.runtime import extract_maze_hard_task_input
 from ehc_sn.types import Batch
 
@@ -24,9 +29,9 @@ from ehc_sn.types import Batch
 # =============================================================================
 @dataclass(frozen=True)
 class MazeHardHRMV2PolicyOutput:
-    """Policy readouts emitted by the MazeHard HRM v2 bridge."""
+    """Value-control readouts emitted by the MazeHard HRM v2 bridge."""
 
-    policy_logits: Tensor
+    q_values: Tensor
     valid_action_mask: Tensor | None = None
 
 
@@ -48,10 +53,14 @@ class MazeHardHRMV2BridgeOutput:
     critic: MazeHardHRMV2CriticOutput
 
 
-MazeHardTokenEncoder: TypeAlias = MazeHardLearnedEncoder[HRMInputV2] | MazeHardRoPEEncoder[HRMInputV2]
+MazeHardTokenEncoder: TypeAlias = (
+    MazeHardLearnedEncoder[HRMInputV2] | MazeHardRoPEEncoder[HRMInputV2]
+)
 
 
-def _make_input_v2(schema_tokens: Tensor, prefix_bias: Tensor | None) -> HRMInputV2:
+def _make_input_v2(
+    schema_tokens: Tensor, prefix_bias: Tensor | None
+) -> HRMInputV2:
     """Construct the model-native HRM v2 input payload."""
     return HRMInputV2(schema_tokens=schema_tokens, prefix_bias=prefix_bias)
 
@@ -141,7 +150,7 @@ class MazeHardHRMV2BridgeAdapter(nn.Module):
         """Split one HRM step output into task, policy, and critic surfaces."""
         return MazeHardHRMV2BridgeOutput(
             task=self._decoder(outputs),
-            policy=MazeHardHRMV2PolicyOutput(policy_logits=outputs.policy_logits),
+            policy=MazeHardHRMV2PolicyOutput(q_values=outputs.q_values),
             critic=MazeHardHRMV2CriticOutput(state_value=outputs.state_value),
         )
 

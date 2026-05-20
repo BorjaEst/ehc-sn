@@ -4,16 +4,18 @@ This module defines a PyTorch Lightning :class:`~lightning.LightningModule` wrap
 around the HRM v2 architecture (:class:`HRModelV2`) and its training loop.
 
 Compared to HRM v1 (ACT-supervised), HRM v2 couples a PFC-style recurrent reasoning
-core with an STR actor-critic head and trains via a deliberation actor-critic pipeline:
+core with a PFC value head and an STR state-value head, trained via a deliberation
+value-control pipeline:
 
-    source -> controller.step() -> ActorCriticInteractionRecord
-    -> TD0ActorCriticBatchBuilder.build_deliberation_ac_batch() -> HybridActorCriticBatch
+    source -> controller.step() -> ValueControlInteractionRecord
+    -> TD0ActorCriticBatchBuilder.build_deliberation_ac_batch(next_obs=..., carry=...)
+    -> HybridValueBatch
     -> HybridRLObjective.compute_step() -> loss -> optimizer
 
 Key behaviors:
     - **Manual optimization**: sets ``automatic_optimization = False`` and performs
         explicit backward/optimizer/scheduler steps.
-    - **Three-optimizer training**: supervised params, RL (STR) params, and vmPFC
+    - **Three-optimizer training**: supervised params, STR critic params, and vmPFC
         (``pfc.estimator``) params are optimized with separate optimizers.
     - **Warmup**: for the first ``supervised_only_warmup_steps`` global steps,
         ``allow_halt=False`` forces full deliberation and RL losses are zeroed.
@@ -30,14 +32,13 @@ from typing import Any, Optional
 
 import lightning as L
 import torch
-from pydantic import AliasChoices, BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field
 from torch import Tensor
 from torch.optim import Optimizer
 from torchmetrics import MetricCollection
 
 from ehc_sn import utils
 from ehc_sn.adapters.mazehard.hrm import (
-    MazeHardAdapterSettings,
     MazeHardHRMAdapterSettings,
     MazeHardHRMV2BridgeAdapter,
     MazeHardHRMV2HybridTaskBinding,
@@ -50,17 +51,8 @@ from ehc_sn.controllers.deliberation.actor_critic import (
     DeliberationACController,
     DeliberationACControllerConfig,
 )
-from ehc_sn.controllers.online.actor_critic import (
-    RLController,
-    RLControllerConfig,
-)
 from ehc_sn.lightning._rollout import (
     evaluate_rollout,
-    observe_rollout_chunk,
-)
-from ehc_sn.lightning.eval.contracts import (
-    EvaluationBatchArtifacts,
-    EvaluationTraceRequest,
 )
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics import (
@@ -83,14 +75,7 @@ from ehc_sn.tasks.mazehard.capabilities.deliberation import (
     MazeHardDeliberationCapability,
     MazeHardDeliberationConfig,
 )
-from ehc_sn.tasks.mazehard.environment import EnvConfig, MazeHardEnv
 from ehc_sn.tasks.mazehard.reward import MazeHardRewardProjector
-from ehc_sn.tasks.mazehard.traces import (
-    MazeHardEvaluationSourceContext,
-    apply_mazehard_trace_supplements,
-    build_mazehard_trace_supplements,
-)
-from ehc_sn.traces import TraceTree
 from ehc_sn.training.actor_critic import (
     TD0ActorCriticBatchBuilder,
     ZeroBootstrapActorCriticValidationScorer,
@@ -113,7 +98,6 @@ class HRMV2ModelConfig(BaseModel, extra="forbid"):
 
     This config wires together:
         - model settings (:class:`ModelSettingsV2`)
-        - environment settings (:class:`~ehc_sn.envs.mazehard.EnvConfig`)
         - RL controller and loss head configs
         - optimizer and scheduler settings
 
@@ -133,51 +117,35 @@ class HRMV2ModelConfig(BaseModel, extra="forbid"):
     )
     adapter: MazeHardHRMAdapterSettings = Field(
         default_factory=MazeHardHRMAdapterSettings,
-        description="Settings for the MazeHard bridge adapter that binds the HRM v2 core to task inputs/outputs.",
+        description="Settings for the MazeHard bridge adapter that binds the "
+        "HRM v2 core to task inputs/outputs.",
     )
     deliberation: MazeHardDeliberationConfig = Field(
         ...,
-        description="Deliberation capability config (halt_action, episode_horizon) for the MazeHard deliberation path.",
+        description="Deliberation capability config for the MazeHard "
+        "deliberation path (halt_action, episode_horizon).",
     )
     controller: DeliberationACControllerConfig = Field(
         default_factory=DeliberationACControllerConfig,
-        description="Configuration for the deliberation actor-critic controller.",
+        description="Configuration for the deliberation actor-critic "
+        "controller.",
     )
     objective: HybridRLLossConfig = Field(
         ...,
         description="Configuration for the hybrid RL objective scorer.",
     )
 
-    @model_validator(mode="after")
-    def _synthesize_environment(self) -> "HRMV2ModelConfig":
-        if self.environment is not None:
-            return self
-        if self.deliberation is None:
-            raise ValueError(
-                "Either 'environment' or 'deliberation' must be provided in HRMV2ModelConfig."
-            )
-        model_settings = ModelSettingsV2.from_config(self.model_config_path)
-        object.__setattr__(
-            self,
-            "environment",
-            EnvConfig(
-                max_episode_steps=self.deliberation.episode_horizon,
-                seq_length=model_settings.pfc.seq_length,
-                vocab_size=model_settings.vocab_size,
-                halt_action=self.deliberation.halt_action,
-            ),
-        )
-        return self
-
     # -------------------------------------------------------------------------
     # Optimizers & scheduling
     optimizer_supervised: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
-        description="optimizer for supervised parameters (PFC + embeddings + LM head).",
+        description="optimizer for supervised parameters (PFC + embeddings + "
+        "LM head).",
     )
     optimizer_rl: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
-        description="optimizer for RL parameters (STR actor-critic only).",
+        description="Optimizer for RL parameters (STR critic only; actor "
+        "logits live in PFC).",
     )
     optimizer_qv: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
@@ -190,11 +158,10 @@ class HRMV2ModelConfig(BaseModel, extra="forbid"):
     supervised_only_warmup_steps: int = Field(
         default=5000,
         ge=0,
-        description=(
-            "Number of optimizer steps during which only the supervised optimizer trains. "
-            "STR and vmPFC are frozen; allow_halt=False forces full deliberation. "
-            "Prevents 'halt immediately' collapse before PFC representations are informative."
-        ),
+        description="Number of optimizer steps during which only the "
+        "supervised optimizer trains. STR and vmPFC are frozen; "
+        "allow_halt=False forces full deliberation. Prevents halt immediately "
+        "collapse before PFC representations are informative.",
     )
     runtime: RuntimeConfig = Field(
         default_factory=RuntimeConfig,
@@ -217,8 +184,8 @@ class HRMV2TrainingModel(L.LightningModule):
     """LightningModule wrapper for HRM v2 deliberation actor-critic training.
 
     This wrapper manages:
-        - wiring :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationACController` and
-          :class:`~ehc_sn.objectives.hybrid_rl.HybridRLObjective`
+        - wiring :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationACController`
+          and :class:`~ehc_sn.objectives.hybrid_rl.HybridRLObjective`
         - partial-reset batching via FIFO buffering
         - manual optimization with three optimizers
     """
@@ -230,21 +197,11 @@ class HRMV2TrainingModel(L.LightningModule):
         super().__init__()
         model_settings = ModelSettingsV2.from_config(config.model_config_path)
         self.model = HRModelV2(model_settings)
-        self.bridge_adapter = MazeHardHRMV2BridgeAdapter(
-            self.model, config.adapter
-        )
-        self.controller: DeliberationACController | None = (
-            None  # Initialized in setup()
-        )
-        self.objective: HybridRLObjective | None = (
-            None  # Initialized in setup()
-        )
-        self.learner: TD0ActorCriticBatchBuilder | None = (
-            None  # Initialized in setup()
-        )
-        self.val_scorer: ZeroBootstrapActorCriticValidationScorer | None = (
-            None  # Initialized in setup()
-        )
+        self.adapter = MazeHardHRMV2BridgeAdapter(self.model, config.adapter)
+        self.controller: DeliberationACController | None = None
+        self.objective: HybridRLObjective | None = None
+        self.learner: TD0ActorCriticBatchBuilder | None = None
+        self.val_scorer: ZeroBootstrapActorCriticValidationScorer | None = None
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()
@@ -260,9 +217,9 @@ class HRMV2TrainingModel(L.LightningModule):
         self.val_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(
             prefix="val/"
         )
-        self.trace_specs = build_trace_spec(
-            "rl", extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
-        )
+        # self.trace_specs = build_trace_spec(
+        #     "rl", extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
+        # )
 
         # Buffer + assembler implement partial-reset batching for deliberation runs.
         self._train_buffer = FifoBuffer(
@@ -290,12 +247,12 @@ class HRMV2TrainingModel(L.LightningModule):
             task_config, MazeHardRewardProjector()
         )
         self.controller = DeliberationACController(
-            self.bridge_adapter, self.config.controller, finalizer
+            self.adapter, self.config.controller, finalizer
         )
         self.objective = HybridRLObjective(self.config.objective)
         task_binding = MazeHardHRMV2HybridTaskBinding()
         self.learner = TD0ActorCriticBatchBuilder(
-            self.bridge_adapter,
+            self.adapter,
             None,
             gamma=self.config.objective.gamma,
             task_binding=task_binding,
@@ -323,14 +280,12 @@ class HRMV2TrainingModel(L.LightningModule):
         str_ids = {id(p) for p in self.model.str.parameters()}
         excluded_ids = vmPFC_ids | str_ids
         sup_params = [
-            p
-            for p in self.bridge_adapter.parameters()
-            if id(p) not in excluded_ids
+            p for p in self.adapter.parameters() if id(p) not in excluded_ids
         ]
 
-        # Optimizer A: supervised — backbone + LM params only ().
+        # Optimizer A: supervised — backbone + LM params only.
         opt_sup = AdamATan2(sup_params, self.config.optimizer_supervised)
-        # Optimizer B: RL — STR actor-critic only (strictly isolated)
+        # Optimizer B: RL — STR critic only (actor logits live in PFC).
         opt_rl = AdamATan2(
             list(self.model.str.parameters()), self.config.optimizer_rl
         )
@@ -380,22 +335,18 @@ class HRMV2TrainingModel(L.LightningModule):
         replaced with fresh examples from the current incoming batch.
 
         Notes:
-            - ``setup()`` must have run so that ``self.controller`` and ``self.objective`` are available.
-            - During warmup (``global_step < supervised_only_warmup_steps``), halting is disabled.
+            - ``setup()`` must have run so that ``self.controller`` and
+              ``self.objective`` are available.
+            - During warmup (``global_step < supervised_only_warmup_steps``),
+              halting is disabled.
         """
-        if (
-            self.controller is None
-            or self.objective is None
-            or self.learner is None
-        ):
-            raise RuntimeError(
-                "HRM v2 runtime is not initialized. Call setup() before training."
-            )
+        self._assert_setup()  # Confirm that setup()
 
         # Initialize carry/state on the first batch.
         if self._train_carry is None:
             self._train_carry = self.controller.initial_state(batch)
 
+        # Warmup mode: only the supervised optimizer trains
         is_warmup = self.global_step < self.config.supervised_only_warmup_steps
 
         execution = self._train_runner.run(
@@ -406,7 +357,12 @@ class HRMV2TrainingModel(L.LightningModule):
             ),
             controller=self.controller,
             carry=self._train_carry,
-            options={"allow_halt": not is_warmup, "explore": True},
+            options={
+                "allow_halt": not is_warmup,
+                "explore": True,
+                "halt_action": self.config.deliberation.halt_action,
+                "max_halt_steps": self.config.deliberation.episode_horizon,
+            },
         )
         self._train_carry = execution.final_carry.detach()
 
@@ -416,9 +372,14 @@ class HRMV2TrainingModel(L.LightningModule):
                 "HRM v2 training runner produced a record without step counters."
             )
 
+        if self._train_carry is None:
+            raise RuntimeError("HRM v2 training carry missing after rollout.")
+        next_obs = self.controller.refresh_slot_data(batch, self._train_carry)
         ac_batch = self.learner.build_deliberation_ac_batch(
             record.outputs,
             record.snapshot,
+            next_obs=next_obs,
+            carry=self._train_carry,
             use_token_weights=True,
         )
         step_output = self.objective.compute_step(ac_batch, is_warmup=is_warmup)
@@ -494,16 +455,42 @@ class HRMV2TrainingModel(L.LightningModule):
             objective=self.val_scorer,
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
-            runner_options={"explore": False, "allow_halt": False},
+            runner_options={
+                "explore": False,
+                "allow_halt": False,
+                "halt_action": self.config.deliberation.halt_action,
+                "max_halt_steps": self.config.deliberation.episode_horizon,
+            },
             metric_collection=self.val_metrics,
             metric_routes=RL_EPISODE_ROUTES,
         )
-        trace = observe_rollout_chunk(
-            evaluation.chunk,
-            self.trace_specs,
-            trace_meta=build_mazehard_hrm_trace_meta(batch),
-        )
-        return {"trace": trace}
+
+        return {}
+        # trace = observe_rollout_chunk(
+        #     evaluation.chunk,
+        #     self.trace_specs,
+        #     trace_meta=build_mazehard_hrm_trace_meta(batch),
+        # )
+        # return {"trace": trace}
+
+    def _assert_setup(self) -> None:
+        """Helper to assert that setup() has run and initialized components."""
+        if self.controller is None:
+            raise RuntimeError(
+                "HRM v2 runtime is not initialized. Call setup() before use."
+            )
+        if self.objective is None:
+            raise RuntimeError(
+                "HRM v2 runtime is not initialized. Call setup() before use."
+            )
+        if self.learner is None:
+            raise RuntimeError(
+                "HRM v2 runtime is not initialized. Call setup() before use."
+            )
+        if self.val_scorer is None:
+            raise RuntimeError(
+                "HRM v2 runtime is not initialized. Call setup() before use."
+            )
 
 
 # =============================================================================
