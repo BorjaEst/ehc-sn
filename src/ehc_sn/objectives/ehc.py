@@ -30,7 +30,7 @@ from ehc_sn.loss.regularization import (
     RegularizationNorm,
     sum_regularization_terms,
 )
-from ehc_sn.metrics import signals as S
+import ehc_sn.metrics.signals as S
 from ehc_sn.metrics.keys import (
     EHC_ACC_OBS_ANCESTRAL_ALL,
     EHC_ACC_OBS_ANCESTRAL_REVISIT,
@@ -54,8 +54,8 @@ from ehc_sn.objectives._variational import (
     get_reg_term,
     require_latent_relation,
 )
-from ehc_sn.rollouts import CarrySnapshot, StepRecord
-from ehc_sn.training.types import RatioStat, StepMetrics
+from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
+from ehc_sn.rollouts.runtime import CarrySnapshot, StepRecord
 from ehc_sn.types import Batch
 
 GRID_REG_TERM = "grid_reg_term"

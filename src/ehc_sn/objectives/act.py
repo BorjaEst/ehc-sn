@@ -224,7 +224,7 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
         # --- metrics from precomputed losses/terms ---
         context.metrics = self.evaluate_metrics(context)
 
-        # --- signals from precomputed losses/context (no re-extraction) ---
+        # --- signals from precomputed losses/context ---
         context.signals = self.compute_signals(context)
 
         return self.build_output(context)

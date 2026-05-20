@@ -23,7 +23,7 @@ from ehc_sn.controllers.contracts.value_control import (
 )
 from ehc_sn.objectives._token import AccuracyStats, compute_accuracy_stats
 from ehc_sn.objectives.act import ACTObjectiveBinding
-from ehc_sn.objectives.hybrid_rl import HybridValueTaskBinding
+from ehc_sn.objectives.hybrid_rl import HybridValueObjectiveBinding
 from ehc_sn.rollouts.runtime import CarrySnapshot
 from ehc_sn.tasks.mazehard.contracts import (
     MAZE_HARD_IGNORE_LABEL_ID,
@@ -96,7 +96,7 @@ class MazeHardHRMV1ACTTaskBinding(ACTObjectiveBinding[MazeHardTargets]):
 class MazeHardHRMV2HybridTaskBinding:
     """MazeHard-specific extraction for the hybrid RL value-control batch path.
 
-    Implements :class:`~ehc_sn.objectives.hybrid_rl.HybridValueTaskBinding`
+    Implements :class:`~ehc_sn.objectives.hybrid_rl.HybridValueObjectiveBinding`
     for the HRM v2 + MazeHard pairing.  Extracts token logits from the
     task output on the interaction record and supervision labels from the
     observation dict used for the decision.
@@ -133,7 +133,7 @@ class MazeHardHRMV2HybridTaskBinding:
 
 
 # make the type-checker confirm the protocol is satisfied
-_: HybridValueTaskBinding = MazeHardHRMV2HybridTaskBinding()
+_: HybridValueObjectiveBinding = MazeHardHRMV2HybridTaskBinding()
 
 
 # =============================================================================

@@ -107,6 +107,27 @@ def compute_token_loss_sum(  # -------------------------------------------------
     token_weights: Tensor | None = None,
 ) -> Tensor:
     """Compute the summed supervised Token loss over the batch."""
+    loss_per_token = compute_token_loss_unreduced(
+        loss_fn,
+        logits_token,
+        labels,
+        ignore_label_id=ignore_label_id,
+        token_weights=token_weights,
+    )
+    loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
+    return loss_per_seq.sum()
+
+
+# =============================================================================
+def compute_token_loss_unreduced(  # ------------------------------------------
+    loss_fn: Any,
+    logits_token: Tensor,
+    labels: Tensor,
+    *,
+    ignore_label_id: int = IGNORE_LABEL_ID,
+    token_weights: Tensor | None = None,
+) -> Tensor:
+    """Return the per-token loss tensor before sequence reduction."""
     loss_per_token = loss_fn(logits_token, labels, ignore_index=ignore_label_id)
     if token_weights is not None:
         if token_weights.shape != labels.shape:
@@ -114,8 +135,7 @@ def compute_token_loss_sum(  # -------------------------------------------------
                 "token_weights must match labels shape for Token loss weighting.",
             )
         loss_per_token = loss_per_token * token_weights.to(loss_per_token.dtype)
-    loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
-    return loss_per_seq.sum()
+    return loss_per_token
 
 
 # =============================================================================
@@ -171,5 +191,6 @@ __all__ = [
     "TokenSupervisionBinding",
     "build_token_step_metrics",
     "compute_accuracy_stats",
+    "compute_token_loss_unreduced",
     "compute_token_loss_sum",
 ]

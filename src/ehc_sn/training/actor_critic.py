@@ -6,7 +6,7 @@ model-agnostic, task-agnostic, and controller-family-agnostic: no concrete
 controller state type is imported here.
 
 Task-specific field extraction is delegated to an injected
-:class:`HybridValueTaskBinding`.
+:class:`HybridValueObjectiveBinding`.
 
 Training path — online (TD(0) with live bootstrap)::
 
@@ -51,7 +51,7 @@ from ehc_sn.objectives.hybrid_rl import (
     HybridRLObjective,
     HybridRLObjectiveStep,
     HybridValueBatch,
-    HybridValueTaskBinding,
+    HybridValueObjectiveBinding,
 )
 from ehc_sn.objectives.rollout import EvaluatedChunk, score_rollout_chunk
 from ehc_sn.rollouts.runtime import RolloutChunk, StepRecord
@@ -77,7 +77,7 @@ class TD0ActorCriticBatchBuilder:
         backbone: ValueControlRolloutBackbone,
         runtime: OnlineBootstrapRuntime | None,
         gamma: float,
-        task_binding: HybridValueTaskBinding,
+        task_binding: HybridValueObjectiveBinding,
     ) -> None:
         """Initialize the batch builder with a backbone for bootstrap value
         computation, a runtime for bootstrap value extraction, a discount
@@ -271,7 +271,7 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
     ir: ValueControlInteractionRecord,
     steps: Tensor,
     halted: Tensor,
-    task_binding: HybridValueTaskBinding,
+    task_binding: HybridValueObjectiveBinding,
     *,
     use_token_weights: bool = False,
 ) -> HybridValueBatch:
@@ -334,7 +334,7 @@ class ZeroBootstrapActorCriticValidationScorer:
     def __init__(  # ----------------------------------------------------------
         self,
         objective: HybridRLObjective,
-        task_binding: HybridValueTaskBinding,
+        task_binding: HybridValueObjectiveBinding,
     ) -> None:
         """Initialize the scorer with a loss head for step-wise loss
         computation and a task binding for task-specific field extraction.
@@ -407,7 +407,7 @@ class _TokenWeightBinding(Protocol):
 
 # =============================================================================
 __all__ = [
-    "HybridValueTaskBinding",
+    "HybridValueObjectiveBinding",
     "OnlineBootstrapCarry",
     "OnlineBootstrapRuntime",
     "TD0ActorCriticBatchBuilder",

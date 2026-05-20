@@ -10,7 +10,7 @@ learner-owned TD(0) batch path — it is not a rollout-scoring objective.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import torch
@@ -34,7 +34,7 @@ from ehc_sn.objectives._token import (
     AccuracyStats,
     build_token_step_metrics,
     compute_accuracy_stats,
-    compute_token_loss_sum,
+    compute_token_loss_unreduced,
 )
 from ehc_sn.utils.detach import DetachMixin
 
@@ -73,7 +73,7 @@ class HybridRLLossConfig(BaseModel, extra="forbid"):
 
 
 # =============================================================================
-class HybridValueTaskBinding(Protocol):
+class HybridValueObjectiveBinding(Protocol):
     """Adapter-owned extraction of task-specific fields for hybrid RL batches.
 
     Implement this protocol in the adapter layer so that training helpers stay
@@ -161,6 +161,31 @@ class HybridRLObjectiveStep:
 
 
 # =============================================================================
+@dataclass(frozen=True)
+class HybridValueTerms:
+    """Per-example hybrid RL loss terms (unreduced)."""
+
+    loss_token: Tensor
+    loss_state_value: Tensor
+    loss_q_value: Tensor
+
+
+# =============================================================================
+@dataclass
+class HybridValueContext:
+    """Shared context resolved once per hybrid RL step."""
+
+    batch: HybridValueBatch
+    stats: AccuracyStats
+    is_warmup: bool
+
+    terms: HybridValueTerms | None = field(default=None, init=False)
+    losses: HybridRLLosses | None = field(default=None, init=False)
+    metrics: StepMetrics | None = field(default=None, init=False)
+    signals: dict[str, Tensor] = field(default_factory=dict, init=False)
+
+
+# =============================================================================
 class HybridRLObjective(nn.Module):
     """Hybrid RL batch-loss module: token-supervised Token loss plus value-control.
 
@@ -194,22 +219,6 @@ class HybridRLObjective(nn.Module):
         """Return the configured token-level loss function."""
         return getattr(cross_entropy_module, self._config.token_loss)
 
-    def compute_token_loss(  # ---------------------------------------------------
-        self,
-        logits_token: Tensor,
-        labels: Tensor,
-        stats: AccuracyStats,
-        token_weights: Tensor | None = None,
-    ) -> Tensor:
-        """Compute the summed supervised token loss for a step."""
-        return compute_token_loss_sum(
-            self.token_loss_fn,
-            logits_token,
-            labels,
-            stats,
-            token_weights=token_weights,
-        )
-
     def compute_step(  # ------------------------------------------------------
         self,
         batch: HybridValueBatch,
@@ -222,10 +231,92 @@ class HybridRLObjective(nn.Module):
         The caller (learner) owns TD(0) post-processing and provides a fully
         materialized batch; this method is a pure function over that input.
         """
+        context = self.build_context(batch, is_warmup=is_warmup)
+        context.terms = self.compute_terms(context)
+        context.losses = self.compute_losses(context)
+        context.metrics = self.evaluate_metrics(context)
+        context.signals = self.compute_signals(context)
+        return self.build_output(context)
+
+    def build_context(  # -----------------------------------------------------
+        self,
+        batch: HybridValueBatch,
+        *,
+        is_warmup: bool = False,
+        **_: Any,
+    ) -> HybridValueContext:
+        """Resolve token stats and other shared context for one batch step."""
         stats = compute_accuracy_stats(batch.task_logits, batch.labels)
-        losses = self.compute_losses(batch, stats, is_warmup=is_warmup)
+        return HybridValueContext(batch=batch, stats=stats, is_warmup=is_warmup)
+
+    def compute_terms(  # -----------------------------------------------------
+        self,
+        context: HybridValueContext,
+        **_: Any,
+    ) -> HybridValueTerms:
+        """Compute unreduced loss terms for a pre-materialized batch."""
+        batch = context.batch
+        loss_token = compute_token_loss_unreduced(
+            self.token_loss_fn,
+            batch.task_logits,
+            batch.labels,
+            token_weights=batch.token_weights,
+        )
+        if context.is_warmup:
+            zero = batch.task_logits.new_zeros(batch.rewards.shape[0])
+            loss_state_value = zero
+            loss_q_value = zero
+        else:
+            loss_state_value = F.mse_loss(
+                batch.state_values, batch.returns, reduction="none"
+            )
+            q_a = batch.q_values.gather(1, batch.actions.unsqueeze(-1)).squeeze(
+                -1
+            )
+            loss_q_value = F.mse_loss(
+                q_a, batch.returns.detach(), reduction="none"
+            )
+        return HybridValueTerms(
+            loss_token=loss_token,
+            loss_state_value=loss_state_value,
+            loss_q_value=loss_q_value,
+        )
+
+    def compute_losses(  # ----------------------------------------------------
+        self,
+        context: HybridValueContext,
+        **_: Any,
+    ) -> HybridRLLosses:
+        """Reduce per-example hybrid RL loss terms to batch sums."""
+        if context.terms is None:
+            raise RuntimeError(
+                "HybridRLObjective.compute_losses requires terms."
+            )
+        loss_token_per_seq = context.terms.loss_token.sum(
+            -1
+        ) / context.stats.loss_counts.clamp_min(1)
+        loss_token_sum = loss_token_per_seq.sum()
+        return HybridRLLosses(
+            loss_token_sum=loss_token_sum,
+            loss_state_value_sum=self.config.c_state_value
+            * context.terms.loss_state_value.sum(),
+            loss_q_value_sum=self.config.c_q_value
+            * context.terms.loss_q_value.sum(),
+        )
+
+    def evaluate_metrics(  # -------------------------------------------------
+        self,
+        context: HybridValueContext,
+        **_: Any,
+    ) -> StepMetrics:
+        """Compute per-step metrics for the hybrid RL objective."""
+        if context.losses is None:
+            raise RuntimeError(
+                "HybridRLObjective.evaluate_metrics requires losses."
+            )
+        batch = context.batch
         extras = self._build_metric_ratios(
-            losses, batch_size=int(batch.rewards.shape[0])
+            context.losses, batch_size=int(batch.rewards.shape[0])
         )
         steps = (
             batch.steps
@@ -236,50 +327,8 @@ class HybridRLObjective(nn.Module):
                 device=batch.rewards.device,
             )
         )
-        metrics = build_token_step_metrics(steps, batch.halted, stats, extras)
-        signals = self.compute_signals(batch, losses)
-        return HybridRLObjectiveStep(
-            losses=losses, metrics=metrics, signals=signals
-        )
-
-    def compute_losses(  # ----------------------------------------------------
-        self,
-        batch: HybridValueBatch,
-        stats: AccuracyStats,
-        *,
-        is_warmup: bool = False,
-        **_: Any,
-    ) -> HybridRLLosses:
-        """Compute supervised and hybrid RL loss terms from a pre-materialized batch.
-
-        This method is pure: it does not instantiate distributions, compute
-        log-probabilities, or compute advantages. All precomputed fields are
-        consumed directly from ``batch``.
-        """
-        loss_token_sum = self.compute_token_loss(
-            batch.task_logits,
-            batch.labels,
-            stats,
-            token_weights=batch.token_weights,
-        )
-        if not is_warmup:
-            loss_state_value = F.mse_loss(
-                batch.state_values, batch.returns, reduction="sum"
-            )
-            q_a = batch.q_values.gather(1, batch.actions.unsqueeze(-1)).squeeze(
-                -1
-            )
-            loss_q_value = F.mse_loss(
-                q_a, batch.returns.detach(), reduction="sum"
-            )
-        else:
-            zero = batch.task_logits.new_zeros(())
-            loss_state_value = zero
-            loss_q_value = zero
-        return HybridRLLosses(
-            loss_token_sum=loss_token_sum,
-            loss_state_value_sum=self.config.c_state_value * loss_state_value,
-            loss_q_value_sum=self.config.c_q_value * loss_q_value,
+        return build_token_step_metrics(
+            steps, batch.halted, context.stats, extras
         )
 
     def _build_metric_ratios(  # ----------------------------------------------
@@ -293,22 +342,32 @@ class HybridRLObjective(nn.Module):
             batch_size, dtype=torch.float32
         )
         return {
-            LOSS_TOKEN: RatioStat(losses.loss_token_sum.detach(), batch_count),
+            LOSS_TOKEN: RatioStat(
+                numerator_sum=losses.loss_token_sum.detach(),
+                denominator_sum=batch_count,
+            ),
             RL_LOSS_STATE_VALUE: RatioStat(
-                losses.loss_state_value_sum.detach(), batch_count
+                numerator_sum=losses.loss_state_value_sum.detach(),
+                denominator_sum=batch_count,
             ),
             RL_LOSS_Q_VALUE: RatioStat(
-                losses.loss_q_value_sum.detach(), batch_count
+                numerator_sum=losses.loss_q_value_sum.detach(),
+                denominator_sum=batch_count,
             ),
         }
 
     def compute_signals(  # ---------------------------------------------------
         self,
-        batch: HybridValueBatch,
-        losses: HybridRLLosses,
+        context: HybridValueContext,
         **_: Any,
     ) -> dict[str, Tensor]:
         """Compute lightweight diagnostic signals for the hybrid RL objective."""
+        if context.losses is None:
+            raise RuntimeError(
+                "HybridRLObjective.compute_signals requires losses."
+            )
+        batch = context.batch
+        losses = context.losses
         td_error = batch.returns - batch.state_values
         return {
             S.REWARD_MEAN: batch.rewards.mean().detach(),
@@ -320,11 +379,29 @@ class HybridRLObjective(nn.Module):
             S.LOSS_Q_VALUE: losses.loss_q_value_sum.detach(),
         }  # fmt: skip
 
+    def build_output(  # -----------------------------------------------------
+        self,
+        context: HybridValueContext,
+        **_: Any,
+    ) -> HybridRLObjectiveStep:
+        """Build the final step output from computed context fields."""
+        if context.losses is None or context.metrics is None:
+            raise RuntimeError(
+                "HybridRLObjective.build_output requires losses and metrics."
+            )
+        return HybridRLObjectiveStep(
+            losses=context.losses,
+            metrics=context.metrics,
+            signals=context.signals,
+        )
+
 
 # =============================================================================
 __all__ = [
-    "HybridValueTaskBinding",
+    "HybridValueObjectiveBinding",
     "HybridValueBatch",
+    "HybridValueContext",
+    "HybridValueTerms",
     "HybridRLLossConfig",
     "HybridRLObjective",
     "HybridRLLosses",
