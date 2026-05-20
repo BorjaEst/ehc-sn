@@ -25,7 +25,7 @@ from pathlib import Path
 from ehc_sn.traces.trace_tree import TraceTree
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class CountwalkEvaluationSourceContext:
     """Typed, frozen provider-side context for a Countwalk evaluation case batch.
@@ -45,13 +45,16 @@ class CountwalkEvaluationSourceContext:
     def __post_init__(self) -> None:
         if self.task_family != "countwalk":
             raise ValueError(
-                f"CountwalkEvaluationSourceContext.task_family must be 'countwalk', got {self.task_family!r}"
+                "CountwalkEvaluationSourceContext.task_family must be "
+                f"'countwalk', got {self.task_family!r}"
             )
         if not self.sample_ids:
-            raise ValueError("CountwalkEvaluationSourceContext.sample_ids must not be empty")
+            raise ValueError(
+                "CountwalkEvaluationSourceContext.sample_ids must not be empty",
+            )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class CountwalkTraceSupplements:
     """Canonical supplement content for Countwalk traces.
@@ -61,8 +64,8 @@ class CountwalkTraceSupplements:
     """
 
 
-# =================================================================================================
-def build_countwalk_trace_supplements(
+# =============================================================================
+def build_countwalk_trace_supplements(  # -------------------------------------
     source_context: CountwalkEvaluationSourceContext,
     trace_length: int,
 ) -> CountwalkTraceSupplements:
@@ -82,8 +85,8 @@ def build_countwalk_trace_supplements(
     return CountwalkTraceSupplements()
 
 
-# =================================================================================================
-def apply_countwalk_trace_supplements(
+# =============================================================================
+def apply_countwalk_trace_supplements(  # -------------------------------------
     trace: TraceTree,
     supplements: CountwalkTraceSupplements,
 ) -> None:
@@ -98,7 +101,7 @@ def apply_countwalk_trace_supplements(
     """
 
 
-# =================================================================================================
+# =============================================================================
 __all__ = [
     "CountwalkEvaluationSourceContext",
     "CountwalkTraceSupplements",
