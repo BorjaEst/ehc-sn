@@ -39,6 +39,14 @@ from ehc_sn.objectives.hybrid_rl import (
     HybridRLObjective,
     HybridRLObjectiveStep,
 )
+from ehc_sn.objectives.rollout import (
+    EvaluatedChunk,
+    ObjectiveStepOutput,
+    ObservedStep,
+    RolloutScorer,
+    materialize_observed_step,
+    score_rollout_chunk,
+)
 from ehc_sn.objectives.tem import (
     TEMLosses,
     TEMObjective,
@@ -52,6 +60,13 @@ from ehc_sn.objectives.tem import (
 __all__ = [
     # base
     "BaseObjective",
+    # rollout scoring
+    "EvaluatedChunk",
+    "ObjectiveStepOutput",
+    "ObservedStep",
+    "RolloutScorer",
+    "materialize_observed_step",
+    "score_rollout_chunk",
     # token family — implementation / compat
     "IGNORE_LABEL_ID",
     "AccuracyStats",

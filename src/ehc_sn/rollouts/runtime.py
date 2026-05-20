@@ -63,21 +63,6 @@ ControllerOutputT = TypeVar("ControllerOutputT")
 
 
 # =============================================================================
-class ObjectiveStepOutput(Protocol):
-    """Minimal scored-step output exposed outside objective modules."""
-
-    @property
-    def loss(self) -> Tensor:
-        """Return the scalar loss tensor for this step."""
-
-    metrics: object
-    signals: Mapping[str, object]
-
-
-ScoredOutputT = TypeVar("ScoredOutputT", bound=ObjectiveStepOutput)
-
-
-# =============================================================================
 @dataclass(frozen=True)
 class CarrySnapshot:
     """Frozen post-step projection of controller carry.
@@ -178,52 +163,6 @@ class RolloutChunk(Generic[CarryT, ControllerOutputT]):
 
 
 # =============================================================================
-@dataclass(frozen=True)
-class ObservedStep(Generic[ScoredOutputT]):
-    """Objective-scored step context consumed by metrics and trace observers.
-
-    Fields
-    ------
-    batch:
-        Backward-compatible alias; always contains the *executed_frame* content.
-    sampled_input:
-        Raw source-batch proposal; ``None`` when not populated by the runner.
-    executed_frame:
-        Exact tensors consumed by the model and objective on this step.
-        ``None`` when not populated (legacy path).
-    """
-
-    index: int
-    batch: Batch
-    snapshot: CarrySnapshot
-    outputs: ScoredOutputT
-    sampled_input: Batch | None = None
-    executed_frame: Batch | None = None
-
-    @property
-    def carry(self) -> CarrySnapshot:
-        """Backward-compatible alias for the frozen post-step snapshot."""
-        return self.snapshot
-
-
-# =============================================================================
-@dataclass(frozen=True)
-class EvaluatedChunk(Generic[CarryT, ScoredOutputT]):
-    """Objective-scored rollout fragment returned by a pure objective."""
-
-    steps: tuple[ObservedStep[ScoredOutputT], ...]
-    loss: Tensor
-    final_carry: CarryT
-    source_exhausted: bool = False
-
-    @property
-    def last_step(self) -> ObservedStep[ScoredOutputT]:
-        """Return the final scored step in the chunk."""
-        if not self.steps:
-            raise ValueError("EvaluatedChunk has no observed steps.")
-        return self.steps[-1]
-
-
 # =============================================================================
 class Source(Protocol):
     """Passive rollout batch supplier used by runners.
@@ -568,11 +507,8 @@ class RecurrentRunner:
 # =============================================================================
 __all__ = [
     "CarrySnapshot",
-    "EvaluatedChunk",
     "ExecutionHaltError",
     "HaltedCarry",
-    "ObjectiveStepOutput",
-    "ObservedStep",
     "RecurrentRunner",
     "RolloutExecution",
     "RolloutChunk",

@@ -18,21 +18,21 @@ from pydantic import BaseModel, Field
 from torch import Tensor
 
 import ehc_sn.loss.cross_entropy as cross_entropy_module
+import ehc_sn.metrics.signals as S
 from ehc_sn.controllers.deliberation.act import (
     ACTController,
     collapse_act_halt_continue_logits,
 )
 from ehc_sn.loss.cross_entropy import LossType
-from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import ACT_LOSS_Q_CONTINUE, ACT_LOSS_Q_DONE, LOSS_TOKEN
+from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
 from ehc_sn.objectives._base import BaseObjective
 from ehc_sn.objectives._token import (
     IGNORE_LABEL_ID,
     AccuracyStats,
     build_token_step_metrics,
 )
-from ehc_sn.rollouts import CarrySnapshot, StepRecord
-from ehc_sn.training.types import RatioStat, StepMetrics
+from ehc_sn.rollouts.runtime import CarrySnapshot, StepRecord
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
@@ -96,13 +96,13 @@ class ACTObjectiveBinding[TargetsT](Protocol):
 
 # =============================================================================
 class _TokenWeightBinding(Protocol):
-    """Optional task binding surface for per-token LM weights."""
+    """Optional task binding surface for per-token Token weights."""
 
     def build_token_weights(  # -----------------------------------------------
         self,
         labels: Tensor,
     ) -> Tensor:
-        """Return per-token loss weights aligned with LM labels."""
+        """Return per-token loss weights aligned with Token labels."""
 
 
 # =============================================================================
@@ -330,7 +330,7 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
         if token_weights is not None:
             if token_weights.shape != labels.shape:
                 raise ValueError(
-                    "token_weights must match labels shape for LM loss "
+                    "token_weights must match labels shape for Token loss "
                     "weighting."
                 )
             loss_per_token = loss_per_token * token_weights.to(

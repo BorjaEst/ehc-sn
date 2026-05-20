@@ -63,13 +63,17 @@ class MazeHardDeliberationCapability:
         - Delegate reward computation to :class:`~ehc_sn.tasks.mazehard.reward.MazeHardRewardProjector`.
         - Mark per-slot termination when ``action == config.halt_action``.
         - Mark per-slot truncation when ``steps >= config.episode_horizon``.
-        - Thread ``prev_accuracy`` as ``runtime_state`` across steps.
+        - No reward-local runtime state is threaded across steps.
 
     Implements :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationStepFinalizer`
     structurally (duck-typed; no Protocol inheritance required for runtime use).
     """
 
-    def __init__(self, config: MazeHardDeliberationConfig, reward_projector: MazeHardRewardProjector) -> None:
+    def __init__(
+        self,
+        config: MazeHardDeliberationConfig,
+        reward_projector: MazeHardRewardProjector,
+    ) -> None:
         """Create the MazeHard deliberation capability.
 
         Args:
@@ -98,36 +102,34 @@ class MazeHardDeliberationCapability:
                 with a ``task_logits`` tensor of shape ``(B, S, V)``.
             action: Sampled action tensor of shape ``(B,)``.
             steps: Per-slot step counters of shape ``(B,)``.
-            runtime_state: Previous ``prev_accuracy`` tensor of shape ``(B, 1)``,
-                or ``None`` on the first step.
+            runtime_state: Unused runtime carry for MazeHard reward semantics.
 
         Returns:
             :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationStepResult` with:
                 - ``reward``: shape ``(B, 1)``, ``float32``.
                 - ``terminated``: ``action == halt_action``, shape ``(B,)``.
                 - ``truncated``: ``steps >= episode_horizon``, shape ``(B,)``.
-                - ``next_runtime_state``: updated ``prev_accuracy`` tensor, ``(B, 1)``.
+                - ``next_runtime_state``: ``None`` (stateless reward projection).
         """
         assert isinstance(
             task_output, MazeHardTaskOutput
         ), f"MazeHardDeliberationCapability expects MazeHardTaskOutput, got {type(task_output).__name__}"
         labels: Tensor = data["labels"]
-        prev_accuracy: Tensor | None = runtime_state if isinstance(runtime_state, Tensor) else None
-
-        step_score = build_maze_hard_step_score(task_output, labels)
-        accuracy, reward = self._reward_projector.project_step_reward(
-            step_score,
-            prev_accuracy=prev_accuracy,
-        )
-
         terminated = action.eq(self._halt_action)
         truncated = steps >= self._episode_horizon
+
+        step_score = build_maze_hard_step_score(task_output, labels)
+        reward = self._reward_projector.project_step_reward(
+            step_score,
+            terminated=terminated,
+            truncated=truncated,
+        )
 
         return DeliberationStepResult(
             reward=reward,
             terminated=terminated,
             truncated=truncated,
-            next_runtime_state=accuracy.detach(),
+            next_runtime_state=None,
         )
 
 

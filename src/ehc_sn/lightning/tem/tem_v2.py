@@ -18,32 +18,37 @@ from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryController,
     ReplayTrajectoryControllerConfig,
 )
-from ehc_sn.lightning._rollout import (
-    evaluate_rollout,
-    evaluate_rollout_streaming,
-)
 from ehc_sn.lightning.tem.core.runtime import (
     RuntimeConfig,
     TEMRuntimeState,
     resolve_tem_runtime,
 )
-from ehc_sn.metrics import build_train_metrics, build_val_metrics
-from ehc_sn.metrics.routes import (
+from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
+from ehc_sn.metrics.rollout import (
+    make_observed_step_metric_observer,
+    update_metric_collection_from_evaluated_chunk,
+)
+from ehc_sn.metrics.routes.tem import (
     TEM_EPISODE_ROUTES,
     TEM_PRIMARY_VAL_ROUTE_KEY,
     TEM_STEP_ROUTES,
 )
 from ehc_sn.models.tem.tem_v2 import ModelSettingsV2, TEMModelV2
-from ehc_sn.objectives import TEMObjective, TEMObjectiveConfig
-from ehc_sn.rollouts import PartialResetSource, RecurrentRunner, RepeatSource
+from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
+from ehc_sn.rollouts.buffers import FifoBuffer
+from ehc_sn.rollouts.partial_reset import PartialResetBatchAssembler
+from ehc_sn.rollouts.runtime import RecurrentRunner
+from ehc_sn.rollouts.sources import PartialResetSource, RepeatSource
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
 from ehc_sn.tasks.arena.runtime import (
     batch_size_from_arena_batch,
     infer_arena_replay_batch_keys,
 )
-from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.optim import Adam, AdamConfig
-from ehc_sn.training.partial_reset import PartialResetBatchAssembler
+from ehc_sn.training.rollout import (
+    score_captured_rollout,
+    score_rollout_streaming,
+)
 from ehc_sn.training.schedules import (
     CosineAnnealingLRWithWarmup,
     SchedulerConfig,
@@ -218,7 +223,7 @@ class TEMV2TrainingModel(L.LightningModule):
         if self._train_carry is None:
             self._train_carry = train_controller.initial_state(batch)
 
-        evaluation = evaluate_rollout_streaming(
+        evaluation = score_rollout_streaming(
             runner=self._train_runner,
             source=PartialResetSource(
                 incoming=batch,
@@ -229,10 +234,11 @@ class TEMV2TrainingModel(L.LightningModule):
             carry=self._train_carry,
             objective=train_objective,
             max_rollout_steps=self._train_chunk_steps(),
-            metric_collection=self.train_metrics,
-            metric_routes=TEM_STEP_ROUTES,
             objective_options=train_objective.runtime_loss_options(
                 self.global_step, p2g_use=runtime.p2g_use
+            ),
+            observed_step_observer=make_observed_step_metric_observer(
+                self.train_metrics, TEM_STEP_ROUTES
             ),
         )
         next_carry = evaluation.execution.final_carry.detach()
@@ -296,7 +302,7 @@ class TEMV2TrainingModel(L.LightningModule):
             self.global_step, p2g_use=runtime.p2g_use
         )
 
-        evaluation = evaluate_rollout(
+        evaluation = score_captured_rollout(
             runner=self._eval_runner,
             source=RepeatSource(batch),
             controller=eval_controller,
@@ -306,8 +312,9 @@ class TEMV2TrainingModel(L.LightningModule):
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options=step_options,
             objective_options=objective_options,
-            metric_collection=self.val_metrics,
-            metric_routes=TEM_EPISODE_ROUTES,
+        )
+        update_metric_collection_from_evaluated_chunk(
+            self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES
         )
 
         return {}

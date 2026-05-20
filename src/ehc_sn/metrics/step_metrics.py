@@ -1,14 +1,6 @@
-"""Generic step-metrics types for rollout-based objectives.
+"""Shared step-metrics contracts for rollout objectives."""
 
-The shared layer exposes three pieces of structure:
-
-* **Episode aggregates** for completed sequences on the current step.
-* **Step aggregates** for all currently evaluated sequences on the current step.
-* **Keyed ratio extras** for algorithm-specific losses and diagnostics.
-
-This keeps the generic layer free of ACT- or RL-specific field names while
-preserving the routing model used by :func:`~ehc_sn.metrics.update_metrics_from_step`.
-"""
+from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass

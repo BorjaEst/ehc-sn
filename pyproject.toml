@@ -54,6 +54,7 @@
         "isort",
         "flake8",
         "mypy",
+        "import-linter",
         "ruff",
         "pyupgrade",
     ]

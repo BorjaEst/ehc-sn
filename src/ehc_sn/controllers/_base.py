@@ -80,7 +80,7 @@ class BaseController[ModelState, ConfigT: BaseModel]:
     * **Action selection** — any policy (greedy argmax, categorical sampling,
       exploration gating) lives in the subclass private hook
       ``_select_action_and_done``.
-    * **LM loss computation** — no loss is computed here.
+    * **Token loss computation** — no loss is computed here.
 
     Subclasses must implement ``step(state, batch, **options)`` following this
     sequence:

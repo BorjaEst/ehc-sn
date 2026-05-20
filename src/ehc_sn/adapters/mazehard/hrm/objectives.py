@@ -23,13 +23,13 @@ from ehc_sn.controllers.contracts.value_control import (
 )
 from ehc_sn.objectives._token import AccuracyStats, compute_accuracy_stats
 from ehc_sn.objectives.act import ACTObjectiveBinding
-from ehc_sn.rollouts import CarrySnapshot
+from ehc_sn.objectives.hybrid_rl import HybridValueTaskBinding
+from ehc_sn.rollouts.runtime import CarrySnapshot
 from ehc_sn.tasks.mazehard.contracts import (
     MAZE_HARD_IGNORE_LABEL_ID,
     MazeHardTargets,
 )
 from ehc_sn.tasks.mazehard.runtime import PATH_ID
-from ehc_sn.training.actor_critic import HybridValueTaskBinding
 from ehc_sn.types import Batch
 
 
@@ -88,7 +88,7 @@ class MazeHardHRMV1ACTTaskBinding(ACTObjectiveBinding[MazeHardTargets]):
         )
 
     def build_token_weights(self, labels: Tensor) -> Tensor:
-        """Return per-token LM weights that emphasize MazeHard PATH labels."""
+        """Return per-token Token weights that emphasize MazeHard PATH labels."""
         return _build_mazehard_token_weights(labels)
 
 
@@ -96,7 +96,7 @@ class MazeHardHRMV1ACTTaskBinding(ACTObjectiveBinding[MazeHardTargets]):
 class MazeHardHRMV2HybridTaskBinding:
     """MazeHard-specific extraction for the hybrid RL value-control batch path.
 
-    Implements :class:`~ehc_sn.training.actor_critic.HybridValueTaskBinding`
+    Implements :class:`~ehc_sn.objectives.hybrid_rl.HybridValueTaskBinding`
     for the HRM v2 + MazeHard pairing.  Extracts token logits from the
     task output on the interaction record and supervision labels from the
     observation dict used for the decision.
@@ -127,7 +127,7 @@ class MazeHardHRMV2HybridTaskBinding:
     def extract_token_weights(
         self, record: ValueControlInteractionRecord
     ) -> Tensor:
-        """Return per-token LM weights that emphasize MazeHard PATH labels."""
+        """Return per-token Token weights that emphasize MazeHard PATH labels."""
         labels = self.extract_labels(record)
         return _build_mazehard_token_weights(labels)
 
@@ -162,7 +162,7 @@ def _extract_record_task_logits(  # -------------------------------------------
 def _build_mazehard_token_weights(  # -----------------------------------------
     labels: Tensor,
 ) -> Tensor:
-    """Build per-token weights that upweight PATH labels during LM loss."""
+    """Build per-token weights that upweight PATH labels during Token loss."""
     weights = torch.ones_like(labels, dtype=torch.float32)
     weights = torch.where(
         labels == PATH_ID,

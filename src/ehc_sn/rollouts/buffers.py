@@ -1,9 +1,11 @@
-"""Small FIFO buffer utilities for partial-reset training.
+"""Small FIFO buffer utilities for partial-reset rollouts.
 
-The main consumer is :class:`~ehc_sn.training.partial_reset.PartialResetBatchAssembler`.
+The main consumer is :class:`~ehc_sn.rollouts.partial_reset.PartialResetBatchAssembler`.
 Rows are pushed from (typically GPU) batches and stored as CPU tensors (optionally
 pinned) so they can be used to refill halted slots later.
 """
+
+from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass

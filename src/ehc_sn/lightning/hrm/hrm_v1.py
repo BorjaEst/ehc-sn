@@ -11,7 +11,7 @@ Key behaviors:
         support continuation / halting semantics.
     - **Partial reset batching**: halted examples are replaced with fresh rows
         using a FIFO buffer and
-        :class:`~ehc_sn.training.partial_reset.PartialResetBatchAssembler`.
+        :class:`~ehc_sn.rollouts.partial_reset.PartialResetBatchAssembler`.
 
 The batch structure used throughout this file is a plain ``dict[str, Tensor]``
 with keys ``"input_ids"`` and ``"labels"``.
@@ -23,6 +23,7 @@ import lightning as L
 from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 from pydantic import AliasChoices, BaseModel, Field
 from torch.optim import Optimizer
+from torchmetrics import MetricCollection
 
 from ehc_sn.adapters.mazehard.hrm import (
     MazeHardHRMAdapterSettings,
@@ -35,26 +36,20 @@ from ehc_sn.controllers.deliberation.act import (
     ACTController,
     ACTControllerConfig,
 )
-from ehc_sn.lightning._rollout import evaluate_rollout
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
-from ehc_sn.metrics import build_train_metrics, build_val_metrics
-from ehc_sn.metrics.routes import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
+from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
+from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
+from ehc_sn.metrics.routes.act import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
-from ehc_sn.objectives import ACTObjective
 from ehc_sn.objectives.act import ACTObjective, ACTObjectiveConfig
-from ehc_sn.rollouts import (
-    PartialResetSource,
-    RecurrentRunner,
-    RepeatSource,
-    SingleStepRunner,
-)
-
-# from ehc_sn.traces import build_trace_spec
-from ehc_sn.training.buffers import FifoBuffer
+from ehc_sn.rollouts.buffers import FifoBuffer
+from ehc_sn.rollouts.partial_reset import PartialResetBatchAssembler
+from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
+from ehc_sn.rollouts.sources import PartialResetSource, RepeatSource
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
-from ehc_sn.training.partial_reset import PartialResetBatchAssembler
+from ehc_sn.training.rollout import score_captured_rollout
 from ehc_sn.training.schedules import (
     CosineAnnealingLRWithWarmup,
     SchedulerConfig,
@@ -260,7 +255,7 @@ class HRMV1TrainingModel(L.LightningModule):
             assembler=self._train_batch_assembler,
             carry0=self._train_carry,
         )
-        evaluation = evaluate_rollout(
+        evaluation = score_captured_rollout(
             runner=self._train_runner,
             source=source,
             controller=self.controller,
@@ -272,8 +267,9 @@ class HRMV1TrainingModel(L.LightningModule):
                 "td_target": True,
                 "use_token_weights": True,
             },
-            metric_collection=self.train_metrics,
-            metric_routes=ACT_STEP_ROUTES,
+        )
+        update_metric_collection_from_evaluated_chunk(
+            self.train_metrics, evaluation.evaluated, ACT_STEP_ROUTES
         )
         self._train_carry = evaluation.chunk.final_carry.detach()
 
@@ -320,7 +316,7 @@ class HRMV1TrainingModel(L.LightningModule):
         budget without exploration.
         """
         carry0 = self.controller.initial_state(batch)
-        evaluation = evaluate_rollout(
+        evaluation = score_captured_rollout(
             runner=self._eval_runner,
             source=RepeatSource(batch),
             controller=self.controller,
@@ -330,9 +326,11 @@ class HRMV1TrainingModel(L.LightningModule):
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options={"allow_halt": False, "explore": False},
             objective_options={"controller": self.controller, "td_target": False },  # fmt: skip
-            metric_collection=self.val_metrics,
-            metric_routes=ACT_EPISODE_ROUTES,
         )
+        update_metric_collection_from_evaluated_chunk(
+            self.val_metrics, evaluation.evaluated, ACT_EPISODE_ROUTES
+        )
+        return {}
         # trace = observe_rollout_chunk(
         #     evaluation.chunk,
         #     self.trace_specs,

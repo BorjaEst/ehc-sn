@@ -1,11 +1,12 @@
 """MazeHard task-owned reward semantics.
 
-:class:`MazeHardRewardProjector` computes the dense improvement reward from
+:class:`MazeHardRewardProjector` computes the stop-time reward from
 task evaluation semantics (:class:`~ehc_sn.tasks.mazehard.evaluation.MazeHardStepScore`).
 This is a task-owned orthogonal projection — it does not depend on any
 capability or execution-binding internals.
 
-Reward formula: ``exp(accuracy_t) - exp(accuracy_{t-1})``.
+Reward formula: terminal success reward plus explicit continue cost, incorrect
+halt penalty, and truncation penalty.
 
 The projector is injected into
 :class:`~ehc_sn.tasks.mazehard.capabilities.deliberation.MazeHardDeliberationCapability`
@@ -23,7 +24,12 @@ from .evaluation import MazeHardStepScore
 
 # =============================================================================
 class MazeHardRewardConfig(BaseModel, extra="forbid"):
-    """Configuration for the MazeHard dense improvement reward."""
+    """Configuration for the MazeHard stop-time reward."""
+
+    success_reward: float = 1.0
+    continue_cost: float = -0.01
+    incorrect_halt_penalty: float = -1.0
+    truncation_penalty: float = -1.0
 
 
 # =============================================================================
@@ -31,11 +37,13 @@ class MazeHardRewardProjector:
     """Orthogonal reward projection over MazeHard task evaluation semantics.
 
     Consumes :class:`~ehc_sn.tasks.mazehard.evaluation.MazeHardStepScore`
-    and applies the dense improvement formula:
-    ``reward = exp(accuracy_t) - exp(accuracy_{t-1})``.
+    and applies the stop-time reward:
+    - terminal success reward when halting with exact sequence correctness
+    - explicit continue cost when still deliberating
+    - explicit incorrect-halt penalty
+    - explicit truncation penalty
 
-    No capability internals are required.  The projector is stateless;
-    ``prev_accuracy`` is threaded externally by the capability runtime.
+    No capability internals are required.  The projector is stateless.
     """
 
     def __init__(self, config: MazeHardRewardConfig | None = None) -> None:
@@ -51,27 +59,66 @@ class MazeHardRewardProjector:
         self,
         step_score: MazeHardStepScore,
         *,
-        prev_accuracy: Tensor | None = None,
-    ) -> tuple[Tensor, Tensor]:
-        """Return ``(accuracy, reward)`` for one deliberation step.
+        terminated: Tensor,
+        truncated: Tensor,
+    ) -> Tensor:
+        """Return the stop-time reward for one deliberation step.
 
         Args:
             step_score: Per-sequence correctness summary from
                 :func:`~ehc_sn.tasks.mazehard.evaluation.build_maze_hard_step_score`.
-            prev_accuracy: Previous step accuracy tensor of shape ``(B, 1)``,
-                or ``None`` for the first step (treated as zero).
+            terminated: Per-slot termination signal (halt action) of shape ``(B,)``.
+            truncated: Per-slot truncation signal (episode horizon) of shape ``(B,)``.
 
         Returns:
-            A tuple ``(accuracy, reward)`` where both tensors have shape
-            ``(B, 1)`` and dtype ``float32``.
+            Reward tensor of shape ``(B, 1)`` and dtype ``float32``.
         """
-        accuracy = step_score.sequence_accuracy.unsqueeze(-1).to(dtype=torch.float32)
-        if prev_accuracy is None:
-            prev_acc = torch.zeros_like(accuracy)
-        else:
-            prev_acc = prev_accuracy.to(device=accuracy.device, dtype=torch.float32)
-        reward = torch.exp(accuracy) - torch.exp(prev_acc)
-        return accuracy, reward
+        sequence_correct = step_score.sequence_is_correct
+        device = sequence_correct.device
+        batch = sequence_correct.shape[0]
+
+        reward = torch.full(
+            (batch, 1),
+            float(self._config.continue_cost),
+            device=device,
+            dtype=torch.float32,
+        )
+
+        truncation_reward = torch.full(
+            (batch, 1),
+            float(self._config.truncation_penalty),
+            device=device,
+            dtype=torch.float32,
+        )
+        reward = torch.where(
+            truncated.to(device=device, dtype=torch.bool).unsqueeze(-1),
+            truncation_reward,
+            reward,
+        )
+
+        success_reward = torch.full(
+            (batch, 1),
+            float(self._config.success_reward),
+            device=device,
+            dtype=torch.float32,
+        )
+        incorrect_reward = torch.full(
+            (batch, 1),
+            float(self._config.incorrect_halt_penalty),
+            device=device,
+            dtype=torch.float32,
+        )
+        halt_reward = torch.where(
+            sequence_correct.to(device=device, dtype=torch.bool).unsqueeze(-1),
+            success_reward,
+            incorrect_reward,
+        )
+        reward = torch.where(
+            terminated.to(device=device, dtype=torch.bool).unsqueeze(-1),
+            halt_reward,
+            reward,
+        )
+        return reward
 
 
 # =============================================================================

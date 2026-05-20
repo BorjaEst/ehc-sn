@@ -51,50 +51,11 @@ from ehc_sn.objectives.hybrid_rl import (
     HybridRLObjective,
     HybridRLObjectiveStep,
     HybridValueBatch,
+    HybridValueTaskBinding,
 )
-from ehc_sn.rollouts import (
-    EvaluatedChunk,
-    ObservedStep,
-    RolloutChunk,
-    StepRecord,
-)
+from ehc_sn.objectives.rollout import EvaluatedChunk, score_rollout_chunk
+from ehc_sn.rollouts.runtime import RolloutChunk, StepRecord
 from ehc_sn.types import Batch
-
-
-# =============================================================================
-class HybridValueTaskBinding(Protocol):
-    """Adapter-owned extraction of task-specific fields from a
-    :class:`ValueControlInteractionRecord`.
-
-    Implement this protocol in the adapter layer so that the generic
-    :class:`TD0ActorCriticBatchBuilder` and
-    :class:`ZeroBootstrapActorCriticValidationScorer` remain task-agnostic.
-
-    The binding owns:
-    - extraction of token-prediction logits for the LM loss component
-    - extraction of supervision labels for the LM loss component
-    """
-
-    def extract_task_logits(  # -----------------------------------------------
-        self,
-        record: ValueControlInteractionRecord,
-    ) -> Tensor:
-        """Return token-prediction logits from the task output on ``record``."""
-
-    def extract_labels(  # ----------------------------------------------------
-        self,
-        record: ValueControlInteractionRecord,
-    ) -> Tensor:
-        """Return supervision labels from the interaction record."""
-
-
-class _TokenWeightBinding(Protocol):
-    """Optional task binding surface for per-token LM weights."""
-
-    def extract_token_weights(
-        self, record: ValueControlInteractionRecord
-    ) -> Tensor:
-        """Return per-token loss weights aligned with LM labels."""
 
 
 # =============================================================================
@@ -367,7 +328,7 @@ class ZeroBootstrapActorCriticValidationScorer:
     This is the same canonical construction path used by
     :meth:`TD0ActorCriticBatchBuilder.build_deliberation_ac_batch`.
 
-    Satisfies the :class:`~ehc_sn.lightning._rollout.RolloutObjective` protocol.
+    Satisfies the :class:`~ehc_sn.objectives.rollout.RolloutScorer` protocol.
     """
 
     def __init__(  # ----------------------------------------------------------
@@ -383,36 +344,7 @@ class ZeroBootstrapActorCriticValidationScorer:
 
     def __call__(self, chunk: RolloutChunk, **options: Any) -> EvaluatedChunk:
         """Score all records in a rollout chunk and return an evaluated chunk."""
-        observed_steps: list[ObservedStep] = []
-        total_loss: Tensor | None = None
-
-        for record in chunk.records:
-            step_output = self.evaluate_step(record, **options)
-            observed_steps.append(
-                ObservedStep(
-                    index=record.index,
-                    batch=record.batch,
-                    snapshot=record.snapshot,
-                    outputs=step_output,
-                )
-            )
-            total_loss = (
-                step_output.loss
-                if total_loss is None
-                else total_loss + step_output.loss
-            )
-
-        if total_loss is None:
-            raise ValueError(
-                "ZeroBootstrapActorCriticValidationScorer received an empty chunk."
-            )
-
-        return EvaluatedChunk(
-            steps=tuple(observed_steps),
-            loss=total_loss,
-            final_carry=chunk.final_carry,
-            source_exhausted=chunk.source_exhausted,
-        )
+        return score_rollout_chunk(chunk, self, **options)
 
     def evaluate_step(  # -----------------------------------------------------
         self,
@@ -461,6 +393,16 @@ class ZeroBootstrapActorCriticValidationScorer:
         )
         is_warmup = bool(options.get("is_warmup", False))
         return self._objective.compute_step(ac_batch, is_warmup=is_warmup)
+
+
+# =============================================================================
+class _TokenWeightBinding(Protocol):
+    """Optional task binding surface for per-token Token weights."""
+
+    def extract_token_weights(
+        self, record: ValueControlInteractionRecord
+    ) -> Tensor:
+        """Return per-token loss weights aligned with Token labels."""
 
 
 # =============================================================================

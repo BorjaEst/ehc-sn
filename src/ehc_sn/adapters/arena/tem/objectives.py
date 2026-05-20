@@ -22,8 +22,9 @@ from ehc_sn.metrics.keys import (
     TEM_ACC_OBS_RETRIEVED_ALL,
     TEM_ACC_OBS_RETRIEVED_REVISIT,
 )
+from ehc_sn.metrics.step_metrics import RatioStat
 from ehc_sn.objectives.tem import TEMStepOutput
-from ehc_sn.rollouts import CarrySnapshot
+from ehc_sn.rollouts.runtime import CarrySnapshot
 from ehc_sn.tasks.arena.contracts import ArenaTargets
 from ehc_sn.tasks.arena.evaluation import (
     ArenaStepScore,
@@ -32,7 +33,6 @@ from ehc_sn.tasks.arena.evaluation import (
     coerce_revisit_mask,
 )
 from ehc_sn.tasks.arena.runtime import coerce_arena_targets
-from ehc_sn.training.types import RatioStat
 from ehc_sn.types import Batch
 
 

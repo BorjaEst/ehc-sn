@@ -1,4 +1,4 @@
-"""Hybrid RL objective: token-supervised LM loss plus value-control.
+"""Hybrid RL objective: token-supervised Token loss plus value-control.
 
 This is the *hybrid* batch-loss module for models that jointly train a
 token-prediction head alongside a value-based ACT head (e.g. the
@@ -11,7 +11,7 @@ learner-owned TD(0) batch path — it is not a rollout-scoring objective.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import torch
 import torch.nn.functional as F
@@ -19,20 +19,23 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 import ehc_sn.loss.cross_entropy as cross_entropy_module
+import ehc_sn.metrics.signals as S
+from ehc_sn.controllers.contracts.value_control import (
+    ValueControlInteractionRecord,
+)
 from ehc_sn.loss.cross_entropy import LossType
-from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import (
     LOSS_TOKEN,
     RL_LOSS_Q_VALUE,
     RL_LOSS_STATE_VALUE,
 )
+from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
 from ehc_sn.objectives._token import (
     AccuracyStats,
     build_token_step_metrics,
     compute_accuracy_stats,
     compute_token_loss_sum,
 )
-from ehc_sn.training.types import RatioStat, StepMetrics
 from ehc_sn.utils.detach import DetachMixin
 
 
@@ -70,6 +73,27 @@ class HybridRLLossConfig(BaseModel, extra="forbid"):
 
 
 # =============================================================================
+class HybridValueTaskBinding(Protocol):
+    """Adapter-owned extraction of task-specific fields for hybrid RL batches.
+
+    Implement this protocol in the adapter layer so that training helpers stay
+    task-agnostic while using the value-control interaction record.
+    """
+
+    def extract_task_logits(  # -----------------------------------------------
+        self,
+        record: ValueControlInteractionRecord,
+    ) -> Tensor:
+        """Return token-prediction logits from the task output on ``record``."""
+
+    def extract_labels(  # ----------------------------------------------------
+        self,
+        record: ValueControlInteractionRecord,
+    ) -> Tensor:
+        """Return supervision labels from the interaction record."""
+
+
+# =============================================================================
 @dataclass(frozen=True)
 class HybridValueBatch:
     """Fully materialized value-control batch consumed by :class:`HybridRLObjective`.
@@ -89,13 +113,13 @@ class HybridValueBatch:
     terminated: Tensor  # (B,) episode terminated flag
     truncated: Tensor  # (B,) episode truncated flag
     state_values: Tensor  # (B,) V(s_t) from the critic
-    task_logits: Tensor  # (B, S, V) token-prediction logits for LM loss
-    labels: Tensor  # (B, S) supervision targets for LM loss
+    task_logits: Tensor  # (B, S, V) token-prediction logits for Token loss
+    labels: Tensor  # (B, S) supervision targets for Token loss
     bootstrap_value: Tensor  # (B,) V(s_{t+1}) used for TD(0) target
     returns: Tensor  # (B,) TD(0) return: r + gamma * V(s_{t+1}) * (1 - done)
     steps: Tensor  # (B,) per-slot step counters after this step
     halted: Tensor  # (B,) per-slot done flags (used for episode metrics)
-    token_weights: Tensor | None = None  # (B, S) optional LM loss weights
+    token_weights: Tensor | None = None  # (B, S) optional Token loss weights
 
 
 # =============================================================================
@@ -138,7 +162,7 @@ class HybridRLObjectiveStep:
 
 # =============================================================================
 class HybridRLObjective(nn.Module):
-    """Hybrid RL batch-loss module: token-supervised LM loss plus value-control.
+    """Hybrid RL batch-loss module: token-supervised Token loss plus value-control.
 
     The sole entry point is :meth:`compute_step`, which accepts a fully
     materialized :class:`HybridValueBatch` assembled by the learner
@@ -299,6 +323,7 @@ class HybridRLObjective(nn.Module):
 
 # =============================================================================
 __all__ = [
+    "HybridValueTaskBinding",
     "HybridValueBatch",
     "HybridRLLossConfig",
     "HybridRLObjective",

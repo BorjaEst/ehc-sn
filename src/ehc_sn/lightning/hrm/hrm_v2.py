@@ -20,8 +20,8 @@ Key behaviors:
     - **Warmup**: for the first ``supervised_only_warmup_steps`` global steps,
         ``allow_halt=False`` forces full deliberation and RL losses are zeroed.
     - **Partial reset batching**: halted slots are replaced with fresh rows using
-        :class:`~ehc_sn.training.buffers.FifoBuffer` and
-        :class:`~ehc_sn.training.partial_reset.PartialResetBatchAssembler`.
+        :class:`~ehc_sn.rollouts.buffers.FifoBuffer` and
+        :class:`~ehc_sn.rollouts.partial_reset.PartialResetBatchAssembler`.
 
 The batch structure used throughout this file is a plain ``dict[str, Tensor]``
 with keys ``"input_ids"`` and ``"labels"``.
@@ -51,39 +51,36 @@ from ehc_sn.controllers.deliberation.actor_critic import (
     DeliberationACController,
     DeliberationACControllerConfig,
 )
-from ehc_sn.lightning._rollout import (
-    evaluate_rollout,
-)
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
-from ehc_sn.metrics import (
-    build_train_metrics,
-    build_val_metrics,
-    update_metrics_from_step,
-)
-from ehc_sn.metrics.routes import RL_EPISODE_ROUTES, RL_STEP_ROUTES
+from ehc_sn.metrics.adapter import update_metrics_from_step
+from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
+from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
+from ehc_sn.metrics.routes.rl import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettingsV2
-from ehc_sn.objectives import HybridRLLossConfig, HybridRLObjective
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLObjective
-from ehc_sn.rollouts import (
-    PartialResetSource,
-    RecurrentRunner,
-    RepeatSource,
-    SingleStepRunner,
-)
+from ehc_sn.rollouts.buffers import FifoBuffer
+from ehc_sn.rollouts.partial_reset import PartialResetBatchAssembler
+from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
+from ehc_sn.rollouts.sources import PartialResetSource, RepeatSource
 from ehc_sn.tasks.mazehard.capabilities.deliberation import (
     MazeHardDeliberationCapability,
     MazeHardDeliberationConfig,
 )
-from ehc_sn.tasks.mazehard.reward import MazeHardRewardProjector
+from ehc_sn.tasks.mazehard.reward import (
+    MazeHardRewardConfig,
+    MazeHardRewardProjector,
+)
 from ehc_sn.training.actor_critic import (
     TD0ActorCriticBatchBuilder,
     ZeroBootstrapActorCriticValidationScorer,
 )
-from ehc_sn.training.buffers import FifoBuffer
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
-from ehc_sn.training.partial_reset import PartialResetBatchAssembler
+from ehc_sn.training.rollout import (
+    run_captured_rollout,
+    score_captured_rollout,
+)
 from ehc_sn.training.schedules import (
     CosineAnnealingLRWithWarmup,
     SchedulerConfig,
@@ -125,6 +122,10 @@ class HRMV2ModelConfig(BaseModel, extra="forbid"):
         description="Deliberation capability config for the MazeHard "
         "deliberation path (halt_action, episode_horizon).",
     )
+    reward: MazeHardRewardConfig = Field(
+        default_factory=MazeHardRewardConfig,
+        description="Reward configuration for MazeHard stop-time projection.",
+    )
     controller: DeliberationACControllerConfig = Field(
         default_factory=DeliberationACControllerConfig,
         description="Configuration for the deliberation actor-critic "
@@ -140,7 +141,7 @@ class HRMV2ModelConfig(BaseModel, extra="forbid"):
     optimizer_supervised: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
         description="optimizer for supervised parameters (PFC + embeddings + "
-        "LM head).",
+        "Token head).",
     )
     optimizer_rl: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
@@ -214,8 +215,11 @@ class HRMV2TrainingModel(L.LightningModule):
         self.train_metrics = build_train_metrics(RL_STEP_ROUTES).clone(
             prefix="train/"
         )
-        self.val_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(
-            prefix="val/"
+        self.val_budget_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(
+            prefix="val_fixed_budget_metrics/"
+        )
+        self.val_halt_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(
+            prefix="val_learned_halt_metrics/"
         )
         # self.trace_specs = build_trace_spec(
         #     "rl", extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
@@ -244,7 +248,7 @@ class HRMV2TrainingModel(L.LightningModule):
         """Initialize the deliberation controller and wiring."""
         task_config = self.config.deliberation
         finalizer = MazeHardDeliberationCapability(
-            task_config, MazeHardRewardProjector()
+            task_config, MazeHardRewardProjector(self.config.reward)
         )
         self.controller = DeliberationACController(
             self.adapter, self.config.controller, finalizer
@@ -261,6 +265,25 @@ class HRMV2TrainingModel(L.LightningModule):
             self.objective, task_binding
         )
 
+    def _assert_setup(self) -> None:
+        """Helper to assert that setup() has run and initialized components."""
+        if self.controller is None:
+            raise RuntimeError(
+                "HRM v2 runtime is not initialized. Call setup() before use."
+            )
+        if self.objective is None:
+            raise RuntimeError(
+                "HRM v2 runtime is not initialized. Call setup() before use."
+            )
+        if self.learner is None:
+            raise RuntimeError(
+                "HRM v2 runtime is not initialized. Call setup() before use."
+            )
+        if self.val_scorer is None:
+            raise RuntimeError(
+                "HRM v2 runtime is not initialized. Call setup() before use."
+            )
+
     def configure_optimizers(  # ----------------------------------------------
         self,
     ) -> tuple[list[Optimizer], list[SequentialLR]]:
@@ -275,7 +298,7 @@ class HRMV2TrainingModel(L.LightningModule):
         """
         total_steps = int(self.trainer.estimated_stepping_batches)
 
-        # Optimizer A: supervised — backbone + LM params only.
+        # Optimizer A: supervised — backbone + Token params only.
         vmPFC_ids = {id(p) for p in self.model.pfc.estimator.parameters()}
         str_ids = {id(p) for p in self.model.str.parameters()}
         excluded_ids = vmPFC_ids | str_ids
@@ -283,7 +306,7 @@ class HRMV2TrainingModel(L.LightningModule):
             p for p in self.adapter.parameters() if id(p) not in excluded_ids
         ]
 
-        # Optimizer A: supervised — backbone + LM params only.
+        # Optimizer A: supervised — backbone + Token params only.
         opt_sup = AdamATan2(sup_params, self.config.optimizer_supervised)
         # Optimizer B: RL — STR critic only (actor logits live in PFC).
         opt_rl = AdamATan2(
@@ -319,7 +342,8 @@ class HRMV2TrainingModel(L.LightningModule):
         self,
     ) -> None:
         """Reset validation metrics at the start of each epoch."""
-        self.val_metrics.reset()
+        self.val_budget_metrics.reset()
+        self.val_halt_metrics.reset()
 
     def training_step(  # -----------------------------------------------------
         self,
@@ -349,15 +373,17 @@ class HRMV2TrainingModel(L.LightningModule):
         # Warmup mode: only the supervised optimizer trains
         is_warmup = self.global_step < self.config.supervised_only_warmup_steps
 
-        execution = self._train_runner.run(
-            source=PartialResetSource(
-                incoming=batch,
-                assembler=self._train_batch_assembler,
-                carry0=self._train_carry,
-            ),
+        source = PartialResetSource(
+            incoming=batch,
+            assembler=self._train_batch_assembler,
+            carry0=self._train_carry,
+        )
+        execution = run_captured_rollout(
+            runner=self._train_runner,
+            source=source,
             controller=self.controller,
             carry=self._train_carry,
-            options={
+            runner_options={
                 "allow_halt": not is_warmup,
                 "explore": True,
                 "halt_action": self.config.deliberation.halt_action,
@@ -437,6 +463,9 @@ class HRMV2TrainingModel(L.LightningModule):
         Validation runs the controller to the max horizon (no exploration) and
         collects a trace tree for downstream logging/analysis.
 
+        A second deterministic rollout with learned halting enabled runs for
+        diagnostics and is logged under ``val_halt/``.
+
         The :class:`~ehc_sn.training.actor_critic.ZeroBootstrapActorCriticValidationScorer` is
         used as the rollout objective.  It applies zero bootstrap values, so all RL
         loss numbers are approximate diagnostic values only.
@@ -446,12 +475,12 @@ class HRMV2TrainingModel(L.LightningModule):
                 "HRM v2 runtime is not initialized. Call setup() before validation."
             )
 
-        carry0 = self.controller.initial_state(batch)
-        evaluation = evaluate_rollout(
+        carry0_fixed = self.controller.initial_state(batch)
+        evaluation = score_captured_rollout(
             runner=self._eval_runner,
             source=RepeatSource(batch),
             controller=self.controller,
-            carry=carry0,
+            carry=carry0_fixed,
             objective=self.val_scorer,
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
@@ -461,10 +490,35 @@ class HRMV2TrainingModel(L.LightningModule):
                 "halt_action": self.config.deliberation.halt_action,
                 "max_halt_steps": self.config.deliberation.episode_horizon,
             },
-            metric_collection=self.val_metrics,
-            metric_routes=RL_EPISODE_ROUTES,
         )
 
+        update_metric_collection_from_evaluated_chunk(
+            collection=self.val_budget_metrics,
+            evaluated=evaluation.evaluated,
+            routes=RL_EPISODE_ROUTES,
+        )
+
+        carry0_learned = self.controller.initial_state(batch)
+        learned_halt = score_captured_rollout(
+            runner=self._eval_runner,
+            source=RepeatSource(batch),
+            controller=self.controller,
+            carry=carry0_learned,
+            objective=self.val_scorer,
+            max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
+            hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
+            runner_options={
+                "explore": False,
+                "allow_halt": True,
+                "halt_action": self.config.deliberation.halt_action,
+                "max_halt_steps": self.config.deliberation.episode_horizon,
+            },
+        )
+        update_metric_collection_from_evaluated_chunk(
+            collection=self.val_halt_metrics,
+            evaluated=learned_halt.evaluated,
+            routes=RL_EPISODE_ROUTES,
+        )
         return {}
         # trace = observe_rollout_chunk(
         #     evaluation.chunk,
@@ -472,25 +526,6 @@ class HRMV2TrainingModel(L.LightningModule):
         #     trace_meta=build_mazehard_hrm_trace_meta(batch),
         # )
         # return {"trace": trace}
-
-    def _assert_setup(self) -> None:
-        """Helper to assert that setup() has run and initialized components."""
-        if self.controller is None:
-            raise RuntimeError(
-                "HRM v2 runtime is not initialized. Call setup() before use."
-            )
-        if self.objective is None:
-            raise RuntimeError(
-                "HRM v2 runtime is not initialized. Call setup() before use."
-            )
-        if self.learner is None:
-            raise RuntimeError(
-                "HRM v2 runtime is not initialized. Call setup() before use."
-            )
-        if self.val_scorer is None:
-            raise RuntimeError(
-                "HRM v2 runtime is not initialized. Call setup() before use."
-            )
 
 
 # =============================================================================

@@ -1,58 +1,20 @@
-from typing import Sequence
-
-from torchmetrics import MetricCollection
+"""Metrics and related utilities for EHC-SN."""
 
 from ehc_sn.metrics.adapter import Route, update_metrics_from_step
+from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
+from ehc_sn.metrics.rollout import (
+    make_observed_step_metric_observer,
+    update_metric_collection_from_evaluated_chunk,
+    update_metric_collection_from_observed_step,
+)
+from ehc_sn.metrics.routes import (
+    EHC_EPISODE_ROUTES,
+    EHC_PRIMARY_VAL_ROUTE_KEY,
+    EHC_STEP_ROUTES,
+    RL_EPISODE_ROUTES,
+    RL_STEP_ROUTES,
+)
 from ehc_sn.metrics.torchmetrics import LastRatioMetric, RatioMetric
-
-
-# =============================================================================
-def build_train_metrics(  # ---------------------------------------------------
-    routes: Sequence[Route],
-) -> MetricCollection:
-    """Build a MetricCollection for training metrics (non-accumulated, direct step ratios).
-
-    Args:
-        routes: Paradigm-specific routing table (e.g. :data:`~ehc_sn.metrics.routes.ACT_STEP_ROUTES`,
-            :data:`~ehc_sn.metrics.routes.ACT_EPISODE_ROUTES`,
-            :data:`~ehc_sn.metrics.routes.RL_STEP_ROUTES`, or
-            :data:`~ehc_sn.metrics.routes.RL_EPISODE_ROUTES`). The metric keys are derived from
-            ``route.key`` for each entry.
-
-    Returns:
-        A :class:`~torchmetrics.MetricCollection` of :class:`LastRatioMetric` instances,
-        keyed by the route keys.  Pass the returned collection to
-        :func:`update_metrics_from_step` with the same *routes*.
-    """
-    keys = [r.key for r in routes]
-    return MetricCollection(
-        {k: LastRatioMetric() for k in keys}, compute_groups=[keys]
-    )
-
-
-# =============================================================================
-def build_val_metrics(  # -----------------------------------------------------
-    routes: Sequence[Route],
-) -> MetricCollection:
-    """Build a MetricCollection for validation metrics (accumulated over the epoch).
-
-    Args:
-        routes: Paradigm-specific routing table (e.g. :data:`~ehc_sn.metrics.routes.ACT_STEP_ROUTES`,
-            :data:`~ehc_sn.metrics.routes.ACT_EPISODE_ROUTES`,
-            :data:`~ehc_sn.metrics.routes.RL_STEP_ROUTES`, or
-            :data:`~ehc_sn.metrics.routes.RL_EPISODE_ROUTES`). The metric keys are derived from
-            ``route.key`` for each entry.
-
-    Returns:
-        A :class:`~torchmetrics.MetricCollection` of :class:`RatioMetric` instances,
-        keyed by the route keys.  Pass the returned collection to
-        :func:`update_metrics_from_step` with the same *routes*.
-    """
-    keys = [r.key for r in routes]
-    return MetricCollection(
-        {k: RatioMetric() for k in keys}, compute_groups=[keys]
-    )
-
 
 # =============================================================================
 __all__ = [
@@ -60,6 +22,14 @@ __all__ = [
     "RatioMetric",
     "LastRatioMetric",
     "update_metrics_from_step",
+    "make_observed_step_metric_observer",
+    "update_metric_collection_from_evaluated_chunk",
+    "update_metric_collection_from_observed_step",
     "build_train_metrics",
     "build_val_metrics",
+    "EHC_EPISODE_ROUTES",
+    "EHC_PRIMARY_VAL_ROUTE_KEY",
+    "EHC_STEP_ROUTES",
+    "RL_EPISODE_ROUTES",
+    "RL_STEP_ROUTES",
 ]

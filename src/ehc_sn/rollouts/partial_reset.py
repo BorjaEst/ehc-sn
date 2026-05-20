@@ -1,4 +1,4 @@
-""" """
+"""Partial-reset batching helpers for rollout sources."""
 
 from __future__ import annotations
 
@@ -7,16 +7,17 @@ from typing import Sequence
 import torch
 from torch import Tensor
 
-from ehc_sn.training.buffers import FifoBuffer
+from ehc_sn.rollouts.buffers import FifoBuffer
 
 
+# =============================================================================
 class PartialResetBatchAssembler:
     def __init__(
         self,
         *,
         buffer: FifoBuffer,
         keys: Sequence[str],
-    ):
+    ) -> None:
         self.buffer = buffer
         self.keys = list(keys)
 
@@ -26,7 +27,10 @@ class PartialResetBatchAssembler:
         incoming: dict[str, Tensor],
         reset_mask: Tensor,
     ) -> dict[str, Tensor]:
-        return self.ingest_and_make_step_batch(incoming=incoming, reset_mask=reset_mask)
+        return self.ingest_and_make_step_batch(
+            incoming=incoming,
+            reset_mask=reset_mask,
+        )
 
     def ingest_and_make_step_batch(
         self,
@@ -45,8 +49,8 @@ class PartialResetBatchAssembler:
         B = incoming[self.keys[0]].shape[0]
         assert reset_mask.shape == (B,)
 
-        reset_idx = reset_mask.nonzero(as_tuple=False).flatten()  # slots that WILL consume fresh data
-        keep_idx = (~reset_mask).nonzero(as_tuple=False).flatten()  # slots that will ignore incoming data
+        reset_idx = reset_mask.nonzero(as_tuple=False).flatten()
+        keep_idx = (~reset_mask).nonzero(as_tuple=False).flatten()
 
         # Always buffer the incoming rows that won't be used (keep_idx)
         self.buffer.push_rows(incoming, keep_idx)
@@ -60,8 +64,10 @@ class PartialResetBatchAssembler:
         if n_from_buf == 0:
             return incoming
 
-        buf_rows_cpu = self.buffer.pop(n_from_buf)  # CPU pinned tensors, leading dim n_from_buf
-        buf_rows_gpu = {k: v.to(device, non_blocking=True) for k, v in buf_rows_cpu.items()}
+        buf_rows_cpu = self.buffer.pop(n_from_buf)
+        buf_rows_gpu = {
+            k: v.to(device, non_blocking=True) for k, v in buf_rows_cpu.items()
+        }
 
         # Choose which reset slots to fill from buffer: first n_from_buf reset indices
         fill_idx = reset_idx[:n_from_buf]
@@ -73,7 +79,7 @@ class PartialResetBatchAssembler:
         step_batch = dict(incoming)
         for k in self.keys:
             x = step_batch[k]
-            x = x.clone()  # avoid in-place on incoming (safer)
+            x = x.clone()
             x.index_copy_(0, fill_idx, buf_rows_gpu[k])
             step_batch[k] = x
 
@@ -102,7 +108,9 @@ class PartialResetBatchAssembler:
             return None
 
         buf_rows_cpu = self.buffer.pop(n_reset)
-        buf_rows_gpu = {k: v.to(device, non_blocking=True) for k, v in buf_rows_cpu.items()}
+        buf_rows_gpu = {
+            k: v.to(device, non_blocking=True) for k, v in buf_rows_cpu.items()
+        }
 
         step_batch = dict(template)
         for k in self.keys:
@@ -112,3 +120,7 @@ class PartialResetBatchAssembler:
             step_batch[k] = x
 
         return step_batch
+
+
+# =============================================================================
+__all__ = ["PartialResetBatchAssembler"]

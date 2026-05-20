@@ -25,7 +25,7 @@ from ehc_sn.utils.detach import DetachMixin
 class ModelSettingsV1(BaseModel, extra="forbid"):
     """HRM v1 core settings.
 
-    No task vocabulary, token embedding, positional encoding, or LM head fields
+    No task vocabulary, token embedding, positional encoding, or Token head fields
     belong here. Those remain adapter-owned.
     """
 

@@ -12,14 +12,14 @@ from typing import Any, Protocol
 import torch
 from torch import Tensor
 
-from ehc_sn.rollouts import CarrySnapshot
-from ehc_sn.training.types import (
+from ehc_sn.metrics.step_metrics import (
     RatioStat,
     RolloutAgg,
     StepMetrics,
     TokenAgg,
     TransitionAgg,
 )
+from ehc_sn.rollouts.runtime import CarrySnapshot
 from ehc_sn.types import Batch
 
 IGNORE_LABEL_ID: int = -100
@@ -106,12 +106,12 @@ def compute_token_loss_sum(  # -------------------------------------------------
     ignore_label_id: int = IGNORE_LABEL_ID,
     token_weights: Tensor | None = None,
 ) -> Tensor:
-    """Compute the summed supervised LM loss over the batch."""
+    """Compute the summed supervised Token loss over the batch."""
     loss_per_token = loss_fn(logits_token, labels, ignore_index=ignore_label_id)
     if token_weights is not None:
         if token_weights.shape != labels.shape:
             raise ValueError(
-                "token_weights must match labels shape for LM loss weighting.",
+                "token_weights must match labels shape for Token loss weighting.",
             )
         loss_per_token = loss_per_token * token_weights.to(loss_per_token.dtype)
     loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)

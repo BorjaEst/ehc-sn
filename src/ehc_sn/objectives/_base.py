@@ -10,14 +10,10 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel
-from torch import Tensor, nn
+from torch import nn
 
-from ehc_sn.rollouts import (
-    EvaluatedChunk,
-    ObservedStep,
-    RolloutChunk,
-    StepRecord,
-)
+from ehc_sn.objectives.rollout import EvaluatedChunk, score_rollout_chunk
+from ehc_sn.rollouts.runtime import RolloutChunk, StepRecord
 
 
 # =============================================================================
@@ -25,7 +21,7 @@ class BaseObjective[ConfigT: BaseModel](nn.Module):
     """Minimal wiring base for all rollout objectives.
 
     Concrete subclasses score executed :class:`~ehc_sn.rollouts.RolloutChunk`
-    objects and return an :class:`~ehc_sn.rollouts.EvaluatedChunk` containing
+    objects and return an :class:`~ehc_sn.objectives.rollout.EvaluatedChunk` containing
     one scored step result per executed step.
     """
 
@@ -48,41 +44,7 @@ class BaseObjective[ConfigT: BaseModel](nn.Module):
         **options: Any,
     ) -> EvaluatedChunk:
         """Score an executed rollout chunk and return one observed step per record."""
-        observed_steps: list[ObservedStep] = []
-        total_loss: Tensor | None = None
-
-        for record in chunk.records:
-            step_output = self.evaluate_step(record, **options)
-            executed = (
-                record.executed_frame
-                if record.executed_frame is not None
-                else record.batch
-            )
-            observed_steps.append(
-                ObservedStep(
-                    index=record.index,
-                    batch=executed,
-                    executed_frame=executed,
-                    sampled_input=record.sampled_input,
-                    snapshot=record.snapshot,
-                    outputs=step_output,
-                )
-            )
-            total_loss = (
-                step_output.loss
-                if total_loss is None
-                else total_loss + step_output.loss
-            )
-
-        if total_loss is None:
-            raise ValueError("Objective received an empty rollout chunk.")
-
-        return EvaluatedChunk(
-            steps=tuple(observed_steps),
-            loss=total_loss,
-            final_carry=chunk.final_carry,
-            source_exhausted=chunk.source_exhausted,
-        )
+        return score_rollout_chunk(chunk, self, **options)
 
     def evaluate_step(  # -----------------------------------------------------
         self,

@@ -27,7 +27,14 @@ supervised_only_warmup_steps = 5000
     halt_action      = 0
     episode_horizon  = 16
 
-# -- Objective, optimizer, scheduler (defaults are fine; override here if needed) ---
+# -- Reward config ------------------------------------------------------------
+[reward]
+    success_reward = 1.0
+    continue_cost = -0.01
+    incorrect_halt_penalty = -1.0
+    truncation_penalty = -1.0
+
+# -- Objective, optimizer, scheduler ------------------------------------------
 [objective]
     token_loss  = "stablemax_cross_entropy"
     c_state_value = 0.5

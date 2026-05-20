@@ -12,7 +12,6 @@ task-agnostic.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
@@ -20,6 +19,7 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
+import ehc_sn.metrics.signals as S
 from ehc_sn.loss.consistency import (
     LatentCode,
     LatentRelation,
@@ -31,7 +31,6 @@ from ehc_sn.loss.regularization import (
     RegularizationNorm,
     sum_regularization_terms,
 )
-from ehc_sn.metrics import signals as S
 from ehc_sn.metrics.keys import (
     TEM_LOSS_GRID_KL_ALL,
     TEM_LOSS_GRID_KL_REVISIT,
@@ -48,6 +47,7 @@ from ehc_sn.metrics.keys import (
     TEM_LOSS_REG_ALL,
     TEM_LOSS_REG_REVISIT,
 )
+from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
 from ehc_sn.objectives._variational import (
     VariationalLosses,
     VariationalObjectiveBase,
@@ -56,8 +56,7 @@ from ehc_sn.objectives._variational import (
     get_reg_term,
     require_latent_relation,
 )
-from ehc_sn.rollouts import CarrySnapshot, StepRecord
-from ehc_sn.training.types import RatioStat, StepMetrics
+from ehc_sn.rollouts.runtime import CarrySnapshot, StepRecord
 from ehc_sn.types import Batch
 
 # Canonical string keys for the latent-relation dictionaries produced by the
@@ -228,7 +227,7 @@ class TEMObjectiveBinding[TargetsT](Protocol):
     ) -> dict[str, RatioStat]:
         """Return task-owned count-bearing accuracy metrics for one step.
 
-        The values are :class:`~ehc_sn.training.types.RatioStat` numerator/
+        The values are :class:`~ehc_sn.metrics.step_metrics.RatioStat` numerator/
         denominator pairs (counts, not yet reduced to ratios).  Keys must align
         with the TEM metric-key constants in :mod:`ehc_sn.metrics.keys`.
         """
@@ -407,18 +406,18 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
         return TEMContext(
             # Task-specific target extraction and protocol masking are delegated to the binding
             targets=self._task_binding.extract_targets(
-                batch=record.batch,
-                carry=record.carry,
+                executed_batch=record.batch,
+                snapshot=record.carry,
                 step_output=record.outputs,
             ),
             labels=self._task_binding.extract_observation_id(
-                batch=record.batch,
-                carry=record.carry,
+                executed_batch=record.batch,
+                snapshot=record.carry,
                 step_output=record.outputs,
             ),
             protocol_mask=self._task_binding.extract_protocol_mask(
-                batch=record.batch,
-                carry=record.carry,
+                executed_batch=record.batch,
+                snapshot=record.carry,
                 step_output=record.outputs,
             ),
             # Relation extraction is delegated to the binding

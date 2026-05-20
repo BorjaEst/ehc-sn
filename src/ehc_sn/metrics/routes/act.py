@@ -1,8 +1,8 @@
 """Routing tables for HRM v1 ACT (Adaptive Computation Time).
 
 These routes map metric keys to dotted attribute paths on
-:class:`~ehc_sn.training.types.StepMetrics`, which is the step-metrics object
-produced by :class:`~ehc_sn.objectives.act.ACTObjective`.
+:class:`~ehc_sn.metrics.step_metrics.StepMetrics`, which is the step-metrics
+object produced by :class:`~ehc_sn.objectives.act.ACTObjective`.
 """
 
 from ehc_sn.metrics.adapter import Route
@@ -14,7 +14,8 @@ from ehc_sn.metrics.keys import (
 )
 
 
-def _with_namespace(
+# =============================================================================
+def _with_namespace(  # -------------------------------------------------------
     namespace: str, routes: tuple[Route, ...]
 ) -> tuple[Route, ...]:
     """Prefix route keys with a metric namespace."""
@@ -24,37 +25,68 @@ def _with_namespace(
     )
 
 
+# =============================================================================
 ACT_STEP_ROUTES: tuple[Route, ...] = (
-    # key                                  numerator path                           denominator path
-    Route("all/accuracy",                "step.accuracy_sum",                    "step.evaluated_count"),         # fmt: skip
-    Route("rollout/completed_rate",      "episode.completed_count",              "step.evaluated_count"),         # fmt: skip
-    Route("rollout/avg_steps",           "step.steps_sum",                       "step.evaluated_count"),         # fmt: skip
-    Route("tokens/accuracy",             "step_tokens.token_correct_sum",        "step_tokens.token_count_sum"),  # fmt: skip
-    Route("loss/lm",                     *extra_ratio_paths(LOSS_TOKEN)),                                            # fmt: skip
-    Route("loss/q_done",                 *extra_ratio_paths(ACT_LOSS_Q_DONE)),                                    # fmt: skip
-    Route("loss/q_continue",             *extra_ratio_paths(ACT_LOSS_Q_CONTINUE)),                                # fmt: skip
+    Route(
+        key="all/accuracy",
+        num_path="step.accuracy_sum",
+        den_path="step.evaluated_count",
+    ),
+    Route(
+        key="rollout/completed_rate",
+        num_path="episode.completed_count",
+        den_path="step.evaluated_count",
+    ),
+    Route(
+        key="rollout/avg_steps",
+        num_path="step.steps_sum",
+        den_path="step.evaluated_count",
+    ),
+    Route(
+        key="tokens/accuracy",
+        num_path="step_tokens.token_correct_sum",
+        den_path="step_tokens.token_count_sum",
+    ),
+    Route(
+        "loss/token",
+        *extra_ratio_paths(LOSS_TOKEN),
+    ),
+    Route(
+        "loss/q_done",
+        *extra_ratio_paths(ACT_LOSS_Q_DONE),
+    ),
+    Route(
+        "loss/q_continue",
+        *extra_ratio_paths(ACT_LOSS_Q_CONTINUE),
+    ),
 )
 
+# =============================================================================
 ACT_EPISODE_ROUTES: tuple[Route, ...] = _with_namespace(
     "episode",
     (
         Route(
-            "all/accuracy", "episode.accuracy_sum", "episode.completed_count"
+            key="all/accuracy",
+            num_path="episode.accuracy_sum",
+            den_path="episode.completed_count",
         ),
         Route(
-            "rollout/completed_rate",
-            "episode.completed_count",
-            "episode.eligible_count",
+            key="rollout/completed_rate",
+            num_path="episode.completed_count",
+            den_path="episode.eligible_count",
         ),
         Route(
-            "rollout/avg_steps", "episode.steps_sum", "episode.completed_count"
+            key="rollout/avg_steps",
+            num_path="episode.steps_sum",
+            den_path="episode.completed_count",
         ),
         Route(
-            "tokens/accuracy",
-            "episode_tokens.token_correct_sum",
-            "episode_tokens.token_count_sum",
+            key="tokens/accuracy",
+            num_path="episode_tokens.token_correct_sum",
+            den_path="episode_tokens.token_count_sum",
         ),
     ),
 )
 
+# =============================================================================
 __all__ = ["ACT_EPISODE_ROUTES", "ACT_STEP_ROUTES"]

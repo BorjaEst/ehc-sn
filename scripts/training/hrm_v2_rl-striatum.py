@@ -34,6 +34,7 @@ from ehc_sn.objectives import HybridRLLossConfig
 from ehc_sn.tasks.mazehard.capabilities.deliberation import (
     MazeHardDeliberationConfig,
 )
+from ehc_sn.tasks.mazehard.reward import MazeHardRewardConfig
 from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import (
     resolve_effective_world_size,
@@ -115,6 +116,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         ...,
         description="Deliberation capability config (halt_action, episode_horizon) for the MazeHard deliberation path.",
     )
+    reward: MazeHardRewardConfig = Field(
+        default_factory=MazeHardRewardConfig,
+        description="Reward configuration for MazeHard stop-time projection.",
+    )
     controller: DeliberationACControllerConfig = Field(
         default_factory=DeliberationACControllerConfig,
         description="Deliberation actor-critic controller configuration (policy settings).",
@@ -127,7 +132,7 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
     # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     optimizer_supervised: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
-        description="Optimizer for supervised parameters (PFC + embeddings + LM head).",
+        description="Optimizer for supervised parameters (PFC + embeddings + Token head).",
     )
     optimizer_rl: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
