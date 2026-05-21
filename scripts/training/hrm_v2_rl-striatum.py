@@ -9,7 +9,6 @@ from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
-from lightning.pytorch.callbacks import LearningRateMonitor
 from pydantic import Field, model_validator
 from pydantic_settings import (
     BaseSettings,
@@ -24,6 +23,7 @@ from ehc_sn.callbacks.diagnostics import (
     DiagnosticsSettings,
 )
 from ehc_sn.callbacks.lr_monitor import (
+    LearningRateMonitor,
     LearningRateMonitorSettings,
 )
 from ehc_sn.callbacks.metrics import MetricsCallback
