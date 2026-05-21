@@ -97,6 +97,11 @@ diagnostic_level     = "standard"
     prefix    = ""
 
 [checkpoint]
+    dirpath                 = "checkpoints/tem-v1"
+    filename                = "epoch={epoch:03d}"
+    save_top_k              = 0
     every_n_epochs          = 1
     save_on_train_epoch_end = false
     save_last               = true
+    save_on_exception       = true
+    save_weights_only       = false

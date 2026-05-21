@@ -262,10 +262,9 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
 
     # -------------------------------------------------------------------------
     # Checkpointing and evaluation settings
-    checkpoint_path: Optional[str] = Field(
+    resume_from_checkpoint: Optional[str] = Field(
         default=None,
-        description="Path to save checkpoints and logs. If not set, it "
-        "defaults to `checkpoints/<project_name>/<run_name>`.",
+        description="Optional checkpoint path to resume full trainer state via Trainer.fit(ckpt_path=...).",
     )
     checkpoint_every_eval: bool = Field(
         default=False,
@@ -359,5 +358,5 @@ if __name__ == "__main__":
             settings.datamodule, transform=coerce_maze_hard_batch
         ),
         # Optional: resume training from a checkpoint.
-        ckpt_path=settings.checkpoint_path,
+        ckpt_path=settings.resume_from_checkpoint,
     )

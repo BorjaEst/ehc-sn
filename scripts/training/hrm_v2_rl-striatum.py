@@ -9,6 +9,7 @@ from typing import Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
+from lightning.pytorch.callbacks import LearningRateMonitor
 from pydantic import Field, model_validator
 from pydantic_settings import (
     BaseSettings,
@@ -278,12 +279,9 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
 
     # -------------------------------------------------------------------------
     # Checkpointing and evaluation settings (passed as kwargs to Trainer and Checkpoint callback)
-    checkpoint_path: Optional[str] = Field(
+    resume_from_checkpoint: Optional[str] = Field(
         default=None,
-        description=(
-            "Path to save checkpoints and logs. "
-            "If not set, it defaults to `checkpoints/<project_name>/<run_name>`."
-        ),
+        description="Optional checkpoint path to resume full trainer state via Trainer.fit(ckpt_path=...).",
     )
     checkpoint_every_eval: bool = Field(
         default=False,
@@ -337,18 +335,29 @@ if __name__ == "__main__":
     # Seed everything for reproducibility.
     seed_everything(settings.seed)
 
-    # Prepare callbacks: checkpointing + optional figure generation.
+    # Build logger first so callback wiring can follow the same gate.
+    logger = Logger(settings.logger) if settings.logger is not None else None
+
+    # Prepare callbacks: metrics + checkpointing + optional diagnostics/LR telemetry.
     callbacks_list = [MetricsCallback()]
     if settings.checkpoint is not None:
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
     if settings.diagnostic_level != "minimal":
         callbacks_list.append(DiagnosticsCallback(settings.diagnostics))
+    if logger is not None:
+        callbacks_list.append(
+            LearningRateMonitor(
+                logging_interval="step",
+                log_weight_decay=True,
+                log_momentum=False,
+            )
+        )
 
     # Build the PyTorch Lightning Trainer.
     # This wires together logging, callbacks, and training control.
     trainer = Trainer(
         # Logger + callbacks handle metrics/hparams and checkpointing.
-        logger=Logger(settings.logger) if settings.logger is not None else None,
+        logger=logger,
         callbacks=callbacks_list if callbacks_list else None,
         # Lightning Trainer kwargs (extracted from config)
         accelerator=settings.trainer_accelerator,
@@ -378,5 +387,5 @@ if __name__ == "__main__":
             settings.datamodule, transform=coerce_maze_hard_batch
         ),
         # Optional: resume training from a checkpoint.
-        ckpt_path=settings.checkpoint_path,
+        ckpt_path=settings.resume_from_checkpoint,
     )
