@@ -66,6 +66,11 @@ supervised_only_warmup_steps = 5000
     log_graph = false
     prefix    = ""
 
+[lr_monitor]
+    logging_interval = "step"
+    log_weight_decay = false
+    log_momentum = false
+
 [checkpoint]
     dirpath                 = "checkpoints/hrm-v2"
     filename                = "epoch={epoch:03d}"

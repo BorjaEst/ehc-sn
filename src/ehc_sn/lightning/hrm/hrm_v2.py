@@ -283,7 +283,7 @@ class HRMV2TrainingModel(L.LightningModule):
 
     def configure_optimizers(  # ----------------------------------------------
         self,
-    ) -> tuple[list[Optimizer], list[SequentialLR]]:
+    ) -> tuple[list[Optimizer], list[dict[str, Any]]]:
         """Build optimizers and schedulers.
 
         Returns:
@@ -315,17 +315,35 @@ class HRMV2TrainingModel(L.LightningModule):
             self.config.optimizer_qv,
         )
 
-        sch_sup = CosineAnnealingLRWithWarmup(
-            opt_sup, total_steps, self.config.scheduler
-        )
-        sch_rl = CosineAnnealingLRWithWarmup(
-            opt_rl, total_steps, self.config.scheduler
-        )
-        sch_qv = CosineAnnealingLRWithWarmup(
-            opt_qv, total_steps, self.config.scheduler
-        )
+        # Schedulers: one per optimizer, with shared config but independent state.
+        schedulers: list[dict[str, Any]] = [
+            {
+                "scheduler": CosineAnnealingLRWithWarmup(
+                    opt_sup, total_steps, self.config.scheduler
+                ),
+                "interval": "step",
+                "frequency": 1,
+                "name": "optim/supervised",
+            },
+            {
+                "scheduler": CosineAnnealingLRWithWarmup(
+                    opt_rl, total_steps, self.config.scheduler
+                ),
+                "interval": "step",
+                "frequency": 1,
+                "name": "optim/rl",
+            },
+            {
+                "scheduler": CosineAnnealingLRWithWarmup(
+                    opt_qv, total_steps, self.config.scheduler
+                ),
+                "interval": "step",
+                "frequency": 1,
+                "name": "optim/qv",
+            },
+        ]
 
-        return [opt_sup, opt_rl, opt_qv], [sch_sup, sch_rl, sch_qv]
+        return [opt_sup, opt_rl, opt_qv], schedulers
 
     def on_train_epoch_start(  # ----------------------------------------------
         self,

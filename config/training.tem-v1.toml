@@ -96,6 +96,11 @@ diagnostic_level     = "standard"
     log_graph = false
     prefix    = ""
 
+[lr_monitor]
+    logging_interval = "step"
+    log_weight_decay = false
+    log_momentum = false
+
 [checkpoint]
     dirpath                 = "checkpoints/tem-v1"
     filename                = "epoch={epoch:03d}"

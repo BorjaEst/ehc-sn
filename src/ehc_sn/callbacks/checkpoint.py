@@ -1,9 +1,10 @@
 from typing import Literal, Optional
 
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch import callbacks as lp_callbacks
 from pydantic import BaseModel, Field, model_validator
 
 
+# =============================================================================
 class CheckpointSettings(BaseModel, extra="forbid"):
     """Settings for model checkpointing."""
 
@@ -77,11 +78,13 @@ class CheckpointSettings(BaseModel, extra="forbid"):
         return self
 
 
-class CheckpointCallback(ModelCheckpoint):
+# =============================================================================
+class CheckpointCallback(lp_callbacks.ModelCheckpoint):
     """Custom ModelCheckpoint that accepts CheckpointSettings."""
 
     def __init__(self, settings: CheckpointSettings):
         super().__init__(**settings.model_dump())
 
 
+# =============================================================================
 __all__ = ["CheckpointSettings", "CheckpointCallback"]

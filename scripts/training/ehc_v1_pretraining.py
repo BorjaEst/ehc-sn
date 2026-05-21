@@ -28,6 +28,10 @@ from ehc_sn.callbacks.diagnostics import (
     DiagnosticsCallback,
     DiagnosticsSettings,
 )
+from ehc_sn.callbacks.lr_monitor import (
+    LearningRateMonitor,
+    LearningRateMonitorSettings,
+)
 from ehc_sn.callbacks.metrics import MetricsCallback
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.ehc.core._base import load_weights_from_checkpoint
@@ -47,7 +51,9 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
-CONFIGURATION_PATH = os.environ.get("EHC_V1_CONFIGURATION_PATH", "config/training.ehc-v1-spatial.toml")  # fmt: skip
+CONFIGURATION_PATH = os.environ.get(
+    "EHC_V1_CONFIGURATION_PATH", "config/training.ehc-v1-spatial.toml"
+)
 
 
 # =============================================================================
@@ -154,6 +160,10 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
         default_factory=LoggerSettings,
         description="TensorBoard logger settings for this run.",
     )
+    lr_monitor: Optional[LearningRateMonitorSettings] = Field(
+        default=None,
+        description="Optional LearningRateMonitor callback settings.",
+    )
     checkpoint: Optional[CheckpointSettings] = Field(
         default_factory=CheckpointSettings,
         description="Model checkpoint callback settings.",
@@ -189,7 +199,7 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
     )
 
     # -- Checkpointing -------------------------------------------------------------------------
-    checkpoint_path: Optional[str] = Field(
+    resume_from_checkpoint: Optional[str] = Field(
         default=None,
         description="Optional checkpoint path to resume full training state via Trainer.fit(ckpt_path=...). Does not initialize model weights independently.",
     )
@@ -198,7 +208,7 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
         description=(
             "Optional checkpoint path for model-weight initialization only. "
             "Hydrates named semantic groups without restoring optimizer, scheduler, or "
-            "trainer-progress state. Distinct from checkpoint_path (full resume). "
+            "trainer-progress state. Distinct from resume_from_checkpoint (full resume). "
             "Specify which groups via init_weights_groups."
         ),
     )
@@ -229,12 +239,12 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
     @model_validator(mode="after")
     def _validate_checkpoint_mutual_exclusion(self) -> "RunArguments":
         if (
-            self.checkpoint_path is not None
+            self.resume_from_checkpoint is not None
             and self.init_weights_from is not None
         ):
             raise ValueError(
-                "checkpoint_path and init_weights_from are mutually exclusive. "
-                "Use checkpoint_path for full Trainer resume (restores optimizer, scheduler, and "
+                "resume_from_checkpoint and init_weights_from are mutually exclusive. "
+                "Use resume_from_checkpoint for full Trainer resume (restores optimizer, scheduler, and "
                 "trainer-progress state). Use init_weights_from for init-only semantic-group "
                 "weight hydration without restoring training state."
             )
@@ -281,18 +291,23 @@ if __name__ == "__main__":
     else:
         transform = None
 
+    # Build logger first so callback wiring can follow the same gate.
+    logger = Logger(settings.logger) if settings.logger is not None else None
+
     # Prepare callbacks: checkpointing + optional figure generation.
     callbacks_list = [MetricsCallback()]
     if settings.checkpoint is not None:
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
     if settings.diagnostic_level != "minimal":
         callbacks_list.append(DiagnosticsCallback(settings.diagnostics))
+    if settings.lr_monitor:
+        callbacks_list.append(LearningRateMonitor(settings.lr_monitor))
 
     # Build the PyTorch Lightning Trainer.
     # This wires together logging, callbacks, and training control.
     trainer = Trainer(
         # Logger + callbacks handle metrics/hparams and checkpointing.
-        logger=Logger(settings.logger) if settings.logger is not None else None,
+        logger=logger,
         callbacks=callbacks_list if callbacks_list else None,
         # Lightning Trainer kwargs (extracted from config)
         accelerator=settings.trainer_accelerator,
@@ -317,7 +332,7 @@ if __name__ == "__main__":
     training_model = EHCV1TrainingModel(settings.model_config)
 
     # Optional: initialize model weights from a separate checkpoint (does not restore
-    # optimizer, scheduler, or trainer-progress state — use checkpoint_path for that).
+    # optimizer, scheduler, or trainer-progress state — use resume_from_checkpoint for that).
     if settings.init_weights_from is not None:
         loaded_keys = load_weights_from_checkpoint(
             training_model.model,
@@ -335,5 +350,5 @@ if __name__ == "__main__":
         # Data module: dataset + DataLoader construction.
         datamodule=Datamodule(settings.datamodule_config, transform=transform),
         # Optional: resume training from a checkpoint.
-        ckpt_path=settings.checkpoint_path,
+        ckpt_path=settings.resume_from_checkpoint,
     )

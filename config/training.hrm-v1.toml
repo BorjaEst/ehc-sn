@@ -48,6 +48,11 @@ val_check_interval = 1000
     log_graph = false
     prefix    = ""
 
+[lr_monitor]
+    logging_interval = "step"
+    log_weight_decay = false
+    log_momentum = false
+
 [checkpoint]
     dirpath                 = "checkpoints/hrm-v1"
     filename                = "epoch={epoch:03d}"

@@ -22,6 +22,10 @@ from ehc_sn.callbacks.diagnostics import (
     DiagnosticsCallback,
     DiagnosticsSettings,
 )
+from ehc_sn.callbacks.lr_monitor import (
+    LearningRateMonitor,
+    LearningRateMonitorSettings,
+)
 from ehc_sn.callbacks.metrics import MetricsCallback
 from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
@@ -191,6 +195,10 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         default_factory=LoggerSettings,
         description="TensorBoard logger settings.",
     )
+    lr_monitor: Optional[LearningRateMonitorSettings] = Field(
+        default=None,
+        description="Optional LearningRateMonitor callback settings.",
+    )
     checkpoint: Optional[CheckpointSettings] = Field(
         default_factory=CheckpointSettings,
         description="Model checkpoint settings.",
@@ -323,6 +331,8 @@ if __name__ == "__main__":
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
     if settings.diagnostic_level != "minimal":
         callbacks_list.append(DiagnosticsCallback(settings.diagnostics))
+    if settings.lr_monitor:
+        callbacks_list.append(LearningRateMonitor(settings.lr_monitor))
 
     # Build the PyTorch Lightning Trainer.
     # This wires together logging, callbacks, and training control.
