@@ -215,11 +215,8 @@ class HRMV2TrainingModel(L.LightningModule):
         self.train_metrics = build_train_metrics(RL_STEP_ROUTES).clone(
             prefix="train/"
         )
-        self.val_budget_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(
-            prefix="val_fixed_budget_metrics/"
-        )
-        self.val_halt_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(
-            prefix="val_learned_halt_metrics/"
+        self.val_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(
+            prefix="val/"
         )
         # self.trace_specs = build_trace_spec(
         #     "rl", extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
@@ -342,8 +339,7 @@ class HRMV2TrainingModel(L.LightningModule):
         self,
     ) -> None:
         """Reset validation metrics at the start of each epoch."""
-        self.val_budget_metrics.reset()
-        self.val_halt_metrics.reset()
+        self.val_metrics.reset()
 
     def training_step(  # -----------------------------------------------------
         self,
@@ -475,12 +471,11 @@ class HRMV2TrainingModel(L.LightningModule):
                 "HRM v2 runtime is not initialized. Call setup() before validation."
             )
 
-        carry0_fixed = self.controller.initial_state(batch)
         evaluation = score_captured_rollout(
             runner=self._eval_runner,
             source=RepeatSource(batch),
             controller=self.controller,
-            carry=carry0_fixed,
+            carry=self.controller.initial_state(batch),
             objective=self.val_scorer,
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
@@ -491,41 +486,13 @@ class HRMV2TrainingModel(L.LightningModule):
                 "max_halt_steps": self.config.deliberation.episode_horizon,
             },
         )
-
         update_metric_collection_from_evaluated_chunk(
-            collection=self.val_budget_metrics,
+            collection=self.val_metrics,
             evaluated=evaluation.evaluated,
             routes=RL_EPISODE_ROUTES,
         )
 
-        carry0_learned = self.controller.initial_state(batch)
-        learned_halt = score_captured_rollout(
-            runner=self._eval_runner,
-            source=RepeatSource(batch),
-            controller=self.controller,
-            carry=carry0_learned,
-            objective=self.val_scorer,
-            max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
-            hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
-            runner_options={
-                "explore": False,
-                "allow_halt": True,
-                "halt_action": self.config.deliberation.halt_action,
-                "max_halt_steps": self.config.deliberation.episode_horizon,
-            },
-        )
-        update_metric_collection_from_evaluated_chunk(
-            collection=self.val_halt_metrics,
-            evaluated=learned_halt.evaluated,
-            routes=RL_EPISODE_ROUTES,
-        )
         return {}
-        # trace = observe_rollout_chunk(
-        #     evaluation.chunk,
-        #     self.trace_specs,
-        #     trace_meta=build_mazehard_hrm_trace_meta(batch),
-        # )
-        # return {"trace": trace}
 
 
 # =============================================================================

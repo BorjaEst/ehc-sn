@@ -22,7 +22,7 @@ from ehc_sn.callbacks.diagnostics import (
     DiagnosticsCallback,
     DiagnosticsSettings,
 )
-from ehc_sn.callbacks.metrics import TrainingMetricsCallback
+from ehc_sn.callbacks.metrics import MetricsCallback
 from ehc_sn.controllers.deliberation.actor_critic import (
     DeliberationACControllerConfig,
 )
@@ -338,7 +338,7 @@ if __name__ == "__main__":
     seed_everything(settings.seed)
 
     # Prepare callbacks: checkpointing + optional figure generation.
-    callbacks_list = [TrainingMetricsCallback()]
+    callbacks_list = [MetricsCallback()]
     if settings.checkpoint is not None:
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
     if settings.diagnostic_level != "minimal":

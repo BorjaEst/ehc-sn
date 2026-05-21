@@ -17,16 +17,22 @@ from typing import Literal, Optional
 import torch
 from lightning.pytorch import Trainer, seed_everything
 from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource
+from pydantic_settings import (
+    BaseSettings,
+    CliSettingsSource,
+    PydanticBaseSettingsSource,
+)
 
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
-from ehc_sn.callbacks.diagnostics import DiagnosticsCallback, DiagnosticsSettings
-from ehc_sn.callbacks.metrics import TrainingMetricsCallback
+from ehc_sn.callbacks.diagnostics import (
+    DiagnosticsCallback,
+    DiagnosticsSettings,
+)
+from ehc_sn.callbacks.metrics import MetricsCallback
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.ehc.core._base import load_weights_from_checkpoint
 from ehc_sn.lightning.ehc.ehc_v1 import EHCV1TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
-from ehc_sn.models.ehc.ehc_v1 import EHCModelSettingsV1
 from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import (
     resolve_effective_world_size,
@@ -41,17 +47,18 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
-CONFIGURATION_PATH = os.environ.get("EHC_V1_CONFIGURATION_PATH", "config/training.ehc-v1-spatial.toml")
+CONFIGURATION_PATH = os.environ.get("EHC_V1_CONFIGURATION_PATH", "config/training.ehc-v1-spatial.toml")  # fmt: skip
 
 
-# =================================================================================================
+# =============================================================================
+# =============================================================================
 # Run settings (common to both modes)
-# =================================================================================================
+# =============================================================================
 class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
     """Common training script arguments. Mode-specific model settings are read from TOML."""
 
     @classmethod
-    def settings_customise_sources(  # ------------------------------------------------------------
+    def settings_customise_sources(  # ----------------------------------------
         cls,
         settings_cls,
         init_settings,
@@ -59,16 +66,20 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
         dotenv_settings,
         file_secret_settings,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        extra = [init_settings, env_settings, dotenv_settings, file_secret_settings]
+        """Custom settings sources: parse CLI args first, then env vars, .env files, and secrets."""
+        extra = [init_settings, env_settings, dotenv_settings, file_secret_settings]  # fmt: skip
         return CliSettingsSource(settings_cls), *extra
 
-    # -- Mode ----------------------------------------------------------------------------------
+    # -- Mode -----------------------------------------------------------------
     mode: Literal["spatial_pretrain", "reason_pretrain"] = Field(
         ...,
-        description="EHC training mode. Determines training objective, adapter family, and optimizer configuration.",
+        description=(
+            "EHC training mode. Determines training objective, adapter family, "
+            "and optimizer configuration."
+        ),
     )
 
-    # -- Names and tracking --------------------------------------------------------------------
+    # -- Names and tracking ---------------------------------------------------
     project_name: Optional[str] = Field(
         default=None,
         description="Optional project label retained in the entry-point settings for external launchers or downstream metadata.",
@@ -78,7 +89,7 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
         description="Optional run label retained in the entry-point settings for external launchers or downstream metadata.",
     )
 
-    # -- Data ----------------------------------------------------------------------------------
+    # -- Data -----------------------------------------------------------------
     dataset_path: Path = Field(
         ...,
         description="Path to the processed dataset directory.",
@@ -112,7 +123,7 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
         description="Keep DataLoader workers alive across epochs instead of recreating them each time.",
     )
 
-    # -- Training control ----------------------------------------------------------------------
+    # -- Training control -----------------------------------------------------
     max_epochs: int = Field(
         ...,
         description="Maximum number of training epochs.",
@@ -212,12 +223,15 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
         description="Reserved list of evaluation artifact keys to persist; currently not consumed by this entrypoint.",
     )
 
-    # ---------------------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Aggregate settings (compose leaf settings for modules)
 
     @model_validator(mode="after")
     def _validate_checkpoint_mutual_exclusion(self) -> "RunArguments":
-        if self.checkpoint_path is not None and self.init_weights_from is not None:
+        if (
+            self.checkpoint_path is not None
+            and self.init_weights_from is not None
+        ):
             raise ValueError(
                 "checkpoint_path and init_weights_from are mutually exclusive. "
                 "Use checkpoint_path for full Trainer resume (restores optimizer, scheduler, and "
@@ -239,19 +253,18 @@ class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
         return DiagnosticsSettings.model_validate(self, from_attributes=True)
 
 
-# =================================================================================================
+# =============================================================================
 RunArguments.model_rebuild()
 
 
-# =================================================================================================
+# =============================================================================
 # Entrypoint
-# =================================================================================================
+# =============================================================================
 if __name__ == "__main__":
     raw = tomllib.load(Path(CONFIGURATION_PATH).open("rb"))
     settings = RunArguments(**raw)
     # Merge CLI-overridden run-level values (e.g. --mode) and any extra model-config
     # overrides captured via extra="allow" back into raw, so parse_ehc_v1_config sees them.
-    _effective = {**raw, "mode": settings.mode, **settings.model_extra}
     world_size = resolve_effective_world_size(
         settings.trainer_strategy,
         settings.trainer_devices,
@@ -269,7 +282,7 @@ if __name__ == "__main__":
         transform = None
 
     # Prepare callbacks: checkpointing + optional figure generation.
-    callbacks_list = [TrainingMetricsCallback()]
+    callbacks_list = [MetricsCallback()]
     if settings.checkpoint is not None:
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
     if settings.diagnostic_level != "minimal":
@@ -283,7 +296,9 @@ if __name__ == "__main__":
         callbacks=callbacks_list if callbacks_list else None,
         # Lightning Trainer kwargs (extracted from config)
         accelerator=settings.trainer_accelerator,
-        strategy=resolve_trainer_strategy(settings.trainer_strategy, world_size, find_unused_parameters=True),
+        strategy=resolve_trainer_strategy(
+            settings.trainer_strategy, world_size, find_unused_parameters=True
+        ),
         devices=settings.trainer_devices,
         num_nodes=settings.trainer_num_nodes,
         precision=settings.trainer_precision,
