@@ -1,4 +1,4 @@
-"""Private shared helpers for TEM training entrypoints."""
+"""Private shared helpers for HRM training entrypoints."""
 
 from __future__ import annotations
 
@@ -8,16 +8,15 @@ from typing import Sequence
 import torch
 from torch import nn
 
-# Mapping from public semantic group name to TEM model state-dict prefixes.
+# Mapping from public semantic group name to HRM model state-dict prefixes.
 _GROUP_TO_PREFIXES: dict[str, tuple[str, ...]] = {
-    "spatial_memory": ("hpc",),
-    "path_integration": ("mec",),
-    "sensory_binding": ("lec", "projections"),
+    "pfc_core": ("pfc",),
+    "striatum": ("str",),
     "all": (),
 }
 
 VALID_INIT_GROUPS: frozenset[str] = frozenset(_GROUP_TO_PREFIXES)
-"""Set of valid semantic group names for TEM init-only hydration."""
+"""Set of valid semantic group names for HRM init-only hydration."""
 
 
 # =============================================================================
@@ -26,7 +25,7 @@ def load_weights_from_checkpoint(  # ------------------------------------------
     checkpoint_path: str | Path,
     groups: Sequence[str],
 ) -> list[str]:
-    """Hydrate named TEM semantic-group weights from a checkpoint into *model*.
+    """Hydrate named HRM semantic-group weights from a checkpoint into *model*.
 
     Loads only model parameter subsets for the specified groups. Optimizer,
     scheduler, and trainer-progress state in the checkpoint are not touched.
@@ -36,7 +35,7 @@ def load_weights_from_checkpoint(  # ------------------------------------------
     stripped before matching.
 
     Args:
-        model: Target TEM model to hydrate in place.
+        model: Target HRM model to hydrate in place.
         checkpoint_path: Path to a Lightning or raw-model checkpoint.
         groups: Non-empty sequence of semantic group names.
 

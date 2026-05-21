@@ -18,6 +18,7 @@ with keys ``"input_ids"`` and ``"labels"``.
 """
 
 from pathlib import Path
+from typing import Any
 
 import lightning as L
 from adam_atan2_pytorch import AdamAtan2 as AdamATan2
@@ -53,7 +54,6 @@ from ehc_sn.training.rollout import score_captured_rollout
 from ehc_sn.training.schedules import (
     CosineAnnealingLRWithWarmup,
     SchedulerConfig,
-    SequentialLR,
 )
 from ehc_sn.types import Batch
 
@@ -195,7 +195,7 @@ class HRMV1TrainingModel(L.LightningModule):
 
     def configure_optimizers(  # ----------------------------------------------
         self,
-    ) -> tuple[list[Optimizer], list[SequentialLR]]:
+    ) -> tuple[list[Optimizer], list[dict[str, Any]]]:
         """Build optimizers and LR schedulers.
 
         Returns:
@@ -206,11 +206,18 @@ class HRMV1TrainingModel(L.LightningModule):
         # Optimizer for the main model parameters
         sup_params = [p for p in self.adapter.parameters() if p.requires_grad]
         opt_sup = AdamATan2(sup_params, self._config.optimizer)
-        sch_sup = CosineAnnealingLRWithWarmup(
-            opt_sup, total_steps, self.config.scheduler
-        )
+        schedulers: list[dict[str, Any]] = [
+            {
+                "scheduler": CosineAnnealingLRWithWarmup(
+                    opt_sup, total_steps, self.config.scheduler
+                ),
+                "interval": "step",
+                "frequency": 1,
+                "name": "optim/main",
+            }
+        ]
 
-        return [opt_sup], [sch_sup]
+        return [opt_sup], schedulers
 
     def on_train_epoch_start(  # ----------------------------------------------
         self,

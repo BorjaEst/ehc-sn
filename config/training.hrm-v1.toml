@@ -14,6 +14,10 @@ max_epochs        = 100
 seed              = 42
 augment           = true
 val_check_interval = 1000
+init_weights_groups = ["all"]
+
+# Optional model-only init hydration (mutually exclusive with full resume)
+# init_weights_from = "checkpoints/hrm-v1/last.ckpt"
 
 # -- Adapter settings ---------------------------------------------------------
 [adapter]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import lightning as L
 from pydantic import AliasChoices, BaseModel, Field
@@ -52,7 +52,6 @@ from ehc_sn.training.rollout import (
 from ehc_sn.training.schedules import (
     CosineAnnealingLRWithWarmup,
     SchedulerConfig,
-    SequentialLR,
 )
 from ehc_sn.types import Batch
 
@@ -162,18 +161,25 @@ class TEMV1TrainingModel(L.LightningModule):
 
     def configure_optimizers(  # ----------------------------------------------
         self,
-    ) -> tuple[list[Optimizer], list[SequentialLR]]:
+    ) -> tuple[list[Optimizer], list[dict[str, Any]]]:
         """Build the optimizer and learning-rate scheduler."""
         total_steps = int(self.trainer.estimated_stepping_batches)
 
         # Optimizer for the main model parameters
         sup_params = [p for p in self.adapter.parameters() if p.requires_grad]
         opt_sup = Adam(sup_params, self.config.optimizer)
-        sch_sup = CosineAnnealingLRWithWarmup(
-            opt_sup, total_steps, self.config.scheduler
-        )
+        schedulers: list[dict[str, Any]] = [
+            {
+                "scheduler": CosineAnnealingLRWithWarmup(
+                    opt_sup, total_steps, self.config.scheduler
+                ),
+                "interval": "step",
+                "frequency": 1,
+                "name": "optim/main",
+            }
+        ]
 
-        return [opt_sup], [sch_sup]
+        return [opt_sup], schedulers
 
     def on_train_epoch_start(  # ----------------------------------------------
         self,

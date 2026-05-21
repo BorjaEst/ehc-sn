@@ -11,6 +11,7 @@ global_batch_size    = 10
 max_epochs           = 100
 seed                 = 42
 augment              = true
+init_weights_groups  = ["all"]
 num_workers          = 4
 prefetch_factor      = 2
 pin_memory           = true
@@ -26,6 +27,9 @@ trainer_devices      = 1
 trainer_num_nodes    = 1
 trainer_precision    = "bf16-mixed"
 diagnostic_level     = "standard"
+
+# Optional model-only init hydration (mutually exclusive with full resume)
+# init_weights_from = "checkpoints/tem-v2/last.ckpt"
 
 # -- Adapter ------------------------------------------------------------------
 [adapter]

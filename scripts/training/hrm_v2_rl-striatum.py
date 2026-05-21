@@ -31,6 +31,10 @@ from ehc_sn.controllers.deliberation.actor_critic import (
     DeliberationACControllerConfig,
 )
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
+from ehc_sn.lightning.hrm.core._base import (
+    VALID_INIT_GROUPS,
+    load_weights_from_checkpoint,
+)
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.lightning.hrm.hrm_v2 import HRMV2ModelConfig, HRMV2TrainingModel
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
@@ -290,6 +294,14 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         default=None,
         description="Optional checkpoint path to resume full trainer state via Trainer.fit(ckpt_path=...).",
     )
+    init_weights_from: Optional[str] = Field(
+        default=None,
+        description="Optional checkpoint path for model-weight initialization only. Distinct from resume_from_checkpoint.",
+    )
+    init_weights_groups: list[str] = Field(
+        default_factory=lambda: ["all"],
+        description="Named HRM semantic groups to hydrate from init_weights_from. Valid groups: pfc_core, striatum, all.",
+    )
     checkpoint_every_eval: bool = Field(
         default=False,
         description="Whether to checkpoint the model after every evaluation.",
@@ -305,6 +317,30 @@ class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
         default_factory=list,
         description="Evaluation output keys saved as tensors in the checkpoint directory.",
     )
+
+    @model_validator(mode="after")
+    def _validate_transfer_init_options(self) -> "RunArguments":
+        if (
+            self.resume_from_checkpoint is not None
+            and self.init_weights_from is not None
+        ):
+            raise ValueError(
+                "resume_from_checkpoint and init_weights_from are mutually exclusive."
+            )
+        if self.init_weights_from is not None:
+            if not self.init_weights_groups:
+                raise ValueError("init_weights_groups must be non-empty.")
+            unknown = [
+                g
+                for g in self.init_weights_groups
+                if g not in VALID_INIT_GROUPS
+            ]
+            if unknown:
+                raise ValueError(
+                    f"Unknown init_weights_groups: {unknown!r}. "
+                    f"Valid groups: {sorted(VALID_INIT_GROUPS)!r}."
+                )
+        return self
 
     # -------------------------------------------------------------------------
     # Aggregate settings (compose leaf settings for modules)
@@ -380,9 +416,24 @@ if __name__ == "__main__":
     # Start training.
     # - The LightningModule wraps the HRM model and defines the training loop.
     # - The DataModule constructs loaders for the puzzle/maze dataset.
+    training_model = HRMV2TrainingModel(settings.hrm_config)
+
+    # Optional: initialize model weights from a checkpoint without restoring
+    # trainer/optimizer/scheduler state.
+    if settings.init_weights_from is not None:
+        loaded_keys = load_weights_from_checkpoint(
+            training_model.model,
+            settings.init_weights_from,
+            settings.init_weights_groups,
+        )
+        print(
+            f"[init_weights_from] Loaded {len(loaded_keys)} parameter keys "
+            f"(groups={settings.init_weights_groups}) from {settings.init_weights_from!r}."
+        )
+
     trainer.fit(
         # Lightning module: training step, optimizer and schedule setup.
-        model=HRMV2TrainingModel(settings.hrm_config),
+        model=training_model,
         # Data module: dataset + DataLoader construction.
         datamodule=Datamodule(
             settings.datamodule, transform=coerce_maze_hard_batch
