@@ -78,6 +78,11 @@ RL_EPISODE_ROUTES: tuple[Route, ...] = _with_namespace(
             den_path="episode.completed_count",
         ),
         Route(
+            key="all/exact_accuracy",
+            num_path="episode.exact_sum",
+            den_path="episode.completed_count",
+        ),
+        Route(
             key="rollout/completed_rate",
             num_path="episode.completed_count",
             den_path="episode.eligible_count",
