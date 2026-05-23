@@ -226,7 +226,23 @@ class TEMV2TrainingModel(L.LightningModule):
         batch_idx: int,
     ) -> dict[str, object]:
         """Run one TEM chunked-TBPTT optimizer update through the recurrent runner."""
-        runtime = self._apply_runtime(self.global_step, log_values=True)
+        runtime = self._apply_runtime(self.global_step)
+        self.log(
+            "train/runtime/eta", runtime.eta,
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
+        self.log(
+            "train/runtime/hebbian_decay", runtime.hebbian_decay,
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
+        self.log(
+            "train/runtime/p2g_use", runtime.p2g_use,
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
+        self.log(
+            "train/runtime/p2g_uncertainty_offset", runtime.p2g_uncertainty_offset,
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
         train_controller = self._require_train_controller()
         train_objective = self._require_train_objective()
         batch_assembler = self._ensure_train_batch_assembler(batch)
@@ -323,7 +339,7 @@ class TEMV2TrainingModel(L.LightningModule):
         trace_request: EvaluationTraceRequest | None = None,
     ) -> EvaluationBatchResult:
         """Execute one provider-owned replay case through the TEM eval path."""
-        runtime = self._apply_runtime(self.global_step, log_values=False)
+        runtime = self._apply_runtime(self.global_step)
         eval_controller = self._require_eval_controller()
         eval_objective = self._require_eval_objective()
         carry0 = eval_controller.initial_state(case.batch)
@@ -347,33 +363,12 @@ class TEMV2TrainingModel(L.LightningModule):
     def _apply_runtime(  # ----------------------------------------------------
         self,
         step: int,
-        *,
-        log_values: bool,
     ) -> TEMRuntimeState:
         """Resolve and apply TEM runtime dynamics for the current global step."""
         runtime = resolve_tem_runtime(step, self.config.runtime)
         self.model.set_runtime(
             runtime.eta, runtime.hebbian_decay, runtime.p2g_uncertainty_offset
         )
-
-        if log_values:
-            self.log(
-                "train/runtime/eta", runtime.eta,
-                on_step=True, on_epoch=False, logger=True,
-            )  # fmt: skip
-            self.log(
-                "train/runtime/hebbian_decay", runtime.hebbian_decay,
-                on_step=True, on_epoch=False, logger=True,
-            )  # fmt: skip
-            self.log(
-                "train/runtime/p2g_use", runtime.p2g_use,
-                on_step=True, on_epoch=False, logger=True,
-            )  # fmt: skip
-            self.log(
-                "train/runtime/p2g_uncertainty_offset", runtime.p2g_uncertainty_offset,
-                on_step=True, on_epoch=False, logger=True,
-            )  # fmt: skip
-
         return runtime
 
     def _train_chunk_steps(  # ------------------------------------------------
