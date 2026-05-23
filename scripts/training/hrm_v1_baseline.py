@@ -14,6 +14,7 @@ from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
     PydanticBaseSettingsSource,
+    SettingsConfigDict,
 )
 
 from ehc_sn.adapters.mazehard.hrm import MazeHardHRMAdapterSettings
@@ -62,8 +63,10 @@ CONFIGURATION_PATH = os.environ.get(
 # =============================================================================
 # Settings Model
 # =============================================================================
-class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
+class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     """Common training script arguments. Mode-specific model settings are read from TOML."""
+
+    model_config = SettingsConfigDict(extra="forbid")
 
     @classmethod
     def settings_customise_sources(  # ---------------------------------------

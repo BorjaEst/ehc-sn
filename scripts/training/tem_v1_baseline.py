@@ -21,6 +21,7 @@ from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
     PydanticBaseSettingsSource,
+    SettingsConfigDict,
 )
 
 from ehc_sn.adapters.arena.tem import ArenaTEMAdapterSettings
@@ -73,8 +74,10 @@ CONFIGURATION_PATH = os.environ.get(
 # =============================================================================
 # Settings Model
 # =============================================================================
-class RunArguments(BaseSettings, extra="forbid", cli_parse_args=True):
-    """ """
+class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
+    """Settings for TEM v1 baseline training run."""
+
+    model_config = SettingsConfigDict(extra="forbid")
 
     @classmethod
     def settings_customise_sources(  # ----------------------------------------

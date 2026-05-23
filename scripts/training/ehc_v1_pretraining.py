@@ -21,6 +21,7 @@ from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
     PydanticBaseSettingsSource,
+    SettingsConfigDict,
 )
 
 from ehc_sn.callbacks.checkpoint import CheckpointCallback, CheckpointSettings
@@ -60,8 +61,10 @@ CONFIGURATION_PATH = os.environ.get(
 # =============================================================================
 # Run settings (common to both modes)
 # =============================================================================
-class RunArguments(BaseSettings, extra="allow", cli_parse_args=True):
+class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     """Common training script arguments. Mode-specific model settings are read from TOML."""
+
+    model_config = SettingsConfigDict(extra="forbid")
 
     @classmethod
     def settings_customise_sources(  # ----------------------------------------
@@ -291,9 +294,6 @@ if __name__ == "__main__":
     else:
         transform = None
 
-    # Build logger first so callback wiring can follow the same gate.
-    logger = Logger(settings.logger) if settings.logger is not None else None
-
     # Prepare callbacks: checkpointing + optional figure generation.
     callbacks_list = [MetricsCallback()]
     if settings.checkpoint is not None:
@@ -307,7 +307,7 @@ if __name__ == "__main__":
     # This wires together logging, callbacks, and training control.
     trainer = Trainer(
         # Logger + callbacks handle metrics/hparams and checkpointing.
-        logger=logger,
+        logger=Logger(settings.logger) if settings.logger is not None else None,
         callbacks=callbacks_list if callbacks_list else None,
         # Lightning Trainer kwargs (extracted from config)
         accelerator=settings.trainer_accelerator,
