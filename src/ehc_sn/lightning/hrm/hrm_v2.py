@@ -51,6 +51,12 @@ from ehc_sn.controllers.deliberation.actor_critic import (
     DeliberationACController,
     DeliberationACControllerConfig,
 )
+from ehc_sn.eval.contracts import (
+    EvaluationBatchResult,
+    EvaluationCaseBatch,
+    EvaluationTraceRequest,
+)
+from ehc_sn.eval.executor import execute_replay_evaluation_batch
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics.adapter import update_metrics_from_step
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
@@ -489,11 +495,48 @@ class HRMV2TrainingModel(L.LightningModule):
                 "HRM v2 runtime is not initialized. Call setup() before validation."
             )
 
-        evaluation = score_captured_rollout(
+        evaluation = self.execute_evaluation_batch(
+            EvaluationCaseBatch(
+                batch=batch,
+                case_id=f"val-{batch_idx:04d}",
+            ),
+        )
+        update_metric_collection_from_evaluated_chunk(
+            collection=self.val_metrics,
+            evaluated=evaluation.evaluated,
+            routes=RL_EPISODE_ROUTES,
+        )
+
+        return {}
+
+    def execute_evaluation_batch(
+        self,
+        case: EvaluationCaseBatch,
+        *,
+        trace_request: EvaluationTraceRequest | None = None,
+    ) -> EvaluationBatchResult:
+        """Execute one provider-owned replay case through the HRM v2 eval path."""
+        if self.controller is None or self.val_scorer is None:
+            raise RuntimeError(
+                "HRM v2 runtime is not initialized. Call setup() before evaluation."
+            )
+
+        effective_trace_request = trace_request
+        if trace_request is not None and trace_request.enabled:
+            trace_meta = dict(build_mazehard_hrm_trace_meta(case.batch))
+            if trace_request.trace_meta is not None:
+                trace_meta.update(trace_request.trace_meta)
+            effective_trace_request = EvaluationTraceRequest(
+                enabled=True,
+                trace_spec=trace_request.trace_spec,
+                trace_meta=trace_meta,
+            )
+
+        return execute_replay_evaluation_batch(
+            case=case,
             runner=self._eval_runner,
-            source=RepeatSource(batch),
             controller=self.controller,
-            carry=self.controller.initial_state(batch),
+            carry=self.controller.initial_state(case.batch),
             objective=self.val_scorer,
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
@@ -503,14 +546,8 @@ class HRMV2TrainingModel(L.LightningModule):
                 "halt_action": self.config.deliberation.halt_action,
                 "max_halt_steps": self.config.deliberation.episode_horizon,
             },
+            trace_request=effective_trace_request,
         )
-        update_metric_collection_from_evaluated_chunk(
-            collection=self.val_metrics,
-            evaluated=evaluation.evaluated,
-            routes=RL_EPISODE_ROUTES,
-        )
-
-        return {}
 
 
 # =============================================================================

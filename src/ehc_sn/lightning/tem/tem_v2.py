@@ -18,6 +18,12 @@ from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryController,
     ReplayTrajectoryControllerConfig,
 )
+from ehc_sn.eval.contracts import (
+    EvaluationBatchResult,
+    EvaluationCaseBatch,
+    EvaluationTraceRequest,
+)
+from ehc_sn.eval.executor import execute_replay_evaluation_batch
 from ehc_sn.lightning.tem.core.runtime import (
     RuntimeConfig,
     TEMRuntimeState,
@@ -38,7 +44,7 @@ from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts.buffers import FifoBuffer
 from ehc_sn.rollouts.partial_reset import PartialResetBatchAssembler
 from ehc_sn.rollouts.runtime import RecurrentRunner
-from ehc_sn.rollouts.sources import PartialResetSource, RepeatSource
+from ehc_sn.rollouts.sources import PartialResetSource
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
 from ehc_sn.tasks.arena.runtime import (
     batch_size_from_arena_batch,
@@ -46,7 +52,6 @@ from ehc_sn.tasks.arena.runtime import (
 )
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.rollout import (
-    score_captured_rollout,
     score_rollout_streaming,
 )
 from ehc_sn.training.schedules import (
@@ -299,31 +304,45 @@ class TEMV2TrainingModel(L.LightningModule):
         batch_idx: int,
     ) -> dict[str, object]:
         """Run a full TEM rollout through the recurrent runner and trace observer."""
+        result = self.execute_evaluation_batch(
+            EvaluationCaseBatch(
+                batch=batch,
+                case_id=f"val-{batch_idx:04d}",
+            )
+        )
+        update_metric_collection_from_evaluated_chunk(
+            self.val_metrics, result.evaluated, TEM_EPISODE_ROUTES
+        )
+
+        return {}
+
+    def execute_evaluation_batch(
+        self,
+        case: EvaluationCaseBatch,
+        *,
+        trace_request: EvaluationTraceRequest | None = None,
+    ) -> EvaluationBatchResult:
+        """Execute one provider-owned replay case through the TEM eval path."""
         runtime = self._apply_runtime(self.global_step, log_values=False)
         eval_controller = self._require_eval_controller()
         eval_objective = self._require_eval_objective()
-        step_options = {"allow_halt": True, "explore": False}
-        carry0 = eval_controller.initial_state(batch)
+        carry0 = eval_controller.initial_state(case.batch)
+
         objective_options = eval_objective.runtime_loss_options(
             self.global_step, p2g_use=runtime.p2g_use
         )
-
-        evaluation = score_captured_rollout(
+        return execute_replay_evaluation_batch(
+            case=case,
             runner=self._eval_runner,
-            source=RepeatSource(batch),
             controller=eval_controller,
             carry=carry0,
             objective=eval_objective,
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
-            runner_options=step_options,
+            runner_options={"allow_halt": True, "explore": False},
             objective_options=objective_options,
+            trace_request=trace_request,
         )
-        update_metric_collection_from_evaluated_chunk(
-            self.val_metrics, evaluation.evaluated, TEM_EPISODE_ROUTES
-        )
-
-        return {}
 
     def _apply_runtime(  # ----------------------------------------------------
         self,

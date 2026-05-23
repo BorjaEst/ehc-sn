@@ -37,17 +37,22 @@ from ehc_sn.controllers.deliberation.act import (
     ACTController,
     ACTControllerConfig,
 )
+from ehc_sn.eval.contracts import (
+    EvaluationBatchResult,
+    EvaluationCaseBatch,
+    EvaluationTraceRequest,
+)
+from ehc_sn.eval.executor import execute_replay_evaluation_batch
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.routes.act import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
-from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
 from ehc_sn.objectives.act import ACTObjective, ACTObjectiveConfig
 from ehc_sn.rollouts.buffers import FifoBuffer
 from ehc_sn.rollouts.partial_reset import PartialResetBatchAssembler
 from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
-from ehc_sn.rollouts.sources import PartialResetSource, RepeatSource
+from ehc_sn.rollouts.sources import PartialResetSource
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.rollout import score_captured_rollout
@@ -322,28 +327,40 @@ class HRMV1TrainingModel(L.LightningModule):
         is therefore disabled here and the controller runs to its configured
         budget without exploration.
         """
-        carry0 = self.controller.initial_state(batch)
-        evaluation = score_captured_rollout(
+        result = self.execute_evaluation_batch(
+            EvaluationCaseBatch(
+                batch=batch,
+                case_id=f"val-{batch_idx:04d}",
+            )
+        )
+        update_metric_collection_from_evaluated_chunk(
+            self.val_metrics, result.evaluated, ACT_EPISODE_ROUTES
+        )
+        return {}
+
+    def execute_evaluation_batch(
+        self,
+        case: EvaluationCaseBatch,
+        *,
+        trace_request: EvaluationTraceRequest | None = None,
+    ) -> EvaluationBatchResult:
+        """Execute one provider-owned replay case through the ACT eval path."""
+        carry0 = self.controller.initial_state(case.batch)
+        return execute_replay_evaluation_batch(
+            case=case,
             runner=self._eval_runner,
-            source=RepeatSource(batch),
             controller=self.controller,
             carry=carry0,
             objective=self.objective,
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
             runner_options={"allow_halt": False, "explore": False},
-            objective_options={"controller": self.controller, "td_target": False },  # fmt: skip
+            objective_options={
+                "controller": self.controller,
+                "td_target": False,
+            },
+            trace_request=trace_request,
         )
-        update_metric_collection_from_evaluated_chunk(
-            self.val_metrics, evaluation.evaluated, ACT_EPISODE_ROUTES
-        )
-        return {}
-        # trace = observe_rollout_chunk(
-        #     evaluation.chunk,
-        #     self.trace_specs,
-        #     trace_meta=build_mazehard_hrm_trace_meta(batch),
-        # )
-        # return {"trace": trace}
 
 
 # =============================================================================
