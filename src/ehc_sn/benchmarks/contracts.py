@@ -194,13 +194,6 @@ READY_CAPABILITY_CONTRACTS: dict[
 
 
 # =============================================================================
-class FreshBridgeFactory(Protocol):
-    """Factory that returns a fresh benchmark bridge instance per execution."""
-
-    def __call__(self) -> object: ...
-
-
-# =============================================================================
 class ScoreAggregator(Protocol):
     """Benchmark-owned score-aggregation surface for model-comparison mode."""
 
@@ -209,14 +202,29 @@ class ScoreAggregator(Protocol):
 
 # =============================================================================
 @dataclass(frozen=True)
+class ModelComparisonExecution:
+    """Per-execution benchmark resources for model-comparison mode."""
+
+    bridge: object
+    controller: object
+    bridge_parameter_groups: tuple[dict[str, Any], ...]
+
+
+# =============================================================================
+class ModelComparisonExecutionFactory(Protocol):
+    """Factory that materializes fresh execution resources per benchmark run."""
+
+    def __call__(self) -> ModelComparisonExecution: ...
+
+
+# =============================================================================
+@dataclass(frozen=True)
 class ModelComparisonExecutionBundle:
     """Benchmark-owned binding bundle for model-comparison execution."""
 
     model: object
-    fresh_bridge: FreshBridgeFactory
-    bridge_parameter_groups: tuple[dict[str, Any], ...]
+    create_execution: ModelComparisonExecutionFactory
     loaders: dict[str, object]
-    controller: object
     score_aggregator: ScoreAggregator
 
 
@@ -266,10 +274,11 @@ __all__ = [
     "ArtifactManifest",
     "ArtifactProvenance",
     "CapabilityKind",
-    "FreshBridgeFactory",
     "MazeHardDeliberationCapabilityContract",
     "ModelComparisonBinding",
+    "ModelComparisonExecution",
     "ModelComparisonExecutionBundle",
+    "ModelComparisonExecutionFactory",
     "ModelComparisonMode",
     "READY_CAPABILITY_CONTRACTS",
     "ScoreAggregator",
