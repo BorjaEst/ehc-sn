@@ -7,6 +7,7 @@ offers reusable execution helpers that Lightning families can delegate to.
 from ehc_sn.eval.contracts import (
     EvaluationBatchResult,
     EvaluationCaseBatch,
+    EvaluationRegimeResult,
     EvaluationSourceProvider,
     EvaluationTraceRequest,
     LightningEvaluationExecutor,
@@ -19,6 +20,7 @@ from ehc_sn.eval.executor import (
 __all__ = [
     "EvaluationBatchResult",
     "EvaluationCaseBatch",
+    "EvaluationRegimeResult",
     "EvaluationSourceProvider",
     "EvaluationTraceRequest",
     "LightningEvaluationExecutor",

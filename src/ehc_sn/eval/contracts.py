@@ -54,6 +54,15 @@ class EvaluationBatchResult:
 
 
 # =============================================================================
+@dataclass(frozen=True)
+class EvaluationRegimeResult:
+    """Aggregate result payload for one named evaluation regime."""
+
+    regime_id: str
+    results: tuple[EvaluationBatchResult, ...]
+
+
+# =============================================================================
 class EvaluationSourceProvider(Protocol):
     """Task-owned provider that yields replay case batches for one regime."""
 
@@ -86,6 +95,7 @@ class LightningEvaluationExecutor(Protocol):
 __all__ = [
     "EvaluationBatchResult",
     "EvaluationCaseBatch",
+    "EvaluationRegimeResult",
     "EvaluationSourceProvider",
     "EvaluationTraceRequest",
     "LightningEvaluationExecutor",
