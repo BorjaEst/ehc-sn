@@ -39,7 +39,6 @@ from ehc_sn.metrics.routes.tem import (
     TEM_PRIMARY_VAL_ROUTE_KEY,
     TEM_STEP_ROUTES,
 )
-from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.tem.tem_v2 import ModelSettingsV2, TEMModelV2
 from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts.buffers import FifoBuffer
@@ -51,6 +50,7 @@ from ehc_sn.tasks.arena.runtime import (
     batch_size_from_arena_batch,
     infer_arena_replay_batch_keys,
 )
+from ehc_sn.traces import build_trace_spec
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.rollout import (
     score_rollout_streaming,
@@ -147,7 +147,8 @@ class TEMV2TrainingModel(L.LightningModule):
         )
         self.primary_val_metric_key = f"val/{TEM_PRIMARY_VAL_ROUTE_KEY}"
         self._eval_trace_keys: set[str] | None = None
-        self.trace_specs = build_trace_spec("tem")
+        self.trace_spec = build_trace_spec("tem")
+        self.trace_specs = self.trace_spec
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer: FifoBuffer | None = None
         self._train_batch_assembler: PartialResetBatchAssembler | None = None
@@ -220,10 +221,11 @@ class TEMV2TrainingModel(L.LightningModule):
     ) -> None:
         """Set semantic trace keys for evaluation-regime capture."""
         self._eval_trace_keys = set(keys)
-        self.trace_specs = build_trace_spec(
+        self.trace_spec = build_trace_spec(
             "tem",
             include_keys=self._eval_trace_keys,
         )
+        self.trace_specs = self.trace_spec
 
     def _validation_seed(self, batch_idx: int) -> int:
         """Return the explicit evaluation seed for one validation batch."""

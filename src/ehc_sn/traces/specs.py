@@ -7,8 +7,8 @@ here so model files contain *no* trace wiring.
 
 Usage
 -----
-    from ehc_sn.metrics.traces import build_trace_spec
-    self.trace_specs = build_trace_spec("act")   # or "rl" / "tem" / "ehc"
+    from ehc_sn.traces import build_trace_spec
+    self.trace_spec = build_trace_spec("act")   # or "rl" / "tem" / "ehc"
 
 Naming convention
 -----------------
@@ -29,7 +29,7 @@ from typing import Any, Iterable, Literal, Mapping, Protocol
 import torch
 from torch import Tensor
 
-from ehc_sn.traces import TraceField, TraceSpec, TraceValue
+from ehc_sn.traces.observer import TraceField, TraceSpec, TraceValue
 from ehc_sn.types import MemoryEntry
 
 
@@ -436,6 +436,6 @@ __all__ = [
     "COMMON_TRACE_FIELDS",
     "ACT_TRACE_FIELDS",
     "RL_TRACE_FIELDS",
-    TEM_TRACE_FIELDS,
+    "TEM_TRACE_FIELDS",
     "build_trace_spec",
 ]

@@ -62,7 +62,6 @@ from ehc_sn.metrics.adapter import update_metrics_from_step
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.routes.rl import RL_EPISODE_ROUTES, RL_STEP_ROUTES
-from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettingsV2
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig, HybridRLObjective
 from ehc_sn.rollouts.buffers import FifoBuffer
@@ -77,6 +76,7 @@ from ehc_sn.tasks.mazehard.reward import (
     MazeHardRewardConfig,
     MazeHardRewardProjector,
 )
+from ehc_sn.traces import build_trace_spec
 from ehc_sn.training.actor_critic import (
     TD0ActorCriticBatchBuilder,
     ZeroBootstrapActorCriticValidationScorer,
@@ -225,9 +225,10 @@ class HRMV2TrainingModel(L.LightningModule):
             prefix="val/"
         )
         self._eval_trace_keys: set[str] | None = None
-        self.trace_specs = build_trace_spec(
+        self.trace_spec = build_trace_spec(
             "rl", extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
         )
+        self.trace_specs = self.trace_spec
 
         # Buffer + assembler implement partial-reset batching for deliberation runs.
         self._train_buffer = FifoBuffer(
@@ -377,11 +378,12 @@ class HRMV2TrainingModel(L.LightningModule):
             for field in MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
             if field.name in self._eval_trace_keys
         )
-        self.trace_specs = build_trace_spec(
+        self.trace_spec = build_trace_spec(
             "rl",
             include_keys=self._eval_trace_keys,
             extra_fields=extra_fields,
         )
+        self.trace_specs = self.trace_spec
 
     def training_step(  # -----------------------------------------------------
         self,
