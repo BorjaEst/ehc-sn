@@ -5,8 +5,8 @@ offers reusable execution helpers that Lightning families can delegate to.
 """
 
 from ehc_sn.eval.contracts import (
-    EvaluationCaseResult,
     EvaluationCaseBatch,
+    EvaluationCaseResult,
     EvaluationExecutor,
     EvaluationRegimeResult,
     EvaluationSourceProvider,

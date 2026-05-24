@@ -1,6 +1,6 @@
 """Task-owned evaluation case providers for the MazeHard task family.
 
-These providers implement :class:`~ehc_sn.lightning.eval.contracts.EvaluationSourceProvider`
+These providers implement :class:`~ehc_sn.eval.contracts.EvaluationSourceProvider`
 and supply batched MazeHard replay cases to named evaluation regimes.
 
 Ownership rules:
@@ -26,7 +26,7 @@ from torch.utils.data import DataLoader
 
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
-from ehc_sn.lightning.eval.contracts import EvaluationCaseBatch
+from ehc_sn.eval.contracts import EvaluationCaseBatch
 from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.tasks.mazehard.traces import MazeHardEvaluationSourceContext
 
@@ -79,7 +79,7 @@ class MazeHardReplayDiagnosticProvider:
             max_batches: If > 0, yield at most this many batches; otherwise yield all.
 
         Yields:
-            :class:`~ehc_sn.lightning.eval.contracts.EvaluationCaseBatch` items with
+            :class:`~ehc_sn.eval.contracts.EvaluationCaseBatch` items with
             ``{"input_ids": Tensor, "labels": Tensor}`` batches, a deterministic
             ``case_id``, and split metadata.
         """
@@ -200,7 +200,7 @@ class MazeHardFixedProbeProvider:
             max_batches: If > 0, stop after this many batches; otherwise yield all.
 
         Yields:
-            :class:`~ehc_sn.lightning.eval.contracts.EvaluationCaseBatch` items with
+            :class:`~ehc_sn.eval.contracts.EvaluationCaseBatch` items with
             ``{"input_ids": Tensor, "labels": Tensor}`` batches, a deterministic
             ``case_id``, and probe metadata.
 

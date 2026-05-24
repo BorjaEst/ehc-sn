@@ -1,6 +1,6 @@
 """Task-owned evaluation case providers for the countwalk task family.
 
-These providers implement :class:`~ehc_sn.lightning.eval.contracts.EvaluationSourceProvider`
+These providers implement :class:`~ehc_sn.eval.contracts.EvaluationSourceProvider`
 and supply batched countwalk replay cases to named evaluation regimes.
 
 Ownership rules:
@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader
 
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
-from ehc_sn.lightning.eval.contracts import EvaluationCaseBatch
+from ehc_sn.eval.contracts import EvaluationCaseBatch
 from ehc_sn.tasks.countwalk.traces import CountwalkEvaluationSourceContext
 
 
@@ -69,7 +69,7 @@ class CountwalkReplayDiagnosticProvider:
             max_batches: If > 0, yield at most this many batches; otherwise yield all.
 
         Yields:
-            :class:`~ehc_sn.lightning.eval.contracts.EvaluationCaseBatch` items with
+            :class:`~ehc_sn.eval.contracts.EvaluationCaseBatch` items with
             countwalk channel tensors, a deterministic ``case_id``, and a typed
             :class:`~ehc_sn.tasks.countwalk.traces.CountwalkEvaluationSourceContext`.
         """
@@ -188,7 +188,7 @@ class CountwalkFixedProbeProvider:
             max_batches: If > 0, stop after this many batches; otherwise yield all.
 
         Yields:
-            :class:`~ehc_sn.lightning.eval.contracts.EvaluationCaseBatch` items with
+            :class:`~ehc_sn.eval.contracts.EvaluationCaseBatch` items with
             countwalk channel tensors, a deterministic ``case_id``, and a typed
             :class:`~ehc_sn.tasks.countwalk.traces.CountwalkEvaluationSourceContext`.
 
