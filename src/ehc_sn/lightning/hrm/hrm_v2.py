@@ -52,8 +52,8 @@ from ehc_sn.controllers.deliberation.actor_critic import (
     DeliberationACControllerConfig,
 )
 from ehc_sn.eval.contracts import (
-    EvaluationBatchResult,
     EvaluationCaseBatch,
+    EvaluationCaseResult,
     EvaluationTraceRequest,
 )
 from ehc_sn.eval.executor import execute_replay_evaluation_batch
@@ -224,9 +224,10 @@ class HRMV2TrainingModel(L.LightningModule):
         self.val_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(
             prefix="val/"
         )
-        # self.trace_specs = build_trace_spec(
-        #     "rl", extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
-        # )
+        self._eval_trace_keys: set[str] | None = None
+        self.trace_specs = build_trace_spec(
+            "rl", extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
+        )
 
         # Buffer + assembler implement partial-reset batching for deliberation runs.
         self._train_buffer = FifoBuffer(
@@ -364,6 +365,23 @@ class HRMV2TrainingModel(L.LightningModule):
     ) -> None:
         """Reset validation metrics at the start of each epoch."""
         self.val_metrics.reset()
+
+    def set_eval_trace_keys(  # -----------------------------------------------
+        self,
+        keys: set[str],
+    ) -> None:
+        """Set semantic trace keys for evaluation-regime capture."""
+        self._eval_trace_keys = set(keys)
+        extra_fields = tuple(
+            field
+            for field in MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
+            if field.name in self._eval_trace_keys
+        )
+        self.trace_specs = build_trace_spec(
+            "rl",
+            include_keys=self._eval_trace_keys,
+            extra_fields=extra_fields,
+        )
 
     def training_step(  # -----------------------------------------------------
         self,
@@ -509,12 +527,12 @@ class HRMV2TrainingModel(L.LightningModule):
 
         return {}
 
-    def execute_evaluation_batch(
+    def execute_evaluation_batch(  # ------------------------------------------
         self,
         case: EvaluationCaseBatch,
         *,
         trace_request: EvaluationTraceRequest | None = None,
-    ) -> EvaluationBatchResult:
+    ) -> EvaluationCaseResult:
         """Execute one provider-owned replay case through the HRM v2 eval path."""
         if self.controller is None or self.val_scorer is None:
             raise RuntimeError(
@@ -522,12 +540,11 @@ class HRMV2TrainingModel(L.LightningModule):
             )
 
         effective_trace_request = trace_request
-        if trace_request is not None and trace_request.enabled:
+        if trace_request is not None:
             trace_meta = dict(build_mazehard_hrm_trace_meta(case.batch))
             if trace_request.trace_meta is not None:
                 trace_meta.update(trace_request.trace_meta)
             effective_trace_request = EvaluationTraceRequest(
-                enabled=True,
                 trace_spec=trace_request.trace_spec,
                 trace_meta=trace_meta,
             )

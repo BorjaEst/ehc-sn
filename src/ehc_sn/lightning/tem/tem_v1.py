@@ -19,8 +19,8 @@ from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryControllerConfig,
 )
 from ehc_sn.eval.contracts import (
-    EvaluationBatchResult,
     EvaluationCaseBatch,
+    EvaluationCaseResult,
     EvaluationTraceRequest,
 )
 from ehc_sn.eval.executor import execute_replay_evaluation_batch
@@ -39,6 +39,7 @@ from ehc_sn.metrics.routes.tem import (
     TEM_PRIMARY_VAL_ROUTE_KEY,
     TEM_STEP_ROUTES,
 )
+from ehc_sn.metrics.traces import build_trace_spec
 from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
 from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts.buffers import FifoBuffer
@@ -144,6 +145,8 @@ class TEMV1TrainingModel(L.LightningModule):
             prefix="val/"
         )
         self.primary_val_metric_key = f"val/{TEM_PRIMARY_VAL_ROUTE_KEY}"
+        self._eval_trace_keys: set[str] | None = None
+        self.trace_specs = build_trace_spec("tem")
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer: FifoBuffer | None = None
         self._train_batch_assembler: PartialResetBatchAssembler | None = None
@@ -209,6 +212,17 @@ class TEMV1TrainingModel(L.LightningModule):
         at each step from the global step count.
         """
         self.val_metrics.reset()
+
+    def set_eval_trace_keys(  # -----------------------------------------------
+        self,
+        keys: set[str],
+    ) -> None:
+        """Set semantic trace keys for evaluation-regime capture."""
+        self._eval_trace_keys = set(keys)
+        self.trace_specs = build_trace_spec(
+            "tem",
+            include_keys=self._eval_trace_keys,
+        )
 
     def _validation_seed(self, batch_idx: int) -> int:
         """Return the explicit evaluation seed for one validation batch."""
@@ -331,12 +345,12 @@ class TEMV1TrainingModel(L.LightningModule):
 
         return {}
 
-    def execute_evaluation_batch(
+    def execute_evaluation_batch(  # ------------------------------------------
         self,
         case: EvaluationCaseBatch,
         *,
         trace_request: EvaluationTraceRequest | None = None,
-    ) -> EvaluationBatchResult:
+    ) -> EvaluationCaseResult:
         """Execute one provider-owned replay case through the TEM eval path."""
         runtime = self._apply_runtime(self.global_step)
         eval_controller = self._require_eval_controller()
