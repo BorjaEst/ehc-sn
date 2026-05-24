@@ -1,12 +1,12 @@
 # =============================================================================
-# EHC v1 Architecture
+# EHC v1 Architecture (MazeHard reason_pretrain)
 # =============================================================================
 
 transition_action_count = 5
 f_initial               = [0.99, 0.3, 0.09, 0.5, 0.4]
 
 [pfc]
-    seq_length             = 36  # 1-cue, 1-replay, 34-reasoning_steps
+    seq_length             = 900 # 3 fixed slots + 897 content slots for 30x30 MazeHard states
     value_head.hidden_size = 512 # Matches the PFC reasoning embedding_dim
     value_head.n_actions   = 2
     value_head.pool_mode   = "first"

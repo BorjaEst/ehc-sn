@@ -5,15 +5,11 @@ from __future__ import annotations
 # =============================================================================
 LOSS_TOKEN: str = "loss_token"
 
-ACT_LOSS_Q_DONE: str = "loss_q_done"
+ACT_LOSS_Q_DONE: str = "act_loss_q_done"
 ACT_LOSS_Q_CONTINUE: str = "loss_q_continue"
 
-RL_LOSS_STATE_VALUE: str = "loss_state_value"
-RL_LOSS_Q_VALUE: str = "loss_q_value"
-
-VAR_LOSS_OBS_NLL: str = "loss_obs_nll"
-VAR_LOSS_LATENT: str = "loss_latent"
-VAR_LOSS_REG: str = "loss_reg"
+RL_LOSS_STATE_VALUE: str = "rl_loss_state_value"
+RL_LOSS_Q_VALUE: str = "rl_loss_q_value"
 
 TEM_LOSS_OBS_NLL_REVISIT: str = "loss_obs_nll_revisit"
 TEM_LOSS_OBS_NLL_ALL: str = "loss_obs_nll_all"
@@ -64,11 +60,11 @@ def extra_ratio_paths(  # -----------------------------------------------------
 
 # =============================================================================
 __all__ = [
-    "ACT_LOSS_Q_CONTINUE",
     "ACT_LOSS_Q_DONE",
+    "ACT_LOSS_Q_CONTINUE",
     "LOSS_TOKEN",
-    "RL_LOSS_STATE_VALUE",
     "RL_LOSS_Q_VALUE",
+    "RL_LOSS_STATE_VALUE",
     "EHC_ACC_OBS_ANCESTRAL_ALL",
     "EHC_ACC_OBS_ANCESTRAL_REVISIT",
     "EHC_ACC_OBS_INFERENCE_ALL",
@@ -103,8 +99,5 @@ __all__ = [
     "TEM_LOSS_OBS_INFERENCE_ALL",
     "TEM_LOSS_OBS_RETRIEVED_ALL",
     "TEM_LOSS_OBS_ANCESTRAL_ALL",
-    "VAR_LOSS_LATENT",
-    "VAR_LOSS_OBS_NLL",
-    "VAR_LOSS_REG",
     "extra_ratio_paths",
 ]

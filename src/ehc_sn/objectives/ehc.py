@@ -18,6 +18,7 @@ from typing import Any, Optional, Protocol
 from pydantic import BaseModel, Field
 from torch import Tensor
 
+import ehc_sn.metrics.signals as S
 from ehc_sn.loss.consistency import (
     LatentCode,
     LatentRelation,
@@ -30,7 +31,6 @@ from ehc_sn.loss.regularization import (
     RegularizationNorm,
     sum_regularization_terms,
 )
-import ehc_sn.metrics.signals as S
 from ehc_sn.metrics.keys import (
     EHC_ACC_OBS_ANCESTRAL_ALL,
     EHC_ACC_OBS_ANCESTRAL_REVISIT,
@@ -47,14 +47,15 @@ from ehc_sn.metrics.keys import (
     EHC_LOSS_REG_ALL,
     EHC_LOSS_REG_REVISIT,
 )
+from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
 from ehc_sn.objectives._variational import (
     VariationalLosses,
     VariationalObjectiveBase,
     VariationalObjectiveStep,
+    build_variational_step_metrics,
     get_reg_term,
     require_latent_relation,
 )
-from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
 from ehc_sn.rollouts.runtime import CarrySnapshot, StepRecord
 from ehc_sn.types import Batch
 
@@ -213,11 +214,40 @@ class EHCObjectiveConfig(BaseModel, extra="forbid"):
 class EHCLosses(VariationalLosses):
     """ELBO-style EHC loss bundle with explicit latent groups."""
 
+    loss_obs_inference_sum: Tensor
+    loss_obs_retrieved_sum: Tensor
+    loss_obs_ancestral_sum: Tensor
     loss_place_transition_sum: Tensor
     loss_place_sensory_sum: Tensor
     loss_grid_kl_sum: Tensor
-    loss_place_consistency_sum: Tensor
+    loss_grid_reg_sum: Tensor
+    loss_place_reg_sum: Tensor
+    # Detached all-batch component sums retained for diagnostics parity.
+    loss_obs_inference_all_sum: Tensor
+    loss_obs_retrieved_all_sum: Tensor
+    loss_obs_ancestral_all_sum: Tensor
+    loss_place_transition_all_sum: Tensor
+    loss_place_sensory_all_sum: Tensor
     protocol_count: Tensor
+
+    @property
+    def loss_obs_nll_sum(self) -> Tensor:
+        """Return the aggregate observation negative log-likelihood sum."""
+        return (
+            self.loss_obs_inference_sum
+            + self.loss_obs_retrieved_sum
+            + self.loss_obs_ancestral_sum
+        )
+
+    @property
+    def loss_reg_sum(self) -> Tensor:
+        """Return the aggregate regularization sum for the current step."""
+        return self.loss_grid_reg_sum + self.loss_place_reg_sum
+
+    @property
+    def loss_place_consistency_sum(self) -> Tensor:
+        """Return the aggregate place-consistency sum for the current step."""
+        return self.loss_place_transition_sum + self.loss_place_sensory_sum
 
     @property
     def loss_latent_sum(self) -> Tensor:
@@ -248,6 +278,56 @@ class EHCObjectiveStep(VariationalObjectiveStep):
 
 
 # =============================================================================
+@dataclass(frozen=True)
+class EHCTerms:
+    """Scored per-example EHC loss terms shared across consumers."""
+
+    obs_inference: Tensor
+    obs_retrieved: Tensor
+    obs_ancestral: Tensor
+    place_transition: Tensor
+    place_sensory: Tensor
+    grid_kl: Tensor
+    grid_reg: Tensor
+    place_reg: Tensor
+
+    @property
+    def obs_nll(self) -> Tensor:
+        """Return the aggregate per-example observation loss."""
+        return self.obs_inference + self.obs_retrieved + self.obs_ancestral
+
+    @property
+    def place_consistency(self) -> Tensor:
+        """Return the aggregate per-example place-consistency term."""
+        return self.place_transition + self.place_sensory
+
+    @property
+    def latent(self) -> Tensor:
+        """Return the aggregate per-example latent loss across relations."""
+        return self.place_consistency + self.grid_kl
+
+    @property
+    def reg(self) -> Tensor:
+        """Return the aggregate per-example regularization term."""
+        return self.grid_reg + self.place_reg
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class EHCContext:
+    """Shared objective-scoring context resolved once per EHC consumer."""
+
+    targets: Any
+    labels: Tensor
+    protocol_mask: Tensor
+    grid_relation: LatentRelation
+    place_transition_relation: LatentRelation
+    place_sensory_relation: LatentRelation | None
+    grid_reg_code: LatentCode
+    place_reg_code: LatentCode
+
+
+# =============================================================================
 class EHCObjective(VariationalObjectiveBase[EHCObjectiveConfig]):
     """EHC objective scored over executed rollout chunks."""
 
@@ -261,172 +341,258 @@ class EHCObjective(VariationalObjectiveBase[EHCObjectiveConfig]):
         super().__init__(config=config)
         self._task_binding = task_binding
 
-    def compute_losses(  # ----------------------------------------------------
+    def runtime_loss_options(  # ----------------------------------------------
+        self,
+        step: int,
+        *,
+        p2g_use: float | None = None,
+    ) -> dict[str, float]:
+        """Derive per-step schedule scalars from the current step."""
+        options = resolve_objective_schedule(step=step, config=self.config)
+        if p2g_use is not None:
+            options["p2g_use"] = p2g_use
+        return options
+
+    def build_context(  # -----------------------------------------------------
+        self,
+        record: StepRecord,
+        outputs: EHCStepOutput,
+        **_: Any,
+    ) -> EHCContext:
+        """Resolve task targets, protocol masks, relations, and reg fallbacks."""
+        targets = self._task_binding.extract_targets(
+            executed_batch=record.batch,
+            snapshot=record.carry,
+            step_output=record.outputs,
+        )
+        return EHCContext(
+            targets=targets,
+            labels=self._task_binding.extract_observation_id(targets),
+            protocol_mask=self._task_binding.extract_protocol_mask(targets),
+            grid_relation=require_latent_relation(
+                outputs.latent_relations,
+                GRID_TRANSITION_RELATION,
+            ),
+            place_transition_relation=require_latent_relation(
+                outputs.latent_relations,
+                PLACE_TRANSITION_RELATION,
+            ),
+            place_sensory_relation=outputs.latent_relations.get(
+                PLACE_SENSORY_RELATION,
+            ),
+            grid_reg_code=get_reg_term(
+                outputs.reg_terms,
+                outputs.latent_relations,
+                key=GRID_REG_TERM,
+                fallback=GRID_TRANSITION_RELATION,
+            ),
+            place_reg_code=get_reg_term(
+                outputs.reg_terms,
+                outputs.latent_relations,
+                key=PLACE_REG_TERM,
+                fallback=PLACE_TRANSITION_RELATION,
+            ),
+        )
+
+    def obs_loss_fn(  # -------------------------------------------------------
+        self,
+        logits: Tensor,
+        labels: Tensor,
+    ) -> Tensor:
+        """Compute per-example observation NLL under the configured loss."""
+        return super().obs_loss_fn(logits, labels)
+
+    def latent_loss_fn(  # ----------------------------------------------------
+        self,
+        relation: LatentRelation | None,
+        *,
+        zeros_like: Tensor | None = None,
+    ) -> Tensor:
+        """Compute per-example latent loss for one relation."""
+        if relation is None:
+            if zeros_like is None:
+                raise ValueError("zeros_like is required when relation is None")
+            return zeros_like.new_zeros(zeros_like.shape[0])
+        return sum_latent_terms(mse_consistency, relation.lhs, relation.rhs)
+
+    def greg_loss_fn(  # ------------------------------------------------------
+        self,
+        code: LatentCode,
+    ) -> Tensor:
+        """Compute per-example grid-code regularization under the config."""
+        return _regularization_terms(code, self.config.grid_reg_norm)
+
+    def preg_loss_fn(  # ------------------------------------------------------
+        self,
+        code: LatentCode,
+    ) -> Tensor:
+        """Compute per-example place-code regularization under the config."""
+        return _regularization_terms(code, self.config.place_reg_norm)
+
+    def compute_terms(  # -----------------------------------------------------
         self,
         outputs: EHCStepOutput,
-        carry: Any,
-        batch: Any = None,
-        step_output: Any = None,
+        context: EHCContext,
+        *,
         temp: float = 1.0,
         p2g_use: float = 1.0,
         g_cell_reg: float = 1.0,
         p_cell_reg: float = 1.0,
+        **_: Any,
+    ) -> EHCTerms:
+        """Return scored per-example EHC loss terms for one step."""
+        return EHCTerms(
+            obs_inference=self.obs_loss_fn(
+                logits=outputs.logits_inference,
+                labels=context.labels,
+            )
+            * self.config.c_obs,
+            obs_retrieved=self.obs_loss_fn(
+                logits=outputs.logits_retrieved,
+                labels=context.labels,
+            )
+            * self.config.c_obs,
+            obs_ancestral=self.obs_loss_fn(
+                logits=outputs.logits_ancestral,
+                labels=context.labels,
+            )
+            * self.config.c_obs,
+            place_transition=self.latent_loss_fn(
+                relation=context.place_transition_relation,
+            )
+            * self.config.c_place
+            * temp,
+            place_sensory=self.latent_loss_fn(
+                relation=context.place_sensory_relation,
+                zeros_like=context.labels,
+            )
+            * self.config.c_place
+            * temp
+            * p2g_use,
+            grid_kl=self.latent_loss_fn(
+                relation=context.grid_relation,
+            )
+            * self.config.c_grid
+            * temp,
+            grid_reg=self.greg_loss_fn(context.grid_reg_code)
+            * self.config.c_grid_reg
+            * g_cell_reg,
+            place_reg=self.preg_loss_fn(context.place_reg_code)
+            * self.config.c_place_reg
+            * p_cell_reg,
+        )
+
+    def compute_losses(  # ----------------------------------------------------
+        self,
+        terms: EHCTerms,
+        context: EHCContext,
         **_: Any,
     ) -> EHCLosses:
         """Compute ELBO-style EHC losses for a single step."""
-        targets = self._task_binding.extract_targets(
-            executed_batch=batch, snapshot=carry, step_output=step_output
-        )
-        labels = self._task_binding.extract_observation_id(targets)
-        protocol_mask = self._task_binding.extract_protocol_mask(targets)
-        grid_relation = require_latent_relation(
-            outputs.latent_relations, GRID_TRANSITION_RELATION
-        )
-        place_transition_relation = require_latent_relation(
-            outputs.latent_relations, PLACE_TRANSITION_RELATION
-        )
-
-        loss_obs_inference = self.loss_fn(outputs.logits_inference, labels)
-        loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels)
-        loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels)
-        loss_obs_nll_sum = self.config.c_obs * self._masked_sum(
-            loss_obs_inference + loss_obs_retrieved + loss_obs_ancestral,
-            protocol_mask,
-        )
-        grid_mse = sum_latent_terms(
-            mse_consistency, grid_relation.lhs, grid_relation.rhs
-        )
-        loss_grid_kl_sum = (
-            temp
-            * self.config.c_grid
-            * self._masked_sum(grid_mse, protocol_mask)
-        )
-
-        place_transition = sum_latent_terms(
-            mse_consistency,
-            place_transition_relation.lhs,
-            place_transition_relation.rhs,
-        )
-        place_sensory_relation = outputs.latent_relations.get(
-            PLACE_SENSORY_RELATION
-        )
-        if place_sensory_relation is not None:
-            place_sensory = sum_latent_terms(
-                mse_consistency,
-                place_sensory_relation.lhs,
-                place_sensory_relation.rhs,
-            )
-        else:
-            place_sensory = place_transition.new_zeros(place_transition.shape)
-        loss_place_transition_sum = (
-            temp
-            * self.config.c_place
-            * self._masked_sum(place_transition, protocol_mask)
-        )
-        loss_place_sensory_sum = (
-            temp
-            * p2g_use
-            * self.config.c_place
-            * self._masked_sum(place_sensory, protocol_mask)
-        )
-        loss_place_consistency_sum = (
-            loss_place_transition_sum + loss_place_sensory_sum
-        )
-
-        grid_reg_code = get_reg_term(outputs.reg_terms, GRID_REG_TERM)
-        if grid_reg_code is None:
-            grid_reg_code = grid_relation.lhs
-
-        place_reg_code = get_reg_term(outputs.reg_terms, PLACE_REG_TERM)
-        if place_reg_code is None:
-            place_reg_code = place_transition_relation.lhs
-
-        grid_reg = self._regularization_terms(
-            grid_reg_code,
-            self.config.grid_reg_norm,
-            self.config.c_grid_reg * g_cell_reg,
-        )
-        place_reg = self._regularization_terms(
-            place_reg_code,
-            self.config.place_reg_norm,
-            self.config.c_place_reg * p_cell_reg,
-        )
-        loss_reg_sum = self._masked_sum(grid_reg + place_reg, protocol_mask)
-
-        protocol_count = protocol_mask.to(dtype=loss_obs_nll_sum.dtype).sum()
+        protocol_count = context.protocol_mask.to(
+            dtype=terms.obs_nll.dtype
+        ).sum()
         return EHCLosses(
-            loss_obs_nll_sum=loss_obs_nll_sum,
-            loss_reg_sum=loss_reg_sum,
-            loss_place_transition_sum=loss_place_transition_sum,
-            loss_place_sensory_sum=loss_place_sensory_sum,
-            loss_grid_kl_sum=loss_grid_kl_sum,
-            loss_place_consistency_sum=loss_place_consistency_sum,
+            loss_obs_inference_sum=self._masked_sum(
+                terms.obs_inference,
+                context.protocol_mask,
+            ),
+            loss_obs_retrieved_sum=self._masked_sum(
+                terms.obs_retrieved,
+                context.protocol_mask,
+            ),
+            loss_obs_ancestral_sum=self._masked_sum(
+                terms.obs_ancestral,
+                context.protocol_mask,
+            ),
+            loss_place_transition_sum=self._masked_sum(
+                terms.place_transition,
+                context.protocol_mask,
+            ),
+            loss_place_sensory_sum=self._masked_sum(
+                terms.place_sensory,
+                context.protocol_mask,
+            ),
+            loss_grid_kl_sum=self._masked_sum(
+                terms.grid_kl,
+                context.protocol_mask,
+            ),
+            loss_grid_reg_sum=self._masked_sum(
+                terms.grid_reg,
+                context.protocol_mask,
+            ),
+            loss_place_reg_sum=self._masked_sum(
+                terms.place_reg,
+                context.protocol_mask,
+            ),
+            loss_obs_inference_all_sum=terms.obs_inference.sum().detach(),
+            loss_obs_retrieved_all_sum=terms.obs_retrieved.sum().detach(),
+            loss_obs_ancestral_all_sum=terms.obs_ancestral.sum().detach(),
+            loss_place_transition_all_sum=terms.place_transition.sum().detach(),
+            loss_place_sensory_all_sum=terms.place_sensory.sum().detach(),
             protocol_count=protocol_count,
         )
 
-    def _build_metric_ratios(  # ----------------------------------------------
+    def evaluate_metrics(  # --------------------------------------------------
         self,
-        losses: EHCLosses,
-        *,
-        carry: Any,
+        record: StepRecord,
         outputs: EHCStepOutput,
-        batch_size: int,
-        batch: Any = None,
-        step_output: Any = None,
-        temp: float = 1.0,
-        p2g_use: float = 1.0,
-        g_cell_reg: float = 1.0,
-        p_cell_reg: float = 1.0,
+        context: EHCContext,
+        terms: EHCTerms,
+        losses: EHCLosses,
         **_: Any,
-    ) -> dict[str, RatioStat]:
-        """Build detached EHC ratio metrics for logging."""
-        targets = self._task_binding.extract_targets(
-            executed_batch=batch, snapshot=carry, step_output=step_output
-        )
-        labels = self._task_binding.extract_observation_id(targets)
-        protocol_mask = self._task_binding.extract_protocol_mask(targets)
-        protocol_count = protocol_mask.to(dtype=losses.total.dtype).sum()
-        batch_count = losses.total.new_tensor(
-            batch_size, dtype=losses.total.dtype
-        )
-        all_loss_sums = self._all_step_loss_sums(
+    ) -> StepMetrics:
+        """Evaluate EHC metrics for one step from precomputed losses and terms."""
+        _ = record, losses
+        acc_extras = self._task_binding.evaluate_observation_metrics(
             outputs,
-            labels,
-            temp=temp,
-            p2g_use=p2g_use,
-            g_cell_reg=g_cell_reg,
-            p_cell_reg=p_cell_reg,
+            context.targets,
         )
-        acc_metrics = self._task_binding.evaluate_observation_metrics(
-            outputs, targets
-        )
-        return {
-            **acc_metrics,
+        revisit = context.protocol_mask.float()
+        revisit_count = revisit.sum().detach()
+        batch_count = revisit.new_tensor(float(revisit.shape[0]))
+
+        def _rev_sum(tensor: Tensor) -> Tensor:
+            return (tensor * revisit).sum().detach()
+
+        def _all_sum(tensor: Tensor) -> Tensor:
+            return tensor.sum().detach()
+
+        loss_extras = {
             EHC_LOSS_OBS_NLL_REVISIT: RatioStat(
-                losses.loss_obs_nll_sum.detach(), protocol_count
-            ),
-            EHC_LOSS_GRID_KL_REVISIT: RatioStat(
-                losses.loss_grid_kl_sum.detach(), protocol_count
-            ),
-            EHC_LOSS_PLACE_CONSISTENCY_REVISIT: RatioStat(
-                losses.loss_place_consistency_sum.detach(), protocol_count
-            ),
-            EHC_LOSS_REG_REVISIT: RatioStat(
-                losses.loss_reg_sum.detach(), protocol_count
+                numerator_sum=_rev_sum(terms.obs_nll),
+                denominator_sum=revisit_count,
             ),
             EHC_LOSS_OBS_NLL_ALL: RatioStat(
-                all_loss_sums["loss_obs_nll_sum"], batch_count
+                numerator_sum=_all_sum(terms.obs_nll),
+                denominator_sum=batch_count,
+            ),
+            EHC_LOSS_GRID_KL_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.grid_kl),
+                denominator_sum=revisit_count,
             ),
             EHC_LOSS_GRID_KL_ALL: RatioStat(
-                all_loss_sums["loss_grid_kl_sum"], batch_count
+                numerator_sum=_all_sum(terms.grid_kl),
+                denominator_sum=batch_count,
+            ),
+            EHC_LOSS_PLACE_CONSISTENCY_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.place_consistency),
+                denominator_sum=revisit_count,
             ),
             EHC_LOSS_PLACE_CONSISTENCY_ALL: RatioStat(
-                all_loss_sums["loss_place_consistency_sum"], batch_count
+                numerator_sum=_all_sum(terms.place_consistency),
+                denominator_sum=batch_count,
+            ),
+            EHC_LOSS_REG_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.reg),
+                denominator_sum=revisit_count,
             ),
             EHC_LOSS_REG_ALL: RatioStat(
-                all_loss_sums["loss_reg_sum"], batch_count
+                numerator_sum=_all_sum(terms.reg),
+                denominator_sum=batch_count,
             ),
         }
+        return build_variational_step_metrics({**acc_extras, **loss_extras})
 
     def build_output(  # ------------------------------------------------
         self,
@@ -444,85 +610,44 @@ class EHCObjective(VariationalObjectiveBase[EHCObjectiveConfig]):
         self,
         record: StepRecord,
         outputs: EHCStepOutput,
-        context: Any,
-        terms: Any,
+        context: EHCContext,
+        terms: EHCTerms,
         losses: EHCLosses,
         **_: Any,
     ) -> dict[str, Tensor]:
         """Compute detached EHC diagnostics and ELBO-style scalar signals."""
-        _ = context, terms
-        step_output = record.outputs
-        targets = self._task_binding.extract_targets(
-            executed_batch=record.batch,
-            snapshot=record.carry,
-            step_output=step_output,
-        )
-        labels = self._task_binding.extract_observation_id(targets)
-        grid_relation = require_latent_relation(
-            outputs.latent_relations, GRID_TRANSITION_RELATION
-        )
-        place_transition_relation = require_latent_relation(
-            outputs.latent_relations, PLACE_TRANSITION_RELATION
-        )
-        place_sensory_relation = outputs.latent_relations.get(
-            PLACE_SENSORY_RELATION
-        )
+        _ = record
         denom = losses.protocol_count.detach().clamp_min(1.0)
-        signals = super().compute_signals(
-            record, outputs, context, terms, losses
-        )
+        grid_post_norm = mean_latent_norm(context.grid_relation.lhs).detach()
+        grid_prior_norm = mean_latent_norm(context.grid_relation.rhs).detach()
+        place_post_norm = mean_latent_norm(
+            context.place_transition_relation.lhs
+        ).detach()
+        place_prior_norm = mean_latent_norm(
+            context.place_transition_relation.rhs
+        ).detach()
 
-        loss_obs_inference = (
-            self.loss_fn(outputs.logits_inference, labels).sum().detach()
-        )
-        loss_obs_retrieved = (
-            self.loss_fn(outputs.logits_retrieved, labels).sum().detach()
-        )
-        loss_obs_ancestral = (
-            self.loss_fn(outputs.logits_ancestral, labels).sum().detach()
-        )
-        place_transition = (
-            sum_latent_terms(
-                mse_consistency,
-                place_transition_relation.lhs,
-                place_transition_relation.rhs,
-            )
-            .sum()
-            .detach()
-        )
-        if place_sensory_relation is not None:
-            place_sensory = (
-                sum_latent_terms(
-                    mse_consistency,
-                    place_sensory_relation.lhs,
-                    place_sensory_relation.rhs,
-                )
-                .sum()
-                .detach()
-            )
-        else:
-            place_sensory = losses.loss_place_consistency_sum.new_zeros(())
-
-        signals.update(
-            {
-                S.LOSS_GRID_KL: losses.loss_grid_kl_sum.detach() / denom,
-                S.LOSS_PLACE_CONSISTENCY: losses.loss_place_consistency_sum.detach()
-                / denom,
-                S.LOSS_OBS_INFER: loss_obs_inference / denom,
-                S.LOSS_OBS_RETRIEVED: loss_obs_retrieved / denom,
-                S.LOSS_OBS_ANCESTRAL: loss_obs_ancestral / denom,
-                S.LOSS_PLACE_TRANSITION: place_transition / denom,
-                S.LOSS_PLACE_SENSORY: place_sensory / denom,
-                S.GRID_POST_NORM: mean_latent_norm(grid_relation.lhs),
-                S.GRID_PRIOR_NORM: mean_latent_norm(grid_relation.rhs),
-                S.PLACE_POST_NORM: mean_latent_norm(
-                    place_transition_relation.lhs
-                ),
-                S.PLACE_PRIOR_NORM: mean_latent_norm(
-                    place_transition_relation.rhs
-                ),
-            }
-        )
+        signals = {
+            S.LOSS_TOTAL: losses.total.detach(),
+            S.LOSS_OBS_NLL: losses.loss_obs_nll_sum.detach(),
+            S.LOSS_LATENT: losses.loss_latent_sum.detach(),
+            S.LOSS_REG: losses.loss_reg_sum.detach(),
+            S.LATENT_POST_NORM: grid_post_norm,
+            S.LATENT_PRIOR_NORM: grid_prior_norm,
+            S.LOSS_GRID_KL: losses.loss_grid_kl_sum.detach() / denom,
+            S.LOSS_PLACE_CONSISTENCY: losses.loss_place_consistency_sum.detach()
+            / denom,
+            S.LOSS_OBS_INFER: losses.loss_obs_inference_all_sum / denom,
+            S.LOSS_OBS_RETRIEVED: losses.loss_obs_retrieved_all_sum / denom,
+            S.LOSS_OBS_ANCESTRAL: losses.loss_obs_ancestral_all_sum / denom,
+            S.LOSS_PLACE_TRANSITION: losses.loss_place_transition_all_sum
+            / denom,
+            S.LOSS_PLACE_SENSORY: losses.loss_place_sensory_all_sum / denom,
+            S.GRID_POST_NORM: grid_post_norm,
+            S.GRID_PRIOR_NORM: grid_prior_norm,
+            S.PLACE_POST_NORM: place_post_norm,
+            S.PLACE_PRIOR_NORM: place_prior_norm,
+        }
         theta_cls = getattr(outputs, "theta_cls", None)
         if theta_cls is not None:
             signals[S.THETA_CLS_NORM] = theta_cls.detach().norm(dim=-1).mean()
@@ -535,99 +660,6 @@ class EHCObjective(VariationalObjectiveBase[EHCObjectiveConfig]):
     ) -> Tensor:
         """Return the scalar sum over values selected by a boolean batch mask."""
         return (values * mask.to(dtype=values.dtype)).sum()
-
-    def _all_step_loss_sums(  # -----------------------------------------------
-        self,
-        outputs: EHCStepOutput,
-        labels: Tensor,
-        temp: float = 1.0,
-        p2g_use: float = 1.0,
-        g_cell_reg: float = 1.0,
-        p_cell_reg: float = 1.0,
-    ) -> dict[str, Tensor]:
-        """Return detached all-step EHC loss sums for diagnostics and metric logging."""
-        grid_relation = require_latent_relation(
-            outputs.latent_relations, GRID_TRANSITION_RELATION
-        )
-        place_transition_relation = require_latent_relation(
-            outputs.latent_relations, PLACE_TRANSITION_RELATION
-        )
-        place_sensory_relation = outputs.latent_relations.get(
-            PLACE_SENSORY_RELATION
-        )
-
-        loss_obs_inference = self.loss_fn(outputs.logits_inference, labels)
-        loss_obs_retrieved = self.loss_fn(outputs.logits_retrieved, labels)
-        loss_obs_ancestral = self.loss_fn(outputs.logits_ancestral, labels)
-        loss_obs_nll_sum = (
-            self.config.c_obs
-            * (
-                loss_obs_inference + loss_obs_retrieved + loss_obs_ancestral
-            ).sum()
-        )
-
-        place_transition = sum_latent_terms(
-            mse_consistency,
-            place_transition_relation.lhs,
-            place_transition_relation.rhs,
-        )
-        if place_sensory_relation is not None:
-            place_sensory = sum_latent_terms(
-                mse_consistency,
-                place_sensory_relation.lhs,
-                place_sensory_relation.rhs,
-            )
-        else:
-            place_sensory = place_transition.new_zeros(place_transition.shape)
-
-        grid_reg_code = get_reg_term(outputs.reg_terms, GRID_REG_TERM)
-        if grid_reg_code is None:
-            grid_reg_code = grid_relation.lhs
-
-        place_reg_code = get_reg_term(outputs.reg_terms, PLACE_REG_TERM)
-        if place_reg_code is None:
-            place_reg_code = place_transition_relation.lhs
-
-        grid_reg = self._regularization_terms(
-            grid_reg_code,
-            self.config.grid_reg_norm,
-            self.config.c_grid_reg * g_cell_reg,
-        )
-        place_reg = self._regularization_terms(
-            place_reg_code,
-            self.config.place_reg_norm,
-            self.config.c_place_reg * p_cell_reg,
-        )
-
-        return {
-            "loss_obs_nll_sum": loss_obs_nll_sum.detach(),
-            "loss_grid_kl_sum": (
-                temp
-                * self.config.c_grid
-                * sum_latent_terms(
-                    mse_consistency, grid_relation.lhs, grid_relation.rhs
-                ).sum()
-            ).detach(),
-            "loss_place_consistency_sum": (
-                self.config.c_place
-                * (
-                    temp * place_transition + temp * p2g_use * place_sensory
-                ).sum()
-            ).detach(),
-            "loss_reg_sum": (grid_reg.sum() + place_reg.sum()).detach(),
-        }
-
-    def _regularization_terms(  # ---------------------------------------------
-        self,
-        code: LatentCode,
-        norm: RegularizationNorm,
-        coefficient: float,
-    ) -> Tensor:
-        """Return weighted per-example regularization for one latent group."""
-        if coefficient == 0.0 or norm == "none":
-            first_block = code if isinstance(code, Tensor) else next(iter(code))
-            return first_block.new_zeros((first_block.shape[0],))
-        return coefficient * sum_regularization_terms(code, norm)
 
 
 # =============================================================================
@@ -648,6 +680,18 @@ def resolve_objective_schedule(  # --------------------------------------------
         "g_cell_reg": g_cell_reg,
         "p_cell_reg": p_cell_reg,
     }
+
+
+# =============================================================================
+def _regularization_terms(  # -------------------------------------------------
+    code: LatentCode,
+    norm: RegularizationNorm,
+) -> Tensor:
+    """Return per-example regularization for one latent group."""
+    if norm == "none":
+        first_block = code if isinstance(code, Tensor) else next(iter(code))
+        return first_block.new_zeros((first_block.shape[0],))
+    return sum_regularization_terms(code, norm)
 
 
 # =============================================================================

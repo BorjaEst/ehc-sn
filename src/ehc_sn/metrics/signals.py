@@ -1,36 +1,35 @@
-"""Canonical signal vocabulary for diagnostic and research logging.
+"""Canonical scalar telemetry vocabulary for diagnostic and research logging.
 
-All signal producers (:meth:`~ehc_sn.objectives.act.ACTObjective.compute_signals`,
+All telemetry producers (:meth:`~ehc_sn.objectives.act.ACTObjective.compute_signals`,
 :meth:`~ehc_sn.objectives.hybrid_rl.HybridRLObjective.compute_step`,
 :meth:`~ehc_sn.objectives.tem.TEMObjective.compute_signals`) and consumers
-(:class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback`) import from this
-module rather than using string literals. This ensures that renaming a signal
-requires a single edit, and mismatches between producers and consumers fail
-loudly via ``NameError`` rather than silently emitting nothing to the dashboard.
+import from this module rather than using string literals. This ensures that
+renaming a telemetry key requires a single edit, and mismatches between producers and
+consumers fail loudly via ``NameError`` rather than silently emitting nothing
+to the dashboard.
+
+This module keeps the historical ``signals`` import surface for compatibility,
+but the schema itself is shared scalar telemetry (not StepMetrics-owned extras).
 
 Structure
 ---------
 ``CROSS_PARADIGM_SIGNALS``
-    Small set of signals that can appear in any training paradigm.  Use these
+    Small set of telemetry keys that can appear in any training paradigm. Use these
     in figure specs or callbacks that must work across models.
 
 ``ACT_SIGNALS``
-    Signals specific to ACT (Adaptive Computation Time) training objectives.
+    Telemetry keys specific to ACT (Adaptive Computation Time) training objectives.
 
 ``RL_SIGNALS``
-    Signals specific to RL (Reinforcement Learning) training objectives.
+    Telemetry keys specific to RL (Reinforcement Learning) training objectives.
 
 ``VAR_SIGNALS``
-    Latent variational signals shared across TEM-family objectives (base set for
+    Latent variational telemetry shared across TEM-family objectives (base set for
     :data:`TEM_SIGNALS`).
 
 ``TEM_SIGNALS``
-    Signals specific to TEM variational training objectives.
+    Telemetry keys specific to TEM variational training objectives.
 
-``STANDARD_SIGNALS``
-    The union of cross-paradigm + paradigm-specific signals that are stable
-    enough to log at the ``"standard"`` diagnostic tier (T2).  All other signals
-    are only logged at the ``"research"`` tier.
 """
 
 from __future__ import annotations
@@ -197,25 +196,6 @@ TEM_SIGNALS: frozenset[str] = VAR_SIGNALS | frozenset(
 )  # fmt: skip
 
 
-# =============================================================================
-# T2 standard set — re-used by DiagnosticsCallback
-# =============================================================================
-
-STANDARD_SIGNALS: frozenset[str] = (
-    CROSS_PARADIGM_SIGNALS
-    | ACT_SIGNALS
-    | RL_SIGNALS
-    | VAR_SIGNALS
-    | TEM_SIGNALS
-)
-"""All signals that are logged at the ``"standard"`` diagnostic tier.
-
-A :class:`~ehc_sn.callbacks.diagnostics.DiagnosticsCallback` configured with
-``diagnostic_level="standard"`` will only log signals whose keys appear in this
-set.  All other signals require ``diagnostic_level="research"``.
-"""
-
-# =============================================================================
 __all__ = [
     # Cross-paradigm
     "STEPS_MEAN", "THETA_CLS_NORM", "CROSS_PARADIGM_SIGNALS",
@@ -231,6 +211,4 @@ __all__ = [
     "LOSS_GRID_KL", "LOSS_PLACE_CONSISTENCY", "LOSS_OBS_INFER", "LOSS_OBS_RETRIEVED",
     "LOSS_OBS_ANCESTRAL", "LOSS_PLACE_TRANSITION", "LOSS_PLACE_SENSORY", "GRID_POST_NORM",
     "GRID_PRIOR_NORM", "PLACE_POST_NORM", "PLACE_PRIOR_NORM", "TEM_SIGNALS",
-    # Aggregate
-    "STANDARD_SIGNALS",
 ]  # fmt: skip

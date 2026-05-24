@@ -24,11 +24,7 @@ from ehc_sn.controllers.contracts.value_control import (
     ValueControlInteractionRecord,
 )
 from ehc_sn.loss.cross_entropy import LossType
-from ehc_sn.metrics.keys import (
-    LOSS_TOKEN,
-    RL_LOSS_Q_VALUE,
-    RL_LOSS_STATE_VALUE,
-)
+from ehc_sn.metrics.keys import LOSS_TOKEN, RL_LOSS_Q_VALUE, RL_LOSS_STATE_VALUE
 from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
 from ehc_sn.objectives._token import (
     AccuracyStats,

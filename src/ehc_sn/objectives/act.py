@@ -24,7 +24,11 @@ from ehc_sn.controllers.deliberation.act import (
     collapse_act_halt_continue_logits,
 )
 from ehc_sn.loss.cross_entropy import LossType
-from ehc_sn.metrics.keys import ACT_LOSS_Q_CONTINUE, ACT_LOSS_Q_DONE, LOSS_TOKEN
+from ehc_sn.metrics.keys import (
+    ACT_LOSS_Q_CONTINUE,
+    ACT_LOSS_Q_DONE,
+    LOSS_TOKEN,
+)
 from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
 from ehc_sn.objectives._base import BaseObjective
 from ehc_sn.objectives._token import (

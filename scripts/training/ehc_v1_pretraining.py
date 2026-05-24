@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 import torch
 from lightning.pytorch import Trainer, seed_everything
@@ -40,7 +40,12 @@ from ehc_sn.callbacks.lr_monitor import (
 from ehc_sn.callbacks.metrics import MetricsCallback
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.ehc.core._base import load_weights_from_checkpoint
-from ehc_sn.lightning.ehc.ehc_v1 import EHCV1TrainingModel
+from ehc_sn.lightning.ehc.core.runtime import RuntimeConfig
+from ehc_sn.lightning.ehc.ehc_v1 import (
+    EHCV1TrainingModel,
+    ModelConfig_EHC_V1,
+    parse_ehc_v1_config,
+)
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
 from ehc_sn.training.distributed import (
@@ -48,6 +53,8 @@ from ehc_sn.training.distributed import (
     resolve_trainer_strategy,
     validate_batch_size_divisibility,
 )
+from ehc_sn.training.optim import AdamATan2Config, AdamConfig
+from ehc_sn.training.schedules import SchedulerConfig
 
 torch.set_float32_matmul_precision("high")
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -100,6 +107,53 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     run_name: Optional[str] = Field(
         default=None,
         description="Optional run label retained in the entry-point settings for external launchers or downstream metadata.",
+    )
+
+    # -- Mode-specific model/runtime config ----------------------------------
+    model_config_path: Path = Field(
+        ...,
+        description="Path to the EHC model configuration TOML file.",
+    )
+    adapter: dict[str, Any] = Field(
+        ...,
+        description="Mode-specific adapter settings table parsed from the training TOML.",
+    )
+    controller: dict[str, Any] = Field(
+        ...,
+        description="Mode-specific controller settings table parsed from the training TOML.",
+    )
+    objective: dict[str, Any] = Field(
+        ...,
+        description="Mode-specific objective settings table parsed from the training TOML.",
+    )
+    deliberation: dict[str, Any] | None = Field(
+        default=None,
+        description="MazeHard deliberation settings used by reason_pretrain.",
+    )
+    optimizer: AdamConfig = Field(
+        default_factory=AdamConfig,
+        description="Optimizer config used by spatial_pretrain.",
+    )
+    optimizer_ctrl: AdamATan2Config = Field(
+        default_factory=AdamATan2Config,
+        description="Controller optimizer config used by reason_pretrain.",
+    )
+    optimizer_heads: AdamATan2Config = Field(
+        default_factory=AdamATan2Config,
+        description="Heads optimizer config used by reason_pretrain.",
+    )
+    scheduler: SchedulerConfig = Field(
+        default_factory=SchedulerConfig,
+        description="Scheduler config for the active training mode.",
+    )
+    runtime: RuntimeConfig = Field(
+        default_factory=RuntimeConfig,
+        description="Runtime schedule and validation limits for the active training mode.",
+    )
+    supervised_only_warmup_steps: int = Field(
+        default=5000,
+        ge=0,
+        description="Reason-pretrain warmup steps before heads-only optimization is disabled.",
     )
 
     # -- Data -----------------------------------------------------------------
@@ -262,8 +316,9 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
         return self
 
     @property
-    def model_config(self) -> dict:
-        return EHCModelSettingsV1.model_validate(self, from_attributes=True)
+    def ehc_config(self) -> ModelConfig_EHC_V1:
+        """Compose the mode-specific EHC training config from flat run settings."""
+        return parse_ehc_v1_config(self.model_dump())
 
     @property
     def datamodule_config(self) -> DatamoduleConfig:
@@ -284,8 +339,6 @@ RunArguments.model_rebuild()
 if __name__ == "__main__":
     raw = tomllib.load(Path(CONFIGURATION_PATH).open("rb"))
     settings = RunArguments(**raw)
-    # Merge CLI-overridden run-level values (e.g. --mode) and any extra model-config
-    # overrides captured via extra="allow" back into raw, so parse_ehc_v1_config sees them.
     world_size = resolve_effective_world_size(
         settings.trainer_strategy,
         settings.trainer_devices,
@@ -339,7 +392,7 @@ if __name__ == "__main__":
     # Start training.
     # - The LightningModule wraps the EHC model family and defines the training loop.
     # - The DataModule constructs loaders for the selected processed dataset.
-    training_model = EHCV1TrainingModel(settings.model_config)
+    training_model = EHCV1TrainingModel(settings.ehc_config)
 
     # Optional: initialize model weights from a separate checkpoint (does not restore
     # optimizer, scheduler, or trainer-progress state — use resume_from_checkpoint for that).
