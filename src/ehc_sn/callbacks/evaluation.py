@@ -31,7 +31,7 @@ from ehc_sn.eval import (
     EvaluationTraceRequest,
     iter_evaluation_regime,
 )
-from ehc_sn.figures import FigureContext, REGISTRY, list_figures, render
+from ehc_sn.figures import REGISTRY, FigureContext, list_figures, render
 from ehc_sn.figures.sinks import save_pdf, save_png
 
 
