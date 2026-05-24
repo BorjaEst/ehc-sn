@@ -29,6 +29,10 @@ from ehc_sn.callbacks.diagnostics import (
     DiagnosticsCallback,
     DiagnosticsSettings,
 )
+from ehc_sn.callbacks.evaluation import (
+    EvaluationRegimesCallback,
+    EvaluationRegimesCallbackSettings,
+)
 from ehc_sn.callbacks.lr_monitor import (
     LearningRateMonitor,
     LearningRateMonitorSettings,
@@ -171,6 +175,10 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
         default_factory=CheckpointSettings,
         description="Model checkpoint callback settings.",
     )
+    eval_regimes: Optional[EvaluationRegimesCallbackSettings] = Field(
+        default=None,
+        description="Optional named replay-evaluation regime callback settings.",
+    )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(
         default="standard",
         description=(
@@ -296,6 +304,8 @@ if __name__ == "__main__":
 
     # Prepare callbacks: checkpointing + optional figure generation.
     callbacks_list = [MetricsCallback()]
+    if settings.eval_regimes is not None:
+        callbacks_list.append(EvaluationRegimesCallback(settings.eval_regimes))
     if settings.checkpoint is not None:
         callbacks_list.append(CheckpointCallback(settings.checkpoint))
     if settings.diagnostic_level != "minimal":
