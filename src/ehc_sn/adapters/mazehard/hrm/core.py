@@ -19,7 +19,10 @@ from torch import nn
 
 from ehc_sn.adapters.mazehard.decoders import MazeHardDecoder
 from ehc_sn.adapters.mazehard.encoders import MazeHardEncoder
-from ehc_sn.tasks.mazehard.contracts import MazeHardTaskInput, MazeHardTaskOutput
+from ehc_sn.tasks.mazehard.contracts import (
+    MazeHardTaskInput,
+    MazeHardTaskOutput,
+)
 from ehc_sn.tasks.mazehard.runtime import PATH_ID as O_ID
 from ehc_sn.tasks.mazehard.runtime import SEM_VOCAB_SIZE as MAZE_SEM_VOCAB_SIZE
 
@@ -52,7 +55,7 @@ class MazeHardHRMAdapterSettings(BaseModel, extra="forbid"):
 class MazeHardLearnedEncoder(nn.Module, MazeHardEncoder, Generic[TInput]):
     """Encoder for MazeHard token inputs using learned positional embeddings."""
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         seq_length: int,
         vocab_size: int,
@@ -63,18 +66,26 @@ class MazeHardLearnedEncoder(nn.Module, MazeHardEncoder, Generic[TInput]):
         dtype: Dtype | None = None,
     ) -> None:
         super().__init__()
-        self.embed_tokens = nn.Embedding(vocab_size, hidden_size, device=device, dtype=dtype)
-        self.embed_pos = nn.Embedding(seq_length, hidden_size, device=device, dtype=dtype)
+        self.embed_tokens = nn.Embedding(
+            vocab_size, hidden_size, device=device, dtype=dtype
+        )
+        self.embed_pos = nn.Embedding(
+            seq_length, hidden_size, device=device, dtype=dtype
+        )
         self.embedding_scale = 0.707106781 * (hidden_size**0.5)
         self._input_factory = input_factory
 
-    def forward(
+    def forward(  # -----------------------------------------------------------
         self,
         batch: MazeHardTaskInput,
     ) -> TInput:
         """Encode MazeHard tokens with learned positional embeddings."""
-        token_embeddings = self.embed_tokens(batch.input_ids.to(dtype=torch.int32))
-        positions = torch.arange(self.embed_pos.num_embeddings, device=batch.input_ids.device)
+        token_embeddings = self.embed_tokens(
+            batch.input_ids.to(dtype=torch.int32)
+        )
+        positions = torch.arange(
+            self.embed_pos.num_embeddings, device=batch.input_ids.device
+        )
         pos_embeddings = self.embed_pos(positions).unsqueeze(0)
         return self._input_factory(
             self.embedding_scale * (token_embeddings + pos_embeddings),
@@ -86,7 +97,7 @@ class MazeHardLearnedEncoder(nn.Module, MazeHardEncoder, Generic[TInput]):
 class MazeHardRoPEEncoder(nn.Module, MazeHardEncoder, Generic[TInput]):
     """Encoder for MazeHard token inputs using a RoPE-compatible front-end."""
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         seq_length: int,
         vocab_size: int,
@@ -98,16 +109,20 @@ class MazeHardRoPEEncoder(nn.Module, MazeHardEncoder, Generic[TInput]):
     ) -> None:
         super().__init__()
         _ = seq_length
-        self.embed_tokens = nn.Embedding(vocab_size, hidden_size, device=device, dtype=dtype)
+        self.embed_tokens = nn.Embedding(
+            vocab_size, hidden_size, device=device, dtype=dtype
+        )
         self.embedding_scale = hidden_size**0.5
         self._input_factory = input_factory
 
-    def forward(
+    def forward(  # -----------------------------------------------------------
         self,
         batch: MazeHardTaskInput,
     ) -> TInput:
         """Encode MazeHard tokens without a learned positional table."""
-        token_embeddings = self.embed_tokens(batch.input_ids.to(dtype=torch.int32))
+        token_embeddings = self.embed_tokens(
+            batch.input_ids.to(dtype=torch.int32)
+        )
         return self._input_factory(
             self.embedding_scale * token_embeddings,
             None,
@@ -155,7 +170,7 @@ class HasSchemaSlots(Protocol):
 class MazeHardMLPDecoder(nn.Module, MazeHardDecoder):
     """Decoder mapping HRM schema-slot features to MazeHard task logits."""
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         hidden_size: int,
         vocab_size: int,
@@ -164,14 +179,18 @@ class MazeHardMLPDecoder(nn.Module, MazeHardDecoder):
         dtype: Dtype | None = None,
     ) -> None:
         super().__init__()
-        self.lm_head = nn.Linear(hidden_size, vocab_size, bias=False, device=device, dtype=dtype)
+        self.lm_head = nn.Linear(
+            hidden_size, vocab_size, bias=False, device=device, dtype=dtype
+        )
 
-    def forward(
+    def forward(  # -----------------------------------------------------------
         self,
         outputs: HasSchemaSlots,
     ) -> MazeHardTaskOutput:
         """Decode schema-slot activations into MazeHard token logits."""
-        return MazeHardTaskOutput(task_logits=self.lm_head(outputs.schema_slots))
+        return MazeHardTaskOutput(
+            task_logits=self.lm_head(outputs.schema_slots)
+        )
 
 
 # =============================================================================

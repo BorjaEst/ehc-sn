@@ -10,8 +10,8 @@ Usage
         MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
         MAZE_HARD_HRM_ACT_TRACE_FIELDS,
     )
-    self.trace_specs = build_trace_spec("act", extra_fields=MAZE_HARD_HRM_ACT_TRACE_FIELDS)
-    self.trace_specs = build_trace_spec(
+    self.trace_spec = build_trace_spec("act", extra_fields=MAZE_HARD_HRM_ACT_TRACE_FIELDS)
+    self.trace_spec = build_trace_spec(
         "actor_critic",
         extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
     )
@@ -78,9 +78,7 @@ def _get_maze_hard_solution_overlay_act(
     ctx: _MazeHardHRMACTTraceContext,
 ) -> TraceValue:
     """Read MazeHard solution-overlay traces from ACT backbone task logits."""
-    return _solution_overlay_from_task_logits(
-        ctx.outputs.task.task_logits
-    )
+    return _solution_overlay_from_task_logits(ctx.outputs.task.task_logits)
 
 
 def _get_maze_hard_solution_overlay_actor_critic(
