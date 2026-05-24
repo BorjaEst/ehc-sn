@@ -27,7 +27,7 @@ class ArenaEncoder(ABC):
         """Initialize the arena encoder over task inputs."""
 
     @abstractmethod
-    def forward(
+    def forward(  # -----------------------------------------------------------
         self,
         batch: ArenaTaskInput,
     ) -> Any:

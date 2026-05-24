@@ -27,7 +27,7 @@ class ArenaDecoder(ABC):
         """Initialize the arena decoder heads over model-facing features."""
 
     @abstractmethod
-    def forward(
+    def forward(  # -----------------------------------------------------------
         self,
         outputs: Any,
     ) -> ArenaTaskOutput:
