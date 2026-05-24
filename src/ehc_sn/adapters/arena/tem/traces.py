@@ -16,7 +16,7 @@ Usage
         ARENA_TEM_TRACE_FIELDS,
         select_arena_tem_trace_fields,
     )
-    self.trace_specs = build_trace_spec("tem", extra_fields=ARENA_TEM_TRACE_FIELDS)
+    self.trace_spec = build_trace_spec("tem", extra_fields=ARENA_TEM_TRACE_FIELDS)
 """
 
 from __future__ import annotations

@@ -31,12 +31,13 @@ from ehc_sn.types import Batch
 class ArenaInputsEncoderV1(nn.Module):
     """Encodes arena step data into a :class:`TEMInputV1` payload."""
 
-    def __init__(  # -----------------------------------------------------------
+    def __init__(  # ----------------------------------------------------------
         self,
         observation_dim: int,
         feature_dim: int,
         n_freq: int,
     ) -> None:
+        """Initializes the encoder with the given dimensions and frequency count."""
         super().__init__()
         self.encoder = core.ArenaTwoHotEncoder(
             observation_dim, feature_dim, n_freq
@@ -93,18 +94,20 @@ class ArenaOutputsDecoderV1(nn.Module):
         model_output: TEMOutputV1,
     ) -> ArenaTEMBridgeOutput:
         """Decode all three place pathways and return the split task + TEM surfaces."""
-        pc = model_output.place_codes
-        gc = model_output.grid_codes
-        xc = model_output.pred_codes
+        obs_inference = self._decode(model_output.pred_codes.inference)
+        obs_retrieved = (
+            self._decode(model_output.pred_codes.retrieved)
+            if model_output.pred_codes.retrieved is not None
+            else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)
+        )
+        obs_ancestral = self._decode(model_output.pred_codes.ancestral)
 
-        obs_inference = self._decode(xc.inference)
-        obs_retrieved = self._decode(xc.retrieved) if xc.retrieved is not None else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)  # fmt: skip
-        obs_ancestral = self._decode(xc.ancestral)
-
-        ol = (obs_inference, obs_retrieved, obs_ancestral)
         task = core.ArenaTaskOutput(obs_logits=obs_inference)
         tem = core.ArenaTEMDiagnostics(
-            obs_logits=ol, grid_codes=gc, place_codes=pc, pred_codes=xc
+            obs_logits=(obs_inference, obs_retrieved, obs_ancestral),
+            grid_codes=model_output.grid_codes,
+            place_codes=model_output.place_codes,
+            pred_codes=model_output.pred_codes,
         )
         return core.ArenaTEMBridgeOutput(task=task, tem=tem)
 
@@ -118,6 +121,7 @@ class ArenaTEMV1BridgeAdapter(nn.Module):
         model: TEMModelV1,
         config: ArenaTEMAdapterSettings,
     ) -> None:
+        """Initializes the adapter with the given TEM v1 model and arena adapter settings."""
         super().__init__()
         self._config = config
         self.model = model
@@ -126,20 +130,38 @@ class ArenaTEMV1BridgeAdapter(nn.Module):
 
     @property
     def config(self) -> ArenaTEMAdapterSettings:
+        """Returns the adapter's configuration settings."""
         return self._config
 
-    def init_state(
-        self, batch_size: int, *, device: Optional[torch.device] = None
+    def init_state(  # --------------------------------------------------------
+        self,
+        batch_size: int,
+        *,
+        device: Optional[torch.device] = None,
     ) -> TEMStateV1:
+        """Initializes the TEM state for a new episode."""
         return self.model.init_state(batch_size, device=device)
 
-    def reset_state(self, reset_flag: Tensor, state: TEMStateV1) -> TEMStateV1:
+    def reset_state(  # -------------------------------------------------------
+        self,
+        reset_flag: Tensor,
+        state: TEMStateV1,
+    ) -> TEMStateV1:
+        """Resets the TEM state for episodes indicated by the reset_flag."""
         return self.model.reset_state(reset_flag, state)
 
-    def prepare_inputs(self, batch: Batch) -> TEMInputV1:
+    def prepare_inputs(  # ----------------------------------------------------
+        self,
+        batch: Batch,
+    ) -> TEMInputV1:
+        """Prepares the TEM v1 input from the arena step batch."""
         return self._encoder(batch)
 
-    def postprocess(self, model_output: TEMOutputV1) -> ArenaTEMBridgeOutput:
+    def postprocess(  # -------------------------------------------------------
+        self,
+        model_output: TEMOutputV1,
+    ) -> ArenaTEMBridgeOutput:
+        """Postprocesses the TEM v1 output into the arena bridge output."""
         return self._decoder(model_output)
 
     def forward(  # -----------------------------------------------------------
@@ -190,7 +212,9 @@ def _build_decoder_v1(  # -----------------------------------------------------
         raise NotImplementedError(
             "Multi-scale decoding is not yet implemented for ArenaTEMV1BridgeAdapter."
         )
-    raise ValueError(f"Unsupported decoder kind: {config.decoder.kind}")
+    raise ValueError(
+        f"Unsupported decoder kind: {config.decoder.kind}",
+    )
 
 
 # =============================================================================

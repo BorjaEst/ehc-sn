@@ -16,7 +16,7 @@ class ArenaDecoder(ABC):
     """Model-facing latent features consumed by arena task decoders."""
 
     @abstractmethod
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         observation_dim: int,
         latent_dim: int,

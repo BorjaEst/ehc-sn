@@ -89,18 +89,20 @@ class ArenaOutputsDecoderV2(nn.Module):
         model_output: TEMOutputV2,
     ) -> ArenaTEMBridgeOutput:
         """Decode all three place pathways and return the split task + TEM surfaces."""
-        pc = model_output.place_codes
-        gc = model_output.grid_codes
-        xc = model_output.pred_codes
+        obs_inference = self._decode(model_output.pred_codes.inference)
+        obs_retrieved = (
+            self._decode(model_output.pred_codes.retrieved)
+            if model_output.pred_codes.retrieved is not None
+            else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)
+        )
+        obs_ancestral = self._decode(model_output.pred_codes.ancestral)
 
-        obs_inference = self._decode(xc.inference)
-        obs_retrieved = self._decode(xc.retrieved) if xc.retrieved is not None else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)  # fmt: skip
-        obs_ancestral = self._decode(xc.ancestral)
-
-        ol = (obs_inference, obs_retrieved, obs_ancestral)
         task = core.ArenaTaskOutput(obs_logits=obs_inference)
         tem = core.ArenaTEMDiagnostics(
-            obs_logits=ol, grid_codes=gc, place_codes=pc, pred_codes=xc
+            obs_logits=(obs_inference, obs_retrieved, obs_ancestral),
+            grid_codes=model_output.grid_codes,
+            place_codes=model_output.place_codes,
+            pred_codes=model_output.pred_codes,
         )
         return core.ArenaTEMBridgeOutput(task=task, tem=tem)
 

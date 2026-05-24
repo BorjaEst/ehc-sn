@@ -22,11 +22,17 @@ from ehc_sn.metrics.keys import (
     EHC_ACC_OBS_RETRIEVED_ALL,
     EHC_ACC_OBS_RETRIEVED_REVISIT,
 )
+from ehc_sn.metrics.step_metrics import RatioStat
 from ehc_sn.objectives.ehc import EHCStepOutput
+from ehc_sn.rollouts.runtime import CarrySnapshot
 from ehc_sn.tasks.arena.contracts import ArenaTargets
-from ehc_sn.tasks.arena.evaluation import build_arena_step_score, coerce_observation_ids, coerce_revisit_mask
+from ehc_sn.tasks.arena.evaluation import (
+    ArenaStepScore,
+    build_arena_step_score,
+    coerce_observation_ids,
+    coerce_revisit_mask,
+)
 from ehc_sn.tasks.arena.runtime import coerce_arena_targets
-from ehc_sn.training.types import RatioStat
 from ehc_sn.types import Batch
 
 
@@ -43,21 +49,21 @@ class ArenaEHCTaskBinding:
 
     def extract_targets(
         self,
-        batch: Batch,
-        carry: Any,
+        executed_batch: Batch,
+        snapshot: CarrySnapshot,
         step_output: Any,
     ) -> ArenaTargets:
         """Build an :class:`ArenaTargets` from the executed step payload.
 
         Args:
-            batch: Executed step payload (observation_id, is_revisit, ...).
+            executed_batch: Executed step payload (observation_id, is_revisit, ...).
                 This is the executed_frame alias set by the runner — carry is
                 NOT consulted so snapshot is not the execution authority.
-            carry: Controller carry state; unused here.
+            snapshot: Frozen post-step snapshot; unused here.
             step_output: Controller step output; unused here.
         """
-        _ = carry, step_output
-        return coerce_arena_targets(batch)
+        _ = snapshot, step_output
+        return coerce_arena_targets(executed_batch)
 
     def extract_observation_id(
         self,
@@ -73,7 +79,10 @@ class ArenaEHCTaskBinding:
         """Return the revisit-eligibility mask for protocol supervision."""
         is_revisit = targets.is_revisit
         if is_revisit is None:
-            raise KeyError("Arena carry data must provide 'is_revisit' for protocol-gated EHC supervision.")
+            raise KeyError(
+                "Arena carry data must provide 'is_revisit' for protocol-gated "
+                "EHC supervision."
+            )
         result = coerce_revisit_mask(is_revisit, device=is_revisit.device)
         return result.to(dtype=torch.bool)  # type: ignore[union-attr]
 
@@ -87,21 +96,33 @@ class ArenaEHCTaskBinding:
         m_ret = build_arena_step_score(step_output.logits_retrieved, targets)
         m_anc = build_arena_step_score(step_output.logits_ancestral, targets)
 
-        batch_count = m_inf.is_correct.new_tensor(float(m_inf.is_correct.shape[0]), dtype=torch.float32)
-        protocol_count = m_inf.is_revisit.sum().float() if m_inf.is_revisit is not None else m_inf.is_correct.new_zeros(())
+        batch_count = m_inf.is_correct.new_tensor(
+            float(m_inf.is_correct.shape[0]), dtype=torch.float32
+        )
+        protocol_count = (
+            m_inf.is_revisit.sum().float()
+            if m_inf.is_revisit is not None
+            else m_inf.is_correct.new_zeros(())
+        )
 
-        def _correct(m: "ArenaStepScore") -> Tensor:
+        def _correct(m: ArenaStepScore) -> Tensor:
             return m.is_correct.sum().float()
 
-        def _correct_revisit(m: "ArenaStepScore") -> Tensor:
+        def _correct_revisit(m: ArenaStepScore) -> Tensor:
             if m.is_revisit is None:
                 return m.is_correct.new_zeros(())
             return (m.is_correct & m.is_revisit).sum().float()
 
         return {
-            EHC_ACC_OBS_INFERENCE_REVISIT: RatioStat(_correct_revisit(m_inf), protocol_count),
-            EHC_ACC_OBS_RETRIEVED_REVISIT: RatioStat(_correct_revisit(m_ret), protocol_count),
-            EHC_ACC_OBS_ANCESTRAL_REVISIT: RatioStat(_correct_revisit(m_anc), protocol_count),
+            EHC_ACC_OBS_INFERENCE_REVISIT: RatioStat(
+                _correct_revisit(m_inf), protocol_count
+            ),
+            EHC_ACC_OBS_RETRIEVED_REVISIT: RatioStat(
+                _correct_revisit(m_ret), protocol_count
+            ),
+            EHC_ACC_OBS_ANCESTRAL_REVISIT: RatioStat(
+                _correct_revisit(m_anc), protocol_count
+            ),
             EHC_ACC_OBS_INFERENCE_ALL: RatioStat(_correct(m_inf), batch_count),
             EHC_ACC_OBS_RETRIEVED_ALL: RatioStat(_correct(m_ret), batch_count),
             EHC_ACC_OBS_ANCESTRAL_ALL: RatioStat(_correct(m_anc), batch_count),
