@@ -237,7 +237,7 @@ class EvaluationRegimesCallback(pl.Callback):
             regime.provider_settings,
         )
         trace_request = self._build_trace_request(pl_module, regime)
-        results = tuple(
+        case_results = tuple(
             iter_evaluation_regime(
                 provider,
                 pl_module,
@@ -245,7 +245,22 @@ class EvaluationRegimesCallback(pl.Callback):
                 trace_request=trace_request,
             )
         )
-        return EvaluationRegimeResult(regime_id=regime.regime_id, results=results)
+        losses = [
+            value
+            for value in (
+                _extract_loss_scalar(result.evaluated)
+                for result in case_results
+            )
+            if value is not None
+        ]
+        summary: dict[str, object] = {"n_cases": len(case_results)}
+        if losses:
+            summary["loss"] = sum(losses) / len(losses)
+        return EvaluationRegimeResult(
+            regime_id=regime.regime_id,
+            case_results=case_results,
+            summary=summary,
+        )
 
     def _build_trace_request(  # ----------------------------------------------
         self,
@@ -271,7 +286,6 @@ class EvaluationRegimesCallback(pl.Callback):
             )
 
         return EvaluationTraceRequest(
-            enabled=True,
             trace_spec=trace_spec,
         )
 
@@ -283,25 +297,24 @@ class EvaluationRegimesCallback(pl.Callback):
     ) -> None:
         """Log namespaced aggregate metrics for one completed regime run."""
         namespace = f"{regime.phase_kind}/{regime.regime_id}"
-        losses = [
-            value
-            for value in (
-                _extract_loss_scalar(result.evaluated) for result in regime_result.results
-            )
-            if value is not None
-        ]
+        n_cases = regime_result.summary.get("n_cases")
+        if isinstance(n_cases, Real):
+            n_cases_value = float(n_cases)
+        else:
+            n_cases_value = float(len(regime_result.case_results))
         pl_module.log(
             f"{namespace}/n_cases",
-            float(len(regime_result.results)),
+            n_cases_value,
             on_step=False,
             on_epoch=True,
             logger=True,
             sync_dist=False,
         )
-        if losses:
+        loss = regime_result.summary.get("loss")
+        if isinstance(loss, Real):
             pl_module.log(
                 f"{namespace}/loss",
-                sum(losses) / len(losses),
+                float(loss),
                 on_step=False,
                 on_epoch=True,
                 logger=True,
@@ -333,7 +346,7 @@ class EvaluationRegimesCallback(pl.Callback):
         run_dir.mkdir(parents=True, exist_ok=True)
 
         summary_rows: list[dict[str, Any]] = []
-        for idx, result in enumerate(regime_result.results):
+        for idx, result in enumerate(regime_result.case_results):
             summary_row = {
                 "case_id": result.case_id,
                 "source_context": _to_jsonable(result.source_context),
@@ -361,7 +374,7 @@ class EvaluationRegimesCallback(pl.Callback):
             "trigger_kind": trigger_kind,
             "epoch": trainer.current_epoch + 1,
             "step": trainer.global_step,
-            "n_cases": len(regime_result.results),
+            "summary": _to_jsonable(dict(regime_result.summary)),
             "cases": summary_rows,
         }
         (run_dir / "summary.json").write_text(

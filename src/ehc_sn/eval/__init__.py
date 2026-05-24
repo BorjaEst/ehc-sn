@@ -5,12 +5,12 @@ offers reusable execution helpers that Lightning families can delegate to.
 """
 
 from ehc_sn.eval.contracts import (
-    EvaluationBatchResult,
+    EvaluationCaseResult,
     EvaluationCaseBatch,
+    EvaluationExecutor,
     EvaluationRegimeResult,
     EvaluationSourceProvider,
     EvaluationTraceRequest,
-    LightningEvaluationExecutor,
 )
 from ehc_sn.eval.executor import (
     execute_replay_evaluation_batch,
@@ -18,12 +18,12 @@ from ehc_sn.eval.executor import (
 )
 
 __all__ = [
-    "EvaluationBatchResult",
+    "EvaluationCaseResult",
     "EvaluationCaseBatch",
+    "EvaluationExecutor",
     "EvaluationRegimeResult",
     "EvaluationSourceProvider",
     "EvaluationTraceRequest",
-    "LightningEvaluationExecutor",
     "execute_replay_evaluation_batch",
     "iter_evaluation_regime",
 ]

@@ -31,20 +31,13 @@ class EvaluationCaseBatch:
 class EvaluationTraceRequest:
     """Trace materialization request for an evaluation batch execution."""
 
-    enabled: bool = False
-    trace_spec: TraceSpec | None = None
+    trace_spec: TraceSpec
     trace_meta: Mapping[str, object] | None = None
-
-    def __post_init__(self) -> None:
-        if self.enabled and self.trace_spec is None:
-            raise ValueError(
-                "EvaluationTraceRequest.enabled=True requires trace_spec."
-            )
 
 
 # =============================================================================
 @dataclass(frozen=True)
-class EvaluationBatchResult:
+class EvaluationCaseResult:
     """Result payload returned by ``execute_evaluation_batch``."""
 
     case_id: str
@@ -59,7 +52,8 @@ class EvaluationRegimeResult:
     """Aggregate result payload for one named evaluation regime."""
 
     regime_id: str
-    results: tuple[EvaluationBatchResult, ...]
+    case_results: tuple[EvaluationCaseResult, ...]
+    summary: Mapping[str, object]
 
 
 # =============================================================================
@@ -72,31 +66,26 @@ class EvaluationSourceProvider(Protocol):
     ) -> Iterator[EvaluationCaseBatch]:
         """Yield replay case batches in deterministic provider-owned order."""
 
-    def description(
-        self,
-    ) -> str:
-        """Return a human-readable provider description for logs."""
-
 
 # =============================================================================
-class LightningEvaluationExecutor(Protocol):
+class EvaluationExecutor(Protocol):
     """Family-facing execution seam consumed by future evaluation callbacks."""
 
-    def execute_evaluation_batch(
+    def execute_evaluation_batch(  # ------------------------------------------
         self,
         case: EvaluationCaseBatch,
         *,
         trace_request: EvaluationTraceRequest | None = None,
-    ) -> EvaluationBatchResult:
+    ) -> EvaluationCaseResult:
         """Execute one provider case and return objective-scored outputs."""
 
 
 # =============================================================================
 __all__ = [
-    "EvaluationBatchResult",
+    "EvaluationCaseResult",
     "EvaluationCaseBatch",
+    "EvaluationExecutor",
     "EvaluationRegimeResult",
     "EvaluationSourceProvider",
     "EvaluationTraceRequest",
-    "LightningEvaluationExecutor",
 ]
