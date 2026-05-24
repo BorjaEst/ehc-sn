@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 import json
 import re
+import warnings
 from dataclasses import asdict, is_dataclass
 from numbers import Real
 from pathlib import Path
@@ -30,7 +31,7 @@ from ehc_sn.eval import (
     EvaluationTraceRequest,
     iter_evaluation_regime,
 )
-from ehc_sn.figures import FigureContext, list_figures, render
+from ehc_sn.figures import FigureContext, REGISTRY, list_figures, render
 from ehc_sn.figures.sinks import save_pdf, save_png
 
 
@@ -113,6 +114,11 @@ class EvaluationFigureRequestSettings(BaseModel, extra="forbid"):
         ge=1,
         description="Optional item cap passed into FigureContext.",
     )
+    max_cases: int = Field(
+        default=2,
+        ge=1,
+        description="Maximum number of regime case results to render per run.",
+    )
     save_pdf: bool = Field(
         default=True,
         description="Persist rendered figures as PDF files.",
@@ -125,6 +131,10 @@ class EvaluationFigureRequestSettings(BaseModel, extra="forbid"):
         default=160,
         ge=1,
         description="PNG export DPI used when save_png is enabled.",
+    )
+    failure_policy: Literal["warn", "raise"] = Field(
+        default="warn",
+        description="Figure failure handling policy: warn-and-continue or fail-fast.",
     )
 
     @model_validator(mode="after")
@@ -146,6 +156,17 @@ class EvaluationFigureRequestSettings(BaseModel, extra="forbid"):
             unknown = ", ".join(sorted(set(missing)))
             raise ValueError(
                 "figure_request.figures contains unknown names: " f"{unknown}."
+            )
+        non_diagnostic = [
+            name
+            for name in self.figures
+            if REGISTRY.get(name).kind != "diagnostic"
+        ]
+        if non_diagnostic:
+            blocked = ", ".join(sorted(set(non_diagnostic)))
+            raise ValueError(
+                "figure_request.figures only supports diagnostic figures for "
+                f"online rendering: {blocked}."
             )
         return self
 
@@ -329,13 +350,6 @@ class EvaluationRegimesCallback(pl.Callback):
                 regime,
             )
             self._log_regime_result(pl_module, regime, regime_result)
-            self._render_regime_figures(
-                trainer,
-                pl_module,
-                regime,
-                regime_result,
-                trigger_kind=trigger_kind,
-            )
             if self.settings.persist_artifacts:
                 self._persist_regime_result(
                     trainer,
@@ -343,6 +357,13 @@ class EvaluationRegimesCallback(pl.Callback):
                     regime_result,
                     trigger_kind=trigger_kind,
                 )
+            self._render_regime_figures(
+                trainer,
+                pl_module,
+                regime,
+                regime_result,
+                trigger_kind=trigger_kind,
+            )
 
     def _render_regime_figures(  # -------------------------------------------
         self,
@@ -377,29 +398,48 @@ class EvaluationRegimesCallback(pl.Callback):
         )
 
         rendered_count = 0
-        for idx, result in enumerate(regime_result.case_results):
+        selected_case_results = regime_result.case_results[: request.max_cases]
+        for idx, result in enumerate(selected_case_results):
             if result.trace is None:
                 continue
             for name in request.figures:
-                fig = render(name, result.trace, figure_ctx)
-                stem = (
-                    f"{idx:04d}-"
-                    f"{_sanitize_filename_component(result.case_id)}-"
-                    f"{_sanitize_filename_component(name)}"
-                )
-                if request.save_pdf:
-                    save_pdf(fig, figure_dir / f"{stem}.pdf")
-                if request.save_png:
-                    save_png(
-                        fig, figure_dir / f"{stem}.png", dpi=request.png_dpi
+                fig = None
+                try:
+                    fig = render(name, result.trace, figure_ctx)
+                    stem = (
+                        f"{idx:04d}-"
+                        f"{_sanitize_filename_component(result.case_id)}-"
+                        f"{_sanitize_filename_component(name)}"
                     )
-                plt.close(fig)
-                rendered_count += 1
+                    if request.save_pdf:
+                        save_pdf(fig, figure_dir / f"{stem}.pdf")
+                    if request.save_png:
+                        save_png(
+                            fig,
+                            figure_dir / f"{stem}.png",
+                            dpi=request.png_dpi,
+                        )
+                    rendered_count += 1
+                except Exception as exc:
+                    self._handle_figure_failure(
+                        request,
+                        regime,
+                        "Online figure rendering failed for "
+                        f"regime {regime.regime_id!r}, case {result.case_id!r}, "
+                        f"figure {name!r}.",
+                        error=exc,
+                    )
+                finally:
+                    if fig is not None:
+                        plt.close(fig)
 
         if rendered_count == 0:
-            raise RuntimeError(
+            self._handle_figure_failure(
+                request,
+                regime,
                 "figure_request is enabled for regime "
-                f"{regime.regime_id!r}, but no case trace was available for rendering."
+                f"{regime.regime_id!r}, but no figure was rendered from the "
+                f"first {request.max_cases} case results.",
             )
         pl_module.log(
             f"{regime.regime_kind}/{regime.regime_id}/figures_rendered",
@@ -409,6 +449,29 @@ class EvaluationRegimesCallback(pl.Callback):
             logger=True,
             sync_dist=False,
         )
+
+    def _handle_figure_failure(
+        self,
+        request: EvaluationFigureRequestSettings,
+        regime: EvaluationRegimeSettings,
+        message: str,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        """Apply configured figure failure policy for this regime."""
+        if request.failure_policy == "raise":
+            if error is not None:
+                raise RuntimeError(message) from error
+            raise RuntimeError(message)
+
+        if error is not None:
+            warnings.warn(
+                f"{message} ({error!r})",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return
+        warnings.warn(message, RuntimeWarning, stacklevel=2)
 
     def _run_one_regime(  # ---------------------------------------------------
         self,
