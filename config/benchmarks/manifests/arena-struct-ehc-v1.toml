@@ -1,0 +1,18 @@
+schema_version = "1"
+artifact_id = "arena-struct-ehc-v1-default"
+artifact_type = "model_core"
+model_family = "ehc-v1"
+model_config_path = "config/models/ehc-v1.toml"
+checkpoint_path = "checkpoints/ehc-v1-spatial/last.ckpt"
+checkpoint_format = "lightning"
+supported_tracks = ["arena-struct"]
+
+[load_policy]
+freeze_core = true
+allow_full_resume = false
+
+[benchmark_policy]
+mode = "model-comparison"
+
+[provenance]
+source_run = "ready-track-default"

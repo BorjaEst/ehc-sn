@@ -1,3 +1,5 @@
 track = "mazehard-delib"
+manifest = "config/benchmarks/manifests/mazehard-delib-hrm-v1.toml"
+recipe = "config/benchmarks/recipes/mazehard-delib.toml"
 fixed_recipe = "default"
 seed_count = 1

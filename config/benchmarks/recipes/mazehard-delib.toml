@@ -1,0 +1,63 @@
+schema_version = "1"
+recipe_id = "mazehard-delib-hrm-v1"
+track_id = "mazehard-delib"
+mode = "model-comparison"
+capability_kind = "mazehard_deliberation"
+compared_artifact_type = "within-task architecture comparison"
+fixed_recipe_label = "mazehard-delib-hrm-v1"
+adaptation_protocol_id = "bridge-act-v1"
+primary_metric = "sequences_exact"
+supported_model_families = ["hrm-v1", "hrm-v2"]
+
+[artifact_rules]
+require_frozen_core = true
+require_fresh_bridge = true
+
+[bridge]
+adapter = {}
+
+[execution]
+fixed_budget_steps = 1
+halt_action = 0
+allow_halt = false
+explore = false
+seed = 7
+reseed_before_evaluation = true
+max_batches = 0
+
+[adaptation_data]
+dataset_path = "data/processed/mazehard/default/v1"
+split = "train"
+batch_size = 1
+n_cases = 1
+sample_ids = []
+
+[evaluation_data]
+dataset_path = "data/processed/mazehard/default/v1"
+split = "test"
+batch_size = 1
+n_cases = 1
+sample_ids = []
+
+[adaptation]
+objective_token_loss = "stablemax_cross_entropy"
+
+[adaptation.protocol]
+examples = 1
+steps = 1
+optimizer = "adam"
+learning_rate = 0.001
+weight_decay = 0.0
+betas = [0.9, 0.98]
+seed = 7
+reseed_before_adaptation = true
+stopping_rule = "fixed_steps"
+
+[reporting]
+fixed_recipe = "mazehard-delib-hrm-v1"
+
+[bindings.hrm-v1]
+adapter = { encoder_kind = "learned", vocab_size = 32 }
+
+[bindings.hrm-v2]
+adapter = { encoder_kind = "learned", vocab_size = 32 }

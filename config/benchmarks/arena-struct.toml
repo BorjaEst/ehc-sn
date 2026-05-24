@@ -1,3 +1,5 @@
 track = "arena-struct"
+manifest = "config/benchmarks/manifests/arena-struct-tem-v1.toml"
+recipe = "config/benchmarks/recipes/arena-struct.toml"
 fixed_recipe = "default"
 seed_count = 1

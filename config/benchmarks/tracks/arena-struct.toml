@@ -1,0 +1,17 @@
+schema_version = "1"
+track_id = "arena-struct"
+aliases = []
+task_family = "arena"
+claim_family = "structural_representation"
+compared_artifact_type = "within-task architecture comparison"
+readiness_state = "ready"
+execution_mode = "replay"
+primary_metric = "accuracy_revisit"
+secondary_metrics = [
+  "accuracy_all",
+  "correct_all",
+  "count_all",
+  "correct_revisit",
+  "count_revisit",
+]
+ready_runtime_model_families = ["tem-v1", "tem-v2", "ehc-v1"]

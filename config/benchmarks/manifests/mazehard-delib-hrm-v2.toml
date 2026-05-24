@@ -1,0 +1,18 @@
+schema_version = "1"
+artifact_id = "mazehard-delib-hrm-v2-default"
+artifact_type = "model_core"
+model_family = "hrm-v2"
+model_config_path = "config/models/hrm-v2.toml"
+checkpoint_path = "checkpoints/hrm-v2/model-v000.ckpt"
+checkpoint_format = "lightning"
+supported_tracks = ["mazehard-delib"]
+
+[load_policy]
+freeze_core = true
+allow_full_resume = false
+
+[benchmark_policy]
+mode = "model-comparison"
+
+[provenance]
+source_run = "ready-track-default"
