@@ -25,16 +25,17 @@ from ehc_sn.tasks.arena.traces import ArenaEvaluationSourceContext
 
 
 # =============================================================================
-class ArenaReplayDiagnosticProvider:
-    """Arena-task-owned provider for processed replay diagnostics.
+class ArenaReplayProvider:
+    """Arena-task-owned provider for processed replay evaluation.
 
     Loads from a versioned processed arena split and yields batched replay cases
     for named evaluation regimes. Case identity is derived from the dataset index.
 
-    This provider is diagnostic-only: it yields raw arena channel tensors in the
-    same format as the fit-path DataLoader, so any Lightning family with an arena
-    adapter can consume the cases through :meth:`execute_evaluation_batch` without
-    modification.
+    This provider yields raw arena channel tensors in the same format as the
+    fit-path DataLoader, so any Lightning family with an arena adapter can
+    consume the cases through :meth:`execute_evaluation_batch` without
+    modification. It stays task-owned and does not encode benchmark-claim
+    semantics.
 
     ``provider_settings`` keys:
 
@@ -112,12 +113,16 @@ class ArenaReplayDiagnosticProvider:
     ) -> str:
         """Return a human-readable description for logging."""
         return (
-            f"ArenaReplayDiagnosticProvider("
+            f"ArenaReplayProvider("
             f"path={self._dataset_path}, "
             f"split={self._split!r}, "
             f"batch_size={self._batch_size}, "
             f"n_cases={self._n_cases})"
         )
+
+
+# Backward-compatibility alias for existing internal callers.
+ArenaReplayDiagnosticProvider = ArenaReplayProvider
 
 
 # =============================================================================
@@ -261,4 +266,8 @@ class ArenaFixedProbeProvider:
 
 
 # =============================================================================
-__all__ = ["ArenaReplayDiagnosticProvider", "ArenaFixedProbeProvider"]
+__all__ = [
+    "ArenaReplayProvider",
+    "ArenaReplayDiagnosticProvider",
+    "ArenaFixedProbeProvider",
+]

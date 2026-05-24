@@ -32,8 +32,8 @@ from ehc_sn.tasks.mazehard.traces import MazeHardEvaluationSourceContext
 
 
 # =============================================================================
-class MazeHardReplayDiagnosticProvider:
-    """MazeHard-task-owned provider for processed replay diagnostics.
+class MazeHardReplayProvider:
+    """MazeHard-task-owned provider for processed replay evaluation.
 
     Loads from a versioned processed MazeHard task corpus and yields batched
     cases for named evaluation regimes.  Each case batch is already transformed
@@ -41,8 +41,8 @@ class MazeHardReplayDiagnosticProvider:
     (i.e. ``{"input_ids": Tensor, "labels": Tensor}``) so any HRM Lightning
     family can consume it unchanged through :meth:`execute_evaluation_batch`.
 
-    This provider is diagnostic-only: it does not affect fit-path validation
-    behavior and makes no benchmark claims.
+    This provider is task-owned replay infrastructure: it does not affect
+    fit-path validation behavior and does not encode benchmark-claim semantics.
 
     ``provider_settings`` keys:
 
@@ -127,12 +127,16 @@ class MazeHardReplayDiagnosticProvider:
     ) -> str:
         """Return a human-readable description for logging."""
         return (
-            f"MazeHardReplayDiagnosticProvider("
+            f"MazeHardReplayProvider("
             f"path={self._dataset_path}, "
             f"split={self._split!r}, "
             f"batch_size={self._batch_size}, "
             f"n_cases={self._n_cases})"
         )
+
+
+# Backward-compatibility alias for existing internal callers.
+MazeHardReplayDiagnosticProvider = MazeHardReplayProvider
 
 
 # =============================================================================
@@ -278,4 +282,8 @@ class MazeHardFixedProbeProvider:
 
 
 # =============================================================================
-__all__ = ["MazeHardReplayDiagnosticProvider", "MazeHardFixedProbeProvider"]
+__all__ = [
+    "MazeHardReplayProvider",
+    "MazeHardReplayDiagnosticProvider",
+    "MazeHardFixedProbeProvider",
+]
