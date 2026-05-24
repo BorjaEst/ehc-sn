@@ -105,9 +105,9 @@ class RLRolloutState[ModelState](RolloutState[ModelState]):
 class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
     """Action sampler + rollout state manager for online actor-critic training."""
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
-        backbone: RLRolloutBackbone[ModelState],
+        backbone: ActorCriticRolloutBackbone[ModelState],
         env: EnvBase,
         config: RLControllerConfig,
         runtime: RLTaskRuntime,
@@ -133,7 +133,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         """Return the task-owned environment TensorDict runtime."""
         return self._runtime
 
-    def initial_state(
+    def initial_state(  # -----------------------------------------------------
         self,
         batch_sample: Batch,
     ) -> RLRolloutState[ModelState]:
@@ -150,7 +150,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
             env_td=env_td,
         )
 
-    def step(
+    def step(  # --------------------------------------------------------------
         self,
         state: RLRolloutState[ModelState],
         batch: Batch,
@@ -159,7 +159,9 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         explore: bool = True,
         **_: Any,
     ) -> tuple[RLRolloutState[ModelState], ActorCriticInteractionRecord]:
-        """Advance the controller by one step and emit an :class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord`."""
+        """Advance the controller by one step and emit an
+        :class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord`.
+        """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
         backbone_output, model_state = self.backbone(data, model_state)
@@ -199,7 +201,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         )
         return state, record
 
-    def _select_action_and_done(
+    def _select_action_and_done(  # -------------------------------------------
         self,
         backbone_output: ActorCriticBackboneOutput,
         steps: Tensor,
@@ -209,6 +211,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         allow_halt: bool,
         explore: bool,
     ) -> tuple[Tensor, Tensor, TensorDictBase, PolicyDecision]:
+        """Select an action using the policy and determine done flags."""
         policy = backbone_output.policy
         logits = policy.policy_logits
         valid_action_mask = policy.valid_action_mask

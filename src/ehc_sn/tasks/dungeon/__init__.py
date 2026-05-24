@@ -11,7 +11,7 @@ Stable task surface:
 - :mod:`~ehc_sn.tasks.dungeon.evaluation` — step score builder and aggregate report.
 - :mod:`~ehc_sn.tasks.dungeon.reward` — task-owned reward projection.
 - :mod:`~ehc_sn.tasks.dungeon.providers` — task-owned evaluation case providers
-  (:class:`~ehc_sn.tasks.dungeon.providers.DungeonReplayDiagnosticProvider`,
+    (:class:`~ehc_sn.tasks.dungeon.providers.DungeonReplayProvider`,
   :class:`~ehc_sn.tasks.dungeon.providers.DungeonFixedProbeProvider`).
 
 Dungeon v1 models episode-terminal task facts only; token-supervision targets
@@ -28,7 +28,12 @@ from .builder import (
     validate_dungeon_task_root,
     validate_dungeon_task_sample,
 )
-from .contracts import DUNGEON_ACTION_COUNT, DungeonAction, DungeonTaskInput, DungeonTaskOutput
+from .contracts import (
+    DUNGEON_ACTION_COUNT,
+    DungeonAction,
+    DungeonTaskInput,
+    DungeonTaskOutput,
+)
 from .evaluation import DungeonScoreReport, DungeonStepScore
 from .reward import DungeonRewardConfig, DungeonRewardProjector
 from .traces import (

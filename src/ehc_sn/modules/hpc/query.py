@@ -67,7 +67,7 @@ class AttractorRead(nn.Module):
         """Return attractor retrieval settings."""
         return self._config
 
-    def forward(
+    def forward(  # -----------------------------------------------------------
         self,
         query: Tensor,
         memory_view: LinearMemoryView,
@@ -161,7 +161,7 @@ class FactorRead(nn.Module):
         """Return factor-retrieval settings."""
         return self._config
 
-    def forward(
+    def forward(  # -----------------------------------------------------------
         self,
         query: Tensor,
         memory_view: FactorMemoryView,

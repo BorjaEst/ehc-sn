@@ -20,7 +20,7 @@ Stable task surface:
 - :mod:`~ehc_sn.tasks.countwalk.runtime` — replay batch schema constants and
   batch-cursor-aware target extraction.
 - :mod:`~ehc_sn.tasks.countwalk.providers` — task-owned evaluation case providers
-  (:class:`~ehc_sn.tasks.countwalk.providers.CountwalkReplayDiagnosticProvider`,
+  (:class:`~ehc_sn.tasks.countwalk.providers.CountwalkReplayProvider`,
   :class:`~ehc_sn.tasks.countwalk.providers.CountwalkFixedProbeProvider`).
 
 Execution-binding capability:

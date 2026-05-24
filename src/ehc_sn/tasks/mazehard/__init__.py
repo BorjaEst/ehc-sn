@@ -10,7 +10,7 @@ Stable task surface:
 - :mod:`~ehc_sn.tasks.mazehard.evaluation` — sequence evaluation and aggregate report.
 - :mod:`~ehc_sn.tasks.mazehard.reward` — task-owned reward semantics.
 - :mod:`~ehc_sn.tasks.mazehard.providers` — task-owned evaluation case providers
-  (:class:`~ehc_sn.tasks.mazehard.providers.MazeHardReplayDiagnosticProvider`,
+  (:class:`~ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider`,
   :class:`~ehc_sn.tasks.mazehard.providers.MazeHardFixedProbeProvider`).
 
 Execution-binding capability:
@@ -29,7 +29,12 @@ from .builder import (
     validate_mazehard_task_sample,
 )
 from .capabilities.deliberation import MazeHardDeliberationCapability
-from .contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets, MazeHardTaskInput, MazeHardTaskOutput
+from .contracts import (
+    MAZE_HARD_IGNORE_LABEL_ID,
+    MazeHardTargets,
+    MazeHardTaskInput,
+    MazeHardTaskOutput,
+)
 from .evaluation import MazeHardScoreReport, MazeHardStepScore
 from .reward import MazeHardRewardConfig, MazeHardRewardProjector
 from .traces import (

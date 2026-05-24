@@ -81,7 +81,7 @@ class _MazeHardHRMV2ACTBridgeAdapter:
     def __getattr__(self, name: str) -> object:
         return getattr(self._bridge, name)
 
-    def forward(
+    def forward(  # -----------------------------------------------------------
         self,
         batch: object,
         state: object | None = None,

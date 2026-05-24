@@ -147,7 +147,7 @@ class DeliberationACController[ModelState](
     No TorchRL environment, no ``env_td``, no :class:`~ehc_sn.controllers.online.actor_critic.RLTaskRuntime`.
     """
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         backbone: ValueControlRolloutBackbone[ModelState],
         config: DeliberationACControllerConfig,
@@ -168,7 +168,7 @@ class DeliberationACController[ModelState](
         """Return the injected step finalizer."""
         return self._finalizer
 
-    def initial_state(
+    def initial_state(  # -----------------------------------------------------
         self,
         batch_sample: Batch,
         *,
@@ -184,7 +184,7 @@ class DeliberationACController[ModelState](
             runtime_state=initial_runtime_state,
         )
 
-    def step(
+    def step(  # ----------------------------------------------------------
         self,
         state: DeliberationACRolloutState[ModelState],
         batch: Batch,

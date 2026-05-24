@@ -25,16 +25,17 @@ from ehc_sn.tasks.dungeon.traces import DungeonEvaluationSourceContext
 
 
 # =============================================================================
-class DungeonReplayDiagnosticProvider:
-    """Dungeon-task-owned provider for processed replay diagnostics.
+class DungeonReplayProvider:
+    """Dungeon-task-owned provider for processed replay evaluation.
 
     Loads from a versioned processed dungeon split and yields batched replay cases
     for named evaluation regimes.  Case identity is derived from the dataset index.
 
-    This provider is diagnostic-only: it yields raw dungeon channel tensors in the
-    same format as the fit-path DataLoader, so any Lightning family with a dungeon
-    adapter can consume the cases through :meth:`execute_evaluation_batch` without
-    modification.
+    This provider yields raw dungeon channel tensors in the same format as the
+    fit-path DataLoader, so any Lightning family with a dungeon adapter can
+    consume the cases through :meth:`execute_evaluation_batch` without
+    modification. It stays task-owned and does not encode benchmark-claim
+    semantics.
 
     ``provider_settings`` keys:
 
@@ -115,12 +116,16 @@ class DungeonReplayDiagnosticProvider:
     ) -> str:
         """Return a human-readable description for logging."""
         return (
-            f"DungeonReplayDiagnosticProvider("
+            f"DungeonReplayProvider("
             f"path={self._dataset_path}, "
             f"split={self._split!r}, "
             f"batch_size={self._batch_size}, "
             f"n_cases={self._n_cases})"
         )
+
+
+# Backward-compatibility alias for existing internal callers.
+DungeonReplayDiagnosticProvider = DungeonReplayProvider
 
 
 # =============================================================================
@@ -265,4 +270,8 @@ class DungeonFixedProbeProvider:
 
 
 # =============================================================================
-__all__ = ["DungeonReplayDiagnosticProvider", "DungeonFixedProbeProvider"]
+__all__ = [
+    "DungeonReplayProvider",
+    "DungeonReplayDiagnosticProvider",
+    "DungeonFixedProbeProvider",
+]

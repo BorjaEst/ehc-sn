@@ -17,7 +17,12 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.controllers._base import BaseController, RolloutBackbone, RolloutState, batch_anchor_tensor
+from ehc_sn.controllers._base import (
+    BaseController,
+    RolloutBackbone,
+    RolloutState,
+    batch_anchor_tensor,
+)
 from ehc_sn.types import Batch
 from ehc_sn.utils.detach import DetachMixin
 
@@ -32,7 +37,7 @@ _TRAJECTORY_IDENTITY_KEY = "__trajectory_id__"
 class ReplayTrajectoryRuntime(Protocol):
     """Task-owned per-step extraction interface for replay trajectory controllers."""
 
-    def extract_step_per_slot(
+    def extract_step_per_slot(  # ---------------------------------------------
         self,
         resident: Batch,
         cursor: Tensor,
@@ -51,11 +56,19 @@ class ReplayTrajectoryRuntime(Protocol):
         """
         ...
 
-    def initial_task_state(self, batch: Batch, *, device: Any) -> dict[str, Tensor]:
+    def initial_task_state(  # ------------------------------------------------
+        self,
+        batch: Batch,
+        *,
+        device: Any,
+    ) -> dict[str, Tensor]:
         """Allocate the initial (zeroed) task-local state for a fresh episode."""
         ...
 
-    def trajectory_lengths(self, batch: Batch) -> Tensor:
+    def trajectory_lengths(  # ------------------------------------------------
+        self,
+        batch: Batch,
+    ) -> Tensor:
         """Return the per-slot effective trajectory length from a source batch."""
         ...
 
@@ -98,9 +111,9 @@ class ReplayRolloutState[ModelState](RolloutState[ModelState]):
     """
 
     cursor: Tensor  # (B,) int64 — current step index per slot
-    trajectory_length: Tensor  # (B,) int64 — effective trajectory length per slot
-    trajectory_id: Tensor  # (B,) int64 — stable admitted-trajectory identity; -1 = empty
-    resident_payload: dict[str, Tensor]  # carry-owned trajectory arrays; NOT in snapshot
+    trajectory_length: Tensor  # (B,) int64 — effective tr. length per slot
+    trajectory_id: Tensor  # (B,) int64 — stable admitted-trajectory identity
+    resident_payload: dict[str, Tensor]  # carry-owned trajectory arrays
     task_state: dict[str, Tensor] = field(default_factory=dict)
     """Task-owned replay-local state (e.g. visit counts) threaded explicitly through carry."""
 
@@ -138,7 +151,11 @@ def _build_resident_payload(
     Returns:
         Updated resident payload ``{key: (B, T, ...)}`` on the same device as *batch*.
     """
-    resident_keys = [k for k in batch if k.startswith(_TRAJECTORY_PREFIX) and k != "trajectory_length"]
+    resident_keys = [
+        k
+        for k in batch
+        if k.startswith(_TRAJECTORY_PREFIX) and k != "trajectory_length"
+    ]
 
     if not old_resident:
         # First call: all slots are halted (initial state), copy everything from batch.
@@ -163,7 +180,9 @@ def _build_resident_payload(
 
 
 # =============================================================================
-class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTrajectoryControllerConfig]):
+class ReplayTrajectoryController[ModelState](
+    BaseController[ModelState, ReplayTrajectoryControllerConfig]
+):
     """Generic stepwise replay controller for arena-family recurrent replay.
 
     Slot continuity contract
@@ -185,7 +204,7 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
        state only (cursor vs trajectory_length).
     """
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         backbone: RolloutBackbone[ModelState],
         config: ReplayTrajectoryControllerConfig,
@@ -200,7 +219,7 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
         """Return the injected task-owned replay runtime."""
         return self._runtime
 
-    def initial_state(
+    def initial_state(  # -----------------------------------------------------
         self,
         batch_sample: Batch,
     ) -> ReplayRolloutState[ModelState]:
@@ -218,7 +237,9 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
         B = int(anchor.shape[0])
         device = anchor.device
 
-        task_state = self._runtime.initial_task_state(batch_sample, device=device)
+        task_state = self._runtime.initial_task_state(
+            batch_sample, device=device
+        )
 
         return ReplayRolloutState(
             model_state=self.backbone.init_state(B, device=device),
@@ -226,13 +247,17 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
             halted=torch.ones((B,), dtype=torch.bool, device=device),
             data={},
             cursor=torch.zeros((B,), dtype=torch.int64, device=device),
-            trajectory_length=torch.zeros((B,), dtype=torch.int64, device=device),
-            trajectory_id=torch.full((B,), -1, dtype=torch.int64, device=device),
+            trajectory_length=torch.zeros(
+                (B,), dtype=torch.int64, device=device
+            ),
+            trajectory_id=torch.full(
+                (B,), -1, dtype=torch.int64, device=device
+            ),
             resident_payload={},
             task_state=task_state,
         )
 
-    def step(
+    def step(  # ----------------------------------------------------------
         self,
         state: ReplayRolloutState[ModelState],
         batch: Batch,
@@ -255,21 +280,33 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
         admission = state.halted  # (B,) — slots being admitted this step
 
         # ── 1. Admission: update resident payload from batch for admitted slots ──────
-        new_resident = _build_resident_payload(state.resident_payload, batch, admission)
+        new_resident = _build_resident_payload(
+            state.resident_payload, batch, admission
+        )
 
         # ── 2. Cursor: admitted slots reset to 0; active slots advance by 1 ─────────
-        cursor = torch.where(admission, torch.zeros_like(state.cursor), state.cursor + 1)
+        cursor = torch.where(
+            admission, torch.zeros_like(state.cursor), state.cursor + 1
+        )
 
         # ── 3. Trajectory length: admitted slots read from batch; active keep carry ──
-        new_traj_len = self._runtime.trajectory_lengths(batch).to(device=cursor.device, dtype=torch.int64)
+        new_traj_len = self._runtime.trajectory_lengths(batch).to(
+            device=cursor.device, dtype=torch.int64
+        )
         traj_len = torch.where(admission, new_traj_len, state.trajectory_length)
 
         # ── 4. Trajectory identity: changes ONLY at halted→admitted boundary ─────────
         if _TRAJECTORY_IDENTITY_KEY in batch:
-            batch_traj_id = batch[_TRAJECTORY_IDENTITY_KEY].to(device=cursor.device, dtype=torch.int64)
+            batch_traj_id = batch[_TRAJECTORY_IDENTITY_KEY].to(
+                device=cursor.device, dtype=torch.int64
+            )
         else:
-            batch_traj_id = state.trajectory_id  # no identity in batch → keep carry
-        trajectory_id = torch.where(admission, batch_traj_id, state.trajectory_id)
+            batch_traj_id = (
+                state.trajectory_id
+            )  # no identity in batch → keep carry
+        trajectory_id = torch.where(
+            admission, batch_traj_id, state.trajectory_id
+        )
 
         # ── 5. Model state: reset admitted slots, continue active slots ───────────────
         model_state = self.backbone.reset_state(admission, state.model_state)
@@ -277,7 +314,9 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
         # ── 6. Extract step data from resident payload (not from batch!) ──────────────
         # Active slots read from carry-owned trajectory arrays; admitted slots also
         # read from resident_payload which was just updated from batch above.
-        current_data, new_task_state = self._runtime.extract_step_per_slot(new_resident, cursor, state.task_state)
+        current_data, new_task_state = self._runtime.extract_step_per_slot(
+            new_resident, cursor, state.task_state
+        )
 
         # ── 7. Backbone forward pass ──────────────────────────────────────────────────
         backbone_output, model_state = self.backbone(current_data, model_state)
@@ -301,7 +340,9 @@ class ReplayTrajectoryController[ModelState](BaseController[ModelState, ReplayTr
             resident_payload=new_resident,
             task_state=new_task_state,
         )
-        output = ReplayStepOutput(backbone_output=backbone_output, cursor=cursor)
+        output = ReplayStepOutput(
+            backbone_output=backbone_output, cursor=cursor
+        )
         return new_state, output
 
 

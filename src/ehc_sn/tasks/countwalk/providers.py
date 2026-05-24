@@ -25,16 +25,17 @@ from ehc_sn.tasks.countwalk.traces import CountwalkEvaluationSourceContext
 
 
 # =============================================================================
-class CountwalkReplayDiagnosticProvider:
-    """Countwalk-task-owned provider for processed replay diagnostics.
+class CountwalkReplayProvider:
+    """Countwalk-task-owned provider for processed replay evaluation.
 
     Loads from a versioned processed countwalk split and yields batched replay cases
     for named evaluation regimes.  Case identity is derived from the dataset index.
 
-    This provider is diagnostic-only: it yields raw countwalk channel tensors in the
-    same format as the fit-path DataLoader, so any Lightning family with a countwalk
-    adapter can consume the cases through :meth:`execute_evaluation_batch` without
-    modification.
+    This provider yields raw countwalk channel tensors in the same format as the
+    fit-path DataLoader, so any Lightning family with a countwalk adapter can
+    consume the cases through :meth:`execute_evaluation_batch` without
+    modification. It stays task-owned and does not encode benchmark-claim
+    semantics.
 
     ``provider_settings`` keys:
 
@@ -115,12 +116,16 @@ class CountwalkReplayDiagnosticProvider:
     ) -> str:
         """Return a human-readable description for logging."""
         return (
-            f"CountwalkReplayDiagnosticProvider("
+            f"CountwalkReplayProvider("
             f"path={self._dataset_path}, "
             f"split={self._split!r}, "
             f"batch_size={self._batch_size}, "
             f"n_cases={self._n_cases})"
         )
+
+
+# Backward-compatibility alias for existing internal callers.
+CountwalkReplayDiagnosticProvider = CountwalkReplayProvider
 
 
 # =============================================================================
@@ -264,4 +269,8 @@ class CountwalkFixedProbeProvider:
 
 
 # =============================================================================
-__all__ = ["CountwalkReplayDiagnosticProvider", "CountwalkFixedProbeProvider"]
+__all__ = [
+    "CountwalkReplayProvider",
+    "CountwalkReplayDiagnosticProvider",
+    "CountwalkFixedProbeProvider",
+]

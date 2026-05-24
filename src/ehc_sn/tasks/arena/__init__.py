@@ -14,7 +14,7 @@ Stable task surface:
 - :mod:`~ehc_sn.tasks.arena.evaluation` — structural score and evaluation helpers.
 - :mod:`~ehc_sn.tasks.arena.reward` — task-owned reward projection.
 - :mod:`~ehc_sn.tasks.arena.providers` — task-owned evaluation case providers
-  (:class:`~ehc_sn.tasks.arena.providers.ArenaReplayDiagnosticProvider`,
+  (:class:`~ehc_sn.tasks.arena.providers.ArenaReplayProvider`,
   :class:`~ehc_sn.tasks.arena.providers.ArenaFixedProbeProvider`).
 
 Optional execution-binding capability:
@@ -36,7 +36,13 @@ from .builder import (
     validate_arena_task_sample,
 )
 from .capabilities.replay import ArenaReplayCapability
-from .contracts import ARENA_ACTION_COUNT, ArenaAction, ArenaTargets, ArenaTaskInput, ArenaTaskOutput
+from .contracts import (
+    ARENA_ACTION_COUNT,
+    ArenaAction,
+    ArenaTargets,
+    ArenaTaskInput,
+    ArenaTaskOutput,
+)
 from .evaluation import ArenaScoreReport, ArenaStepScore
 from .reward import ArenaRewardConfig, ArenaRewardProjector
 from .traces import (

@@ -12,27 +12,33 @@ from ehc_sn.rollouts.buffers import FifoBuffer
 
 # =============================================================================
 class PartialResetBatchAssembler:
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         *,
         buffer: FifoBuffer,
         keys: Sequence[str],
     ) -> None:
+        """Helper to assemble step batches for partial-reset rollouts from a
+        CPU buffer and incoming GPU batch.
+        """
         self.buffer = buffer
         self.keys = list(keys)
 
-    def make_step_batch(
+    def make_step_batch(  # ---------------------------------------------------
         self,
         *,
         incoming: dict[str, Tensor],
         reset_mask: Tensor,
     ) -> dict[str, Tensor]:
+        """Assemble the step batch by selectively combining incoming batch rows
+        with buffer rows according to the reset_mask.
+        """
         return self.ingest_and_make_step_batch(
             incoming=incoming,
             reset_mask=reset_mask,
         )
 
-    def ingest_and_make_step_batch(
+    def ingest_and_make_step_batch(  # ----------------------------------------
         self,
         *,
         incoming: dict[str, Tensor],
@@ -85,7 +91,7 @@ class PartialResetBatchAssembler:
 
         return step_batch
 
-    def refill_only(
+    def refill_only(  # -------------------------------------------------------
         self,
         *,
         template: dict[str, Tensor],

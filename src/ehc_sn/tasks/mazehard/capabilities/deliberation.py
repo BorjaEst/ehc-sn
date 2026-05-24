@@ -69,7 +69,7 @@ class MazeHardDeliberationCapability:
     structurally (duck-typed; no Protocol inheritance required for runtime use).
     """
 
-    def __init__(
+    def __init__(  # ----------------------------------------------------------
         self,
         config: MazeHardDeliberationConfig,
         reward_projector: MazeHardRewardProjector,
