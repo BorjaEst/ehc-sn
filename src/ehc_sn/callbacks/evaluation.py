@@ -20,15 +20,18 @@ from pathlib import Path
 from typing import Any, Literal
 
 import lightning.pytorch as pl
+import matplotlib.pyplot as plt
 import torch
 from lightning.pytorch import LightningModule, Trainer
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ehc_sn.eval import (
     EvaluationRegimeResult,
     EvaluationTraceRequest,
     iter_evaluation_regime,
 )
+from ehc_sn.figures import FigureContext, list_figures, render
+from ehc_sn.figures.sinks import save_pdf, save_png
 
 
 # =============================================================================
@@ -79,6 +82,75 @@ class EvaluationTraceRequestSettings(BaseModel, extra="forbid"):
 
 
 # =============================================================================
+class EvaluationFigureRequestSettings(BaseModel, extra="forbid"):
+    """Optional per-regime online figure rendering settings."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Whether to render configured figures for this regime run.",
+    )
+    figures: list[str] = Field(
+        default_factory=list,
+        description="Registered figure names to render from each available case trace.",
+    )
+    env_idx: int = Field(
+        default=0,
+        ge=0,
+        description="Environment index passed into FigureContext.",
+    )
+    freq_idx: int = Field(
+        default=0,
+        ge=0,
+        description="Frequency index passed into FigureContext.",
+    )
+    sample_idx: int = Field(
+        default=0,
+        ge=0,
+        description="Starting sample index passed into FigureContext.",
+    )
+    max_items: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional item cap passed into FigureContext.",
+    )
+    save_pdf: bool = Field(
+        default=True,
+        description="Persist rendered figures as PDF files.",
+    )
+    save_png: bool = Field(
+        default=False,
+        description="Persist rendered figures as PNG files.",
+    )
+    png_dpi: int = Field(
+        default=160,
+        ge=1,
+        description="PNG export DPI used when save_png is enabled.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_request(self) -> "EvaluationFigureRequestSettings":
+        """Validate enabled request shape and registered figure names."""
+        if not self.enabled:
+            return self
+        if not self.figures:
+            raise ValueError(
+                "figure_request.enabled=true requires a non-empty figures list."
+            )
+        if not self.save_pdf and not self.save_png:
+            raise ValueError(
+                "figure_request must enable at least one sink: save_pdf or save_png."
+            )
+        available = set(list_figures())
+        missing = [name for name in self.figures if name not in available]
+        if missing:
+            unknown = ", ".join(sorted(set(missing)))
+            raise ValueError(
+                "figure_request.figures contains unknown names: " f"{unknown}."
+            )
+        return self
+
+
+# =============================================================================
 class EvaluationRegimeSettings(BaseModel, extra="forbid"):
     """One named evaluation regime configuration."""
 
@@ -87,8 +159,8 @@ class EvaluationRegimeSettings(BaseModel, extra="forbid"):
         min_length=1,
         description="Unique regime identifier used in metric and artifact namespaces.",
     )
-    phase_kind: Literal["diag", "bench"] = Field(
-        default="diag",
+    regime_kind: Literal["diagnostic", "benchmark"] = Field(
+        default="diagnostic",
         description="Top-level namespace tier for logs and artifacts.",
     )
     provider_ref: str = Field(
@@ -108,6 +180,46 @@ class EvaluationRegimeSettings(BaseModel, extra="forbid"):
         default_factory=EvaluationTraceRequestSettings,
         description="Optional trace materialization request for this regime.",
     )
+    figure_request: EvaluationFigureRequestSettings = Field(
+        default_factory=EvaluationFigureRequestSettings,
+        description="Optional online figure routing for this regime.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_regime_input(cls, value: Any) -> Any:
+        """Accept legacy phase_kind/diag|bench and normalize to regime_kind."""
+        if not isinstance(value, dict):
+            return value
+
+        data = dict(value)
+        legacy_phase_kind = data.pop("phase_kind", None)
+        if "regime_kind" not in data and legacy_phase_kind is not None:
+            data["regime_kind"] = legacy_phase_kind
+        return data
+
+    @field_validator("regime_kind", mode="before")
+    @classmethod
+    def _normalize_regime_kind_value(
+        cls,
+        value: Any,
+    ) -> Literal["diagnostic", "benchmark"]:
+        """Normalize canonical and legacy namespace labels to canonical values."""
+        if value == "diag":
+            return "diagnostic"
+        if value == "bench":
+            return "benchmark"
+        if value in {"diagnostic", "benchmark"}:
+            return value
+        raise ValueError(
+            "regime_kind must be one of: 'diagnostic', 'benchmark', "
+            "or legacy aliases 'diag', 'bench'."
+        )
+
+    @property
+    def phase_kind(self) -> Literal["diag", "bench"]:
+        """Backward-compatibility alias for legacy config/consumer surfaces."""
+        return "diag" if self.regime_kind == "diagnostic" else "bench"
 
 
 # =============================================================================
@@ -217,6 +329,13 @@ class EvaluationRegimesCallback(pl.Callback):
                 regime,
             )
             self._log_regime_result(pl_module, regime, regime_result)
+            self._render_regime_figures(
+                trainer,
+                pl_module,
+                regime,
+                regime_result,
+                trigger_kind=trigger_kind,
+            )
             if self.settings.persist_artifacts:
                 self._persist_regime_result(
                     trainer,
@@ -224,6 +343,72 @@ class EvaluationRegimesCallback(pl.Callback):
                     regime_result,
                     trigger_kind=trigger_kind,
                 )
+
+    def _render_regime_figures(  # -------------------------------------------
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        regime: EvaluationRegimeSettings,
+        regime_result: EvaluationRegimeResult,
+        *,
+        trigger_kind: Literal["step", "epoch"],
+    ) -> None:
+        """Render configured figures from traces already produced in this run."""
+        request = regime.figure_request
+        if not request.enabled:
+            return
+
+        run_dir = _resolve_regime_run_dir(
+            trainer,
+            output_subdir=self.settings.output_subdir,
+            regime=regime,
+            trigger_kind=trigger_kind,
+        )
+        figure_dir = run_dir / "figures"
+        figure_dir.mkdir(parents=True, exist_ok=True)
+
+        figure_ctx = FigureContext(
+            env_idx=request.env_idx,
+            freq_idx=request.freq_idx,
+            sample_idx=request.sample_idx,
+            max_items=request.max_items,
+            global_step=trainer.global_step,
+            split_name=regime.regime_id,
+        )
+
+        rendered_count = 0
+        for idx, result in enumerate(regime_result.case_results):
+            if result.trace is None:
+                continue
+            for name in request.figures:
+                fig = render(name, result.trace, figure_ctx)
+                stem = (
+                    f"{idx:04d}-"
+                    f"{_sanitize_filename_component(result.case_id)}-"
+                    f"{_sanitize_filename_component(name)}"
+                )
+                if request.save_pdf:
+                    save_pdf(fig, figure_dir / f"{stem}.pdf")
+                if request.save_png:
+                    save_png(
+                        fig, figure_dir / f"{stem}.png", dpi=request.png_dpi
+                    )
+                plt.close(fig)
+                rendered_count += 1
+
+        if rendered_count == 0:
+            raise RuntimeError(
+                "figure_request is enabled for regime "
+                f"{regime.regime_id!r}, but no case trace was available for rendering."
+            )
+        pl_module.log(
+            f"{regime.regime_kind}/{regime.regime_id}/figures_rendered",
+            float(rendered_count),
+            on_step=False,
+            on_epoch=True,
+            logger=True,
+            sync_dist=False,
+        )
 
     def _run_one_regime(  # ---------------------------------------------------
         self,
@@ -277,12 +462,14 @@ class EvaluationRegimesCallback(pl.Callback):
             if callable(set_trace_keys):
                 set_trace_keys(set(request.trace_keys))
 
-        trace_spec = getattr(pl_module, "trace_specs", None)
+        trace_spec = getattr(pl_module, "trace_spec", None)
+        if trace_spec is None:
+            trace_spec = getattr(pl_module, "trace_specs", None)
         if trace_spec is None:
             raise RuntimeError(
                 "Trace request is enabled for regime "
                 f"{regime.regime_id!r}, but the active Lightning module does "
-                "not expose trace_specs."
+                "not expose trace_spec (or legacy trace_specs)."
             )
 
         return EvaluationTraceRequest(
@@ -296,7 +483,7 @@ class EvaluationRegimesCallback(pl.Callback):
         regime_result: EvaluationRegimeResult,
     ) -> None:
         """Log namespaced aggregate metrics for one completed regime run."""
-        namespace = f"{regime.phase_kind}/{regime.regime_id}"
+        namespace = f"{regime.regime_kind}/{regime.regime_id}"
         n_cases = regime_result.summary.get("n_cases")
         if isinstance(n_cases, Real):
             n_cases_value = float(n_cases)
@@ -330,18 +517,11 @@ class EvaluationRegimesCallback(pl.Callback):
         trigger_kind: Literal["step", "epoch"],
     ) -> None:
         """Persist regime summary and optional trace payloads under log dir."""
-        output_root = _resolve_output_root(trainer)
-        event_id = (
-            f"epoch-{trainer.current_epoch + 1:04d}_"
-            f"step-{trainer.global_step:08d}_"
-            f"{trigger_kind}"
-        )
-        run_dir = (
-            output_root
-            / self.settings.output_subdir
-            / regime.phase_kind
-            / regime.regime_id
-            / event_id
+        run_dir = _resolve_regime_run_dir(
+            trainer,
+            output_subdir=self.settings.output_subdir,
+            regime=regime,
+            trigger_kind=trigger_kind,
         )
         run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -370,6 +550,7 @@ class EvaluationRegimesCallback(pl.Callback):
 
         summary = {
             "regime_id": regime_result.regime_id,
+            "regime_kind": regime.regime_kind,
             "phase_kind": regime.phase_kind,
             "trigger_kind": trigger_kind,
             "epoch": trainer.current_epoch + 1,
@@ -408,6 +589,30 @@ def _resolve_output_root(  # --------------------------------------------------
     if isinstance(logger_log_dir, str) and logger_log_dir:
         return Path(logger_log_dir)
     return Path(trainer.default_root_dir)
+
+
+# =============================================================================
+def _resolve_regime_run_dir(  # ----------------------------------------------
+    trainer: Trainer,
+    *,
+    output_subdir: str,
+    regime: EvaluationRegimeSettings,
+    trigger_kind: Literal["step", "epoch"],
+) -> Path:
+    """Return the per-regime event directory for one callback trigger event."""
+    output_root = _resolve_output_root(trainer)
+    event_id = (
+        f"epoch-{trainer.current_epoch + 1:04d}_"
+        f"step-{trainer.global_step:08d}_"
+        f"{trigger_kind}"
+    )
+    return (
+        output_root
+        / output_subdir
+        / regime.regime_kind
+        / regime.regime_id
+        / event_id
+    )
 
 
 # =============================================================================
@@ -474,6 +679,7 @@ def _sanitize_filename_component(  # ------------------------------------------
 
 # =============================================================================
 __all__ = [
+    "EvaluationFigureRequestSettings",
     "EvaluationRegimeSettings",
     "EvaluationRegimesCallback",
     "EvaluationRegimesCallbackSettings",
