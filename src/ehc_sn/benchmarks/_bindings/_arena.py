@@ -6,10 +6,12 @@ from typing import Any
 
 from ehc_sn.adapters.arena.ehc import (
     ArenaEHCAdapterSettings,
+    ArenaEHCTaskBinding,
     ArenaEHCV1BridgeAdapter,
 )
 from ehc_sn.adapters.arena.tem import (
     ArenaTEMAdapterSettings,
+    ArenaTEMTaskBinding,
     ArenaTEMV1BridgeAdapter,
     ArenaTEMV2BridgeAdapter,
 )
@@ -20,6 +22,7 @@ from ehc_sn.benchmarks.contracts import (
     ModelComparisonBinding,
     ModelComparisonExecution,
     ModelComparisonExecutionBundle,
+    ModelComparisonExecutionResources,
     TrackRecipe,
     validate_model_comparison_pair,
 )
@@ -27,11 +30,11 @@ from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryController,
     ReplayTrajectoryControllerConfig,
 )
+from ehc_sn.objectives.ehc import EHCObjective, EHCObjectiveConfig
+from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
+from ehc_sn.rollouts.runtime import RecurrentRunner
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
-from ehc_sn.tasks.arena.providers import (
-    ArenaFixedProbeProvider,
-    ArenaReplayDiagnosticProvider,
-)
+from ehc_sn.tasks.arena.providers import ArenaReplayProvider
 
 from ._shared import (
     binding_config,
@@ -74,7 +77,7 @@ class SharedArenaReplayModelComparisonBinding(ModelComparisonBinding):
             )
 
         family_binding = binding_config(recipe, model_family)
-        model, loader_fn, loaded_keys = load_frozen_model(
+        model, _, _ = load_frozen_model(
             model_family,
             manifest,
         )
@@ -91,6 +94,8 @@ class SharedArenaReplayModelComparisonBinding(ModelComparisonBinding):
             return ModelComparisonExecution(
                 bridge=bridge,
                 controller=controller,
+                objective=_build_arena_objective(model_family),
+                runner=RecurrentRunner(),
                 bridge_parameter_groups=bridge_only_parameter_groups(
                     model,
                     bridge,
@@ -100,12 +105,10 @@ class SharedArenaReplayModelComparisonBinding(ModelComparisonBinding):
         return ModelComparisonExecutionBundle(
             model=model,
             create_execution=create_execution,
-            loaders={
-                "init_only_weight_loader": loader_fn,
-                "loaded_key_count": len(loaded_keys),
-                "replay_provider_factory": ArenaReplayDiagnosticProvider,
-                "probe_provider_factory": ArenaFixedProbeProvider,
-            },
+            resources=ModelComparisonExecutionResources(
+                replay_provider_factory=ArenaReplayProvider,
+                controller_step_options={},
+            ),
             score_aggregator=_aggregate_arena_score_reports,
         )
 
@@ -138,7 +141,9 @@ def _resolve_arena_adapter_config(
 ) -> dict[str, Any]:
     adapter_cfg = dict(family_binding.get("adapter", {}))
     if "observation_dim" not in adapter_cfg:
-        for source in (family_binding, recipe.bridge.root, recipe.data.root):
+        bridge_cfg = recipe.bridge.model_dump(exclude_none=True)
+        data_cfg = recipe.data.model_dump(exclude_none=True)
+        for source in (family_binding, bridge_cfg, data_cfg):
             value = source.get("observation_dim")
             if value is not None:
                 adapter_cfg["observation_dim"] = int(value)
@@ -146,7 +151,8 @@ def _resolve_arena_adapter_config(
     if "observation_dim" not in adapter_cfg:
         raise ValueError(
             "Arena shared binding requires observation_dim in either "
-            "recipe.bindings[model_family].adapter, recipe.bridge, or recipe.data."
+            "recipe.bindings[model_family].adapter, recipe.bridge, or "
+            "recipe.data."
         )
 
     if "action_count" not in adapter_cfg:
@@ -167,6 +173,21 @@ def _resolve_arena_adapter_config(
     if "decoder" not in adapter_cfg and "decoder" in family_binding:
         adapter_cfg["decoder"] = family_binding["decoder"]
     return adapter_cfg
+
+
+# =============================================================================
+def _build_arena_objective(model_family: str) -> object:
+    if model_family in {"tem-v1", "tem-v2"}:
+        return TEMObjective(
+            TEMObjectiveConfig(),
+            task_binding=ArenaTEMTaskBinding(),
+        )
+    if model_family == "ehc-v1":
+        return EHCObjective(
+            EHCObjectiveConfig(),
+            task_binding=ArenaEHCTaskBinding(),
+        )
+    raise ValueError(f"Unsupported Arena model family: {model_family!r}.")
 
 
 # =============================================================================

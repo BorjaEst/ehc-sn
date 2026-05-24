@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping as MappingABC
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -112,6 +113,80 @@ def build_track_report(  # ----------------------------------------------------
         "seed_count": seed_count,
         "ood_slice": ood_slice,
         "scores": metrics,
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
+    return report
+
+
+# =============================================================================
+def build_track_report_from_seed_scores(
+    track_id: str,
+    model_family: str,
+    seed_scores: tuple[ArenaScoreReport | MazeHardScoreReport, ...],
+    *,
+    fixed_recipe: str,
+    ood_slice: str | None = None,
+) -> dict[str, object]:
+    """Build one benchmark report from concrete per-seed score reports."""
+    if not seed_scores:
+        raise ValueError("seed_scores must contain at least one score report.")
+
+    track = _resolve_track_definition(track_id)
+    canonical_model = _validate_model_support(track, model_family)
+    per_seed_metrics = [
+        _metrics_from_score(track, seed_score) for seed_score in seed_scores
+    ]
+    metric_names = (track.primary_metric, *track.secondary_metrics)
+    metric_summaries = {
+        metric_name: _summarize_seed_values(
+            tuple(
+                float(seed_metrics[metric_name])
+                for seed_metrics in per_seed_metrics
+            )
+        )
+        for metric_name in metric_names
+    }
+
+    seed_count = len(seed_scores)
+    canonical_ready = seed_count == 5
+
+    report: dict[str, object] = {
+        "track_id": track.track_id,
+        "claim_family": track.claim_family,
+        "compared_artifact_type": track.compared_artifact_type,
+        "readiness_state": track.readiness_state,
+        "task_family": track.task_family,
+        "model_family": canonical_model,
+        "fixed_recipe": fixed_recipe,
+        "primary_metric": {
+            "name": track.primary_metric,
+            "value": metric_summaries[track.primary_metric]["mean"],
+            **metric_summaries[track.primary_metric],
+        },
+        "secondary_metrics": {
+            metric_name: {
+                "value": metric_summaries[metric_name]["mean"],
+                **metric_summaries[metric_name],
+            }
+            for metric_name in track.secondary_metrics
+        },
+        "seed_count": seed_count,
+        "ood_slice": ood_slice,
+        "scores": {
+            metric_name: metric_summaries[metric_name]["mean"]
+            for metric_name in metric_names
+        },
+        "seed_scatter": {
+            metric_name: metric_summaries[metric_name]["per_seed"]
+            for metric_name in metric_names
+        },
+        "canonical_ready_track_evidence": canonical_ready,
+        "canonical_ready_track_requirement": "requires exactly 5 seeds",
+        "canonical_ready_track_note": (
+            None
+            if canonical_ready
+            else "Non-canonical ready-track evidence: report uses fewer than 5 seeds."
+        ),
         "generated_at": datetime.now(UTC).isoformat(),
     }
     return report
@@ -304,6 +379,26 @@ def _coerce_score_payload(  # -------------------------------------------------
 
 
 # =============================================================================
+def _summarize_seed_values(values: tuple[float, ...]) -> dict[str, object]:
+    """Return mean, 95% CI half-width, and per-seed values."""
+    if not values:
+        raise ValueError("Cannot summarize empty seed values.")
+    mean = sum(values) / len(values)
+    if len(values) == 1:
+        ci95 = 0.0
+    else:
+        variance = sum((value - mean) ** 2 for value in values) / (
+            len(values) - 1
+        )
+        ci95 = 1.96 * math.sqrt(variance / len(values))
+    return {
+        "mean": float(mean),
+        "ci95": float(ci95),
+        "per_seed": [float(value) for value in values],
+    }
+
+
+# =============================================================================
 def _metrics_from_score(  # ---------------------------------------------------
     track: TrackDefinition,
     score_report: ArenaScoreReport | MazeHardScoreReport,
@@ -344,6 +439,7 @@ __all__ = [
     "READY_TRACKS",
     "build_score_report",
     "build_track_report",
+    "build_track_report_from_seed_scores",
     "resolve_track_id",
     "write_track_report",
 ]

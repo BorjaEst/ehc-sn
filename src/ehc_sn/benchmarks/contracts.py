@@ -17,8 +17,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol, TypeAlias
 
-from pydantic import BaseModel, Field, RootModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
+from ehc_sn.loss.cross_entropy import LossType
+from ehc_sn.objectives.rollout import RolloutScorer
+from ehc_sn.rollouts.runtime import Runner
 from ehc_sn.tasks.arena.evaluation import ArenaScoreReport
 from ehc_sn.tasks.arena.runtime import (
     ARENA_REPLAY_OPTIONAL_KEYS,
@@ -36,18 +39,25 @@ ScoreReport: TypeAlias = ArenaScoreReport | MazeHardScoreReport
 
 
 # =============================================================================
-class ArtifactLoadPolicy(RootModel[dict[str, Any]]):
-    """Typed load-policy subtable for benchmark artifact manifests."""
+class ArtifactLoadPolicy(BaseModel, extra="forbid"):
+    """Load-policy subtable for benchmark artifact manifests."""
+
+    freeze_core: bool
+    allow_full_resume: bool
 
 
 # =============================================================================
-class ArtifactBenchmarkPolicy(RootModel[dict[str, Any]]):
-    """Typed benchmark-policy subtable for benchmark artifact manifests."""
+class ArtifactBenchmarkPolicy(BaseModel, extra="forbid"):
+    """Benchmark-policy subtable for benchmark artifact manifests."""
+
+    mode: ModelComparisonMode
 
 
 # =============================================================================
-class ArtifactProvenance(RootModel[dict[str, Any]]):
-    """Typed provenance subtable for benchmark artifact manifests."""
+class ArtifactProvenance(BaseModel, extra="forbid"):
+    """Provenance subtable for benchmark artifact manifests."""
+
+    source_run: str
 
 
 # =============================================================================
@@ -67,40 +77,104 @@ class ArtifactManifest(BaseModel, extra="forbid"):
     benchmark_policy: ArtifactBenchmarkPolicy
     provenance: ArtifactProvenance
 
-
-# =============================================================================
-class TrackArtifactRules(RootModel[dict[str, Any]]):
-    """Typed artifact-rules subtable for benchmark track recipes."""
-
-
-# =============================================================================
-class TrackBridge(RootModel[dict[str, Any]]):
-    """Typed bridge subtable for benchmark track recipes."""
-
-
-# =============================================================================
-class TrackExecution(RootModel[dict[str, Any]]):
-    """Typed execution subtable for benchmark track recipes."""
-
-
-# =============================================================================
-class TrackData(RootModel[dict[str, Any]]):
-    """Typed data subtable for benchmark track recipes."""
-
-
-# =============================================================================
-class TrackAdaptation(RootModel[dict[str, Any]]):
-    """Typed adaptation subtable for benchmark track recipes."""
+    @model_validator(mode="after")
+    def _validate_model_comparison_mode(self) -> "ArtifactManifest":
+        if self.artifact_type != "model_core":
+            raise ValueError(
+                "ArtifactManifest.artifact_type must be 'model_core'."
+            )
+        if self.benchmark_policy.mode != "model-comparison":
+            raise ValueError(
+                "ArtifactManifest.benchmark_policy.mode must be "
+                "'model-comparison'."
+            )
+        if not self.load_policy.freeze_core:
+            raise ValueError(
+                "ArtifactManifest.load_policy.freeze_core must be True for "
+                "model-comparison benchmarks."
+            )
+        if self.load_policy.allow_full_resume:
+            raise ValueError(
+                "ArtifactManifest.load_policy.allow_full_resume must be False "
+                "for model-comparison benchmarks."
+            )
+        return self
 
 
 # =============================================================================
-class TrackReporting(RootModel[dict[str, Any]]):
-    """Typed reporting subtable for benchmark track recipes."""
+class TrackArtifactRules(BaseModel, extra="forbid"):
+    """Artifact-rules subtable for benchmark track recipes."""
+
+    require_frozen_core: bool
+    require_fresh_bridge: bool
 
 
 # =============================================================================
-class TrackModelFamilyBinding(RootModel[dict[str, Any]]):
-    """Typed per-model-family binding subtable for track recipes."""
+class TrackBridge(BaseModel, extra="forbid"):
+    """Bridge subtable for benchmark track recipes."""
+
+    adapter: dict[str, Any] = Field(default_factory=dict)
+
+
+# =============================================================================
+class TrackExecution(BaseModel, extra="forbid"):
+    """Execution subtable for benchmark track recipes."""
+
+    fixed_budget_steps: int | None = Field(default=None, ge=1)
+    halt_action: int | None = Field(default=None, ge=0)
+    allow_halt: bool | None = None
+    explore: bool | None = None
+    seed: int | None = None
+    reseed_before_evaluation: bool | None = None
+    max_batches: int = Field(default=0, ge=0)
+
+
+# =============================================================================
+class TrackData(BaseModel, extra="forbid"):
+    """Data subtable for benchmark track recipes."""
+
+    dataset_path: str
+    split: str
+    batch_size: int = Field(ge=1)
+    n_cases: int = Field(ge=0)
+    sample_ids: tuple[str, ...] = ()
+
+
+# =============================================================================
+class BridgeAdaptationProtocol(BaseModel, extra="forbid"):
+    """Explicit benchmark-time bridge adaptation protocol contract."""
+
+    examples: int = Field(ge=1)
+    steps: int = Field(ge=1)
+    optimizer: str
+    learning_rate: float = Field(gt=0.0)
+    weight_decay: float = Field(ge=0.0)
+    betas: tuple[float, float]
+    seed: int
+    reseed_before_adaptation: bool
+    stopping_rule: str
+
+
+# =============================================================================
+class TrackAdaptation(BaseModel, extra="forbid"):
+    """Adaptation subtable for benchmark track recipes."""
+
+    objective_token_loss: LossType
+    protocol: BridgeAdaptationProtocol
+
+
+# =============================================================================
+class TrackReporting(BaseModel, extra="forbid"):
+    """Reporting subtable for benchmark track recipes."""
+
+    fixed_recipe: str
+
+
+# =============================================================================
+class TrackModelFamilyBinding(BaseModel, extra="forbid"):
+    """Per-model-family binding subtable for track recipes."""
+
+    adapter: dict[str, Any]
 
 
 # =============================================================================
@@ -121,10 +195,29 @@ class TrackRecipe(BaseModel, extra="forbid"):
     artifact_rules: TrackArtifactRules
     bridge: TrackBridge
     execution: TrackExecution
-    data: TrackData
+    adaptation_data: TrackData
+    evaluation_data: TrackData
     adaptation: TrackAdaptation
     reporting: TrackReporting
     bindings: dict[str, TrackModelFamilyBinding] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _upgrade_legacy_shared_data_selector(
+        cls,
+        data: Any,
+    ) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if "data" not in data:
+            return data
+        if "adaptation_data" in data or "evaluation_data" in data:
+            return data
+        migrated = dict(data)
+        shared_data = migrated.pop("data")
+        migrated["adaptation_data"] = shared_data
+        migrated["evaluation_data"] = shared_data
+        return migrated
 
     @model_validator(mode="after")
     def _validate_mode_and_bindings(self) -> "TrackRecipe":
@@ -141,6 +234,48 @@ class TrackRecipe(BaseModel, extra="forbid"):
                 + ", ".join(sorted(missing))
                 + "."
             )
+
+        if self.track_id == "mazehard-delib":
+            if self.capability_kind != "mazehard_deliberation":
+                raise ValueError(
+                    "mazehard-delib requires capability_kind='mazehard_deliberation'."
+                )
+            if not self.artifact_rules.require_frozen_core:
+                raise ValueError(
+                    "mazehard-delib requires artifact_rules.require_frozen_core=True."
+                )
+            if not self.artifact_rules.require_fresh_bridge:
+                raise ValueError(
+                    "mazehard-delib requires artifact_rules.require_fresh_bridge=True."
+                )
+            if self.execution.fixed_budget_steps is None:
+                raise ValueError(
+                    "mazehard-delib requires execution.fixed_budget_steps."
+                )
+            if self.execution.halt_action is None:
+                raise ValueError(
+                    "mazehard-delib requires execution.halt_action."
+                )
+            if self.execution.seed is None:
+                raise ValueError("mazehard-delib requires execution.seed.")
+            if self.execution.allow_halt is not False:
+                raise ValueError(
+                    "mazehard-delib requires execution.allow_halt=False."
+                )
+            if self.execution.explore is not False:
+                raise ValueError(
+                    "mazehard-delib requires execution.explore=False."
+                )
+            if self.execution.reseed_before_evaluation is not True:
+                raise ValueError(
+                    "mazehard-delib requires "
+                    "execution.reseed_before_evaluation=True."
+                )
+            if self.adaptation.protocol.reseed_before_adaptation is not True:
+                raise ValueError(
+                    "mazehard-delib requires "
+                    "adaptation.protocol.reseed_before_adaptation=True."
+                )
         return self
 
 
@@ -201,12 +336,37 @@ class ScoreAggregator(Protocol):
 
 
 # =============================================================================
+class ReplayProviderFactory(Protocol):
+    """Factory protocol for task-owned replay evaluation providers."""
+
+    def __call__(
+        self,
+        *,
+        dataset_path: str,
+        split: str,
+        batch_size: int,
+        n_cases: int,
+    ) -> object: ...
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class ModelComparisonExecutionResources:
+    """Typed runtime resources shared by benchmark model-comparison bindings."""
+
+    replay_provider_factory: ReplayProviderFactory
+    controller_step_options: dict[str, object]
+
+
+# =============================================================================
 @dataclass(frozen=True)
 class ModelComparisonExecution:
     """Per-execution benchmark resources for model-comparison mode."""
 
     bridge: object
     controller: object
+    objective: RolloutScorer
+    runner: Runner
     bridge_parameter_groups: tuple[dict[str, Any], ...]
 
 
@@ -224,7 +384,7 @@ class ModelComparisonExecutionBundle:
 
     model: object
     create_execution: ModelComparisonExecutionFactory
-    loaders: dict[str, object]
+    resources: ModelComparisonExecutionResources
     score_aggregator: ScoreAggregator
 
 
@@ -264,6 +424,16 @@ def validate_model_comparison_pair(
             "Unsupported capability_kind for model-comparison mode: "
             f"{recipe.capability_kind!r}."
         )
+    if not manifest.load_policy.freeze_core:
+        raise ValueError(
+            "ArtifactManifest.load_policy.freeze_core must be True for "
+            "model-comparison benchmarks."
+        )
+    if manifest.load_policy.allow_full_resume:
+        raise ValueError(
+            "ArtifactManifest.load_policy.allow_full_resume must be False "
+            "for model-comparison benchmarks."
+        )
 
 
 # =============================================================================
@@ -278,8 +448,10 @@ __all__ = [
     "ModelComparisonBinding",
     "ModelComparisonExecution",
     "ModelComparisonExecutionBundle",
+    "ModelComparisonExecutionResources",
     "ModelComparisonExecutionFactory",
     "ModelComparisonMode",
+    "ReplayProviderFactory",
     "READY_CAPABILITY_CONTRACTS",
     "ScoreAggregator",
     "ScoreReport",

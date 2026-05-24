@@ -37,7 +37,7 @@ def normalize_model_family(model_family: str) -> str:
 def binding_config(recipe: TrackRecipe, model_family: str) -> dict[str, Any]:
     """Return one model-family binding subtable as a mutable mapping."""
     try:
-        raw = recipe.bindings[model_family].root
+        raw = recipe.bindings[model_family].model_dump()
     except KeyError as exc:
         raise ValueError(
             "TrackRecipe.bindings has no entry for model_family "

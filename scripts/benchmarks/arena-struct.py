@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -16,9 +15,13 @@ from pydantic_settings import (
 )
 
 from ehc_sn.benchmarks import (
-    build_score_report,
-    build_track_report,
+    build_track_report_from_seed_scores,
+    run_ready_track_model_comparison_seeds,
     write_track_report,
+)
+from ehc_sn.benchmarks.contracts import (
+    parse_artifact_manifest,
+    parse_track_recipe,
 )
 
 _DEFAULT_TRACK_ID = "arena-struct"
@@ -59,16 +62,16 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
         default=None,
         description="Optional benchmark track override; defaults to the wrapper's canonical track.",
     )
-    model_family: str | None = Field(
+    manifest: Path | None = Field(
         default=None,
-        description="Model family identifier to evaluate (for example tem-v1, tem-v2, ehc-v1).",
+        description="Path to benchmark artifact manifest TOML.",
     )
-    score_json: Path | None = Field(
+    recipe: Path | None = Field(
         default=None,
-        description="Path to score payload JSON consumed by benchmark score coercion.",
+        description="Path to benchmark track recipe TOML.",
     )
-    fixed_recipe: str = Field(
-        default="default",
+    fixed_recipe: str | None = Field(
+        default=None,
         description="Fixed-recipe label recorded in the benchmark report.",
     )
     seed_count: int | None = Field(
@@ -98,10 +101,9 @@ def _run() -> int:
     defaults = _load_defaults(bootstrap.config)
     settings = RunArguments(**defaults)
 
-    track = settings.track or str(defaults.get("track") or _DEFAULT_TRACK_ID)
-    model_family = settings.model_family
-    score_json_path = settings.score_json
-    fixed_recipe = str(settings.fixed_recipe)
+    track = settings.track or _DEFAULT_TRACK_ID
+    manifest_path = settings.manifest
+    recipe_path = settings.recipe
     seed_count = _resolve_seed_count(
         settings.seed_count
         if settings.seed_count is not None
@@ -109,23 +111,32 @@ def _run() -> int:
     )
     ood_slice = settings.ood_slice
 
-    if model_family is None:
-        raise ValueError(
-            "--model-family is required unless provided by defaults."
-        )
-    if score_json_path is None:
-        raise ValueError(
-            "--score-json is required unless provided by defaults."
-        )
+    if manifest_path is None:
+        raise ValueError("--manifest is required unless provided by defaults.")
+    if recipe_path is None:
+        raise ValueError("--recipe is required unless provided by defaults.")
 
-    payload = json.loads(score_json_path.read_text(encoding="utf-8"))
-    score_report = build_score_report(track, payload)
-    report = build_track_report(
-        track,
-        str(model_family),
-        score_report,
-        fixed_recipe=fixed_recipe,
+    manifest = parse_artifact_manifest(manifest_path)
+    recipe = parse_track_recipe(recipe_path)
+    seed_scores = run_ready_track_model_comparison_seeds(
+        manifest,
+        recipe,
         seed_count=seed_count,
+    )
+
+    track = str(track or recipe.track_id)
+    model_family = str(manifest.model_family)
+    fixed_recipe = (
+        str(settings.fixed_recipe)
+        if settings.fixed_recipe is not None
+        else str(recipe.reporting.fixed_recipe)
+    )
+
+    report = build_track_report_from_seed_scores(
+        track,
+        model_family,
+        seed_scores,
+        fixed_recipe=fixed_recipe,
         ood_slice=None if ood_slice is None else str(ood_slice),
     )
 

@@ -7,10 +7,10 @@ private package.
 from __future__ import annotations
 
 from ._arena import SharedArenaReplayModelComparisonBinding
-from ._mazehard import SharedMazeHardModelComparisonBinding
+from ._mazehard import MazeHardDelibHRMV1ModelComparisonBinding
 
 # =============================================================================
 __all__ = [
+    "MazeHardDelibHRMV1ModelComparisonBinding",
     "SharedArenaReplayModelComparisonBinding",
-    "SharedMazeHardModelComparisonBinding",
 ]
