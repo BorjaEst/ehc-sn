@@ -1,0 +1,2 @@
+"""Figure templates package."""
+

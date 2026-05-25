@@ -23,6 +23,13 @@ class FigureContext:
     env_idx: int = 0
     freq_idx: int = 0
 
+    # Render-time sample selection
+    sample_idx: int = 0
+    """Index of the batch sample to use as the primary displayed item."""
+    max_items: int | None = None
+    """Maximum number of items shown per multi-sample panel.  ``None`` defers
+    to each template's own default cap."""
+
     # Optional figure customization parameters
     styles: Sequence[str] = field(default_factory=lambda: ["science"])
     layout: Optional[prp.Layout] = None
@@ -99,3 +106,37 @@ class Registry:
 
 
 REGISTRY = Registry()
+
+
+def _trace_has_numeric_path(trace: TraceTree, path: str) -> bool:
+    """Return whether a numeric leaf or numeric subtree exists at ``path`` in ``trace``."""
+    if not trace.path_to_index:
+        return False
+    idx = trace.path_to_index.get(path)
+    if idx is not None:
+        return bool(trace.leaf_is_numeric[idx])
+    prefix = f"{path}/"
+    for candidate, candidate_idx in trace.path_to_index.items():
+        if candidate.startswith(prefix) and trace.leaf_is_numeric[candidate_idx]:
+            return True
+    return False
+
+
+def _validate_figure_requirements(trace: TraceTree, spec: FigureSpec) -> None:
+    """Validate that ``trace`` satisfies the key requirements declared in ``spec``.
+
+    Args:
+        trace: Rollout trace to validate against ``spec`` requirements.
+        spec: Figure specification with ``trace_keys`` and ``meta_keys`` declarations.
+
+    Raises:
+        ValueError: If any required numeric or metadata key is absent from the trace.
+    """
+    if spec.trace_keys:
+        missing = [p for p in sorted(spec.trace_keys) if not _trace_has_numeric_path(trace, p)]
+        if missing:
+            raise ValueError(f"Figure '{spec.name}' missing required trace keys: {', '.join(missing)}")
+    if spec.meta_keys:
+        missing = [p for p in sorted(spec.meta_keys) if not trace.has_meta_path(p)]
+        if missing:
+            raise ValueError(f"Figure '{spec.name}' missing required metadata keys: {', '.join(missing)}")

@@ -12,11 +12,14 @@ from matplotlib.image import AxesImage
 from ehc_sn.figures.utils.colors import maze_cmap
 
 
-# =================================================================================================
-def plot_maze_with_overlay(  # --------------------------------------------------------------------
-    ax: Axes, inputs_grid: np.ndarray, overlay_mask: np.ndarray, *,
+# =============================================================================
+def plot_maze_with_overlay(  # ------------------------------------------------
+    ax: Axes,
+    inputs_grid: np.ndarray,
+    overlay_mask: np.ndarray,
+    *,
     title: Optional[str] = None,
-) -> tuple[AxesImage, AxesImage]:  # fmt: skip
+) -> tuple[AxesImage, AxesImage]:
     """Render maze inputs with a semi-transparent overlay mask.
 
     The maze grid uses image/grid coordinates with row 0 displayed at the top,
@@ -27,7 +30,14 @@ def plot_maze_with_overlay(  # -------------------------------------------------
     base = np.asarray(inputs_grid)
     overlay = np.asarray(overlay_mask).astype(float)
 
-    base_img = ax.imshow(base, cmap=maze_cmap(), vmin=0, vmax=5, interpolation="nearest", origin="upper")
+    base_img = ax.imshow(
+        base,
+        cmap=maze_cmap(),
+        vmin=0,
+        vmax=5,
+        interpolation="nearest",
+        origin="upper",
+    )
     overlay_img = ax.imshow(
         overlay,
         cmap=ListedColormap(["none", "#e53e3e"]),
@@ -40,3 +50,7 @@ def plot_maze_with_overlay(  # -------------------------------------------------
     if title:
         ax.set_title(title, fontsize=9)
     return base_img, overlay_img
+
+
+# =============================================================================
+__all__ = ["plot_maze_with_overlay"]

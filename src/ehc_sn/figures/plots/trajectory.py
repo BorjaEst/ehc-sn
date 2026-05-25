@@ -6,13 +6,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
 
+from ehc_sn.figures._contracts import AnyWorld
 from ehc_sn.figures.plots.map import plot_map
 from ehc_sn.figures.utils.axes import _environment_locations
 
 
 def plot_time_colored_trajectory(
     ax: plt.Axes,
-    world: object,
+    world: AnyWorld,
     location_ids: list[int],
     *,
     cmap: str = "plasma",
@@ -70,7 +71,7 @@ def plot_time_colored_trajectory(
     return ax
 
 
-def _trajectory_coords(world: object, location_ids: list[int]) -> np.ndarray:
+def _trajectory_coords(world: AnyWorld, location_ids: list[int]) -> np.ndarray:
     """Return trajectory coordinates in canonical world order ``(o, y)``."""
     coords = []
     locations = _environment_locations(world)

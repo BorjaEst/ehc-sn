@@ -15,25 +15,16 @@ fraction* coordinates (0..1).
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Protocol, Sequence, Tuple, cast, overload
+from typing import Any, Literal, Optional, Sequence, TypeAlias, cast
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
-
-# =================================================================================================
-class EnvironmentLike(Protocol):
-    """Minimal protocol for environment coordinate metadata.
-
-    The plotting utilities only rely on a set of named locations with numeric
-    coordinates and (optionally) a location count.
-    """
-
-    locations: Sequence[Mapping[str, float]]
-    n_locations: int
+from ehc_sn.figures._contracts import AnyWorld
 
 
+# =============================================================================
 @dataclass(frozen=True)
 class _AxesRect:
     """Rectangle in container coordinates."""
@@ -44,6 +35,7 @@ class _AxesRect:
     height: float
 
 
+# =============================================================================
 @dataclass(frozen=True)
 class _SolvedMosaic:
     """Aspect-aware mosaic solution in container coordinates.
@@ -63,10 +55,14 @@ class _SolvedMosaic:
     rectangles: tuple[_AxesRect, ...]
 
 
-PlacementMode = Literal["center", "top-left"]
+# =============================================================================
+PlacementMode: TypeAlias = Literal["center", "top-left"]
 
 
-def _environment_locations(environment: object) -> Sequence[Mapping[str, Any]]:
+# =============================================================================
+def _environment_locations(  # ------------------------------------------------
+    environment: object,
+) -> Sequence[Mapping[str, Any]]:
     """Return environment locations from either an object or mapping contract."""
     if isinstance(environment, Mapping):
         locations = environment.get("locations", [])
@@ -75,7 +71,10 @@ def _environment_locations(environment: object) -> Sequence[Mapping[str, Any]]:
     return locations if isinstance(locations, Sequence) else []
 
 
-def _environment_n_locations(environment: object) -> int:
+# =============================================================================
+def _environment_n_locations(  # ----------------------------------------------
+    environment: object,
+) -> int:
     """Return the declared location count or infer it from the locations list."""
     if isinstance(environment, Mapping):
         value = environment.get("n_locations")
@@ -86,18 +85,48 @@ def _environment_n_locations(environment: object) -> int:
     return int(value)
 
 
-# =================================================================================================
-def configure_environment_axes(  # ----------------------------------------------------------------
+# =============================================================================
+def _environment_plot_coords(  # ----------------------------------------------
+    environment: object,
+) -> NDArray[np.float64]:
+    """Return finite coordinates for the locations that should be rendered.
+
+    When location metadata exposes a boolean ``valid`` flag, invalid locations
+    are omitted so axis fitting matches the visible occupancy rather than the
+    full latent lattice. If every location is marked invalid, fall back to all
+    finite coordinates so callers still get deterministic bounds.
+    """
+    locations = _environment_locations(environment)
+    if not locations:
+        return np.zeros((0, 2), dtype=float)
+
+    coords = np.asarray(
+        [[loc.get("o"), loc.get("y")] for loc in locations], dtype=float
+    )
+    finite = np.isfinite(coords).all(axis=1)
+    visible = np.asarray(
+        [bool(loc.get("valid", True)) for loc in locations], dtype=bool
+    )
+    selected = finite & visible
+    if not np.any(selected):
+        selected = finite
+    return coords[selected]
+
+
+# =============================================================================
+def configure_environment_axes(  # --------------------------------------------
     ax: Axes,
     *,
-    environment: Optional[EnvironmentLike] = None, radius: Optional[float] = None,
-    padding_scale: float = 2.0, invert_y: bool = False,
-) -> Axes:  # fmt: skip
+    environment: Optional[AnyWorld] = None,
+    radius: Optional[float] = None,
+    padding_scale: float = 2.0,
+    invert_y: bool = False,
+) -> Axes:
     """Configure `ax` for plotting a 2D environment/map.
 
     This helper standardizes axes defaults used across the figure system:
 
-    - Sets x/y limits based on `environment.locations` when available.
+    - Sets x/y limits based on the visible environment occupancy when available.
     - Enforces equal aspect ratio.
     - Hides ticks/spines (the map content should define the visual frame).
     - Optionally inverts the y-axis (common for image-like coordinate systems).
@@ -120,11 +149,8 @@ def configure_environment_axes(  # ---------------------------------------------
         The same `ax` instance (mutated).
     """
 
-    locations = [] if environment is None else _environment_locations(environment)
-    if locations:
-        coords = np.array([[loc.get("o"), loc.get("y")] for loc in locations], dtype=float)
-        valid = np.isfinite(coords).all(axis=1)
-        coords = coords[valid]
+    if environment is not None:
+        coords = _environment_plot_coords(environment)
         if coords.size > 0:
             x_min, y_min = coords.min(axis=0)
             x_max, y_max = coords.max(axis=0)
@@ -153,14 +179,20 @@ def configure_environment_axes(  # ---------------------------------------------
     return ax
 
 
-def _default_radius(n_locations: int) -> float:
+# =============================================================================
+def _default_radius(  # -------------------------------------------------------
+    n_locations: int,
+) -> float:
     """Return a heuristic marker radius for padding environment axes limits."""
     if n_locations <= 0:
         return 0.05
     return 2 * (0.01 + 1 / (10 * np.sqrt(n_locations)))
 
 
-def _hide_parent_axes(ax: Axes) -> None:
+# =============================================================================
+def _hide_parent_axes(  # -----------------------------------------------------
+    ax: Axes,
+) -> None:
     """Hide ticks, spines, and patch for a parent axes hosting inset children."""
     ax.set_xticks([])
     ax.set_yticks([])
@@ -170,14 +202,21 @@ def _hide_parent_axes(ax: Axes) -> None:
     ax.set_navigate(False)
 
 
-# =================================================================================================
-def subdivide_axes(  # ----------------------------------------------------------------------------
-    ax: Axes, nrows: int = 1, ncols: int = 1,
+# =============================================================================
+def subdivide_axes(  # --------------------------------------------------------
+    ax: Axes,
+    nrows: int = 1,
+    ncols: int = 1,
     *,
-    wspace: float = 0.0, hspace: float = 0.0, left_pad: float = 0.0, right_pad: float = 0.0,
-    top_pad: float = 0.0, bottom_pad: float = 0.0, hide_parent: bool = True,
+    wspace: float = 0.0,
+    hspace: float = 0.0,
+    left_pad: float = 0.0,
+    right_pad: float = 0.0,
+    top_pad: float = 0.0,
+    bottom_pad: float = 0.0,
+    hide_parent: bool = True,
     squeeze: bool = False,
-) -> NDArray[np.object_] | Axes:  # fmt: skip
+) -> NDArray[np.object_] | Axes:
     """Subdivide `ax` into a regular grid of inset child axes.
 
     Child axes are created using :meth:`matplotlib.axes.Axes.inset_axes` with
@@ -221,7 +260,9 @@ def subdivide_axes(  # ---------------------------------------------------------
         - otherwise the same 2D array.
     """
     if nrows <= 0 or ncols <= 0:
-        raise ValueError(f"nrows and ncols must be positive, got nrows={nrows}, ncols={ncols}")
+        raise ValueError(
+            f"nrows and ncols must be positive, got nrows={nrows}, ncols={ncols}"
+        )
 
     if hide_parent:
         _hide_parent_axes(ax)
@@ -236,7 +277,9 @@ def subdivide_axes(  # ---------------------------------------------------------
     cell_w = (usable_w - (ncols - 1) * wspace) / ncols
     cell_h = (usable_h - (nrows - 1) * hspace) / nrows
     if cell_w <= 0 or cell_h <= 0:
-        raise ValueError("Spacing leaves no usable cell size in the parent axes.")
+        raise ValueError(
+            "Spacing leaves no usable cell size in the parent axes."
+        )
 
     out: list[list[Axes]] = []
     for r in range(nrows):
@@ -244,7 +287,9 @@ def subdivide_axes(  # ---------------------------------------------------------
         for c in range(ncols):
             x0 = left_pad + c * (cell_w + wspace)
             y0 = bottom_pad + (nrows - 1 - r) * (cell_h + hspace)
-            child = ax.inset_axes((x0, y0, cell_w, cell_h), transform=ax.transAxes)
+            child = ax.inset_axes(
+                (x0, y0, cell_w, cell_h), transform=ax.transAxes
+            )
             row.append(child)
         out.append(row)
 
@@ -261,13 +306,19 @@ def subdivide_axes(  # ---------------------------------------------------------
     return arr
 
 
-# =================================================================================================
-def mosaic_axes(  # -------------------------------------------------------------------------------
-    ax: Axes, n_items: int,
+# =============================================================================
+def mosaic_axes(  # -----------------------------------------------------------
+    ax: Axes,
+    n_items: int,
     *,
-    wspace: float = 0.0, hspace: float = 0.0, left_pad: float = 0.0, right_pad: float = 0.0,
-    top_pad: float = 0.0, bottom_pad: float = 0.0, hide_parent: bool = True,
-) -> NDArray[np.object_]:  # fmt: skip
+    wspace: float = 0.0,
+    hspace: float = 0.0,
+    left_pad: float = 0.0,
+    right_pad: float = 0.0,
+    top_pad: float = 0.0,
+    bottom_pad: float = 0.0,
+    hide_parent: bool = True,
+) -> NDArray[np.object_]:
     """Create a mosaic of inset axes within `ax`.
 
     Args:
@@ -290,7 +341,9 @@ def mosaic_axes(  # ------------------------------------------------------------
     """
     fig = ax.figure
     if fig is None:
-        raise ValueError("Cannot create a mosaic for an Axes that is not attached to a Figure.")
+        raise ValueError(
+            "Cannot create a mosaic for an Axes that is not attached to a Figure."
+        )
 
     # Ensure layout has been computed before reading positions.
     if getattr(fig, "canvas", None) is not None:
@@ -333,7 +386,7 @@ def mosaic_axes(  # ------------------------------------------------------------
     )
 
 
-# =================================================================================================
+# =============================================================================
 @dataclass(frozen=True)
 class _MosaicChoice:
     nrows: int
@@ -341,19 +394,30 @@ class _MosaicChoice:
     key: tuple[float, int, float]
 
 
-def _choose_generic_mosaic_shape(  # --------------------------------------------------------------
+# =============================================================================
+def _choose_generic_mosaic_shape(  # ------------------------------------------
     *,
-    container_width: float, container_height: float, n_items: int, 
-    wspace: float = 0.0, hspace: float = 0.0,
-    left_pad: float = 0.0, right_pad: float = 0.0, top_pad: float = 0.0, bottom_pad: float = 0.0,
-) -> tuple[int, int]:  # fmt: skip
+    container_width: float,
+    container_height: float,
+    n_items: int,
+    wspace: float = 0.0,
+    hspace: float = 0.0,
+    left_pad: float = 0.0,
+    right_pad: float = 0.0,
+    top_pad: float = 0.0,
+    bottom_pad: float = 0.0,
+) -> tuple[int, int]:
     """Choose a free-aspect mosaic shape using effective drawable cell sizes."""
     if n_items <= 0:
         raise ValueError(f"n_items must be positive, got n_items={n_items}")
     if not np.isfinite(container_width) or container_width <= 0:
-        raise ValueError(f"container_width must be positive, got {container_width}")
+        raise ValueError(
+            f"container_width must be positive, got {container_width}"
+        )
     if not np.isfinite(container_height) or container_height <= 0:
-        raise ValueError(f"container_height must be positive, got {container_height}")
+        raise ValueError(
+            f"container_height must be positive, got {container_height}"
+        )
 
     usable_w = container_width - left_pad - right_pad
     usable_h = container_height - top_pad - bottom_pad
@@ -383,10 +447,10 @@ def _choose_generic_mosaic_shape(  # -------------------------------------------
     return int(best.nrows), int(best.ncols)
 
 
-# =================================================================================================
-def _get_figure_size_inches(  # -------------------------------------------------------------------
+# =============================================================================
+def _get_figure_size_inches(  # -----------------------------------------------
     fig: Any,
-) -> tuple[float, float]:  # fmt: skip
+) -> tuple[float, float]:
     """Return `(width_in, height_in)` for a matplotlib Figure-like object."""
     size = getattr(fig, "get_size_inches", None)
     if callable(size):
@@ -399,4 +463,5 @@ def _get_figure_size_inches(  # ------------------------------------------------
     raise ValueError("Cannot determine figure size in inches.")
 
 
+# =============================================================================
 __all__ = ["configure_environment_axes", "mosaic_axes", "subdivide_axes"]
