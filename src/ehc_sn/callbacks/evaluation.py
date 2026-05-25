@@ -544,10 +544,14 @@ class EvaluationRegimesCallback(pl.Callback):
 
         requested_trace_keys = set(trace_request.trace_keys)
         for name in trace_request.figure_names:
-            requested_trace_keys.update(REGISTRY.get(name).trace_keys)
+            figure = REGISTRY.get(name)
+            requested_trace_keys.update(figure.trace_keys)
+            requested_trace_keys.update(figure.meta_keys)
         if figure_request.enabled:
             for name in figure_request.figures:
-                requested_trace_keys.update(REGISTRY.get(name).trace_keys)
+                figure = REGISTRY.get(name)
+                requested_trace_keys.update(figure.trace_keys)
+                requested_trace_keys.update(figure.meta_keys)
 
         if requested_trace_keys:
             set_trace_keys = getattr(pl_module, "set_eval_trace_keys", None)

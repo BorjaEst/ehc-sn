@@ -54,6 +54,7 @@ def run_captured_rollout(  # -------------------------------------------------
     max_rollout_steps: int | None = None,
     hard_max_rollout_steps: int | None = None,
     runner_options: Mapping[str, object] | None = None,
+    snapshot_model_state: bool = True,
 ) -> RolloutChunk:
     """Execute a rollout and return the captured chunk."""
     executed = runner.run(
@@ -63,6 +64,7 @@ def run_captured_rollout(  # -------------------------------------------------
         max_rollout_steps=max_rollout_steps,
         hard_max_rollout_steps=hard_max_rollout_steps,
         options=dict(runner_options or {}),
+        snapshot_model_state=snapshot_model_state,
     )
     if not isinstance(executed, RolloutChunk):
         raise TypeError(
@@ -84,6 +86,7 @@ def score_captured_rollout(  # -----------------------------------------------
     hard_max_rollout_steps: int | None = None,
     runner_options: Mapping[str, object] | None = None,
     objective_options: Mapping[str, object] | None = None,
+    snapshot_model_state: bool = True,
 ) -> CapturedRolloutResult:
     """Execute a rollout chunk and score it with a pure objective."""
     executed = run_captured_rollout(
@@ -94,6 +97,7 @@ def score_captured_rollout(  # -----------------------------------------------
         max_rollout_steps=max_rollout_steps,
         hard_max_rollout_steps=hard_max_rollout_steps,
         runner_options=runner_options,
+        snapshot_model_state=snapshot_model_state,
     )
     evaluated = score_rollout_chunk(
         executed, objective, **dict(objective_options or {})
@@ -114,6 +118,7 @@ def score_rollout_streaming(  # ----------------------------------------------
     runner_options: Mapping[str, object] | None = None,
     objective_options: Mapping[str, object] | None = None,
     observed_step_observer: Callable[[ObservedStep], None] | None = None,
+    snapshot_model_state: bool = True,
 ) -> StreamingRolloutResult:
     """Execute a rollout and score records on the fly without storing the full chunk."""
     objective_options_dict = dict(objective_options or {})
@@ -142,6 +147,7 @@ def score_rollout_streaming(  # ----------------------------------------------
         options=dict(runner_options or {}),
         record_observer=observe_record,
         capture_records=False,
+        snapshot_model_state=snapshot_model_state,
     )
     if isinstance(executed, RolloutChunk):
         raise TypeError(

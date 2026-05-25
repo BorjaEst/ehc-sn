@@ -315,22 +315,27 @@ TRACE_WORLD_LOCATION_IDS_TEM = TraceField(
 TRACE_DIAGNOSTIC_LEC_CELLS_TEM = TraceField(
     name="diagnostic/lec/cells",
     get=_get_diagnostic_lec_cells_tem,
+    requires_model_state=True,
 )
 TRACE_DIAGNOSTIC_LEC_FILTERED_TEM = TraceField(
     name="diagnostic/lec/filtered",
     get=_get_diagnostic_lec_filtered_tem,
+    requires_model_state=True,
 )
 TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM = TraceField(
     name="diagnostic/mec/location_mean",
     get=_get_diagnostic_mec_location_mean_tem,
+    requires_model_state=True,
 )
 TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM = TraceField(
     name="diagnostic/hpc/location_mean",
     get=_get_diagnostic_hpc_location_mean_tem,
+    requires_model_state=True,
 )
 TRACE_DIAGNOSTIC_HPC_MEMORY_TEM = TraceField(
     name="diagnostic/hpc/memory",
     get=_get_diagnostic_hpc_memory_tem,
+    requires_model_state=True,
 )
 TRACE_LEC_FILTER_ALPHA_SIGMOID_TEM = TraceField(
     name="lec/filter/alpha_sigmoid",

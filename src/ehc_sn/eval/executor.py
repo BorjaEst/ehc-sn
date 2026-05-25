@@ -34,6 +34,7 @@ def execute_replay_evaluation_batch(
     trace_request: EvaluationTraceRequest | None = None,
 ) -> EvaluationCaseResult:
     """Execute and score one replay case with optional trace materialization."""
+    snapshot_model_state = _trace_request_needs_model_state(trace_request)
     evaluation = score_captured_rollout(
         runner=runner,
         source=RepeatSource(case.batch),
@@ -44,6 +45,7 @@ def execute_replay_evaluation_batch(
         hard_max_rollout_steps=hard_max_rollout_steps,
         runner_options=runner_options,
         objective_options=objective_options,
+        snapshot_model_state=snapshot_model_state,
     )
 
     trace = None
@@ -86,6 +88,16 @@ def iter_evaluation_regime(
             case,
             trace_request=trace_request,
         )
+
+
+# =============================================================================
+def _trace_request_needs_model_state(
+    trace_request: EvaluationTraceRequest | None,
+) -> bool:
+    """Return whether requested trace fields require carry.model_state snapshots."""
+    if trace_request is None:
+        return False
+    return trace_request.trace_spec.requires_model_state()
 
 
 # =============================================================================

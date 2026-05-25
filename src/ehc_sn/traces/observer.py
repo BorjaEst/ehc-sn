@@ -46,6 +46,7 @@ class TraceField(Generic[Context]):
     name: str
     get: TraceGetter[Context]
     storage: TraceStorage = "dense"
+    requires_model_state: bool = False
 
 
 # =============================================================================
@@ -60,6 +61,12 @@ class TraceSpec(Generic[Context]):
     ) -> set[str]:
         """Return the set of field names in this spec."""
         return {field.name for field in self.fields}
+
+    def requires_model_state(  # ---------------------------------------------
+        self,
+    ) -> bool:
+        """Return whether any selected field needs carry.model_state."""
+        return any(field.requires_model_state for field in self.fields)
 
 
 # =============================================================================

@@ -13,6 +13,7 @@ import tomllib
 from dataclasses import asdict, dataclass, is_dataclass
 from numbers import Real
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal
 
 import numpy as np
@@ -92,43 +93,77 @@ def collect_regime_figure_bundle(
         trace_keys=trace_keys or [],
         figure_names=figure_names or [],
     )
-    case_results = tuple(
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    cases_dir = run_dir / "cases"
+    cases_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_rows: list[dict[str, Any]] = []
+    manifest_rows: list[dict[str, Any]] = []
+    lightweight_case_results: list[EvaluationCaseResult] = []
+    loss_sum = 0.0
+    loss_count = 0
+
+    for idx, result in enumerate(
         iter_evaluation_regime(
             provider,
             executor,
             max_batches=max_batches,
             trace_request=trace_request,
         )
-    )
-
-    losses = [
-        value
-        for value in (
-            _extract_loss_scalar(result.evaluated) for result in case_results
+    ):
+        row = _persist_regime_case(
+            run_dir=run_dir,
+            result=result,
+            index=idx,
+            write_legacy_compat=write_legacy_compat,
         )
-        if value is not None
-    ]
-    summary: dict[str, object] = {"n_cases": len(case_results)}
-    if losses:
-        summary["loss"] = sum(losses) / len(losses)
+        summary_rows.append(
+            {
+                "case_id": row["case_id"],
+                "source_context": row["source_context"],
+                "loss": row["loss"],
+                "has_trace": row["has_trace"],
+            }
+        )
+        manifest_rows.append(row)
 
-    regime_result = EvaluationRegimeResult(
-        regime_id=regime_id,
-        case_results=case_results,
-        summary=summary,
-    )
-    persist_regime_figure_bundle(
+        loss = row["loss"]
+        if isinstance(loss, Real):
+            loss_sum += float(loss)
+            loss_count += 1
+
+        lightweight_case_results.append(
+            EvaluationCaseResult(
+                case_id=result.case_id,
+                evaluated=SimpleNamespace(loss=loss),
+                source_context=result.source_context,
+                trace=None,
+            )
+        )
+
+    summary: dict[str, object] = {"n_cases": len(summary_rows)}
+    if loss_count > 0:
+        summary["loss"] = loss_sum / float(loss_count)
+
+    _write_regime_bundle_manifest(
         run_dir=run_dir,
+        regime_summary=summary,
+        summary_rows=summary_rows,
+        manifest_rows=manifest_rows,
         regime_kind=regime_kind,
         regime_id=regime_id,
         phase_kind="diag" if regime_kind == "diagnostic" else "bench",
         trigger_kind=trigger_kind,
         epoch=epoch,
         step=step,
-        regime_result=regime_result,
         write_legacy_compat=write_legacy_compat,
     )
-    return regime_result
+    return EvaluationRegimeResult(
+        regime_id=regime_id,
+        case_results=tuple(lightweight_case_results),
+        summary=summary,
+    )
 
 
 # =============================================================================
@@ -378,14 +413,91 @@ def persist_regime_figure_bundle(
 
         manifest_rows.append(row)
 
+    _write_regime_bundle_manifest(
+        run_dir=run_dir,
+        regime_summary=dict(regime_result.summary),
+        summary_rows=summary_rows,
+        manifest_rows=manifest_rows,
+        regime_kind=regime_kind,
+        regime_id=regime_id,
+        phase_kind=phase_kind,
+        trigger_kind=trigger_kind,
+        epoch=epoch,
+        step=step,
+        write_legacy_compat=write_legacy_compat,
+    )
+
+
+# =============================================================================
+def _persist_regime_case(
+    *,
+    run_dir: Path,
+    result: EvaluationCaseResult,
+    index: int,
+    write_legacy_compat: bool,
+) -> dict[str, Any]:
+    """Persist one case payload and return one manifest-ready case row."""
+    source_context = _to_jsonable(result.source_context)
+    loss = _extract_loss_scalar(result.evaluated)
+    has_trace = result.trace is not None
+    row: dict[str, Any] = {
+        "case_id": result.case_id,
+        "source_context": source_context,
+        "loss": loss,
+        "has_trace": has_trace,
+    }
+    if not has_trace:
+        return row
+
+    stem = f"{index:04d}-{_sanitize_filename_component(result.case_id)}"
+    dense_rel = Path("cases") / f"{stem}.dense.npz"
+    meta_rel = Path("cases") / f"{stem}.meta.json"
+    dense = result.trace.export()
+    meta = result.trace.get_meta()
+    _write_dense_npz(run_dir / dense_rel, dense)
+    (run_dir / meta_rel).write_text(
+        json.dumps(_to_jsonable(meta), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    row["dense_artifact"] = str(dense_rel)
+    row["meta_artifact"] = str(meta_rel)
+
+    if write_legacy_compat:
+        trace_payload = {
+            "case_id": result.case_id,
+            "source_context": result.source_context,
+            "dense": dense,
+            "meta": meta,
+        }
+        trace_path = run_dir / f"{stem}.pt"
+        torch.save(trace_payload, trace_path)
+    return row
+
+
+# =============================================================================
+def _write_regime_bundle_manifest(
+    *,
+    run_dir: Path,
+    regime_summary: dict[str, object],
+    summary_rows: list[dict[str, Any]],
+    manifest_rows: list[dict[str, Any]],
+    regime_kind: Literal["diagnostic", "benchmark"],
+    regime_id: str,
+    phase_kind: Literal["diag", "bench"],
+    trigger_kind: str,
+    epoch: int,
+    step: int,
+    write_legacy_compat: bool,
+) -> None:
+    """Write canonical and legacy-compatible manifest/summary payloads."""
     summary = {
-        "regime_id": regime_result.regime_id,
+        "regime_id": regime_id,
         "regime_kind": regime_kind,
         "phase_kind": phase_kind,
         "trigger_kind": trigger_kind,
         "epoch": epoch,
         "step": step,
-        "summary": _to_jsonable(dict(regime_result.summary)),
+        "summary": _to_jsonable(dict(regime_summary)),
         "cases": summary_rows,
     }
     if write_legacy_compat:
@@ -402,7 +514,7 @@ def persist_regime_figure_bundle(
         "trigger_kind": trigger_kind,
         "epoch": epoch,
         "step": step,
-        "summary": _to_jsonable(dict(regime_result.summary)),
+        "summary": _to_jsonable(dict(regime_summary)),
         "cases": manifest_rows,
     }
     (run_dir / _MANIFEST_FILENAME).write_text(
@@ -577,7 +689,9 @@ def _build_trace_request(
         # Force figures-package bootstrap so built-in names resolve in fresh processes.
         list_figures()
     for name in figure_names:
-        requested_trace_keys.update(REGISTRY.get(name).trace_keys)
+        figure = REGISTRY.get(name)
+        requested_trace_keys.update(figure.trace_keys)
+        requested_trace_keys.update(figure.meta_keys)
 
     if requested_trace_keys:
         set_trace_keys = getattr(executor, "set_eval_trace_keys", None)
@@ -675,6 +789,11 @@ def _to_jsonable(value: Any) -> Any:
         return value
     if isinstance(value, Path):
         return str(value)
+    if torch.is_tensor(value):
+        tensor = value.detach().cpu()
+        if tensor.ndim == 0:
+            return tensor.item()
+        return tensor.tolist()
     if isinstance(value, np.ndarray):
         return value.tolist()
     return repr(value)

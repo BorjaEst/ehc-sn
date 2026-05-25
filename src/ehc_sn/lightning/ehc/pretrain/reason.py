@@ -12,6 +12,7 @@ from torchmetrics import MetricCollection
 
 from ehc_sn import utils
 from ehc_sn.adapters.mazehard.ehc import (
+    MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS,
     MazeHardEHCAdapterSettings,
     MazeHardEHCV1HybridTaskBinding,
 )
@@ -47,6 +48,7 @@ from ehc_sn.tasks.mazehard.capabilities.deliberation import (
     MazeHardDeliberationConfig,
 )
 from ehc_sn.tasks.mazehard.reward import MazeHardRewardProjector
+from ehc_sn.traces import build_trace_spec
 from ehc_sn.training.actor_critic import (
     TD0ActorCriticBatchBuilder,
     ZeroBootstrapActorCriticValidationScorer,
@@ -143,6 +145,7 @@ class EHCReasonPretrainRegime:
 
         self._train_buffer: FifoBuffer | None = None
         self._train_batch_assembler: PartialResetBatchAssembler | None = None
+        self._eval_trace_keys: set[str] | None = None
 
     def _ensure_train_batch_assembler(
         self, batch: Batch
@@ -248,6 +251,21 @@ class EHCReasonPretrainRegime:
     ) -> None:
         """Reset val metrics at the start of each validation epoch."""
         self._lm.val_metrics.reset()
+
+    def set_eval_trace_keys(self, keys: set[str]) -> None:
+        """Set semantic trace keys for replay-evaluation capture."""
+        self._eval_trace_keys = set(keys)
+        extra_fields = tuple(
+            field
+            for field in MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS
+            if field.name in self._eval_trace_keys
+        )
+        self._lm.trace_spec = build_trace_spec(
+            "rl",
+            include_keys=self._eval_trace_keys,
+            extra_fields=extra_fields,
+        )
+        self._lm.trace_specs = self._lm.trace_spec
 
     def training_step(  # -----------------------------------------------------
         self,
