@@ -4,7 +4,7 @@ Supports two public modes (selected by the ``mode`` field in the config):
     spatial_pretrain    — arena replay, EHC variational objective.
     reason_pretrain     — MazeHard deliberation, hybrid RL.
 
-Configuration path: EHC_V1_CONFIGURATION_PATH (default: config/training.ehc-v1-spatial.toml).
+Configuration path: EHC_V1_CONFIGURATION_PATH (default: config/training/ehc-v1-spatial-vram8gib.toml).
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
 CONFIGURATION_PATH = os.environ.get(
-    "EHC_V1_CONFIGURATION_PATH", "config/training.ehc-v1-spatial.toml"
+    "EHC_V1_CONFIGURATION_PATH", "config/training/ehc-v1-spatial-vram8gib.toml"
 )
 
 

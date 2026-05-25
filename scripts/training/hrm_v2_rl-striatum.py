@@ -66,7 +66,7 @@ torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
 CONFIGURATION_PATH = os.environ.get(
-    "HRM_V2_CONFIGURATION_PATH", "config/training.hrm-v2.toml"
+    "HRM_V2_CONFIGURATION_PATH", "config/training/hrm-v2-default.toml"
 )
 
 

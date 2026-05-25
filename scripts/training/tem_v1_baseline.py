@@ -71,7 +71,7 @@ torch.backends.cuda.enable_flash_sdp(True)
 torch.backends.cuda.enable_mem_efficient_sdp(True)
 torch.backends.cuda.enable_math_sdp(True)
 CONFIGURATION_PATH = os.environ.get(
-    "TEM_V1_CONFIGURATION_PATH", "config/training.tem-v1.toml"
+    "TEM_V1_CONFIGURATION_PATH", "config/training/tem-v1-default.toml"
 )
 
 
