@@ -14,14 +14,14 @@ model_config_path = "config/models/hrm-v1-base.toml"
 dataset_path         = "data/processed/mazehard/default/v1"
 global_batch_size    = 4
 max_epochs           = 1
-max_steps            = 1
+max_steps            = 32
 seed                 = 42
 augment              = true
 num_workers          = 0
 pin_memory           = false
 persistent_workers   = false
 log_every_n_steps    = 1
-val_check_interval   = 1
+val_check_interval   = 8
 limit_val_batches    = 1
 enable_progress_bar  = false
 trainer_accelerator  = "auto"
@@ -90,13 +90,13 @@ provider_ref = "ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider"
 dataset_path = "data/processed/mazehard/default/v1"
 split        = "val"
 batch_size   = 1
-n_cases      = 2
+n_cases      = 4
 
 [eval_regimes.regimes.schedule]
 every_n_epochs = 0
-every_n_steps  = 1
-max_batches    = 2
+every_n_steps  = 8
+max_batches    = 4
 
 [eval_regimes.regimes.trace_request]
-enabled    = false
-trace_keys = []
+enabled    = true
+trace_keys = ["value/q_logits"]
