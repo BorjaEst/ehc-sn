@@ -3,7 +3,7 @@
 #
 # Standard workflow does NOT use this script.
 # Prefer live eval_regimes bundle persistence during training and then run
-# render_report_figures.py with examples/figures/render_ehc_v1_mazehard_overlay.toml.
+# render_report_figures.py with examples/config/render_ehc_v1_mazehard_overlay.toml.
 #
 # Notes:
 # - artifact.executor_config_path must point to the training config used by the
@@ -30,7 +30,7 @@ step = 0
 schema_version = "1"
 artifact_type = "evaluation_executor"
 model_family = "ehc-v1"
-executor_config_path = "examples/figures/training.ehc-v1-reason-512.toml"
+executor_config_path = "examples/config/training.ehc-v1-reason-512.toml"
 checkpoint_path = "checkpoints/ehc-v1-reason/eval-weights-only.pt"
 checkpoint_format = "weights_only"
 
