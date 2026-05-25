@@ -54,6 +54,15 @@ CROSS_PARADIGM_SIGNALS: frozenset[str] = frozenset({STEPS_MEAN, THETA_CLS_NORM})
 LOSS_Q_DONE: str = "loss_q_done"
 """Q-done binary cross-entropy loss (ACT)."""
 
+HALT_LOGIT_MEAN: str = "halt_logit_mean"
+"""Mean halt-logit value across the current ACT batch."""
+
+CONTINUE_LOGIT_MEAN: str = "continue_logit_mean"
+"""Mean continue-logit value across the current ACT batch."""
+
+GREEDY_HALT_RATE: str = "greedy_halt_rate"
+"""Fraction of slots where halt strictly beats continue."""
+
 TARGET_Q_MEAN: str = "target_q_mean"
 """TD(0) bootstrap Q-target mean (ACT)."""
 
@@ -61,7 +70,14 @@ TARGET_Q_STD: str = "target_q_std"
 """TD(0) bootstrap Q-target standard deviation (ACT)."""
 
 ACT_SIGNALS: frozenset[str] = frozenset(
-    {LOSS_Q_DONE, TARGET_Q_MEAN, TARGET_Q_STD}
+    {
+        LOSS_Q_DONE,
+        HALT_LOGIT_MEAN,
+        CONTINUE_LOGIT_MEAN,
+        GREEDY_HALT_RATE,
+        TARGET_Q_MEAN,
+        TARGET_Q_STD,
+    }
 )
 
 
@@ -200,7 +216,8 @@ __all__ = [
     # Cross-paradigm
     "STEPS_MEAN", "THETA_CLS_NORM", "CROSS_PARADIGM_SIGNALS",
     # ACT
-    "LOSS_Q_DONE", "TARGET_Q_MEAN", "TARGET_Q_STD", "ACT_SIGNALS",
+    "LOSS_Q_DONE", "HALT_LOGIT_MEAN", "CONTINUE_LOGIT_MEAN", "GREEDY_HALT_RATE",
+    "TARGET_Q_MEAN", "TARGET_Q_STD", "ACT_SIGNALS",
     # RL
     "REWARD_MEAN", "REWARD_STD", "Q_MEAN", "Q_STD", "RPE_MAGNITUDE",
     "LOSS_STATE_VALUE", "LOSS_Q_VALUE", "RL_SIGNALS",

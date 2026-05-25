@@ -444,10 +444,19 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
         steps = context.snapshot.steps
         if steps is None:
             steps = losses.loss_sum.new_zeros((1,))
+        scores = collapse_act_halt_continue_logits(
+            context.outputs.q_logits,
+            done_action=context.outputs.done_action,
+        )
 
         signals: dict[str, Tensor] = {
             S.STEPS_MEAN: steps.float().mean().detach(),
             S.LOSS_Q_DONE: losses.loss_q_done_sum.detach(),
+            S.HALT_LOGIT_MEAN: scores.halt_logit.mean().detach(),
+            S.CONTINUE_LOGIT_MEAN: scores.continue_logit.mean().detach(),
+            S.GREEDY_HALT_RATE: (
+                scores.greedy_halt.to(dtype=torch.float32).mean().detach()
+            ),
         }
         target_q = context.target_q
         if target_q is not None:
