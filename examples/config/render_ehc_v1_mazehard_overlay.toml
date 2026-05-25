@@ -5,7 +5,7 @@
 # 2. Let eval_regimes persist one run under logs/.../eval_regimes/....
 # 3. Point run_dir at that callback-produced event directory and render.
 
-run_dir = "outputs/examples/ehc_v1_mazehard_overlay_bundle"
+run_dir = "examples/logs/eval_regimes/diagnostic/mazehard_overlay_demo/epoch-0001_step-00000010_epoch"
 output_dir = "outputs/examples/ehc_v1_mazehard_overlay_report"
 
 save_pdf = true

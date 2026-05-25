@@ -1,9 +1,10 @@
-# Legacy fallback: collect a persisted figure bundle from an EHC v1 MazeHard
-# artifact.
+# Legacy-only fallback: collect a persisted figure bundle from an EHC v1
+# MazeHard artifact.
 #
-# Standard workflow does NOT use this script.
-# Prefer live eval_regimes bundle persistence during training and then run
-# render_report_figures.py with examples/config/render_ehc_v1_mazehard_overlay.toml.
+# This path is not part of the supported EHC report workflow.
+# Standard workflow: enable eval_regimes during training, then run
+# render_report_figures.py with examples/config/render_ehc_v1_mazehard_overlay.toml
+# against a callback-produced logs/.../eval_regimes/... event directory.
 #
 # Notes:
 # - artifact.executor_config_path must point to the training config used by the

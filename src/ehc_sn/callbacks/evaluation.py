@@ -7,6 +7,10 @@ This callback is orchestration-only:
   via ehc_sn.eval helpers,
 - logs namespaced summary metrics,
 - persists returned trace/artifact payloads.
+
+Standard report generation is offline from persisted run directories via
+ehc_sn.eval.offline_report. Callback-side figure rendering is optional
+diagnostic routing and is not the canonical report workflow.
 """
 
 from __future__ import annotations
@@ -109,11 +113,15 @@ class EvaluationTraceRequestSettings(BaseModel, extra="forbid"):
 
 # =============================================================================
 class EvaluationFigureRequestSettings(BaseModel, extra="forbid"):
-    """Optional per-regime online figure rendering settings."""
+    """Optional callback-local diagnostic figure rendering settings."""
 
     enabled: bool = Field(
         default=False,
-        description="Whether to render configured figures for this regime run.",
+        description=(
+            "Whether to render configured diagnostic figures during callback "
+            "execution for this regime. Offline reporting from persisted "
+            "bundles remains the standard report path."
+        ),
     )
     figures: list[str] = Field(
         default_factory=list,
@@ -379,7 +387,7 @@ class EvaluationRegimesCallback(pl.Callback):
         *,
         trigger_kind: Literal["step", "epoch"],
     ) -> None:
-        """Render configured figures from traces already produced in this run."""
+        """Render optional callback-local diagnostic figures from run traces."""
         request = regime.figure_request
         if not request.enabled:
             return
