@@ -1,3 +1,10 @@
+# =============================================================================
+# Metadata (comments only)
+# class: benchmark-launcher
+# id: b0-mazehard
+# role: launcher defaults selecting benchmark track execution parameters
+# =============================================================================
+
 track = "b0"
 fixed_recipe = "default"
 seed_count = 1

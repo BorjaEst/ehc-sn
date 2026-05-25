@@ -1,3 +1,10 @@
+# =============================================================================
+# Metadata (comments only)
+# class: benchmark-recipe
+# id: mazehard-delib
+# role: comparison protocol and execution policy for benchmarked artifacts
+# =============================================================================
+
 schema_version = "1"
 recipe_id = "mazehard-delib-hrm-v1"
 track_id = "mazehard-delib"

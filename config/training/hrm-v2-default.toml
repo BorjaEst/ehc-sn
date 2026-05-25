@@ -1,9 +1,12 @@
 # =============================================================================
-# HRM v2 Deliberation Actor-Critic — Default Configuration
+# Metadata (comments only)
+# class: training
+# id: hrm-v2-default
+# role: entrypoint default training config for HRM v2 deliberation
 # =============================================================================
 
 # -- Model architecture -------------------------------------------------------
-model_config_path = "config/models/hrm-v2.toml"
+model_config_path = "config/models/hrm-v2-base.toml"
 
 # -- Dataset & training -------------------------------------------------------
 dataset_path       = "data/processed/mazehard/default/v1"

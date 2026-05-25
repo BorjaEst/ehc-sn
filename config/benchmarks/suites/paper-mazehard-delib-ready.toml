@@ -1,3 +1,10 @@
+# =============================================================================
+# Metadata (comments only)
+# class: benchmark-suite
+# id: paper-mazehard-delib-ready
+# role: curated suite binding tracks, recipes, and artifact manifests for reporting
+# =============================================================================
+
 schema_version = "1"
 suite_id = "paper-mazehard-delib-ready"
 track_ids = ["mazehard-delib"]

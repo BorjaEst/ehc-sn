@@ -1,8 +1,15 @@
+# =============================================================================
+# Metadata (comments only)
+# class: benchmark-manifest
+# id: mazehard-delib-hrm-v1
+# role: artifact manifest for model-comparison benchmark loading and provenance
+# =============================================================================
+
 schema_version = "1"
 artifact_id = "mazehard-delib-hrm-v1-default"
 artifact_type = "model_core"
 model_family = "hrm-v1"
-model_config_path = "config/models/hrm-v1.toml"
+model_config_path = "config/models/hrm-v1-base.toml"
 checkpoint_path = "checkpoints/hrm-v1/model-v000.ckpt"
 checkpoint_format = "lightning"
 supported_tracks = ["mazehard-delib"]

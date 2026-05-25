@@ -1,5 +1,8 @@
 # =============================================================================
-# EHC v1 Architecture
+# Metadata (comments only)
+# class: model
+# id: ehc-v1-compact
+# role: architecture-only compact model defaults; runtime budgets are owned by training configs
 # =============================================================================
 
 transition_action_count = 5
@@ -7,25 +10,25 @@ f_initial               = [0.99, 0.3, 0.09, 0.5, 0.4]
 
 [pfc]
     seq_length             = 36  # 1-cue, 1-replay, 34-reasoning_steps
-    value_head.hidden_size = 512 # Matches the PFC reasoning embedding_dim
+    value_head.hidden_size = 384 # Matches the reduced PFC reasoning embedding_dim
     value_head.n_actions   = 2
     value_head.pool_mode   = "first"
     value_head.pool_index  = 0 # Reads the CLS summary slot, not a maze cell
     value_head.init_bias   = -5.0
 
-    cortex.embedding_dim   = 512
-    cortex.num_heads       = 8
+    cortex.embedding_dim   = 384
+    cortex.num_heads       = 6   # Keeps 64-dim attention heads while shrinking memory
     cortex.pos_encodings   = "rope"
     cortex.rope_theta      = 10000.0
 
-    layers_h               = 4
+    layers_h               = 3
     cycles_h               = 2
-    layers_l               = 4
+    layers_l               = 3
     cycles_l               = 2
 
 [str]
-    n_features = 512  # Matches the PFC reasoning embedding_dim
-    n_actions  = 2    # Matches the PFC value head n_actions
+    n_features  = 384  # Matches the reduced PFC reasoning embedding_dim
+    n_actions   = 2    # Matches the PFC value head n_actions
     hidden_size = 64
 
 [hpc]

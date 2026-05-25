@@ -1,0 +1,30 @@
+# Offline report-figure rendering from one persisted eval regime run.
+#
+# Update run_dir to a concrete event directory, for example:
+# logs/<exp>/<run>/eval_regimes/diagnostic/<regime_id>/<event_id>
+
+run_dir = "logs/example/eval_regimes/diagnostic/arena_diag/epoch-0001_step-00000010_epoch"
+
+# Optional; defaults to <run_dir>/report_figures when omitted.
+output_dir = "outputs/diagnostics/report-figures"
+
+save_pdf = true
+save_png = false
+png_dpi = 160
+
+[[entries]]
+figure = "overlay"
+max_cases = 8
+
+[entries.context]
+sample_idx = 0
+# max_items = 5
+
+# Example with independent case selection and context overrides:
+# [[entries]]
+# figure = "overlay"
+# case_ids = ["case-000", "case-001"]
+#
+# [entries.context]
+# sample_idx = 1
+# max_items = 3

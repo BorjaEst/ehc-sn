@@ -1,5 +1,8 @@
 # =============================================================================
-# TEM v2 Architecture
+# Metadata (comments only)
+# class: model
+# id: tem-v1-base
+# role: architecture-only model defaults; runtime budgets are owned by training configs
 # =============================================================================
 
 transition_action_count = 5
@@ -12,21 +15,11 @@ enable_sensory_recall   = true
     do_sample     = false
 
 [hpc.read]
-    beta            = 1.0
-    empty_retrieval = "query"
-    beta_scaling    = "log_memory_count"
-    iterations      = 1
-    recurrence      = "none"
+    kappa = 0.8
 
 [hpc.write]
-    policy             = "append_if_novel"
-    novelty_similarity = "cosine"
-    novelty_threshold  = 0.95
-    write_bank         = "default"
-
-[hpc.store]
-    memory_capacity = 64
-    bank_names      = [ ]
+    clamp_min = -1.0
+    clamp_max = 1.0
 
 [lec]
     feature_dim = 10

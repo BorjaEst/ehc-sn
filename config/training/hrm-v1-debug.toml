@@ -1,23 +1,36 @@
 # =============================================================================
-# HRM v1 Baseline — Default Configuration
+# Metadata (comments only)
+# class: training
+# id: hrm-v1-debug
+# role: entrypoint debug defaults for HRM v1 diagnostics and replay checks
 # =============================================================================
 # Override any value via CLI:  --model.pfc.cortex.embedding_dim=256
 # Or via env var:              HRM_V1_CONFIGURATION_PATH=config/my_config.toml
 
 # -- Model architecture -------------------------------------------------------
-model_config_path = "config/models/hrm-v1.toml"
+model_config_path = "config/models/hrm-v1-base.toml"
 
 # -- Dataset & training -------------------------------------------------------
-dataset_path      = "data/processed/mazehard/default/v1"
-global_batch_size = 16
-max_epochs        = 100
-seed              = 42
-augment           = true
-val_check_interval = 1000
-init_weights_groups = ["all"]
-
-# Optional model-only init hydration (mutually exclusive with full resume)
-# init_weights_from = "checkpoints/hrm-v1/last.ckpt"
+dataset_path         = "data/processed/mazehard/default/v1"
+global_batch_size    = 4
+max_epochs           = 1
+max_steps            = 1
+seed                 = 42
+augment              = true
+num_workers          = 0
+pin_memory           = false
+persistent_workers   = false
+log_every_n_steps    = 1
+val_check_interval   = 1
+limit_val_batches    = 1
+enable_progress_bar  = false
+trainer_accelerator  = "auto"
+trainer_strategy     = "auto"
+trainer_devices      = 1
+trainer_num_nodes    = 1
+trainer_precision    = "16-mixed"
+diagnostic_level     = "standard"
+init_weights_groups  = ["all"]
 
 # -- Adapter settings ---------------------------------------------------------
 [adapter]
@@ -29,7 +42,7 @@ init_weights_groups = ["all"]
     max_halt_steps = 16
     exploration_prob = 0.1
 
-# -- Objective, optimizer, scheduler (defaults are fine; override here if needed) ---
+# -- Objective, optimizer, scheduler ------------------------------------------
 [objective]
     token_loss = "stablemax_cross_entropy"
 
@@ -48,7 +61,7 @@ init_weights_groups = ["all"]
 # -- Logs and checkpoints -----------------------------------------------------
 [logger]
     save_dir  = "logs"
-    name      = "hrm-v1"
+    name      = "hrm-v1-debug"
     log_graph = false
     prefix    = ""
 
@@ -58,7 +71,7 @@ init_weights_groups = ["all"]
     log_momentum = false
 
 [checkpoint]
-    dirpath                 = "checkpoints/hrm-v1"
+    dirpath                 = "checkpoints/hrm-v1-debug"
     filename                = "epoch={epoch:03d}"
     save_top_k              = 0
     every_n_epochs          = 1
@@ -66,3 +79,24 @@ init_weights_groups = ["all"]
     save_last               = true
     save_on_exception       = true
     save_weights_only       = false
+
+# -- Named evaluation regimes -------------------------------------------------
+[[eval_regimes.regimes]]
+regime_id    = "maze_val_diag"
+regime_kind  = "diagnostic"
+provider_ref = "ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider"
+
+[eval_regimes.regimes.provider_settings]
+dataset_path = "data/processed/mazehard/default/v1"
+split        = "val"
+batch_size   = 1
+n_cases      = 2
+
+[eval_regimes.regimes.schedule]
+every_n_epochs = 0
+every_n_steps  = 1
+max_batches    = 2
+
+[eval_regimes.regimes.trace_request]
+enabled    = false
+trace_keys = []

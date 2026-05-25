@@ -1,17 +1,20 @@
 # =============================================================================
-# EHC v1 Arena Baseline — Default Smoke Configuration
+# Metadata (comments only)
+# class: training
+# id: tem-v2-default
+# role: entrypoint default training config for TEM v2
 # =============================================================================
 
 # -- Model architecture -------------------------------------------------------
-model_config_path = "config/models/ehc-v1.toml"
+model_config_path = "config/models/tem-v2-base.toml"
 
 # -- General settings ---------------------------------------------------------
-mode                 = "spatial_pretrain"
 dataset_path         = "data/processed/arena/default/v1"
-global_batch_size    = 8
+global_batch_size    = 10
 max_epochs           = 100
 seed                 = 42
 augment              = true
+init_weights_groups  = ["all"]
 num_workers          = 4
 prefetch_factor      = 2
 pin_memory           = true
@@ -25,8 +28,11 @@ trainer_accelerator  = "gpu"
 trainer_strategy     = "ddp"
 trainer_devices      = 1
 trainer_num_nodes    = 1
-trainer_precision    = "16-mixed"
+trainer_precision    = "bf16-mixed"
 diagnostic_level     = "standard"
+
+# Optional model-only init hydration (mutually exclusive with full resume)
+# init_weights_from = "checkpoints/tem-v2/last.ckpt"
 
 # -- Adapter ------------------------------------------------------------------
 [adapter]
@@ -71,7 +77,8 @@ diagnostic_level     = "standard"
     tbptt_steps = 75
 
 [runtime.validation]
-    hard_max_rollout_steps = 600
+    hard_max_rollout_steps = 1000
+    seed = 42
 
 # -- Objective ----------------------------------------------------------------
 [objective]
@@ -84,7 +91,7 @@ diagnostic_level     = "standard"
     grid_reg_norm    = "l2"
     place_reg_norm   = "l1"
     temp_it          = 2000
-    p2g_use_it       = 8000
+    p2g_use_it       = 0.0
     p2g_scale        = 200.0
     g_reg_it         = 40000000
     p_reg_it         = 4000
@@ -92,7 +99,7 @@ diagnostic_level     = "standard"
 # -- Figures & diagnostics ----------------------------------------------------
 [logger]
     save_dir  = "logs"
-    name      = "ehc-v1"
+    name      = "tem-v2"
     log_graph = false
     prefix    = ""
 
@@ -102,7 +109,7 @@ diagnostic_level     = "standard"
     log_momentum = false
 
 [checkpoint]
-    dirpath                 = "checkpoints/ehc-v1-spatial"
+    dirpath                 = "checkpoints/tem-v2"
     filename                = "epoch={epoch:03d}"
     save_top_k              = 0
     every_n_epochs          = 1
@@ -110,41 +117,3 @@ diagnostic_level     = "standard"
     save_last               = true
     save_on_exception       = true
     save_weights_only       = false
-
-# -- Named evaluation regimes -------------------------------------------------
-# Uncomment and configure to enable out-of-band diagnostic regime runs.
-# Regimes log under diagnostic/<regime_id>/ and never touch val/.
-
-[[eval_regimes.regimes]]
-regime_id    = "arena_diag"
-regime_kind  = "diagnostic"
-provider_ref = "ehc_sn.tasks.arena.providers.ArenaReplayProvider"
-
-[eval_regimes.regimes.provider_settings]
-dataset_path = "data/processed/arena/long_horizon/v1"
-split        = "val"
-batch_size   = 4
-n_cases      = 0
-
-[eval_regimes.regimes.schedule]
-every_n_epochs = 5
-every_n_steps  = 0
-max_batches    = 10
-
-[eval_regimes.regimes.trace_request]
-enabled = true
-trace_keys = [
-  # Model-side diagnostic traces (emitted by the runtime/model).
-  "diagnostic/lec/cells",
-  "lec/filter/alpha_sigmoid",
-  "lec/w_f_sigmoid",
-  "diagnostic/mec/location_mean",
-  "diagnostic/hpc/location_mean",
-  "diagnostic/hpc/memory",
-]
-
-[eval_regimes.regimes.figure_request]
-enabled  = false
-figures  = ["lec_summary", "mec_summary", "hpc_summary"]
-save_pdf = true
-save_png = false

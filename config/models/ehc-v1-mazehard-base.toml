@@ -1,5 +1,8 @@
 # =============================================================================
-# EHC v1 Architecture (MazeHard reason_pretrain)
+# Metadata (comments only)
+# class: model
+# id: ehc-v1-mazehard-base
+# role: architecture-only MazeHard model defaults; runtime budgets are owned by training configs
 # =============================================================================
 
 transition_action_count = 5

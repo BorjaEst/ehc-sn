@@ -1,0 +1,72 @@
+# =============================================================================
+# Metadata (comments only)
+# class: training
+# id: hrm-v1-default
+# role: entrypoint default training config for HRM v1
+# =============================================================================
+# Override any value via CLI:  --model.pfc.cortex.embedding_dim=256
+# Or via env var:              HRM_V1_CONFIGURATION_PATH=config/my_config.toml
+
+# -- Model architecture -------------------------------------------------------
+model_config_path = "config/models/hrm-v1-base.toml"
+
+# -- Dataset & training -------------------------------------------------------
+dataset_path      = "data/processed/mazehard/default/v1"
+global_batch_size = 16
+max_epochs        = 50000
+max_steps         = 26041
+seed              = 42
+augment           = true
+val_check_interval = 1000
+init_weights_groups = ["all"]
+
+# Optional model-only init hydration (mutually exclusive with full resume)
+# init_weights_from = "checkpoints/hrm-v1/last.ckpt"
+
+# -- Adapter settings ---------------------------------------------------------
+[adapter]
+    encoder_kind = "rope"  # "learned" or "rope"
+    vocab_size = 6  # 5 canonical SEM IDs + O_ID (solution-path token)
+
+# -- ACT controller -----------------------------------------------------------
+[controller]
+    max_halt_steps = 16
+    exploration_prob = 0.1
+
+# -- Objective, optimizer, scheduler (defaults are fine; override here if needed) ---
+[objective]
+    token_loss = "stablemax_cross_entropy"
+
+[optimizer]
+    lr           = 1e-4
+    weight_decay = 0.1
+    betas        = [0.9, 0.95]
+
+[scheduler]
+    warmup_steps = 2000
+    min_ratio    = 1.00
+
+[runtime.validation]
+    max_rollout_steps = 16
+
+# -- Logs and checkpoints -----------------------------------------------------
+[logger]
+    save_dir  = "logs"
+    name      = "hrm-v1"
+    log_graph = false
+    prefix    = ""
+
+[lr_monitor]
+    logging_interval = "step"
+    log_weight_decay = false
+    log_momentum = false
+
+[checkpoint]
+    dirpath                 = "checkpoints/hrm-v1"
+    filename                = "epoch={epoch:03d}"
+    save_top_k              = 0
+    every_n_epochs          = 1
+    save_on_train_epoch_end = false
+    save_last               = true
+    save_on_exception       = true
+    save_weights_only       = false

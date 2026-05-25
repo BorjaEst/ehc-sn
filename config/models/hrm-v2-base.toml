@@ -1,5 +1,8 @@
 # =============================================================================
-# HRM v2 Architecture
+# Metadata (comments only)
+# class: model
+# id: hrm-v2-base
+# role: architecture-only model defaults; runtime budgets are owned by training configs
 # =============================================================================
 
 [pfc]

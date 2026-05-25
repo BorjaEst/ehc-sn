@@ -1,9 +1,12 @@
 # =============================================================================
-# EHC v1 MazeHard Reason Baseline — Default Smoke Configuration
+# Metadata (comments only)
+# class: training
+# id: ehc-v1-reason-default
+# role: entrypoint training defaults for MazeHard reason pretraining; runtime budgets are owned here
 # =============================================================================
 
 # -- Model architecture -------------------------------------------------------
-model_config_path = "config/models/ehc-v1-mazehard.toml"
+model_config_path = "config/models/ehc-v1-mazehard-compact.toml"
 
 # -- Dataset & training -------------------------------------------------------
 mode                          = "reason_pretrain"

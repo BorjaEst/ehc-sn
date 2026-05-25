@@ -1,3 +1,10 @@
+# =============================================================================
+# Metadata (comments only)
+# class: benchmark-recipe
+# id: arena-struct
+# role: comparison protocol and execution policy for benchmarked artifacts
+# =============================================================================
+
 schema_version = "1"
 recipe_id = "arena-struct-tem-v1"
 track_id = "arena-struct"

@@ -1,0 +1,86 @@
+# =============================================================================
+# EHC v1 Architecture (RTX 5070 Ti 16 GB sizing)
+# =============================================================================
+
+transition_action_count = 5
+f_initial               = [0.99, 0.3, 0.09, 0.5, 0.4]
+
+[pfc]
+    seq_length             = 36  # 1-cue, 1-replay, 34-reasoning_steps
+    value_head.hidden_size = 384 # Matches the reduced PFC reasoning embedding_dim
+    value_head.n_actions   = 2
+    value_head.pool_mode   = "first"
+    value_head.pool_index  = 0 # Reads the CLS summary slot, not a maze cell
+    value_head.init_bias   = -5.0
+
+    cortex.embedding_dim   = 384
+    cortex.num_heads       = 6   # Keeps 64-dim attention heads while shrinking memory
+    cortex.pos_encodings   = "rope"
+    cortex.rope_theta      = 10000.0
+
+    layers_h               = 3
+    cycles_h               = 2
+    layers_l               = 3
+    cycles_l               = 2
+
+[str]
+    n_features  = 384  # Matches the reduced PFC reasoning embedding_dim
+    n_actions   = 2    # Matches the PFC value head n_actions
+    hidden_size = 64
+
+[hpc]
+    shape         = [100, 100, 80, 60, 60]
+    common_memory = false
+    do_sample     = false
+
+[hpc.read]
+    beta            = 1.0
+    empty_retrieval = "query"
+    beta_scaling    = "log_memory_count"
+    iterations      = 1
+    recurrence      = "none"
+
+[hpc.write]
+    policy             = "append_if_novel"
+    novelty_similarity = "cosine"
+    novelty_threshold  = 0.95
+    write_bank         = "default"
+
+[hpc.store]
+    memory_capacity = 512
+    bank_names      = ["c"]
+
+[lec]
+    feature_dim = 10
+    clamp_min   = -1.0
+    clamp_max   = 1.0
+
+[mec]
+    grid_shape = [30, 24, 18, 24, 18]
+    do_sample  = false
+    sigma_init = 0.5
+    clamp_min  = -1.0
+    clamp_max  = 1.0
+
+[projections.lec_to_hpc]
+    kind      = "tiling"
+    init      = "identity"
+    learnable = false
+
+[projections.mec_to_hpc]
+    kind      = "low_rank"
+    init      = "identity"
+    learnable = false
+    rank      = [10, 10, 8, 6, 6]
+
+[projections.pfc_to_hpc]
+    kind      = "linear"
+    bridge    = "broadcast"
+    init      = "random"
+    learnable = true
+
+[projections.hpc_to_pfc]
+    kind      = "linear"
+    bridge    = "aligned"
+    init      = "random"
+    learnable = true

@@ -1,9 +1,12 @@
 # =============================================================================
-# TEM v1 Baseline — Default Smoke Configuration
+# Metadata (comments only)
+# class: training
+# id: tem-v1-default
+# role: entrypoint default training config for TEM v1
 # =============================================================================
 
 # -- Model architecture -------------------------------------------------------
-model_config_path = "config/models/tem-v1.toml"
+model_config_path = "config/models/tem-v1-base.toml"
 
 # -- General settings ---------------------------------------------------------
 dataset_path         = "data/processed/arena/default/v1"
