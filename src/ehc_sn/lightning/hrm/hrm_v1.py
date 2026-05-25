@@ -298,7 +298,7 @@ class HRMV1TrainingModel(L.LightningModule):
             objective_options={
                 "controller": self.controller,
                 "td_target": True,
-                "use_token_weights": True,
+                "use_token_weights": self.config.objective.use_token_weights,
             },
         )
         update_metric_collection_from_evaluated_chunk(

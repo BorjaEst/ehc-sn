@@ -49,6 +49,13 @@ class ACTObjectiveConfig(BaseModel, extra="forbid"):
         default="stablemax_cross_entropy",
         description="The loss function to use for the modeling loss.",
     )
+    use_token_weights: bool = Field(
+        default=False,
+        description=(
+            "Whether to apply task-provided per-token weights when computing "
+            "token supervision loss."
+        ),
+    )
 
 
 # =============================================================================
