@@ -1,0 +1,28 @@
+# Example: render report figures from a live eval_regimes callback bundle.
+#
+# Standard flow:
+# 1. Train with examples/figures/training.ehc-v1-reason-512.toml.
+# 2. Let eval_regimes persist one run under logs/.../eval_regimes/....
+# 3. Point run_dir at that callback-produced event directory and render.
+
+run_dir = "logs/ehc-v1-reason/lightning_logs/version_0/eval_regimes/diagnostic/maze_val_diag/epoch-0005_step-00005000_epoch"
+output_dir = "outputs/examples/ehc_v1_mazehard_overlay_report"
+
+save_pdf = true
+save_png = false
+png_dpi = 160
+
+[[entries]]
+figure = "overlay"
+max_cases = 8
+
+[entries.context]
+sample_idx = 0
+
+# For a deterministic subset, replace max_cases with explicit case_ids:
+# [[entries]]
+# figure = "overlay"
+# case_ids = ["maze-0001", "maze-0002"]
+#
+# [entries.context]
+# sample_idx = 0
