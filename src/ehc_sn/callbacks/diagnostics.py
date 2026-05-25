@@ -1,7 +1,8 @@
-"""Lightning callback for logging diagnostic signals.
+"""Lightning callback for logging diagnostic telemetry.
 
 Models typically return a dict from ``training_step`` containing a ``signals``
-payload. This callback logs a configurable subset of those signals.
+payload. This callback is the consumer policy layer that filters and logs a
+configurable subset of telemetry keys.
 """
 
 from __future__ import annotations
@@ -16,12 +17,26 @@ import torch
 from lightning.pytorch import LightningModule, Trainer
 from pydantic import BaseModel, Field
 
-from ehc_sn.metrics.signals import STANDARD_SIGNALS
+from ehc_sn.metrics.signals import (
+    ACT_SIGNALS,
+    CROSS_PARADIGM_SIGNALS,
+    RL_SIGNALS,
+    TEM_SIGNALS,
+    VAR_SIGNALS,
+)
+
+STANDARD_SIGNALS: frozenset[str] = (
+    CROSS_PARADIGM_SIGNALS
+    | ACT_SIGNALS
+    | RL_SIGNALS
+    | VAR_SIGNALS
+    | TEM_SIGNALS
+)
 
 
 # =============================================================================
 class DiagnosticsSettings(BaseModel, extra="forbid"):
-    """Settings controlling which diagnostic signals are logged."""
+    """Settings controlling which diagnostic telemetry keys are logged."""
 
     diagnostic_level: Literal["standard", "research"] = Field(
         default="standard",
@@ -75,7 +90,7 @@ class DiagnosticsSettings(BaseModel, extra="forbid"):
 
 # =============================================================================
 class DiagnosticsCallback(pl.Callback):
-    """Logs step-level diagnostic signals emitted by the training step."""
+    """Logs step-level diagnostic telemetry emitted by the training step."""
 
     def __init__(  # ----------------------------------------------------------
         self,

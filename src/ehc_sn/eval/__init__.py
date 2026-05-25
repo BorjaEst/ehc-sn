@@ -16,6 +16,16 @@ from ehc_sn.eval.executor import (
     execute_replay_evaluation_batch,
     iter_evaluation_regime,
 )
+from ehc_sn.eval.figure_bundle import (
+    FigureBundleExecutorArtifact,
+    PersistedTraceCase,
+    collect_regime_figure_bundle,
+    collect_regime_figure_bundle_from_artifact,
+    load_executor_from_artifact,
+    load_persisted_regime_run_cases,
+    persist_regime_figure_bundle,
+    resolve_provider,
+)
 
 __all__ = [
     "EvaluationCaseResult",
@@ -24,6 +34,14 @@ __all__ = [
     "EvaluationRegimeResult",
     "EvaluationSourceProvider",
     "EvaluationTraceRequest",
+    "FigureBundleExecutorArtifact",
+    "PersistedTraceCase",
+    "collect_regime_figure_bundle",
+    "collect_regime_figure_bundle_from_artifact",
     "execute_replay_evaluation_batch",
     "iter_evaluation_regime",
+    "load_persisted_regime_run_cases",
+    "load_executor_from_artifact",
+    "persist_regime_figure_bundle",
+    "resolve_provider",
 ]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
 from ehc_sn.eval.contracts import (
@@ -69,9 +69,19 @@ def iter_evaluation_regime(
     *,
     max_batches: int = 0,
     trace_request: EvaluationTraceRequest | None = None,
+    prepare_case_batch: (
+        Callable[[EvaluationCaseBatch], EvaluationCaseBatch] | None
+    ) = None,
 ) -> Iterator[EvaluationCaseResult]:
-    """Yield executor results for all provider batches in one regime."""
+    """Yield executor results for all provider batches in one regime.
+
+    ``prepare_case_batch`` exists for out-of-loop orchestration such as named
+    regime execution, where provider batches must be normalized or moved to the
+    active runtime device before entering the family evaluation seam.
+    """
     for case in provider.provide_cases(max_batches=max_batches):
+        if prepare_case_batch is not None:
+            case = prepare_case_batch(case)
         yield executor.execute_evaluation_batch(
             case,
             trace_request=trace_request,

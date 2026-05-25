@@ -11,11 +11,8 @@ This callback is orchestration-only:
 
 from __future__ import annotations
 
-import importlib
-import json
-import re
 import warnings
-from dataclasses import asdict, is_dataclass
+from dataclasses import replace
 from numbers import Real
 from pathlib import Path
 from typing import Any, Literal
@@ -31,8 +28,13 @@ from ehc_sn.eval import (
     EvaluationTraceRequest,
     iter_evaluation_regime,
 )
+from ehc_sn.eval.contracts import EvaluationCaseBatch
+from ehc_sn.eval.figure_bundle import (
+    persist_regime_figure_bundle,
+    resolve_provider,
+)
 from ehc_sn.figures import REGISTRY, FigureContext, list_figures, render
-from ehc_sn.figures.sinks import save_pdf, save_png
+from ehc_sn.figures.sinks import _persist_named_figure_artifacts
 
 
 # =============================================================================
@@ -80,6 +82,29 @@ class EvaluationTraceRequestSettings(BaseModel, extra="forbid"):
         default_factory=list,
         description="Optional semantic trace keys to request from the model family.",
     )
+    figure_names: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Optional registered figure names whose trace-key requirements are "
+            "added to this regime request. Supports report and diagnostic "
+            "figures for offline bundle production."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_figure_names(self) -> "EvaluationTraceRequestSettings":
+        """Validate declared figure names against the registry."""
+        if not self.figure_names:
+            return self
+        available = set(list_figures())
+        missing = [name for name in self.figure_names if name not in available]
+        if missing:
+            unknown = ", ".join(sorted(set(missing)))
+            raise ValueError(
+                "trace_request.figure_names contains unknown names: "
+                f"{unknown}."
+            )
+        return self
 
 
 # =============================================================================
@@ -93,26 +118,6 @@ class EvaluationFigureRequestSettings(BaseModel, extra="forbid"):
     figures: list[str] = Field(
         default_factory=list,
         description="Registered figure names to render from each available case trace.",
-    )
-    env_idx: int = Field(
-        default=0,
-        ge=0,
-        description="Environment index passed into FigureContext.",
-    )
-    freq_idx: int = Field(
-        default=0,
-        ge=0,
-        description="Frequency index passed into FigureContext.",
-    )
-    sample_idx: int = Field(
-        default=0,
-        ge=0,
-        description="Starting sample index passed into FigureContext.",
-    )
-    max_items: int | None = Field(
-        default=None,
-        ge=1,
-        description="Optional item cap passed into FigureContext.",
     )
     max_cases: int = Field(
         default=2,
@@ -389,10 +394,6 @@ class EvaluationRegimesCallback(pl.Callback):
         figure_dir.mkdir(parents=True, exist_ok=True)
 
         figure_ctx = FigureContext(
-            env_idx=request.env_idx,
-            freq_idx=request.freq_idx,
-            sample_idx=request.sample_idx,
-            max_items=request.max_items,
             global_step=trainer.global_step,
             split_name=regime.regime_id,
         )
@@ -403,22 +404,20 @@ class EvaluationRegimesCallback(pl.Callback):
             if result.trace is None:
                 continue
             for name in request.figures:
+                figure_spec = REGISTRY.get(name)
                 fig = None
                 try:
                     fig = render(name, result.trace, figure_ctx)
-                    stem = (
-                        f"{idx:04d}-"
-                        f"{_sanitize_filename_component(result.case_id)}-"
-                        f"{_sanitize_filename_component(name)}"
+                    _persist_named_figure_artifacts(
+                        fig,
+                        output_dir=figure_dir,
+                        case_index=idx,
+                        case_id=result.case_id,
+                        default_filename=figure_spec.default_filename,
+                        save_pdf_enabled=request.save_pdf,
+                        save_png_enabled=request.save_png,
+                        png_dpi=request.png_dpi,
                     )
-                    if request.save_pdf:
-                        save_pdf(fig, figure_dir / f"{stem}.pdf")
-                    if request.save_png:
-                        save_png(
-                            fig,
-                            figure_dir / f"{stem}.png",
-                            dpi=request.png_dpi,
-                        )
                     rendered_count += 1
                 except Exception as exc:
                     self._handle_figure_failure(
@@ -480,17 +479,22 @@ class EvaluationRegimesCallback(pl.Callback):
         regime: EvaluationRegimeSettings,
     ) -> EvaluationRegimeResult:
         """Resolve provider and execute one configured regime end-to-end."""
-        provider = _resolve_provider(
+        provider = resolve_provider(
             regime.provider_ref,
             regime.provider_settings,
         )
         trace_request = self._build_trace_request(pl_module, regime)
+
+        def prepare_case_batch(case):
+            return self._prepare_case_batch(trainer, pl_module, case)
+
         case_results = tuple(
             iter_evaluation_regime(
                 provider,
                 pl_module,
                 max_batches=regime.schedule.max_batches,
                 trace_request=trace_request,
+                prepare_case_batch=prepare_case_batch,
             )
         )
         losses = [
@@ -504,11 +508,24 @@ class EvaluationRegimesCallback(pl.Callback):
         summary: dict[str, object] = {"n_cases": len(case_results)}
         if losses:
             summary["loss"] = sum(losses) / len(losses)
+
         return EvaluationRegimeResult(
             regime_id=regime.regime_id,
             case_results=case_results,
             summary=summary,
         )
+
+    def _prepare_case_batch(  # ----------------------------------------------
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        case: EvaluationCaseBatch,
+    ) -> EvaluationCaseBatch:
+        """Re-enter Lightning's normal batch-transfer contract for one case."""
+        batch = trainer.precision_plugin.convert_input(case.batch)
+        batch = pl_module._on_before_batch_transfer(batch, dataloader_idx=0)
+        batch = trainer.strategy.batch_to_device(batch, dataloader_idx=0)
+        return replace(case, batch=batch)
 
     def _build_trace_request(  # ----------------------------------------------
         self,
@@ -516,14 +533,26 @@ class EvaluationRegimesCallback(pl.Callback):
         regime: EvaluationRegimeSettings,
     ) -> EvaluationTraceRequest | None:
         """Build an optional trace request from regime settings and module state."""
-        request = regime.trace_request
-        if not request.enabled:
+        trace_request = regime.trace_request
+        figure_request = regime.figure_request
+        if (
+            not trace_request.enabled
+            and not trace_request.figure_names
+            and not figure_request.enabled
+        ):
             return None
 
-        if request.trace_keys:
+        requested_trace_keys = set(trace_request.trace_keys)
+        for name in trace_request.figure_names:
+            requested_trace_keys.update(REGISTRY.get(name).trace_keys)
+        if figure_request.enabled:
+            for name in figure_request.figures:
+                requested_trace_keys.update(REGISTRY.get(name).trace_keys)
+
+        if requested_trace_keys:
             set_trace_keys = getattr(pl_module, "set_eval_trace_keys", None)
             if callable(set_trace_keys):
-                set_trace_keys(set(request.trace_keys))
+                set_trace_keys(requested_trace_keys)
 
         trace_spec = getattr(pl_module, "trace_spec", None)
         if trace_spec is None:
@@ -586,57 +615,17 @@ class EvaluationRegimesCallback(pl.Callback):
             regime=regime,
             trigger_kind=trigger_kind,
         )
-        run_dir.mkdir(parents=True, exist_ok=True)
-
-        summary_rows: list[dict[str, Any]] = []
-        for idx, result in enumerate(regime_result.case_results):
-            summary_row = {
-                "case_id": result.case_id,
-                "source_context": _to_jsonable(result.source_context),
-                "loss": _extract_loss_scalar(result.evaluated),
-                "has_trace": result.trace is not None,
-            }
-            summary_rows.append(summary_row)
-            if result.trace is None:
-                continue
-
-            trace_payload = {
-                "case_id": result.case_id,
-                "source_context": result.source_context,
-                "dense": result.trace.export(),
-                "meta": result.trace.get_meta(),
-            }
-            trace_path = run_dir / (
-                f"{idx:04d}-{_sanitize_filename_component(result.case_id)}.pt"
-            )
-            torch.save(trace_payload, trace_path)
-
-        summary = {
-            "regime_id": regime_result.regime_id,
-            "regime_kind": regime.regime_kind,
-            "phase_kind": regime.phase_kind,
-            "trigger_kind": trigger_kind,
-            "epoch": trainer.current_epoch + 1,
-            "step": trainer.global_step,
-            "summary": _to_jsonable(dict(regime_result.summary)),
-            "cases": summary_rows,
-        }
-        (run_dir / "summary.json").write_text(
-            json.dumps(summary, indent=2, sort_keys=True),
-            encoding="utf-8",
+        persist_regime_figure_bundle(
+            run_dir=run_dir,
+            regime_kind=regime.regime_kind,
+            regime_id=regime.regime_id,
+            phase_kind=regime.phase_kind,
+            trigger_kind=trigger_kind,
+            epoch=trainer.current_epoch + 1,
+            step=trainer.global_step,
+            regime_result=regime_result,
+            write_legacy_compat=True,
         )
-
-
-# =============================================================================
-def _resolve_provider(  # -----------------------------------------------------
-    provider_ref: str,
-    provider_settings: dict[str, Any],
-) -> Any:
-    """Resolve and instantiate a provider class from dotted import path."""
-    module_name, class_name = provider_ref.rsplit(".", maxsplit=1)
-    module = importlib.import_module(module_name)
-    provider_cls = getattr(module, class_name)
-    return provider_cls(**provider_settings)
 
 
 # =============================================================================
@@ -707,37 +696,6 @@ def _extract_loss_scalar(  # --------------------------------------------------
     if isinstance(loss, Real):
         return float(loss)
     return None
-
-
-# =============================================================================
-def _to_jsonable(  # ----------------------------------------------------------
-    value: Any,
-) -> Any:
-    """Convert nested objects into JSON-serializable primitives recursively."""
-    if value is None:
-        return None
-    if is_dataclass(value):
-        return _to_jsonable(asdict(value))
-    if hasattr(value, "model_dump") and callable(value.model_dump):
-        return _to_jsonable(value.model_dump())
-    if isinstance(value, dict):
-        return {str(k): _to_jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_to_jsonable(v) for v in value]
-    if isinstance(value, (str, bool, int, float)):
-        return value
-    if isinstance(value, Path):
-        return str(value)
-    return repr(value)
-
-
-# =============================================================================
-def _sanitize_filename_component(  # ------------------------------------------
-    value: str,
-) -> str:
-    """Normalize a string into a safe filename component."""
-    sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._")
-    return sanitized or "case"
 
 
 # =============================================================================
