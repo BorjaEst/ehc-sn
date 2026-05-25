@@ -70,11 +70,6 @@ class EHCRegime(Protocol):
     ) -> None:
         """Hook called by Lightning at the start of each validation epoch."""
 
-    def on_validation_epoch_end(  # -------------------------------------------
-        self,
-    ) -> None:
-        """Hook called by Lightning at the end of each validation epoch."""
-
     def training_step(  # -----------------------------------------------------
         self,
         batch: Batch,

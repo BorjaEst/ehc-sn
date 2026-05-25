@@ -160,11 +160,6 @@ class EHCV1TrainingModel(L.LightningModule):
     ) -> None:
         self._regime.on_validation_epoch_start()
 
-    def on_validation_epoch_end(  # -------------------------------------------
-        self,
-    ) -> None:
-        self._regime.on_validation_epoch_end()
-
     def training_step(  # -----------------------------------------------------
         self,
         batch: Batch,
