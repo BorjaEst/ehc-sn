@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Literal, Optional, Sequence, TypeAlias
+from typing import (
+    Any,
+    Callable,
+    Iterable,
+    Literal,
+    Optional,
+    Sequence,
+    TypeAlias,
+)
 
 import matplotlib.figure as mpl_figure
 import pub_ready_plots as prp
@@ -29,6 +37,9 @@ class FigureContext:
     max_items: int | None = None
     """Maximum number of items shown per multi-sample panel.  ``None`` defers
     to each template's own default cap."""
+    max_cells: int | None = None
+    """Maximum number of cells shown per cell-level figure.  ``None`` defers
+    to each selector's own default cap."""
 
     # Optional figure customization parameters
     styles: Sequence[str] = field(default_factory=lambda: ["science"])
@@ -102,7 +113,9 @@ class Registry:
         """
         if kind is None:
             return sorted(self._specs.keys())
-        return sorted(name for name, spec in self._specs.items() if spec.kind == kind)
+        return sorted(
+            name for name, spec in self._specs.items() if spec.kind == kind
+        )
 
 
 REGISTRY = Registry()
@@ -117,7 +130,10 @@ def _trace_has_numeric_path(trace: TraceTree, path: str) -> bool:
         return bool(trace.leaf_is_numeric[idx])
     prefix = f"{path}/"
     for candidate, candidate_idx in trace.path_to_index.items():
-        if candidate.startswith(prefix) and trace.leaf_is_numeric[candidate_idx]:
+        if (
+            candidate.startswith(prefix)
+            and trace.leaf_is_numeric[candidate_idx]
+        ):
             return True
     return False
 
@@ -133,10 +149,20 @@ def _validate_figure_requirements(trace: TraceTree, spec: FigureSpec) -> None:
         ValueError: If any required numeric or metadata key is absent from the trace.
     """
     if spec.trace_keys:
-        missing = [p for p in sorted(spec.trace_keys) if not _trace_has_numeric_path(trace, p)]
+        missing = [
+            p
+            for p in sorted(spec.trace_keys)
+            if not _trace_has_numeric_path(trace, p)
+        ]
         if missing:
-            raise ValueError(f"Figure '{spec.name}' missing required trace keys: {', '.join(missing)}")
+            raise ValueError(
+                f"Figure '{spec.name}' missing required trace keys: {', '.join(missing)}"
+            )
     if spec.meta_keys:
-        missing = [p for p in sorted(spec.meta_keys) if not trace.has_meta_path(p)]
+        missing = [
+            p for p in sorted(spec.meta_keys) if not trace.has_meta_path(p)
+        ]
         if missing:
-            raise ValueError(f"Figure '{spec.name}' missing required metadata keys: {', '.join(missing)}")
+            raise ValueError(
+                f"Figure '{spec.name}' missing required metadata keys: {', '.join(missing)}"
+            )

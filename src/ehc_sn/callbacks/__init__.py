@@ -4,6 +4,7 @@ from .evaluation import (
     EvaluationRegimesCallback,
     EvaluationRegimesCallbackSettings,
 )
+from .figures import FigureGenerationCallback, FigureGenerationSettings
 from .lr_monitor import LearningRateMonitor, LearningRateMonitorSettings
 from .metrics import MetricsCallback
 
@@ -14,6 +15,8 @@ __all__ = [
     "DiagnosticsSettings",
     "EvaluationRegimesCallback",
     "EvaluationRegimesCallbackSettings",
+    "FigureGenerationCallback",
+    "FigureGenerationSettings",
     "LearningRateMonitorSettings",
     "LearningRateMonitor",
     "MetricsCallback",

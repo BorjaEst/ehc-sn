@@ -27,6 +27,10 @@ from ehc_sn.callbacks.evaluation import (
     EvaluationRegimesCallback,
     EvaluationRegimesCallbackSettings,
 )
+from ehc_sn.callbacks.figures import (
+    FigureGenerationCallback,
+    FigureGenerationSettings,
+)
 from ehc_sn.callbacks.lr_monitor import (
     LearningRateMonitor,
     LearningRateMonitorSettings,
@@ -238,6 +242,10 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
         default=None,
         description="Optional named replay-evaluation regime callback settings.",
     )
+    figures: Optional[FigureGenerationSettings] = Field(
+        default=None,
+        description="Optional standalone figure generation callback settings.",
+    )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(
         default="standard",
         description=(
@@ -402,6 +410,8 @@ if __name__ == "__main__":
         callbacks_list.append(DiagnosticsCallback(settings.diagnostics))
     if settings.lr_monitor is not None:
         callbacks_list.append(LearningRateMonitor(settings.lr_monitor))
+    if settings.figures is not None:
+        callbacks_list.append(FigureGenerationCallback(settings.figures))
 
     # Build the PyTorch Lightning Trainer.
     # This wires together logging, callbacks, and training control.
