@@ -50,6 +50,10 @@ from ehc_sn.training.distributed import (
 )
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
+from ehc_sn.training.stabilization import (
+    TargetAdapterModule,
+    TargetNetworkConfig,
+)
 
 # Configure PyTorch for better performance on modern GPUs
 torch.set_float32_matmul_precision("high")
@@ -151,6 +155,18 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     runtime: RuntimeConfig = Field(
         default_factory=RuntimeConfig,
         description="HRM runtime-owned validation safety settings.",
+    )
+    target_network: TargetNetworkConfig = Field(
+        default_factory=TargetNetworkConfig,
+        description="Optional EMA-lagged target network config for "
+        "q_continue bootstrap stabilization.",
+    )
+    supervised_only_warmup_steps: int = Field(
+        default=0,
+        ge=0,
+        description="Number of optimizer steps during which learned halting "
+        "is disabled (allow_halt=False). Pattern-matched from "
+        "HRM-v2 warmup phase.",
     )
 
     # -------------------------------------------------------------------------

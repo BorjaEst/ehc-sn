@@ -23,6 +23,9 @@ init_weights_groups = ["all"]
 # Optional model-only init hydration (mutually exclusive with full resume)
 # init_weights_from = "checkpoints/hrm-v1/last.ckpt"
 
+# -- Stabilization ------------------------------------------------------------
+supervised_only_warmup_steps = 500
+
 # -- Adapter settings ---------------------------------------------------------
 [adapter]
     encoder_kind = "rope"  # "learned" or "rope"

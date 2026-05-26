@@ -215,17 +215,21 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
         record: StepRecord,
         controller: ACTController | None = None,
         td_target: bool = False,
+        target_q: Tensor | None = None,
+        target_backbone: Any | None = None,
         **options: Any,
     ) -> ACTObjectiveStep:
         """Score one ACT rollout step and attach any objective-owned TD target."""
-
-        target_q = options.pop("target_q", None)
         if td_target:
             if controller is None:
                 raise ValueError(
                     "ACTObjective: td_target=True requires a controller."
                 )
-            target_q = self._compute_td_target(controller, record)
+            target_q = self._compute_td_target(
+                controller=controller,
+                record=record,
+                target_backbone=target_backbone,
+            )
 
         # --- single scored-step computation ---
         context = self.build_context(record, target_q=target_q, **options)
@@ -516,9 +520,36 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
 
     @staticmethod
     def _compute_td_target(  # ------------------------------------------------
-        controller: ACTController, record: StepRecord
+        controller: ACTController,
+        record: StepRecord,
+        *,
+        target_backbone: Any | None = None,
     ) -> Tensor:
-        """Compute the TD bootstrap target from executed carry state."""
+        """Compute the TD bootstrap target from executed carry state.
+
+        When a *target_backbone* is provided, a fresh target model state is
+        derived by cloning the online model state from the record, resetting it
+        with the same post-rollout halted mask, and stepping the target backbone
+        on the *same executed inputs* (``record.carry.data``) that the online
+        backbone consumed.  This guarantees input alignment — the key invariant
+        that the previous implementation violated by stepping the target on the
+        raw incoming batch.
+
+        When *target_backbone* is *None*, falls back to the online controller's
+        backbone (current self-bootstrap behaviour).
+
+        Args:
+            controller: The online ACT controller (used as fallback when
+                ``target_backbone`` is *None*).
+            record: The executed step record containing carry/model_state.
+            target_backbone: Optional frozen lagged backbone.  Must expose
+                ``init_state(batch_size)``, ``reset_state(flag, state)``, and a
+                forward call ``(data, state) -> (output, next_state)``.  If
+                *None*, uses ``controller.backbone``.
+
+        Returns:
+            Sigmoid-squashed TD bootstrap target tensor of shape ``(B,)``.
+        """
         data = record.carry.data
         model_state = record.carry.model_state
         steps = record.carry.steps
@@ -528,9 +559,26 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
                 "carry.steps."
             )
 
-        with torch.no_grad():
-            backbone_output, _ = controller.backbone(data, model_state)
-            next_q = backbone_output.control.q_logits
+        if target_backbone is not None:
+            # Build a fresh target state from the online state: clone, reset
+            # with the same halted mask, then step on the same executed data.
+            with torch.no_grad():
+                batch_size = int(
+                    next(iter(data.values())).shape[0]
+                    if isinstance(data, dict)
+                    else model_state.steps.shape[0]
+                )
+                online_halted = record.carry.halted
+                target_state = model_state.detach()
+                target_state = target_backbone.target.reset_state(
+                    online_halted, target_state
+                )
+                backbone_output, _ = target_backbone(data, target_state)
+                next_q = backbone_output.control.q_logits
+        else:
+            with torch.no_grad():
+                backbone_output, _ = controller.backbone(data, model_state)
+                next_q = backbone_output.control.q_logits
 
         done_action = controller.config.done_action
         max_halt_steps = controller.config.max_halt_steps

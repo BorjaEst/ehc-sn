@@ -12,10 +12,17 @@ Key behaviors:
     - **Partial reset batching**: halted examples are replaced with fresh rows
         using a FIFO buffer and
         :class:`~ehc_sn.rollouts.partial_reset.PartialResetBatchAssembler`.
+    - **Target network** (optional): EMA-lagged target backbone for TD bootstrap
+        stabilization. Controlled by the ``[target_network]`` config section.
+    - **Warmup phase** (optional): disables learned halting for the first
+        ``supervised_only_warmup_steps`` steps so the PFC representations become
+        informative before the control head learns.
 
 The batch structure used throughout this file is a plain ``dict[str, Tensor]``
 with keys ``"input_ids"`` and ``"labels"``.
 """
+
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
@@ -60,6 +67,10 @@ from ehc_sn.training.rollout import score_captured_rollout
 from ehc_sn.training.schedules import (
     CosineAnnealingLRWithWarmup,
     SchedulerConfig,
+)
+from ehc_sn.training.stabilization import (
+    TargetAdapterModule,
+    TargetNetworkConfig,
 )
 from ehc_sn.types import Batch
 
@@ -129,6 +140,18 @@ class HRMV1ModelConfig(BaseModel, extra="forbid"):
             "is computed as `global_batch_size // world_size`."
         ),
     )  # TODO: consider moving to BufferSettings or similar
+    target_network: TargetNetworkConfig = Field(
+        default_factory=TargetNetworkConfig,
+        description="Optional EMA-lagged target network config for "
+        "q_continue bootstrap stabilization.",
+    )
+    supervised_only_warmup_steps: int = Field(
+        default=0,
+        ge=0,
+        description="Number of optimizer steps during which learned halting "
+        "is disabled (allow_halt=False). Pattern-matched from "
+        "HRM-v2 warmup phase.",
+    )
 
 
 # =============================================================================
@@ -195,6 +218,11 @@ class HRMV1TrainingModel(L.LightningModule):
             buffer=self._train_buffer,
             keys=("input_ids", "labels"),
         )
+
+        # Optional target network for TD bootstrap stabilization.
+        self._target_adapter: TargetAdapterModule | None = None
+        if config.target_network.enabled:
+            self._target_adapter = TargetAdapterModule(self.adapter)
 
     @property
     def config(self) -> HRMV1ModelConfig:
@@ -278,27 +306,44 @@ class HRMV1TrainingModel(L.LightningModule):
               mini-batch.
             - Loss is normalized by the local batch size; DDP averages gradients
               across ranks.
+            - ``supervised_only_warmup_steps > 0`` disables learned halting
+              during the warmup phase so the PFC representations become
+              informative before the control head learns.
+            - ``target_network.enabled`` activates an EMA-lagged target backbone
+              for q_continue TD bootstrap targets.
         """
         # Initialize carry/state on the first batch
         if self._train_carry is None:
             self._train_carry = self.controller.initial_state(batch)
+
+        # Warmup gate: do not allow learned halting during the first N steps.
+        is_warmup = self.global_step < self.config.supervised_only_warmup_steps
 
         source = PartialResetSource(
             incoming=batch,
             assembler=self._train_batch_assembler,
             carry0=self._train_carry,
         )
+
+        # Target backbone is passed to the objective so _compute_td_target can
+        # step it on the *same executed inputs* (record.carry.data) that the
+        # online backbone consumed — not on the raw incoming batch.
+        target_backbone: TargetAdapterModule | None = (
+            self._target_adapter if self._target_adapter is not None else None
+        )
+
         evaluation = score_captured_rollout(
             runner=self._train_runner,
             source=source,
             controller=self.controller,
             carry=self._train_carry,
             objective=self.objective,
-            runner_options={"allow_halt": True, "explore": True},
+            runner_options={"allow_halt": not is_warmup, "explore": True},
             objective_options={
                 "controller": self.controller,
                 "td_target": True,
                 "use_token_weights": self.config.objective.use_token_weights,
+                "target_backbone": target_backbone,
             },
         )
         update_metric_collection_from_evaluated_chunk(
@@ -320,6 +365,12 @@ class HRMV1TrainingModel(L.LightningModule):
 
         for opt in optimizers if isinstance(optimizers, list) else [optimizers]:
             opt.step()  # type: ignore
+
+        # EMA update of target backbone after optimizer step.
+        if self._target_adapter is not None:
+            self._target_adapter.ema_update(
+                self.adapter, self.config.target_network.tau
+            )
 
         scheduler = self.lr_schedulers()
         for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
