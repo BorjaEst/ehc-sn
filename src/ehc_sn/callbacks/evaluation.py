@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 import lightning.pytorch as pl
-import matplotlib.pyplot as plt
 import torch
 from lightning.pytorch import LightningModule, Trainer
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -33,12 +32,13 @@ from ehc_sn.eval import (
     iter_evaluation_regime,
 )
 from ehc_sn.eval.contracts import EvaluationCaseBatch
-from ehc_sn.eval.figure_bundle import (
-    persist_regime_figure_bundle,
+from ehc_sn.eval.eval_artifacts import (
+    persist_regime_artifact_bundle,
     resolve_provider,
 )
-from ehc_sn.figures import REGISTRY, FigureContext, list_figures, render
-from ehc_sn.figures.sinks import _persist_named_figure_artifacts
+from ehc_sn.eval.render_regime_previews import render_regime_preview_figures
+from ehc_sn.figures import REGISTRY, FigureContext, list_figures
+from ehc_sn.traces import build_trace_spec
 
 
 # =============================================================================
@@ -180,6 +180,19 @@ class EvaluationFigureRequestSettings(BaseModel, extra="forbid"):
             raise ValueError(
                 "figure_request.figures only supports diagnostic figures for "
                 f"online rendering: {blocked}."
+            )
+
+        offline_only = [
+            name
+            for name in self.figures
+            if REGISTRY.get(name).input_contract == "offline_artifact"
+        ]
+        if offline_only:
+            blocked = ", ".join(sorted(set(offline_only)))
+            raise ValueError(
+                "figure_request.figures contains offline-only figures: "
+                f"{blocked}. "
+                "These are for the offline report pipeline."
             )
         return self
 
@@ -387,7 +400,11 @@ class EvaluationRegimesCallback(pl.Callback):
         *,
         trigger_kind: Literal["step", "epoch"],
     ) -> None:
-        """Render optional callback-local diagnostic figures from run traces."""
+        """Render optional callback-local diagnostic figures from run traces.
+
+        Delegates rendering to :func:`render_regime_preview_figures` and
+        owns only failure-policy and logging.
+        """
         request = regime.figure_request
         if not request.enabled:
             return
@@ -399,48 +416,35 @@ class EvaluationRegimesCallback(pl.Callback):
             trigger_kind=trigger_kind,
         )
         figure_dir = run_dir / "figures"
-        figure_dir.mkdir(parents=True, exist_ok=True)
 
         figure_ctx = FigureContext(
             global_step=trainer.global_step,
             split_name=regime.regime_id,
         )
 
-        rendered_count = 0
-        selected_case_results = regime_result.case_results[: request.max_cases]
-        for idx, result in enumerate(selected_case_results):
-            if result.trace is None:
-                continue
-            for name in request.figures:
-                figure_spec = REGISTRY.get(name)
-                fig = None
-                try:
-                    fig = render(name, result.trace, figure_ctx)
-                    _persist_named_figure_artifacts(
-                        fig,
-                        output_dir=figure_dir,
-                        case_index=idx,
-                        case_id=result.case_id,
-                        default_filename=figure_spec.default_filename,
-                        save_pdf_enabled=request.save_pdf,
-                        save_png_enabled=request.save_png,
-                        png_dpi=request.png_dpi,
-                    )
-                    rendered_count += 1
-                except Exception as exc:
-                    self._handle_figure_failure(
-                        request,
-                        regime,
-                        "Online figure rendering failed for "
-                        f"regime {regime.regime_id!r}, case {result.case_id!r}, "
-                        f"figure {name!r}.",
-                        error=exc,
-                    )
-                finally:
-                    if fig is not None:
-                        plt.close(fig)
+        previews = render_regime_preview_figures(
+            case_results=regime_result.case_results,
+            figure_names=request.figures,
+            figure_dir=figure_dir,
+            figure_ctx=figure_ctx,
+            max_cases=request.max_cases,
+            save_pdf=request.save_pdf,
+            save_png=request.save_png,
+            png_dpi=request.png_dpi,
+        )
 
-        if rendered_count == 0:
+        succeeded = sum(1 for p in previews if p.error is None)
+        for preview in previews:
+            if preview.error is not None:
+                self._handle_figure_failure(
+                    request,
+                    regime,
+                    "Online figure rendering failed for "
+                    f"regime {regime.regime_id!r}, case {preview.case_id!r}, "
+                    f"figure {preview.figure_name!r}: {preview.error}",
+                )
+
+        if succeeded == 0 and previews:
             self._handle_figure_failure(
                 request,
                 regime,
@@ -450,7 +454,7 @@ class EvaluationRegimesCallback(pl.Callback):
             )
         pl_module.log(
             f"{regime.regime_kind}/{regime.regime_id}/figures_rendered",
-            float(rendered_count),
+            float(succeeded),
             on_step=False,
             on_epoch=True,
             logger=True,
@@ -540,7 +544,13 @@ class EvaluationRegimesCallback(pl.Callback):
         pl_module: LightningModule,
         regime: EvaluationRegimeSettings,
     ) -> EvaluationTraceRequest | None:
-        """Build an optional trace request from regime settings and module state."""
+        """Build an optional trace request from regime settings and module state.
+
+        Trace keys are computed from configured figure names and merged with
+        explicitly requested keys.  The resulting spec is used directly for the
+        ``EvaluationTraceRequest``; the callback no longer calls
+        ``set_eval_trace_keys()`` on the module.
+        """
         trace_request = regime.trace_request
         figure_request = regime.figure_request
         if (
@@ -550,30 +560,52 @@ class EvaluationRegimesCallback(pl.Callback):
         ):
             return None
 
-        requested_trace_keys = set(trace_request.trace_keys)
+        # Keys needed for the persisted artifact bundle.
+        artifact_keys: set[str] = set(trace_request.trace_keys)
         for name in trace_request.figure_names:
             figure = REGISTRY.get(name)
-            requested_trace_keys.update(figure.trace_keys)
-            requested_trace_keys.update(figure.meta_keys)
+            artifact_keys.update(figure.trace_keys)
+            artifact_keys.update(figure.meta_keys)
+
+        # Keys needed for callback-local diagnostic preview rendering.
+        preview_keys: set[str] = set()
         if figure_request.enabled:
             for name in figure_request.figures:
                 figure = REGISTRY.get(name)
-                requested_trace_keys.update(figure.trace_keys)
-                requested_trace_keys.update(figure.meta_keys)
+                preview_keys.update(figure.trace_keys)
+                preview_keys.update(figure.meta_keys)
 
-        if requested_trace_keys:
-            set_trace_keys = getattr(pl_module, "set_eval_trace_keys", None)
-            if callable(set_trace_keys):
-                set_trace_keys(requested_trace_keys)
+        all_keys = artifact_keys | preview_keys
 
-        trace_spec = getattr(pl_module, "trace_spec", None)
-        if trace_spec is None:
-            trace_spec = getattr(pl_module, "trace_specs", None)
+        # Warn when preview config adds keys beyond what artifact capture
+        # would request — this makes the semantic boundary observable.
+        if trace_request.enabled:
+            extra_preview = preview_keys - artifact_keys
+            if extra_preview:
+                warnings.warn(
+                    f"Regime {regime.regime_id!r}: preview figures require "
+                    f"trace keys {sorted(extra_preview)} that are not in the "
+                    "artifact trace request. These keys will be captured for "
+                    "online preview but are not persisted in the artifact bundle.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+
+        # Build trace spec directly from the accumulated keys instead of
+        # pushing them into the module via set_eval_trace_keys.
+        if all_keys:
+            trace_spec = _build_trace_spec_for_module(pl_module, all_keys)
+        else:
+            trace_spec = getattr(pl_module, "trace_spec", None)
+            if trace_spec is None:
+                trace_spec = getattr(pl_module, "trace_specs", None)
+
         if trace_spec is None:
             raise RuntimeError(
                 "Trace request is enabled for regime "
                 f"{regime.regime_id!r}, but the active Lightning module does "
-                "not expose trace_spec (or legacy trace_specs)."
+                "not expose trace_spec (or legacy trace_specs) and no trace "
+                "keys were provided via trace_request or figure_request."
             )
 
         return EvaluationTraceRequest(
@@ -627,7 +659,7 @@ class EvaluationRegimesCallback(pl.Callback):
             regime=regime,
             trigger_kind=trigger_kind,
         )
-        persist_regime_figure_bundle(
+        persist_regime_artifact_bundle(
             run_dir=run_dir,
             regime_kind=regime.regime_kind,
             regime_id=regime.regime_id,
@@ -708,6 +740,30 @@ def _extract_loss_scalar(  # --------------------------------------------------
     if isinstance(loss, Real):
         return float(loss)
     return None
+
+
+# =============================================================================
+def _build_trace_spec_for_module(  # ------------------------------------------
+    module: LightningModule,
+    trace_keys: set[str],
+) -> Any | None:
+    """Build a trace spec from explicit keys, without calling set_eval_trace_keys.
+
+    Attempts model-family-aware trace spec construction via ``build_trace_spec``
+    if a ``_trace_paradigm`` attribute is available on the module.  Falls back to
+    the module's ``trace_spec`` attribute if present.
+
+    Returns ``None`` when neither path produces a spec.
+    """
+    paradigm = getattr(module, "_trace_paradigm", None)
+    if paradigm is not None and trace_keys:
+        return build_trace_spec(paradigm, include_keys=trace_keys)
+
+    # Fallback: use the module's existing trace_spec if available.
+    trace_spec = getattr(module, "trace_spec", None)
+    if trace_spec is None:
+        trace_spec = getattr(module, "trace_specs", None)
+    return trace_spec
 
 
 # =============================================================================

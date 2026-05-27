@@ -90,6 +90,16 @@ class FigureGenerationSettings(BaseModel, extra="forbid"):
         ge=1,
         description="Maximum cells shown per cell-level figure (e.g. rate maps).",
     )
+    max_timesteps: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Maximum number of timesteps rendered from each bounded diagnostic "
+            "trace.  This is a render-time guard — it slices diagnostic traces "
+            "before figure rendering but does not reduce the amount of trace "
+            "data captured by the model/family validation step."
+        ),
+    )
     max_retained_files: int = Field(
         default=200,
         ge=1,
@@ -125,21 +135,71 @@ class FigureGenerationSettings(BaseModel, extra="forbid"):
                 "FigureGenerationSettings.figures contains unknown names: "
                 f"{unknown}."
             )
+        report_kind = [
+            name
+            for name in self.figures
+            if name in available and REGISTRY.get(name).kind == "report"
+        ]
+        if report_kind:
+            blocked = ", ".join(sorted(set(report_kind)))
+            raise ValueError(
+                "FigureGenerationSettings.figures contains report-kind names: "
+                f"{blocked}. "
+                "Use the offline report pipeline for these."
+            )
+
+        non_bounded = [
+            name
+            for name in self.figures
+            if name in available
+            and REGISTRY.get(name).input_contract != "bounded_trace"
+        ]
+        if non_bounded:
+            lines: list[str] = [
+                "FigureGenerationCallback only supports bounded_trace figures.",
+            ]
+            for name in sorted(set(non_bounded)):
+                spec = REGISTRY.get(name)
+                lines.append("")
+                lines.append(f"  {name}")
+                lines.append(f"    requires: {spec.input_contract}")
+                if spec.input_contract == "evaluation_artifact":
+                    lines.append(
+                        "    Use: add this figure to an EvaluationRegimesCallback "
+                        "regime to capture full eval artifacts, "
+                        "then render it offline with render_report()."
+                    )
+                elif spec.input_contract == "offline_artifact":
+                    lines.append(
+                        "    Use: render this figure offline with "
+                        "render_report(...) from a persisted eval artifact run."
+                    )
+            lines.append("")
+            lines.append(
+                "Valid bounded_trace figures: "
+                + ", ".join(
+                    sorted(
+                        name
+                        for name in available
+                        if REGISTRY.get(name).input_contract == "bounded_trace"
+                    )
+                )
+            )
+            raise ValueError("\n".join(lines))
         return self
 
 
 # =============================================================================
 class FigureGenerationCallback(pl.Callback):
-    """Standalone scheduled figure generation callback.
+    """Bounded trace diagnostic figure generation callback.
 
-    Collects traces from the LightningModule's validation/test step outputs
-    (expected under the ``trace`` key), gates by cadence, and renders
-    registered figures via the ``ehc_sn.figures`` pipeline.
+    Consumes ``pl_module.diagnostic_traces`` (a tuple of bounded ``TraceTree``
+    objects owned by the module), gates by cadence, and renders registered
+    diagnostic figures via the ``ehc_sn.figures`` pipeline.
 
-    This is a simpler alternative to
-    :class:`~ehc_sn.callbacks.evaluation.EvaluationRegimesCallback` that
-    requires no provider resolution — it works with any LightningModule that
-    returns ``{"trace": TraceTree}`` from its step methods.
+    The callback does **not** accumulate traces, infer trace keys, or tell the
+    module what traces to produce — those responsibilities belong to the module
+    and evaluator layers.
     """
 
     def __init__(self, settings: FigureGenerationSettings) -> None:
@@ -154,20 +214,9 @@ class FigureGenerationCallback(pl.Callback):
         """Render due figures after validation epoch end."""
         if self.settings.context != "validation":
             return
-        self._run(trainer, pl_module, trigger_kind="epoch")
-
-    def on_train_batch_end(  # ------------------------------------------------
-        self,
-        trainer: Trainer,
-        pl_module: LightningModule,
-        outputs: Any,
-        batch: Any,
-        batch_idx: int,
-    ) -> None:
-        """Render due figures after train batch (step-based cadence)."""
-        if self.settings.context != "validation":
+        if not self.settings.enabled:
             return
-        self._run(trainer, pl_module, trigger_kind="step")
+        self._run_from_module(trainer, pl_module, trigger_kind="epoch")
 
     def on_test_epoch_end(  # -------------------------------------------------
         self,
@@ -177,7 +226,32 @@ class FigureGenerationCallback(pl.Callback):
         """Render due figures after test epoch end."""
         if self.settings.context != "testing":
             return
-        self._run(trainer, pl_module, trigger_kind="epoch")
+        if not self.settings.enabled:
+            return
+        self._run_from_module(trainer, pl_module, trigger_kind="epoch")
+
+    def _run_from_module(  # --------------------------------------------------
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        *,
+        trigger_kind: Literal["step", "epoch"],
+    ) -> None:
+        """Read bounded diagnostic traces from the module and render.
+
+        The module owns trace capture; this callback only renders and logs.
+        """
+        if trainer.sanity_checking:
+            return
+        if not trainer.is_global_zero:
+            return
+        if not self._is_due(trigger_kind, trainer):
+            return
+
+        traces: list[Any] = list(getattr(pl_module, "diagnostic_traces", ()))
+        if not traces:
+            return
+        self._run(trainer, pl_module, trigger_kind="epoch", traces=traces)
 
     def _run(  # --------------------------------------------------------------
         self,
@@ -185,8 +259,17 @@ class FigureGenerationCallback(pl.Callback):
         pl_module: LightningModule,
         *,
         trigger_kind: Literal["step", "epoch"],
+        traces: list[Any],
     ) -> None:
-        """Execute figure generation if the schedule is due."""
+        """Execute figure generation if the schedule is due.
+
+        Args:
+            trainer: Lightning Trainer instance.
+            pl_module: LightningModule whose traces are being rendered.
+            trigger_kind: What kind of trigger invoked this run.
+            traces: Module-owned ``TraceTree`` objects from the just-completed
+                validation epoch.
+        """
         if not self.settings.enabled:
             return
         if trainer.sanity_checking:
@@ -197,7 +280,6 @@ class FigureGenerationCallback(pl.Callback):
         if not self._is_due(trigger_kind, trainer):
             return
 
-        traces = self._collect_traces(trainer, pl_module)
         if not traces:
             return
 
@@ -222,6 +304,9 @@ class FigureGenerationCallback(pl.Callback):
             for idx, trace in enumerate(traces[: self.settings.max_cases]):
                 if trace is None:
                     continue
+
+                if self.settings.max_timesteps is not None:
+                    trace = trace.slice_time(0, self.settings.max_timesteps)
 
                 fig = None
                 try:
@@ -277,35 +362,6 @@ class FigureGenerationCallback(pl.Callback):
             self.settings.every_n_epochs > 0
             and (trainer.current_epoch + 1) % self.settings.every_n_epochs == 0
         )
-
-    def _collect_traces(  # ---------------------------------------------------
-        self,
-        trainer: Trainer,
-        pl_module: LightningModule,
-    ) -> list[Any]:
-        """Collect trace outputs from the LightningModule's step results.
-
-        Expected source: ``validation_step`` / ``test_step`` outputs that
-        contain a ``trace`` key.
-
-        The callback relies on the module owning trace materialization
-        (via ``observe_rollout_chunk``) and returning the trace as part of
-        its step output dict.
-        """
-        collected: list[Any] = []
-        # Traces are accumulated per batch in the module's step outputs.
-        # We look for them either in trainer.callback_metrics (post-epoch)
-        # or directly from the module's output cache.
-        outputs_buffer = getattr(pl_module, "_validation_step_outputs", None)
-        if outputs_buffer is None:
-            outputs_buffer = getattr(pl_module, "_test_step_outputs", None)
-        if outputs_buffer is not None and isinstance(outputs_buffer, list):
-            for output in outputs_buffer:
-                if isinstance(output, dict):
-                    trace = output.get("trace")
-                    if trace is not None:
-                        collected.append(trace)
-        return collected
 
     def _resolve_output_dir(  # -----------------------------------------------
         self,
