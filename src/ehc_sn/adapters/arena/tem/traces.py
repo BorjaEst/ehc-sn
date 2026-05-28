@@ -27,12 +27,21 @@ from torch import Tensor
 
 from ehc_sn.tasks.arena.evaluation import coerce_observation_ids
 from ehc_sn.traces import TraceField, TraceValue
+from ehc_sn.types import Batch
 
 
 # =============================================================================
 class _ArenaTEMCarryData(Protocol):
-    def __getitem__(self, key: str) -> Tensor: ...
-    def get(self, key: str, default: Tensor | None = None) -> Tensor | None: ...
+    def __getitem__(  # -------------------------------------------------------
+        self,
+        key: str,
+    ) -> Tensor: ...
+
+    def get(  # ---------------------------------------------------------------
+        self,
+        key: str,
+        default: Tensor | None = None,
+    ) -> Tensor | None: ...
 
 
 class _ArenaTEMCarry(Protocol):
@@ -54,27 +63,41 @@ class _ArenaTEMTraceContext(Protocol):
 
 
 # =============================================================================
-def _get_world_observation_id(ctx: _ArenaTEMTraceContext) -> TraceValue:
+def _get_world_observation_id(  # ---------------------------------------------
+    ctx: _ArenaTEMTraceContext,
+) -> TraceValue:
     obs_id: Tensor = ctx.batch["observation_id"]
     return coerce_observation_ids(obs_id).detach()
 
 
-def _get_is_revisit(ctx: _ArenaTEMTraceContext) -> TraceValue:
+# =============================================================================
+def _get_is_revisit(  # -------------------------------------------------------
+    ctx: _ArenaTEMTraceContext,
+) -> TraceValue:
     is_revisit: Tensor | None = ctx.batch.get("is_revisit")
     if is_revisit is None:
         return None
     return is_revisit.view(-1).bool().detach()
 
 
-def _get_pred_obs_id_inference(ctx: _ArenaTEMTraceContext) -> TraceValue:
+# =============================================================================
+def _get_pred_obs_id_inference(  # --------------------------------------------
+    ctx: _ArenaTEMTraceContext,
+) -> TraceValue:
     return ctx.outputs.backbone_output.obs_logits[0].detach().argmax(dim=-1)
 
 
-def _get_pred_obs_id_retrieved(ctx: _ArenaTEMTraceContext) -> TraceValue:
+# =============================================================================
+def _get_pred_obs_id_retrieved(  # --------------------------------------------
+    ctx: _ArenaTEMTraceContext,
+) -> TraceValue:
     return ctx.outputs.backbone_output.obs_logits[1].detach().argmax(dim=-1)
 
 
-def _get_pred_obs_id_ancestral(ctx: _ArenaTEMTraceContext) -> TraceValue:
+# =============================================================================
+def _get_pred_obs_id_ancestral(  # ---------------------------------------------
+    ctx: _ArenaTEMTraceContext,
+) -> TraceValue:
     return ctx.outputs.backbone_output.obs_logits[2].detach().argmax(dim=-1)
 
 
@@ -115,7 +138,7 @@ ARENA_TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
 
 
 # =============================================================================
-def select_arena_tem_trace_fields(
+def select_arena_tem_trace_fields(  # -----------------------------------------
     include_keys: Iterable[str] | None,
 ) -> tuple[TraceField, ...]:
     """Return the Arena TEM trace fields matching a requested key set."""
@@ -123,6 +146,37 @@ def select_arena_tem_trace_fields(
         return ARENA_TEM_TRACE_FIELDS
     requested = set(include_keys)
     return tuple(f for f in ARENA_TEM_TRACE_FIELDS if f.name in requested)
+
+
+# =============================================================================
+TARGET_OBSERVATION_ID_META_KEY: str = "target/observation_id"
+"""Trace metadata key for the ground-truth observation-id trajectory.
+
+Populated by :func:`build_arena_tem_trace_meta` and read by TEM figure
+selectors via ``trace.get_meta_path(TARGET_OBSERVATION_ID_META_KEY)``.
+"""
+
+
+# =============================================================================
+def build_arena_tem_trace_meta(  # --------------------------------------------
+    batch: Batch,
+) -> dict[str, object]:
+    """Return ground-truth observation-id trajectory from an arena replay batch.
+
+    Args:
+        batch: Arena replay batch containing ``"trajectory_observation_id"``
+            with shape ``(B, T_max)``.
+
+    Returns:
+        Nested dict keyed by ``"target/observation_id"`` with the full
+        trajectory moved to CPU.
+    """
+    root_key, leaf_key = TARGET_OBSERVATION_ID_META_KEY.split("/", maxsplit=1)
+    return {
+        root_key: {
+            leaf_key: batch["trajectory_observation_id"].detach().cpu(),
+        },
+    }
 
 
 # =============================================================================
@@ -134,4 +188,6 @@ __all__ = [
     "ARENA_TEM_TRACE_PRED_RETRIEVED",
     "ARENA_TEM_TRACE_PRED_ANCESTRAL",
     "select_arena_tem_trace_fields",
+    "TARGET_OBSERVATION_ID_META_KEY",
+    "build_arena_tem_trace_meta",
 ]
