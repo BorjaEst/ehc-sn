@@ -57,6 +57,8 @@
         "import-linter",
         "ruff",
         "pyupgrade",
+        "mkdocs",
+        "mkdocstrings[python]",
     ]
 
 [project.urls]
