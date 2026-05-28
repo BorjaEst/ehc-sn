@@ -2,7 +2,11 @@
 
 from ehc_sn.metrics.adapter import Route, update_metrics_from_step
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
-from ehc_sn.metrics.reducers import HiddenNormHistogram, OccupancyHistogram
+from ehc_sn.metrics.reducers import (
+    HiddenNormHistogram,
+    OccupancyHistogram,
+    compute_nonempty,
+)
 from ehc_sn.metrics.renderers import (
     log_reducer_figure,
     render_hidden_norm_histogram,
@@ -26,6 +30,7 @@ from ehc_sn.metrics.torchmetrics import LastRatioMetric, RatioMetric
 __all__ = [
     "HiddenNormHistogram",
     "OccupancyHistogram",
+    "compute_nonempty",
     "Route",
     "RatioMetric",
     "LastRatioMetric",

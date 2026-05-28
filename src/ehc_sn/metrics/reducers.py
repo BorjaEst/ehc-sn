@@ -12,9 +12,12 @@ O(n_bins) for histograms.
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 from torch import Tensor
 from torchmetrics import Metric
+from torchmetrics.collections import MetricCollection
 
 
 # =============================================================================
@@ -51,6 +54,7 @@ class OccupancyHistogram(Metric):
         self._max_batches = max_batches
         self.add_state("grid", default=torch.zeros(n_locations), dist_reduce_fx="sum")  # type: ignore[arg-type]
         self.add_state("batch_count", default=torch.tensor(0), dist_reduce_fx="sum")  # type: ignore[arg-type]
+        self.add_state("sample_count", default=torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum")  # type: ignore[arg-type]
 
     def update(  # ------------------------------------------------------------
         self,
@@ -67,13 +71,16 @@ class OccupancyHistogram(Metric):
         """
         if self._max_batches > 0 and self.batch_count >= self._max_batches:
             return
+        self.batch_count += 1  # type: ignore[operator]
+        if location_ids.numel() == 0:
+            return
         flat = location_ids.reshape(-1).long()
         self.grid.scatter_add_(  # type: ignore[union-attr]
             0,
             flat.to(self.grid.device),
             torch.ones_like(flat, dtype=torch.float32),
         )
-        self.batch_count += 1  # type: ignore[operator]
+        self.sample_count += flat.numel()  # type: ignore[operator]
 
     def compute(
         self,
@@ -89,9 +96,10 @@ class OccupancyHistogram(Metric):
         return self.grid / total  # type: ignore[return-value]
 
     def reset(self) -> None:  # ----------------------------------------------
-        """Zero the grid and batch counter."""
+        """Zero the grid, batch counter, and sample counter."""
         self.grid.zero_()  # type: ignore[union-attr]
         self.batch_count.zero_()  # type: ignore[union-attr]
+        self.sample_count.zero_()  # type: ignore[union-attr]
 
 
 # =============================================================================
@@ -136,6 +144,7 @@ class HiddenNormHistogram(Metric):
         self._max_batches = max_batches
         self.add_state("counts", default=torch.zeros(n_bins), dist_reduce_fx="sum")  # type: ignore[arg-type]
         self.add_state("batch_count", default=torch.tensor(0), dist_reduce_fx="sum")  # type: ignore[arg-type]
+        self.add_state("sample_count", default=torch.tensor(0, dtype=torch.long), dist_reduce_fx="sum")  # type: ignore[arg-type]
 
     def update(  # ------------------------------------------------------------
         self,
@@ -148,6 +157,9 @@ class HiddenNormHistogram(Metric):
         """
         if self._max_batches > 0 and self.batch_count >= self._max_batches:
             return
+        self.batch_count += 1  # type: ignore[operator]
+        if norms.numel() == 0:
+            return
         flat = norms.detach().reshape(-1).to(self._edges.device)
         bin_indices = torch.bucketize(flat, self._edges) - 1
         bin_indices = bin_indices.clamp(0, self.counts.shape[0] - 1)
@@ -156,7 +168,7 @@ class HiddenNormHistogram(Metric):
             bin_indices,
             torch.ones_like(bin_indices, dtype=torch.float32),
         )
-        self.batch_count += 1  # type: ignore[operator]
+        self.sample_count += flat.numel()  # type: ignore[operator]
 
     def compute(  # -----------------------------------------------------------
         self,
@@ -174,13 +186,61 @@ class HiddenNormHistogram(Metric):
     def reset(  # -------------------------------------------------------------
         self,
     ) -> None:
-        """Zero the bin counts and batch counter."""
+        """Zero the bin counts, batch counter, and sample counter."""
         self.counts.zero_()  # type: ignore[union-attr]
         self.batch_count.zero_()  # type: ignore[union-attr]
+        self.sample_count.zero_()  # type: ignore[union-attr]
+
+
+# =============================================================================
+def compute_nonempty(collection: MetricCollection) -> dict[str, Any]:
+    """Compute a ``MetricCollection`` and return only metrics with samples.
+
+    Calls ``collection.compute()`` on all ranks unconditionally, then
+    filters the result to metrics whose ``sample_count`` is positive
+    after distributed synchronization.  This avoids DDP rank divergence.
+
+    Args:
+        collection: A ``MetricCollection`` whose constituent metrics each
+            expose a ``sample_count`` state (``dist_reduce_fx="sum"``).
+
+    Returns:
+        Subset of ``collection.compute()`` entries where
+        ``metric.sample_count.item() > 0``.  Empty dict when no metric
+        accumulated data.
+
+    Raises:
+        TypeError: If any metric in the collection lacks a ``sample_count``
+            attribute.
+    """
+    raw = collection.compute()
+
+    # Build a lookup from compute keys to Metric objects.  The original
+    # attribute names are preserved as module attributes even after
+    # ``clone(prefix=...)``, but the ``compute()`` keys include the prefix.
+    # Use ``items()`` which returns ``(prefixed_key, metric)`` pairs.
+    metric_by_key = dict(collection.items())
+
+    return {
+        name: value
+        for name, value in raw.items()
+        if _is_nonempty(metric_by_key[name])
+    }
+
+
+def _is_nonempty(metric: Metric) -> bool:
+    """Return ``True`` if *metric* accumulated at least one real sample."""
+    if not hasattr(metric, "sample_count"):
+        raise TypeError(
+            f"{type(metric).__name__} must define a distributed "
+            f"sample_count state."
+        )
+    return int(metric.sample_count.item()) > 0
 
 
 # =============================================================================
 __all__ = [
     "OccupancyHistogram",
     "HiddenNormHistogram",
+    "compute_nonempty",
 ]
