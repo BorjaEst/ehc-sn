@@ -30,6 +30,7 @@ trainer_devices      = 1
 trainer_num_nodes    = 1
 trainer_precision    = "16-mixed"
 diagnostic_level     = "standard"
+non_finite_policy    = "raise"
 init_weights_groups  = ["all"]
 
 # -- Adapter settings ---------------------------------------------------------
@@ -72,9 +73,9 @@ init_weights_groups  = ["all"]
 
 [checkpoint]
     dirpath                 = "checkpoints/hrm-v1-debug"
-    filename                = "epoch={epoch:03d}"
-    save_top_k              = 0
-    every_n_epochs          = 1
+    filename                = "hrm-v1-{step:08d}"
+    save_top_k              = -1
+    every_n_train_steps     = 100
     save_on_train_epoch_end = false
     save_last               = true
     save_on_exception       = true
@@ -98,6 +99,7 @@ failure_policy = "warn"
 
 # -- Named evaluation regimes -------------------------------------------------
 [[eval_regimes.regimes]]
+task         = "maze_hard"
 regime_id    = "maze_val_diag"
 regime_kind  = "diagnostic"
 provider_ref = "ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider"

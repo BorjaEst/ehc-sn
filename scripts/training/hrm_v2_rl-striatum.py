@@ -254,6 +254,13 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
             "'research': all available diagnostic signals."
         ),
     )
+    non_finite_policy: Literal["drop", "raise"] = Field(
+        default="drop",
+        description=(
+            "Policy for NaN/Inf scalar diagnostic values. Set to 'raise' "
+            "to fail fast instead of silently dropping NaN values."
+        ),
+    )
 
     # -------------------------------------------------------------------------
     # Training control settings (passed as kwargs to Lightning Trainer)

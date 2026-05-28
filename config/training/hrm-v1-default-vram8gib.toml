@@ -36,6 +36,7 @@ trainer_precision    = "16-mixed"
 limit_val_batches    = 1.0  # float: fraction of validation set (1.0 = 100%)
 val_check_interval   = 1000
 diagnostic_level     = "standard"
+non_finite_policy    = "raise"
 
 # Optional model-only init hydration (mutually exclusive with full resume)
 # init_weights_from = "checkpoints/hrm-v1/last.ckpt"
@@ -83,9 +84,9 @@ supervised_only_warmup_steps = 500
 
 [checkpoint]
     dirpath                 = "checkpoints/hrm-v1"
-    filename                = "epoch={epoch:03d}"
-    save_top_k              = 0
-    every_n_epochs          = 1
+    filename                = "hrm-v1-{step:08d}"
+    save_top_k              = -1
+    every_n_train_steps     = 1000
     save_on_train_epoch_end = false
     save_last               = true
     save_on_exception       = true

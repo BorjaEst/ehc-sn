@@ -248,6 +248,13 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
             "'standard' adds routine diagnostics; 'research' enables the fullest diagnostic surface."
         ),
     )
+    non_finite_policy: Literal["drop", "raise"] = Field(
+        default="drop",
+        description=(
+            "Policy for NaN/Inf scalar diagnostic values. Set to 'raise' "
+            "to fail fast instead of silently dropping NaN values."
+        ),
+    )
 
     # -- Distributed ---------------------------------------------------------------------------
     trainer_accelerator: Literal["auto", "gpu", "cpu"] = Field(

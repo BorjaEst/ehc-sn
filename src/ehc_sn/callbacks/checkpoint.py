@@ -38,8 +38,8 @@ class CheckpointSettings(BaseModel, extra="forbid"):
         ge=1,
         description="Save every N training steps when set.",
     )
-    every_n_epochs: int = Field(
-        default=1,
+    every_n_epochs: Optional[int] = Field(
+        default=None,
         ge=1,
         description="Checkpoint on validation boundaries for epochs divisible by this value.",
     )

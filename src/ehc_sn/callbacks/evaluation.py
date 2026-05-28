@@ -201,6 +201,11 @@ class EvaluationFigureRequestSettings(BaseModel, extra="forbid"):
 class EvaluationRegimeSettings(BaseModel, extra="forbid"):
     """One named evaluation regime configuration."""
 
+    task: str = Field(
+        ...,
+        min_length=1,
+        description="Canonical task-family identifier (e.g. ``arena``).",
+    )
     regime_id: str = Field(
         ...,
         min_length=1,
@@ -635,6 +640,7 @@ class EvaluationRegimesCallback(pl.Callback):
         )
         persist_regime_artifact_bundle(
             run_dir=run_dir,
+            task=regime.task,
             regime_kind=regime.regime_kind,
             regime_id=regime.regime_id,
             trigger_kind=trigger_kind,
