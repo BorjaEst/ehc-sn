@@ -160,34 +160,34 @@ LOSS_PLACE_CONSISTENCY: str = "loss_place_consistency"
 LOSS_OBS_INFER: str = "loss_obs_infer"
 """Objective-scope inference-pathway observation NLL (TEM).
 
-Weighted by ``c_obs``, revisit-masked, and normalised by ``protocol_count``.
+Weighted by ``c_obs``, revisit-masked, and normalized by ``protocol_count``.
 Equals ``loss_obs_nll`` minus the retrieved and ancestral components.
 """
 
 LOSS_OBS_RETRIEVED: str = "loss_obs_retrieved"
 """Objective-scope retrieved-pathway observation NLL (TEM).
 
-Weighted by ``c_obs``, revisit-masked, and normalised by ``protocol_count``.
+Weighted by ``c_obs``, revisit-masked, and normalized by ``protocol_count``.
 Equals ``loss_obs_nll`` minus the inference and ancestral components.
 """
 
 LOSS_OBS_ANCESTRAL: str = "loss_obs_ancestral"
 """Objective-scope ancestral-pathway observation NLL (TEM).
 
-Weighted by ``c_obs``, revisit-masked, and normalised by ``protocol_count``.
+Weighted by ``c_obs``, revisit-masked, and normalized by ``protocol_count``.
 Equals ``loss_obs_nll`` minus the inference and retrieved components.
 """
 
 LOSS_PLACE_TRANSITION: str = "loss_place_transition"
 """Objective-scope place-consistency transition contribution (TEM).
 
-Weighted by ``c_place``, revisit-masked, and normalised by ``protocol_count``.
+Weighted by ``c_place``, revisit-masked, and normalized by ``protocol_count``.
 """
 
 LOSS_PLACE_SENSORY: str = "loss_place_sensory"
 """Objective-scope place-consistency sensory-cued contribution (TEM).
 
-Weighted by ``c_place``, revisit-masked, and normalised by ``protocol_count``.
+Weighted by ``c_place``, revisit-masked, and normalized by ``protocol_count``.
 """
 
 GRID_POST_NORM: str = "grid_post_norm"
@@ -204,7 +204,8 @@ PLACE_PRIOR_NORM: str = "place_prior_norm"
 
 TEM_SIGNALS: frozenset[str] = VAR_SIGNALS | frozenset(
     {
-        LOSS_GRID_KL, LOSS_PLACE_CONSISTENCY, LOSS_OBS_INFER, LOSS_OBS_RETRIEVED, LOSS_OBS_ANCESTRAL,
+        LOSS_GRID_KL, LOSS_PLACE_CONSISTENCY, LOSS_OBS_INFER,
+        LOSS_OBS_RETRIEVED, LOSS_OBS_ANCESTRAL,
         LOSS_PLACE_TRANSITION, LOSS_PLACE_SENSORY,
         GRID_POST_NORM, GRID_PRIOR_NORM, PLACE_POST_NORM,
         PLACE_PRIOR_NORM,
@@ -225,7 +226,8 @@ __all__ = [
     "LOSS_TOTAL", "LOSS_OBS_NLL", "LOSS_LATENT", "LOSS_REG", "LATENT_POST_NORM",
     "LATENT_PRIOR_NORM", "VAR_SIGNALS",
     # TEM
-    "LOSS_GRID_KL", "LOSS_PLACE_CONSISTENCY", "LOSS_OBS_INFER", "LOSS_OBS_RETRIEVED",
-    "LOSS_OBS_ANCESTRAL", "LOSS_PLACE_TRANSITION", "LOSS_PLACE_SENSORY", "GRID_POST_NORM",
-    "GRID_PRIOR_NORM", "PLACE_POST_NORM", "PLACE_PRIOR_NORM", "TEM_SIGNALS",
+    "LOSS_GRID_KL", "LOSS_PLACE_CONSISTENCY", "LOSS_OBS_INFER", 
+    "LOSS_OBS_RETRIEVED", "LOSS_OBS_ANCESTRAL", "LOSS_PLACE_TRANSITION",
+    "LOSS_PLACE_SENSORY", "GRID_POST_NORM", "GRID_PRIOR_NORM", 
+    "PLACE_POST_NORM", "PLACE_PRIOR_NORM", "TEM_SIGNALS",
 ]  # fmt: skip

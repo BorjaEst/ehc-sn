@@ -184,66 +184,61 @@ ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_Q_LOGITS_ACT,)
 
 def _get_q_logits_rl(ctx: _RLTraceContext) -> TraceValue:
     """Value-control Q-values over actions from the RL controller."""
-    return ctx.outputs.q_values.detach()
-
-
-def _require_state_value(ctx: _RLTraceContext) -> Tensor:
-    """Return the critic state value from the interaction record."""
-    return ctx.outputs.state_value
+    return ctx.outputs.q_values.detach().cpu()
 
 
 def _get_state_value_rl(ctx: _RLTraceContext) -> TraceValue:
     """Critic state-value estimates V(s) from the value head."""
-    return ctx.outputs.state_value.detach()
+    return ctx.outputs.state_value.detach().cpu()
 
 
 def _get_reward_env(ctx: _RLTraceContext) -> TraceValue:
     """Scalar environment reward for each batch slot."""
-    return ctx.outputs.reward.squeeze(-1).detach()
+    return ctx.outputs.reward.squeeze(-1).detach().cpu()
 
 
 def _get_action(ctx: _RLTraceContext) -> TraceValue:
     """Selected action index for each batch slot."""
-    return ctx.outputs.sampled_action.detach()
+    return ctx.outputs.sampled_action.detach().cpu()
 
 
 def _get_rpe(ctx: _RLTraceContext) -> TraceValue:
     """Reward prediction error: reward − V(s)."""
     reward: Tensor = ctx.outputs.reward.squeeze(-1)
     value: Tensor = ctx.outputs.state_value.squeeze(-1)
-    return (reward - value).detach()
+    return (reward - value).detach().cpu()
 
 
 def _get_world_observation_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Current-step observation encoding aligned with this step's TEM outputs."""
-    v = ctx.carry.data.get("observation")
-    return None if v is None else v.detach()
+    v = ctx.carry.data.get("observation_id")
+    return None if v is None else v.detach().cpu()
 
 
 def _get_world_location_ids_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Current-step location ids aligned with this step's TEM outputs."""
     v = ctx.carry.data.get("location_id")
-    return None if v is None else v.squeeze(-1).detach()
+    return None if v is None else v.squeeze(-1).detach().cpu()
 
 
 def _get_diagnostic_lec_cells_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable LEC activations by frequency for diagnostic figures."""
-    return [cell.detach() for cell in ctx.carry.model_state.lec.cells]
+    return [cell.detach().cpu() for cell in ctx.carry.model_state.lec.cells]
 
 
 def _get_diagnostic_lec_filtered_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable LEC filtered by frequency for diagnostic figures."""
-    return [cell.detach() for cell in ctx.carry.model_state.lec.filtered]
+    return [cell.detach().cpu() for cell in ctx.carry.model_state.lec.filtered]
 
 
 def _get_diagnostic_mec_location_mean_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable MEC location codes by frequency for diagnostic figures."""
-    return [cell.detach() for cell in ctx.carry.model_state.mec.cells]
+    return [cell.detach().cpu() for cell in ctx.carry.model_state.mec.cells]
 
 
 def _get_diagnostic_hpc_location_mean_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable HPC grounded-location codes by frequency for diagnostic figures."""
-    return [cell.detach() for cell in ctx.carry.model_state.hpc.cells]
+    return [cell.detach().cpu() for cell in ctx.carry.model_state.hpc.cells]
 
 
 def _get_diagnostic_hpc_memory_tem(ctx: _TEMTraceContext) -> TraceValue:
@@ -257,7 +252,7 @@ def _get_diagnostic_hpc_memory_tem(ctx: _TEMTraceContext) -> TraceValue:
 
 def _memory_entry_for_trace(memory: MemoryEntry) -> Tensor:
     """Return the canonical dense memory operator for trace storage."""
-    return memory.to_dense().detach()
+    return memory.to_dense().detach().cpu()
 
 
 def _get_lec_alpha_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
@@ -270,7 +265,7 @@ def _get_lec_alpha_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
             if static_data is None
             else static_data.get("lec_alpha_sigmoid")
         )
-    return None if value is None else value.detach()
+    return None if value is None else value.detach().cpu()
 
 
 def _get_lec_w_f_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
@@ -281,7 +276,7 @@ def _get_lec_w_f_sigmoid_tem(ctx: _TEMTraceContext) -> TraceValue:
         value = (
             None if static_data is None else static_data.get("lec_w_f_sigmoid")
         )
-    return None if value is None else value.detach()
+    return None if value is None else value.detach().cpu()
 
 
 TRACE_Q_LOGITS_RL = TraceField(

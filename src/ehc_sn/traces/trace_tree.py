@@ -153,6 +153,17 @@ class TraceTree:
         )
         return torch_pytree.tree_unflatten(dense_leaves, self.spec)
 
+    def list_meta_keys(  # ----------------------------------------------------
+        self,
+    ) -> list[str]:
+        """Return sorted list of slash-delimited metadata paths from attached meta.
+
+        Returns:
+            Sorted list of leaf paths in ``attached_meta``, using ``"/"``
+            as the segment separator.  Empty list when no metadata is attached.
+        """
+        return sorted(_list_meta_leaf_paths(self.attached_meta))
+
     def export_meta_tree(  # --------------------------------------------------
         self,
     ) -> Any:
@@ -503,7 +514,23 @@ def _lookup_meta_path(  # -----------------------------------------------------
 
 
 # =============================================================================
-def _merge_meta_mapping(  # ----------------------------------------------------
+def _list_meta_leaf_paths(  # -------------------------------------------------
+    meta: Mapping[str, Any],
+    *,
+    _prefix: str = "",
+) -> list[str]:
+    """Recursively enumerate leaf paths in a nested metadata mapping."""
+    paths: list[str] = []
+    for key, value in meta.items():
+        segment = f"{_prefix}/{key}" if _prefix else key
+        if isinstance(value, Mapping):
+            paths.extend(_list_meta_leaf_paths(value, _prefix=segment))
+        else:
+            paths.append(segment)
+    return paths
+
+
+def _merge_meta_mapping(  # ---------------------------------------------------
     destination: dict[str, Any],
     source: Mapping[str, Any],
     *,
