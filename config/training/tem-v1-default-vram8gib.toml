@@ -12,14 +12,18 @@ model_config_path = "config/models/tem-v1-base.toml"
 dataset_path         = "data/processed/arena/default/v1"
 global_batch_size    = 10
 max_epochs           = 100
+max_steps            = 200000
 seed                 = 42
 augment              = true
-init_weights_groups  = ["all"]
+
+# -- DataLoader settings ------------------------------------------------------
 num_workers          = 4
 prefetch_factor      = 2
 pin_memory           = true
 persistent_workers   = true
-max_steps            = 200000
+
+# -- Trainer control ----------------------------------------------------------
+init_weights_groups  = ["all"]
 log_every_n_steps    = 10
 val_check_interval   = 1000  # int: training steps between validation runs
 limit_val_batches    = 10     # int: N validation batches per run
