@@ -53,7 +53,7 @@ from ehc_sn.eval.executor import execute_replay_evaluation_batch
 from ehc_sn.lightning.diagnostics import DiagnosticTraceSpec
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
-from ehc_sn.metrics.reducers import HiddenNormHistogram
+from ehc_sn.metrics.reducers import HiddenNormHistogram, compute_nonempty
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.routes.act import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
@@ -217,8 +217,9 @@ class HRMV1TrainingModel(L.LightningModule):
             bin_edges=torch.linspace(0.0, 50.0, 51), max_batches=10
         )
         self._val_reducer_collection = MetricCollection(
-            {"hidden_norms": self._val_hidden_norms}
-        ).clone(prefix="val_diag/")
+            {"hidden_norms": self._val_hidden_norms},
+            prefix="val_diag/",
+        )
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer = FifoBuffer(
@@ -447,7 +448,7 @@ class HRMV1TrainingModel(L.LightningModule):
         self,
     ) -> None:
         """Compute, log, and reset bounded diagnostic reducers."""
-        self._val_reducer_collection.compute()
+        compute_nonempty(self._val_reducer_collection)
         self._val_reducer_collection.reset()
 
     def execute_evaluation_batch(  # ------------------------------------------

@@ -35,7 +35,11 @@ from ehc_sn.lightning.tem.core.runtime import (
     resolve_tem_runtime,
 )
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
-from ehc_sn.metrics.reducers import HiddenNormHistogram, OccupancyHistogram
+from ehc_sn.metrics.reducers import (
+    HiddenNormHistogram,
+    OccupancyHistogram,
+    compute_nonempty,
+)
 from ehc_sn.metrics.renderers import (
     log_reducer_figure,
     render_hidden_norm_histogram,
@@ -178,8 +182,9 @@ class TEMV2TrainingModel(L.LightningModule):
             {
                 "occupancy": self._val_occupancy,
                 "hidden_norms": self._val_hidden_norms,
-            }
-        ).clone(prefix="val_diag/")
+            },
+            prefix="val_diag/",
+        )
 
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer: FifoBuffer | None = None
@@ -397,17 +402,23 @@ class TEMV2TrainingModel(L.LightningModule):
             self.val_metrics, result.evaluated, TEM_EPISODE_ROUTES
         )
 
-        # Feed bounded diagnostic reducers.
+        # Feed bounded diagnostic reducers unconditionally (empty tensors
+        # when data is absent — DDP-safe lifecycle).
         obs_id = batch.get("observation_id")
-        if obs_id is not None:
-            self._val_occupancy.update(obs_id.detach().cpu())
+        self._val_occupancy.update(
+            obs_id.detach().cpu() if obs_id is not None
+            else torch.empty(0, dtype=torch.long)
+        )
 
         # Feed hidden-state norm histogram from the rollout carry model_state.
+        norms = None
         if result.evaluated.steps:
             model_state = result.evaluated.last_step.snapshot.model_state
             if model_state is not None:
                 norms = _compute_hidden_state_norms(model_state)
-                self._val_hidden_norms.update(norms)
+        self._val_hidden_norms.update(
+            norms if norms is not None else torch.empty(0)
+        )
 
         # Store bounded diagnostic traces for callback consumption.
         if (
@@ -422,7 +433,7 @@ class TEMV2TrainingModel(L.LightningModule):
         self,
     ) -> None:
         """Compute, render, and reset bounded diagnostic reducers."""
-        summaries = self._val_reducer_collection.compute()
+        summaries = compute_nonempty(self._val_reducer_collection)
 
         if self.trainer is not None and self.trainer.is_global_zero:
             occ = summaries.get("val_diag/occupancy")

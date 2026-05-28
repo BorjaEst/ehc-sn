@@ -34,7 +34,11 @@ from ehc_sn.lightning.ehc.core.runtime import (
     RuntimeConfig,
     resolve_ehc_runtime,
 )
-from ehc_sn.metrics.reducers import HiddenNormHistogram, OccupancyHistogram
+from ehc_sn.metrics.reducers import (
+    HiddenNormHistogram,
+    OccupancyHistogram,
+    compute_nonempty,
+)
 from ehc_sn.metrics.renderers import (
     log_reducer_figure,
     render_hidden_norm_histogram,
@@ -160,8 +164,9 @@ class EHCSpatialPretrainRegime:
             {
                 "occupancy": self._val_occupancy,
                 "hidden_norms": self._val_hidden_norms,
-            }
-        ).clone(prefix="val_diag/")
+            },
+            prefix="val_diag/",
+        )
 
         self._train_carry = None
         self._diag_params_cache: dict[str, object] | None = None
@@ -480,10 +485,14 @@ class EHCSpatialPretrainRegime:
             lm.val_metrics, result.evaluated, EHC_EPISODE_ROUTES
         )
 
-        # Feed bounded diagnostic reducers.
+        # Feed bounded diagnostic reducers unconditionally (empty tensors
+        # when data is absent — DDP-safe lifecycle).
         obs_id = batch.get("observation_id")
-        if obs_id is not None:
-            self._val_occupancy.update(obs_id.detach().cpu())
+        self._val_occupancy.update(
+            obs_id.detach().cpu()
+            if obs_id is not None
+            else torch.empty(0, dtype=torch.long)
+        )
 
         # Store bounded diagnostic traces for callback consumption.
         if (
@@ -499,10 +508,10 @@ class EHCSpatialPretrainRegime:
     ) -> None:
         """Compute, render, and reset bounded diagnostic reducers."""
         lm = self._lm
-        summaries = self._val_reducer_collection.compute()
+        summaries = compute_nonempty(self._val_reducer_collection)
 
         if lm.trainer is not None and lm.trainer.is_global_zero:
-            occ = summaries.get("occupancy")
+            occ = summaries.get("val_diag/occupancy")
             if occ is not None:
                 log_reducer_figure(
                     lm.logger,
@@ -511,7 +520,7 @@ class EHCSpatialPretrainRegime:
                     global_step=lm.global_step,
                 )
 
-            norm = summaries.get("hidden_norms")
+            norm = summaries.get("val_diag/hidden_norms")
             if norm is not None:
                 centers, density = norm
                 log_reducer_figure(

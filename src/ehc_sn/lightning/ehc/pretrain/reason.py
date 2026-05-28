@@ -35,7 +35,7 @@ from ehc_sn.lightning.ehc.core._base import (
 )
 from ehc_sn.lightning.ehc.core.runtime import RuntimeConfig
 from ehc_sn.metrics.adapter import update_metrics_from_step
-from ehc_sn.metrics.reducers import HiddenNormHistogram
+from ehc_sn.metrics.reducers import HiddenNormHistogram, compute_nonempty
 from ehc_sn.metrics.renderers import (
     log_reducer_figure,
     render_hidden_norm_histogram,
@@ -177,8 +177,9 @@ class EHCReasonPretrainRegime:
             bin_edges=torch.linspace(0.0, 50.0, 51), max_batches=10
         )
         self._val_reducer_collection = MetricCollection(
-            {"hidden_norms": self._val_hidden_norms}
-        ).clone(prefix="val_diag/")
+            {"hidden_norms": self._val_hidden_norms},
+            prefix="val_diag/",
+        )
 
     def _ensure_train_batch_assembler(
         self, batch: Batch
@@ -443,10 +444,10 @@ class EHCReasonPretrainRegime:
     ) -> None:
         """Compute, render, and reset bounded diagnostic reducers."""
         lm = self._lm
-        summaries = self._val_reducer_collection.compute()
+        summaries = compute_nonempty(self._val_reducer_collection)
 
         if lm.trainer is not None and lm.trainer.is_global_zero:
-            norm = summaries.get("hidden_norms")
+            norm = summaries.get("val_diag/hidden_norms")
             if norm is not None:
                 centers, density = norm
                 log_reducer_figure(
