@@ -135,10 +135,6 @@ class MazeHardReplayProvider:
         )
 
 
-# Backward-compatibility alias for existing internal callers.
-MazeHardReplayDiagnosticProvider = MazeHardReplayProvider
-
-
 # =============================================================================
 class MazeHardFixedProbeProvider:
     """MazeHard-task-owned provider that evaluates a fixed, explicitly-named set of mazes.
@@ -284,6 +280,5 @@ class MazeHardFixedProbeProvider:
 # =============================================================================
 __all__ = [
     "MazeHardReplayProvider",
-    "MazeHardReplayDiagnosticProvider",
     "MazeHardFixedProbeProvider",
 ]

@@ -124,10 +124,6 @@ class DungeonReplayProvider:
         )
 
 
-# Backward-compatibility alias for existing internal callers.
-DungeonReplayDiagnosticProvider = DungeonReplayProvider
-
-
 # =============================================================================
 class DungeonFixedProbeProvider:
     """Dungeon-task-owned provider that evaluates a fixed, explicitly-named set of samples.
@@ -272,6 +268,5 @@ class DungeonFixedProbeProvider:
 # =============================================================================
 __all__ = [
     "DungeonReplayProvider",
-    "DungeonReplayDiagnosticProvider",
     "DungeonFixedProbeProvider",
 ]

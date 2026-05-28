@@ -103,14 +103,22 @@ def build_arena_step_score(
     labels = coerce_observation_ids(targets.observation_id)
     revisit_mask = coerce_revisit_mask(targets.is_revisit, device=labels.device)
     if logits.ndim != 2:
-        raise ValueError(f"Arena observation logits must have shape (B, obs_dim), got {tuple(logits.shape)}.")
+        raise ValueError(
+            f"Arena observation logits must have shape (B, obs_dim), got {tuple(logits.shape)}."
+        )
     if labels.ndim != 1:
-        raise ValueError(f"Arena observation labels must have shape (B,), got {tuple(labels.shape)}.")
+        raise ValueError(
+            f"Arena observation labels must have shape (B,), got {tuple(labels.shape)}."
+        )
     if logits.shape[0] != labels.shape[0]:
-        raise ValueError("Arena logits/labels batch size mismatch: " f"logits batch={logits.shape[0]}, labels batch={labels.shape[0]}.")
+        raise ValueError(
+            "Arena logits/labels batch size mismatch: "
+            f"logits batch={logits.shape[0]}, labels batch={labels.shape[0]}."
+        )
     if revisit_mask is not None and revisit_mask.shape[0] != labels.shape[0]:
         raise ValueError(
-            "Arena revisit mask/labels batch size mismatch: " f"revisit batch={revisit_mask.shape[0]}, labels batch={labels.shape[0]}."
+            "Arena revisit mask/labels batch size mismatch: "
+            f"revisit batch={revisit_mask.shape[0]}, labels batch={labels.shape[0]}."
         )
     is_correct = logits.argmax(dim=-1).eq(labels)
     return ArenaStepScore(is_correct=is_correct, is_revisit=revisit_mask)
@@ -134,9 +142,13 @@ def build_arena_score_report(
     """
     dtype = torch.float32
     correct_all = step.is_correct.sum().to(dtype=dtype)
-    count_all = step.is_correct.new_tensor(float(step.is_correct.shape[0]), dtype=dtype)
+    count_all = step.is_correct.new_tensor(
+        float(step.is_correct.shape[0]), dtype=dtype
+    )
     if step.is_revisit is not None:
-        correct_revisit = (step.is_correct & step.is_revisit).sum().to(dtype=dtype)
+        correct_revisit = (
+            (step.is_correct & step.is_revisit).sum().to(dtype=dtype)
+        )
         count_revisit = step.is_revisit.sum().to(dtype=dtype)
     else:
         correct_revisit = step.is_correct.new_zeros(())
@@ -158,7 +170,7 @@ def coerce_observation_ids(
     """Return categorical observation labels with shape ``(B,)``.
 
     Accepts ``(B,)``, ``(B, 1)``, or ``(B, obs_dim)`` (one-hot / soft-label)
-    inputs and normalises to a clean 1-D integer tensor regardless of how the
+    inputs and normalizes to a clean 1-D integer tensor regardless of how the
     source emits observation identifiers.
 
     Args:
