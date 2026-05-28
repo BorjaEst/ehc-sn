@@ -25,6 +25,7 @@ from ehc_sn.figures.sinks import (
     _persist_named_figure_artifacts,
     log_tensorboard_figure,
 )
+from ehc_sn.lightning.diagnostics import DiagnosticTraceSpec
 
 
 # =============================================================================
@@ -193,18 +194,84 @@ class FigureGenerationSettings(BaseModel, extra="forbid"):
 class FigureGenerationCallback(pl.Callback):
     """Bounded trace diagnostic figure generation callback.
 
-    Consumes ``pl_module.diagnostic_traces`` (a tuple of bounded ``TraceTree``
-    objects owned by the module), gates by cadence, and renders registered
-    diagnostic figures via the ``ehc_sn.figures`` pipeline.
+    - **setup()**: Derives required trace keys from configured ``bounded_trace``
+      figures via the registry and configures ``pl_module.diagnostic_trace_spec``
+      to enable trace capture with the needed keys.
+    - **on_validation_epoch_end** / **on_test_epoch_end**: Reads captured
+      ``diagnostic_traces`` from the module, gates by cadence, and renders
+      registered diagnostic figures via the ``ehc_sn.figures`` pipeline.
 
-    The callback does **not** accumulate traces, infer trace keys, or tell the
-    module what traces to produce — those responsibilities belong to the module
-    and evaluator layers.
+    The callback does not accumulate traces — it only consumes what the module
+    exposes via ``diagnostic_traces``.
     """
 
     def __init__(self, settings: FigureGenerationSettings) -> None:
         super().__init__()
         self.settings = settings
+
+    def setup(  # -------------------------------------------------------------
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        stage: str | None = None,
+    ) -> None:
+        """Derive and configure the module's ``diagnostic_trace_spec``.
+
+        Reads required ``trace_keys`` from every configured ``bounded_trace``
+        figure in the registry, merges them with any keys already present on
+        the module's ``diagnostic_trace_spec``, and enables trace capture.
+
+        This is safe to call multiple times (idempotent merge).
+        """
+        if not self.settings.enabled:
+            return
+        if not self.settings.figures:
+            return
+        if stage not in (None, "fit", "validate"):
+            return
+
+        required_keys: set[str] = set()
+        for name in self.settings.figures:
+            if name not in REGISTRY:
+                continue
+            spec = REGISTRY.get(name)
+            if spec.input_contract != "bounded_trace":
+                continue
+            if not spec.trace_keys:
+                raise ValueError(
+                    f"Figure {name!r} has input_contract='bounded_trace' but "
+                    "declares empty trace_keys; cannot derive required keys."
+                )
+            required_keys.update(spec.trace_keys)
+
+        if not required_keys:
+            return
+
+        current: DiagnosticTraceSpec = getattr(
+            pl_module, "diagnostic_trace_spec", None
+        )
+        if current is None:
+            warnings.warn(
+                "FigureGenerationCallback.setup(): LightningModule has no "
+                "'diagnostic_trace_spec' attribute; bounded diagnostic traces "
+                "will not be captured.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return
+
+        merged_keys = tuple(sorted(set(current.keys) | required_keys))
+        merged_max_batches = (
+            current.max_batches
+            if current.max_batches <= self.settings.max_cases
+            else self.settings.max_cases
+        )
+
+        pl_module.diagnostic_trace_spec = DiagnosticTraceSpec(
+            enabled=True,
+            max_batches=merged_max_batches,
+            keys=merged_keys,
+        )
 
     def on_validation_epoch_end(  # -------------------------------------------
         self,

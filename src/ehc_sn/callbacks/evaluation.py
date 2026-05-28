@@ -9,7 +9,7 @@ This callback is orchestration-only:
 - persists returned trace/artifact payloads.
 
 Standard report generation is offline from persisted run directories via
-ehc_sn.eval.offline_report. Callback-side figure rendering is optional
+ehc_sn.eval.reports. Callback-side figure rendering is optional
 diagnostic routing and is not the canonical report workflow.
 """
 
@@ -31,12 +31,12 @@ from ehc_sn.eval import (
     EvaluationTraceRequest,
     iter_evaluation_regime,
 )
-from ehc_sn.eval.contracts import EvaluationCaseBatch
-from ehc_sn.eval.eval_artifacts import (
+from ehc_sn.eval.artifacts import (
     persist_regime_artifact_bundle,
     resolve_provider,
 )
-from ehc_sn.eval.render_regime_previews import render_regime_preview_figures
+from ehc_sn.eval.contracts import EvaluationCaseBatch
+from ehc_sn.eval.render import render_regime_preview_figures
 from ehc_sn.figures import REGISTRY, FigureContext, list_figures
 from ehc_sn.traces import build_trace_spec
 
@@ -232,41 +232,18 @@ class EvaluationRegimeSettings(BaseModel, extra="forbid"):
         description="Optional online figure routing for this regime.",
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_regime_input(cls, value: Any) -> Any:
-        """Accept legacy phase_kind/diag|bench and normalize to regime_kind."""
-        if not isinstance(value, dict):
-            return value
-
-        data = dict(value)
-        legacy_phase_kind = data.pop("phase_kind", None)
-        if "regime_kind" not in data and legacy_phase_kind is not None:
-            data["regime_kind"] = legacy_phase_kind
-        return data
-
     @field_validator("regime_kind", mode="before")
     @classmethod
     def _normalize_regime_kind_value(
         cls,
         value: Any,
     ) -> Literal["diagnostic", "benchmark"]:
-        """Normalize canonical and legacy namespace labels to canonical values."""
-        if value == "diag":
-            return "diagnostic"
-        if value == "bench":
-            return "benchmark"
+        """Normalize to canonical regime_kind labels."""
         if value in {"diagnostic", "benchmark"}:
             return value
         raise ValueError(
-            "regime_kind must be one of: 'diagnostic', 'benchmark', "
-            "or legacy aliases 'diag', 'bench'."
+            "regime_kind must be one of: 'diagnostic', 'benchmark'."
         )
-
-    @property
-    def phase_kind(self) -> Literal["diag", "bench"]:
-        """Backward-compatibility alias for legacy config/consumer surfaces."""
-        return "diag" if self.regime_kind == "diagnostic" else "bench"
 
 
 # =============================================================================
@@ -591,21 +568,18 @@ class EvaluationRegimesCallback(pl.Callback):
                     stacklevel=2,
                 )
 
-        # Build trace spec directly from the accumulated keys instead of
-        # pushing them into the module via set_eval_trace_keys.
+        # Build trace spec directly from the accumulated keys.
         if all_keys:
             trace_spec = _build_trace_spec_for_module(pl_module, all_keys)
         else:
             trace_spec = getattr(pl_module, "trace_spec", None)
-            if trace_spec is None:
-                trace_spec = getattr(pl_module, "trace_specs", None)
 
         if trace_spec is None:
             raise RuntimeError(
                 "Trace request is enabled for regime "
                 f"{regime.regime_id!r}, but the active Lightning module does "
-                "not expose trace_spec (or legacy trace_specs) and no trace "
-                "keys were provided via trace_request or figure_request."
+                "not expose trace_spec and no trace keys were provided via "
+                "trace_request or figure_request."
             )
 
         return EvaluationTraceRequest(
@@ -663,12 +637,10 @@ class EvaluationRegimesCallback(pl.Callback):
             run_dir=run_dir,
             regime_kind=regime.regime_kind,
             regime_id=regime.regime_id,
-            phase_kind=regime.phase_kind,
             trigger_kind=trigger_kind,
             epoch=trainer.current_epoch + 1,
             step=trainer.global_step,
             regime_result=regime_result,
-            write_legacy_compat=True,
         )
 
 
@@ -760,10 +732,7 @@ def _build_trace_spec_for_module(  # ------------------------------------------
         return build_trace_spec(paradigm, include_keys=trace_keys)
 
     # Fallback: use the module's existing trace_spec if available.
-    trace_spec = getattr(module, "trace_spec", None)
-    if trace_spec is None:
-        trace_spec = getattr(module, "trace_specs", None)
-    return trace_spec
+    return getattr(module, "trace_spec", None)
 
 
 # =============================================================================

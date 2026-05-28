@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
+import matplotlib.figure as mpl_figure
 import matplotlib.pyplot as plt
 from pydantic import BaseModel, Field, model_validator
 
-from ehc_sn.eval.figure_bundle import (
-    PersistedTraceCase,
-    load_persisted_regime_run_cases,
+from ehc_sn.eval.artifacts import (
+    LoadedArtifactCase,
+    load_artifact_run_cases,
 )
 from ehc_sn.figures import REGISTRY, FigureContext, list_figures, render
 from ehc_sn.figures.sinks import _persist_named_figure_artifacts
@@ -117,6 +119,18 @@ class OfflineReportRenderSettings(BaseModel, extra="forbid"):
                 "Offline report rendering only supports report-kind figures: "
                 f"{blocked}."
             )
+
+        bounded = [
+            entry.figure
+            for entry in self.entries
+            if REGISTRY.get(entry.figure).input_contract == "bounded_trace"
+        ]
+        if bounded:
+            blocked = ", ".join(sorted(set(bounded)))
+            raise ValueError(
+                "Offline report rendering does not support bounded-trace "
+                f"figures: {blocked}."
+            )
         return self
 
 
@@ -125,7 +139,7 @@ def render_report_figures_from_run(
     settings: OfflineReportRenderSettings,
 ) -> dict[str, int]:
     """Render report-kind figures for one persisted regime run."""
-    loaded_cases = load_persisted_regime_run_cases(settings.run_dir)
+    loaded_cases = load_artifact_run_cases(settings.run_dir)
 
     output_dir = settings.output_dir or (
         Path(settings.run_dir) / "report_figures"
@@ -150,7 +164,12 @@ def render_report_figures_from_run(
         spec = REGISTRY.get(entry.figure)
 
         for idx, case in enumerate(selected_cases):
-            fig = render(entry.figure, case.trace, ctx)
+            fig = render(
+                entry.figure,
+                case.trace,
+                ctx,
+                temporal_semantics=case.temporal_semantics,
+            )
             try:
                 _persist_named_figure_artifacts(
                     fig,
@@ -175,16 +194,89 @@ def render_report_figures_from_run(
 
 
 # =============================================================================
+# =============================================================================
+def render_case(
+    figure: str,
+    case: LoadedArtifactCase,
+    *,
+    ctx: FigureContext | None = None,
+) -> mpl_figure.Figure:
+    """Render one registered figure from a loaded evaluation artifact case.
+
+    Args:
+        figure: Registered figure name.
+        case: Loaded artifact case.
+        ctx: Optional figure context; defaults to ``FigureContext()``.
+
+    Returns:
+        Matplotlib ``Figure``.
+
+    Raises:
+        ValueError: If the case has no trace attached.
+    """
+    if case.trace is None:
+        raise ValueError(
+            f"Artifact case {case.case_id!r} has no trace; "
+            f"cannot render figure {figure!r}."
+        )
+    return render(
+        figure,
+        trace=case.trace,
+        ctx=ctx or FigureContext(),
+        temporal_semantics=case.temporal_semantics,
+    )
+
+
+# =============================================================================
+def render_report(
+    artifact_run: str | Path,
+    figures: Sequence[str],
+    output_dir: str | Path,
+    *,
+    max_cases: int | None = None,
+) -> dict[str, int]:
+    """Render report-quality figures from a persisted evaluation artifact run.
+
+    This is a convenience wrapper around
+    :func:`render_report_figures_from_run` that builds the required settings
+    object internally.
+
+    Args:
+        artifact_run: Path to one persisted eval regime run directory.
+        figures: Registered report-kind figure names to render.
+        output_dir: Output directory for persisted figure files.
+        max_cases: Maximum cases rendered per figure entry.  Defaults to 8.
+
+    Returns:
+        Dict with keys: ``n_cases_loaded``, ``n_cases_rendered``,
+        ``n_entries_rendered``, ``n_figures_rendered``.
+    """
+    entries = [
+        OfflineReportFigureEntrySettings(
+            figure=f,
+            max_cases=max_cases or 8,
+        )
+        for f in figures
+    ]
+    settings = OfflineReportRenderSettings(
+        run_dir=Path(artifact_run),
+        output_dir=Path(output_dir),
+        entries=entries,
+    )
+    return render_report_figures_from_run(settings)
+
+
+# =============================================================================
 def _select_cases(
-    loaded_cases: list[PersistedTraceCase],
+    loaded_cases: list[LoadedArtifactCase],
     *,
     case_ids: list[str],
     max_cases: int,
-) -> list[PersistedTraceCase]:
+) -> list[LoadedArtifactCase]:
     """Select cases deterministically from loaded persisted trace cases."""
     if case_ids:
         by_id = {case.case_id: case for case in loaded_cases}
-        selected: list[PersistedTraceCase] = []
+        selected: list[LoadedArtifactCase] = []
         for case_id in case_ids:
             case = by_id.get(case_id)
             if case is None:
@@ -202,7 +294,9 @@ __all__ = [
     "OfflineReportFigureEntrySettings",
     "OfflineReportFigureContextSettings",
     "OfflineReportRenderSettings",
-    "PersistedTraceCase",
-    "load_persisted_regime_run_cases",
+    "LoadedArtifactCase",
+    "load_artifact_run_cases",
+    "render_case",
+    "render_report",
     "render_report_figures_from_run",
 ]

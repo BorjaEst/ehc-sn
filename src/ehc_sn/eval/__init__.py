@@ -4,6 +4,16 @@ This package defines shared contracts consumed by task-owned providers and
 offers reusable execution helpers that Lightning families can delegate to.
 """
 
+from ehc_sn.eval.artifacts import (
+    EvalArtifactExecutorRef,
+    LoadedArtifactCase,
+    collect_regime_artifact_bundle,
+    collect_regime_artifact_bundle_from_ref,
+    load_artifact_run_cases,
+    load_executor_from_artifact,
+    persist_regime_artifact_bundle,
+    resolve_provider,
+)
 from ehc_sn.eval.contracts import (
     EvaluationCaseBatch,
     EvaluationCaseResult,
@@ -16,15 +26,9 @@ from ehc_sn.eval.executor import (
     execute_replay_evaluation_batch,
     iter_evaluation_regime,
 )
-from ehc_sn.eval.figure_bundle import (
-    FigureBundleExecutorArtifact,
-    PersistedTraceCase,
-    collect_regime_figure_bundle,
-    collect_regime_figure_bundle_from_artifact,
-    load_executor_from_artifact,
-    load_persisted_regime_run_cases,
-    persist_regime_figure_bundle,
-    resolve_provider,
+from ehc_sn.eval.reports import (
+    render_case,
+    render_report,
 )
 
 __all__ = [
@@ -34,14 +38,16 @@ __all__ = [
     "EvaluationRegimeResult",
     "EvaluationSourceProvider",
     "EvaluationTraceRequest",
-    "FigureBundleExecutorArtifact",
-    "PersistedTraceCase",
-    "collect_regime_figure_bundle",
-    "collect_regime_figure_bundle_from_artifact",
+    "EvalArtifactExecutorRef",
+    "LoadedArtifactCase",
+    "collect_regime_artifact_bundle",
+    "collect_regime_artifact_bundle_from_ref",
     "execute_replay_evaluation_batch",
     "iter_evaluation_regime",
-    "load_persisted_regime_run_cases",
+    "load_artifact_run_cases",
     "load_executor_from_artifact",
-    "persist_regime_figure_bundle",
+    "persist_regime_artifact_bundle",
+    "render_case",
+    "render_report",
     "resolve_provider",
 ]

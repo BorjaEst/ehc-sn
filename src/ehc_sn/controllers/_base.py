@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 import torch
 from pydantic import BaseModel
@@ -36,7 +36,7 @@ class RolloutBackbone[ModelState, ModelOutput](Protocol):
 
 
 # =============================================================================
-@dataclass
+@dataclass(kw_only=True)
 class RolloutState[ModelState](DetachMixin):
     """Per-slot rollout state carried across controller steps.
 
@@ -56,6 +56,7 @@ class RolloutState[ModelState](DetachMixin):
     steps: Tensor
     halted: Tensor
     data: dict[str, Tensor]
+    static_data: dict[str, Any] | None = None
 
 
 # =============================================================================

@@ -89,7 +89,7 @@ class ReplayTrajectoryControllerConfig(BaseModel, extra="forbid"):
 
 
 # =============================================================================
-@dataclass
+@dataclass(kw_only=True)
 class ReplayRolloutState[ModelState](RolloutState[ModelState]):
     """Controller carry for replay trajectory controllers.
 
@@ -222,6 +222,8 @@ class ReplayTrajectoryController[ModelState](
     def initial_state(  # -----------------------------------------------------
         self,
         batch_sample: Batch,
+        *,
+        static_data: dict[str, Any] | None = None,
     ) -> ReplayRolloutState[ModelState]:
         """Build the initial all-halted carry from a sample batch.
 
@@ -232,6 +234,9 @@ class ReplayTrajectoryController[ModelState](
             batch_sample: Any source batch; only used to infer batch size and device.
                 Trajectory arrays are NOT read here — they will be read at the
                 first admission boundary in :meth:`step`.
+            static_data: Optional rollout-scoped static metadata dict.  Injected
+                into ``CarrySnapshot.static_data`` at every step so trace field
+                getters in ``traces/specs.py`` can consume it.
         """
         anchor = batch_anchor_tensor(batch_sample)
         B = int(anchor.shape[0])
@@ -246,6 +251,7 @@ class ReplayTrajectoryController[ModelState](
             steps=torch.zeros((B,), dtype=torch.int32, device=device),
             halted=torch.ones((B,), dtype=torch.bool, device=device),
             data={},
+            static_data=static_data,
             cursor=torch.zeros((B,), dtype=torch.int64, device=device),
             trajectory_length=torch.zeros(
                 (B,), dtype=torch.int64, device=device

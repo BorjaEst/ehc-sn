@@ -1,7 +1,7 @@
-"""Eval-owned figure bundle collection and persistence helpers.
+"""Eval-owned artifact collection and persistence helpers.
 
-This module owns the long-term on-disk contract for persisted figure-ready
-evaluation traces while keeping compatibility with legacy summary+pt payloads.
+This module owns the long-term on-disk contract for persisted evaluation
+artifacts (traces, metadata, manifests).
 """
 
 from __future__ import annotations
@@ -27,17 +27,19 @@ from ehc_sn.eval.contracts import (
 )
 from ehc_sn.eval.executor import iter_evaluation_regime
 from ehc_sn.figures import REGISTRY, list_figures
+from ehc_sn.traces import build_trace_spec
 from ehc_sn.traces.trace_tree import TraceTree
 
-_BUNDLE_SCHEMA = "ehc_sn.eval.figure_bundle.v1"
+_ARTIFACT_SCHEMA = "ehc_sn.eval.artifact.v2"
 _MANIFEST_FILENAME = "manifest.json"
+_SUCCESS_FILENAME = "_SUCCESS"
 _SUPPORTED_EXECUTOR_FAMILIES: frozenset[str] = frozenset(
     {"ehc-v1", "hrm-v1", "hrm-v2", "tem-v1", "tem-v2"}
 )
 
 
 # =============================================================================
-class FigureBundleExecutorArtifact(BaseModel, extra="forbid"):
+class EvalArtifactExecutorRef(BaseModel, extra="forbid"):
     """Typed artifact metadata used to reconstruct an evaluation executor."""
 
     schema_version: str = "1"
@@ -48,7 +50,7 @@ class FigureBundleExecutorArtifact(BaseModel, extra="forbid"):
     checkpoint_format: Literal["weights_only"] = "weights_only"
 
     @model_validator(mode="after")
-    def _normalize_and_validate_family(self) -> "FigureBundleExecutorArtifact":
+    def _normalize_and_validate_family(self) -> "EvalArtifactExecutorRef":
         self.model_family = self.model_family.strip().lower()
         if self.model_family not in _SUPPORTED_EXECUTOR_FAMILIES:
             raise ValueError(
@@ -61,16 +63,91 @@ class FigureBundleExecutorArtifact(BaseModel, extra="forbid"):
 
 # =============================================================================
 @dataclass(frozen=True)
-class PersistedTraceCase:
+class LoadedArtifactCase:
     """One persisted case trace loaded from an eval run directory."""
 
     case_id: str
     source_context: object | None
     trace: TraceTree
+    temporal_semantics: dict[str, object] | None = None
 
 
 # =============================================================================
-def collect_regime_figure_bundle(
+def _extract_model_family(executor: Any) -> str | None:
+    """Extract a model-family string from a loaded executor, if possible."""
+    # Direct attribute on executor objects
+    family = getattr(executor, "_model_family", None)
+    if family is not None:
+        return str(family)
+
+    # Fallback: try _trace_paradigm as a proxy for model family
+    paradigm = getattr(executor, "_trace_paradigm", None)
+    if paradigm is not None:
+        return str(paradigm)
+    return None
+
+
+# =============================================================================
+def _resolve_temporal_semantics(executor: Any) -> dict[str, object]:
+    """Extract temporal-semantics metadata from an evaluation executor.
+
+    Defaults to ``"unknown"`` / ``None`` when the executor provides no
+    information.  This is a best-effort extraction — fields are populated
+    only when the executor exposes known attributes.
+    """
+    semantics: dict[str, object] = {
+        "rollout_mode": "unknown",
+        "carry_policy": "unknown",
+        "bptt_chunk_size": None,
+        "teacher_forcing": None,
+    }
+
+    # Try known executor attributes.
+    rollout_mode = getattr(executor, "_evaluation_rollout_mode", None)
+    if rollout_mode is not None:
+        semantics["rollout_mode"] = rollout_mode
+
+    carry_policy = getattr(executor, "_carry_policy", None)
+    if carry_policy is not None:
+        semantics["carry_policy"] = carry_policy
+
+    config = getattr(executor, "config", None)
+    if config is not None:
+        bptt = getattr(config, "bptt_chunk_size", None)
+        if bptt is not None:
+            semantics["bptt_chunk_size"] = int(bptt)
+        tf = getattr(config, "teacher_forcing", None)
+        if tf is not None:
+            semantics["teacher_forcing"] = bool(tf)
+
+    return semantics
+
+
+# =============================================================================
+def _atomic_write_directory(
+    tmp_dir: Path,
+    final_dir: Path,
+) -> None:
+    """Atomically commit a temporary write directory to its final path.
+
+    Writes ``_SUCCESS`` sentinel into *tmp_dir*, then renames the whole
+    directory over *final_dir* (overwriting any previous artifact at that
+    path).  Raises ``FileNotFoundError`` if *tmp_dir* does not exist.
+    """
+    if not tmp_dir.exists():
+        raise FileNotFoundError(
+            f"Cannot commit atomic write: temp dir does not exist: {tmp_dir}"
+        )
+    (tmp_dir / _SUCCESS_FILENAME).write_text("", encoding="utf-8")
+    if final_dir.exists():
+        import shutil
+
+        shutil.rmtree(final_dir)
+    tmp_dir.rename(final_dir)
+
+
+# =============================================================================
+def collect_regime_artifact_bundle(
     *,
     executor: Any,
     provider_ref: str,
@@ -84,9 +161,8 @@ def collect_regime_figure_bundle(
     trigger_kind: str = "manual",
     epoch: int = 0,
     step: int = 0,
-    write_legacy_compat: bool = True,
 ) -> EvaluationRegimeResult:
-    """Collect one figure-ready evaluation regime and persist it as a bundle."""
+    """Collect one evaluation regime and persist it as an artifact bundle."""
     provider = resolve_provider(provider_ref, provider_settings)
     trace_request = _build_trace_request(
         executor=executor,
@@ -94,8 +170,18 @@ def collect_regime_figure_bundle(
         figure_names=figure_names or [],
     )
     run_dir = Path(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    cases_dir = run_dir / "cases"
+    model_family = _extract_model_family(executor)
+    trace_paradigm = getattr(executor, "_trace_paradigm", None)
+    temporal_semantics = _resolve_temporal_semantics(executor)
+
+    # Write to temporary directory for atomic commit.
+    tmp_dir = run_dir.with_suffix(".tmp")
+    if tmp_dir.exists():
+        import shutil
+
+        shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir(parents=True, exist_ok=False)
+    cases_dir = tmp_dir / "cases"
     cases_dir.mkdir(parents=True, exist_ok=True)
 
     summary_rows: list[dict[str, Any]] = []
@@ -113,10 +199,9 @@ def collect_regime_figure_bundle(
         )
     ):
         row = _persist_regime_case(
-            run_dir=run_dir,
+            run_dir=tmp_dir,
             result=result,
             index=idx,
-            write_legacy_compat=write_legacy_compat,
         )
         summary_rows.append(
             {
@@ -147,18 +232,20 @@ def collect_regime_figure_bundle(
         summary["loss"] = loss_sum / float(loss_count)
 
     _write_regime_bundle_manifest(
-        run_dir=run_dir,
+        run_dir=tmp_dir,
         regime_summary=summary,
         summary_rows=summary_rows,
         manifest_rows=manifest_rows,
         regime_kind=regime_kind,
         regime_id=regime_id,
-        phase_kind="diag" if regime_kind == "diagnostic" else "bench",
         trigger_kind=trigger_kind,
         epoch=epoch,
         step=step,
-        write_legacy_compat=write_legacy_compat,
+        model_family=model_family,
+        trace_paradigm=trace_paradigm,
+        temporal_semantics=temporal_semantics,
     )
+    _atomic_write_directory(tmp_dir, run_dir)
     return EvaluationRegimeResult(
         regime_id=regime_id,
         case_results=tuple(lightweight_case_results),
@@ -167,9 +254,9 @@ def collect_regime_figure_bundle(
 
 
 # =============================================================================
-def collect_regime_figure_bundle_from_artifact(
+def collect_regime_artifact_bundle_from_ref(
     *,
-    artifact: FigureBundleExecutorArtifact,
+    artifact: EvalArtifactExecutorRef,
     provider_ref: str,
     provider_settings: dict[str, Any],
     run_dir: Path,
@@ -181,12 +268,11 @@ def collect_regime_figure_bundle_from_artifact(
     trigger_kind: str = "manual",
     epoch: int = 0,
     step: int = 0,
-    write_legacy_compat: bool = True,
 ) -> EvaluationRegimeResult:
-    """Collect and persist one figure bundle from a typed artifact."""
+    """Collect and persist one artifact bundle from a typed executor ref."""
     executor = load_executor_from_artifact(artifact)
 
-    return collect_regime_figure_bundle(
+    return collect_regime_artifact_bundle(
         executor=executor,
         provider_ref=provider_ref,
         provider_settings=provider_settings,
@@ -199,12 +285,11 @@ def collect_regime_figure_bundle_from_artifact(
         trigger_kind=trigger_kind,
         epoch=epoch,
         step=step,
-        write_legacy_compat=write_legacy_compat,
     )
 
 
 # =============================================================================
-def load_executor_from_artifact(artifact: FigureBundleExecutorArtifact) -> Any:
+def load_executor_from_artifact(artifact: EvalArtifactExecutorRef) -> Any:
     """Construct and hydrate one family-specific evaluation executor."""
     config_path = Path(artifact.executor_config_path)
     checkpoint_path = Path(artifact.checkpoint_path)
@@ -234,59 +319,74 @@ def _build_executor_from_family_artifact(
     config_map: dict[str, Any],
 ) -> Any:
     """Instantiate one training/evaluation executor for a supported family."""
+    _FAMILY_TO_PARADIGM = {
+        "tem-v1": "tem",
+        "tem-v2": "tem",
+        "hrm-v1": "act",
+        "hrm-v2": "rl",
+        "ehc-v1": "ehc",
+    }
+    paradigm = _FAMILY_TO_PARADIGM.get(model_family, model_family.split("-")[0])
+
     if model_family == "ehc-v1":
         from ehc_sn.lightning.ehc.ehc_v1 import (
             EHCV1TrainingModel,
             parse_ehc_v1_config,
         )
 
-        return EHCV1TrainingModel(parse_ehc_v1_config(config_map))
+        executor = EHCV1TrainingModel(parse_ehc_v1_config(config_map))
 
-    if model_family == "hrm-v1":
+    elif model_family == "hrm-v1":
         from ehc_sn.lightning.hrm.hrm_v1 import (
             HRMV1ModelConfig,
             HRMV1TrainingModel,
         )
 
-        return HRMV1TrainingModel(
+        executor = HRMV1TrainingModel(
             _build_model_config(config_map, HRMV1ModelConfig)
         )
 
-    if model_family == "hrm-v2":
+    elif model_family == "hrm-v2":
         from ehc_sn.lightning.hrm.hrm_v2 import (
             HRMV2ModelConfig,
             HRMV2TrainingModel,
         )
 
-        return HRMV2TrainingModel(
+        executor = HRMV2TrainingModel(
             _build_model_config(config_map, HRMV2ModelConfig)
         )
 
-    if model_family == "tem-v1":
+    elif model_family == "tem-v1":
         from ehc_sn.lightning.tem.tem_v1 import (
             TEMV1ModelConfig,
             TEMV1TrainingModel,
         )
 
-        return TEMV1TrainingModel(
+        executor = TEMV1TrainingModel(
             _build_model_config(config_map, TEMV1ModelConfig)
         )
 
-    if model_family == "tem-v2":
+    elif model_family == "tem-v2":
         from ehc_sn.lightning.tem.tem_v2 import (
             TEMV2ModelConfig,
             TEMV2TrainingModel,
         )
 
-        return TEMV2TrainingModel(
+        executor = TEMV2TrainingModel(
             _build_model_config(config_map, TEMV2ModelConfig)
         )
 
-    raise ValueError(
-        "Unsupported executor artifact model_family "
-        f"{model_family!r}. Supported families: "
-        f"{sorted(_SUPPORTED_EXECUTOR_FAMILIES)!r}."
-    )
+    else:
+        raise ValueError(
+            "Unsupported executor artifact model_family "
+            f"{model_family!r}. Supported families: "
+            f"{sorted(_SUPPORTED_EXECUTOR_FAMILIES)!r}."
+        )
+
+    # Tag the executor so _build_trace_request can construct a trace spec
+    # without calling set_eval_trace_keys.
+    executor._trace_paradigm = paradigm  # type: ignore[attr-defined]
+    return executor
 
 
 # =============================================================================
@@ -311,7 +411,7 @@ def _hydrate_executor_from_checkpoint(
         }.intersection(raw):
             raise ValueError(
                 "Unsupported checkpoint artifact: full trainer-resume checkpoints "
-                "are not allowed for figure collection. Provide a weights-only "
+                "are not allowed for artifact collection. Provide a weights-only "
                 "executor checkpoint instead."
             )
         state_dict = raw.get("state_dict", raw)
@@ -344,22 +444,25 @@ def _initialize_eval_runtime(executor: Any) -> None:
 
 
 # =============================================================================
-def persist_regime_figure_bundle(
+def persist_regime_artifact_bundle(
     *,
     run_dir: Path,
     regime_kind: Literal["diagnostic", "benchmark"],
     regime_id: str,
-    phase_kind: Literal["diag", "bench"],
     trigger_kind: str,
     epoch: int,
     step: int,
     regime_result: EvaluationRegimeResult,
-    write_legacy_compat: bool = True,
 ) -> None:
     """Persist regime artifacts to canonical manifest+portable format."""
     run_dir = Path(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    cases_dir = run_dir / "cases"
+    tmp_dir = run_dir.with_suffix(".tmp")
+    if tmp_dir.exists():
+        import shutil
+
+        shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir(parents=True, exist_ok=False)
+    cases_dir = tmp_dir / "cases"
     cases_dir.mkdir(parents=True, exist_ok=True)
 
     summary_rows: list[dict[str, Any]] = []
@@ -389,8 +492,8 @@ def persist_regime_figure_bundle(
             stem = f"{idx:04d}-{_sanitize_filename_component(result.case_id)}"
             dense_rel = Path("cases") / f"{stem}.dense.npz"
             meta_rel = Path("cases") / f"{stem}.meta.json"
-            _write_dense_npz(run_dir / dense_rel, result.trace.export())
-            (run_dir / meta_rel).write_text(
+            _write_dense_npz(tmp_dir / dense_rel, result.trace.export())
+            (tmp_dir / meta_rel).write_text(
                 json.dumps(
                     _to_jsonable(result.trace.get_meta()),
                     indent=2,
@@ -401,31 +504,20 @@ def persist_regime_figure_bundle(
             row["dense_artifact"] = str(dense_rel)
             row["meta_artifact"] = str(meta_rel)
 
-            if write_legacy_compat:
-                trace_payload = {
-                    "case_id": result.case_id,
-                    "source_context": result.source_context,
-                    "dense": result.trace.export(),
-                    "meta": result.trace.get_meta(),
-                }
-                trace_path = run_dir / f"{stem}.pt"
-                torch.save(trace_payload, trace_path)
-
         manifest_rows.append(row)
 
     _write_regime_bundle_manifest(
-        run_dir=run_dir,
+        run_dir=tmp_dir,
         regime_summary=dict(regime_result.summary),
         summary_rows=summary_rows,
         manifest_rows=manifest_rows,
         regime_kind=regime_kind,
         regime_id=regime_id,
-        phase_kind=phase_kind,
         trigger_kind=trigger_kind,
         epoch=epoch,
         step=step,
-        write_legacy_compat=write_legacy_compat,
     )
+    _atomic_write_directory(tmp_dir, run_dir)
 
 
 # =============================================================================
@@ -434,7 +526,6 @@ def _persist_regime_case(
     run_dir: Path,
     result: EvaluationCaseResult,
     index: int,
-    write_legacy_compat: bool,
 ) -> dict[str, Any]:
     """Persist one case payload and return one manifest-ready case row."""
     source_context = _to_jsonable(result.source_context)
@@ -461,16 +552,6 @@ def _persist_regime_case(
     )
     row["dense_artifact"] = str(dense_rel)
     row["meta_artifact"] = str(meta_rel)
-
-    if write_legacy_compat:
-        trace_payload = {
-            "case_id": result.case_id,
-            "source_context": result.source_context,
-            "dense": dense,
-            "meta": meta,
-        }
-        trace_path = run_dir / f"{stem}.pt"
-        torch.save(trace_payload, trace_path)
     return row
 
 
@@ -483,37 +564,39 @@ def _write_regime_bundle_manifest(
     manifest_rows: list[dict[str, Any]],
     regime_kind: Literal["diagnostic", "benchmark"],
     regime_id: str,
-    phase_kind: Literal["diag", "bench"],
     trigger_kind: str,
     epoch: int,
     step: int,
-    write_legacy_compat: bool,
+    model_family: str | None = None,
+    trace_paradigm: str | None = None,
+    temporal_semantics: dict[str, object] | None = None,
 ) -> None:
-    """Write canonical and legacy-compatible manifest/summary payloads."""
-    summary = {
-        "regime_id": regime_id,
-        "regime_kind": regime_kind,
-        "phase_kind": phase_kind,
-        "trigger_kind": trigger_kind,
-        "epoch": epoch,
-        "step": step,
-        "summary": _to_jsonable(dict(regime_summary)),
-        "cases": summary_rows,
-    }
-    if write_legacy_compat:
-        (run_dir / "summary.json").write_text(
-            json.dumps(summary, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
+    """Write canonical manifest payloads."""
+    provenance: dict[str, object] = {}
+    if model_family is not None:
+        provenance["model_family"] = model_family
+    if trace_paradigm is not None:
+        provenance["trace_paradigm"] = trace_paradigm
+    provenance["global_step"] = step
+    provenance["epoch"] = epoch
 
     manifest = {
-        "schema": _BUNDLE_SCHEMA,
+        "schema": _ARTIFACT_SCHEMA,
+        "status": "complete",
         "regime_id": regime_id,
         "regime_kind": regime_kind,
-        "phase_kind": phase_kind,
+        "phase_kind": "diag" if regime_kind == "diagnostic" else "bench",
         "trigger_kind": trigger_kind,
         "epoch": epoch,
         "step": step,
+        "provenance": provenance,
+        "temporal_semantics": temporal_semantics
+        or {
+            "rollout_mode": "unknown",
+            "carry_policy": "unknown",
+            "bptt_chunk_size": None,
+            "teacher_forcing": None,
+        },
         "summary": _to_jsonable(dict(regime_summary)),
         "cases": manifest_rows,
     }
@@ -524,15 +607,28 @@ def _write_regime_bundle_manifest(
 
 
 # =============================================================================
-def load_persisted_regime_run_cases(run_dir: Path) -> list[PersistedTraceCase]:
-    """Load trace-bearing cases from a canonical or legacy run directory."""
+def load_artifact_run_cases(run_dir: Path) -> list[LoadedArtifactCase]:
+    """Load trace-bearing cases from a persisted artifact run directory."""
     run_dir = Path(run_dir)
+    success_path = run_dir / _SUCCESS_FILENAME
     manifest_path = run_dir / _MANIFEST_FILENAME
-    if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest.get("schema") == _BUNDLE_SCHEMA:
-            return _load_manifest_cases(run_dir, manifest)
-    return _load_legacy_cases(run_dir)
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Missing manifest.json under {run_dir}.")
+    if not success_path.exists():
+        raise RuntimeError(
+            f"Artifact at {run_dir} is missing _SUCCESS sentinel."
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("schema") != _ARTIFACT_SCHEMA:
+        raise ValueError(
+            f"Unsupported artifact schema: {manifest.get('schema')!r}. "
+            f"Expected {_ARTIFACT_SCHEMA!r}."
+        )
+    if manifest.get("status", "complete") != "complete":
+        raise RuntimeError(
+            f"Artifact at {run_dir} has status!=complete in manifest."
+        )
+    return _load_manifest_cases(run_dir, manifest)
 
 
 # =============================================================================
@@ -556,13 +652,13 @@ def resolve_provider(
 def _load_manifest_cases(
     run_dir: Path,
     manifest: dict[str, Any],
-) -> list[PersistedTraceCase]:
+) -> list[LoadedArtifactCase]:
     """Load trace-bearing cases from canonical manifest bundle payloads."""
     cases = manifest.get("cases")
     if not isinstance(cases, list):
         raise ValueError("manifest.json must contain a list under key 'cases'.")
 
-    loaded_cases: list[PersistedTraceCase] = []
+    loaded_cases: list[LoadedArtifactCase] = []
     for row in cases:
         if not isinstance(row, dict):
             raise ValueError("manifest.json case rows must be dictionaries.")
@@ -595,82 +691,14 @@ def _load_manifest_cases(
                 f"Case {case_id!r} meta artifact must decode to a dict."
             )
 
+        temporal_semantics = manifest.get("temporal_semantics")
+
         loaded_cases.append(
-            PersistedTraceCase(
+            LoadedArtifactCase(
                 case_id=case_id,
                 source_context=row.get("source_context"),
                 trace=_rehydrate_trace_tree(dense=dense, meta=meta_raw),
-            )
-        )
-    return loaded_cases
-
-
-# =============================================================================
-def _load_legacy_cases(run_dir: Path) -> list[PersistedTraceCase]:
-    """Load trace-bearing cases from legacy summary.json + per-case .pt files."""
-    summary_path = run_dir / "summary.json"
-    if not summary_path.exists():
-        raise FileNotFoundError(
-            f"Missing canonical manifest.json and legacy summary.json under {run_dir}."
-        )
-
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    summary_cases = summary.get("cases")
-    if not isinstance(summary_cases, list):
-        raise ValueError("summary.json must contain a list under key 'cases'.")
-
-    payload_by_case_id: dict[str, dict[str, Any]] = {}
-    for payload_path in sorted(run_dir.glob("*.pt")):
-        payload = torch.load(
-            payload_path, map_location="cpu", weights_only=False
-        )
-        if not isinstance(payload, dict):
-            raise ValueError(f"Trace payload at {payload_path} must be a dict.")
-        case_id = payload.get("case_id")
-        if not isinstance(case_id, str) or not case_id:
-            raise ValueError(
-                f"Trace payload at {payload_path} is missing a non-empty case_id."
-            )
-        payload_by_case_id[case_id] = payload
-
-    loaded_cases: list[PersistedTraceCase] = []
-    for row in summary_cases:
-        if not isinstance(row, dict):
-            raise ValueError("summary.json case rows must be dictionaries.")
-        case_id = row.get("case_id")
-        has_trace = bool(row.get("has_trace", False))
-        if not isinstance(case_id, str) or not case_id:
-            raise ValueError(
-                "summary.json case rows require a non-empty case_id."
-            )
-        if not has_trace:
-            continue
-
-        payload = payload_by_case_id.get(case_id)
-        if payload is None:
-            raise ValueError(
-                "summary.json marks case as trace-bearing but payload is missing "
-                f"for case_id={case_id!r}."
-            )
-
-        dense = payload.get("dense")
-        meta = payload.get("meta")
-        if dense is None:
-            raise ValueError(
-                f"Trace payload for case {case_id!r} is missing 'dense'."
-            )
-        if meta is None:
-            meta = {}
-        if not isinstance(meta, dict):
-            raise ValueError(
-                f"Trace payload meta for case {case_id!r} must be a dict."
-            )
-
-        loaded_cases.append(
-            PersistedTraceCase(
-                case_id=case_id,
-                source_context=payload.get("source_context"),
-                trace=_rehydrate_trace_tree(dense=dense, meta=meta),
+                temporal_semantics=temporal_semantics,
             )
         )
     return loaded_cases
@@ -683,83 +711,86 @@ def _build_trace_request(
     trace_keys: list[str],
     figure_names: list[str],
 ) -> EvaluationTraceRequest:
-    """Build trace request for collection using figure trace vocabulary."""
+    """Build trace request for collection using figure trace vocabulary.
+
+    Trace keys are accumulated from explicit keys and figure requirements,
+    then used to build a trace spec directly.  Does **not** call
+    ``set_eval_trace_keys()`` on the executor — the executor's trace
+    production is configured through its own ``diagnostic_trace_spec`` or
+    through the model-family-aware ``build_trace_spec`` helper.
+    """
     requested_trace_keys = set(trace_keys)
     if figure_names:
         # Force figures-package bootstrap so built-in names resolve in fresh processes.
         list_figures()
     for name in figure_names:
-        figure = REGISTRY.get(name)
-        requested_trace_keys.update(figure.trace_keys)
-        requested_trace_keys.update(figure.meta_keys)
+        spec = REGISTRY.get(name)
+        requested_trace_keys.update(spec.trace_keys)
+        requested_trace_keys.update(spec.meta_keys)
 
-    if requested_trace_keys:
-        set_trace_keys = getattr(executor, "set_eval_trace_keys", None)
-        if callable(set_trace_keys):
-            set_trace_keys(requested_trace_keys)
+    paradigm = getattr(executor, "_trace_paradigm", None)
+    if paradigm is not None and requested_trace_keys:
+        return EvaluationTraceRequest(
+            trace_spec=build_trace_spec(
+                paradigm, include_keys=requested_trace_keys
+            ),
+            trace_meta=None,
+        )
 
     trace_spec = getattr(executor, "trace_spec", None)
-    if trace_spec is None:
-        trace_spec = getattr(executor, "trace_specs", None)
-    if trace_spec is None:
-        raise RuntimeError(
-            "Figure bundle collection requires trace_spec (or legacy trace_specs) "
-            "on the executor."
+    if trace_spec is not None:
+        return EvaluationTraceRequest(
+            trace_spec=trace_spec,
+            trace_meta=None,
         )
-    return EvaluationTraceRequest(trace_spec=trace_spec)
-
-
-# =============================================================================
-def _write_dense_npz(path: Path, dense: Any) -> None:
-    """Write exported trace dense payload in portable compressed format."""
-    flat = _flatten_dense_tree(dense)
-    if not flat:
-        raise ValueError("Persisted trace dense payload is empty.")
-
-    arrays: dict[str, np.ndarray] = {}
-    paths: list[str] = []
-    for idx, (dense_path, value) in enumerate(sorted(flat.items())):
-        key = f"arr_{idx:05d}"
-        arrays[key] = np.asarray(value)
-        paths.append(dense_path)
-
-    np.savez_compressed(
-        path,
-        __paths=np.asarray(paths, dtype=object),
-        **arrays,
+    raise ValueError(
+        "Cannot build trace request: executor has no _trace_paradigm or trace_spec. "
+        "Provide explicit trace_keys or figure_names."
     )
 
 
 # =============================================================================
-def _read_dense_npz(path: Path) -> dict[str, Any]:
-    """Read portable dense payload and return a flat path->array mapping."""
-    with np.load(path, allow_pickle=True) as data:
-        if "__paths" not in data:
-            raise ValueError(f"Dense artifact is missing __paths: {path}")
-        paths = data["__paths"].tolist()
-        if not isinstance(paths, list):
-            raise ValueError(
-                f"Dense artifact __paths must decode to a list: {path}"
-            )
-
-        out: dict[str, Any] = {}
-        for idx, dense_path in enumerate(paths):
-            if not isinstance(dense_path, str) or not dense_path:
-                raise ValueError(
-                    f"Dense artifact has invalid path entry at {path}"
-                )
-            key = f"arr_{idx:05d}"
-            if key not in data:
-                raise ValueError(
-                    f"Dense artifact {path} is missing payload array {key}."
-                )
-            out[dense_path] = np.asarray(data[key])
-        return out
-
-
+# Internal persistence helpers
 # =============================================================================
+
+
+def _sanitize_filename_component(name: str) -> str:
+    """Sanitize a string for safe use as a filename component."""
+    safe = re.sub(r"[^\w\-.]", "_", name)
+    return safe.strip("._") or "unnamed"
+
+
+def _to_jsonable(value: object) -> object:
+    """Recursively convert a value to a JSON-serializable form."""
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, torch.Tensor):
+        return _to_jsonable(value.detach().cpu().numpy())
+    if is_dataclass(value) and not isinstance(value, type):
+        return _to_jsonable(asdict(value))
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_jsonable(v) for v in value]
+    if isinstance(value, set):
+        return sorted(_to_jsonable(v) for v in value)
+    return str(value)
+
+
 def _extract_loss_scalar(evaluated: Any) -> float | None:
-    """Extract a scalar loss value from an evaluated payload."""
+    """Extract a scalar loss value from an evaluated chunk payload when available."""
     loss = getattr(evaluated, "loss", None)
     if loss is None:
         return None
@@ -772,106 +803,75 @@ def _extract_loss_scalar(evaluated: Any) -> float | None:
     return None
 
 
-# =============================================================================
-def _to_jsonable(value: Any) -> Any:
-    """Convert nested objects into JSON-serializable primitives recursively."""
-    if value is None:
-        return None
-    if is_dataclass(value):
-        return _to_jsonable(asdict(value))
-    if hasattr(value, "model_dump") and callable(value.model_dump):
-        return _to_jsonable(value.model_dump())
-    if isinstance(value, dict):
-        return {str(k): _to_jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_to_jsonable(v) for v in value]
-    if isinstance(value, (str, bool, int, float)):
-        return value
-    if isinstance(value, Path):
-        return str(value)
-    if torch.is_tensor(value):
-        tensor = value.detach().cpu()
-        if tensor.ndim == 0:
-            return tensor.item()
-        return tensor.tolist()
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    return repr(value)
+def _write_dense_npz(path: Path, data: dict[str, Any]) -> None:
+    """Write a dense payload dict to an NPZ file."""
+    arrays: dict[str, np.ndarray] = {}
+    for key, value in data.items():
+        if isinstance(value, np.ndarray):
+            arrays[key] = value
+        elif isinstance(value, torch.Tensor):
+            arrays[key] = value.cpu().numpy()
+        elif isinstance(value, (int, float)):
+            arrays[key] = np.array(value)
+        elif isinstance(value, list):
+            arrays[key] = np.array(value)
+        else:
+            arrays[key] = np.array(value)
+    np.savez_compressed(path, **arrays)
 
 
-# =============================================================================
-def _sanitize_filename_component(value: str) -> str:
-    """Normalize a string into a safe filename component."""
-    sanitized = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._")
-    return sanitized or "case"
+def _read_dense_npz(path: Path) -> dict[str, np.ndarray]:
+    """Read a dense payload dict from an NPZ file."""
+    return dict(np.load(path))
 
 
-# =============================================================================
-def _rehydrate_trace_tree(*, dense: Any, meta: dict[str, Any]) -> TraceTree:
-    """Rehydrate a TraceTree from persisted dense/meta artifact payloads."""
+def _rehydrate_trace_tree(
+    dense: dict[str, np.ndarray],
+    meta: dict[str, Any],
+) -> TraceTree:
+    """Rehydrate a TraceTree from persisted dense + meta payloads."""
     trace = TraceTree()
-    trace.finalize()
+    for key, leaf_strings in _split_nested_keys(dense):
+        for leaf in leaf_strings:
+            path = key
+            if leaf:
+                path = f"{path}/{leaf}"
+            if path not in trace.path_to_index:
+                trace.path_to_index[path] = len(trace.paths)
+                trace.paths.append(tuple(path.split("/")))
+                trace.path_strs.append(path)
+                trace.leaf_is_numeric.append(True)
 
-    flattened = (
-        dense
-        if isinstance(dense, dict)
-        and all(isinstance(k, str) and "/" in k for k in dense)
-        else _flatten_dense_tree(dense)
-    )
-    if not flattened:
-        raise ValueError("Persisted trace dense payload is empty.")
+    if meta:
+        trace.attached_meta.update(meta)
 
-    first_shape: tuple[int, ...] | None = None
-    for path, value in flattened.items():
-        array = np.asarray(value)
-        trace.attach_dense(path, array, overwrite=True)
-        if first_shape is None and array.ndim > 0:
-            first_shape = tuple(array.shape)
-
-    if first_shape is not None:
-        trace.length = int(first_shape[0])
-        if len(first_shape) > 1:
-            trace.batch_size = int(first_shape[1])
-
-    trace.attach_meta(meta, overwrite=True)
-    environments = meta.get("environments")
-    if isinstance(environments, list):
-        trace.batch_size = len(environments)
+    trace._rehydrated_dense = dense  # type: ignore[attr-defined]
     return trace
 
 
-# =============================================================================
-def _flatten_dense_tree(
-    value: Any, prefix: tuple[str, ...] = ()
-) -> dict[str, Any]:
-    """Flatten nested dense payload structures into slash-delimited paths."""
-    if isinstance(value, dict):
-        out: dict[str, Any] = {}
-        for key, child in value.items():
-            out.update(_flatten_dense_tree(child, prefix + (str(key),)))
-        return out
-    if isinstance(value, (list, tuple)):
-        out: dict[str, Any] = {}
-        for idx, child in enumerate(value):
-            out.update(_flatten_dense_tree(child, prefix + (str(idx),)))
-        return out
-    if value is None:
-        return {}
-    if not prefix:
-        raise ValueError(
-            "Persisted dense payload must be nested under named paths."
-        )
-    return {"/".join(prefix): value}
+def _split_nested_keys(
+    data: dict[str, np.ndarray],
+) -> list[tuple[str, list[str]]]:
+    """Split slash-delimited keys into top-level group and sub-leaf parts."""
+    result: dict[str, set[str]] = {}
+    for key in data:
+        parts = key.split("/")
+        if len(parts) == 1:
+            result.setdefault(parts[0], set()).add("")
+        else:
+            group = parts[0]
+            leaf = "/".join(parts[1:])
+            result.setdefault(group, set()).add(leaf)
+    return [(k, sorted(v)) for k, v in result.items()]
 
 
 __all__ = [
-    "FigureBundleExecutorArtifact",
-    "PersistedTraceCase",
-    "collect_regime_figure_bundle",
-    "collect_regime_figure_bundle_from_artifact",
-    "load_persisted_regime_run_cases",
+    "EvalArtifactExecutorRef",
+    "LoadedArtifactCase",
+    "collect_regime_artifact_bundle",
+    "collect_regime_artifact_bundle_from_ref",
+    "load_artifact_run_cases",
     "load_executor_from_artifact",
-    "persist_regime_figure_bundle",
-    "resolve_dotted_symbol",
+    "persist_regime_artifact_bundle",
     "resolve_provider",
 ]

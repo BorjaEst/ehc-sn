@@ -287,8 +287,7 @@ def _aggregate_mazehard_score_reports(
             sequences_exact=sequence_exact_sum / sequence_count_sum,
         )
 
-    # Backward-compatible fallback for legacy callers that only provide
-    # pre-aggregated scalar MazeHardScoreReport values.
+    # Aggregate typed MazeHardScoreReport values.
     typed_reports = tuple(
         report for report in reports if isinstance(report, MazeHardScoreReport)
     )
