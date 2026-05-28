@@ -1,4 +1,56 @@
 site_name: ehc-sn
-# 
-site_author: Borja Esteban
-# 
+site_description: Entorhinal-Hippocampal Circuit Spatial Navigation library
+site_author: Borja Esteban Sanchis
+docs_dir: docs
+
+theme:
+  name: mkdocs
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths:
+            - ../src
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Getting Started: getting-started.md
+      - Run Cookbook: run-cookbook.md
+  - Concepts:
+      - Architecture: architecture.md
+      - Model Family Selection: model-family-selection.md
+  - Usage:
+      - Data and Paths: data-and-paths.md
+      - Data Generation: data-generation.md
+      - Training: training.md
+      - Benchmarks: benchmarks.md
+      - Evaluation: evaluation.md
+      - Figures: figures.md
+      - Checkpoints and Artifacts: checkpoints-and-artifacts.md
+  - Configuration:
+      - Configuration: configuration.md
+      - Environment Variables: environment-variables.md
+  - API:
+      - Overview: api/index.md
+      - Lightning Surface: api/lightning.md
+      - Data API: api/data.md
+      - Training API: api/training.md
+      - Evaluation API: api/eval.md
+      - Model Families: api/model-families.md
+      - Reference (Docstrings): api/reference.md
+  - Developers:
+      - Development: development.md
+      - Specs And Governance: specs-and-governance.md
+      - Legacy Context: legacy-context.md
+  - Theory:
+      - EHC Theory Foundations: ehc-theory-foundations.md
+      - Notation Map: notation-map.md
+      - PFC Working Memory Theory: pfc-working-memory-theory.md
+
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: true
