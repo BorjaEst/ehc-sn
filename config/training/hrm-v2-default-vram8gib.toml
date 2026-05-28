@@ -14,9 +14,27 @@ global_batch_size  = 25
 max_epochs         = 100
 seed               = 42
 augment            = true
-val_check_interval = 1000
-supervised_only_warmup_steps = 5000
+max_steps          = 200000
+
+# -- DataLoader settings ------------------------------------------------------
+num_workers        = 4
+prefetch_factor    = 2
+pin_memory         = true
+persistent_workers = true
+
+# -- Trainer control ----------------------------------------------------------
 init_weights_groups = ["all"]
+log_every_n_steps    = 10
+enable_progress_bar  = true
+trainer_accelerator  = "gpu"
+trainer_strategy     = "ddp"
+trainer_devices      = 1
+trainer_num_nodes    = 1
+trainer_precision    = "16-mixed"
+limit_val_batches    = 1.0  # float: fraction of validation set (1.0 = 100%)
+val_check_interval   = 1000
+supervised_only_warmup_steps = 5000
+diagnostic_level     = "standard"
 
 # Optional model-only init hydration (mutually exclusive with full resume)
 # init_weights_from = "checkpoints/hrm-v2/last.ckpt"

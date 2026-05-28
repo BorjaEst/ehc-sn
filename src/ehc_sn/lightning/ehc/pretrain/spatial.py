@@ -16,11 +16,6 @@ from ehc_sn.adapters.arena.ehc import (
     ArenaEHCTaskBinding,
     ArenaEHCV1BridgeAdapter,
 )
-from ehc_sn.adapters.arena.ehc.traces import (
-    ARENA_EHC_TRACE_FIELDS,
-    select_arena_ehc_trace_fields,
-)
-from ehc_sn.adapters.mazehard.ehc import MazeHardEHCV1BridgeAdapter
 from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryController,
     ReplayTrajectoryControllerConfig,
@@ -32,23 +27,27 @@ from ehc_sn.eval.contracts import (
     EvaluationTraceRequest,
 )
 from ehc_sn.eval.executor import execute_replay_evaluation_batch
+from ehc_sn.lightning.diagnostics import DiagnosticTraceSpec
 from ehc_sn.lightning.ehc.core._base import EHCMode, EHCRegime, freeze_params
 from ehc_sn.lightning.ehc.core.runtime import (
     EHCRuntimeState,
     RuntimeConfig,
     resolve_ehc_runtime,
 )
-from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
+from ehc_sn.metrics.reducers import HiddenNormHistogram, OccupancyHistogram
+from ehc_sn.metrics.renderers import (
+    log_reducer_figure,
+    render_hidden_norm_histogram,
+    render_occupancy_histogram,
+)
 from ehc_sn.metrics.rollout import (
     make_observed_step_metric_observer,
     update_metric_collection_from_evaluated_chunk,
 )
 from ehc_sn.metrics.routes.ehc import (
     EHC_EPISODE_ROUTES,
-    EHC_PRIMARY_VAL_ROUTE_KEY,
     EHC_STEP_ROUTES,
 )
-from ehc_sn.metrics.routes.rl import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.models.ehc.ehc_v1 import EHCModelV1, ModelSettingsV1
 from ehc_sn.objectives.ehc import (
     EHCObjective,
@@ -86,31 +85,36 @@ class EHCSpatialPretrainConfig(BaseModel, extra="forbid"):
 
     model_config_path: Path = Field(
         ...,
-        description="",
+        description="Path to the model config TOML file used to construct the "
+        "EHCModelV1.",
     )
     adapter: ArenaEHCAdapterSettings = Field(
         ...,
-        description="",
+        description="Adapter settings for encoding batches and decoding model "
+        "outputs.",
     )
     controller: ReplayTrajectoryControllerConfig = Field(
         ...,
-        description="",
+        description="Controller config for replay trajectory control during "
+        "spatial pretrain.",
     )
     objective: EHCObjectiveConfig = Field(
         ...,
-        description="",
+        description="EHC variational objective config for spatial pretrain.",
     )
     optimizer: AdamConfig = Field(
         default_factory=AdamConfig,
-        description="",
+        description="Optimizer config for spatial pretrain (applied to bridge "
+        "adapter parameters).",
     )
     scheduler: SchedulerConfig = Field(
         default_factory=SchedulerConfig,
-        description="",
+        description="Learning rate scheduler config for spatial pretrain.",
     )
     runtime: RuntimeConfig = Field(
         default_factory=RuntimeConfig,
-        description="",
+        description="Runtime settings for training and validation execution, "
+        "including max rollout steps for validation.",
     )
 
 
@@ -142,12 +146,39 @@ class EHCSpatialPretrainRegime:
 
         self._train_runner = RecurrentRunner()
         self._eval_runner = RecurrentRunner()
+
+        # Bounded diagnostic reducers (occupancy histogram + hidden-norm histogram).
+        # These accumulate bounded sufficient statistics over validation batches
+        # and are computed/reset at epoch end.
+        self._val_occupancy = OccupancyHistogram(
+            n_locations=config.adapter.observation_dim, max_batches=10
+        )
+        self._val_hidden_norms = HiddenNormHistogram(
+            bin_edges=torch.linspace(0.0, 50.0, 51), max_batches=10
+        )
+        self._val_reducer_collection = MetricCollection(
+            {
+                "occupancy": self._val_occupancy,
+                "hidden_norms": self._val_hidden_norms,
+            }
+        ).clone(prefix="val_diag/")
+
         self._train_carry = None
+        self._diag_params_cache: dict[str, object] | None = None
         self._train_buffer: FifoBuffer | None = None
         self._train_batch_assembler: PartialResetBatchAssembler | None = None
-        self._eval_trace_keys: set[str] | None = None
+        self._trace_paradigm: str = "ehc"
+        self.diagnostic_trace_spec: DiagnosticTraceSpec = DiagnosticTraceSpec(
+            enabled=False,
+            max_batches=2,
+            keys=(),
+        )
+        self._diagnostic_traces: list[Any] = []
 
-    def _build_runtime(self) -> tuple[ReplayTrajectoryController, EHCObjective]:
+    def _build_runtime(  # ----------------------------------------------------
+        self,
+    ) -> tuple[ReplayTrajectoryController, EHCObjective]:
+        """ """
         lm = self._lm
         controller = ReplayTrajectoryController(
             backbone=lm.bridge_adapter,
@@ -160,51 +191,76 @@ class EHCSpatialPretrainRegime:
         )
         return controller, objective
 
-    def _ensure_train_runtime(self) -> None:
+    def _ensure_train_runtime(  # ---------------------------------------------
+        self,
+    ) -> None:
+        """ """
         if self._train_controller is None:
             self._train_controller, self._train_objective = (
                 self._build_runtime()
             )
 
-    def _ensure_eval_runtime(self) -> None:
+    def _ensure_eval_runtime(  # ----------------------------------------------
+        self,
+    ) -> None:
+        """ """
         if self._eval_controller is None:
             self._eval_controller, self._eval_objective = self._build_runtime()
 
-    def _require_train_controller(self) -> ReplayTrajectoryController:
+    def _require_train_controller(  # -----------------------------------------
+        self,
+    ) -> ReplayTrajectoryController:
+        """ """
         self._ensure_train_runtime()
         assert self._train_controller is not None
         return self._train_controller
 
-    def _require_train_objective(self) -> EHCObjective:
+    def _require_train_objective(  # ------------------------------------------
+        self,
+    ) -> EHCObjective:
         self._ensure_train_runtime()
         assert self._train_objective is not None
         return self._train_objective
 
-    def _require_eval_controller(self) -> ReplayTrajectoryController:
+    def _require_eval_controller(  # ------------------------------------------
+        self,
+    ) -> ReplayTrajectoryController:
+        """ """
         self._ensure_eval_runtime()
         assert self._eval_controller is not None
         return self._eval_controller
 
-    def _require_eval_objective(self) -> EHCObjective:
+    def _require_eval_objective(  # -------------------------------------------
+        self,
+    ) -> EHCObjective:
+        """ """
         self._ensure_eval_runtime()
         assert self._eval_objective is not None
         return self._eval_objective
 
-    def _train_chunk_steps(self) -> int:
+    def _train_chunk_steps(  # ------------------------------------------------
+        self,
+    ) -> int:
+        """ """
         if self._config.controller.window_size is not None:
             return self._config.controller.window_size
         return self._config.runtime.sequence.tbptt_steps
 
-    def _apply_runtime(self, step: int) -> EHCRuntimeState:
+    def _apply_runtime(  # ----------------------------------------------------
+        self,
+        step: int,
+    ) -> EHCRuntimeState:
+        """ """
         runtime = resolve_ehc_runtime(step, self._config.runtime)
         self._lm.model.set_runtime(
             runtime.eta, runtime.hebbian_decay, runtime.p2g_uncertainty_offset
         )
         return runtime
 
-    def _ensure_train_batch_assembler(
+    def _ensure_train_batch_assembler(  # -------------------------------------
         self, batch: Batch
     ) -> PartialResetBatchAssembler:
+        """ """
         if self._train_batch_assembler is not None:
             return self._train_batch_assembler
         keys = infer_arena_replay_batch_keys(batch)
@@ -218,41 +274,64 @@ class EHCSpatialPretrainRegime:
         )
         return self._train_batch_assembler
 
-    def _build_trace_meta(self) -> dict[str, object]:
-        model = self._lm.model
-        lec_alpha = torch.stack(
-            [torch.sigmoid(alpha).detach() for alpha in model.lec.filter.alpha]
-        )
-        lec_w_f = torch.stack(
-            [torch.sigmoid(weight).detach() for weight in model.lec.w_f]
-        )
-        return {
-            "lec": {
-                "filter": {"alpha_sigmoid": lec_alpha},
-                "w_f_sigmoid": lec_w_f,
-            }
-        }
-
-    def _reset_train_stream(self) -> None:
+    def _reset_train_stream(  # -----------------------------------------------
+        self,
+    ) -> None:
+        """ """
         self._train_carry = None
         if self._train_buffer is not None:
             self._train_buffer.clear()
 
-    def set_eval_trace_keys(self, keys: set[str]) -> None:
-        self._eval_trace_keys = set(keys)
+    @property
+    def diagnostic_traces(self) -> tuple[Any, ...]:
+        """Return bounded diagnostic traces captured during the just-completed
+        validation epoch.  Empty tuple when trace capture was disabled or no
+        batches were processed.
+        """
+        return tuple(self._diagnostic_traces)
+
+    def reset_diagnostic_traces(  # -------------------------------------------
+        self,
+    ) -> None:
+        """Clear the internal diagnostic trace buffer."""
+        self._diagnostic_traces.clear()
+
+    def _build_static_params(  # ----------------------------------------------
+        self,
+    ) -> dict[str, object]:
+        """Return static diagnostic parameters injected into the rollout carry."""
+        if self._diag_params_cache is None:
+            model = self._lm.model
+            self._diag_params_cache = {
+                "lec_alpha_sigmoid": torch.stack(
+                    [
+                        torch.sigmoid(a).detach().cpu()
+                        for a in model.lec.filter.alpha
+                    ]
+                ),
+                "lec_w_f_sigmoid": torch.stack(
+                    [torch.sigmoid(w).detach().cpu() for w in model.lec.w_f]
+                ),
+            }
+        return self._diag_params_cache
 
     # -- Regime hooks -----------------------------------------------------------------------------
 
-    def setup(self, stage: str | None) -> None:
+    def setup(  # -------------------------------------------------------------
+        self,
+        stage: str | None,
+    ) -> None:
+        """ """
         if stage in (None, "fit"):
             self._ensure_train_runtime()
             self._ensure_eval_runtime()
         elif stage in ("validate", "test"):
             self._ensure_eval_runtime()
 
-    def configure_optimizers(
+    def configure_optimizers(  # ----------------------------------------------
         self,
     ) -> tuple[list[Optimizer], list[dict[str, Any]]]:
+        """ """
         total_steps = int(self._lm.trainer.estimated_stepping_batches)
         # spatial_pretrain: exclude controller params (already frozen via requires_grad=False).
         excluded = (
@@ -279,44 +358,47 @@ class EHCSpatialPretrainRegime:
         ]
         return [opt], schedulers
 
-    def on_train_epoch_start(self) -> None:
+    def on_train_epoch_start(  # ----------------------------------------------
+        self,
+    ) -> None:
+        """ """
         self._reset_train_stream()
         self._lm.train_metrics.reset()
 
-    def on_validation_epoch_start(self) -> None:
+    def on_validation_epoch_start(  # -----------------------------------------
+        self,
+    ) -> None:
+        """ """
         self._lm.val_metrics.reset()
+        self._val_reducer_collection.reset()
 
-    def training_step(self, batch: Batch, batch_idx: int) -> dict[str, Any]:
+    def training_step(  # -----------------------------------------------------
+        self,
+        batch: Batch,
+        batch_idx: int,
+    ) -> dict[str, Any]:
+        """ """
         lm = self._lm
         runtime = self._apply_runtime(lm.global_step)
         lm.log(
-            "train/runtime/eta",
-            runtime.eta,
-            on_step=True,
-            on_epoch=False,
-            logger=True,
-        )
+            "train/runtime/eta", runtime.eta,
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
         lm.log(
             "train/runtime/hebbian_decay",
             runtime.hebbian_decay,
             on_step=True,
             on_epoch=False,
             logger=True,
-        )
+        )  # fmt: skip
         lm.log(
-            "train/runtime/p2g_uncertainty_offset",
-            runtime.p2g_uncertainty_offset,
-            on_step=True,
-            on_epoch=False,
-            logger=True,
-        )
+            "train/runtime/p2g_uncertainty_offset", runtime.p2g_uncertainty_offset,
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
         lm.log(
-            "train/runtime/p2g_trust",
-            runtime.p2g_trust,
-            on_step=True,
-            on_epoch=False,
-            logger=True,
-        )
+            "train/runtime/p2g_trust", runtime.p2g_trust,
+            on_step=True, on_epoch=False, logger=True,
+        )  # fmt: skip
         ctrl = self._require_train_controller()
         obj = self._require_train_objective()
         assembler = self._ensure_train_batch_assembler(batch)
@@ -359,32 +441,31 @@ class EHCSpatialPretrainRegime:
             sch.step()  # type: ignore[union-attr]
 
         lm.log(
-            "train/loss",
-            loss.detach(),
-            on_step=True,
-            on_epoch=False,
-            prog_bar=True,
-            logger=True,
-        )
+            "train/loss", loss.detach(),
+            on_step=True, on_epoch=False, prog_bar=True, logger=True,
+        )  # fmt: skip
         return {
             "loss": loss.detach(),
             "signals": evaluation.last_step.outputs.signals,
         }
 
-    def validation_step(self, batch: Batch, batch_idx: int) -> dict[str, Any]:
+    def validation_step(  # ---------------------------------------------------
+        self,
+        batch: Batch,
+        batch_idx: int,
+    ) -> dict[str, Any]:
+        """ """
         lm = self._lm
         source_context = self._resolve_val_source_context(batch_idx, batch)
         trace_request = None
-        if self._eval_trace_keys is not None:
-            arena_extra = select_arena_ehc_trace_fields(self._eval_trace_keys)
+        ds = self.diagnostic_trace_spec
+        if ds.enabled and batch_idx < ds.max_batches and ds.keys:
             trace_spec = build_trace_spec(
                 "ehc",
-                include_keys=self._eval_trace_keys,
-                extra_fields=arena_extra,
+                include_keys=set(ds.keys),
             )
             trace_request = EvaluationTraceRequest(
                 trace_spec=trace_spec,
-                trace_meta=self._build_trace_meta(),
             )
 
         result = self.execute_evaluation_batch(
@@ -399,7 +480,48 @@ class EHCSpatialPretrainRegime:
             lm.val_metrics, result.evaluated, EHC_EPISODE_ROUTES
         )
 
+        # Feed bounded diagnostic reducers.
+        obs_id = batch.get("observation_id")
+        if obs_id is not None:
+            self._val_occupancy.update(obs_id.detach().cpu())
+
+        # Store bounded diagnostic traces for callback consumption.
+        if (
+            result.trace is not None
+            and len(self._diagnostic_traces) < ds.max_batches
+        ):
+            self._diagnostic_traces.append(result.trace)
+
         return {"trace": result.trace}
+
+    def on_validation_epoch_end(  # -------------------------------------------
+        self,
+    ) -> None:
+        """Compute, render, and reset bounded diagnostic reducers."""
+        lm = self._lm
+        summaries = self._val_reducer_collection.compute()
+
+        if lm.trainer is not None and lm.trainer.is_global_zero:
+            occ = summaries.get("occupancy")
+            if occ is not None:
+                log_reducer_figure(
+                    lm.logger,
+                    "val_diag/occupancy",
+                    render_occupancy_histogram(occ),
+                    global_step=lm.global_step,
+                )
+
+            norm = summaries.get("hidden_norms")
+            if norm is not None:
+                centers, density = norm
+                log_reducer_figure(
+                    lm.logger,
+                    "val_diag/hidden_norms",
+                    render_hidden_norm_histogram(centers, density),
+                    global_step=lm.global_step,
+                )
+
+        self._val_reducer_collection.reset()
 
     def execute_evaluation_batch(  # ------------------------------------------
         self,
@@ -412,7 +534,10 @@ class EHCSpatialPretrainRegime:
         self._apply_runtime(lm.global_step)
         ctrl = self._require_eval_controller()
         obj = self._require_eval_objective()
-        carry0 = ctrl.initial_state(case.batch)
+        carry0 = ctrl.initial_state(
+            case.batch,
+            static_data=self._build_static_params(),
+        )
 
         result = execute_replay_evaluation_batch(
             case=case,
@@ -432,9 +557,12 @@ class EHCSpatialPretrainRegime:
             _maybe_apply_arena_supplements(result.trace, result.source_context)
         return result
 
-    def _resolve_val_source_context(
-        self, batch_idx: int, batch: Batch
+    def _resolve_val_source_context(  # ---------------------------------------
+        self,
+        batch_idx: int,
+        batch: Batch,
     ) -> object | None:
+        """ """
         lm = self._lm
         trainer = getattr(lm, "trainer", None)
         if trainer is None:
@@ -465,6 +593,7 @@ def _maybe_apply_arena_supplements(
     trace: TraceTree,
     source_context: object | None,
 ) -> tuple[str, ...]:
+    """ """
     if not isinstance(source_context, ArenaEvaluationSourceContext):
         return ()
     supplements = build_arena_trace_supplements(source_context, trace.length)

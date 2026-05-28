@@ -44,9 +44,6 @@ from ehc_sn.adapters.mazehard.hrm import (
     MazeHardHRMV2HybridTaskBinding,
     build_mazehard_hrm_trace_meta,
 )
-from ehc_sn.adapters.mazehard.hrm.traces import (
-    MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
-)
 from ehc_sn.controllers.deliberation.actor_critic import (
     DeliberationACController,
     DeliberationACControllerConfig,
@@ -57,9 +54,11 @@ from ehc_sn.eval.contracts import (
     EvaluationTraceRequest,
 )
 from ehc_sn.eval.executor import execute_replay_evaluation_batch
+from ehc_sn.lightning.diagnostics import DiagnosticTraceSpec
 from ehc_sn.lightning.hrm.core.runtime import RuntimeConfig
 from ehc_sn.metrics.adapter import update_metrics_from_step
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
+from ehc_sn.metrics.reducers import HiddenNormHistogram
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.routes.rl import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v2 import Batch, HRModelV2, ModelSettingsV2
@@ -83,14 +82,10 @@ from ehc_sn.training.actor_critic import (
 )
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
-from ehc_sn.training.rollout import (
-    run_captured_rollout,
-    score_captured_rollout,
-)
+from ehc_sn.training.rollout import run_captured_rollout
 from ehc_sn.training.schedules import (
     CosineAnnealingLRWithWarmup,
     SchedulerConfig,
-    SequentialLR,
 )
 from ehc_sn.types import Batch
 
@@ -224,11 +219,19 @@ class HRMV2TrainingModel(L.LightningModule):
         self.val_metrics = build_val_metrics(RL_EPISODE_ROUTES).clone(
             prefix="val/"
         )
-        self._eval_trace_keys: set[str] | None = None
-        self.trace_spec = build_trace_spec(
-            "rl", extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
+        self._trace_paradigm: str = "rl"
+        self.diagnostic_trace_spec: DiagnosticTraceSpec = DiagnosticTraceSpec(
+            enabled=False, max_batches=2, keys=()
         )
-        self.trace_specs = self.trace_spec
+        self._diagnostic_traces: list[Any] = []
+
+        # Bounded diagnostic reducers (hidden-state norm histogram).
+        self._val_hidden_norms = HiddenNormHistogram(
+            bin_edges=torch.linspace(0.0, 50.0, 51), max_batches=10
+        )
+        self._val_reducer_collection = MetricCollection(
+            {"hidden_norms": self._val_hidden_norms}
+        ).clone(prefix="val_diag/")
 
         # Buffer + assembler implement partial-reset batching for deliberation runs.
         self._train_buffer = FifoBuffer(
@@ -364,26 +367,26 @@ class HRMV2TrainingModel(L.LightningModule):
     def on_validation_epoch_start(  # -----------------------------------------
         self,
     ) -> None:
-        """Reset validation metrics at the start of each epoch."""
+        """Reset validation metrics and diagnostic reducers at the start of each epoch."""
         self.val_metrics.reset()
+        self._val_reducer_collection.reset()
+        self._diagnostic_traces.clear()
 
-    def set_eval_trace_keys(  # -----------------------------------------------
+    @property
+    def diagnostic_traces(  # -------------------------------------------------
         self,
-        keys: set[str],
+    ) -> tuple[Any, ...]:
+        """Return bounded diagnostic traces captured during the just-completed
+        validation epoch.  Empty tuple when trace capture was disabled or no
+        batches were processed.
+        """
+        return tuple(self._diagnostic_traces)
+
+    def reset_diagnostic_traces(  # -------------------------------------------
+        self,
     ) -> None:
-        """Set semantic trace keys for evaluation-regime capture."""
-        self._eval_trace_keys = set(keys)
-        extra_fields = tuple(
-            field
-            for field in MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
-            if field.name in self._eval_trace_keys
-        )
-        self.trace_spec = build_trace_spec(
-            "rl",
-            include_keys=self._eval_trace_keys,
-            extra_fields=extra_fields,
-        )
-        self.trace_specs = self.trace_spec
+        """Clear the internal diagnostic trace buffer."""
+        self._diagnostic_traces.clear()
 
     def training_step(  # -----------------------------------------------------
         self,
@@ -515,11 +518,19 @@ class HRMV2TrainingModel(L.LightningModule):
                 "HRM v2 runtime is not initialized. Call setup() before validation."
             )
 
+        trace_request = None
+        ds = self.diagnostic_trace_spec
+        if ds.enabled and batch_idx < ds.max_batches and ds.keys:
+            trace_request = EvaluationTraceRequest(
+                trace_spec=build_trace_spec("rl", include_keys=set(ds.keys)),
+                trace_meta=dict(build_mazehard_hrm_trace_meta(batch)),
+            )
         evaluation = self.execute_evaluation_batch(
             EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"val-{batch_idx:04d}",
             ),
+            trace_request=trace_request,
         )
         update_metric_collection_from_evaluated_chunk(
             collection=self.val_metrics,
@@ -527,7 +538,28 @@ class HRMV2TrainingModel(L.LightningModule):
             routes=RL_EPISODE_ROUTES,
         )
 
-        return {}
+        # Feed bounded diagnostic reducers.
+        inp = self.adapter.prepare_inputs(batch)
+        model_out, _ = self.model(inp, state=None)
+        self._val_hidden_norms.update(
+            model_out.theta_summary.norm(dim=-1).detach().cpu()
+        )
+
+        # Store bounded diagnostic traces for callback consumption.
+        if (
+            evaluation.trace is not None
+            and len(self._diagnostic_traces) < ds.max_batches
+        ):
+            self._diagnostic_traces.append(evaluation.trace)
+
+        return {"trace": evaluation.trace}
+
+    def on_validation_epoch_end(  # -------------------------------------------
+        self,
+    ) -> None:
+        """Compute, log, and reset bounded diagnostic reducers."""
+        self._val_reducer_collection.compute()
+        self._val_reducer_collection.reset()
 
     def execute_evaluation_batch(  # ------------------------------------------
         self,
@@ -539,16 +571,6 @@ class HRMV2TrainingModel(L.LightningModule):
         if self.controller is None or self.val_scorer is None:
             raise RuntimeError(
                 "HRM v2 runtime is not initialized. Call setup() before evaluation."
-            )
-
-        effective_trace_request = trace_request
-        if trace_request is not None:
-            trace_meta = dict(build_mazehard_hrm_trace_meta(case.batch))
-            if trace_request.trace_meta is not None:
-                trace_meta.update(trace_request.trace_meta)
-            effective_trace_request = EvaluationTraceRequest(
-                trace_spec=trace_request.trace_spec,
-                trace_meta=trace_meta,
             )
 
         return execute_replay_evaluation_batch(
@@ -565,7 +587,7 @@ class HRMV2TrainingModel(L.LightningModule):
                 "halt_action": self.config.deliberation.halt_action,
                 "max_halt_steps": self.config.deliberation.episode_horizon,
             },
-            trace_request=effective_trace_request,
+            trace_request=trace_request,
         )
 
 

@@ -325,10 +325,10 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
         default=False,
         description="Whether to checkpoint the model after every evaluation.",
     )
-    limit_val_batches: float = Field(
+    limit_val_batches: int | float = Field(
         default=1.0,
-        description="Fraction of validation batches to run. Use 1.0 for full "
-        "validation coverage; values < 1.0 cap the run.",
+        description="Validation batches to run. ``int`` = N batches; ``float`` = "
+        "fraction of validation set (1.0 = 100%).",
     )
     eval_save_outputs: list[str] = Field(
         default_factory=list,

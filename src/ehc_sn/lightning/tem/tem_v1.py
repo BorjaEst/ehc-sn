@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, Optional
 
 import lightning as L
+import torch
 from pydantic import AliasChoices, BaseModel, Field
 from torch.optim import Adam, Optimizer
+from torchmetrics import MetricCollection
 
 from ehc_sn.adapters.arena.tem import (
     ArenaTEMAdapterSettings,
     ArenaTEMTaskBinding,
     ArenaTEMV1BridgeAdapter,
+    build_arena_tem_trace_meta,
 )
 from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryController,
@@ -24,12 +28,19 @@ from ehc_sn.eval.contracts import (
     EvaluationTraceRequest,
 )
 from ehc_sn.eval.executor import execute_replay_evaluation_batch
+from ehc_sn.lightning.diagnostics import DiagnosticTraceSpec
 from ehc_sn.lightning.tem.core.runtime import (
     RuntimeConfig,
     TEMRuntimeState,
     resolve_tem_runtime,
 )
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
+from ehc_sn.metrics.reducers import HiddenNormHistogram, OccupancyHistogram
+from ehc_sn.metrics.renderers import (
+    log_reducer_figure,
+    render_hidden_norm_histogram,
+    render_occupancy_histogram,
+)
 from ehc_sn.metrics.rollout import (
     make_observed_step_metric_observer,
     update_metric_collection_from_evaluated_chunk,
@@ -89,20 +100,23 @@ class TEMV1ModelConfig(BaseModel, extra="forbid"):
     )
     objective: TEMObjectiveConfig = Field(
         ...,
-        description="",
+        description="Objective configuration for both training and evaluation "
+        "(loss weights, etc.).",
     )
 
     optimizer: AdamConfig = Field(
         default_factory=AdamConfig,
-        description="",
+        description="Adam optimizer hyperparameters for training the TEM model.",
     )
     scheduler: SchedulerConfig = Field(
         default_factory=SchedulerConfig,
-        description="",
+        description="Learning-rate scheduler configuration for training the "
+        "TEM model.",
     )
     runtime: RuntimeConfig = Field(
         default_factory=RuntimeConfig,
-        description="",
+        description="Runtime configuration for TEM training and evaluation "
+        "(dynamics schedules, validation rollout settings, etc.).",
     )
 
 
@@ -137,6 +151,9 @@ class TEMV1TrainingModel(L.LightningModule):
         self.automatic_optimization = False
         self._train_carry = None
 
+        # Trace paradigm for offline trace-spec construction without set_eval_trace_keys.
+        self._trace_paradigm: str = "tem"
+
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(TEM_STEP_ROUTES).clone(
             prefix="train/"
@@ -145,9 +162,26 @@ class TEMV1TrainingModel(L.LightningModule):
             prefix="val/"
         )
         self.primary_val_metric_key = f"val/{TEM_PRIMARY_VAL_ROUTE_KEY}"
-        self._eval_trace_keys: set[str] | None = None
-        self.trace_spec = build_trace_spec("tem")
-        self.trace_specs = self.trace_spec
+        self.diagnostic_trace_spec: DiagnosticTraceSpec = DiagnosticTraceSpec(
+            enabled=False, max_batches=2, keys=()
+        )
+        self._diagnostic_traces: list[Any] = []
+        self._diag_params_cache: dict[str, object] | None = None
+
+        # Bounded diagnostic reducers (observations + hidden-state norms).
+        self._val_occupancy = OccupancyHistogram(
+            n_locations=config.adapter.observation_dim, max_batches=10
+        )
+        self._val_hidden_norms = HiddenNormHistogram(
+            bin_edges=torch.linspace(0.0, 50.0, 51), max_batches=10
+        )
+        self._val_reducer_collection = MetricCollection(
+            {
+                "occupancy": self._val_occupancy,
+                "hidden_norms": self._val_hidden_norms,
+            }
+        ).clone(prefix="val_diag/")
+
         # Buffer + assembler implement partial-reset batching for ACT runs.
         self._train_buffer: FifoBuffer | None = None
         self._train_batch_assembler: PartialResetBatchAssembler | None = None
@@ -213,20 +247,26 @@ class TEMV1TrainingModel(L.LightningModule):
         at each step from the global step count.
         """
         self.val_metrics.reset()
+        self._diagnostic_traces.clear()
 
-    def set_eval_trace_keys(  # -----------------------------------------------
+    @property
+    def diagnostic_traces(self) -> tuple[Any, ...]:
+        """Return bounded diagnostic traces captured during the just-completed
+        validation epoch.  Empty tuple when trace capture was disabled or no
+        batches were processed.
+        """
+        return tuple(self._diagnostic_traces)
+
+    def reset_diagnostic_traces(  # -------------------------------------------
         self,
-        keys: set[str],
     ) -> None:
-        """Set semantic trace keys for evaluation-regime capture."""
-        self._eval_trace_keys = set(keys)
-        self.trace_spec = build_trace_spec(
-            "tem",
-            include_keys=self._eval_trace_keys,
-        )
-        self.trace_specs = self.trace_spec
+        """Clear the internal diagnostic trace buffer."""
+        self._diagnostic_traces.clear()
 
-    def _validation_seed(self, batch_idx: int) -> int:
+    def _validation_seed(  # --------------------------------------------------
+        self,
+        batch_idx: int,
+    ) -> int:
         """Return the explicit evaluation seed for one validation batch."""
         seed = self.config.runtime.validation.seed
         if seed is None:
@@ -334,18 +374,102 @@ class TEMV1TrainingModel(L.LightningModule):
         batch: Batch,
         batch_idx: int,
     ) -> dict[str, object]:
-        """Run a full TEM rollout through the recurrent runner and trace observer."""
+        """Run a full TEM rollout through the recurrent runner and optionally
+        capture traces.
+
+        Trace capture is gated on ``self.diagnostic_trace_spec.enabled`` and
+        capped to ``self.diagnostic_trace_spec.max_batches`` batches to bound
+        peak memory for state-heavy traces.
+        """
+        trace_request = None
+        ds = self.diagnostic_trace_spec
+        if ds.enabled and batch_idx < ds.max_batches and ds.keys:
+            trace_request = EvaluationTraceRequest(
+                trace_spec=build_trace_spec("tem", include_keys=set(ds.keys)),
+                trace_meta=dict(build_arena_tem_trace_meta(batch)),
+            )
         result = self.execute_evaluation_batch(
             EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"val-{batch_idx:04d}",
-            )
+            ),
+            trace_request=trace_request,
         )
         update_metric_collection_from_evaluated_chunk(
             self.val_metrics, result.evaluated, TEM_EPISODE_ROUTES
         )
 
-        return {}
+        # Feed bounded diagnostic reducers.
+        obs_id = batch.get("observation_id")
+        if obs_id is not None:
+            self._val_occupancy.update(obs_id.detach().cpu())
+
+        # Feed hidden-state norm histogram from the rollout carry model_state.
+        if result.evaluated.steps:
+            model_state = result.evaluated.last_step.snapshot.model_state
+            if model_state is not None:
+                norms = _compute_hidden_state_norms(model_state)
+                self._val_hidden_norms.update(norms)
+
+        # Store bounded diagnostic traces for callback consumption.
+        if (
+            result.trace is not None
+            and len(self._diagnostic_traces) < ds.max_batches
+        ):
+            self._diagnostic_traces.append(result.trace)
+
+        return {"trace": result.trace}
+
+    def on_validation_epoch_end(  # -------------------------------------------
+        self,
+    ) -> None:
+        """Compute, render, and reset bounded diagnostic reducers."""
+        summaries = self._val_reducer_collection.compute()
+
+        if self.trainer is not None and self.trainer.is_global_zero:
+            occ = summaries.get("val_diag/occupancy")
+            if occ is not None:
+                log_reducer_figure(
+                    self.logger,
+                    "val_diag/occupancy",
+                    render_occupancy_histogram(occ),
+                    global_step=self.global_step,
+                )
+
+            norm = summaries.get("val_diag/hidden_norms")
+            if norm is not None:
+                centers, density = norm
+                log_reducer_figure(
+                    self.logger,
+                    "val_diag/hidden_norms",
+                    render_hidden_norm_histogram(centers, density),
+                    global_step=self.global_step,
+                )
+
+        self._val_reducer_collection.reset()
+
+    def _diagnostic_params(  # ------------------------------------------------
+        self,
+    ) -> dict[str, object]:
+        """Return static diagnostic parameters injected into the rollout carry.
+
+        Computed once and cached so repeated calls during validation do not
+        recompute sigmoids or allocate new tensors.
+        """
+        if self._diag_params_cache is None:
+            model = self.model
+            self._diag_params_cache = {
+                "lec_alpha_sigmoid": torch.stack(
+                    [
+                        torch.sigmoid(a).detach().cpu()
+                        for a in model.lec.filter.alpha
+                    ]
+                ),
+                "lec_w_f_sigmoid": torch.stack(
+                    [torch.sigmoid(w).detach().cpu() for w in model.lec.w_f]
+                ),
+            }
+        return self._diag_params_cache
 
     def execute_evaluation_batch(  # ------------------------------------------
         self,
@@ -357,7 +481,10 @@ class TEMV1TrainingModel(L.LightningModule):
         runtime = self._apply_runtime(self.global_step)
         eval_controller = self._require_eval_controller()
         eval_objective = self._require_eval_objective()
-        carry0 = eval_controller.initial_state(case.batch)
+        carry0 = eval_controller.initial_state(
+            case.batch,
+            static_data=self._diagnostic_params(),
+        )
 
         objective_options = eval_objective.runtime_loss_options(
             self.global_step, p2g_use=runtime.p2g_use
@@ -483,6 +610,37 @@ class TEMV1TrainingModel(L.LightningModule):
             keys=keys,
         )
         return self._train_batch_assembler
+
+
+# =============================================================================
+def _compute_hidden_state_norms(model_state: Any) -> torch.Tensor:
+    """Compute per-batch L2 norms from a TEM model state.
+
+    Recursively collects all ``torch.Tensor`` leaves from the dataclass tree,
+    flattens each to ``(B, D)``, concatenates, and computes the L2 norm per
+    batch element.  Returns a 1-D tensor of shape ``(B,)``.
+    """
+
+    tensors: list[torch.Tensor] = []
+
+    def _collect(obj: Any) -> None:
+        if isinstance(obj, torch.Tensor):
+            if obj.numel() > 0:
+                tensors.append(obj.reshape(obj.shape[0], -1).float())
+        elif is_dataclass(obj):
+            for f in fields(obj):
+                _collect(getattr(obj, f.name))
+        elif isinstance(obj, (list, tuple)):
+            for item in obj:
+                _collect(item)
+        elif isinstance(obj, dict):
+            for v in obj.values():
+                _collect(v)
+
+    _collect(model_state)
+    if not tensors:
+        return torch.zeros(1, dtype=torch.float32)
+    return torch.cat(tensors, dim=-1).norm(dim=-1)
 
 
 # =============================================================================

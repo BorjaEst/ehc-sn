@@ -6,13 +6,13 @@ from pathlib import Path
 from typing import Any, Literal
 
 import lightning as L
+import torch
 from pydantic import BaseModel, Field
 from torch.optim import Optimizer
 from torchmetrics import MetricCollection
 
 from ehc_sn import utils
 from ehc_sn.adapters.mazehard.ehc import (
-    MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS,
     MazeHardEHCAdapterSettings,
     MazeHardEHCV1HybridTaskBinding,
 )
@@ -27,6 +27,7 @@ from ehc_sn.eval.contracts import (
     EvaluationTraceRequest,
 )
 from ehc_sn.eval.executor import execute_replay_evaluation_batch
+from ehc_sn.lightning.diagnostics import DiagnosticTraceSpec
 from ehc_sn.lightning.ehc.core._base import (
     freeze_params,
     resolve_controller_heads_ids,
@@ -34,7 +35,11 @@ from ehc_sn.lightning.ehc.core._base import (
 )
 from ehc_sn.lightning.ehc.core.runtime import RuntimeConfig
 from ehc_sn.metrics.adapter import update_metrics_from_step
-from ehc_sn.metrics.builders import build_val_metrics
+from ehc_sn.metrics.reducers import HiddenNormHistogram
+from ehc_sn.metrics.renderers import (
+    log_reducer_figure,
+    render_hidden_norm_histogram,
+)
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.routes.rl import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.models.ehc.ehc_v1 import EHCModelV1
@@ -65,50 +70,62 @@ from ehc_sn.types import Batch
 
 # =============================================================================
 class EHCReasonPretrainConfig(BaseModel, extra="forbid"):
-    """Config for controller pretrain (MazeHard deliberation, hybrid RL objective)."""
+    """Config for controller pretrain.
+    (MazeHard deliberation, hybrid RL objective)
+    """
 
     mode: Literal["reason_pretrain"] = "reason_pretrain"
 
     model_config_path: Path = Field(
         ...,
-        description="",
+        description="Path to the model config TOML file used to construct the "
+        "EHCModelV1.",
     )
     adapter: MazeHardEHCAdapterSettings = Field(
         default_factory=MazeHardEHCAdapterSettings,
-        description="",
+        description="Adapter settings for encoding batches and decoding model "
+        "outputs.",
     )
     deliberation: MazeHardDeliberationConfig = Field(
         ...,
-        description="",
+        description="MazeHard deliberation capability config, including "
+        "deliberation steps and reward projector settings.",
     )
     controller: DeliberationACControllerConfig = Field(
         default_factory=DeliberationACControllerConfig,
-        description="",
+        description="Controller architecture config for the deliberation AC"
+        "Controller used in this regime.",
     )
     objective: HybridRLLossConfig = Field(
         ...,
-        description="",
+        description="Config for the hybrid RL loss used as the training "
+        "objective in this regime, including ",
     )
     optimizer_ctrl: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
-        description="",
+        description="Optimizer config for the controller body and bridge "
+        "parameters.",
     )
     optimizer_heads: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
-        description="",
+        description="Optimizer config for the controller heads parameters.",
     )
     scheduler: SchedulerConfig = Field(
         default_factory=SchedulerConfig,
-        description="",
+        description="Scheduler config for both optimizers; typically a cosine "
+        "annealing with warmup or a sequential scheduler.",
     )
     supervised_only_warmup_steps: int = Field(
         default=5000,
         ge=0,
-        description="",
+        description="Number of initial training steps to run with "
+        "supervised-only loss (no RL signals) for warmup. During these steps, "
+        "the controller is allowed to halt but does not explore.",
     )
     runtime: RuntimeConfig = Field(
         default_factory=RuntimeConfig,
-        description="",
+        description="Runtime settings for training and validation execution, "
+        "including max rollout steps for validation.",
     )
 
 
@@ -127,7 +144,9 @@ class EHCReasonPretrainRegime:
         model: EHCModelV1,
         config: EHCReasonPretrainConfig,
     ) -> None:
-        """Initialize regime with model and config. Build controller, objective, learner, scorer."""
+        """Initialize regime with model and config. Build controller, objective,
+        learner, scorer.
+        """
         self._lm = lm
         self._config = config
 
@@ -145,7 +164,21 @@ class EHCReasonPretrainRegime:
 
         self._train_buffer: FifoBuffer | None = None
         self._train_batch_assembler: PartialResetBatchAssembler | None = None
-        self._eval_trace_keys: set[str] | None = None
+        self._trace_paradigm: str = "rl"
+        self.diagnostic_trace_spec: DiagnosticTraceSpec = DiagnosticTraceSpec(
+            enabled=False,
+            max_batches=2,
+            keys=(),
+        )
+        self._diagnostic_traces: list[Any] = []
+
+        # Bounded diagnostic reducers.
+        self._val_hidden_norms = HiddenNormHistogram(
+            bin_edges=torch.linspace(0.0, 50.0, 51), max_batches=10
+        )
+        self._val_reducer_collection = MetricCollection(
+            {"hidden_norms": self._val_hidden_norms}
+        ).clone(prefix="val_diag/")
 
     def _ensure_train_batch_assembler(
         self, batch: Batch
@@ -192,7 +225,9 @@ class EHCReasonPretrainRegime:
     def configure_optimizers(  # ----------------------------------------------
         self,
     ) -> tuple[list[Optimizer], list[dict[str, Any]]]:
-        """Configure separate optimizers and schedulers for controller body + bridge, and controller heads."""
+        """Configure separate optimizers and schedulers for controller body +
+        bridge, and controller heads.
+        """
         total_steps = int(self._lm.trainer.estimated_stepping_batches)
         model = self._lm.model
 
@@ -249,30 +284,35 @@ class EHCReasonPretrainRegime:
     def on_validation_epoch_start(
         self,
     ) -> None:
-        """Reset val metrics at the start of each validation epoch."""
+        """Reset val metrics and diagnostic reducers at the start of each
+        validation epoch.
+        """
         self._lm.val_metrics.reset()
+        self._val_reducer_collection.reset()
+        self._diagnostic_traces.clear()
 
-    def set_eval_trace_keys(self, keys: set[str]) -> None:
-        """Set semantic trace keys for replay-evaluation capture."""
-        self._eval_trace_keys = set(keys)
-        extra_fields = tuple(
-            field
-            for field in MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS
-            if field.name in self._eval_trace_keys
-        )
-        self._lm.trace_spec = build_trace_spec(
-            "rl",
-            include_keys=self._eval_trace_keys,
-            extra_fields=extra_fields,
-        )
-        self._lm.trace_specs = self._lm.trace_spec
+    @property
+    def diagnostic_traces(self) -> tuple[Any, ...]:
+        """Return bounded diagnostic traces captured during the just-completed
+        validation epoch.  Empty tuple when trace capture was disabled or no
+        batches were processed.
+        """
+        return tuple(self._diagnostic_traces)
+
+    def reset_diagnostic_traces(  # --------------------------------------------
+        self,
+    ) -> None:
+        """Clear the internal diagnostic trace buffer."""
+        self._diagnostic_traces.clear()
 
     def training_step(  # -----------------------------------------------------
         self,
         batch: Batch,
         batch_idx: int,
     ) -> dict[str, Any]:
-        """Run a training step: execute one step of the controller, compute loss with the objective, and optimize."""
+        """Run a training step: execute one step of the controller, compute loss
+        with the objective, and optimize.
+        """
         lm = self._lm
         if (
             self._controller is None
@@ -280,7 +320,8 @@ class EHCReasonPretrainRegime:
             or self._learner is None
         ):
             raise RuntimeError(
-                "Controller pretrain runtime not initialized — call setup() first."
+                "Controller pretrain runtime not initialized — call setup() "
+                "first.",
             )
 
         if self._train_carry is None:
@@ -357,17 +398,23 @@ class EHCReasonPretrainRegime:
         batch: Batch,
         batch_idx: int,
     ) -> dict[str, Any]:
-        """Run a validation step: execute full rollout with the controller, compute episode metrics with the val_scorer."""
+        """Run a validation step: execute full rollout with the controller,
+        compute episode metrics with the val_scorer.
+        """
         lm = self._lm
         if self._controller is None or self._val_scorer is None:
             raise RuntimeError(
-                "Controller pretrain runtime not initialized — call setup() first."
+                "Controller pretrain runtime not initialized — call setup() "
+                "first.",
             )
 
-        trace_request = EvaluationTraceRequest(
-            trace_spec=lm.trace_spec,
-            trace_meta=build_mazehard_ehc_trace_meta(batch),
-        )
+        trace_request = None
+        ds = self.diagnostic_trace_spec
+        if ds.enabled and batch_idx < ds.max_batches and ds.keys:
+            trace_request = EvaluationTraceRequest(
+                trace_spec=build_trace_spec("rl", include_keys=set(ds.keys)),
+                trace_meta=dict(build_mazehard_ehc_trace_meta(batch)),
+            )
         evaluation = self.execute_evaluation_batch(
             EvaluationCaseBatch(
                 batch=batch,
@@ -378,7 +425,54 @@ class EHCReasonPretrainRegime:
         update_metric_collection_from_evaluated_chunk(
             lm.val_metrics, evaluation.evaluated, RL_EPISODE_ROUTES
         )
+
+        # Feed bounded diagnostic reducers.
+        self._val_hidden_norms.update(self._extract_theta_norm(batch))
+
+        # Store bounded diagnostic traces for callback consumption.
+        if (
+            evaluation.trace is not None
+            and len(self._diagnostic_traces) < ds.max_batches
+        ):
+            self._diagnostic_traces.append(evaluation.trace)
+
         return {"trace": evaluation.trace}
+
+    def on_validation_epoch_end(  # -------------------------------------------
+        self,
+    ) -> None:
+        """Compute, render, and reset bounded diagnostic reducers."""
+        lm = self._lm
+        summaries = self._val_reducer_collection.compute()
+
+        if lm.trainer is not None and lm.trainer.is_global_zero:
+            norm = summaries.get("hidden_norms")
+            if norm is not None:
+                centers, density = norm
+                log_reducer_figure(
+                    lm.logger,
+                    "val_diag/hidden_norms",
+                    render_hidden_norm_histogram(centers, density),
+                    global_step=lm.global_step,
+                )
+
+        self._val_reducer_collection.reset()
+
+    def _extract_theta_norm(  # -----------------------------------------------
+        self,
+        batch: Batch,
+    ) -> torch.Tensor:
+        """Return L2 norm of the PFC theta summary for hidden-norm logging.
+
+        Runs a lightweight forward pass on the model to get the theta summary
+        from the current batch.  Extracted once per validation step.
+        """
+        model = self._lm.model
+        adapter = self._lm.bridge_adapter
+        inp = adapter.encode_batch(batch)
+        output = model(inp, state=None)
+        theta = output.control.theta_summary  # (B, D)
+        return theta.norm(dim=-1, keepdim=False).detach()
 
     def execute_evaluation_batch(  # ------------------------------------------
         self,
@@ -389,17 +483,8 @@ class EHCReasonPretrainRegime:
         """Execute one provider-owned replay case through the reason-pretrain eval path."""
         if self._controller is None or self._val_scorer is None:
             raise RuntimeError(
-                "Controller pretrain runtime not initialized — call setup() first."
-            )
-
-        effective_trace_request = trace_request
-        if trace_request is not None:
-            trace_meta = dict(build_mazehard_ehc_trace_meta(case.batch))
-            if trace_request.trace_meta is not None:
-                trace_meta.update(trace_request.trace_meta)
-            effective_trace_request = EvaluationTraceRequest(
-                trace_spec=trace_request.trace_spec,
-                trace_meta=trace_meta,
+                "Controller pretrain runtime not initialized — call setup() "
+                "first."
             )
 
         return execute_replay_evaluation_batch(
@@ -411,7 +496,7 @@ class EHCReasonPretrainRegime:
             max_rollout_steps=self._config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self._config.runtime.validation.hard_max_rollout_steps,
             runner_options={"explore": False, "allow_halt": False},
-            trace_request=effective_trace_request,
+            trace_request=trace_request,
         )
 
 

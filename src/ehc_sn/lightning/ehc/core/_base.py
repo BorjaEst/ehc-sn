@@ -21,10 +21,13 @@ from ehc_sn.types import Batch
 
 # EHC v1 unified training surface.  See EHCV1TrainingModel for details.
 _SPATIAL_CORE_NAMES = ("lec", "mec", "hpc", "lec_to_hpc", "mec_to_hpc")
-"""EHCModelV1 submodule name prefixes for the spatial core, which includes all"""
+"""EHCModelV1 submodule name prefixes for the spatial core, which includes all
+"""
 
 _CONTROLLER_BRIDGE_NAMES = ("pfc_to_hpc", "hpc_to_pfc")
-"""EHCModelV1 submodule name prefixes for the controller bridge, which includes all modules directly bridging pfc and hpc."""
+"""EHCModelV1 submodule name prefixes for the controller bridge, which includes 
+all modules directly bridging pfc and hpc.
+"""
 
 
 # Mapping from public semantic group name to module-name prefixes on EHCModelV1.
@@ -33,7 +36,9 @@ _GROUP_TO_PREFIXES: dict[str, tuple[str, ...]] = {
     "controller_bridge": _CONTROLLER_BRIDGE_NAMES,
     "controller_heads": ("pfc.estimator", "str"),
 }
-"""Public semantic group names and their corresponding EHCModelV1 submodule prefixes."""
+"""Public semantic group names and their corresponding EHCModelV1 submodule 
+prefixes.
+"""
 
 VALID_INIT_GROUPS: frozenset[str] = frozenset(_GROUP_TO_PREFIXES)
 """Set of valid semantic group names for weight initialization."""
@@ -84,6 +89,11 @@ class EHCRegime(Protocol):
     ) -> dict:
         """Validation step method called by Lightning for each validation batch."""
 
+    def on_validation_epoch_end(  # -------------------------------------------
+        self,
+    ) -> None:
+        """Hook called by Lightning at the end of each validation epoch."""
+
     def execute_evaluation_batch(  # ------------------------------------------
         self,
         case: EvaluationCaseBatch,
@@ -105,6 +115,7 @@ def resolve_spatial_core_ids(  # ----------------------------------------------
     }
 
 
+# =============================================================================
 def resolve_controller_bridge_ids(  # -----------------------------------------
     model: EHCModelV1,
 ) -> set[int]:
@@ -116,6 +127,7 @@ def resolve_controller_bridge_ids(  # -----------------------------------------
     }
 
 
+# =============================================================================
 def resolve_controller_heads_ids(  # ------------------------------------------
     model: EHCModelV1,
 ) -> set[int]:
@@ -125,6 +137,7 @@ def resolve_controller_heads_ids(  # ------------------------------------------
     }
 
 
+# =============================================================================
 def freeze_params(  # ---------------------------------------------------------
     model: EHCModelV1,
     *names: str,
@@ -135,6 +148,7 @@ def freeze_params(  # ---------------------------------------------------------
             p.requires_grad_(False)
 
 
+# =============================================================================
 def load_weights_from_checkpoint(  # ------------------------------------------
     model: EHCModelV1,
     checkpoint_path: str | Path,

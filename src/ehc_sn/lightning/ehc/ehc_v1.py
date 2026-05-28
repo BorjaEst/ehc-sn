@@ -105,7 +105,6 @@ class EHCV1TrainingModel(L.LightningModule):
             self.trace_spec = build_trace_spec(
                 "ehc", extra_fields=ARENA_EHC_TRACE_FIELDS
             )
-            self.trace_specs = self.trace_spec
             return EHCSpatialPretrainRegime(self, model, config)
 
         if isinstance(config, EHCReasonPretrainConfig):
@@ -122,20 +121,23 @@ class EHCV1TrainingModel(L.LightningModule):
             self.trace_spec = build_trace_spec(
                 "rl", extra_fields=MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS
             )
-            self.trace_specs = self.trace_spec
             return EHCReasonPretrainRegime(self, model, config)
 
         else:
             raise ValueError(f"Unsupported config type: {type(config)}")
 
-    def set_eval_trace_keys(  # -----------------------------------------------
+    @property
+    def diagnostic_traces(self) -> tuple[Any, ...]:
+        """Delegate to regime's diagnostic_traces."""
+        return getattr(self._regime, "diagnostic_traces", ())
+
+    def reset_diagnostic_traces(  # -------------------------------------------
         self,
-        keys: set[str],
     ) -> None:
-        """Set semantic trace keys for figure capture."""
-        setter = getattr(self._regime, "set_eval_trace_keys", None)
-        if callable(setter):
-            setter(keys)
+        """Delegate to regime's reset_diagnostic_traces."""
+        resetter = getattr(self._regime, "reset_diagnostic_traces", None)
+        if callable(resetter):
+            resetter()
 
     # -- Stable hook surface --------------------------------------------------
 
@@ -173,6 +175,11 @@ class EHCV1TrainingModel(L.LightningModule):
         batch_idx: int,
     ) -> dict[str, Any]:
         return self._regime.validation_step(batch, batch_idx)
+
+    def on_validation_epoch_end(  # -------------------------------------------
+        self,
+    ) -> None:
+        self._regime.on_validation_epoch_end()
 
     def execute_evaluation_batch(  # ------------------------------------------
         self,
