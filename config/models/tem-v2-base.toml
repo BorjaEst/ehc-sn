@@ -28,7 +28,7 @@ enable_sensory_recall   = true
     write_bank         = "default"
 
 [hpc.store]
-    memory_capacity = 64
+    memory_capacity = 1024
     bank_names      = [ ]
 
 [lec]

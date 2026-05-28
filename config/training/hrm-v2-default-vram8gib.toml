@@ -1,7 +1,7 @@
 # =============================================================================
 # Metadata (comments only)
 # class: training
-# id: hrm-v2-default
+# id: hrm-v2-default-vram8gib
 # role: entrypoint default training config for HRM v2 deliberation
 # =============================================================================
 
@@ -10,7 +10,7 @@ model_config_path = "config/models/hrm-v2-base.toml"
 
 # -- Dataset & training -------------------------------------------------------
 dataset_path       = "data/processed/mazehard/default/v1"
-global_batch_size  = 16
+global_batch_size  = 25
 max_epochs         = 100
 seed               = 42
 augment            = true
@@ -87,3 +87,19 @@ init_weights_groups = ["all"]
     save_last               = true
     save_on_exception       = true
     save_weights_only       = false
+
+# -- Standalone scheduled figure generation -----------------------------------
+[figures]
+enabled    = false
+context    = "validation"
+every_n_epochs = 5
+every_n_steps  = 0
+figures    = ["halting_timeline", "value_evolution"]
+max_cases  = 2
+save_pdf   = true
+save_png   = false
+png_dpi    = 160
+max_items  = 4
+max_cells  = 16
+max_retained_files = 200
+failure_policy = "warn"

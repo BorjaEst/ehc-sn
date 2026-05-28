@@ -1,12 +1,12 @@
 # =============================================================================
 # Metadata (comments only)
 # class: training
-# id: tem-v1-default
-# role: entrypoint default training config for TEM v1
+# id: tem-v2-default-vram8gib
+# role: entrypoint default training config for TEM v2
 # =============================================================================
 
 # -- Model architecture -------------------------------------------------------
-model_config_path = "config/models/tem-v1-base.toml"
+model_config_path = "config/models/tem-v2-base.toml"
 
 # -- General settings ---------------------------------------------------------
 dataset_path         = "data/processed/arena/default/v1"
@@ -32,7 +32,7 @@ trainer_precision    = "bf16-mixed"
 diagnostic_level     = "standard"
 
 # Optional model-only init hydration (mutually exclusive with full resume)
-# init_weights_from = "checkpoints/tem-v1/last.ckpt"
+# init_weights_from = "checkpoints/tem-v2/last.ckpt"
 
 # -- Adapter ------------------------------------------------------------------
 [adapter]
@@ -96,10 +96,10 @@ diagnostic_level     = "standard"
     g_reg_it         = 40000000
     p_reg_it         = 4000
 
-# -- Logs and checkpoints -----------------------------------------------------
+# -- Figures & diagnostics ----------------------------------------------------
 [logger]
     save_dir  = "logs"
-    name      = "tem-v1"
+    name      = "tem-v2"
     log_graph = false
     prefix    = ""
 
@@ -109,7 +109,7 @@ diagnostic_level     = "standard"
     log_momentum = false
 
 [checkpoint]
-    dirpath                 = "checkpoints/tem-v1"
+    dirpath                 = "checkpoints/tem-v2"
     filename                = "epoch={epoch:03d}"
     save_top_k              = 0
     every_n_epochs          = 1
@@ -117,3 +117,19 @@ diagnostic_level     = "standard"
     save_last               = true
     save_on_exception       = true
     save_weights_only       = false
+
+# -- Standalone scheduled figure generation -----------------------------------
+[figures]
+enabled    = false
+context    = "validation"
+every_n_epochs = 5
+every_n_steps  = 0
+figures    = ["halting_timeline"]
+max_cases  = 2
+save_pdf   = true
+save_png   = false
+png_dpi    = 160
+max_items  = 4
+max_cells  = 16
+max_retained_files = 200
+failure_policy = "warn"
