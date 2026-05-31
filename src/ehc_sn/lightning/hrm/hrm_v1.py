@@ -62,7 +62,7 @@ from ehc_sn.rollouts.buffers import FifoBuffer
 from ehc_sn.rollouts.partial_reset import PartialResetBatchAssembler
 from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
 from ehc_sn.rollouts.sources import PartialResetSource
-from ehc_sn.traces import build_trace_spec
+from ehc_sn.traces import HRM_HIDDEN_STATE_FIELDS, build_trace_spec
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.rollout import score_captured_rollout
@@ -414,7 +414,11 @@ class HRMV1TrainingModel(L.LightningModule):
         ds = self.diagnostic_trace_spec
         if ds.enabled and batch_idx < ds.max_batches and ds.keys:
             trace_request = EvaluationTraceRequest(
-                trace_spec=build_trace_spec("act", include_keys=set(ds.keys)),
+                trace_spec=build_trace_spec(
+                    "act",
+                    include_keys=set(ds.keys),
+                    extra_fields=HRM_HIDDEN_STATE_FIELDS,
+                ),
                 trace_meta=dict(build_mazehard_hrm_trace_meta(batch)),
             )
         result = self.execute_evaluation_batch(

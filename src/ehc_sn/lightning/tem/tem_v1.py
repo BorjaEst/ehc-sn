@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -13,6 +14,7 @@ from torch.optim import Adam, Optimizer
 from torchmetrics import MetricCollection
 
 from ehc_sn.adapters.arena.tem import (
+    ARENA_TEM_TRACE_FIELDS,
     ArenaTEMAdapterSettings,
     ArenaTEMTaskBinding,
     ArenaTEMV1BridgeAdapter,
@@ -35,6 +37,10 @@ from ehc_sn.lightning.tem.core.runtime import (
     resolve_tem_runtime,
 )
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
+from ehc_sn.metrics.keys import (
+    TEM_ACC_OBS_INFERENCE_ALL,
+    TEM_ACC_OBS_INFERENCE_REVISIT,
+)
 from ehc_sn.metrics.reducers import (
     HiddenNormHistogram,
     OccupancyHistogram,
@@ -54,6 +60,7 @@ from ehc_sn.metrics.routes.tem import (
     TEM_PRIMARY_VAL_ROUTE_KEY,
     TEM_STEP_ROUTES,
 )
+from ehc_sn.metrics.step_metrics import StepMetrics
 from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
 from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts.buffers import FifoBuffer
@@ -157,6 +164,7 @@ class TEMV1TrainingModel(L.LightningModule):
 
         # Trace paradigm for offline trace-spec construction without set_eval_trace_keys.
         self._trace_paradigm: str = "tem"
+        self._extra_trace_fields: tuple = ARENA_TEM_TRACE_FIELDS
 
         # Metrics are cloned for train/val to allow separate logging and state management.
         self.train_metrics = build_train_metrics(TEM_STEP_ROUTES).clone(
@@ -408,7 +416,8 @@ class TEMV1TrainingModel(L.LightningModule):
         # when data is absent — DDP-safe lifecycle).
         obs_id = batch.get("observation_id")
         self._val_occupancy.update(
-            obs_id.detach().cpu() if obs_id is not None
+            obs_id.detach().cpu()
+            if obs_id is not None
             else torch.empty(0, dtype=torch.long)
         )
 
@@ -489,6 +498,14 @@ class TEMV1TrainingModel(L.LightningModule):
         trace_request: EvaluationTraceRequest | None = None,
     ) -> EvaluationCaseResult:
         """Execute one provider-owned replay case through the TEM eval path."""
+        # Attach trace metadata from the case batch when the trace request
+        # does not already carry it (offline eval path).
+        if trace_request is not None and trace_request.trace_meta is None:
+            trace_request = EvaluationTraceRequest(
+                trace_spec=trace_request.trace_spec,
+                trace_meta=dict(build_arena_tem_trace_meta(case.batch)),
+            )
+
         runtime = self._apply_runtime(self.global_step)
         eval_controller = self._require_eval_controller()
         eval_objective = self._require_eval_objective()
@@ -604,6 +621,58 @@ class TEMV1TrainingModel(L.LightningModule):
         if self.eval_objective is None:
             raise RuntimeError("TEM evaluation runtime is not initialized.")
         return self.eval_objective
+
+    def aggregate_evaluation_case_metrics(  # ---------------------------------
+        self,
+        *,
+        task: str,
+        regime_id: str,
+        regime_kind: str,
+        case_results: Sequence[EvaluationCaseResult],
+    ) -> dict[str, float | int]:
+        """Aggregate per-case Arena observation accuracy into a regime summary.
+
+        Reads ``RatioStat`` values from each case's ``StepMetrics.extras``, sums
+        numerators and denominators across all steps, and returns overall accuracy
+        ratios keyed to the Arena normalizer's expected field names
+        (``accuracy_all``, ``accuracy_revisit``).
+        """
+        _ = task, regime_id, regime_kind
+
+        total_correct_all = 0.0
+        total_count_all = 0.0
+        total_correct_revisit = 0.0
+        total_count_revisit = 0.0
+
+        for case in case_results:
+            for step in case.evaluated.steps:
+                metrics = step.outputs.metrics
+                if not isinstance(metrics, StepMetrics):
+                    raise TypeError(
+                        f"Expected StepMetrics, got {type(metrics).__name__}."
+                    )
+                rs_all = metrics.extras.get(TEM_ACC_OBS_INFERENCE_ALL)
+                if rs_all is not None:
+                    total_correct_all += float(rs_all.numerator_sum.item())
+                    total_count_all += float(rs_all.denominator_sum.item())
+
+                rs_revisit = metrics.extras.get(TEM_ACC_OBS_INFERENCE_REVISIT)
+                if rs_revisit is not None:
+                    total_correct_revisit += float(
+                        rs_revisit.numerator_sum.item()
+                    )
+                    total_count_revisit += float(
+                        rs_revisit.denominator_sum.item()
+                    )
+
+        result: dict[str, float | int] = {}
+        if total_count_all > 0:
+            result["accuracy_all"] = total_correct_all / total_count_all
+        if total_count_revisit > 0:
+            result["accuracy_revisit"] = (
+                total_correct_revisit / total_count_revisit
+            )
+        return result
 
     def _ensure_train_batch_assembler(  # -------------------------------------
         self,

@@ -151,7 +151,9 @@ class FigureRenderSpec(BaseModel, extra="forbid"):
     @classmethod
     def _formats_non_empty(cls, v: list[str]) -> list[str]:
         if not v:
-            raise ValueError("figures.formats must contain at least one format.")
+            raise ValueError(
+                "figures.formats must contain at least one format."
+            )
         return v
 
 
