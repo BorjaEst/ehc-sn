@@ -1,0 +1,18 @@
+schema_version = "ehc_sn.reporting.report_spec.v1"
+model_family = "tem-v1"
+eval_artifacts_root = "artifacts/evaluation/tem_v1"
+output_dir = "artifacts/reports/tem_v1/arena_n4"
+
+[checkpoint]
+path = "checkpoints/tem-v1/eval-weights-only.pt"
+
+[[regimes]]
+task = "arena"
+regime_kind = "diagnostic"
+regime_ids = ["arena_n4"]
+
+[figures]
+figures = ["arena_prediction_overlay"]
+
+[render]
+formats = ["markdown"]

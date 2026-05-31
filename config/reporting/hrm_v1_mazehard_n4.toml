@@ -1,0 +1,18 @@
+schema_version = "ehc_sn.reporting.report_spec.v1"
+model_family = "hrm-v1"
+eval_artifacts_root = "artifacts/evaluation/hrm_v1"
+output_dir = "artifacts/reports/hrm_v1/mazehard_n4"
+
+[checkpoint]
+path = "checkpoints/hrm-v1/eval-weights-only.pt"
+
+[[regimes]]
+task = "mazehard"
+regime_kind = "diagnostic"
+regime_ids = ["mazehard_smoke"]
+
+[figures]
+figures = ["overlay"]
+
+[render]
+formats = ["markdown"]

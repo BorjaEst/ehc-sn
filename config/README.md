@@ -99,59 +99,22 @@ Files are named `{family}-{task}.toml`.
 | `ehc-v1-arena.toml`    | EHC v1 | Arena    | `config/training/ehc-v1-spatial-vram8gib.toml` |
 | `ehc-v1-mazehard.toml` | EHC v1 | MazeHard | `config/training/ehc-v1-reason-vram8gib.toml`  |
 
-### Checkpoint Format
+---
 
-`run_offline_eval()` requires a **weights-only** checkpoint. Full Lightning
-trainer-resume checkpoints (containing `optimizer_states`, `lr_schedulers`,
-`loops`) are rejected.
+## Reporting Configs
 
-Existing `eval-weights-only.pt` files are already present for some families
-under `checkpoints/<family>/`. To convert a full Lightning checkpoint:
+**Directory:** `config/reporting/`
 
-```python
-import torch
-ckpt = torch.load("checkpoints/<family>/last.ckpt", map_location="cpu", weights_only=False)
-state_dict = ckpt.get("state_dict", ckpt)
-torch.save(state_dict, "checkpoints/<family>/eval-weights-only.pt")
-```
+Each TOML file is a `ReportSpec` that selects existing eval artifacts and
+declares report outputs (metrics, figures, rendered formats). Consumed by
+`scripts/reporting/run_report.py` or
+`python -m ehc_sn.reporting.run_report build`.
 
-### Usage
+Files are named `{family}_{task}_n{cases}.toml`.
 
-```bash
-# TEM v1 Arena full diagnostic (4 cases, with traces)
-python scripts/evaluation/run_eval.py \
-    --model-family tem-v1 \
-    --checkpoint checkpoints/tem-v1/eval-weights-only.pt \
-    --config config/evaluation/tem-v1-arena.toml \
-    --task arena \
-    --provider-ref ehc_sn.tasks.arena.providers.ArenaReplayProvider \
-    --provider-settings '{"dataset_path": "data/processed/arena/default/v1", "split": "test", "n_cases": 4}' \
-    --regime-id arena_struct_4 \
-    --regime-kind diagnostic \
-    --output artifacts/evaluation/tem_v1/arena_n4 \
-    --trace-keys "pred/observation,mec/g_2d,hpc/p" \
-    --device cpu
-
-# HRM v1 MazeHard full diagnostic (4 case, with traces)
-python scripts/evaluation/run_eval.py \
-    --model-family hrm-v1 \
-    --checkpoint checkpoints/hrm-v1/eval-weights-only.pt \
-    --config config/evaluation/hrm-v1-mazehard.toml \
-    --task mazehard \
-    --provider-ref ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider \
-    --provider-settings '{"dataset_path": "data/processed/mazehard/default/v1", "split": "test", "n_cases": 4}' \
-    --regime-id mazehard_reason_4 \
-    --regime-kind diagnostic \
-    --output artifacts/evaluation/hrm_v1/mazehard_4n \
-    --trace-keys "pred/solution_overlay,act/halted" \
-    --device cpu
-```
-
-### Key Differences from Training Configs
-
-| Difference                     | Reason                                                                      |
-| ------------------------------ | --------------------------------------------------------------------------- |
-| `exploration_prob = 0.0` (HRM) | Training uses 0.1 ε-greedy; eval must be deterministic for stable metrics   |
-| `global_batch_size = 1` (HRM)  | Required by `HRMV1ModelConfig`/`HRMV2ModelConfig`; truthful for single-case |
-| `runtime.*` preserved          | Memory dynamics (TEM) and rollout caps (HRM/EHC) affect inference behavior  |
-| `mode` in EHC configs          | Required by `parse_ehc_v1_config()` dispatch logic                          |
+| File                      | Model  | Task     | Cases | Figures                    |
+| ------------------------- | ------ | -------- | ----: | -------------------------- |
+| `tem_v1_arena_n4.toml`    | TEM v1 | Arena    |     4 | `arena_prediction_overlay` |
+| `tem_v2_arena_n4.toml`    | TEM v2 | Arena    |     4 | `arena_prediction_overlay` |
+| `hrm_v1_mazehard_n4.toml` | HRM v1 | MazeHard |     4 | `overlay`                  |
+| `hrm_v2_mazehard_n4.toml` | HRM v2 | MazeHard |     4 | `overlay`                  |
