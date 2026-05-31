@@ -45,6 +45,7 @@
         "maze-nd",
         "dungeongen",
         "typer",
+        "markdown",
     ]
 
 [project.optional-dependencies]
