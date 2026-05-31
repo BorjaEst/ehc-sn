@@ -16,12 +16,133 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import torch
 from torch.utils.data import DataLoader
 
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
+from ehc_sn.data.manifest import read_manifest
 from ehc_sn.eval.contracts import EvaluationCaseBatch
 from ehc_sn.tasks.arena.traces import ArenaEvaluationSourceContext
+
+
+# =============================================================================
+def _resolve_parent_substrate_root(arena_root: Path) -> Path:
+    """Resolve the parent dungeon shared-substrate root from the Arena manifest.
+
+    The Arena manifest declares ``parent_substrate`` as a relative path from
+    the repository root.  This helper locates the repo root by walking up from
+    *arena_root* and returns the resolved absolute path.
+    """
+    manifest = read_manifest(arena_root)
+    parent_rel = manifest["parent_substrate"]
+    # Walk up from the dataset path to find the repo root.
+    for candidate in (arena_root, *arena_root.parents):
+        if (candidate / "src").exists() and (candidate / "config").exists():
+            return (candidate / parent_rel).resolve()
+    raise FileNotFoundError(
+        f"Cannot resolve repo root from {arena_root} to locate parent "
+        f"substrate at {parent_rel!r}."
+    )
+
+
+# =============================================================================
+def _load_shared_substrate(
+    parent_root: Path, split: str
+) -> dict[str, np.ndarray]:
+    """Load shared dungeon substrate arrays for one split.
+
+    Returns a dict with ``"topology"``, ``"observations"``, ``"mask_valid"``
+    arrays memory-mapped from the parent substrate root.
+    """
+    split_dir = parent_root / split
+    return {
+        "topology": np.load(split_dir / "topology.npy", mmap_mode="r"),
+        "observations": np.load(split_dir / "observations.npy", mmap_mode="r"),
+        "mask_valid": np.load(split_dir / "mask_valid.npy", mmap_mode="r"),
+    }
+
+
+# =============================================================================
+def _build_task_evidence_arrays(
+    batch: dict[str, torch.Tensor],
+    substrate_arrays: dict[str, np.ndarray],
+    sample_position: int,
+    n_observations: int,
+) -> dict[str, np.ndarray]:
+    """Build ``arena/*`` trace arrays for one evaluation case batch.
+
+    Extracts the shared environment layout (wall mask, observation map) and
+    the per-episode trajectory data (visited locations, actions, revisit mask)
+    from the given batch data.
+
+    Args:
+        batch: Raw arena channel tensors from the ProcessedDataset DataLoader.
+        substrate_arrays: Shared dungeon substrate arrays (topology, observations).
+        sample_position: Index of this sample in the substrate split arrays.
+        n_observations: Number of unique observation IDs in the environment.
+        shape: (H, W) for the grid layout.
+
+    Returns:
+        Dict of arena/* trace key → numpy array, or empty dict if any required
+        key is missing from the batch.
+    """
+    if "trajectory_row" not in batch or "trajectory_col" not in batch:
+        return {}
+
+    B = batch["trajectory_row"].shape[0]
+    H = substrate_arrays["topology"].shape[1]
+    W = substrate_arrays["topology"].shape[2]
+
+    # Shared environment arrays (same for all B episodes — take first).
+    wall_mask = substrate_arrays["topology"][sample_position]
+    obs_map = substrate_arrays["observations"][sample_position]
+    valid_mask = substrate_arrays["mask_valid"][sample_position]
+
+    # Per-episode trajectory: take the first episode for the overview.
+    rows = batch["trajectory_row"][0].detach().cpu().numpy()  # (T,)
+    cols = batch["trajectory_col"][0].detach().cpu().numpy()  # (T,)
+    valid_tensor = batch.get(
+        "trajectory_valid_step",
+        torch.ones(batch["trajectory_row"][0].shape, dtype=torch.bool),
+    )
+    valid = valid_tensor[0].detach().cpu().numpy().astype(bool)
+
+    # Filter to valid steps.
+    valid_mask_step = valid.astype(bool)
+    rows_valid = rows[valid_mask_step]
+    cols_valid = cols[valid_mask_step]
+
+    # Convert (row, col) → location id (row-major full-grid index).
+    trajectory_locations = (rows_valid * W + cols_valid).astype(np.int32)
+
+    # Revisit mask: True when this location was visited earlier in the trajectory.
+    revisit_mask = np.zeros(len(trajectory_locations), dtype=bool)
+    seen: set[int] = set()
+    for i, loc in enumerate(trajectory_locations.tolist()):
+        if loc in seen:
+            revisit_mask[i] = True
+        else:
+            seen.add(loc)
+
+    # Actions: previous action at each transition.
+    actions: np.ndarray | None = None
+    if "trajectory_previous_action" in batch:
+        act = batch["trajectory_previous_action"][0].detach().cpu().numpy()
+        actions = act[valid_mask_step].astype(np.int8)
+
+    evidence: dict[str, np.ndarray] = {
+        "arena/wall_mask": wall_mask,
+        "arena/observation_ids": obs_map,
+        "arena/valid_mask": valid_mask,
+        "arena/trajectory_locations": trajectory_locations,
+        "arena/revisit_mask": revisit_mask,
+    }
+    if actions is not None:
+        evidence["arena/actions"] = actions
+
+    return evidence
 
 
 # =============================================================================
@@ -60,6 +181,9 @@ class ArenaReplayProvider:
         self._split = split
         self._batch_size = batch_size
         self._n_cases = n_cases
+        # Lazy-load shared substrate arrays on first provide_cases call.
+        self._substrate_arrays: dict[str, np.ndarray] | None = None
+        self._n_observations: int = 0
 
     def provide_cases(  # -----------------------------------------------------
         self,
@@ -75,6 +199,18 @@ class ArenaReplayProvider:
             arena channel tensors, a deterministic ``case_id``, and split metadata.
         """
         data_root = self._dataset_path
+
+        # Lazy-load shared substrate arrays once.
+        if self._substrate_arrays is None:
+            parent_root = _resolve_parent_substrate_root(data_root)
+            self._substrate_arrays = _load_shared_substrate(
+                parent_root, self._split
+            )
+            arena_manifest = read_manifest(data_root)
+            self._n_observations = arena_manifest.get(
+                "observation_vocab_size", 1
+            )
+
         all_entries = read_index(data_root / "index.jsonl")
         entries = filter_index(all_entries, split=self._split)
 
@@ -97,6 +233,32 @@ class ArenaReplayProvider:
             start = batch_idx * self._batch_size
             n_episodes = batch[next(iter(batch))].shape[0]
             ids_in_batch = [e.id for e in entries[start : start + n_episodes]]
+
+            # Build task evidence arrays for the first episode in this batch.
+            task_arrays = _build_task_evidence_arrays(
+                batch,
+                self._substrate_arrays,
+                sample_position=start,
+                n_observations=self._n_observations,
+            )
+
+            # Compact scalar metadata from the first episode.
+            case_meta: dict[str, object] | None = None
+            if task_arrays:
+                locs = task_arrays.get("arena/trajectory_locations")
+                rmask = task_arrays.get("arena/revisit_mask")
+                wall = task_arrays.get("arena/wall_mask")
+                case_meta = {
+                    "n_locations": (
+                        int(np.sum(wall > -1)) if wall is not None else 0
+                    ),
+                    "n_observations": self._n_observations,
+                    "n_actions": 4,
+                    "trajectory_length": len(locs) if locs is not None else 0,
+                    "n_revisits": int(rmask.sum()) if rmask is not None else 0,
+                    "grid_shape": list(wall.shape) if wall is not None else [],
+                }
+
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"arena-{self._split}-{batch_idx:04d}",
@@ -105,6 +267,8 @@ class ArenaReplayProvider:
                     dataset_path=self._dataset_path,
                     split=self._split,
                     sample_ids=tuple(ids_in_batch),
+                    task_evidence_arrays=task_arrays,
+                    case_metadata=case_meta,
                 ),
             )
 
@@ -119,10 +283,6 @@ class ArenaReplayProvider:
             f"batch_size={self._batch_size}, "
             f"n_cases={self._n_cases})"
         )
-
-
-# Backward-compatibility alias for existing internal callers.
-ArenaReplayDiagnosticProvider = ArenaReplayProvider
 
 
 # =============================================================================
@@ -268,6 +428,5 @@ class ArenaFixedProbeProvider:
 # =============================================================================
 __all__ = [
     "ArenaReplayProvider",
-    "ArenaReplayDiagnosticProvider",
     "ArenaFixedProbeProvider",
 ]

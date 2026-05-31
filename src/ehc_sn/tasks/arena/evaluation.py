@@ -1,8 +1,9 @@
 """Arena task evaluation helpers.
 
 Owns the canonical additive structural score, the benchmark-facing
-:class:`ArenaScoreReport`, full-episode evaluation primitives, and coercion
-utilities used by arena objective bindings.
+:class:`ArenaScoreReport`, full-episode evaluation primitives, per-case
+aggregation from rollout steps, and coercion utilities used by arena
+objective bindings.
 """
 
 from __future__ import annotations
@@ -12,6 +13,9 @@ from typing import Mapping
 
 import torch
 from torch import Tensor
+
+from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
+from ehc_sn.objectives.rollout import EvaluatedChunk
 
 from .contracts import ArenaTargets, ArenaTaskInput
 
@@ -164,6 +168,106 @@ def build_arena_score_report(
 
 
 # =============================================================================
+@dataclass(frozen=True)
+class ArenaCaseMetrics:
+    """Per-case scalar aggregates for one Arena-Struct evaluation case.
+
+    Accumulated from per-step :class:`~ehc_sn.metrics.step_metrics.RatioStat`
+    extras across all steps in an :class:`~ehc_sn.objectives.rollout.EvaluatedChunk`.
+    """
+
+    case_id: str
+    accuracy_all: float
+    accuracy_revisit: float
+    correct_all: float
+    count_all: float
+    correct_revisit: float
+    count_revisit: float
+    n_steps: int
+    is_failure: bool
+
+
+# =============================================================================
+def _accumulate_ratio_stat(
+    key: str,
+    steps: tuple,
+) -> tuple[Tensor, Tensor]:
+    """Walk a tuple of observed steps and sum numerator/denominator for one
+    :class:`~ehc_sn.metrics.step_metrics.RatioStat` key from
+    ``step.outputs.metrics.extras``."""
+    num_sum = torch.zeros(())
+    den_sum = torch.zeros(())
+    for step in steps:
+        extras: Mapping[str, RatioStat] = step.outputs.metrics.extras
+        rs = extras.get(key)
+        if rs is None:
+            available = ", ".join(sorted(extras))
+            raise KeyError(
+                f"Metric key {key!r} not found in step {step.index} extras. "
+                f"Available: {available}."
+            )
+        num_sum = num_sum + rs.numerator_sum.detach().cpu().float()
+        den_sum = den_sum + rs.denominator_sum.detach().cpu().float()
+    return num_sum, den_sum
+
+
+# =============================================================================
+def aggregate_arena_case_metrics(
+    evaluated: EvaluatedChunk,
+    case_id: str,
+    *,
+    acc_all_key: str = "accuracy_obs_inference_all",
+    acc_revisit_key: str = "accuracy_obs_inference_revisit",
+    failure_threshold_revisit: float = 0.5,
+) -> ArenaCaseMetrics:
+    """Return per-case scalar aggregates from an evaluated Arena rollout.
+
+    Accumulates ``RatioStat`` values from every step in *evaluated* using
+    the metric keys configured for the model family.
+
+    Args:
+        evaluated: Objective-scored rollout chunk containing per-step metrics.
+        case_id: Provider-owned case identifier.
+        acc_all_key: Extras key for all-step accuracy (family-dependent).
+        acc_revisit_key: Extras key for revisit-step accuracy (family-dependent).
+        failure_threshold_revisit: Revisit accuracy below which the case is
+            flagged as a failure.
+
+    Returns:
+        :class:`ArenaCaseMetrics` with scalar aggregates.
+    """
+    if not evaluated.steps:
+        raise ValueError(
+            f"Cannot aggregate arena case {case_id!r}: evaluated chunk has no "
+            f"observed steps."
+        )
+
+    correct_all, count_all = _accumulate_ratio_stat(
+        acc_all_key, evaluated.steps
+    )
+    correct_revisit, count_revisit = _accumulate_ratio_stat(
+        acc_revisit_key, evaluated.steps
+    )
+
+    count_all_safe = float(count_all.clamp_min(1.0).item())
+    count_revisit_safe = float(count_revisit.clamp_min(1.0).item())
+
+    metrics = ArenaCaseMetrics(
+        case_id=case_id,
+        accuracy_all=float(correct_all.item()) / count_all_safe,
+        accuracy_revisit=float(correct_revisit.item()) / count_revisit_safe,
+        correct_all=float(correct_all.item()),
+        count_all=float(count_all.item()),
+        correct_revisit=float(correct_revisit.item()),
+        count_revisit=float(count_revisit.item()),
+        n_steps=len(evaluated.steps),
+        is_failure=float(correct_revisit.item()) / count_revisit_safe
+        < failure_threshold_revisit,
+    )
+    return metrics
+
+
+# =============================================================================
 def coerce_observation_ids(
     observation_id: Tensor,
 ) -> Tensor:
@@ -209,9 +313,11 @@ def coerce_revisit_mask(
 
 # =============================================================================
 __all__ = [
+    "ArenaCaseMetrics",
     "ArenaEpisodeSemantics",
     "ArenaScoreReport",
     "ArenaStepScore",
+    "aggregate_arena_case_metrics",
     "build_arena_score_report",
     "build_arena_step_score",
     "coerce_observation_ids",

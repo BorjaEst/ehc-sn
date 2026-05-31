@@ -49,12 +49,22 @@ class ArenaEvaluationSourceContext:
         dataset_path: Absolute path to the processed Arena dataset root.
         split: Dataset split the samples belong to (e.g. ``"val"``).
         sample_ids: Ordered list of Arena sample ids in this batch.
+        task_evidence_arrays: Optional dict of name → ndarray for task-context
+            figures (e.g. ``arena_task_overview``). Keys are namespaced trace
+            paths such as ``"arena/wall_mask"``, ``"arena/observation_ids"``,
+            ``"arena/trajectory_locations"``, ``"arena/revisit_mask"``.
+            Populated by the Arena provider.  ``None`` when not available.
+        case_metadata: Optional dict of compact scalar metadata for the
+            eval-artifact manifest case row.  Populated by the Arena provider.
+            ``None`` when not available.
     """
 
     task_family: str
     dataset_path: Path
     split: str
     sample_ids: tuple[str, ...]
+    task_evidence_arrays: dict[str, np.ndarray] | None = None
+    case_metadata: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         if self.task_family != "arena":
