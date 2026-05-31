@@ -9,7 +9,7 @@ This callback is orchestration-only:
 - persists returned trace/artifact payloads.
 
 Standard report generation is offline from persisted run directories via
-ehc_sn.eval.reports. Callback-side figure rendering is optional
+ehc_sn.reporting.figures. Callback-side figure rendering is optional
 diagnostic routing and is not the canonical report workflow.
 """
 
@@ -38,6 +38,7 @@ from ehc_sn.eval.artifacts import (
 from ehc_sn.eval.contracts import EvaluationCaseBatch
 from ehc_sn.eval.render import render_regime_preview_figures
 from ehc_sn.figures import REGISTRY, FigureContext, list_figures
+from ehc_sn.metrics.values import validate_metric_value
 from ehc_sn.traces import build_trace_spec
 
 
@@ -173,12 +174,12 @@ class EvaluationFigureRequestSettings(BaseModel, extra="forbid"):
         non_diagnostic = [
             name
             for name in self.figures
-            if REGISTRY.get(name).kind != "diagnostic"
+            if "diagnostic" not in REGISTRY.get(name).allowed_surfaces
         ]
         if non_diagnostic:
             blocked = ", ".join(sorted(set(non_diagnostic)))
             raise ValueError(
-                "figure_request.figures only supports diagnostic figures for "
+                "figure_request.figures only supports diagnostic-surface figures for "
                 f"online rendering: {blocked}."
             )
 
@@ -503,6 +504,20 @@ class EvaluationRegimesCallback(pl.Callback):
         if losses:
             summary["loss"] = sum(losses) / len(losses)
 
+        # Optional family-owned metric aggregation hook -------------------
+        aggregate = getattr(
+            pl_module, "aggregate_evaluation_case_metrics", None
+        )
+        if aggregate is not None:
+            task_summary = aggregate(
+                task=regime.task,
+                regime_id=regime.regime_id,
+                regime_kind=regime.regime_kind,
+                case_results=case_results,
+            )
+            validated = _validate_hook_metrics(task_summary)
+            summary.update(validated)
+
         return EvaluationRegimeResult(
             regime_id=regime.regime_id,
             case_results=case_results,
@@ -718,6 +733,43 @@ def _extract_loss_scalar(  # --------------------------------------------------
     if isinstance(loss, Real):
         return float(loss)
     return None
+
+
+# =============================================================================
+_RESERVED_SUMMARY_KEYS: frozenset[str] = frozenset({"n_cases", "loss"})
+
+
+def _validate_hook_metrics(  # ------------------------------------------------
+    task_summary: dict[str, object],
+) -> dict[str, float | int]:
+    """Validate and type-narrow a family-owned hook return value.
+
+    Rules:
+        - Keys in ``_RESERVED_SUMMARY_KEYS`` are rejected (``ValueError``).
+        - Per-value validation delegates to
+          :func:`ehc_sn.metrics.values.validate_metric_value`.
+
+    Returns
+    -------
+    dict[str, float | int]
+        Type-narrowed copy of the input with only valid scalar-numeric values.
+    """
+    collided = _RESERVED_SUMMARY_KEYS & task_summary.keys()
+    if collided:
+        raise ValueError(
+            "Hook returned reserved summary keys: " f"{sorted(collided)}."
+        )
+
+    validated: dict[str, float | int] = {}
+    for key, value in task_summary.items():
+        if not isinstance(key, str):
+            raise TypeError(
+                f"Metric key must be str, got {type(key).__name__} ({key!r})."
+            )
+        if not key:
+            raise ValueError("Metric key must be a non-empty string.")
+        validated[key] = validate_metric_value(key=key, value=value)
+    return validated
 
 
 # =============================================================================

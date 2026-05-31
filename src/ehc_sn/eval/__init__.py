@@ -26,10 +26,6 @@ from ehc_sn.eval.executor import (
     execute_replay_evaluation_batch,
     iter_evaluation_regime,
 )
-from ehc_sn.eval.reports import (
-    render_case,
-    render_report,
-)
 
 __all__ = [
     "EvaluationCaseResult",
@@ -47,7 +43,5 @@ __all__ = [
     "load_artifact_run_cases",
     "load_executor_from_artifact",
     "persist_regime_artifact_bundle",
-    "render_case",
-    "render_report",
     "resolve_provider",
 ]

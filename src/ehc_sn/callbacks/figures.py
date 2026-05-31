@@ -139,12 +139,13 @@ class FigureGenerationSettings(BaseModel, extra="forbid"):
         report_kind = [
             name
             for name in self.figures
-            if name in available and REGISTRY.get(name).kind == "report"
+            if name in available
+            and "report" in REGISTRY.get(name).allowed_surfaces
         ]
         if report_kind:
             blocked = ", ".join(sorted(set(report_kind)))
             raise ValueError(
-                "FigureGenerationSettings.figures contains report-kind names: "
+                "FigureGenerationSettings.figures contains report-surface names: "
                 f"{blocked}. "
                 "Use the offline report pipeline for these."
             )

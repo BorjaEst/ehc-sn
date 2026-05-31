@@ -30,7 +30,7 @@ from ehc_sn.figures import REGISTRY, list_figures
 from ehc_sn.traces import build_trace_spec
 from ehc_sn.traces.trace_tree import TraceTree
 
-_ARTIFACT_SCHEMA = "ehc_sn.eval.artifact.v2"
+_ARTIFACT_SCHEMA = "ehc_sn.eval.artifact.v3"
 _MANIFEST_FILENAME = "manifest.json"
 _SUCCESS_FILENAME = "_SUCCESS"
 _SUPPORTED_EXECUTOR_FAMILIES: frozenset[str] = frozenset(
@@ -150,6 +150,7 @@ def _atomic_write_directory(
 def collect_regime_artifact_bundle(
     *,
     executor: Any,
+    task: str,
     provider_ref: str,
     provider_settings: dict[str, Any],
     run_dir: Path,
@@ -233,6 +234,7 @@ def collect_regime_artifact_bundle(
 
     _write_regime_bundle_manifest(
         run_dir=tmp_dir,
+        task=task,
         regime_summary=summary,
         summary_rows=summary_rows,
         manifest_rows=manifest_rows,
@@ -257,6 +259,7 @@ def collect_regime_artifact_bundle(
 def collect_regime_artifact_bundle_from_ref(
     *,
     artifact: EvalArtifactExecutorRef,
+    task: str,
     provider_ref: str,
     provider_settings: dict[str, Any],
     run_dir: Path,
@@ -274,6 +277,7 @@ def collect_regime_artifact_bundle_from_ref(
 
     return collect_regime_artifact_bundle(
         executor=executor,
+        task=task,
         provider_ref=provider_ref,
         provider_settings=provider_settings,
         run_dir=run_dir,
@@ -398,6 +402,55 @@ def _build_model_config(config_map: dict[str, Any], config_cls: Any) -> Any:
 
 
 # =============================================================================
+# Generic case task-evidence helpers (task-agnostic duck-typed hook)
+# =============================================================================
+
+
+def _extract_case_task_evidence(
+    result: EvaluationCaseResult,
+) -> dict[str, np.ndarray] | None:
+    """Extract task-evidence arrays from the case result, if attached.
+
+    Checks for ``task_evidence_arrays`` on the ``source_context`` via
+    duck-typing (``hasattr`` / ``isinstance(dict)``).  Returns ``None``
+    when no arrays are present — this is the normal case for tasks that
+    do not produce task-evidence sidecars.
+
+    This function is intentionally generic: it does not import from
+    ``tasks/arena`` or any task- or model-specific module.
+    """
+    ctx = result.source_context
+    if hasattr(ctx, "task_evidence_arrays"):
+        raw = ctx.task_evidence_arrays
+        if isinstance(raw, dict) and raw:
+            return raw
+    if isinstance(ctx, dict):
+        raw = ctx.get("task_evidence_arrays")
+        if isinstance(raw, dict) and raw:
+            return raw
+    return None
+
+
+def _extract_case_metadata(
+    result: EvaluationCaseResult,
+) -> dict[str, object] | None:
+    """Extract case-level scalar metadata from the result, if attached.
+
+    Same duck-typing pattern as :func:`_extract_case_task_evidence`.
+    """
+    ctx = result.source_context
+    if hasattr(ctx, "case_metadata"):
+        raw = ctx.case_metadata
+        if isinstance(raw, dict):
+            return raw
+    if isinstance(ctx, dict):
+        raw = ctx.get("case_metadata")
+        if isinstance(raw, dict):
+            return raw
+    return None
+
+
+# =============================================================================
 def _hydrate_executor_from_checkpoint(
     executor: Any, checkpoint_path: Path
 ) -> None:
@@ -447,6 +500,7 @@ def _initialize_eval_runtime(executor: Any) -> None:
 def persist_regime_artifact_bundle(
     *,
     run_dir: Path,
+    task: str,
     regime_kind: Literal["diagnostic", "benchmark"],
     regime_id: str,
     trigger_kind: str,
@@ -488,8 +542,8 @@ def persist_regime_artifact_bundle(
             "loss": loss,
             "has_trace": has_trace,
         }
+        stem = f"{idx:04d}-{_sanitize_filename_component(result.case_id)}"
         if has_trace:
-            stem = f"{idx:04d}-{_sanitize_filename_component(result.case_id)}"
             dense_rel = Path("cases") / f"{stem}.dense.npz"
             meta_rel = Path("cases") / f"{stem}.meta.json"
             _write_dense_npz(tmp_dir / dense_rel, result.trace.export())
@@ -504,10 +558,21 @@ def persist_regime_artifact_bundle(
             row["dense_artifact"] = str(dense_rel)
             row["meta_artifact"] = str(meta_rel)
 
+        # Optional per-case task-evidence sidecar.
+        case_task_arrays = _extract_case_task_evidence(result)
+        if case_task_arrays:
+            task_rel = Path("cases") / f"{stem}.task.npz"
+            _write_dense_npz(tmp_dir / task_rel, case_task_arrays)
+            row["task_arrays_path"] = str(task_rel)
+            case_meta = _extract_case_metadata(result)
+            if case_meta:
+                row["case_metadata"] = case_meta
+
         manifest_rows.append(row)
 
     _write_regime_bundle_manifest(
         run_dir=tmp_dir,
+        task=task,
         regime_summary=dict(regime_result.summary),
         summary_rows=summary_rows,
         manifest_rows=manifest_rows,
@@ -559,6 +624,7 @@ def _persist_regime_case(
 def _write_regime_bundle_manifest(
     *,
     run_dir: Path,
+    task: str,
     regime_summary: dict[str, object],
     summary_rows: list[dict[str, Any]],
     manifest_rows: list[dict[str, Any]],
@@ -583,6 +649,7 @@ def _write_regime_bundle_manifest(
     manifest = {
         "schema": _ARTIFACT_SCHEMA,
         "status": "complete",
+        "task": task,
         "regime_id": regime_id,
         "regime_kind": regime_kind,
         "phase_kind": "diag" if regime_kind == "diagnostic" else "bench",
@@ -690,6 +757,14 @@ def _load_manifest_cases(
             raise ValueError(
                 f"Case {case_id!r} meta artifact must decode to a dict."
             )
+
+        # Merge optional task-evidence sidecar into the dense dict so that
+        # arena/* keys are available via TraceTree.get() after rehydration.
+        task_arrays_rel = row.get("task_arrays_path")
+        if isinstance(task_arrays_rel, str):
+            task_dense = _read_dense_npz(run_dir / task_arrays_rel)
+            # Model trace keys take precedence on collision.
+            dense = {**task_dense, **dense}
 
         temporal_semantics = manifest.get("temporal_semantics")
 
@@ -841,6 +916,16 @@ def _rehydrate_trace_tree(
                 trace.paths.append(tuple(path.split("/")))
                 trace.path_strs.append(path)
                 trace.leaf_is_numeric.append(True)
+
+    # Build dense_leaves array directly from rehydrated data so that
+    # TraceTree.get() and figure rendering work on reloaded artifacts.
+    n = len(trace.path_strs)
+    dense_leaves: list[np.ndarray | None] = [None] * n
+    for path, idx in trace.path_to_index.items():
+        arr = dense.get(path)
+        if arr is not None:
+            dense_leaves[idx] = arr
+    trace.dense_leaves = dense_leaves
 
     if meta:
         trace.attached_meta.update(meta)
