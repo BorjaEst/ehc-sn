@@ -30,7 +30,7 @@ from ehc_sn.reporting import (
     build_report_run,
     load_report_spec,
 )
-from ehc_sn.reporting.figures import EvalFigureRenderer
+from ehc_sn.reporting.figures import ReportFigureRenderer
 
 # ---------------------------------------------------------------------------
 # CLI settings
@@ -60,7 +60,10 @@ class ReportArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
         ]
         return CliSettingsSource(settings_cls), *extra
 
-    config: Path = Field(..., description="Path to a ReportSpec TOML file.")
+    config: Path = Field(
+        ...,
+        description="Path to a ReportSpec TOML file.",
+    )
     output: Path | None = Field(
         default=None,
         description="Override the output directory from the spec.",
@@ -92,10 +95,10 @@ def main() -> None:
 
         metric_normalizers = DEFAULT_MAZEHARD_NORMALIZER
 
-    # Figure renderers — use the library adapter.
+    # Figure renderers — use the canonical report figure renderer.
     figure_renderers: object = None
     if spec.figures.figures and not settings.no_figures:
-        figure_renderers = EvalFigureRenderer(spec.figures.figures)
+        figure_renderers = ReportFigureRenderer()
 
     # Assemble.
     report = build_report_run(
