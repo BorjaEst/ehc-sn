@@ -12,7 +12,8 @@ regime_kind = "diagnostic"
 regime_ids = ["arena_n4"]
 
 [figures]
-figures = ["arena_prediction_overlay"]
+figures = ["arena_task_overview", "arena_prediction_overlay"]
+formats = ["png", "pdf"]
 
 [render]
 formats = ["markdown"]
