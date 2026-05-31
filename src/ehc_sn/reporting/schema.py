@@ -1,0 +1,552 @@
+"""Report-layer Pydantic contract types.
+
+This module defines the schema for report composition over existing
+evaluation artifacts.  It is the *contract* between:
+
+- **ReportSpec** (input): what report to assemble, from which existing
+  eval artifacts, output to where.
+- **ReportRunManifest** (output): what concrete regimes were selected and
+  what report artifacts were produced.
+
+Both types are pure Pydantic models — no file I/O, no evaluation execution,
+no figure rendering, no notebook code.  They are the canonical data
+contract for ``ehc_sn.reporting``.
+
+This module must remain free of ``lightning/``, ``eval/``, ``models/``,
+``tasks/``, ``adapters/``, and benchmark imports.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+from typing import Literal, TypeAlias
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+from ehc_sn.model_families import ALL_FAMILIES
+from ehc_sn.task_families import KNOWN_TASKS
+
+# ---------------------------------------------------------------------------
+# Schema version tags
+# ---------------------------------------------------------------------------
+
+ReportSpecSchema = Literal["ehc_sn.reporting.report_spec.v1"]
+"""Accepted version tag for :class:`ReportSpec`."""
+
+ReportRunSchema = Literal["ehc_sn.reporting.report_run.v1"]
+"""Accepted version tag for :class:`ReportRunManifest`."""
+
+EvalArtifactSchema = Literal["ehc_sn.eval.artifact.v3"]
+"""Accepted eval-artifact schema version that a report may reference."""
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+RegimeKind: TypeAlias = Literal["diagnostic", "benchmark"]
+"""Classification of an evaluation regime."""
+
+# ---------------------------------------------------------------------------
+# Checkpoint / identity
+# ---------------------------------------------------------------------------
+
+
+class CheckpointSpec(BaseModel, extra="forbid"):
+    """Canonical checkpoint reference carried in report specs and manifests."""
+
+    path: Path
+    """Absolute or relative path to the checkpoint file."""
+    sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    """Optional SHA-256 digest of the checkpoint file contents."""
+
+
+# ---------------------------------------------------------------------------
+# Regime selection (ReportSpec input)
+# ---------------------------------------------------------------------------
+
+
+class RegimeSelector(BaseModel, extra="forbid"):
+    """Filter selecting one or more eval-artifact regimes for a report.
+
+    At least one of *task*, *regime_kind*, or *regime_ids* must be set.
+    When *regime_ids* is provided it must be non-empty.
+    """
+
+    task: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Canonical task-family identifier (e.g. ``arena``).",
+    )
+    regime_kind: RegimeKind | None = None
+    regime_ids: list[str] | None = Field(
+        default=None,
+        description=(
+            "Explicit list of regime IDs to include. "
+            "Must be non-empty when present."
+        ),
+    )
+
+    @field_validator("task")
+    @classmethod
+    def _validate_task(cls, v: str | None) -> str | None:
+        if v is not None and v not in KNOWN_TASKS:
+            known = ", ".join(sorted(KNOWN_TASKS))
+            raise ValueError(f"Unknown task {v!r}. Known tasks: {known}.")
+        return v
+
+    @field_validator("regime_ids")
+    @classmethod
+    def _reject_empty_regime_ids(cls, v: list[str] | None) -> list[str] | None:
+        if v is not None and len(v) == 0:
+            raise ValueError("regime_ids must not be empty.")
+        return v
+
+    @model_validator(mode="after")
+    def _require_at_least_one_selector(self) -> RegimeSelector:
+        if (
+            self.task is None
+            and self.regime_kind is None
+            and self.regime_ids is None
+        ):
+            raise ValueError(
+                "RegimeSelector must specify at least one of "
+                "task, regime_kind, or regime_ids."
+            )
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Figure artifact spec (build-time figure materialization)
+# ---------------------------------------------------------------------------
+
+
+class FigureRenderSpec(BaseModel, extra="forbid"):
+    """Build-time figure artifact materialization settings."""
+
+    figures: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Registered figure names to include in the report. "
+            "When non-empty, the builder validates that every name "
+            "appears in the injected renderer's output."
+        ),
+    )
+    formats: list[Literal["pdf", "png"]] = Field(
+        default_factory=lambda: ["pdf", "png"],
+        description=(
+            "Output formats for report figure files. "
+            "Each entry produces one FigureIndex entry per format. "
+            "Must contain at least one format."
+        ),
+    )
+
+    @field_validator("formats")
+    @classmethod
+    def _formats_non_empty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("figures.formats must contain at least one format.")
+        return v
+
+
+# ---------------------------------------------------------------------------
+# Report render spec (post-hoc document rendering settings)
+# ---------------------------------------------------------------------------
+
+
+class ReportRenderSpec(BaseModel, extra="forbid"):
+    """Post-hoc document rendering settings."""
+
+    formats: list[Literal["markdown", "html"]] = Field(
+        default_factory=lambda: ["markdown"],
+        description=("List of output formats for post-hoc document rendering."),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Metric suite specification (report-level metric validation)
+# ---------------------------------------------------------------------------
+
+
+class MetricSuiteSpec(BaseModel, extra="forbid"):
+    """Declares which metrics a report expects for a (task, regime_kind) pair.
+
+    When attached to a :class:`ReportSpec`, the builder validates that
+    every ``required_metrics`` name appears in the normalized
+    :class:`MetricRecord` rows for that (task, regime_kind).
+
+    This is the **report-level** contract.  It is independent of the
+    normalizer-level ``MetricSummaryField.required`` flag, which controls
+    whether a field is mandatory at extraction time.
+    """
+
+    task: str = Field(
+        ..., min_length=1, description="Canonical task identifier."
+    )
+    regime_kind: RegimeKind
+    required_metrics: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Metric names that must appear in normalized records.",
+    )
+    optional_metrics: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description="Metric names that may appear in normalized records.",
+    )
+
+    @field_validator("task")
+    @classmethod
+    def _validate_task(cls, v: str) -> str:
+        if v not in KNOWN_TASKS:
+            known = ", ".join(sorted(KNOWN_TASKS))
+            raise ValueError(f"Unknown task {v!r}. Known tasks: {known}.")
+        return v
+
+    @model_validator(mode="after")
+    def _reject_overlap(self) -> MetricSuiteSpec:
+        overlap = set(self.required_metrics) & set(self.optional_metrics)
+        if overlap:
+            raise ValueError(
+                f"Metric names must not appear in both required_metrics and "
+                f"optional_metrics: {sorted(overlap)}."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_at_least_one_metric(self) -> MetricSuiteSpec:
+        if not self.required_metrics and not self.optional_metrics:
+            raise ValueError(
+                "At least one metric must be declared in required_metrics "
+                "or optional_metrics."
+            )
+        return self
+
+
+# ---------------------------------------------------------------------------
+# ReportSpec — input contract
+# ---------------------------------------------------------------------------
+
+
+class ReportSpec(BaseModel, extra="forbid"):
+    """Assembly specification for one report over existing eval artifacts.
+
+    In v1 this is an **assembly-only** spec.  It selects existing
+    eval-artifact regimes and declares report outputs.  It does **not**
+    trigger or describe new evaluation execution.
+
+    ``eval_artifacts_root`` is expected to contain immediate child
+    directories, each of which is a single eval-artifact regime directory
+    with ``manifest.json`` and ``_SUCCESS``.  Recursive discovery is
+    intentionally not part of v1.
+    """
+
+    schema_version: ReportSpecSchema = "ehc_sn.reporting.report_spec.v1"
+    model_family: str = Field(
+        ...,
+        min_length=1,
+        description="Canonical model-family identifier.",
+    )
+    checkpoint: CheckpointSpec
+    eval_artifacts_root: Path = Field(
+        ...,
+        description=(
+            "Path to a directory of flat immediate-child regime artifact "
+            "directories.  Each child containing both manifest.json and "
+            "_SUCCESS is treated as one regime artifact.  Recursive "
+            "discovery is not part of v1."
+        ),
+    )
+    regimes: list[RegimeSelector] = Field(
+        ..., min_length=1, description="At least one regime selector."
+    )
+    metric_suites: tuple[MetricSuiteSpec, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Optional per-(task, regime_kind) metric requirements. "
+            "Empty (default) = no metric validation. "
+            "Non-empty = builder fails if any required metric is missing "
+            "or no normalizer is registered for a declared suite."
+        ),
+    )
+    output_dir: Path
+    figures: FigureRenderSpec = Field(default_factory=FigureRenderSpec)
+    render: ReportRenderSpec = Field(default_factory=ReportRenderSpec)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_render(cls, data: dict) -> dict:
+        """Normalize legacy ``render`` block into new split schema.
+
+        - ``render.figures`` → ``figures.figures``
+        - ``render.html`` / ``render.pdf`` → silently dropped (dead config)
+        - If both ``figures`` and legacy ``render`` are present, the new
+          ``figures`` takes precedence.
+
+        # TODO(reporting): Remove legacy render.html/render.pdf normalization
+        # once all configs have migrated to the split FigureRenderSpec /
+        # ReportRenderSpec schema. These fields were dead config (never
+        # consumed by any renderer) and their silent drop can hide user
+        # confusion about whether HTML/PDF rendering is active.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        render_block = data.get("render")
+        if render_block is not None and isinstance(render_block, dict):
+            # Migrate render.figures → figures.figures if new key is absent.
+            if "figures" not in data and "figures" in render_block:
+                data["figures"] = {"figures": render_block["figures"]}
+            # Remove dead fields; rebuild render block with only formats.
+            cleaned = {
+                k: v
+                for k, v in render_block.items()
+                if k not in ("figures", "html", "pdf")
+            }
+            if cleaned:
+                data["render"] = cleaned
+            else:
+                # No valid render config; set default.
+                data["render"] = {"formats": ["markdown"]}
+
+        return data
+
+    @field_validator("model_family")
+    @classmethod
+    def _validate_model_family(cls, v: str) -> str:
+        if v not in ALL_FAMILIES:
+            known = ", ".join(sorted(ALL_FAMILIES))
+            raise ValueError(
+                f"Unknown model_family {v!r}. Known families: {known}."
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _reject_duplicate_metric_suites(self) -> ReportSpec:
+        """Reject duplicate (task, regime_kind) in metric_suites."""
+        seen: set[tuple[str, str]] = set()
+        for suite in self.metric_suites:
+            key = (suite.task, suite.regime_kind)
+            if key in seen:
+                raise ValueError(
+                    f"Duplicate metric suite for (task={suite.task!r}, "
+                    f"regime_kind={suite.regime_kind!r})."
+                )
+            seen.add(key)
+        return self
+
+
+# ---------------------------------------------------------------------------
+# Eval-artifact reference (part of ReportRunManifest)
+# ---------------------------------------------------------------------------
+
+
+class EvalArtifactReference(BaseModel, extra="forbid"):
+    """Regime-level pointer to one existing eval-artifact directory.
+
+    References an ``ehc_sn.eval.artifact.v3`` regime directory that has
+    already passed the ``_SUCCESS`` / ``manifest.json`` validation.
+    """
+
+    schema_version: EvalArtifactSchema = "ehc_sn.eval.artifact.v3"
+    task: str = Field(
+        ...,
+        min_length=1,
+        description="Canonical task-family identifier (e.g. ``arena``).",
+    )
+    regime_id: str = Field(..., min_length=1)
+    regime_kind: RegimeKind
+    path: Path
+
+    @field_validator("task")
+    @classmethod
+    def _validate_task(cls, v: str) -> str:
+        if v not in KNOWN_TASKS:
+            known = ", ".join(sorted(KNOWN_TASKS))
+            raise ValueError(f"Unknown task {v!r}. Known tasks: {known}.")
+        return v
+
+
+# ---------------------------------------------------------------------------
+# Normalized metric record
+# ---------------------------------------------------------------------------
+
+
+class MetricRecord(BaseModel, extra="forbid"):
+    """One normalized metric row for report consumption.
+
+    This format is optimized for tabular reports, comparison across runs,
+    and manuscript export.  It is derived from the flat ``metrics.json``
+    but structured for joinability.
+    """
+
+    task: str | None = None
+    regime_id: str | None = None
+    metric: str = Field(..., min_length=1)
+    value: float | int | bool | str | None = None
+    unit: str | None = None
+    higher_is_better: bool | None = None
+
+    @field_validator("task")
+    @classmethod
+    def _validate_task(cls, v: str | None) -> str | None:
+        if v is not None and v not in KNOWN_TASKS:
+            known = ", ".join(sorted(KNOWN_TASKS))
+            raise ValueError(f"Unknown task {v!r}. Known tasks: {known}.")
+        return v
+
+
+# ---------------------------------------------------------------------------
+# Figure index (part of report-run output)
+# ---------------------------------------------------------------------------
+
+
+FigureFormat = Literal["png", "svg", "pdf", "html"]
+"""Accepted figure file formats."""
+
+
+class FigureIndexEntry(BaseModel, extra="forbid"):
+    """One rendered figure in a report run.
+
+    Each entry records what was rendered, for which regime, and where
+    the file is located relative to the report-run root.
+    """
+
+    task: str = Field(
+        ..., min_length=1, description="Canonical task identifier."
+    )
+    regime_id: str = Field(..., min_length=1)
+    figure_id: str = Field(..., min_length=1)
+    path: Path = Field(
+        ...,
+        description="Relative path from report-run root to figure file.",
+    )
+    format: FigureFormat
+    title: str | None = None
+    description: str | None = None
+
+    @field_validator("task")
+    @classmethod
+    def _validate_task(cls, v: str) -> str:
+        if v not in KNOWN_TASKS:
+            known = ", ".join(sorted(KNOWN_TASKS))
+            raise ValueError(f"Unknown task {v!r}. Known tasks: {known}.")
+        return v
+
+
+class FigureIndex(BaseModel, extra="forbid"):
+    """Typed manifest of rendered report figures.
+
+    Written by the builder as ``figures/index.json`` when
+    ``RenderSpec.figures`` is non-empty.
+    """
+
+    entries: list[FigureIndexEntry] = Field(
+        default_factory=list,
+        description="List of rendered figure entries (may be empty).",
+    )
+
+
+# ---------------------------------------------------------------------------
+# ReportRunManifest — output contract
+# ---------------------------------------------------------------------------
+
+
+class ReportRunManifest(BaseModel, extra="forbid"):
+    """Manifest produced by one completed report run.
+
+    Records the concrete selected eval-artifact regimes and the paths
+    to all produced report artifacts.  All artifact paths are relative
+    to the report-run directory.
+    """
+
+    schema_version: ReportRunSchema = "ehc_sn.reporting.report_run.v1"
+    model_family: str = Field(
+        ...,
+        min_length=1,
+        description="Canonical model-family identifier.",
+    )
+    checkpoint: CheckpointSpec
+    eval_artifacts: list[EvalArtifactReference] = Field(
+        ...,
+        min_length=1,
+        description="References to the selected regime artifact directories.",
+    )
+
+    # Produced artifact paths (relative to report-run directory).
+    metrics_records_json: Path | None = Field(
+        default=None,
+        description="Canonical normalized metric records, if metrics were produced.",
+    )
+    figures_index_json: Path | None = Field(
+        default=None,
+        description="Index of rendered report figures, if figures were produced.",
+    )
+    provenance_json: Path = Field(default=Path("provenance.json"))
+    resolved_config_yaml: Path = Field(default=Path("config.resolved.yaml"))
+    figures_dir: Path = Field(default=Path("figures"))
+    tables_dir: Path = Field(default=Path("tables"))
+    rendered_dir: Path = Field(default=Path("rendered"))
+
+    # Provenance
+    created_at: datetime = Field(
+        ...,
+        description="Creation timestamp (serialized as ISO 8601 in JSON).",
+    )
+    source_spec: Path | None = Field(
+        default=None,
+        description=(
+            "Optional path to the ReportSpec YAML that produced this "
+            "manifest."
+        ),
+    )
+
+    @field_validator("model_family")
+    @classmethod
+    def _validate_model_family(cls, v: str) -> str:
+        if v not in ALL_FAMILIES:
+            known = ", ".join(sorted(ALL_FAMILIES))
+            raise ValueError(
+                f"Unknown model_family {v!r}. Known families: {known}."
+            )
+        return v
+
+
+# ---------------------------------------------------------------------------
+# Render manifest (post-hoc rendering outputs)
+# ---------------------------------------------------------------------------
+
+
+class RenderedOutput(BaseModel, extra="forbid"):
+    """One rendered output file produced by :func:`render_report_run`.
+
+    ``relative_path`` is relative to the report-run root, not to the
+    ``rendered/`` directory.  This keeps the manifest portable.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["markdown", "html"]
+    relative_path: Path
+    created_at: datetime
+
+
+class RenderManifest(BaseModel, extra="forbid"):
+    """Manifest produced by one :func:`render_report_run` call.
+
+    Written to ``<report_run>/rendered/render_manifest.json``.
+    Completion is indicated by the ``rendered/_SUCCESS`` sentinel,
+    not by any field on this manifest.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["ehc_sn.reporting.render_manifest.v1"] = (
+        "ehc_sn.reporting.render_manifest.v1"
+    )
+    outputs: list[RenderedOutput]
+    created_at: datetime
