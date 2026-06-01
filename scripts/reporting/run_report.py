@@ -31,6 +31,7 @@ from ehc_sn.reporting import (
     load_report_spec,
 )
 from ehc_sn.reporting.figures import ReportFigureRenderer
+from ehc_sn.reporting.metrics import DEFAULT_MAZEHARD_NORMALIZER
 
 # ---------------------------------------------------------------------------
 # CLI settings
@@ -64,6 +65,10 @@ class ReportArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
         ...,
         description="Path to a ReportSpec TOML file.",
     )
+    overwrite: bool = Field(
+        default=False,
+        description="Whether to overwrite existing report output (if any).",
+    )
     output: Path | None = Field(
         default=None,
         description="Override the output directory from the spec.",
@@ -91,8 +96,6 @@ def main() -> None:
     # Metric normalizers.
     metric_normalizers: object = None
     if not settings.no_metrics:
-        from ehc_sn.reporting.metrics import DEFAULT_MAZEHARD_NORMALIZER
-
         metric_normalizers = DEFAULT_MAZEHARD_NORMALIZER
 
     # Figure renderers — use the canonical report figure renderer.
@@ -103,6 +106,7 @@ def main() -> None:
     # Assemble.
     report = build_report_run(
         spec,
+        overwrite=settings.overwrite,
         metric_records=None,
         metric_normalizers=metric_normalizers,
         figure_renderers=figure_renderers,
