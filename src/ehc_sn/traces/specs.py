@@ -89,6 +89,18 @@ class _TEMTraceContext(_CommonTraceContext, Protocol):
     carry: _TEMTraceCarry
 
 
+class _HRMTraceCarry(_CommonTraceCarry, Protocol):
+    """Carry surface required by HRM/PFC trace fields."""
+
+    model_state: Any
+
+
+class _HRMTraceContext(_CommonTraceContext, Protocol):
+    """Execution context for HRM/PFC trace fields."""
+
+    carry: _HRMTraceCarry
+
+
 # =============================================================================
 class ReplayableEnvironments:
     """Non-pytree wrapper for replayable environment metadata."""
@@ -349,6 +361,79 @@ RL_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_REWARD_ENV,
     TRACE_ACTION,
     TRACE_RPE,
+)
+
+
+# =============================================================================
+# HRM/PFC hidden-state — additive diagnostic fields for HRM-family models
+# =============================================================================
+
+
+def _get_hrm_pfc_memory(ctx: _HRMTraceContext) -> Any | None:
+    """Return HRM/PFC working memory if present on the carry model state.
+
+    Returns ``None`` when model state is missing or the expected PFC
+    scratch memory path is not populated (e.g. a non-HRM model).
+    """
+    model_state = getattr(ctx.carry, "model_state", None)
+    if model_state is None:
+        return None
+    pfc_state = getattr(model_state, "pfc", None)
+    if pfc_state is None:
+        return None
+    scratch = getattr(pfc_state, "scratch", None)
+    if scratch is None:
+        return None
+    return getattr(scratch, "memory", None)
+
+
+def _get_hrm_z_H(ctx: _HRMTraceContext) -> TraceValue:
+    """High-level HRM/PFC working-memory state.
+
+    Expected shape ``(B, S+1, D)`` where *S+1* includes the controller
+    slot.  Returns ``None`` when the memory path is unavailable.
+    """
+    memory = _get_hrm_pfc_memory(ctx)
+    if memory is None:
+        return None
+    z_H = getattr(memory, "z_H", None)
+    if z_H is None:
+        return None
+    return z_H.detach().cpu()
+
+
+def _get_hrm_z_L(ctx: _HRMTraceContext) -> TraceValue:
+    """Low-level HRM/PFC working-memory state.
+
+    Expected shape ``(B, S+1, D)``.  Returns ``None`` when the memory
+    path is unavailable.
+    """
+    memory = _get_hrm_pfc_memory(ctx)
+    if memory is None:
+        return None
+    z_L = getattr(memory, "z_L", None)
+    if z_L is None:
+        return None
+    return z_L.detach().cpu()
+
+
+TRACE_HRM_Z_H = TraceField(
+    name="pfc/z_H",
+    get=_get_hrm_z_H,
+    storage="dense",
+    requires_model_state=True,
+)
+
+TRACE_HRM_Z_L = TraceField(
+    name="pfc/z_L",
+    get=_get_hrm_z_L,
+    storage="dense",
+    requires_model_state=True,
+)
+
+HRM_HIDDEN_STATE_FIELDS: tuple[TraceField, ...] = (
+    TRACE_HRM_Z_H,
+    TRACE_HRM_Z_L,
 )
 
 

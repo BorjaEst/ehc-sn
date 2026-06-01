@@ -225,6 +225,7 @@ class TraceTree:
         if self.dense_leaves is None:
             self.finalize()
         arr = np.asarray(array)
+
         if path in self.path_to_index:
             idx = self.path_to_index[path]
             if not self.leaf_is_numeric[idx]:
@@ -249,6 +250,12 @@ class TraceTree:
         self.leaf_signatures.append(None)
         assert self.dense_leaves is not None
         self.dense_leaves.append(arr)
+        # Rebuild spec to account for the newly attached dense path, so that
+        # export_dense_tree() can flatten the updated tree without a spec/leaf
+        # mismatch.
+        self.spec = torch_pytree.tree_flatten(
+            {k: None for k in self.path_strs}
+        )[1]
 
     def export(  # ------------------------------------------------------------
         self,
