@@ -79,6 +79,7 @@ def register_builtin_figures() -> None:
         lec_pipeline,
         lec_summary,
         mec_cells,
+        mec_grid_metrics,
         mec_summary,
         occupancy,
         overlay,
@@ -347,6 +348,26 @@ def register_builtin_figures() -> None:
                 allowed_surfaces={"diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"mec", "ehc"},
+                trace_keys={MEC_TRACE_LOCATION_IDS, TRACE_KEY_MEC_CELLS},
+                meta_keys={MEC_META_ENVIRONMENTS},
+            )
+        )
+
+    if not REGISTRY.has("mec_grid_metrics"):
+        REGISTRY.register(
+            FigureSpec(
+                name="mec_grid_metrics",
+                description=(
+                    "Quantitative gridness and spacing by frequency band. "
+                    "Replaces qualitative autocorrelogram inspection with "
+                    "per-cell metric distributions."
+                ),
+                plot=mec_grid_metrics.plot,
+                default_filename="mec_grid_metrics",
+                maturity="experimental",
+                allowed_surfaces={"report"},
+                input_contract="evaluation_artifact",
+                tags={"mec", "ehc", "report"},
                 trace_keys={MEC_TRACE_LOCATION_IDS, TRACE_KEY_MEC_CELLS},
                 meta_keys={MEC_META_ENVIRONMENTS},
             )

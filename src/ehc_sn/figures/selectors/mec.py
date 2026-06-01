@@ -15,7 +15,10 @@ from ehc_sn.analysis.spatial.gridness import (
 from ehc_sn.figures._contracts import AnyWorld, PreparedRateMap
 from ehc_sn.figures.plots.autocorr import compute_spatial_autocorrelogram
 from ehc_sn.figures.registry import FigureContext
-from ehc_sn.figures.selectors.spatial import prepare_rate_maps, spatial_rate_smooth_sigma
+from ehc_sn.figures.selectors.spatial import (
+    prepare_rate_maps,
+    spatial_rate_smooth_sigma,
+)
 from ehc_sn.traces.trace_tree import TraceTree
 
 # ── Canonical trace / meta path constants ────────────────────────────────────
@@ -89,7 +92,9 @@ class MECGridMetricsData:
     mask_strategy: str
 
 
-def select_mec_grid_metrics(trace: TraceTree, ctx: FigureContext) -> MECGridMetricsData:
+def select_mec_grid_metrics(
+    trace: TraceTree, ctx: FigureContext
+) -> MECGridMetricsData:
     """Compute gridness, spacing, and orientation for all MEC cells.
 
     Parameters
@@ -106,7 +111,9 @@ def select_mec_grid_metrics(trace: TraceTree, ctx: FigureContext) -> MECGridMetr
     """
     n_freq = trace.n_freq(TRACE_KEY_MEC_CELLS)
     env_idx = trace.validate_env_idx(ctx.env_idx)
-    freq_idxs = [trace.validate_freq_idx(TRACE_KEY_MEC_CELLS, f) for f in range(n_freq)]
+    freq_idxs = [
+        trace.validate_freq_idx(TRACE_KEY_MEC_CELLS, f) for f in range(n_freq)
+    ]
     world = trace.get_world(env_idx)
     location_ids = trace.get(TRACE_KEY_LOCATION_IDS)[:, env_idx]
 
@@ -119,11 +126,18 @@ def select_mec_grid_metrics(trace: TraceTree, ctx: FigureContext) -> MECGridMetr
     all_rate_maps: list[tuple[PreparedRateMap, ...]] = []
     for f in freq_idxs:
         cells_t = trace.get(f"{TRACE_KEY_MEC_CELLS}/{f}")[:, env_idx, :]
-        rms = prepare_rate_maps(world, cells_t, location_ids, smooth_sigma=spatial_rate_smooth_sigma(world))
+        rms = prepare_rate_maps(
+            world,
+            cells_t,
+            location_ids,
+            smooth_sigma=spatial_rate_smooth_sigma(world),
+        )
         all_rate_maps.append(rms)
 
     # Derive spatial bin geometry from the first rate map.
-    first_rm = all_rate_maps[0][0] if all_rate_maps and all_rate_maps[0] else None
+    first_rm = (
+        all_rate_maps[0][0] if all_rate_maps and all_rate_maps[0] else None
+    )
     if first_rm is None or first_rm.rate_map.size == 0:
         # No data — return all-NaN arrays.
         return MECGridMetricsData(
@@ -138,7 +152,9 @@ def select_mec_grid_metrics(trace: TraceTree, ctx: FigureContext) -> MECGridMetr
             mask_strategy="fractional",
         )
 
-    geom = SpatialBinGeometry.from_extent_and_shape(first_rm.extent, first_rm.rate_map.shape)
+    geom = SpatialBinGeometry.from_extent_and_shape(
+        first_rm.extent, first_rm.rate_map.shape
+    )
 
     gridness = np.full((n_freq, n_cells), np.nan, dtype=float)
     spacing = np.full((n_freq, n_cells), np.nan, dtype=float)
@@ -153,7 +169,9 @@ def select_mec_grid_metrics(trace: TraceTree, ctx: FigureContext) -> MECGridMetr
             if rm.rate_map.size == 0:
                 continue
 
-            autocorr = compute_spatial_autocorrelogram(rm.rate_map, rm.valid_mask, min_overlap=4)
+            autocorr = compute_spatial_autocorrelogram(
+                rm.rate_map, rm.valid_mask, min_overlap=4
+            )
 
             try:
                 g_result = compute_gridness(autocorr, geometry=geom)
@@ -166,7 +184,9 @@ def select_mec_grid_metrics(trace: TraceTree, ctx: FigureContext) -> MECGridMetr
             gridness[f_idx, c_idx] = g_result.score
             valid_pixel_count[f_idx, c_idx] = g_result.valid_pixel_count
 
-            s_result = estimate_grid_spacing_orientation(autocorr, geometry=geom)
+            s_result = estimate_grid_spacing_orientation(
+                autocorr, geometry=geom
+            )
             spacing[f_idx, c_idx] = s_result.spacing
             orientation_deg[f_idx, c_idx] = s_result.orientation_deg
 
@@ -180,4 +200,60 @@ def select_mec_grid_metrics(trace: TraceTree, ctx: FigureContext) -> MECGridMetr
         inner_radius=inner_radius,
         outer_radius=outer_radius,
         mask_strategy=mask_strategy,
+    )
+
+
+def select_mec_summary(
+    trace: TraceTree, ctx: FigureContext
+) -> MECSummaryFigureData:
+    n_freq = trace.n_freq(TRACE_KEY_MEC_CELLS)
+    env_idx = trace.validate_env_idx(ctx.env_idx)
+    freq_idxs = [
+        trace.validate_freq_idx(TRACE_KEY_MEC_CELLS, f) for f in range(n_freq)
+    ]
+    world = trace.get_world(env_idx)
+    location_ids = trace.get(TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    cells = [
+        trace.get(f"{TRACE_KEY_MEC_CELLS}/{f}")[:, env_idx, :]
+        for f in range(n_freq)
+    ]
+    rate_maps = [
+        prepare_rate_maps(
+            world,
+            c,
+            location_ids,
+            smooth_sigma=spatial_rate_smooth_sigma(world),
+        )
+        for c in cells
+    ]
+    return MECSummaryFigureData(
+        n_freq=n_freq,
+        env_idx=env_idx,
+        freq_idxs=freq_idxs,
+        world=world,
+        location_ids=location_ids,
+        cells=cells,
+        prepared_rate_maps=rate_maps,
+    )
+
+
+def select_mec_cell(trace: TraceTree, ctx: FigureContext) -> MECCellFigureData:
+    env_idx = trace.validate_env_idx(ctx.env_idx)
+    freq_idx = trace.validate_freq_idx(TRACE_KEY_MEC_CELLS, ctx.freq_idx)
+    world = trace.get_world(env_idx)
+    location_ids = trace.get(TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    cells = trace.get(f"{TRACE_KEY_MEC_CELLS}/{freq_idx}")[:, env_idx, :]
+    rate_maps = prepare_rate_maps(
+        world,
+        cells,
+        location_ids,
+        smooth_sigma=spatial_rate_smooth_sigma(world),
+    )
+    return MECCellFigureData(
+        env_idx=env_idx,
+        freq_idx=freq_idx,
+        world=world,
+        location_ids=location_ids,
+        cells=cells,
+        prepared_rate_maps=rate_maps,
     )

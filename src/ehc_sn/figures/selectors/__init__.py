@@ -1,6 +1,9 @@
 """Selectors: extract and prepare trace data for figure templates."""
 
-from ehc_sn.figures.selectors.mec import MECGridMetricsData, select_mec_grid_metrics
+from ehc_sn.figures.selectors.mec import (
+    MECGridMetricsData,
+    select_mec_grid_metrics,
+)
 from ehc_sn.figures.selectors.spatial import (
     DEFAULT_RATE_MAP_MIN_BIN_OCCUPANCY,
     OPEN_FIELD_RATE_SMOOTH_SIGMA,
