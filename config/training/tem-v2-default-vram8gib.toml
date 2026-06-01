@@ -11,7 +11,7 @@ model_config_path = "config/models/tem-v2-base.toml"
 # -- General settings ---------------------------------------------------------
 dataset_path         = "data/processed/arena/default/v1"
 global_batch_size    = 10
-max_epochs           = 100
+max_epochs           = 200
 max_steps            = 200000
 seed                 = 42
 augment              = true
