@@ -12,7 +12,12 @@ regime_kind = "diagnostic"
 regime_ids = ["arena_n4"]
 
 [figures]
-figures = ["arena_task_overview", "arena_prediction_overlay"]
+figures = [
+    "arena_task_overview",
+    "arena_prediction_overlay",
+    "mec_cells",
+    "hpc_cells",
+]
 formats = ["png", "pdf"]
 
 [render]
