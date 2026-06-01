@@ -19,6 +19,13 @@ from torch import nn
 from ehc_sn.types import LocationBelief, Matrix, Reduction, Vector
 
 
+def to_cpu(
+    value: object,
+) -> object:
+    """Move a tensor to CPU if needed; return other values unchanged."""
+    return value.cpu() if hasattr(value, "cpu") else value  # type: ignore[union-attr]
+
+
 def inv_var_weight(
     mus,
     sigmas,
@@ -33,7 +40,9 @@ def inv_var_weight(
     sigmas = torch.stack(sigmas, dim=0)
 
     max_sigma = 1.0 / eps
-    safe_sigmas = torch.nan_to_num(sigmas, nan=eps, posinf=max_sigma, neginf=eps)
+    safe_sigmas = torch.nan_to_num(
+        sigmas, nan=eps, posinf=max_sigma, neginf=eps
+    )
     safe_sigmas = torch.clamp(safe_sigmas, min=eps, max=max_sigma)
     precision = 1.0 / safe_sigmas.square()
     inv_var_var = 1.0 / precision.sum(dim=0).clamp_min(eps)
@@ -47,7 +56,11 @@ def has_any_grad(
     opt: Any,
 ) -> bool:
     raw_opt = getattr(opt, "optimizer", opt)
-    return any(param.grad is not None for group in raw_opt.param_groups for param in group["params"])
+    return any(
+        param.grad is not None
+        for group in raw_opt.param_groups
+        for param in group["params"]
+    )
 
 
 def find_multiple(
@@ -81,7 +94,11 @@ def trunc_normal_init_(
             c = (2 * math.pi) ** -0.5
             pdf_u = c * math.exp(-0.5 * lower**2)
             pdf_l = c * math.exp(-0.5 * upper**2)
-            comp_std = std / math.sqrt(1 - (upper * pdf_u - lower * pdf_l) / z - ((pdf_u - pdf_l) / z) ** 2)
+            comp_std = std / math.sqrt(
+                1
+                - (upper * pdf_u - lower * pdf_l) / z
+                - ((pdf_u - pdf_l) / z) ** 2
+            )
 
             tensor.uniform_(a, b)
             tensor.erfinv_()
@@ -106,7 +123,10 @@ def sample_diag_gaussian(
         Sampled activations if enabled, otherwise the means.
     """
     mu, sigma = transition.mean, transition.uncertainty
-    return [mu_f + float(scale) * sigma_f * torch.randn_like(mu_f) for mu_f, sigma_f in zip(mu, sigma)]
+    return [
+        mu_f + float(scale) * sigma_f * torch.randn_like(mu_f)
+        for mu_f, sigma_f in zip(mu, sigma)
+    ]
 
 
 def expand_row_mask(
@@ -132,7 +152,10 @@ def merge_multiscale_rows(
     fresh: Sequence[Tensor],
 ) -> list[Tensor]:
     """Apply row-wise replacement over a multiscale latent code."""
-    return [merge_rows(flag, current_f, fresh_f) for current_f, fresh_f in zip(current, fresh, strict=True)]
+    return [
+        merge_rows(flag, current_f, fresh_f)
+        for current_f, fresh_f in zip(current, fresh, strict=True)
+    ]
 
 
 def merge_tree_rows(
@@ -150,24 +173,42 @@ def merge_tree_rows(
         return merge_rows(flag, current, fresh)
 
     if type(current) is not type(fresh):
-        raise TypeError(f"merge_tree_rows requires matching types, got {type(current).__name__} and {type(fresh).__name__}")
+        raise TypeError(
+            f"merge_tree_rows requires matching types, got {type(current).__name__} and {type(fresh).__name__}"
+        )
 
     if isinstance(current, list):
-        return [merge_tree_rows(flag, current_v, fresh_v) for current_v, fresh_v in zip(current, fresh, strict=True)]
+        return [
+            merge_tree_rows(flag, current_v, fresh_v)
+            for current_v, fresh_v in zip(current, fresh, strict=True)
+        ]
 
     if isinstance(current, tuple):
-        return tuple(merge_tree_rows(flag, current_v, fresh_v) for current_v, fresh_v in zip(current, fresh, strict=True))
+        return tuple(
+            merge_tree_rows(flag, current_v, fresh_v)
+            for current_v, fresh_v in zip(current, fresh, strict=True)
+        )
 
     if isinstance(current, dict):
         if current.keys() != fresh.keys():
             raise TypeError("merge_tree_rows requires matching dict keys.")
-        return {key: merge_tree_rows(flag, current[key], fresh[key]) for key in current}
+        return {
+            key: merge_tree_rows(flag, current[key], fresh[key])
+            for key in current
+        }
 
     if is_dataclass(current) and is_dataclass(fresh):
-        updates = {field.name: merge_tree_rows(flag, getattr(current, field.name), getattr(fresh, field.name)) for field in fields(current)}
+        updates = {
+            field.name: merge_tree_rows(
+                flag, getattr(current, field.name), getattr(fresh, field.name)
+            )
+            for field in fields(current)
+        }
         return replace(current, **updates)
 
-    raise TypeError(f"Unsupported merge_tree_rows input type: {type(current).__name__}")
+    raise TypeError(
+        f"Unsupported merge_tree_rows input type: {type(current).__name__}"
+    )
 
 
 def inv_var_trans(
@@ -187,7 +228,10 @@ def inv_var_trans(
 
     for i, f in enumerate(freqs):
         mu_f, sigma_f = base.mean[f].clone(), base.uncertainty[f].clone()
-        mu_f[idx], sigma_f[idx] = inv_var_weight([base.mean[f][idx], corr.mean[i]], [base.uncertainty[f][idx], corr.uncertainty[i]])
+        mu_f[idx], sigma_f[idx] = inv_var_weight(
+            [base.mean[f][idx], corr.mean[i]],
+            [base.uncertainty[f][idx], corr.uncertainty[i]],
+        )
         mu_out[f], sigma_out[f] = mu_f, sigma_f
 
     return LocationBelief(mean=mu_out, uncertainty=sigma_out)
@@ -255,9 +299,17 @@ def squared_error(value, target):
     """
     # Return torch MSE loss
     if type(value) is list:
-        loss = [0.5 * torch.sum(torch.nn.MSELoss(reduction="none")(value[i], target[i]), dim=-1) for i in range(len(value))]
+        loss = [
+            0.5
+            * torch.sum(
+                torch.nn.MSELoss(reduction="none")(value[i], target[i]), dim=-1
+            )
+            for i in range(len(value))
+        ]
     else:
-        loss = 0.5 * torch.sum(torch.nn.MSELoss(reduction="none")(value, target), dim=-1)
+        loss = 0.5 * torch.sum(
+            torch.nn.MSELoss(reduction="none")(value, target), dim=-1
+        )
     return loss
 
 
@@ -268,7 +320,10 @@ def cross_entropy(value, target):
     """
     # Return torch BCE loss
     if type(value) is list:
-        loss = [torch.nn.CrossEntropyLoss(reduction="none")(v, t) for v, t in zip(value, target)]
+        loss = [
+            torch.nn.CrossEntropyLoss(reduction="none")(v, t)
+            for v, t in zip(value, target)
+        ]
     else:
         loss = torch.nn.CrossEntropyLoss(reduction="none")(value, target)
     return loss
@@ -282,13 +337,19 @@ def downsample(value, target_dim):
     # Get input dimension
     value_dim = value.size()[-1]
     # Set places to break up input vector into chunks
-    edges = np.append(np.round(np.arange(0, value_dim, float(value_dim) / target_dim)), value_dim).astype(int)
+    edges = np.append(
+        np.round(np.arange(0, value_dim, float(value_dim) / target_dim)),
+        value_dim,
+    ).astype(int)
     # Create downsampling matrix
     downsample = torch.zeros((value_dim, target_dim), dtype=torch.float)
     # Fill downsampling matrix with chunks
     for curr_entry in range(target_dim):
-        downsample[edges[curr_entry] : edges[curr_entry + 1], curr_entry] = torch.tensor(
-            1.0 / (edges[curr_entry + 1] - edges[curr_entry]), dtype=torch.float
+        downsample[edges[curr_entry] : edges[curr_entry + 1], curr_entry] = (
+            torch.tensor(
+                1.0 / (edges[curr_entry + 1] - edges[curr_entry]),
+                dtype=torch.float,
+            )
         )
     # Do downsampling by matrix multiplication
     return torch.matmul(value, downsample)
@@ -304,7 +365,13 @@ def make_directories():
     run = 0
     dir_check = True
     # Initialise all paths
-    train_path, model_path, save_path, script_path, run_path = None, None, None, None, None
+    train_path, model_path, save_path, script_path, run_path = (
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
     # Find the current run: the first run that doesn't exist yet
     while dir_check:
         # Construct new paths
@@ -316,7 +383,11 @@ def make_directories():
         envs_path = script_path + "/envs"
         run += 1
         # And once a path doesn't exist yet: create new folders
-        if not os.path.exists(train_path) and not os.path.exists(model_path) and not os.path.exists(save_path):
+        if (
+            not os.path.exists(train_path)
+            and not os.path.exists(model_path)
+            and not os.path.exists(save_path)
+        ):
             os.makedirs(train_path)
             os.makedirs(model_path)
             os.makedirs(save_path)
@@ -332,7 +403,13 @@ def set_directories(date, run):
     Returns directories for storing data during a model training run from a given previous training run
     """
     # Initialise all paths
-    train_path, model_path, save_path, script_path, run_path = None, None, None, None, None
+    train_path, model_path, save_path, script_path, run_path = (
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
     # Find the current run: the first run that doesn't exist yet
     run_path = "../Summaries/" + date + "/run" + str(run) + "/"
     train_path = run_path + "train"
@@ -481,7 +558,10 @@ def create_repeat_matrices(
     # For input g: [B, n_subsampled], result is g @ W_repeat = [B, n_p]
     # Uses Kronecker product: eye(n_subsampled) ⊗ ones(1, n_p/n_subsampled)
     return [
-        torch.tensor(np.kron(np.eye(dim_in), np.ones((1, dim_out // dim_in))), dtype=torch.float)
+        torch.tensor(
+            np.kron(np.eye(dim_in), np.ones((1, dim_out // dim_in))),
+            dtype=torch.float,
+        )
         for dim_in, dim_out in zip(n_subsampled, n)
     ]
 
@@ -509,9 +589,16 @@ def create_tiling_matrices(
 
     # Validate divisibility
     if any(out % inp != 0 for out, inp in zip(n_out, n_in)):
-        raise ValueError(f"n_out must be divisible by n_in. Got n_out={n_out}, n_in={n_in}")
+        raise ValueError(
+            f"n_out must be divisible by n_in. Got n_out={n_out}, n_in={n_in}"
+        )
 
-    return [torch.tensor(np.kron(np.ones((1, out // inp)), np.eye(inp)), dtype=torch.float) for inp, out in zip(n_in, n_out)]
+    return [
+        torch.tensor(
+            np.kron(np.ones((1, out // inp)), np.eye(inp)), dtype=torch.float
+        )
+        for inp, out in zip(n_in, n_out)
+    ]
 
 
 def create_random_projection(
@@ -672,11 +759,19 @@ def one_hot_with_zero(
         1..num_actions = discrete actions -> one-hot at index (action - 1)
     returns: FloatTensor, shape (len(action), num_actions)
     """
-    action_t = torch.tensor([a if a is not None else 0 for a in action], dtype=torch.long, device=device)
+    action_t = torch.tensor(
+        [a if a is not None else 0 for a in action],
+        dtype=torch.long,
+        device=device,
+    )
     mask = action_t > 0
-    out = torch.zeros((len(action), num_actions), dtype=torch.float32, device=device)
+    out = torch.zeros(
+        (len(action), num_actions), dtype=torch.float32, device=device
+    )
     if mask.any():
-        out[mask] = F.one_hot(action_t[mask] - 1, num_classes=num_actions).float()
+        out[mask] = F.one_hot(
+            action_t[mask] - 1, num_classes=num_actions
+        ).float()
     return out
 
 
@@ -728,7 +823,9 @@ def resolve_ovc_slice(
 
     n_freq_ovc = int(n_freq_ovc)
     if n_freq_ovc < 0 or n_freq_ovc > n_freq_total:
-        raise ValueError(f"MECSettings.n_freq_ovc must be in [0, {n_freq_total}] or None; got {n_freq_ovc}")
+        raise ValueError(
+            f"MECSettings.n_freq_ovc must be in [0, {n_freq_total}] or None; got {n_freq_ovc}"
+        )
 
     if n_freq_ovc == 0:
         # No OVC correction
@@ -754,7 +851,9 @@ def update_to_masks(
     """
     n_freq = len(shape)
     if update.ndim != 2 or update.shape[1] != n_freq:
-        raise ValueError(f"Expected update shape (n_stages, {n_freq}), got {tuple(update.shape)}")
+        raise ValueError(
+            f"Expected update shape (n_stages, {n_freq}), got {tuple(update.shape)}"
+        )
 
     widths = torch.tensor(shape, device=update.device)
     masks = update.to(dtype=torch.float).repeat_interleave(widths, dim=1)
@@ -802,7 +901,9 @@ def make_update_hierarchical(
     update_ramp = i < (n_stages - f)  # (n_stages, ramp_len)
 
     if ramp_len < n_freq:
-        update_tail = torch.ones((n_stages, n_freq - ramp_len), dtype=torch.bool, device=device)
+        update_tail = torch.ones(
+            (n_stages, n_freq - ramp_len), dtype=torch.bool, device=device
+        )
         return torch.cat([update_ramp, update_tail], dim=1)
 
     return update_ramp
@@ -837,7 +938,9 @@ def make_hebbian_write_mask(
     """
     n_freq = len(shape)
     if n_freq != len(f_initial):
-        raise ValueError(f"Expected f_initial length {n_freq}, got {len(f_initial)}")
+        raise ValueError(
+            f"Expected f_initial length {n_freq}, got {len(f_initial)}"
+        )
     if not (0 <= int(n_stages) <= n_freq):
         raise ValueError(f"n_stages must be in [0, {n_freq}], got {n_stages}")
 

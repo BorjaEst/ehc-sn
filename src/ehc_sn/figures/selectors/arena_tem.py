@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.traces.trace_tree import TraceTree
+from ehc_sn.utils import to_cpu
 
 # ── Canonical trace / meta path constants ────────────────────────────────────
 TRACE_KEY_PRED_INFERENCE = "pred/observation_id/inference"
@@ -23,44 +24,44 @@ META_KEY_TARGET_OBS_ID = "target/observation_id"
 _DEFAULT_MAX_SAMPLES = 10
 
 
-def _to_cpu(value: object) -> object:
-    """Move a tensor to CPU if needed; return other values unchanged."""
-    return value.cpu() if hasattr(value, "cpu") else value  # type: ignore[union-attr]
-
-
+# =============================================================================
 @dataclass
 class TEMOverlayData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.tem_prediction_overlay.TEMPredictionOverlayFigure`."""
+    """Prepared data for the per-step argmax prediction overlay figure.
 
-    gt_obs_ids: NDArray  # (n, T_max) int — ground-truth trajectories
-    pred_inference: NDArray  # (n,) int — inference prediction at final step
-    pred_retrieved: NDArray  # (n,) int — retrieved prediction at final step
-    pred_ancestral: NDArray  # (n,) int — ancestral prediction at final step
-    gt_at_final: NDArray  # (n,) int — ground truth at final step index
+    All fields have shape ``(n_cases, T)`` where *T* is the aligned sequence
+    length (min of trace steps and GT steps).
+    """
+
+    gt_obs_ids: NDArray  # (n_cases, T) int
+    pred_inference: NDArray  # (n_cases, T) int
+    pred_retrieved: NDArray  # (n_cases, T) int
+    pred_ancestral: NDArray  # (n_cases, T) int
 
 
+# =============================================================================
 def select_tem_prediction_overlay(
     trace: TraceTree, ctx: FigureContext
 ) -> TEMOverlayData:
-    """Extract TEM prediction-overlay data from the trace.
+    """Extract per-step argmax prediction-overlay data from the trace.
 
-    Selects N samples (bounded by ``ctx.max_items``) and reads predictions
-    at the final rollout step ``T-1``, comparing against ground-truth
-    ``observation_id`` at the corresponding trajectory position.
+    Selects N samples (bounded by ``ctx.max_items``) and reads per-step
+    predictions for all three pathways (inference, retrieved, ancestral),
+    then time-aligns them with the ground-truth observation trajectory.
 
     Args:
-        trace: Rollout trace with both ``pred/observation_id/*`` and
-            ``target/observation_id`` metadata.
+        trace: Rollout trace with ``pred/observation_id/*`` (T, B) and
+            ``target/observation_id`` meta (B, T_max).
         ctx: Figure context controlling ``sample_idx`` and ``max_items``.
 
     Returns:
-        :class:`TEMOverlayData` with selected samples.
+        :class:`TEMOverlayData` with per-step fields.
 
     Raises:
         ValueError: If any prediction key has unexpected dimensionality.
     """
     # Ground-truth trajectory from metadata: (B, T_max) int.
-    gt_raw = np.asarray(_to_cpu(trace.get_meta_path(META_KEY_TARGET_OBS_ID)))
+    gt_raw = np.asarray(to_cpu(trace.get_meta_path(META_KEY_TARGET_OBS_ID)))
     if gt_raw.ndim != 2:
         raise ValueError(
             f"{META_KEY_TARGET_OBS_ID} must have shape (B, T_max), "
@@ -68,9 +69,9 @@ def select_tem_prediction_overlay(
         )
 
     # Predictions from trace: (T, B) int each.
-    pred_inf = np.asarray(_to_cpu(trace.get(TRACE_KEY_PRED_INFERENCE)))
-    pred_ret = np.asarray(_to_cpu(trace.get(TRACE_KEY_PRED_RETRIEVED)))
-    pred_anc = np.asarray(_to_cpu(trace.get(TRACE_KEY_PRED_ANCESTRAL)))
+    pred_inf = np.asarray(to_cpu(trace.get(TRACE_KEY_PRED_INFERENCE)))
+    pred_ret = np.asarray(to_cpu(trace.get(TRACE_KEY_PRED_RETRIEVED)))
+    pred_anc = np.asarray(to_cpu(trace.get(TRACE_KEY_PRED_ANCESTRAL)))
 
     for name, arr in [
         (TRACE_KEY_PRED_INFERENCE, pred_inf),
@@ -82,7 +83,7 @@ def select_tem_prediction_overlay(
                 f"{name} must have shape (T, B), got ndim={arr.ndim}"
             )
 
-    T, B = pred_inf.shape
+    T_pred, B = pred_inf.shape
     batch_size = B
 
     # Select samples.
@@ -94,15 +95,22 @@ def select_tem_prediction_overlay(
         start = 0
     end = start + n
 
-    # Final-step index: last available rollout step.
-    t_final = T - 1
+    # Align trace steps with GT steps.
+    T_gt = gt_raw.shape[1]
+    T = min(T_pred, T_gt)
+    if T_pred != T_gt:
+        import warnings
+
+        warnings.warn(
+            f"Prediction trace steps ({T_pred}) != GT steps ({T_gt}). "
+            f"Truncating to {T} overlapping steps."
+        )
 
     return TEMOverlayData(
-        gt_obs_ids=gt_raw[start:end],
-        pred_inference=pred_inf[t_final, start:end],
-        pred_retrieved=pred_ret[t_final, start:end],
-        pred_ancestral=pred_anc[t_final, start:end],
-        gt_at_final=gt_raw[start:end, t_final] if gt_raw.shape[1] > t_final else np.zeros(n, dtype=gt_raw.dtype),
+        gt_obs_ids=gt_raw[start:end, :T],
+        pred_inference=pred_inf[:T, start:end].T,
+        pred_retrieved=pred_ret[:T, start:end].T,
+        pred_ancestral=pred_anc[:T, start:end].T,
     )
 
 

@@ -30,8 +30,27 @@ Supported keys:
 _TemporalConstraint: TypeAlias = dict[str, object]
 """A dictionary of required temporal-semantics field values."""
 
-FigureKind: TypeAlias = Literal["dev", "diagnostic", "report"]
-"""Classification for the intended lifecycle and stability of a figure."""
+FigureMaturity: TypeAlias = Literal["experimental", "stable", "deprecated"]
+"""Implementation stability of a figure.
+
+``"experimental"``
+    Layout, interpretation, or semantics may change.
+``"stable"``
+    Schema, visual semantics, and interpretation are stable.
+``"deprecated"``
+    Kept for compatibility; not recommended for new report specs.
+"""
+
+FigureSurface: TypeAlias = Literal["training", "diagnostic", "report"]
+"""Permitted rendering surfaces for a figure.
+
+``"training"``
+    May be emitted during training callbacks or TensorBoard previews.
+``"diagnostic"``
+    May be rendered manually for debugging or model inspection.
+``"report"``
+    May be rendered by ``ehc_sn.reporting`` into a ``ReportRun``.
+"""
 
 FigureInputContract: TypeAlias = Literal[
     "bounded_trace",
@@ -89,7 +108,10 @@ class FigureSpec:
     name: str
     plot: Callable[[TraceTree, FigureContext], mpl_figure.Figure]
     default_filename: str
-    kind: FigureKind = "diagnostic"
+    maturity: FigureMaturity = "experimental"
+    allowed_surfaces: set[FigureSurface] = field(
+        default_factory=lambda: {"diagnostic"}
+    )
     input_contract: FigureInputContract = "evaluation_artifact"
     tags: set[str] = field(default_factory=set)
     trace_keys: set[str] = field(default_factory=set)
@@ -152,31 +174,38 @@ class Registry:
         if missing:
             raise ValueError(f"Unknown figures: {', '.join(missing)}")
 
-    def list(self, *, kind: FigureKind | None = None) -> list[str]:
+    def list(self, *, surface: FigureSurface | None = None) -> list[str]:
         """Return sorted list of registered figure names.
 
         Args:
-            kind: Optional figure kind filter.
+            surface: Optional allowed-surface filter.  When set, only
+                figures whose ``allowed_surfaces`` contain *surface*
+                are returned.
         """
-        if kind is None:
+        if surface is None:
             return sorted(self._specs.keys())
         return sorted(
-            name for name, spec in self._specs.items() if spec.kind == kind
+            name
+            for name, spec in self._specs.items()
+            if surface in spec.allowed_surfaces
         )
 
     def list_specs(  # -------------------------------------------------------
         self,
         *,
-        kind: FigureKind | None = None,
+        maturity: FigureMaturity | None = None,
+        surface: FigureSurface | None = None,
         input_contract: FigureInputContract | None = None,
         tags: set[str] | None = None,
     ) -> list[FigureSpec]:
         """Return sorted list of figure specs, optionally filtered.
 
         Args:
-            kind: Optional figure kind filter.
+            maturity: Optional maturity filter.
+            surface: Optional allowed-surface filter.  When set, only specs
+                whose ``allowed_surfaces`` contain *surface* are returned.
             input_contract: Optional input contract filter.
-            tags: Optional tag filter.  When non-\ ``None``, only specs whose
+            tags: Optional tag filter.  When not ``None``, only specs whose
                 ``tags`` are a superset of this set are returned.  An empty
                 set matches all specs (identity filter).
 
@@ -184,8 +213,10 @@ class Registry:
             List of ``FigureSpec`` objects sorted by name.
         """
         specs = list(self._specs.values())
-        if kind is not None:
-            specs = [s for s in specs if s.kind == kind]
+        if maturity is not None:
+            specs = [s for s in specs if s.maturity == maturity]
+        if surface is not None:
+            specs = [s for s in specs if surface in s.allowed_surfaces]
         if input_contract is not None:
             specs = [s for s in specs if s.input_contract == input_contract]
         if tags is not None:

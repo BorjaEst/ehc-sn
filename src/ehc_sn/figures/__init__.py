@@ -26,6 +26,7 @@ from ehc_sn.traces.trace_tree import TraceTree
 _registered = False
 
 
+# =============================================================================
 def _ensure_registered() -> None:
     """Register built-in figures on first use of the root API."""
     global _registered
@@ -34,47 +35,57 @@ def _ensure_registered() -> None:
         _registered = True
 
 
+# =============================================================================
 def list_figures(
     *,
-    kind: str | None = None,
+    surface: str | None = None,
     input_contract: FigureInputContract | None = None,
 ) -> list[str]:
     """Return registered figure names, optionally filtered.
 
     Args:
-        kind: Optional figure kind filter.
+        surface: Optional allowed-surface filter (e.g. ``"report"``).
         input_contract: Optional input-contract filter.
 
     Returns:
         Sorted list of matching figure names.
     """
+    _ensure_registered()
     return [
         spec.name
-        for spec in list_figure_specs(
-            kind=kind,  # type: ignore[arg-type]
+        for spec in REGISTRY.list_specs(
+            surface=surface,  # type: ignore[arg-type]
             input_contract=input_contract,
         )
     ]
 
 
+# =============================================================================
 def list_figure_specs(
     *,
-    kind: FigureKind | None = None,
+    maturity: str | None = None,
+    surface: str | None = None,
     input_contract: FigureInputContract | None = None,
 ) -> list[FigureSpec]:
     """Return registered figure specs, optionally filtered.
 
     Args:
-        kind: Optional figure kind filter.
+        maturity: Optional maturity filter (e.g. ``"stable"``).
+        surface: Optional allowed-surface filter (e.g. ``"report"``).
         input_contract: Optional input contract filter.
 
     Returns:
         Sorted list of matching ``FigureSpec`` objects.
     """
     _ensure_registered()
-    return REGISTRY.list_specs(kind=kind, input_contract=input_contract)
+    return REGISTRY.list_specs(
+        maturity=maturity,  # type: ignore[arg-type]
+        surface=surface,  # type: ignore[arg-type]
+        input_contract=input_contract,
+    )
 
 
+# =============================================================================
 def render(
     name: str,
     trace: TraceTree,
@@ -109,6 +120,7 @@ def render(
     return spec.plot(trace, ctx)
 
 
+# =============================================================================
 __all__ = [
     "FigureContext",
     "FigureInputContract",

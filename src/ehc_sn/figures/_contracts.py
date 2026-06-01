@@ -8,13 +8,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, Union, runtime_checkable
+from typing import Any, Protocol, TypeAlias, Union, runtime_checkable
 
 from numpy.typing import NDArray
 
-
 # ── World protocol ────────────────────────────────────────────────────────────
 
+
+# =============================================================================
 @runtime_checkable
 class WorldLike(Protocol):
     """Minimal structural protocol for environment world objects.
@@ -33,11 +34,13 @@ class WorldLike(Protocol):
 
 
 # Convenience alias accepted wherever a world is needed.
-AnyWorld = Union[WorldLike, Mapping[str, Any]]
+AnyWorld: TypeAlias = Union[WorldLike, Mapping[str, Any]]
 
 
 # ── PreparedRateMap ───────────────────────────────────────────────────────────
 
+
+# =============================================================================
 @dataclass(frozen=True)
 class PreparedRateMap:
     """Prepared rate-map surfaces for one cell.
@@ -58,3 +61,10 @@ class PreparedRateMap:
     extent: tuple[float, float, float, float]
     smooth_sigma: float
     min_bin_occupancy: float
+
+
+# =============================================================================
+__all__ = [
+    "AnyWorld",
+    "PreparedRateMap",
+]

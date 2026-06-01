@@ -9,6 +9,18 @@ def register_builtin_figures() -> None:
     """Register built-in figure specifications (lazy template imports)."""
     # Templates are imported inside this function so that importing
     # ``ehc_sn.figures`` does not eagerly pull in all template modules.
+    from ehc_sn.figures.selectors.arena_task import (  # noqa: PLC0415
+        TRACE_KEY_OBSERVATION_IDS as ARENA_OBS_IDS,
+    )
+    from ehc_sn.figures.selectors.arena_task import (  # noqa: PLC0415
+        TRACE_KEY_REVISIT_MASK as ARENA_REVISIT,
+    )
+    from ehc_sn.figures.selectors.arena_task import (  # noqa: PLC0415
+        TRACE_KEY_TRAJECTORY_LOCATIONS as ARENA_TRAJ_LOC,
+    )
+    from ehc_sn.figures.selectors.arena_task import (  # noqa: PLC0415
+        TRACE_KEY_WALL_MASK as ARENA_WALL_MASK,
+    )
     from ehc_sn.figures.selectors.arena_tem import (  # noqa: PLC0415
         META_KEY_TARGET_OBS_ID as TEM_META_KEY_TARGET_OBS_ID,
     )
@@ -56,12 +68,14 @@ def register_builtin_figures() -> None:
         TRACE_KEY_MEC_CELLS,
     )
     from ehc_sn.figures.templates import (  # noqa: PLC0415
+        arena_task_overview,
         dummy,
         evolution,
         halting,
         hidden_norm,
         hpc_cells,
         hpc_summary,
+        hrm_latent_dynamics,
         lec_pipeline,
         lec_summary,
         mec_cells,
@@ -81,7 +95,8 @@ def register_builtin_figures() -> None:
                 description="dummy figure for testing",
                 plot=dummy.plot,
                 default_filename="dummy",
-                kind="dev",
+                maturity="experimental",
+                allowed_surfaces=set(),
                 input_contract="bounded_trace",
                 tags={"episode"},
                 trace_keys={"act/halted"},
@@ -96,7 +111,8 @@ def register_builtin_figures() -> None:
                 description="MazeHard overlays: N samples with GT vs model paths",
                 plot=overlay.plot,
                 default_filename="overlay",
-                kind="report",
+                maturity="stable",
+                allowed_surfaces={"diagnostic", "report"},
                 input_contract="offline_artifact",
                 tags={"paper", "mazehard"},
                 trace_keys={TRACE_KEY_HALTED, TRACE_KEY_PRED_OVERLAY},
@@ -111,7 +127,8 @@ def register_builtin_figures() -> None:
                 description="MazeHard prediction evolution: GT + per-step argmax overlays for one sample",
                 plot=evolution.plot,
                 default_filename="evolution",
-                kind="diagnostic",
+                maturity="experimental",
+                allowed_surfaces={"diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"mazehard"},
                 trace_keys={TRACE_KEY_HALTED, TRACE_KEY_PRED_OVERLAY},
@@ -124,12 +141,15 @@ def register_builtin_figures() -> None:
             FigureSpec(
                 name="tem_prediction_overlay",
                 description=(
-                    "TEM observation_id: GT vs predicted "
-                    "(inference / retrieved / ancestral) for N samples"
+                    "Per-step argmax prediction overlay: GT vs predicted "
+                    "observation IDs (inference / retrieved / ancestral) "
+                    "across the full episode. Mismatched cells are outlined "
+                    "in black. Does NOT show confidence or pathway uncertainty."
                 ),
                 plot=tem_prediction_overlay.plot,
                 default_filename="tem_prediction_overlay",
-                kind="diagnostic",
+                maturity="experimental",
+                allowed_surfaces={"diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"tem", "arena"},
                 trace_keys={
@@ -141,6 +161,57 @@ def register_builtin_figures() -> None:
             )
         )
 
+    if not REGISTRY.has("arena_prediction_overlay"):
+        REGISTRY.register(
+            FigureSpec(
+                name="arena_prediction_overlay",
+                description=(
+                    "Per-step argmax prediction overlay: GT vs predicted "
+                    "observation IDs (inference / retrieved / ancestral) "
+                    "across the full episode. Mismatched cells are outlined "
+                    "in black. Family-neutral; compatible with TEM-style "
+                    "and EHC-style Arena traces. Does NOT show confidence "
+                    "or pathway uncertainty."
+                ),
+                plot=tem_prediction_overlay.plot,
+                default_filename="arena_prediction_overlay",
+                maturity="stable",
+                allowed_surfaces={"diagnostic", "report"},
+                input_contract="evaluation_artifact",
+                tags={"arena"},
+                trace_keys={
+                    TEM_TRACE_KEY_PRED_INFERENCE,
+                    TEM_TRACE_KEY_PRED_RETRIEVED,
+                    TEM_TRACE_KEY_PRED_ANCESTRAL,
+                },
+                meta_keys={TEM_META_KEY_TARGET_OBS_ID},
+            )
+        )
+
+    if not REGISTRY.has("arena_task_overview"):
+        REGISTRY.register(
+            FigureSpec(
+                name="arena_task_overview",
+                description=(
+                    "Arena task overview: topology, observation map, "
+                    "trajectory, and revisit markers."
+                ),
+                plot=arena_task_overview.plot,
+                default_filename="arena_task_overview",
+                maturity="stable",
+                allowed_surfaces={"report"},
+                input_contract="offline_artifact",
+                tags={"arena", "task-context"},
+                trace_keys={
+                    ARENA_WALL_MASK,
+                    ARENA_OBS_IDS,
+                    ARENA_TRAJ_LOC,
+                    ARENA_REVISIT,
+                },
+                meta_keys=set(),
+            )
+        )
+
     if not REGISTRY.has("halting_timeline"):
         REGISTRY.register(
             FigureSpec(
@@ -148,7 +219,8 @@ def register_builtin_figures() -> None:
                 description="Binary halting signal heatmap over time",
                 plot=halting.plot,
                 default_filename="halting_timeline",
-                kind="diagnostic",
+                maturity="stable",
+                allowed_surfaces={"training", "diagnostic"},
                 input_contract="bounded_trace",
                 tags={"hrm", "ehc", "reasoning", "halting"},
                 trace_keys={"act/halted"},
@@ -163,7 +235,8 @@ def register_builtin_figures() -> None:
                 description="Q-values over rollout steps (RL/EHC-reason/HRM-v2)",
                 plot=_value_evolution_plot,
                 default_filename="q_value_evolution",
-                kind="diagnostic",
+                maturity="experimental",
+                allowed_surfaces={"training", "diagnostic"},
                 input_contract="bounded_trace",
                 tags={"hrm", "ehc", "rl", "reasoning", "value"},
                 trace_keys={"value/q_values"},
@@ -178,10 +251,30 @@ def register_builtin_figures() -> None:
                 description="Halt/continue logits over rollout steps (ACT/HRM-v1)",
                 plot=_value_evolution_plot,
                 default_filename="halt_logit_evolution",
-                kind="diagnostic",
+                maturity="experimental",
+                allowed_surfaces={"training", "diagnostic"},
                 input_contract="bounded_trace",
                 tags={"hrm", "act", "reasoning", "halting"},
                 trace_keys={"value/q_logits"},
+                meta_keys=set(),
+            )
+        )
+
+    if not REGISTRY.has("hrm_h_l_dynamics"):
+        REGISTRY.register(
+            FigureSpec(
+                name="hrm_h_l_dynamics",
+                description=(
+                    "HRM H/L latent dynamics: state norm and delta "
+                    "over rollout time"
+                ),
+                plot=hrm_latent_dynamics.plot,
+                default_filename="hrm_h_l_dynamics",
+                maturity="stable",
+                allowed_surfaces={"diagnostic", "report"},
+                input_contract="offline_artifact",
+                tags={"hrm", "dynamics", "latent"},
+                trace_keys={"pfc/z_H", "pfc/z_L"},
                 meta_keys=set(),
             )
         )
@@ -196,7 +289,8 @@ def register_builtin_figures() -> None:
                 ),
                 plot=occupancy.plot,
                 default_filename="occupancy_histogram",
-                kind="diagnostic",
+                maturity="stable",
+                allowed_surfaces={"training", "diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"tem", "ehc", "spatial", "summary"},
                 trace_keys={"diagnostic/occupancy"},
@@ -214,7 +308,8 @@ def register_builtin_figures() -> None:
                 ),
                 plot=hidden_norm.plot,
                 default_filename="hidden_norm_histogram",
-                kind="diagnostic",
+                maturity="experimental",
+                allowed_surfaces={"training", "diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"tem", "ehc", "spatial", "summary"},
                 trace_keys={
@@ -232,7 +327,8 @@ def register_builtin_figures() -> None:
                 description="LEC overview with observations and per-frequency activations",
                 plot=lec_summary.plot,
                 default_filename="lec_summary",
-                kind="diagnostic",
+                maturity="stable",
+                allowed_surfaces={"diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"lec", "ehc"},
                 trace_keys={TRACE_KEY_OBSERVATION, TRACE_KEY_LEC_CELLS},
@@ -247,7 +343,8 @@ def register_builtin_figures() -> None:
                 description="Multi-frequency MEC overview",
                 plot=mec_summary.plot,
                 default_filename="mec_summary",
-                kind="diagnostic",
+                maturity="stable",
+                allowed_surfaces={"diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"mec", "ehc"},
                 trace_keys={MEC_TRACE_LOCATION_IDS, TRACE_KEY_MEC_CELLS},
@@ -262,7 +359,8 @@ def register_builtin_figures() -> None:
                 description="Multi-frequency HPC overview with memory panels",
                 plot=hpc_summary.plot,
                 default_filename="hpc_summary",
-                kind="diagnostic",
+                maturity="stable",
+                allowed_surfaces={"diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"hpc", "ehc"},
                 trace_keys={
@@ -281,7 +379,8 @@ def register_builtin_figures() -> None:
                 description="Single-frequency LEC activation detail diagnostic",
                 plot=lec_pipeline.plot,
                 default_filename="lec_pipeline",
-                kind="diagnostic",
+                maturity="stable",
+                allowed_surfaces={"diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"lec", "ehc"},
                 trace_keys={
@@ -300,7 +399,8 @@ def register_builtin_figures() -> None:
                 description="Single-frequency MEC grid-cell spatial maps and spatial autocorr",
                 plot=mec_cells.plot,
                 default_filename="mec_cells",
-                kind="diagnostic",
+                maturity="stable",
+                allowed_surfaces={"diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"mec", "ehc"},
                 trace_keys={MEC_TRACE_LOCATION_IDS, TRACE_KEY_MEC_CELLS},
@@ -315,7 +415,8 @@ def register_builtin_figures() -> None:
                 description="Single-frequency HPC place-cell spatial maps and spatial autocorr",
                 plot=hpc_cells.plot,
                 default_filename="hpc_cells",
-                kind="diagnostic",
+                maturity="stable",
+                allowed_surfaces={"diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"hpc", "ehc"},
                 trace_keys={HPC_TRACE_LOCATION_IDS, TRACE_KEY_HPC_CELLS},
