@@ -78,8 +78,8 @@ def register_builtin_figures() -> None:
         hrm_latent_dynamics,
         lec_pipeline,
         lec_summary,
+        mec_autocorr_mosaic,
         mec_cells,
-        mec_grid_examples,
         mec_grid_metrics,
         mec_summary,
         occupancy,
@@ -374,19 +374,19 @@ def register_builtin_figures() -> None:
             )
         )
 
-    if not REGISTRY.has("mec_grid_examples"):
+    if not REGISTRY.has("mec_autocorr_mosaic"):
         REGISTRY.register(
             FigureSpec(
-                name="mec_grid_examples",
+                name="mec_autocorr_mosaic",
                 description=(
-                    "Selected top-gridness MEC cells with paired rate maps "
-                    "and spatial autocorrelograms. Visual evidence to "
-                    "complement the quantitative gridness-by-frequency figure."
+                    "Population autocorrelogram mosaic showing grid-like "
+                    "periodicity across many MEC cells, ordered by gridness "
+                    "score per frequency band."
                 ),
-                plot=mec_grid_examples.plot,
-                default_filename="mec_grid_examples",
+                plot=mec_autocorr_mosaic.plot,
+                default_filename="mec_autocorr_mosaic",
                 maturity="experimental",
-                allowed_surfaces={"report"},
+                allowed_surfaces={"report", "diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"mec", "ehc", "report"},
                 trace_keys={MEC_TRACE_LOCATION_IDS, TRACE_KEY_MEC_CELLS},

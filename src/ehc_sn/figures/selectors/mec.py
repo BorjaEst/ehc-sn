@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
@@ -204,50 +204,55 @@ class MECGridMetricsData:
     inner_radius: float
     outer_radius: float
     mask_strategy: str
+    # ── Top-example fields (populated when select_mec_grid_metrics receives
+    #    max_examples > 0) ───────────────────────────────────────────────────
+    top_autocorrs: tuple[NDArray[np.floating], ...] = ()
+    top_freq_indices: NDArray[np.integer] = field(
+        default_factory=lambda: np.empty(0, dtype=int)
+    )
+    top_cell_indices: NDArray[np.integer] = field(
+        default_factory=lambda: np.empty(0, dtype=int)
+    )
+    top_gridness: NDArray[np.floating] = field(
+        default_factory=lambda: np.empty(0, dtype=float)
+    )
 
 
-# ── Grid examples data and selector ──────────────────────────────────────────
+# ── MEC autocorr mosaic data and selector ────────────────────────────────────
 
 
 @dataclass(frozen=True)
-class MECGridExamplesData:
-    """Selected high-gridness MEC cells with rate maps and autocorrelograms.
+class MECAutocorrMosaicData:
+    """Population autocorrelogram mosaic across frequency bands.
 
     Attributes
     ----------
-    n_examples : int
-        Number of selected example cells.
     freq_indices : NDArray
-        1D array of frequency indices for each example, shape ``(N,)``.
-    cell_indices : NDArray
-        1D array of cell indices for each example, shape ``(N,)``.
-    gridness : NDArray
-        Gridness scores for each example, shape ``(N,)``.
-    rate_maps : tuple[PreparedRateMap, ...]
-        Prepared rate maps for each example.
-    autocorrs : tuple[NDArray, ...]
-        Full spatial autocorrelograms for each example.
+        1D array of frequency indices, shape ``(F,)``.
+    gridness_by_freq : list[NDArray]
+        Gridness scores per frequency band, each of shape ``(C_f,)``.
+    autocorrs_by_freq : list[tuple[NDArray[np.floating], ...]]
+        Autocorrelograms per frequency band, one tuple per band.
+    cell_indices_by_freq : list[NDArray]
+        Cell indices per frequency band.
     extent : tuple[float, float, float, float]
         World extent shared by all rate maps.
     """
 
-    n_examples: int
     freq_indices: NDArray
-    cell_indices: NDArray
-    gridness: NDArray
-    rate_maps: tuple[PreparedRateMap, ...]
-    autocorrs: tuple[NDArray, ...]
+    gridness_by_freq: list[NDArray]
+    autocorrs_by_freq: list[tuple[NDArray[np.floating], ...]]
+    cell_indices_by_freq: list[NDArray]
     extent: tuple[float, float, float, float]
 
 
-def select_mec_grid_examples(
+def select_mec_autocorr_mosaic(
     trace: TraceTree,
     ctx: FigureContext,
     *,
-    max_examples: int = 4,
-    freq_idx: int | None = None,
-) -> MECGridExamplesData:
-    """Select top-gridness MEC cells with rate maps and autocorrelograms.
+    max_cells_per_freq: int = 36,
+) -> MECAutocorrMosaicData:
+    """Select autocorrelograms for a population mosaic, ordered by gridness.
 
     Parameters
     ----------
@@ -255,29 +260,21 @@ def select_mec_grid_examples(
         Trace containing MEC location-mean activation and location-id leaves.
     ctx : FigureContext
         Figure context specifying environment index.
-    max_examples : int
-        Maximum number of example cells to select.
-    freq_idx : int, optional
-        If given, select only from this frequency band.  Otherwise selects
-        across all frequency bands.
+    max_cells_per_freq : int
+        Maximum number of cells to show per frequency band.
 
     Returns
     -------
-    MECGridExamplesData
-        Selected example cells with rate maps and autocorrelograms.
+    MECAutocorrMosaicData
+        Per-frequency autocorrelograms and gridness scores.
     """
     n_freq = trace.n_freq(TRACE_KEY_MEC_CELLS)
     env_idx = trace.validate_env_idx(ctx.env_idx)
+    freq_idxs = [
+        trace.validate_freq_idx(TRACE_KEY_MEC_CELLS, f) for f in range(n_freq)
+    ]
     world = trace.get_world(env_idx)
     location_ids = trace.get(TRACE_KEY_LOCATION_IDS)[:, env_idx]
-
-    if freq_idx is not None:
-        freq_idxs = [trace.validate_freq_idx(TRACE_KEY_MEC_CELLS, freq_idx)]
-    else:
-        freq_idxs = [
-            trace.validate_freq_idx(TRACE_KEY_MEC_CELLS, f)
-            for f in range(n_freq)
-        ]
 
     cells_traces = [
         trace.get(f"{TRACE_KEY_MEC_CELLS}/{f}")[:, env_idx, :]
@@ -292,55 +289,75 @@ def select_mec_grid_examples(
     )
 
     if not all_metrics or _geom is None:
-        return MECGridExamplesData(
-            n_examples=0,
-            freq_indices=np.zeros((0,), dtype=int),
-            cell_indices=np.zeros((0,), dtype=int),
-            gridness=np.zeros((0,), dtype=float),
-            rate_maps=(),
-            autocorrs=(),
+        return MECAutocorrMosaicData(
+            freq_indices=np.asarray(freq_idxs, dtype=int),
+            gridness_by_freq=[],
+            autocorrs_by_freq=[],
+            cell_indices_by_freq=[],
             extent=(0.0, 0.0, 0.0, 0.0),
         )
 
-    # Build flat list of (freq_idx, cell_idx, metrics) with finite gridness.
-    candidates: list[tuple[int, int, _CellMetrics]] = []
+    extent = all_metrics[0][0].rate_map.extent
+
+    gridness_by_freq: list[NDArray] = []
+    autocorrs_by_freq: list[tuple[NDArray[np.floating], ...]] = []
+    cell_indices_by_freq: list[NDArray] = []
+
     for f_idx, freq_metrics in enumerate(all_metrics):
-        for c_idx, cm in enumerate(freq_metrics):
-            if np.isfinite(cm.gridness):
-                candidates.append((freq_idxs[f_idx], c_idx, cm))
+        # Collect cells with finite gridness, sorted descending.
+        scored = [
+            (cm.gridness, c_idx, cm.autocorr)
+            for c_idx, cm in enumerate(freq_metrics)
+            if np.isfinite(cm.gridness)
+        ]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = scored[:max_cells_per_freq]
 
-    # Sort by gridness descending, take top N.
-    candidates.sort(key=lambda x: x[2].gridness, reverse=True)
-    selected = candidates[:max_examples]
+        if not top:
+            gridness_by_freq.append(np.empty(0, dtype=float))
+            autocorrs_by_freq.append(())
+            cell_indices_by_freq.append(np.empty(0, dtype=int))
+        else:
+            gridness_by_freq.append(np.array([s[0] for s in top], dtype=float))
+            autocorrs_by_freq.append(tuple(s[2] for s in top))
+            cell_indices_by_freq.append(
+                np.array([s[1] for s in top], dtype=int)
+            )
 
-    if not selected:
-        return MECGridExamplesData(
-            n_examples=0,
-            freq_indices=np.zeros((0,), dtype=int),
-            cell_indices=np.zeros((0,), dtype=int),
-            gridness=np.zeros((0,), dtype=float),
-            rate_maps=(),
-            autocorrs=(),
-            extent=(0.0, 0.0, 0.0, 0.0),
-        )
-
-    extent = selected[0][2].rate_map.extent
-
-    return MECGridExamplesData(
-        n_examples=len(selected),
-        freq_indices=np.array([s[0] for s in selected], dtype=int),
-        cell_indices=np.array([s[1] for s in selected], dtype=int),
-        gridness=np.array([s[2].gridness for s in selected], dtype=float),
-        rate_maps=tuple(s[2].rate_map for s in selected),
-        autocorrs=tuple(s[2].autocorr for s in selected),
+    return MECAutocorrMosaicData(
+        freq_indices=np.asarray(freq_idxs, dtype=int),
+        gridness_by_freq=gridness_by_freq,
+        autocorrs_by_freq=autocorrs_by_freq,
+        cell_indices_by_freq=cell_indices_by_freq,
         extent=extent,
     )
 
 
 def select_mec_grid_metrics(
-    trace: TraceTree, ctx: FigureContext
+    trace: TraceTree,
+    ctx: FigureContext,
+    *,
+    max_examples: int = 4,
 ) -> MECGridMetricsData:
-    """Compute gridness, spacing, and orientation for all MEC cells."""
+    """Compute gridness, spacing, and orientation for all MEC cells.
+
+    Parameters
+    ----------
+    trace : TraceTree
+        Trace containing MEC location-mean activation and location-id leaves.
+    ctx : FigureContext
+        Figure context specifying environment index.
+    max_examples : int
+        If > 0, select the top-*max_examples* cells by gridness across all
+        frequency bands and attach their autocorrelograms to the returned
+        ``MECGridMetricsData``.
+
+    Returns
+    -------
+    MECGridMetricsData
+        Per-frequency, per-cell gridness metrics, optionally with top-example
+        autocorrelograms.
+    """
     n_freq = trace.n_freq(TRACE_KEY_MEC_CELLS)
     env_idx = trace.validate_env_idx(ctx.env_idx)
     freq_idxs = [
@@ -403,6 +420,28 @@ def select_mec_grid_metrics(
                 outer_radius = g_result.outer_radius
                 mask_strategy = g_result.mask_strategy
 
+    # ── Select top-N examples across all frequencies ────────────────────────
+    top_autocorrs: tuple[NDArray[np.floating], ...] = ()
+    top_freq_idx = np.empty(0, dtype=int)
+    top_cell_idx = np.empty(0, dtype=int)
+    top_gridness = np.empty(0, dtype=float)
+
+    if max_examples > 0:
+        candidates: list[tuple[int, int, float, NDArray]] = []
+        for f_idx, freq_metrics in enumerate(all_metrics):
+            for c_idx, cm in enumerate(freq_metrics):
+                if np.isfinite(cm.gridness):
+                    candidates.append(
+                        (freq_idxs[f_idx], c_idx, cm.gridness, cm.autocorr)
+                    )
+        candidates.sort(key=lambda x: x[2], reverse=True)
+        selected = candidates[:max_examples]
+        if selected:
+            top_autocorrs = tuple(s[3] for s in selected)
+            top_freq_idx = np.array([s[0] for s in selected], dtype=int)
+            top_cell_idx = np.array([s[1] for s in selected], dtype=int)
+            top_gridness = np.array([s[2] for s in selected], dtype=float)
+
     return MECGridMetricsData(
         freq_indices=np.asarray(freq_idxs, dtype=int),
         cell_indices=cell_indices,
@@ -413,6 +452,10 @@ def select_mec_grid_metrics(
         inner_radius=inner_radius,
         outer_radius=outer_radius,
         mask_strategy=mask_strategy,
+        top_autocorrs=top_autocorrs,
+        top_freq_indices=top_freq_idx,
+        top_cell_indices=top_cell_idx,
+        top_gridness=top_gridness,
     )
 
 
