@@ -72,6 +72,11 @@ from ehc_sn.tasks.arena.runtime import (
     batch_size_from_arena_batch,
     infer_arena_replay_batch_keys,
 )
+from ehc_sn.tasks.arena.traces import (
+    ArenaEvaluationSourceContext,
+    apply_arena_trace_supplements,
+    build_arena_trace_supplements,
+)
 from ehc_sn.traces import build_trace_spec
 from ehc_sn.training.optim import Adam, AdamConfig
 from ehc_sn.training.rollout import (
@@ -517,7 +522,7 @@ class TEMV1TrainingModel(L.LightningModule):
         objective_options = eval_objective.runtime_loss_options(
             self.global_step, p2g_use=runtime.p2g_use
         )
-        return execute_replay_evaluation_batch(
+        result = execute_replay_evaluation_batch(
             case=case,
             runner=self._eval_runner,
             controller=eval_controller,
@@ -529,6 +534,16 @@ class TEMV1TrainingModel(L.LightningModule):
             objective_options=objective_options,
             trace_request=trace_request,
         )
+        # Attach arena environment metadata so figure selectors can render
+        # spatial rate maps (mec_cells / hpc_cells).
+        if result.trace is not None and isinstance(
+            result.source_context, ArenaEvaluationSourceContext
+        ):
+            supplements = build_arena_trace_supplements(
+                result.source_context, result.trace.length
+            )
+            apply_arena_trace_supplements(result.trace, supplements)
+        return result
 
     def _apply_runtime(  # ----------------------------------------------------
         self,
