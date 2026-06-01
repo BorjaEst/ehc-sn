@@ -879,7 +879,13 @@ def _extract_loss_scalar(evaluated: Any) -> float | None:
 
 
 def _write_dense_npz(path: Path, data: dict[str, Any]) -> None:
-    """Write a dense payload dict to an NPZ file."""
+    """Write a dense payload dict to an NPZ file.
+
+    Lists of arrays with equal shapes are stacked.  Lists with unequal shapes
+    (e.g. per-frequency diagnostic tensors) are written as separate
+    ``{key}/0``, ``{key}/1``, … keys so the rehydrated TraceTree can
+    reconstruct the original tree-path structure.
+    """
     arrays: dict[str, np.ndarray] = {}
     for key, value in data.items():
         if isinstance(value, np.ndarray):
@@ -889,7 +895,18 @@ def _write_dense_npz(path: Path, data: dict[str, Any]) -> None:
         elif isinstance(value, (int, float)):
             arrays[key] = np.array(value)
         elif isinstance(value, list):
-            arrays[key] = np.array(value)
+            try:
+                arrays[key] = np.array(value)
+            except ValueError:
+                # Jagged list — write each element as its own indexed key.
+                for i, sub in enumerate(value):
+                    sub_key = f"{key}/{i}"
+                    if isinstance(sub, torch.Tensor):
+                        arrays[sub_key] = sub.cpu().numpy()
+                    elif isinstance(sub, np.ndarray):
+                        arrays[sub_key] = sub
+                    else:
+                        arrays[sub_key] = np.array(sub)
         else:
             arrays[key] = np.array(value)
     np.savez_compressed(path, **arrays)
@@ -897,7 +914,7 @@ def _write_dense_npz(path: Path, data: dict[str, Any]) -> None:
 
 def _read_dense_npz(path: Path) -> dict[str, np.ndarray]:
     """Read a dense payload dict from an NPZ file."""
-    return dict(np.load(path))
+    return dict(np.load(path, allow_pickle=True))
 
 
 def _rehydrate_trace_tree(
@@ -916,6 +933,11 @@ def _rehydrate_trace_tree(
                 trace.paths.append(tuple(path.split("/")))
                 trace.path_strs.append(path)
                 trace.leaf_is_numeric.append(True)
+                # Infer batch_size from the first numeric leaf
+                if trace.batch_size is None:
+                    arr = dense.get(path)
+                    if arr is not None and arr.ndim >= 1:
+                        trace.batch_size = int(arr.shape[0])
 
     # Build dense_leaves array directly from rehydrated data so that
     # TraceTree.get() and figure rendering work on reloaded artifacts.
