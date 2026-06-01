@@ -56,15 +56,18 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     track: str | None = Field(
         default=None,
-        description="Optional benchmark track override; defaults to the legacy B0 alias track.",
+        description="Optional benchmark track override; defaults to the legacy "
+        "B0 alias track.",
     )
     model_family: str | None = Field(
         default=None,
-        description="Model family identifier to evaluate (for example hrm-v1, hrm-v2, ehc-v1).",
+        description="Model family identifier to evaluate (for example hrm-v1, "
+        "hrm-v2, ehc-v1).",
     )
     score_json: Path | None = Field(
         default=None,
-        description="Path to score payload JSON consumed by benchmark score coercion.",
+        description="Path to score payload JSON consumed by benchmark score "
+        "coercion.",
     )
     fixed_recipe: str = Field(
         default="default",
@@ -72,15 +75,18 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     seed_count: int | None = Field(
         default=None,
-        description="Number of independent seeds represented by this report payload.",
+        description="Number of independent seeds represented by this report "
+        "payload.",
     )
     ood_slice: str | None = Field(
         default=None,
-        description="Optional OOD or evaluation-slice tag emitted with the report.",
+        description="Optional OOD or evaluation-slice tag emitted with the "
+        "report.",
     )
     output: Path | None = Field(
         default=None,
-        description="Optional output JSON path; defaults to reports/benchmarks/<track>-<model>.json.",
+        description="Optional output JSON path; defaults to "
+        "artifacts/benchmarks/<track>-<model>.json.",
     )
 
 

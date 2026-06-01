@@ -59,7 +59,8 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     track: str | None = Field(
         default=None,
-        description="Optional benchmark track override; defaults to the wrapper's canonical track.",
+        description="Optional benchmark track override; defaults to the "
+        "wrapper's canonical track.",
     )
     manifest: Path | None = Field(
         default=None,
@@ -83,7 +84,8 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     output: Path | None = Field(
         default=None,
-        description="Optional output JSON path; defaults to reports/benchmarks/<track>-<model>.json.",
+        description="Optional output JSON path; defaults to "
+        "artifacts/benchmarks/<track>-<model>.json.",
     )
 
 
