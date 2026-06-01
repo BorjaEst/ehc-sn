@@ -8,11 +8,13 @@ observation-id integer value.
 
 from __future__ import annotations
 
+import matplotlib.cm as mcm
 import matplotlib.colors as mcolors
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.patches import Patch
 
 from ehc_sn.figures.core.base import BaseFigureTemplate
 from ehc_sn.figures.core.panels import panel
@@ -21,12 +23,11 @@ from ehc_sn.figures.selectors.arena_tem import (
     TEMOverlayData,
     select_tem_prediction_overlay,
 )
+from ehc_sn.figures.utils.colors import categorical_id_colormap
 from ehc_sn.traces.trace_tree import TraceTree
 
 # ── Colour map constants ────────────────────────────────────────────────────
-_CMAP_NAME = "tab10"
 _LABELS = ("GT", "Inference", "Retrieved", "Ancestral")
-_LABEL_COLORS = ("black", "steelblue", "firebrick", "darkgreen")
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
@@ -39,49 +40,53 @@ class TEMPredictionOverlayFigure(BaseFigureTemplate):
     HEIGHT_FRAC: float = 0.18
     MOSAIC = [["overlay_grid", "legend_panel"]]
     MOSAIC_KWARGS = {
-        "width_ratios": [8.0, 1.5],
-        "gridspec_kw": {"wspace": 0.02},
+        "width_ratios": [8.0, 1.4],
+        "gridspec_kw": {"wspace": 0.05},
     }
 
     def __init__(self, data: TEMOverlayData, ctx: FigureContext) -> None:
         super().__init__(data, ctx)
-        self._cmap = mcolors.Colormap(_CMAP_NAME)
+
+        # Pre-compute colormap for the full observation-ID range.
+        max_id = max(
+            int(data.gt_obs_ids.max()),
+            int(data.pred_inference.max()),
+            int(data.pred_retrieved.max()),
+            int(data.pred_ancestral.max()),
+        )
+        n_obs = max_id + 1
+        cmap, norm = categorical_id_colormap(n_obs)
+        self._cmap = cmap
+        self._norm = norm
 
     @panel()
     def overlay_grid(self, ax: Axes) -> None:
         """Render the GT-vs-prediction colour grid."""
         data = self.data
-        n = len(data.gt_obs_ids)
-        rows = 4  # GT + 3 predictions
-        cols = data.gt_obs_ids.shape[1]  # T_max
+        n = data.gt_obs_ids.shape[0]
+        rows = 4
+        cols = data.gt_obs_ids.shape[1]
 
-        # Build the colour grid: (rows, n, cols).
         grid = np.stack(
             [
-                data.gt_obs_ids,  # (n, T_max)
-                # Broadcast per-sample scalar predictions to full T_max length
-                # for panel consistency.
-                np.full_like(data.gt_obs_ids, data.pred_inference[:, None]),
-                np.full_like(data.gt_obs_ids, data.pred_retrieved[:, None]),
-                np.full_like(data.gt_obs_ids, data.pred_ancestral[:, None]),
+                data.gt_obs_ids,
+                data.pred_inference,
+                data.pred_retrieved,
+                data.pred_ancestral,
             ],
             axis=0,
-        )  # (4, n, T_max)
+        )  # (4, n, T)
 
-        # Normalise to [0, 1] for colormap lookup.
-        vmin = grid.min()
-        vmax = grid.max()
-        norm = mcolors.Normalize(vmin=vmin, vmax=max(vmax, vmin + 1))
-        coloured = self._cmap(norm(grid))  # (4, n, T_max, 4)
+        coloured = self._cmap(self._norm(grid))  # (4, n, T, 4)
 
-        # Render each sample as a horizontal stack.
         for row_idx in range(rows):
             for sample_idx in range(n):
-                y0 = (rows - 1 - row_idx) * n + sample_idx
+                y0 = row_idx * n + sample_idx
                 cell_colours = coloured[row_idx, sample_idx]
+
                 for t in range(cols):
                     ax.add_patch(
-                        mcolors.Polygon(
+                        mpatches.Polygon(
                             [
                                 (t, y0),
                                 (t + 1, y0),
@@ -93,48 +98,84 @@ class TEMPredictionOverlayFigure(BaseFigureTemplate):
                         )
                     )
 
-        # Axis labels.
         ax.set_xlabel("Timestep")
-        ax.set_ylabel("Sample")
+        ax.set_ylabel("Prediction source")
+
         ax.set_yticks(
-            np.arange(n // 2, rows * n, n),
-            [_LABELS[r] for r in range(rows)],
+            np.arange(n / 2, rows * n, n),
+            _LABELS,
             fontsize="small",
         )
+
         ax.set_xlim(0, cols)
         ax.set_ylim(0, rows * n)
-        ax.tick_params(axis="y", labelsize="small")
         ax.invert_yaxis()
+
+        ax.tick_params(axis="y", labelsize="small")
 
     @panel()
     def legend_panel(self, ax: Axes) -> None:
-        """Render a colourbar and per-row label legend."""
+        """Render a compact categorical legend for observation IDs."""
         ax.axis("off")
 
-        # Colourbar for observation-id values.
-        norm = mcolors.Normalize(
-            vmin=self.data.gt_obs_ids.min(),
-            vmax=max(
-                self.data.gt_obs_ids.max(),
-                self.data.gt_obs_ids.min() + 1,
-            ),
-        )
-        mappable = mcolors.ScalarMappable(cmap=self._cmap, norm=norm)
-        mappable.set_array([])
-        cbar = self.fig.colorbar(mappable, ax=ax, shrink=0.6)
-        cbar.set_label("Obs ID", fontsize="small")
+        n_obs = self._cmap.N
 
-        # Per-row label legend.
-        patches = [
-            Patch(facecolor="none", edgecolor=c, label=l)
-            for l, c in zip(_LABELS, _LABEL_COLORS)
-        ]
-        ax.legend(
-            handles=patches,
-            loc="lower left",
-            fontsize="x-small",
-            frameon=False,
-        )
+        # For many IDs, use multiple columns and sparse labels.
+        n_cols = 3 if n_obs > 24 else 2
+        n_rows = int(np.ceil(n_obs / n_cols))
+
+        swatch_w = 0.8
+        swatch_h = 0.8
+        x_gap = 1.0
+        y_gap = 0.15
+
+        ax.set_title("Obs ID", fontsize="small", pad=4)
+
+        for obs_id in range(n_obs):
+            col = obs_id // n_rows
+            row = obs_id % n_rows
+
+            # top-to-bottom layout
+            y = n_rows - 1 - row
+            x = col * (swatch_w + x_gap + 0.9)
+
+            colour = self._cmap(self._norm(obs_id))
+
+            ax.add_patch(
+                mpatches.Rectangle(
+                    (x, y),
+                    swatch_w,
+                    swatch_h,
+                    facecolor=colour,
+                    edgecolor="none",
+                )
+            )
+
+            # For many categories, do not label every single one.
+            if n_obs <= 20 or obs_id % 5 == 0:
+                ax.text(
+                    x + swatch_w + 0.15,
+                    y + swatch_h / 2,
+                    str(obs_id),
+                    va="center",
+                    ha="left",
+                    fontsize="x-small",
+                )
+
+        # Small explanatory note.
+        if n_obs > 20:
+            ax.text(
+                0,
+                -1.1,
+                "Distinct colours denote distinct\nobservation IDs\n(labels shown every 5 IDs)",
+                fontsize="xx-small",
+                ha="left",
+                va="top",
+            )
+
+        total_w = n_cols * (swatch_w + x_gap + 0.9)
+        ax.set_xlim(0, total_w)
+        ax.set_ylim(-1.5, n_rows + 0.5)
 
 
 # =============================================================================
