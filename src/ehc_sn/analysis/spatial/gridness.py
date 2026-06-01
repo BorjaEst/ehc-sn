@@ -351,7 +351,7 @@ def _local_maxima(
         Input array.
     threshold : float, optional
         Minimum absolute value for a pixel to be considered a peak.
-        If ``None``, uses 25 % of the finite maximum outside the excluded
+        If ``None``, uses 50 % of the finite maximum outside the excluded
         central disk.
     exclude_central_disk_px : float
         Exclude peaks within this radius (pixels) of the centre.
@@ -386,7 +386,7 @@ def _local_maxima(
         # excluded central disk.
         outer_finite = arr[(dist >= exclude_central_disk_px) & np.isfinite(arr)]
         threshold = (
-            0.25 * float(np.max(outer_finite)) if outer_finite.size > 0 else 0.0
+            0.50 * float(np.max(outer_finite)) if outer_finite.size > 0 else 0.0
         )
 
     maxima_mask = maxima_mask & (arr >= threshold)
