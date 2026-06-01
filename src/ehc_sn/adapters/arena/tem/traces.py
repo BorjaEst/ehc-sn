@@ -21,12 +21,16 @@ Usage
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Protocol
+from typing import Any, Iterable, Mapping, Protocol
 
 from torch import Tensor
 
 from ehc_sn.tasks.arena.evaluation import coerce_observation_ids
 from ehc_sn.traces import TraceField, TraceValue
+from ehc_sn.traces.specs import (
+    TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM,
+    TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
+)
 from ehc_sn.types import Batch
 
 
@@ -46,6 +50,7 @@ class _ArenaTEMCarryData(Protocol):
 
 class _ArenaTEMCarry(Protocol):
     data: _ArenaTEMCarryData
+    model_state: Any  # Needed when diagnostic trace fields are exported
 
 
 class _ArenaTEMBackboneOutputs(Protocol):
@@ -133,6 +138,8 @@ ARENA_TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
     ARENA_TEM_TRACE_PRED_INFERENCE,
     ARENA_TEM_TRACE_PRED_RETRIEVED,
     ARENA_TEM_TRACE_PRED_ANCESTRAL,
+    TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
+    TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM,
 )
 """All Arena TEM trace fields in canonical order."""
 
