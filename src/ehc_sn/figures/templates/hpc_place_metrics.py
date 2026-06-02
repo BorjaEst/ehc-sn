@@ -55,12 +55,9 @@ class HPCPlaceMetricsFigure(BaseFigureTemplate):
         spatial information | field centers | top rate-map 2×2 mosaic
     """
 
-    HEIGHT_FRAC: float = 0.35
+    HEIGHT_FRAC: float = 0.22
     MOSAIC = [["spatial_information", "field_centers", "top_maps"]]
-    MOSAIC_KWARGS = {
-        "width_ratios": [1.0, 1.0, 1.2],
-        "gridspec_kw": {"wspace": 0.08},
-    }
+    MOSAIC_KWARGS = {"width_ratios": [1.0, 1.0, 0.8]}
 
     _N_MOSAIC_ROWS: int = 2
     _N_MOSAIC_COLS: int = 2
