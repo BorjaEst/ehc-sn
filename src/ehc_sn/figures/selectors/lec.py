@@ -41,17 +41,16 @@ from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.selectors.arena_tem import (
     TEM_META_KEY_TARGET_OBS_ID,
 )
+from ehc_sn.traces.keys import (
+    LEC_META_KEY_ALPHA,
+    LEC_META_KEY_WF,
+    LEC_TRACE_KEY_CELLS,
+    LEC_TRACE_KEY_FILTERED,
+    WORLD_TRACE_KEY_LOCATION_IDS,
+    WORLD_TRACE_KEY_OBSERVATION,
+)
 from ehc_sn.traces.trace_tree import TraceTree
 from ehc_sn.utils import to_cpu
-
-# ── Canonical trace / meta path constants ────────────────────────────────────
-LEC_TRACE_KEY_OBSERVATION = "world_step/observation"
-LEC_TRACE_KEY_CELLS = "diagnostic/lec/cells"
-LEC_TRACE_KEY_FILTERED = "diagnostic/lec/filtered"
-LEC_TRACE_KEY_LOCATION_IDS = "world_step/location_ids"
-LEC_META_KEY_ALPHA = "lec/filter/alpha_sigmoid"
-LEC_META_KEY_WF = "lec/w_f_sigmoid"
-
 
 # =============================================================================
 # Shared helpers
@@ -100,22 +99,22 @@ def _get_observation_ids(trace: TraceTree, env_idx: int) -> NDArray:
     except (KeyError, FileNotFoundError):
         pass
     # Fallback: per-step trace.
-    obs = trace.get(LEC_TRACE_KEY_OBSERVATION)
+    obs = trace.get(WORLD_TRACE_KEY_OBSERVATION)
     if obs is not None:
         arr = np.asarray(to_cpu(obs))
         if arr.ndim >= 1:
             return arr[:, env_idx] if arr.ndim >= 2 else arr
     raise ValueError(
         "Could not resolve observation IDs from either "
-        f"{TEM_META_KEY_TARGET_OBS_ID} or {LEC_TRACE_KEY_OBSERVATION}"
+        f"{TEM_META_KEY_TARGET_OBS_ID} or {WORLD_TRACE_KEY_OBSERVATION}"
     )
 
 
 def _get_location_ids(trace: TraceTree, env_idx: int) -> NDArray:
     """Return location IDs for one environment."""
-    loc = trace.get(LEC_TRACE_KEY_LOCATION_IDS)
+    loc = trace.get(WORLD_TRACE_KEY_LOCATION_IDS)
     if loc is None:
-        raise ValueError(f"Trace key {LEC_TRACE_KEY_LOCATION_IDS} not found")
+        raise ValueError(f"Trace key {WORLD_TRACE_KEY_LOCATION_IDS} not found")
     arr = np.asarray(to_cpu(loc))
     return arr[:, env_idx] if arr.ndim >= 2 else arr
 
@@ -404,7 +403,7 @@ def select_lec_summary(
     freq_idxs = [
         trace.validate_freq_idx(LEC_TRACE_KEY_CELLS, f) for f in range(n_freq)
     ]
-    obs_values = trace.get(LEC_TRACE_KEY_OBSERVATION)[:, env_idx]
+    obs_values = trace.get(WORLD_TRACE_KEY_OBSERVATION)[:, env_idx]
     cells = [
         trace.get(f"{LEC_TRACE_KEY_CELLS}/{f}")[:, env_idx, :]
         for f in range(n_freq)
@@ -434,7 +433,7 @@ def select_lec_pipeline(
     return LECPipelineFigureData(
         env_idx=env_idx,
         freq_idx=freq_idx,
-        observations=trace.get(LEC_TRACE_KEY_OBSERVATION)[:, env_idx],
+        observations=trace.get(WORLD_TRACE_KEY_OBSERVATION)[:, env_idx],
         cell_series=trace.get(f"{LEC_TRACE_KEY_CELLS}/{freq_idx}")[
             :, env_idx, :
         ],

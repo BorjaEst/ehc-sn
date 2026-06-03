@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from ehc_sn.figures.plots.value_curve import plot_value_curve
 from ehc_sn.figures.registry import FigureContext
+from ehc_sn.traces.keys import TRACE_KEY_Q_VALUES
 from ehc_sn.traces.trace_tree import TraceTree
 
-_TRACE_KEY = "value/q_values"
+_TRACE_KEY = TRACE_KEY_Q_VALUES
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:

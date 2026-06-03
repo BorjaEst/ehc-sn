@@ -19,12 +19,12 @@ from ehc_sn.figures.selectors.spatial import (
     prepare_rate_maps,
     spatial_rate_smooth_sigma,
 )
+from ehc_sn.traces.keys import (
+    MEC_TRACE_KEY_CELLS,
+    META_KEY_ENVIRONMENTS,
+    WORLD_TRACE_KEY_LOCATION_IDS,
+)
 from ehc_sn.traces.trace_tree import TraceTree
-
-# ── Canonical trace / meta path constants ────────────────────────────────────
-MEC_TRACE_KEY_LOCATION_IDS = "world_step/location_ids"
-MEC_TRACE_KEY_CELLS = "diagnostic/mec/location_mean"
-MEC_META_KEY_ENVIRONMENTS = "environments"
 
 
 @dataclass
@@ -274,7 +274,7 @@ def select_mec_autocorr_mosaic(
         trace.validate_freq_idx(MEC_TRACE_KEY_CELLS, f) for f in range(n_freq)
     ]
     world = trace.get_world(env_idx)
-    location_ids = trace.get(MEC_TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    location_ids = trace.get(WORLD_TRACE_KEY_LOCATION_IDS)[:, env_idx]
 
     cells_traces = [
         trace.get(f"{MEC_TRACE_KEY_CELLS}/{f}")[:, env_idx, :]
@@ -364,7 +364,7 @@ def select_mec_grid_metrics(
         trace.validate_freq_idx(MEC_TRACE_KEY_CELLS, f) for f in range(n_freq)
     ]
     world = trace.get_world(env_idx)
-    location_ids = trace.get(MEC_TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    location_ids = trace.get(WORLD_TRACE_KEY_LOCATION_IDS)[:, env_idx]
 
     cells_traces = [
         trace.get(f"{MEC_TRACE_KEY_CELLS}/{f}")[:, env_idx, :]
@@ -468,7 +468,7 @@ def select_mec_summary(
         trace.validate_freq_idx(MEC_TRACE_KEY_CELLS, f) for f in range(n_freq)
     ]
     world = trace.get_world(env_idx)
-    location_ids = trace.get(MEC_TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    location_ids = trace.get(WORLD_TRACE_KEY_LOCATION_IDS)[:, env_idx]
     cells = [
         trace.get(f"{MEC_TRACE_KEY_CELLS}/{f}")[:, env_idx, :]
         for f in range(n_freq)
@@ -497,7 +497,7 @@ def select_mec_cell(trace: TraceTree, ctx: FigureContext) -> MECCellFigureData:
     env_idx = trace.validate_env_idx(ctx.env_idx)
     freq_idx = trace.validate_freq_idx(MEC_TRACE_KEY_CELLS, ctx.freq_idx)
     world = trace.get_world(env_idx)
-    location_ids = trace.get(MEC_TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    location_ids = trace.get(WORLD_TRACE_KEY_LOCATION_IDS)[:, env_idx]
     cells = trace.get(f"{MEC_TRACE_KEY_CELLS}/{freq_idx}")[:, env_idx, :]
     rate_maps = prepare_rate_maps(
         world,

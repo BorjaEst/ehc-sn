@@ -17,13 +17,13 @@ from ehc_sn.figures.selectors.spatial import (
     prepare_rate_maps,
     spatial_rate_smooth_sigma,
 )
+from ehc_sn.traces.keys import (
+    HPC_TRACE_KEY_CELLS,
+    HPC_TRACE_KEY_MEMORY,
+    META_KEY_ENVIRONMENTS,
+    WORLD_TRACE_KEY_LOCATION_IDS,
+)
 from ehc_sn.traces.trace_tree import TraceTree
-
-# ── Canonical trace / meta path constants ────────────────────────────────────
-HPC_TRACE_KEY_LOCATION_IDS = "world_step/location_ids"
-HPC_TRACE_KEY_CELLS = "diagnostic/hpc/location_mean"
-HPC_TRACE_KEY_MEMORY = "diagnostic/hpc/memory"
-HPC_META_KEY_ENVIRONMENTS = "environments"
 
 
 @dataclass
@@ -101,7 +101,7 @@ def _compute_hpc_place_metrics(
     """
     env_idx = trace.validate_env_idx(ctx.env_idx)
     world = trace.get_world(env_idx)
-    location_ids = trace.get(HPC_TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    location_ids = trace.get(WORLD_TRACE_KEY_LOCATION_IDS)[:, env_idx]
 
     cells = trace.get(f"{HPC_TRACE_KEY_CELLS}/0")[:, env_idx, :]
     n_cells = int(cells.shape[-1])
@@ -371,7 +371,7 @@ def select_hpc_summary(
         trace.validate_freq_idx(HPC_TRACE_KEY_CELLS, f) for f in range(n_freq)
     ]
     world = trace.get_world(env_idx)
-    location_ids = trace.get(HPC_TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    location_ids = trace.get(WORLD_TRACE_KEY_LOCATION_IDS)[:, env_idx]
     cells = [
         trace.get(f"{HPC_TRACE_KEY_CELLS}/{f}")[:, env_idx, :]
         for f in range(n_freq)
@@ -404,7 +404,7 @@ def select_hpc_cell(trace: TraceTree, ctx: FigureContext) -> HPCCellFigureData:
     env_idx = trace.validate_env_idx(ctx.env_idx)
     freq_idx = trace.validate_freq_idx(HPC_TRACE_KEY_CELLS, ctx.freq_idx)
     world = trace.get_world(env_idx)
-    location_ids = trace.get(HPC_TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    location_ids = trace.get(WORLD_TRACE_KEY_LOCATION_IDS)[:, env_idx]
     cells = trace.get(f"{HPC_TRACE_KEY_CELLS}/{freq_idx}")[:, env_idx, :]
     rate_maps = prepare_rate_maps(
         world,

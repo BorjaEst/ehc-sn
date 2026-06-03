@@ -14,43 +14,6 @@ def register_builtin_figures() -> None:
     """Register built-in figure specifications (lazy template imports)."""
     # Templates are imported inside this function so that importing
     # ``ehc_sn.figures`` does not eagerly pull in all template modules.
-    from ehc_sn.figures.selectors.arena_task import (
-        ARENA_TRACE_KEY_OBSERVATION_IDS,
-        ARENA_TRACE_KEY_REVISIT_MASK,
-        ARENA_TRACE_KEY_TRAJECTORY_LOCATIONS,
-        ARENA_TRACE_KEY_WALL_MASK,
-    )
-    from ehc_sn.figures.selectors.arena_tem import (
-        TEM_META_KEY_TARGET_OBS_ID,
-        TEM_TRACE_KEY_PRED_ANCESTRAL,
-        TEM_TRACE_KEY_PRED_INFERENCE,
-        TEM_TRACE_KEY_PRED_RETRIEVED,
-    )
-    from ehc_sn.figures.selectors.hpc import (
-        HPC_META_KEY_ENVIRONMENTS,
-        HPC_TRACE_KEY_CELLS,
-        HPC_TRACE_KEY_LOCATION_IDS,
-        HPC_TRACE_KEY_MEMORY,
-    )
-    from ehc_sn.figures.selectors.lec import (
-        LEC_META_KEY_ALPHA,
-        LEC_META_KEY_WF,
-        LEC_TRACE_KEY_CELLS,
-        LEC_TRACE_KEY_FILTERED,
-        LEC_TRACE_KEY_LOCATION_IDS,
-        LEC_TRACE_KEY_OBSERVATION,
-    )
-    from ehc_sn.figures.selectors.mazehard import (
-        MAZEHARD_META_KEY_GT_OVERLAY,
-        MAZEHARD_META_KEY_INPUT_IDS,
-        MAZEHARD_TRACE_KEY_HALTED,
-        MAZEHARD_TRACE_KEY_PRED_OVERLAY,
-    )
-    from ehc_sn.figures.selectors.mec import (
-        MEC_META_KEY_ENVIRONMENTS,
-        MEC_TRACE_KEY_CELLS,
-        MEC_TRACE_KEY_LOCATION_IDS,
-    )
     from ehc_sn.figures.templates import (
         arena_prediction_overlay,
         arena_task_layout,
@@ -65,6 +28,30 @@ def register_builtin_figures() -> None:
         mec_grid_metrics,
         pfc_latent_dynamics,
         q_value_evolution,
+    )
+    from ehc_sn.traces.keys import (
+        ARENA_TRACE_KEY_OBSERVATION_IDS,
+        ARENA_TRACE_KEY_REVISIT_MASK,
+        ARENA_TRACE_KEY_TRAJECTORY_LOCATIONS,
+        ARENA_TRACE_KEY_WALL_MASK,
+        HPC_TRACE_KEY_CELLS,
+        HPC_TRACE_KEY_MEMORY,
+        LEC_META_KEY_ALPHA,
+        LEC_META_KEY_WF,
+        LEC_TRACE_KEY_CELLS,
+        LEC_TRACE_KEY_FILTERED,
+        MAZEHARD_META_KEY_GT_OVERLAY,
+        MAZEHARD_META_KEY_INPUT_IDS,
+        MAZEHARD_TRACE_KEY_HALTED,
+        MAZEHARD_TRACE_KEY_PRED_OVERLAY,
+        MEC_TRACE_KEY_CELLS,
+        META_KEY_ENVIRONMENTS,
+        TEM_META_KEY_TARGET_OBS_ID,
+        TEM_TRACE_KEY_PRED_ANCESTRAL,
+        TEM_TRACE_KEY_PRED_INFERENCE,
+        TEM_TRACE_KEY_PRED_RETRIEVED,
+        WORLD_TRACE_KEY_LOCATION_IDS,
+        WORLD_TRACE_KEY_OBSERVATION,
     )
 
     if not REGISTRY.has("mazehard_solution_overlay"):
@@ -288,7 +275,7 @@ def register_builtin_figures() -> None:
                 allowed_surfaces={"report", "diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"lec", "ehc", "report"},
-                trace_keys={LEC_TRACE_KEY_OBSERVATION, LEC_TRACE_KEY_CELLS},
+                trace_keys={WORLD_TRACE_KEY_OBSERVATION, LEC_TRACE_KEY_CELLS},
                 meta_keys={LEC_META_KEY_ALPHA, LEC_META_KEY_WF},
             )
         )
@@ -308,8 +295,8 @@ def register_builtin_figures() -> None:
                 allowed_surfaces={"report"},
                 input_contract="evaluation_artifact",
                 tags={"mec", "ehc", "report"},
-                trace_keys={MEC_TRACE_KEY_LOCATION_IDS, MEC_TRACE_KEY_CELLS},
-                meta_keys={MEC_META_KEY_ENVIRONMENTS},
+                trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, MEC_TRACE_KEY_CELLS},
+                meta_keys={META_KEY_ENVIRONMENTS},
             )
         )
 
@@ -328,8 +315,8 @@ def register_builtin_figures() -> None:
                 allowed_surfaces={"report", "diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"mec", "ehc", "report"},
-                trace_keys={MEC_TRACE_KEY_LOCATION_IDS, MEC_TRACE_KEY_CELLS},
-                meta_keys={MEC_META_KEY_ENVIRONMENTS},
+                trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, MEC_TRACE_KEY_CELLS},
+                meta_keys={META_KEY_ENVIRONMENTS},
             )
         )
 
@@ -348,8 +335,8 @@ def register_builtin_figures() -> None:
                 allowed_surfaces={"report"},
                 input_contract="evaluation_artifact",
                 tags={"hpc", "ehc", "report"},
-                trace_keys={HPC_TRACE_KEY_LOCATION_IDS, HPC_TRACE_KEY_CELLS},
-                meta_keys={HPC_META_KEY_ENVIRONMENTS},
+                trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, HPC_TRACE_KEY_CELLS},
+                meta_keys={META_KEY_ENVIRONMENTS},
             )
         )
 
@@ -368,8 +355,8 @@ def register_builtin_figures() -> None:
                 allowed_surfaces={"report", "diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"hpc", "ehc", "report"},
-                trace_keys={HPC_TRACE_KEY_LOCATION_IDS, HPC_TRACE_KEY_CELLS},
-                meta_keys={HPC_META_KEY_ENVIRONMENTS},
+                trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, HPC_TRACE_KEY_CELLS},
+                meta_keys={META_KEY_ENVIRONMENTS},
             )
         )
 
@@ -393,8 +380,8 @@ def register_builtin_figures() -> None:
                     LEC_TRACE_KEY_CELLS,
                     MEC_TRACE_KEY_CELLS,
                     HPC_TRACE_KEY_CELLS,
-                    LEC_TRACE_KEY_OBSERVATION,
-                    LEC_TRACE_KEY_LOCATION_IDS,
+                    WORLD_TRACE_KEY_OBSERVATION,
+                    WORLD_TRACE_KEY_LOCATION_IDS,
                 },
                 meta_keys={TEM_META_KEY_TARGET_OBS_ID},
             )

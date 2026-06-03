@@ -12,13 +12,13 @@ from numpy.typing import NDArray
 
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.grids import first_halt_index
+from ehc_sn.traces.keys import (
+    MAZEHARD_META_KEY_GT_OVERLAY,
+    MAZEHARD_META_KEY_INPUT_IDS,
+    MAZEHARD_TRACE_KEY_HALTED,
+    MAZEHARD_TRACE_KEY_PRED_OVERLAY,
+)
 from ehc_sn.traces.trace_tree import TraceTree
-
-# ── Canonical trace / meta path constants ────────────────────────────────────
-MAZEHARD_TRACE_KEY_HALTED = "act/halted"
-MAZEHARD_TRACE_KEY_PRED_OVERLAY = "pred/solution_overlay"
-MAZEHARD_META_KEY_INPUT_IDS = "input_ids"
-MAZEHARD_META_KEY_GT_OVERLAY = "target/solution_overlay"
 
 # Default cap on mazehard_solution_overlay items when ctx.max_items is not set.
 _DEFAULT_MAX_MAZES = 10

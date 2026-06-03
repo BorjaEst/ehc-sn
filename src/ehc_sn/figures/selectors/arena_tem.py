@@ -11,14 +11,14 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ehc_sn.figures.registry import FigureContext
+from ehc_sn.traces.keys import (
+    TEM_META_KEY_TARGET_OBS_ID,
+    TEM_TRACE_KEY_PRED_ANCESTRAL,
+    TEM_TRACE_KEY_PRED_INFERENCE,
+    TEM_TRACE_KEY_PRED_RETRIEVED,
+)
 from ehc_sn.traces.trace_tree import TraceTree
 from ehc_sn.utils import to_cpu
-
-# ── Canonical trace / meta path constants ────────────────────────────────────
-TEM_TRACE_KEY_PRED_INFERENCE = "pred/observation_id/inference"
-TEM_TRACE_KEY_PRED_RETRIEVED = "pred/observation_id/retrieved"
-TEM_TRACE_KEY_PRED_ANCESTRAL = "pred/observation_id/ancestral"
-TEM_META_KEY_TARGET_OBS_ID = "target/observation_id"
 
 # Default cap on mazehard_solution_overlay items when ctx.max_items is not set.
 _DEFAULT_MAX_SAMPLES = 10

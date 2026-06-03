@@ -25,18 +25,20 @@ from numpy.typing import NDArray
 
 from ehc_sn.figures._contracts import AnyWorld
 from ehc_sn.figures.registry import FigureContext
+from ehc_sn.traces.keys import (
+    ARENA_TRACE_KEY_ACTIONS,
+    ARENA_TRACE_KEY_OBSERVATION_IDS,
+    ARENA_TRACE_KEY_REVISIT_MASK,
+    ARENA_TRACE_KEY_TRAJECTORY_LOCATIONS,
+    ARENA_TRACE_KEY_VALID_MASK,
+    ARENA_TRACE_KEY_WALL_MASK,
+)
 from ehc_sn.traces.trace_tree import TraceTree
 
 # =============================================================================
 # Canonical trace key constants
 # =============================================================================
 
-ARENA_TRACE_KEY_WALL_MASK = "arena/wall_mask"
-ARENA_TRACE_KEY_OBSERVATION_IDS = "arena/observation_ids"
-ARENA_TRACE_KEY_TRAJECTORY_LOCATIONS = "arena/trajectory_locations"
-ARENA_TRACE_KEY_REVISIT_MASK = "arena/revisit_mask"
-TRACE_KEY_ACTIONS = "arena/actions"
-TRACE_KEY_VALID_MASK = "arena/valid_mask"
 
 _REQUIRED_KEYS: frozenset[str] = frozenset(
     {
@@ -144,12 +146,12 @@ def select_arena_task_overview(
     revisit_mask = np.asarray(trace.get(ARENA_TRACE_KEY_REVISIT_MASK))
 
     valid_mask: NDArray | None = None
-    if TRACE_KEY_VALID_MASK in trace.path_to_index:
-        valid_mask = np.asarray(trace.get(TRACE_KEY_VALID_MASK))
+    if ARENA_TRACE_KEY_VALID_MASK in trace.path_to_index:
+        valid_mask = np.asarray(trace.get(ARENA_TRACE_KEY_VALID_MASK))
 
     actions: NDArray | None = None
-    if TRACE_KEY_ACTIONS in trace.path_to_index:
-        actions = np.asarray(trace.get(TRACE_KEY_ACTIONS))
+    if ARENA_TRACE_KEY_ACTIONS in trace.path_to_index:
+        actions = np.asarray(trace.get(ARENA_TRACE_KEY_ACTIONS))
 
     world = _build_world_from_mask_and_obs(
         wall_mask,
