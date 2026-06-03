@@ -1,7 +1,7 @@
 schema_version = "ehc_sn.reporting.report_spec.v1"
 model_family = "tem-v2"
 eval_artifacts_root = "artifacts/evaluation/tem_v2"
-output_dir = "artifacts/reports/tem_v2/arena_n4"
+output_dir = "artifacts/reports/tem_v2/arena_n1"
 
 [checkpoint]
 path = "checkpoints/tem-v2/eval-weights-only.pt"
@@ -9,14 +9,18 @@ path = "checkpoints/tem-v2/eval-weights-only.pt"
 [[regimes]]
 task = "arena"
 regime_kind = "diagnostic"
-regime_ids = ["arena_n4"]
+regime_ids = ["arena_n1"]
 
 [figures]
 figures = [
     "arena_task_overview",
     "arena_prediction_overlay",
-    "mec_cells",
-    "hpc_cells",
+    "mec_grid_metrics",
+    "mec_autocorr_mosaic",
+    "hpc_place_metrics",
+    "hpc_rate_map_mosaic",
+    "lec_content_filtering_diagnostic",
+    "lec_content_structure_rsa",
 ]
 formats = ["png", "pdf"]
 
