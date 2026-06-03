@@ -1,4 +1,4 @@
-"""Arena TEM prediction-overlay figure template.
+"""Arena TEM prediction-mazehard_solution_overlay figure template.
 
 Ground-truth vs predicted observation IDs for N samples at the final rollout
 step.  Each sample shows a horizontal bar: GT on the left, then the three
@@ -31,12 +31,12 @@ _LABELS = ("GT", "Inference", "Retrieved", "Ancestral")
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
-    return TEMPredictionOverlayFigure(
+    return ArenaObservationOverlayFigure(
         select_tem_prediction_overlay(trace, ctx), ctx
     ).plot()
 
 
-class TEMPredictionOverlayFigure(BaseFigureTemplate):
+class ArenaObservationOverlayFigure(BaseFigureTemplate):
     HEIGHT_FRAC: float = 0.18
     MOSAIC = [["overlay_grid", "legend_panel"]]
     MOSAIC_KWARGS = {
@@ -180,6 +180,6 @@ class TEMPredictionOverlayFigure(BaseFigureTemplate):
 
 # =============================================================================
 __all__ = [
-    "TEMPredictionOverlayFigure",
+    "ArenaObservationOverlayFigure",
     "plot",
 ]

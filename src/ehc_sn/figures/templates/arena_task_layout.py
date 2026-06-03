@@ -52,13 +52,13 @@ def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
         Matplotlib ``Figure`` with three panels.
     """
     data = select_arena_task_overview(trace, ctx)
-    return ArenaTaskOverviewFigure(data, ctx).plot()
+    return ArenaTaskLayoutFigure(data, ctx).plot()
 
 
 # ── Figure template ─────────────────────────────────────────────────────────
 
 
-class ArenaTaskOverviewFigure(BaseFigureTemplate):
+class ArenaTaskLayoutFigure(BaseFigureTemplate):
     """Three-panel paradigm figure for the Arena evaluation task."""
 
     HEIGHT_FRAC: float = 0.22

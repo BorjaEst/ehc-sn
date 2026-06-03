@@ -47,6 +47,38 @@ def format_panel_title(letter: str, title: str) -> str:
     return f"{letter}. {title}"
 
 
+def set_panel_title(
+    ax: Axes,
+    label: str,
+    *,
+    x: float = 0.04,
+    y: float = 0.90,
+    fontsize: float = 9,
+) -> None:
+    """Place a panel label as an inset text box inside the axes.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        Axes to draw on.
+    label : str
+        Label text (e.g. ``"a. Content-state activations"``).
+    x : float
+        Normalised x position in axes coordinates.
+    y : float
+        Normalised y position in axes coordinates.
+    fontsize : float
+        Font size in points.
+    """
+    ax.text(
+        x, y, label,
+        ha="left", va="top", fontsize=fontsize,
+        transform=ax.transAxes,
+        bbox={"facecolor": "white", "alpha": 0.8,
+              "edgecolor": "none", "pad": 2.0},
+    )
+
+
 def add_panel_label(ax: Axes, label: str, fontsize: int = 12) -> None:
     """Add a visible panel letter to the top-left corner of an axes.
 

@@ -6,7 +6,7 @@ Renders a single sample's channels grouped into semantically coherent panels:
 - **Structure** — ``topology`` + ``regions``, ``landmarks``
 - **Perception** — ``topology`` + ``observations``, ``mask_valid``
 
-Panels whose overlay channels are all absent are omitted automatically.
+Panels whose mazehard_solution_overlay channels are all absent are omitted automatically.
 """
 
 from __future__ import annotations
@@ -49,7 +49,9 @@ def plot_processed_sample(
     np_channels = {k: _to_numpy(v) for k, v in channels.items()}
 
     if _CHANNEL_TOPOLOGY not in np_channels:
-        raise ValueError(f"channels must contain the mandatory '{_CHANNEL_TOPOLOGY}' channel")
+        raise ValueError(
+            f"channels must contain the mandatory '{_CHANNEL_TOPOLOGY}' channel"
+        )
 
     if ctx is None:
         ctx = FigureContext()
@@ -63,7 +65,9 @@ class ProcessedSampleFigure(BaseFigureTemplate):
     HEIGHT_FRAC: float = 0.22
     MOSAIC: list[list[str]] = [["navigation", "structure", "perception"]]
 
-    def __init__(self, channels: dict[str, np.ndarray], ctx: FigureContext) -> None:
+    def __init__(
+        self, channels: dict[str, np.ndarray], ctx: FigureContext
+    ) -> None:
         super().__init__(channels, ctx)
 
     @panel(order=0)
@@ -83,16 +87,22 @@ class ProcessedSampleFigure(BaseFigureTemplate):
         if _CHANNEL_REGIONS in self.data:
             _overlay_categorical(ax, self.data[_CHANNEL_REGIONS], cmap="Set3")
         if _CHANNEL_LANDMARKS in self.data:
-            _overlay_categorical(ax, self.data[_CHANNEL_LANDMARKS], cmap="Accent")
+            _overlay_categorical(
+                ax, self.data[_CHANNEL_LANDMARKS], cmap="Accent"
+            )
         ax.set_title("Structure", fontsize=6)
 
     @panel(order=2)
     def perception(self, ax: Axes) -> None:
         _plot_topology_base(ax, self.data[_CHANNEL_TOPOLOGY])
         if _CHANNEL_OBSERVATIONS in self.data:
-            _overlay_categorical(ax, self.data[_CHANNEL_OBSERVATIONS], cmap="tab20")
+            _overlay_categorical(
+                ax, self.data[_CHANNEL_OBSERVATIONS], cmap="tab20"
+            )
         if _CHANNEL_MASK_VALID in self.data:
-            _overlay_bool(ax, self.data[_CHANNEL_MASK_VALID], "#38a169", alpha=0.3)
+            _overlay_bool(
+                ax, self.data[_CHANNEL_MASK_VALID], "#38a169", alpha=0.3
+            )
         ax.set_title("Perception", fontsize=6)
 
 
@@ -104,14 +114,23 @@ def _to_numpy(v: Any) -> np.ndarray:
 
 def _plot_topology_base(ax: Axes, topology: np.ndarray) -> None:
     cmap = ListedColormap(["#1b1f24", "#f7f4ef"])
-    ax.imshow(topology.astype(float), cmap=cmap, vmin=0, vmax=1, origin="upper", interpolation="nearest")
+    ax.imshow(
+        topology.astype(float),
+        cmap=cmap,
+        vmin=0,
+        vmax=1,
+        origin="upper",
+        interpolation="nearest",
+    )
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():
         spine.set_visible(False)
 
 
-def _overlay_bool(ax: Axes, mask: np.ndarray, color: str, *, alpha: float = 0.7) -> None:
+def _overlay_bool(
+    ax: Axes, mask: np.ndarray, color: str, *, alpha: float = 0.7
+) -> None:
     from matplotlib.colors import to_rgba
 
     rgba = np.zeros((*mask.shape, 4))
@@ -120,11 +139,19 @@ def _overlay_bool(ax: Axes, mask: np.ndarray, color: str, *, alpha: float = 0.7)
     ax.imshow(rgba, origin="upper", interpolation="nearest")
 
 
-def _overlay_categorical(ax: Axes, arr: np.ndarray, *, cmap: str = "tab20", alpha: float = 0.7) -> None:
+def _overlay_categorical(
+    ax: Axes, arr: np.ndarray, *, cmap: str = "tab20", alpha: float = 0.7
+) -> None:
     masked = np.ma.masked_where(arr <= 0, arr)
-    ax.imshow(masked, cmap=cmap, origin="upper", interpolation="nearest", alpha=alpha)
+    ax.imshow(
+        masked, cmap=cmap, origin="upper", interpolation="nearest", alpha=alpha
+    )
 
 
-def _overlay_sequential(ax: Axes, arr: np.ndarray, *, cmap: str = "viridis", alpha: float = 0.6) -> None:
+def _overlay_sequential(
+    ax: Axes, arr: np.ndarray, *, cmap: str = "viridis", alpha: float = 0.6
+) -> None:
     masked = np.ma.masked_where(arr <= 0, arr)
-    ax.imshow(masked, cmap=cmap, origin="upper", interpolation="nearest", alpha=alpha)
+    ax.imshow(
+        masked, cmap=cmap, origin="upper", interpolation="nearest", alpha=alpha
+    )

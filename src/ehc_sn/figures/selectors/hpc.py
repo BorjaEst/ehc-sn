@@ -20,10 +20,10 @@ from ehc_sn.figures.selectors.spatial import (
 from ehc_sn.traces.trace_tree import TraceTree
 
 # ── Canonical trace / meta path constants ────────────────────────────────────
-TRACE_KEY_LOCATION_IDS = "world_step/location_ids"
-TRACE_KEY_HPC_CELLS = "diagnostic/hpc/location_mean"
-TRACE_KEY_HPC_MEMORY = "diagnostic/hpc/memory"
-META_KEY_ENVIRONMENTS = "environments"
+HPC_TRACE_KEY_LOCATION_IDS = "world_step/location_ids"
+HPC_TRACE_KEY_CELLS = "diagnostic/hpc/location_mean"
+HPC_TRACE_KEY_MEMORY = "diagnostic/hpc/memory"
+HPC_META_KEY_ENVIRONMENTS = "environments"
 
 
 @dataclass
@@ -101,9 +101,9 @@ def _compute_hpc_place_metrics(
     """
     env_idx = trace.validate_env_idx(ctx.env_idx)
     world = trace.get_world(env_idx)
-    location_ids = trace.get(TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    location_ids = trace.get(HPC_TRACE_KEY_LOCATION_IDS)[:, env_idx]
 
-    cells = trace.get(f"{TRACE_KEY_HPC_CELLS}/0")[:, env_idx, :]
+    cells = trace.get(f"{HPC_TRACE_KEY_CELLS}/0")[:, env_idx, :]
     n_cells = int(cells.shape[-1])
     cell_indices = np.arange(n_cells)
 
@@ -365,15 +365,15 @@ def select_hpc_rate_map_mosaic(
 def select_hpc_summary(
     trace: TraceTree, ctx: FigureContext
 ) -> HPCSummaryFigureData:
-    n_freq = trace.n_freq(TRACE_KEY_HPC_CELLS)
+    n_freq = trace.n_freq(HPC_TRACE_KEY_CELLS)
     env_idx = trace.validate_env_idx(ctx.env_idx)
     freq_idxs = [
-        trace.validate_freq_idx(TRACE_KEY_HPC_CELLS, f) for f in range(n_freq)
+        trace.validate_freq_idx(HPC_TRACE_KEY_CELLS, f) for f in range(n_freq)
     ]
     world = trace.get_world(env_idx)
-    location_ids = trace.get(TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    location_ids = trace.get(HPC_TRACE_KEY_LOCATION_IDS)[:, env_idx]
     cells = [
-        trace.get(f"{TRACE_KEY_HPC_CELLS}/{f}")[:, env_idx, :]
+        trace.get(f"{HPC_TRACE_KEY_CELLS}/{f}")[:, env_idx, :]
         for f in range(n_freq)
     ]
     rate_maps = [
@@ -385,8 +385,8 @@ def select_hpc_summary(
         )
         for c in cells
     ]
-    memory_g_cued = trace.get(f"{TRACE_KEY_HPC_MEMORY}/g_cued")[-1, env_idx]
-    memory_x_cued = trace.get(f"{TRACE_KEY_HPC_MEMORY}/x_cued")[-1, env_idx]
+    memory_g_cued = trace.get(f"{HPC_TRACE_KEY_MEMORY}/g_cued")[-1, env_idx]
+    memory_x_cued = trace.get(f"{HPC_TRACE_KEY_MEMORY}/x_cued")[-1, env_idx]
     return HPCSummaryFigureData(
         n_freq=n_freq,
         env_idx=env_idx,
@@ -402,10 +402,10 @@ def select_hpc_summary(
 
 def select_hpc_cell(trace: TraceTree, ctx: FigureContext) -> HPCCellFigureData:
     env_idx = trace.validate_env_idx(ctx.env_idx)
-    freq_idx = trace.validate_freq_idx(TRACE_KEY_HPC_CELLS, ctx.freq_idx)
+    freq_idx = trace.validate_freq_idx(HPC_TRACE_KEY_CELLS, ctx.freq_idx)
     world = trace.get_world(env_idx)
-    location_ids = trace.get(TRACE_KEY_LOCATION_IDS)[:, env_idx]
-    cells = trace.get(f"{TRACE_KEY_HPC_CELLS}/{freq_idx}")[:, env_idx, :]
+    location_ids = trace.get(HPC_TRACE_KEY_LOCATION_IDS)[:, env_idx]
+    cells = trace.get(f"{HPC_TRACE_KEY_CELLS}/{freq_idx}")[:, env_idx, :]
     rate_maps = prepare_rate_maps(
         world,
         cells,

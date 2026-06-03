@@ -57,7 +57,7 @@ def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
 
     steps = np.arange(T)
     for i in range(n):
-        # Plot mean across actions for readability; overlay first action
+        # Plot mean across actions for readability; mazehard_solution_overlay first action
         ax.plot(
             steps,
             values[:, i, 0],

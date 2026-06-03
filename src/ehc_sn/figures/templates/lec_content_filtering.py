@@ -24,10 +24,18 @@ from ehc_sn.figures.core.base import BaseFigureTemplate
 from ehc_sn.figures.core.panels import colorbar, panel
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.selectors.lec import (
-    LECContentFilteringData,
+    LECContentFilteringFigureData,
     select_lec_content_filtering,
 )
-from ehc_sn.figures.utils.labels import format_panel_title
+from ehc_sn.figures.utils.colors import (
+    attach_aligned_colorbar_fmt,
+    colormap_with_nan_color,
+)
+from ehc_sn.figures.utils.labels import format_panel_title, set_panel_title
+from ehc_sn.figures.utils.scales import (
+    build_shared_minmax,
+    symmetric_diverging_limit,
+)
 from ehc_sn.traces.trace_tree import TraceTree
 
 
@@ -138,72 +146,9 @@ def _stack_bands(
     )
 
 
-def _robust_activation_limits(*arrays: np.ndarray) -> tuple[float, float]:
-    """Return robust shared limits for activation panels."""
-    vals = np.concatenate(
-        [np.asarray(a, dtype=float).ravel() for a in arrays if a.size > 0]
-    )
-    vals = vals[np.isfinite(vals)]
-    if vals.size == 0:
-        return 0.0, 1.0
-
-    lo = float(np.nanpercentile(vals, 1.0))
-    hi = float(np.nanpercentile(vals, 99.0))
-
-    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
-        lo = float(np.nanmin(vals))
-        hi = float(np.nanmax(vals))
-
-    if hi <= lo:
-        hi = lo + 1.0
-
-    # If activations are already sigmoid-like, keep the familiar scale.
-    if lo >= 0.0 and hi <= 1.0:
-        return 0.0, 1.0
-
-    return lo, hi
-
-
-def _symmetric_effect_limit(diff: np.ndarray) -> float:
-    vals = np.asarray(diff, dtype=float)
-    vals = vals[np.isfinite(vals)]
-    if vals.size == 0:
-        return 1.0
-    vmax = float(np.nanpercentile(np.abs(vals), 99.0))
-    return max(vmax, 1e-3)
-
-
-def _copy_cmap_with_bad(name: str):
-    """Return a colormap with NaN separator rows rendered as light gray."""
-    import matplotlib.pyplot as plt
-
-    cmap = plt.get_cmap(name).copy()
-    cmap.set_bad(color="0.92")
-    return cmap
-
-
 def _ytick_positions(boundaries: list[tuple[int, int]]) -> list[float]:
     """Return vertical center row for each band, to use as ytick positions."""
     return [(start + end) / 2.0 for start, end in boundaries]
-
-
-def _set_panel_title(ax: Axes, label: str) -> None:
-    """Place a panel label at the top-right corner inside the axes."""
-    ax.text(
-        0.040,
-        0.900,
-        label,
-        ha="left",
-        va="top",
-        fontsize=9,
-        transform=ax.transAxes,
-        bbox={
-            "facecolor": "white",
-            "alpha": 0.8,
-            "edgecolor": "none",
-            "pad": 2.0,
-        },
-    )
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
@@ -226,7 +171,7 @@ class LECContentFilteringFigure(BaseFigureTemplate):
     _CMAP_DIVERGING = "RdBu_r"
 
     def __init__(
-        self, data: LECContentFilteringData, ctx: FigureContext
+        self, data: LECContentFilteringFigureData, ctx: FigureContext
     ) -> None:
         super().__init__(data, ctx)
         self._gates_available = len(data.alpha) > 0 or len(data.w_f) > 0
@@ -249,16 +194,17 @@ class LECContentFilteringFigure(BaseFigureTemplate):
 
     @cached_property
     def _activation_limits(self) -> tuple[float, float]:
-        return _robust_activation_limits(
-            self._content.matrix,
-            self._filtered.matrix,
+        return build_shared_minmax(
+            [self._content.matrix, self._filtered.matrix],
+            percentile=(1.0, 99.0),
+            domain=(0.0, 1.0),
         )
 
     def _activation_cmap(self):
-        return _copy_cmap_with_bad(self._CMAP)
+        return colormap_with_nan_color(self._CMAP)
 
     def _effect_cmap(self):
-        return _copy_cmap_with_bad(self._CMAP_DIVERGING)
+        return colormap_with_nan_color(self._CMAP_DIVERGING)
 
     @staticmethod
     def _draw_band_separators(
@@ -294,25 +240,6 @@ class LECContentFilteringFigure(BaseFigureTemplate):
             },
         )
 
-    @staticmethod
-    def _align_effect_colorbar_ticks(ax: Axes, im: Axes, vmax: float) -> None:
-        """Configure effect-panel colorbar tick labels with aligned decimals.
-
-        The diverging colormap colorbar may show labels like ``-0.5``,
-        ``0.0``, ``0.5`` where the minus sign on the negative label
-        shifts the decimal point.  This hook forces all tick labels to
-        the same number of decimal places via ``FormatStrFormatter`` so
-        the decimal column is visually aligned.
-
-        The formatter is stored on the ScalarMappable so that
-        ``_apply_colorbars`` can retrieve it when creating the colorbar.
-        """
-        import matplotlib.ticker as ticker
-
-        ndp = max(1, -int(np.floor(np.log10(vmax))) + 1)
-        ndp = min(ndp, 3)
-        im._tem_cbar_fmt = ticker.FormatStrFormatter(f"% .{ndp}f")
-
     def _apply_colorbars(self, colorbar_groups):
         """Override base-class colorbar application with tick formatting.
 
@@ -342,7 +269,7 @@ class LECContentFilteringFigure(BaseFigureTemplate):
     @colorbar(group="activation", label="Activation")
     @panel()
     def content(self, ax: Axes) -> None:
-        _set_panel_title(
+        set_panel_title(
             ax, format_panel_title("a", "Content-state activations")
         )
 
@@ -373,7 +300,7 @@ class LECContentFilteringFigure(BaseFigureTemplate):
     @colorbar(group="activation", label="Activation")
     @panel()
     def filtered(self, ax: Axes) -> None:
-        _set_panel_title(
+        set_panel_title(
             ax, format_panel_title("b", "Filtered-state activations")
         )
 
@@ -403,7 +330,7 @@ class LECContentFilteringFigure(BaseFigureTemplate):
     @colorbar(group="effect", label="Filtered")
     @panel()
     def effect(self, ax: Axes) -> None:
-        _set_panel_title(ax, format_panel_title("c", "Filter effect"))
+        set_panel_title(ax, format_panel_title("c", "Filter effect"))
 
         content = self._content.matrix
         filtered = self._filtered.matrix
@@ -416,7 +343,7 @@ class LECContentFilteringFigure(BaseFigureTemplate):
             )
 
         diff = filtered - content
-        vmax = _symmetric_effect_limit(diff)
+        vmax = symmetric_diverging_limit(diff)
 
         im = ax.imshow(
             np.ma.masked_invalid(diff),
@@ -440,6 +367,4 @@ class LECContentFilteringFigure(BaseFigureTemplate):
         ax.margins(x=0, y=0)
 
         # -- Align colorbar tick decimals --------------------------------------
-        # Ensure tick labels have matching decimal places so the decimal point
-        # appears vertically aligned regardless of negative-sign width.
-        self._align_effect_colorbar_ticks(ax, im, vmax)
+        attach_aligned_colorbar_fmt(im, vmax)

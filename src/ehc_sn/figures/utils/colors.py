@@ -11,6 +11,24 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 
 
 # =============================================================================
+def colormap_with_nan_color(name: str, nan_color: str = "0.92"):
+    """Return a copy of a named matplotlib colormap with NaN colour set.
+
+    Args:
+        name: Matplotlib colormap name (e.g. ``"GnBu"``).
+        nan_color: Colour string for NaN/bad values.
+
+    Returns:
+        Copy of the colormap with ``set_bad(nan_color)`` applied.
+    """
+    import matplotlib.pyplot as plt
+
+    cmap = plt.get_cmap(name).copy()
+    cmap.set_bad(color=nan_color)
+    return cmap
+
+
+# =============================================================================
 def maze_cmap() -> ListedColormap:
     """Return the base colormap for MazeHard grids."""
     return ListedColormap(
@@ -26,6 +44,25 @@ def maze_cmap() -> ListedColormap:
 
 
 # =============================================================================
+def attach_aligned_colorbar_fmt(mappable, vmax: float) -> None:
+    """Store a ``FormatStrFormatter`` on a ScalarMappable for aligned colourbar ticks.
+
+    The formatter uses space-padded positive values (``% .{ndp}f``) so that
+    decimal points align vertically regardless of minus signs.  The stored
+    ``_tem_cbar_fmt`` attribute is read by custom ``_apply_colorbars``
+    overrides.
+
+    Args:
+        mappable: The ScalarMappable (returned by ``imshow``) to attach to.
+        vmax: Symmetric vmax value; determines decimal places.
+    """
+    import matplotlib.ticker as ticker
+
+    ndp = max(1, -int(np.floor(np.log10(vmax))) + 1)
+    ndp = min(ndp, 3)
+    mappable._tem_cbar_fmt = ticker.FormatStrFormatter(f"% .{ndp}f")
+
+
 def observation_id_colormap(
     n_obs: int,
 ) -> tuple[ListedColormap, BoundaryNorm]:

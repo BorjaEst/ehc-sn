@@ -1,4 +1,4 @@
-"""Selectors for Arena TEM prediction-overlay figures.
+"""Selectors for Arena TEM prediction-mazehard_solution_overlay figures.
 
 Reads ``target/observation_id`` from trace metadata — no adapter imports.
 """
@@ -15,19 +15,19 @@ from ehc_sn.traces.trace_tree import TraceTree
 from ehc_sn.utils import to_cpu
 
 # ── Canonical trace / meta path constants ────────────────────────────────────
-TRACE_KEY_PRED_INFERENCE = "pred/observation_id/inference"
-TRACE_KEY_PRED_RETRIEVED = "pred/observation_id/retrieved"
-TRACE_KEY_PRED_ANCESTRAL = "pred/observation_id/ancestral"
-META_KEY_TARGET_OBS_ID = "target/observation_id"
+TEM_TRACE_KEY_PRED_INFERENCE = "pred/observation_id/inference"
+TEM_TRACE_KEY_PRED_RETRIEVED = "pred/observation_id/retrieved"
+TEM_TRACE_KEY_PRED_ANCESTRAL = "pred/observation_id/ancestral"
+TEM_META_KEY_TARGET_OBS_ID = "target/observation_id"
 
-# Default cap on overlay items when ctx.max_items is not set.
+# Default cap on mazehard_solution_overlay items when ctx.max_items is not set.
 _DEFAULT_MAX_SAMPLES = 10
 
 
 # =============================================================================
 @dataclass
 class TEMOverlayData:
-    """Prepared data for the per-step argmax prediction overlay figure.
+    """Prepared data for the per-step argmax prediction mazehard_solution_overlay figure.
 
     All fields have shape ``(n_cases, T)`` where *T* is the aligned sequence
     length (min of trace steps and GT steps).
@@ -43,7 +43,7 @@ class TEMOverlayData:
 def select_tem_prediction_overlay(
     trace: TraceTree, ctx: FigureContext
 ) -> TEMOverlayData:
-    """Extract per-step argmax prediction-overlay data from the trace.
+    """Extract per-step argmax prediction-mazehard_solution_overlay data from the trace.
 
     Selects N samples (bounded by ``ctx.max_items``) and reads per-step
     predictions for all three pathways (inference, retrieved, ancestral),
@@ -61,22 +61,22 @@ def select_tem_prediction_overlay(
         ValueError: If any prediction key has unexpected dimensionality.
     """
     # Ground-truth trajectory from metadata: (B, T_max) int.
-    gt_raw = np.asarray(to_cpu(trace.get_meta_path(META_KEY_TARGET_OBS_ID)))
+    gt_raw = np.asarray(to_cpu(trace.get_meta_path(TEM_META_KEY_TARGET_OBS_ID)))
     if gt_raw.ndim != 2:
         raise ValueError(
-            f"{META_KEY_TARGET_OBS_ID} must have shape (B, T_max), "
+            f"{TEM_META_KEY_TARGET_OBS_ID} must have shape (B, T_max), "
             f"got ndim={gt_raw.ndim}"
         )
 
     # Predictions from trace: (T, B) int each.
-    pred_inf = np.asarray(to_cpu(trace.get(TRACE_KEY_PRED_INFERENCE)))
-    pred_ret = np.asarray(to_cpu(trace.get(TRACE_KEY_PRED_RETRIEVED)))
-    pred_anc = np.asarray(to_cpu(trace.get(TRACE_KEY_PRED_ANCESTRAL)))
+    pred_inf = np.asarray(to_cpu(trace.get(TEM_TRACE_KEY_PRED_INFERENCE)))
+    pred_ret = np.asarray(to_cpu(trace.get(TEM_TRACE_KEY_PRED_RETRIEVED)))
+    pred_anc = np.asarray(to_cpu(trace.get(TEM_TRACE_KEY_PRED_ANCESTRAL)))
 
     for name, arr in [
-        (TRACE_KEY_PRED_INFERENCE, pred_inf),
-        (TRACE_KEY_PRED_RETRIEVED, pred_ret),
-        (TRACE_KEY_PRED_ANCESTRAL, pred_anc),
+        (TEM_TRACE_KEY_PRED_INFERENCE, pred_inf),
+        (TEM_TRACE_KEY_PRED_RETRIEVED, pred_ret),
+        (TEM_TRACE_KEY_PRED_ANCESTRAL, pred_anc),
     ]:
         if arr.ndim != 2:
             raise ValueError(
@@ -117,9 +117,9 @@ def select_tem_prediction_overlay(
 # =============================================================================
 __all__ = [
     "TEMOverlayData",
-    "TRACE_KEY_PRED_INFERENCE",
-    "TRACE_KEY_PRED_RETRIEVED",
-    "TRACE_KEY_PRED_ANCESTRAL",
-    "META_KEY_TARGET_OBS_ID",
+    "TEM_TRACE_KEY_PRED_INFERENCE",
+    "TEM_TRACE_KEY_PRED_RETRIEVED",
+    "TEM_TRACE_KEY_PRED_ANCESTRAL",
+    "TEM_META_KEY_TARGET_OBS_ID",
     "select_tem_prediction_overlay",
 ]

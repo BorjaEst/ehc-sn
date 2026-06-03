@@ -22,10 +22,9 @@ class MazeHardEHCAdapterSettings(BaseModel, extra="forbid"):
     vocab_size: int = Field(
         default=DEFAULT_MAZE_HARD_EHC_VOCAB_SIZE,
         ge=1,
-        description=(
-            "MazeHard token vocabulary size used by encoder and decoder heads. "
-            "Defaults to the canonical vocabulary including the solution-overlay token."
-        ),
+        description="MazeHard token vocabulary size used by encoder and "
+        "decoder heads. Defaults to the canonical vocabulary including the "
+        "solution overlay token.",
     )
 
 

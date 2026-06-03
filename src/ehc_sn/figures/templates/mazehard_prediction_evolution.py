@@ -9,22 +9,32 @@ from ehc_sn.figures.core.base import BaseFigureTemplate
 from ehc_sn.figures.core.panels import panel
 from ehc_sn.figures.plots.mazehard import plot_maze_with_overlay
 from ehc_sn.figures.registry import FigureContext
-from ehc_sn.figures.selectors.mazehard import EvolutionFigureData, select_evolution
+from ehc_sn.figures.selectors.mazehard import (
+    MazehardPredictionEvolutionFigureData,
+    select_evolution,
+)
 from ehc_sn.figures.utils.axes import subdivide_axes
 from ehc_sn.figures.utils.grids import reshape_grid
 from ehc_sn.traces.trace_tree import TraceTree
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
-    return PredictionEvolutionFigure(select_evolution(trace, ctx), ctx).plot()
+    return MazehardPredictionEvolutionFigure(
+        select_evolution(trace, ctx), ctx
+    ).plot()
 
 
-class PredictionEvolutionFigure(BaseFigureTemplate):
+class MazehardPredictionEvolutionFigure(BaseFigureTemplate):
     HEIGHT_FRAC: float = 0.20
-    MOSAIC = [["label", "evolution"]]
-    MOSAIC_KWARGS = {"width_ratios": [1.0, 5.0], "gridspec_kw": {"wspace": 0.05}}
+    MOSAIC = [["label", "mazehard_prediction_evolution"]]
+    MOSAIC_KWARGS = {
+        "width_ratios": [1.0, 5.0],
+        "gridspec_kw": {"wspace": 0.05},
+    }
 
-    def __init__(self, data: EvolutionFigureData, ctx: FigureContext) -> None:
+    def __init__(
+        self, data: MazehardPredictionEvolutionFigureData, ctx: FigureContext
+    ) -> None:
         super().__init__(data, ctx)
 
     @panel()
@@ -38,8 +48,12 @@ class PredictionEvolutionFigure(BaseFigureTemplate):
         axs = subdivide_axes(ax, nrows=2, ncols=8, wspace=0.02)
         input_grid = reshape_grid(self.data.input_ids[self.data.sample_idx])
         for ax_i, t in zip(axs.ravel(), self.data.t_indices):
-            overlay = reshape_grid(self.data.pred_is_o[t, self.data.sample_idx])
+            mazehard_solution_overlay = reshape_grid(
+                self.data.pred_is_o[t, self.data.sample_idx]
+            )
             title = f"t={t}" + (" (halt)" if t == self.data.t_halt else "")
-            plot_maze_with_overlay(ax_i, input_grid, overlay, title=title)
-        for ax_i in axs.ravel()[len(self.data.t_indices):]:
+            plot_maze_with_overlay(
+                ax_i, input_grid, mazehard_solution_overlay, title=title
+            )
+        for ax_i in axs.ravel()[len(self.data.t_indices) :]:
             ax_i.axis("off")

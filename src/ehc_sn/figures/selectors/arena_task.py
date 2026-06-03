@@ -1,4 +1,4 @@
-"""Selector for the ``arena_task_overview`` figure.
+"""Selector for the ``arena_task_layout`` figure.
 
 Reads ``arena/*`` trace keys from a persisted eval artifact and produces a
 typed data object for the overview template.  The data includes the
@@ -31,19 +31,19 @@ from ehc_sn.traces.trace_tree import TraceTree
 # Canonical trace key constants
 # =============================================================================
 
-TRACE_KEY_WALL_MASK = "arena/wall_mask"
-TRACE_KEY_OBSERVATION_IDS = "arena/observation_ids"
-TRACE_KEY_TRAJECTORY_LOCATIONS = "arena/trajectory_locations"
-TRACE_KEY_REVISIT_MASK = "arena/revisit_mask"
+ARENA_TRACE_KEY_WALL_MASK = "arena/wall_mask"
+ARENA_TRACE_KEY_OBSERVATION_IDS = "arena/observation_ids"
+ARENA_TRACE_KEY_TRAJECTORY_LOCATIONS = "arena/trajectory_locations"
+ARENA_TRACE_KEY_REVISIT_MASK = "arena/revisit_mask"
 TRACE_KEY_ACTIONS = "arena/actions"
 TRACE_KEY_VALID_MASK = "arena/valid_mask"
 
 _REQUIRED_KEYS: frozenset[str] = frozenset(
     {
-        TRACE_KEY_WALL_MASK,
-        TRACE_KEY_OBSERVATION_IDS,
-        TRACE_KEY_TRAJECTORY_LOCATIONS,
-        TRACE_KEY_REVISIT_MASK,
+        ARENA_TRACE_KEY_WALL_MASK,
+        ARENA_TRACE_KEY_OBSERVATION_IDS,
+        ARENA_TRACE_KEY_TRAJECTORY_LOCATIONS,
+        ARENA_TRACE_KEY_REVISIT_MASK,
     }
 )
 
@@ -51,7 +51,7 @@ _REQUIRED_KEYS: frozenset[str] = frozenset(
 # =============================================================================
 @dataclass
 class ArenaTaskOverviewData:
-    """Prepared data for the ``arena_task_overview`` figure template.
+    """Prepared data for the ``arena_task_layout`` figure template.
 
     Attributes:
         wall_mask: ``(H, W)`` bool — True for passable cells.
@@ -136,10 +136,12 @@ def select_arena_task_overview(
                 f"Available keys: {sorted(trace.path_strs)}"
             )
 
-    wall_mask = np.asarray(trace.get(TRACE_KEY_WALL_MASK))
-    observation_ids = np.asarray(trace.get(TRACE_KEY_OBSERVATION_IDS))
-    trajectory_locations = np.asarray(trace.get(TRACE_KEY_TRAJECTORY_LOCATIONS))
-    revisit_mask = np.asarray(trace.get(TRACE_KEY_REVISIT_MASK))
+    wall_mask = np.asarray(trace.get(ARENA_TRACE_KEY_WALL_MASK))
+    observation_ids = np.asarray(trace.get(ARENA_TRACE_KEY_OBSERVATION_IDS))
+    trajectory_locations = np.asarray(
+        trace.get(ARENA_TRACE_KEY_TRAJECTORY_LOCATIONS)
+    )
+    revisit_mask = np.asarray(trace.get(ARENA_TRACE_KEY_REVISIT_MASK))
 
     valid_mask: NDArray | None = None
     if TRACE_KEY_VALID_MASK in trace.path_to_index:

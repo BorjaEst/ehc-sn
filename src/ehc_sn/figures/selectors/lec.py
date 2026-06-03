@@ -39,20 +39,20 @@ from ehc_sn.analysis.tem_representations import (
 )
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.selectors.arena_tem import (
-    META_KEY_TARGET_OBS_ID,
+    TEM_META_KEY_TARGET_OBS_ID,
 )
 from ehc_sn.traces.trace_tree import TraceTree
 from ehc_sn.utils import to_cpu
 
 # ── Canonical trace / meta path constants ────────────────────────────────────
-TRACE_KEY_OBSERVATION = "world_step/observation"
-TRACE_KEY_LEC_CELLS = "diagnostic/lec/cells"
-TRACE_KEY_LEC_FILTERED = "diagnostic/lec/filtered"
-TRACE_KEY_LOCATION_IDS = "world_step/location_ids"
-TRACE_KEY_MEC_CELLS = "diagnostic/mec/location_mean"
-TRACE_KEY_HPC_CELLS = "diagnostic/hpc/location_mean"
-META_KEY_LEC_ALPHA = "lec/filter/alpha_sigmoid"
-META_KEY_LEC_WF = "lec/w_f_sigmoid"
+LEC_TRACE_KEY_OBSERVATION = "world_step/observation"
+LEC_TRACE_KEY_CELLS = "diagnostic/lec/cells"
+LEC_TRACE_KEY_FILTERED = "diagnostic/lec/filtered"
+LEC_TRACE_KEY_LOCATION_IDS = "world_step/location_ids"
+LEC_TRACE_KEY_CELLS = "diagnostic/mec/location_mean"
+LEC_TRACE_KEY_CELLS = "diagnostic/hpc/location_mean"
+LEC_META_KEY_ALPHA = "lec/filter/alpha_sigmoid"
+LEC_META_KEY_WF = "lec/w_f_sigmoid"
 
 
 # =============================================================================
@@ -93,29 +93,31 @@ def _get_observation_ids(trace: TraceTree, env_idx: int) -> NDArray:
     to world_step/observation trace (per-step).
     """
     try:
-        gt_raw = np.asarray(to_cpu(trace.get_meta_path(META_KEY_TARGET_OBS_ID)))
+        gt_raw = np.asarray(
+            to_cpu(trace.get_meta_path(TEM_META_KEY_TARGET_OBS_ID))
+        )
         # Shape: (B, T_max) -> select batch 0.
         if gt_raw.ndim == 2:
             return gt_raw[0]
     except (KeyError, FileNotFoundError):
         pass
     # Fallback: per-step trace.
-    obs = trace.get(TRACE_KEY_OBSERVATION)
+    obs = trace.get(LEC_TRACE_KEY_OBSERVATION)
     if obs is not None:
         arr = np.asarray(to_cpu(obs))
         if arr.ndim >= 1:
             return arr[:, env_idx] if arr.ndim >= 2 else arr
     raise ValueError(
         "Could not resolve observation IDs from either "
-        f"{META_KEY_TARGET_OBS_ID} or {TRACE_KEY_OBSERVATION}"
+        f"{TEM_META_KEY_TARGET_OBS_ID} or {LEC_TRACE_KEY_OBSERVATION}"
     )
 
 
 def _get_location_ids(trace: TraceTree, env_idx: int) -> NDArray:
     """Return location IDs for one environment."""
-    loc = trace.get(TRACE_KEY_LOCATION_IDS)
+    loc = trace.get(LEC_TRACE_KEY_LOCATION_IDS)
     if loc is None:
-        raise ValueError(f"Trace key {TRACE_KEY_LOCATION_IDS} not found")
+        raise ValueError(f"Trace key {LEC_TRACE_KEY_LOCATION_IDS} not found")
     arr = np.asarray(to_cpu(loc))
     return arr[:, env_idx] if arr.ndim >= 2 else arr
 
@@ -154,17 +156,17 @@ def select_lec_activity_trajectory(
     LECActivityTrajectoryData
     """
     env_idx = trace.validate_env_idx(ctx.env_idx)
-    freq_idx = trace.validate_freq_idx(TRACE_KEY_LEC_CELLS, 0)
+    freq_idx = trace.validate_freq_idx(LEC_TRACE_KEY_CELLS, 0)
     obs_ids = _get_observation_ids(trace, env_idx)
     location_ids = _get_location_ids(trace, env_idx)
     cells = np.asarray(
-        to_cpu(trace.get(f"{TRACE_KEY_LEC_CELLS}/{freq_idx}")[:, env_idx, :])
+        to_cpu(trace.get(f"{LEC_TRACE_KEY_CELLS}/{freq_idx}")[:, env_idx, :])
     )
     # Try filtered; silently return None if missing.
     try:
         filtered = np.asarray(
             to_cpu(
-                trace.get(f"{TRACE_KEY_LEC_FILTERED}/{freq_idx}")[:, env_idx, :]
+                trace.get(f"{LEC_TRACE_KEY_FILTERED}/{freq_idx}")[:, env_idx, :]
             )
         )
     except (KeyError, FileNotFoundError):
@@ -214,10 +216,10 @@ def select_lec_observation_tuning(
     LECObservationTuningData
     """
     env_idx = trace.validate_env_idx(ctx.env_idx)
-    freq_idx = trace.validate_freq_idx(TRACE_KEY_LEC_CELLS, 0)
+    freq_idx = trace.validate_freq_idx(LEC_TRACE_KEY_CELLS, 0)
     obs_ids = _get_observation_ids(trace, env_idx)
     cells = np.asarray(
-        to_cpu(trace.get(f"{TRACE_KEY_LEC_CELLS}/{freq_idx}")[:, env_idx, :])
+        to_cpu(trace.get(f"{LEC_TRACE_KEY_CELLS}/{freq_idx}")[:, env_idx, :])
     )
     trace_min, trace_max = int(obs_ids.min()), int(obs_ids.max())
     n_obs = trace_max - trace_min + 1
@@ -271,21 +273,21 @@ def select_lec_content_structure_rsa(
     location_ids = _get_location_ids(trace, env_idx)
 
     # --- LEC ---
-    freq_0 = trace.validate_freq_idx(TRACE_KEY_LEC_CELLS, 0)
+    freq_0 = trace.validate_freq_idx(LEC_TRACE_KEY_CELLS, 0)
     lec_act = np.asarray(
-        to_cpu(trace.get(f"{TRACE_KEY_LEC_CELLS}/{freq_0}")[:, env_idx, :])
+        to_cpu(trace.get(f"{LEC_TRACE_KEY_CELLS}/{freq_0}")[:, env_idx, :])
     )
 
     # --- MEC ---
-    mec_freq_0 = trace.validate_freq_idx(TRACE_KEY_MEC_CELLS, 0)
+    mec_freq_0 = trace.validate_freq_idx(LEC_TRACE_KEY_CELLS, 0)
     mec_act = np.asarray(
-        to_cpu(trace.get(f"{TRACE_KEY_MEC_CELLS}/{mec_freq_0}")[:, env_idx, :])
+        to_cpu(trace.get(f"{LEC_TRACE_KEY_CELLS}/{mec_freq_0}")[:, env_idx, :])
     )
 
     # --- HPC ---
-    hpc_freq_0 = trace.validate_freq_idx(TRACE_KEY_HPC_CELLS, 0)
+    hpc_freq_0 = trace.validate_freq_idx(LEC_TRACE_KEY_CELLS, 0)
     hpc_act = np.asarray(
-        to_cpu(trace.get(f"{TRACE_KEY_HPC_CELLS}/{hpc_freq_0}")[:, env_idx, :])
+        to_cpu(trace.get(f"{LEC_TRACE_KEY_CELLS}/{hpc_freq_0}")[:, env_idx, :])
     )
 
     return compute_content_structure_rsa(
@@ -299,7 +301,7 @@ def select_lec_content_structure_rsa(
 
 
 @dataclass
-class LECContentFilteringData:
+class LECContentFilteringFigureData:
     """Prepared data for the LEC content filtering diagnostic figure."""
 
     env_idx: int
@@ -313,7 +315,7 @@ class LECContentFilteringData:
 
 def select_lec_content_filtering(
     trace: TraceTree, ctx: FigureContext
-) -> LECContentFilteringData:
+) -> LECContentFilteringFigureData:
     """Extract per-frequency LEC content-state and filtered-state data.
 
     Parameters
@@ -326,12 +328,12 @@ def select_lec_content_filtering(
 
     Returns
     -------
-    LECContentFilteringData
+    LECContentFilteringFigureData
     """
-    n_freq = trace.n_freq(TRACE_KEY_LEC_CELLS)
+    n_freq = trace.n_freq(LEC_TRACE_KEY_CELLS)
     env_idx = trace.validate_env_idx(ctx.env_idx)
     freq_idxs = [
-        trace.validate_freq_idx(TRACE_KEY_LEC_CELLS, f) for f in range(n_freq)
+        trace.validate_freq_idx(LEC_TRACE_KEY_CELLS, f) for f in range(n_freq)
     ]
 
     cells_by_freq = []
@@ -339,14 +341,14 @@ def select_lec_content_filtering(
     for f in freq_idxs:
         cells_by_freq.append(
             np.asarray(
-                to_cpu(trace.get(f"{TRACE_KEY_LEC_CELLS}/{f}")[:, env_idx, :])
+                to_cpu(trace.get(f"{LEC_TRACE_KEY_CELLS}/{f}")[:, env_idx, :])
             )
         )
         try:
             filtered_by_freq.append(
                 np.asarray(
                     to_cpu(
-                        trace.get(f"{TRACE_KEY_LEC_FILTERED}/{f}")[
+                        trace.get(f"{LEC_TRACE_KEY_FILTERED}/{f}")[
                             :, env_idx, :
                         ]
                     )
@@ -355,10 +357,10 @@ def select_lec_content_filtering(
         except (KeyError, FileNotFoundError):
             filtered_by_freq.append(np.empty((0, 0), dtype=float))
 
-    alpha = _require_param_vector(trace, META_KEY_LEC_ALPHA)
-    w_f = _require_param_vector(trace, META_KEY_LEC_WF)
+    alpha = _require_param_vector(trace, LEC_META_KEY_ALPHA)
+    w_f = _require_param_vector(trace, LEC_META_KEY_WF)
 
-    return LECContentFilteringData(
+    return LECContentFilteringFigureData(
         env_idx=env_idx,
         n_freq=n_freq,
         freq_idxs=freq_idxs,
@@ -399,20 +401,20 @@ class LECPipelineFigureData:
 def select_lec_summary(
     trace: TraceTree, ctx: FigureContext
 ) -> LECSummaryFigureData:
-    n_freq = trace.n_freq(TRACE_KEY_LEC_CELLS)
+    n_freq = trace.n_freq(LEC_TRACE_KEY_CELLS)
     env_idx = trace.validate_env_idx(ctx.env_idx)
     freq_idxs = [
-        trace.validate_freq_idx(TRACE_KEY_LEC_CELLS, f) for f in range(n_freq)
+        trace.validate_freq_idx(LEC_TRACE_KEY_CELLS, f) for f in range(n_freq)
     ]
-    obs_values = trace.get(TRACE_KEY_OBSERVATION)[:, env_idx]
+    obs_values = trace.get(LEC_TRACE_KEY_OBSERVATION)[:, env_idx]
     cells = [
-        trace.get(f"{TRACE_KEY_LEC_CELLS}/{f}")[:, env_idx, :]
+        trace.get(f"{LEC_TRACE_KEY_CELLS}/{f}")[:, env_idx, :]
         for f in range(n_freq)
     ]
     mean_activity = np.asarray([float(np.mean(c)) for c in cells])
     peak_activity = np.asarray([float(np.max(c)) for c in cells])
-    alpha = _require_param_vector(trace, META_KEY_LEC_ALPHA)
-    w_f = _require_param_vector(trace, META_KEY_LEC_WF)
+    alpha = _require_param_vector(trace, LEC_META_KEY_ALPHA)
+    w_f = _require_param_vector(trace, LEC_META_KEY_WF)
     return LECSummaryFigureData(
         n_freq=n_freq,
         env_idx=env_idx,
@@ -430,15 +432,15 @@ def select_lec_pipeline(
     trace: TraceTree, ctx: FigureContext
 ) -> LECPipelineFigureData:
     env_idx = trace.validate_env_idx(ctx.env_idx)
-    freq_idx = trace.validate_freq_idx(TRACE_KEY_LEC_CELLS, ctx.freq_idx)
+    freq_idx = trace.validate_freq_idx(LEC_TRACE_KEY_CELLS, ctx.freq_idx)
     return LECPipelineFigureData(
         env_idx=env_idx,
         freq_idx=freq_idx,
-        observations=trace.get(TRACE_KEY_OBSERVATION)[:, env_idx],
-        cell_series=trace.get(f"{TRACE_KEY_LEC_CELLS}/{freq_idx}")[
+        observations=trace.get(LEC_TRACE_KEY_OBSERVATION)[:, env_idx],
+        cell_series=trace.get(f"{LEC_TRACE_KEY_CELLS}/{freq_idx}")[
             :, env_idx, :
         ],
-        filtered_series=trace.get(f"{TRACE_KEY_LEC_FILTERED}/{freq_idx}")[
+        filtered_series=trace.get(f"{LEC_TRACE_KEY_FILTERED}/{freq_idx}")[
             :, env_idx, :
         ],
     )

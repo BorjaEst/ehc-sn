@@ -15,12 +15,12 @@ from ehc_sn.figures.utils.grids import first_halt_index
 from ehc_sn.traces.trace_tree import TraceTree
 
 # ── Canonical trace / meta path constants ────────────────────────────────────
-TRACE_KEY_HALTED = "act/halted"
-TRACE_KEY_PRED_OVERLAY = "pred/solution_overlay"
-META_KEY_INPUT_IDS = "input_ids"
-META_KEY_GT_OVERLAY = "target/solution_overlay"
+MAZEHARD_TRACE_KEY_HALTED = "act/halted"
+MAZEHARD_TRACE_KEY_PRED_OVERLAY = "pred/solution_overlay"
+MAZEHARD_META_KEY_INPUT_IDS = "input_ids"
+MAZEHARD_META_KEY_GT_OVERLAY = "target/solution_overlay"
 
-# Default cap on overlay items when ctx.max_items is not set.
+# Default cap on mazehard_solution_overlay items when ctx.max_items is not set.
 _DEFAULT_MAX_MAZES = 10
 
 
@@ -30,8 +30,8 @@ def _to_cpu(value: object) -> object:
 
 
 @dataclass
-class OverlayFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.overlay.OverlayFigure`."""
+class MazehardSolutionOverlayFigureData:
+    """Prepared data for :class:`~ehc_sn.figures.templates.mazehard_solution_overlay.MazehardSolutionOverlayFigure`."""
 
     input_ids: NDArray  # (n, N)
     gt_overlays: NDArray  # (n, N) bool
@@ -39,8 +39,8 @@ class OverlayFigureData:
 
 
 @dataclass
-class EvolutionFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.evolution.PredictionEvolutionFigure`."""
+class MazehardPredictionEvolutionFigureData:
+    """Prepared data for :class:`~ehc_sn.figures.templates.mazehard_prediction_evolution.MazehardPredictionEvolutionFigure`."""
 
     input_ids: NDArray  # (B, N)
     gt_overlay: NDArray  # (N,) bool — single sample
@@ -51,17 +51,25 @@ class EvolutionFigureData:
     t_indices: list[int]
 
 
-def select_overlay(trace: TraceTree, ctx: FigureContext) -> OverlayFigureData:
-    """Extract overlay data from the trace, respecting ctx selection policy."""
-    input_ids = np.asarray(_to_cpu(trace.get_meta_path(META_KEY_INPUT_IDS)))
-    gt_raw = np.asarray(_to_cpu(trace.get_meta_path(META_KEY_GT_OVERLAY)))
-    halted = np.asarray(_to_cpu(trace.get(TRACE_KEY_HALTED)))
-    pred_is_o = np.asarray(_to_cpu(trace.get(TRACE_KEY_PRED_OVERLAY)))
+def select_overlay(
+    trace: TraceTree, ctx: FigureContext
+) -> MazehardSolutionOverlayFigureData:
+    """Extract mazehard_solution_overlay data from the trace, respecting ctx selection policy."""
+    input_ids = np.asarray(
+        _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_INPUT_IDS))
+    )
+    gt_raw = np.asarray(
+        _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_GT_OVERLAY))
+    )
+    halted = np.asarray(_to_cpu(trace.get(MAZEHARD_TRACE_KEY_HALTED)))
+    pred_is_o = np.asarray(_to_cpu(trace.get(MAZEHARD_TRACE_KEY_PRED_OVERLAY)))
 
     if halted.ndim != 2:
-        raise ValueError(f"{TRACE_KEY_HALTED} must have shape [T, B]")
+        raise ValueError(f"{MAZEHARD_TRACE_KEY_HALTED} must have shape [T, B]")
     if pred_is_o.ndim != 3:
-        raise ValueError(f"{TRACE_KEY_PRED_OVERLAY} must have shape [T, B, N]")
+        raise ValueError(
+            f"{MAZEHARD_TRACE_KEY_PRED_OVERLAY} must have shape [T, B, N]"
+        )
 
     batch_size = halted.shape[1]
     start = ctx.sample_idx
@@ -72,27 +80,39 @@ def select_overlay(trace: TraceTree, ctx: FigureContext) -> OverlayFigureData:
         start = 0
 
     end = start + n
-    model_overlays = np.stack([pred_is_o[first_halt_index(halted[:, b]), b] for b in range(start, end)], axis=0)
-    return OverlayFigureData(
+    model_overlays = np.stack(
+        [
+            pred_is_o[first_halt_index(halted[:, b]), b]
+            for b in range(start, end)
+        ],
+        axis=0,
+    )
+    return MazehardSolutionOverlayFigureData(
         input_ids=input_ids[start:end],
         gt_overlays=gt_raw[start:end].astype(bool),
         model_overlays=model_overlays,
     )
 
 
-def select_evolution(trace: TraceTree, ctx: FigureContext, k_max: int = 16) -> EvolutionFigureData:
+def select_evolution(
+    trace: TraceTree, ctx: FigureContext, k_max: int = 16
+) -> MazehardPredictionEvolutionFigureData:
     """Extract evolution data from the trace for the sample chosen by ctx."""
-    input_ids = np.asarray(_to_cpu(trace.get_meta_path(META_KEY_INPUT_IDS)))
-    gt_raw = np.asarray(_to_cpu(trace.get_meta_path(META_KEY_GT_OVERLAY)))
-    pred_is_o = np.asarray(_to_cpu(trace.get(TRACE_KEY_PRED_OVERLAY)))
-    halted = np.asarray(_to_cpu(trace.get(TRACE_KEY_HALTED)))
+    input_ids = np.asarray(
+        _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_INPUT_IDS))
+    )
+    gt_raw = np.asarray(
+        _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_GT_OVERLAY))
+    )
+    pred_is_o = np.asarray(_to_cpu(trace.get(MAZEHARD_TRACE_KEY_PRED_OVERLAY)))
+    halted = np.asarray(_to_cpu(trace.get(MAZEHARD_TRACE_KEY_HALTED)))
 
     batch_size = halted.shape[1] if halted.ndim == 2 else 1
     sample_idx = ctx.sample_idx if ctx.sample_idx < batch_size else 0
     t_halt = first_halt_index(halted[:, sample_idx])
     t_indices = _select_timesteps(t_halt, k_max)
 
-    return EvolutionFigureData(
+    return MazehardPredictionEvolutionFigureData(
         input_ids=input_ids,
         gt_overlay=gt_raw[sample_idx].astype(bool),
         pred_is_o=pred_is_o,

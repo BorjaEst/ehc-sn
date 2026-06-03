@@ -47,16 +47,29 @@ def _validate_maze_hard_batch(
     """Validate and normalize the canonical MazeHard batch mapping."""
     missing = [key for key in MAZE_HARD_BATCH_KEYS if key not in batch]
     if missing:
-        raise KeyError("MazeHard batch is missing required keys: " + ", ".join(missing) + ".")
+        raise KeyError(
+            "MazeHard batch is missing required keys: "
+            + ", ".join(missing)
+            + "."
+        )
 
     input_ids = batch["input_ids"]
     labels = batch["labels"]
     if input_ids.ndim != 2:
-        raise ValueError(f"MazeHard input_ids must have shape (B, S), got {tuple(input_ids.shape)}.")
+        raise ValueError(
+            "MazeHard input_ids must have shape (B, S), "
+            f"got {tuple(input_ids.shape)}."
+        )
     if labels.ndim != 2:
-        raise ValueError(f"MazeHard labels must have shape (B, S), got {tuple(labels.shape)}.")
+        raise ValueError(
+            "MazeHard labels must have shape (B, S), "
+            f"got {tuple(labels.shape)}."
+        )
     if tuple(labels.shape) != tuple(input_ids.shape):
-        raise ValueError(f"MazeHard labels must match input_ids shape {tuple(input_ids.shape)}, got {tuple(labels.shape)}.")
+        raise ValueError(
+            f"MazeHard labels must have shape {tuple(input_ids.shape)}, "
+            f"got {tuple(labels.shape)}."
+        )
 
     return input_ids.to(dtype=torch.int64), labels.to(dtype=torch.int64)
 
@@ -66,7 +79,7 @@ WALL_ID: int = 1
 EMPTY_ID: int = 2
 START_ID: int = 3
 GOAL_ID: int = 4
-PATH_ID: int = 5  # solution-overlay label token
+PATH_ID: int = 5  # solution-mazehard_solution_overlay label token
 SEM_VOCAB_SIZE: int = 5  # base semantic vocabulary (PAD..GOAL)
 MAZE_HARD_VOCAB_SIZE: int = PATH_ID + 1  # full vocab including PATH
 
@@ -96,7 +109,9 @@ def coerce_maze_hard_batch(raw: Mapping[str, Any]) -> Batch:
             dtype=np.bool_,
             name=_CHANNEL_SOLUTION,
         ).to(dtype=torch.bool)
-        labels = torch.where(solution_mask, torch.full_like(labels, PATH_ID), labels)
+        labels = torch.where(
+            solution_mask, torch.full_like(labels, PATH_ID), labels
+        )
 
     return {"input_ids": input_ids, "labels": labels}
 
@@ -120,27 +135,43 @@ def _coerce_numpy_channels(raw: Mapping[str, Any]) -> dict[str, np.ndarray]:
         if isinstance(value, Tensor):
             channels[key] = value.detach().cpu().numpy()
             continue
-        raise TypeError(f"Unsupported MazeHard channel type for key {key!r}: {type(value).__name__}.")
+        raise TypeError(
+            f"Unsupported MazeHard channel type for key {key!r}: {type(value).__name__}."
+        )
     if _MANDATORY_GRID2D_CHANNEL not in channels:
-        raise ValueError(f"MazeHard batch must contain the mandatory '{_MANDATORY_GRID2D_CHANNEL}' channel.")
+        raise ValueError(
+            f"MazeHard batch must contain the mandatory '{_MANDATORY_GRID2D_CHANNEL}' channel."
+        )
     return channels
 
 
 def _validate_channel_stack_shapes(channels: dict[str, np.ndarray]) -> None:
     reference_name, reference = next(iter(channels.items()))
-    mismatched = {name: value.shape for name, value in channels.items() if value.shape != reference.shape}
+    mismatched = {
+        name: value.shape
+        for name, value in channels.items()
+        if value.shape != reference.shape
+    }
     if mismatched:
-        detail = ", ".join(f"{name}={shape}" for name, shape in mismatched.items())
+        detail = ", ".join(
+            f"{name}={shape}" for name, shape in mismatched.items()
+        )
         raise ValueError(
             "MazeHard batch requires aligned raw channel shapes; "
             f"expected all channels to match {reference_name}={reference.shape}, got {detail}."
         )
 
 
-def _flatten_spatial_to_tensor(array: np.ndarray, *, dtype: Any, name: str) -> Tensor:
+def _flatten_spatial_to_tensor(
+    array: np.ndarray, *, dtype: Any, name: str
+) -> Tensor:
     if array.ndim not in (2, 3):
-        raise ValueError(f"MazeHard field {name!r} must have shape (H, W) or (B, H, W), got {array.shape}.")
-    return torch.from_numpy(array.reshape(*array.shape[:-2], -1).astype(dtype, copy=False))
+        raise ValueError(
+            f"MazeHard field {name!r} must have shape (H, W) or (B, H, W), got {array.shape}."
+        )
+    return torch.from_numpy(
+        array.reshape(*array.shape[:-2], -1).astype(dtype, copy=False)
+    )
 
 
 # =============================================================================
