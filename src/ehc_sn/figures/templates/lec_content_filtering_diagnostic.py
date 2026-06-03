@@ -400,7 +400,7 @@ class LECContentFilteringFigure(BaseFigureTemplate):
 
     # -- Panel c: filter effect ------------------------------------------------
 
-    @colorbar(group="effect", label="Filtered \u2212 content")
+    @colorbar(group="effect", label="Filtered")
     @panel()
     def effect(self, ax: Axes) -> None:
         _set_panel_title(ax, format_panel_title("c", "Filter effect"))
