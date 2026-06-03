@@ -50,5 +50,5 @@ model_config_path = "config/models/tem-v2-base.toml"
     tbptt_steps = 75
 
 [runtime.validation]
-    hard_max_rollout_steps = 1000
+    hard_max_rollout_steps = 6000
     seed = 42
