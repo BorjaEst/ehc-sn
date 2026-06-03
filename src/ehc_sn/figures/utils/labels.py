@@ -64,9 +64,9 @@ def set_panel_title(
     label : str
         Label text (e.g. ``"a. Content-state activations"``).
     x : float
-        Normalised x position in axes coordinates.
+        normalized x position in axes coordinates.
     y : float
-        Normalised y position in axes coordinates.
+        normalized y position in axes coordinates.
     fontsize : float
         Font size in points.
     """

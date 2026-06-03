@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from ehc_sn.figures.registry import REGISTRY, FigureSpec
-from ehc_sn.figures.templates import mazehard_solution_overlay
+from ehc_sn.figures.templates import (
+    hidden_norm_histogram,
+    mazehard_solution_overlay,
+    occupancy_histogram,
+)
 
 
 def register_builtin_figures() -> None:
@@ -52,17 +56,13 @@ def register_builtin_figures() -> None:
         arena_task_layout,
         halt_logit_evolution,
         halting_timeline,
-        hidden_norm,
         hpc_place_metrics,
         hpc_rate_map_mosaic,
-        lec_activity_trajectory,
         lec_content_filtering,
         lec_content_structure_rsa,
-        lec_observation_tuning,
         mazehard_prediction_evolution,
         mec_autocorr_mosaic,
         mec_grid_metrics,
-        occupancy,
         pfc_latent_dynamics,
         q_value_evolution,
     )
@@ -116,7 +116,7 @@ def register_builtin_figures() -> None:
             FigureSpec(
                 name="arena_prediction_overlay",
                 description=(
-                    "Per-step argmax prediction mazehard_solution_overlay: GT vs predicted "
+                    "Per-step argmax prediction overlay: GT vs predicted "
                     "observation IDs (inference / retrieved / ancestral) "
                     "across the full episode. Mismatched cells are outlined "
                     "in black. Family-neutral; compatible with TEM-style "
@@ -143,8 +143,9 @@ def register_builtin_figures() -> None:
             FigureSpec(
                 name="arena_task_layout",
                 description=(
-                    "Arena task overview: topology, observation map, "
-                    "trajectory, and revisit markers."
+                    "Task input figure: arena topology, observation map, "
+                    "trajectory, and revisit markers. "
+                    "Not a model diagnostic."
                 ),
                 plot=arena_task_layout.plot,
                 default_filename="arena_task_layout",
@@ -237,7 +238,7 @@ def register_builtin_figures() -> None:
                     "Occupancy histogram — reducer-summary diagnostic "
                     "(TensorBoard path only; not compatible with FigureGenerationCallback)"
                 ),
-                plot=occupancy.plot,
+                plot=occupancy_histogram.plot,
                 default_filename="occupancy_histogram",
                 maturity="stable",
                 allowed_surfaces={"training", "diagnostic"},
@@ -256,7 +257,7 @@ def register_builtin_figures() -> None:
                     "Hidden-state norm histogram — reducer-summary diagnostic "
                     "(TensorBoard path only; not compatible with FigureGenerationCallback)"
                 ),
-                plot=hidden_norm.plot,
+                plot=hidden_norm_histogram.plot,
                 default_filename="hidden_norm_histogram",
                 maturity="experimental",
                 allowed_surfaces={"training", "diagnostic"},
@@ -372,53 +373,6 @@ def register_builtin_figures() -> None:
             )
         )
 
-    if not REGISTRY.has("lec_activity_trajectory"):
-        REGISTRY.register(
-            FigureSpec(
-                name="lec_activity_trajectory",
-                description=(
-                    "LEC activity trajectory: observation IDs, location IDs, "
-                    "and LEC cell/filtered activity heatmaps over the episode. "
-                    "Descriptive only — does not claim content selectivity."
-                ),
-                plot=lec_activity_trajectory.plot,
-                default_filename="lec_activity_trajectory",
-                maturity="experimental",
-                allowed_surfaces={"report", "diagnostic"},
-                input_contract="evaluation_artifact",
-                tags={"lec", "ehc", "report"},
-                trace_keys={
-                    LEC_TRACE_KEY_CELLS,
-                    LEC_TRACE_KEY_OBSERVATION,
-                    LEC_TRACE_KEY_LOCATION_IDS,
-                },
-                meta_keys={TEM_META_KEY_TARGET_OBS_ID},
-            )
-        )
-
-    if not REGISTRY.has("lec_observation_tuning"):
-        REGISTRY.register(
-            FigureSpec(
-                name="lec_observation_tuning",
-                description=(
-                    "LEC observation-ID tuning matrix. Tests whether LEC "
-                    "units are selective for observation/content identity."
-                ),
-                plot=lec_observation_tuning.plot,
-                default_filename="lec_observation_tuning",
-                maturity="experimental",
-                allowed_surfaces={"report", "diagnostic"},
-                input_contract="evaluation_artifact",
-                tags={"lec", "ehc", "report"},
-                trace_keys={
-                    LEC_TRACE_KEY_CELLS,
-                    LEC_TRACE_KEY_OBSERVATION,
-                    LEC_TRACE_KEY_LOCATION_IDS,
-                },
-                meta_keys={TEM_META_KEY_TARGET_OBS_ID},
-            )
-        )
-
     if not REGISTRY.has("lec_content_structure_rsa"):
         REGISTRY.register(
             FigureSpec(
@@ -427,7 +381,7 @@ def register_builtin_figures() -> None:
                     "Cross-system (LEC / MEC / HPC) representational "
                     "similarity analysis. Tests whether LEC is organised "
                     "by observation identity, MEC by location identity, "
-                    "and HPC shows mixed / conjunctive organisation."
+                    "and HPC shows mixed / conjunctive organization."
                 ),
                 plot=lec_content_structure_rsa.plot,
                 default_filename="lec_content_structure_rsa",
@@ -437,8 +391,8 @@ def register_builtin_figures() -> None:
                 tags={"lec", "ehc", "report"},
                 trace_keys={
                     LEC_TRACE_KEY_CELLS,
-                    LEC_TRACE_KEY_CELLS,
-                    LEC_TRACE_KEY_CELLS,
+                    MEC_TRACE_KEY_CELLS,
+                    HPC_TRACE_KEY_CELLS,
                     LEC_TRACE_KEY_OBSERVATION,
                     LEC_TRACE_KEY_LOCATION_IDS,
                 },

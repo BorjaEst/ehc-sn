@@ -1,83 +1,45 @@
-"""Value evolution figure — bounded online diagnostic for ACT/RL paradigms.
+"""Q-value evolution figure — bounded online diagnostic for RL paradigms.
 
-Plots Q-values (or Q-logits) over rollout steps for the first N batch samples.
-Tolerates either ``value/q_values`` (RL) or ``value/q_logits`` (ACT) trace key.
+Plots Q-values over rollout steps for the first N batch samples.
+This module handles only ``value/q_values`` (RL-style).  For ACT-style
+halt/continue logits see :mod:`halt_logit_evolution`.
 """
 
 from __future__ import annotations
 
-import numpy as np
-from matplotlib.figure import Figure
-
+from ehc_sn.figures.plots.value_curve import plot_value_curve
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.traces.trace_tree import TraceTree
 
+_TRACE_KEY = "value/q_values"
+
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
-    """Render a value-evolution trace from either Q-values or Q-logits.
+    """Render a Q-value evolution trace.
 
     Args:
-        trace: Trace containing ``value/q_values`` or ``value/q_logits``
-            shaped ``(T, B, A)``.  Optionally ``act/halted`` for markers.
+        trace: Trace containing ``value/q_values`` shaped ``(T, B, A)``.
         ctx: Figure context (uses ``max_items``).
 
     Returns:
         Matplotlib ``Figure`` with one line-plot axis.
 
     Raises:
-        ValueError: If neither ``value/q_values`` nor ``value/q_logits``
-            exists in the trace.
+        ValueError: If ``value/q_values`` is absent or has wrong rank.
     """
-    source_key: str | None = None
-    values = _try_get(trace, "value/q_values")
-    if values is not None:
-        source_key = "value/q_values"
-    else:
-        values = _try_get(trace, "value/q_logits")
-        if values is not None:
-            source_key = "value/q_logits"
-
-    if source_key is None or values is None:
+    try:
+        values = trace.get(_TRACE_KEY)
+    except (ValueError, KeyError):
         raise ValueError(
-            "value_evolution requires either 'value/q_values' or "
-            "'value/q_logits' in the trace, but neither was found."
-        )
+            f"q_value_evolution requires '{_TRACE_KEY}' in the trace, "
+            "but it was not found."
+        ) from None
 
     if values.ndim != 3:
         raise ValueError(
-            f"{source_key} must be 3-D (T, B, A), got shape {values.shape}."
+            f"{_TRACE_KEY} must be 3-D (T, B, A), got shape {values.shape}."
         )
 
-    T, B, A = values.shape
-    max_samples = ctx.max_items or B
-    n = min(B, max_samples)
-
-    fig = Figure(figsize=(5, 3), layout="constrained")
-    ax = fig.subplots()
-
-    steps = np.arange(T)
-    for i in range(n):
-        # Plot mean across actions for readability; mazehard_solution_overlay first action
-        ax.plot(
-            steps,
-            values[:, i, 0],
-            label=f"Sample {i}" if n <= 6 else None,
-            alpha=0.8,
-        )
-
-    ax.set_xlabel("Step")
-    ax.set_ylabel("Value")
-    ax.set_title(f"value_evolution \u2014 source: {source_key}")
-
-    if n <= 6:
-        ax.legend(fontsize="small")
-
+    fig = plot_value_curve(values, ctx, ylabel="Q-value")
+    fig.axes[0].set_title("Q-value evolution")
     return fig
-
-
-def _try_get(trace: TraceTree, key: str) -> np.ndarray | None:
-    """Return a trace leaf or ``None`` if the key is absent."""
-    try:
-        return trace.get(key)
-    except (ValueError, KeyError):
-        return None

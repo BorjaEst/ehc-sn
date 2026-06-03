@@ -125,7 +125,7 @@ def compute_selectivity_scores(tuning: NDArray) -> NDArray:
 
 
 def compute_tuning_entropy(tuning: NDArray, base: float = 2.0) -> NDArray:
-    """Compute entropy over normalised tuning per unit.
+    """Compute entropy over normalized tuning per unit.
 
     Parameters
     ----------

@@ -49,8 +49,6 @@ LEC_TRACE_KEY_OBSERVATION = "world_step/observation"
 LEC_TRACE_KEY_CELLS = "diagnostic/lec/cells"
 LEC_TRACE_KEY_FILTERED = "diagnostic/lec/filtered"
 LEC_TRACE_KEY_LOCATION_IDS = "world_step/location_ids"
-LEC_TRACE_KEY_CELLS = "diagnostic/mec/location_mean"
-LEC_TRACE_KEY_CELLS = "diagnostic/hpc/location_mean"
 LEC_META_KEY_ALPHA = "lec/filter/alpha_sigmoid"
 LEC_META_KEY_WF = "lec/w_f_sigmoid"
 

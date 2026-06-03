@@ -15,7 +15,7 @@ compute_gridness
 estimate_grid_spacing_orientation
     Estimate grid spacing and orientation from peak analysis.
 compute_rate_map_stats
-    Compute place-field metrics for one cell's occupancy-normalised rate map.
+    Compute place-field metrics for one cell's occupancy-normalized rate map.
 """
 
 from __future__ import annotations

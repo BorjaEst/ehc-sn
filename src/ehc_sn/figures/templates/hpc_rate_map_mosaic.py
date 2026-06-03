@@ -45,7 +45,7 @@ def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
 class HPCRateMapMosaicFigure(BaseFigureTemplate):
     """Flat wrapped rate-map population mosaic for HPC cells.
 
-    Each tile is one cell's occupancy-normalised rate map.
+    Each tile is one cell's occupancy-normalized rate map.
     Tiles are ordered by descending finite spatial information.
     All tiles have the same physical size.
     """

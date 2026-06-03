@@ -2,7 +2,7 @@
 
 Tests whether LEC is more organised by content identity (observation), MEC
 by structural identity (location), and HPC shows mixed / conjunctive
-organisation.
+organization.
 
 This figure asks whether each internal representation groups time steps by
 sensory identity or by arena location.  For each stream, we compute cosine
@@ -47,7 +47,7 @@ def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
 
 
 class LECContentStructureRSAFigure(BaseFigureTemplate):
-    """Content vs. location organisation across LEC, MEC, and HPC.
+    """Content vs. location organization across LEC, MEC, and HPC.
 
     Panels:
         A — LEC: same-observation vs different-observation similarity

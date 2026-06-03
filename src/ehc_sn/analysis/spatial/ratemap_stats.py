@@ -1,6 +1,6 @@
 """Rate-map statistics for place-like spatial firing analysis.
 
-Implements per-cell scalar metrics derived from occupancy-normalised rate
+Implements per-cell scalar metrics derived from occupancy-normalized rate
 maps: peak / mean firing rate, Skaggs-style spatial information, sparsity,
 peak field location, and field area.
 
@@ -43,7 +43,7 @@ returned as ``NaN``."""
 
 @dataclass(frozen=True)
 class RateMapStats:
-    """Per-cell scalar metrics derived from an occupancy-normalised rate map.
+    """Per-cell scalar metrics derived from an occupancy-normalized rate map.
 
     ``NaN`` values indicate invalid / silent / all-NaN rate maps rather than
     meaningful zero measurements.
@@ -88,12 +88,12 @@ def compute_rate_map_stats(
     field_threshold_fraction: float = _DEFAULT_FIELD_THRESHOLD_FRACTION,
     min_spatial_information_for_field: float = _DEFAULT_MIN_SI_FOR_FIELD,
 ) -> RateMapStats:
-    """Compute place-field metrics for one cell's occupancy-normalised rate map.
+    """Compute place-field metrics for one cell's occupancy-normalized rate map.
 
     Parameters
     ----------
     rate_map : NDArray
-        Occupancy-normalised firing-rate map, shape ``(height, width)``.
+        Occupancy-normalized firing-rate map, shape ``(height, width)``.
         Values are nonnegative firing rates.  ``NaN`` marks unvisited bins.
     occupancy : NDArray
         Per-bin occupancy count, shape ``(height, width)``.  Must be
