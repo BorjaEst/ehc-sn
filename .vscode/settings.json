@@ -34,4 +34,5 @@
         100,
         130
     ],
+    "notebook.output.textLineLimit": 100,
 }
