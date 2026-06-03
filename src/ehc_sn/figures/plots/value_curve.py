@@ -1,39 +1,35 @@
-"""Shared private helper for Q-value and halt-logit evolution figures.
-
-Provides ``plot_value_curve`` used by both ``q_value_evolution`` and
-``halt_logit_evolution``.  Not a public figure template.
+"""Value-curve plot helper shared by ``q_value_evolution`` and
+``halt_logit_evolution`` figure templates.
 """
 
 from __future__ import annotations
 
 import numpy as np
-from matplotlib.figure import Figure
-
-from ehc_sn.figures.registry import FigureContext
+from matplotlib.axes import Axes
 
 
 def plot_value_curve(
+    ax: Axes,
     values: np.ndarray,
-    ctx: FigureContext,
     *,
+    max_items: int | None = None,
     ylabel: str = "Value",
-) -> Figure:
-    """Render a line-plot of value/logit curves over rollout steps.
+) -> Axes:
+    """Draw value/logit curves over rollout steps onto *ax*.
 
     Args:
+        ax: Axes to draw into (mutated in place).
         values: Numeric array shaped ``(T, B, A)``.
-        ctx: Figure context (uses ``max_items``).
-        ylabel: Y-axis label (e.g. ``"Q-value"`` or ``"Halt/continue logit"``).
+        max_items: Maximum number of batch samples to plot
+            (if ``None``, all samples are shown).
+        ylabel: Y-axis label (e.g. ``"Q-value"`` or
+            ``"Halt/continue logit"``).
 
     Returns:
-        Matplotlib ``Figure`` with one line-plot axis.
+        The same *ax* instance.
     """
     T, B, A = values.shape
-    max_samples = ctx.max_items or B
-    n = min(B, max_samples)
-
-    fig = Figure(figsize=(5, 3), layout="constrained")
-    ax = fig.subplots()
+    n = min(B, max_items) if max_items is not None else B
 
     steps = np.arange(T)
     for i in range(n):
@@ -50,4 +46,4 @@ def plot_value_curve(
     if n <= 6:
         ax.legend(fontsize="small")
 
-    return fig
+    return ax

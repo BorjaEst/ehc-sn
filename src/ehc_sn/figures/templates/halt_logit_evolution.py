@@ -7,6 +7,8 @@ Q-values see :mod:`q_value_evolution`.
 
 from __future__ import annotations
 
+from matplotlib.figure import Figure
+
 from ehc_sn.figures.plots.value_curve import plot_value_curve
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.traces.keys import TRACE_KEY_Q_LOGITS
@@ -41,6 +43,10 @@ def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
             f"{_TRACE_KEY} must be 3-D (T, B, A), got shape {values.shape}."
         )
 
-    fig = plot_value_curve(values, ctx, ylabel="Halt/continue logit")
-    fig.axes[0].set_title("Halt-logit evolution")
+    fig = Figure(figsize=(5, 3), layout="constrained")
+    ax = fig.subplots()
+    plot_value_curve(
+        ax, values, max_items=ctx.max_items, ylabel="Halt/continue logit"
+    )
+    ax.set_title("Halt-logit evolution")
     return fig
