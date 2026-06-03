@@ -484,7 +484,7 @@ class TEMV2TrainingModel(L.LightningModule):
                     ]
                 ),
                 "lec_w_f_sigmoid": torch.stack(
-                    [torch.sigmoid(w).detach().cpu() for w in model.lec.w_f]
+                    [w.detach().cpu() for w in model.lec.w_f]
                 ),
             }
         return self._diag_params_cache
@@ -527,6 +527,7 @@ class TEMV2TrainingModel(L.LightningModule):
             objective_options=objective_options,
             trace_request=trace_request,
         )
+
         # Attach arena environment metadata so figure selectors can render
         # spatial rate maps (mec_cells / hpc_cells).
         if result.trace is not None and isinstance(
@@ -536,6 +537,17 @@ class TEMV2TrainingModel(L.LightningModule):
                 result.source_context, result.trace.length
             )
             apply_arena_trace_supplements(result.trace, supplements)
+
+        # Attach static diagnostic parameters to the trace meta for figure
+        # rendering (e.g. LEC filter diagnostic panels).
+        if result.trace is not None and self._diag_params_cache is not None:
+            diag = self._diag_params_cache
+            lec_meta = {
+                "filter": {"alpha_sigmoid": diag["lec_alpha_sigmoid"]},
+                "w_f_sigmoid": diag["lec_w_f_sigmoid"],
+            }
+            result.trace.attach_meta({"lec": lec_meta})
+
         return result
 
     def _apply_runtime(  # ----------------------------------------------------

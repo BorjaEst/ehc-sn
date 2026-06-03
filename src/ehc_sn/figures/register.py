@@ -43,11 +43,24 @@ def register_builtin_figures() -> None:
     from ehc_sn.figures.selectors.hpc import (
         TRACE_KEY_LOCATION_IDS as HPC_TRACE_LOCATION_IDS,
     )
-    from ehc_sn.figures.selectors.lec import (  # noqa: PLC0415
+    from ehc_sn.figures.selectors.lec import (
         META_KEY_LEC_ALPHA,
         META_KEY_LEC_WF,
+    )
+    from ehc_sn.figures.selectors.lec import (  # noqa: PLC0415
+        TRACE_KEY_HPC_CELLS as LEC_TRACE_KEY_HPC_CELLS,
+    )
+    from ehc_sn.figures.selectors.lec import (
         TRACE_KEY_LEC_CELLS,
         TRACE_KEY_LEC_FILTERED,
+    )
+    from ehc_sn.figures.selectors.lec import (
+        TRACE_KEY_LOCATION_IDS as LEC_TRACE_KEY_LOCATION_IDS,
+    )
+    from ehc_sn.figures.selectors.lec import (
+        TRACE_KEY_MEC_CELLS as LEC_TRACE_KEY_MEC_CELLS,
+    )
+    from ehc_sn.figures.selectors.lec import (
         TRACE_KEY_OBSERVATION,
     )
 
@@ -74,8 +87,14 @@ def register_builtin_figures() -> None:
         halting,
         hidden_norm,
         hpc_cells,
+        hpc_place_metrics,
+        hpc_rate_map_mosaic,
         hpc_summary,
         hrm_latent_dynamics,
+        lec_activity_trajectory,
+        lec_content_filtering_diagnostic,
+        lec_content_structure_rsa,
+        lec_observation_tuning,
         lec_pipeline,
         lec_summary,
         mec_autocorr_mosaic,
@@ -326,13 +345,41 @@ def register_builtin_figures() -> None:
         REGISTRY.register(
             FigureSpec(
                 name="lec_summary",
-                description="LEC overview with observations and per-frequency activations",
+                description=(
+                    "LEC content-state filtering across frequency bands: "
+                    "alpha/w_f sigmoid gate parameters, observation sequence, "
+                    "and per-frequency LEC cellular activity.  This is a "
+                    "mechanism diagnostic for the sensory/content stream, "
+                    "not a spatial-cell diagnostic."
+                ),
                 plot=lec_summary.plot,
                 default_filename="lec_summary",
                 maturity="stable",
-                allowed_surfaces={"diagnostic"},
+                allowed_surfaces={"diagnostic", "report"},
                 input_contract="evaluation_artifact",
-                tags={"lec", "ehc"},
+                tags={"lec", "ehc", "report"},
+                trace_keys={TRACE_KEY_OBSERVATION, TRACE_KEY_LEC_CELLS},
+                meta_keys=set(),
+            )
+        )
+
+    if not REGISTRY.has("lec_content_filtering_diagnostic"):
+        REGISTRY.register(
+            FigureSpec(
+                name="lec_content_filtering_diagnostic",
+                description=(
+                    "LEC / x content-state filtering per frequency band: "
+                    "content-state activity, filtered diagnostic state, "
+                    "and alpha_f/w_f gate parameters when available. "
+                    "Mechanism diagnostic for the sensory/content stream, "
+                    "not a spatial-cell diagnostic."
+                ),
+                plot=lec_content_filtering_diagnostic.plot,
+                default_filename="lec_content_filtering_diagnostic",
+                maturity="experimental",
+                allowed_surfaces={"report", "diagnostic"},
+                input_contract="evaluation_artifact",
+                tags={"lec", "ehc", "report"},
                 trace_keys={TRACE_KEY_OBSERVATION, TRACE_KEY_LEC_CELLS},
                 meta_keys={META_KEY_LEC_ALPHA, META_KEY_LEC_WF},
             )
@@ -463,6 +510,120 @@ def register_builtin_figures() -> None:
                 tags={"hpc", "ehc"},
                 trace_keys={HPC_TRACE_LOCATION_IDS, TRACE_KEY_HPC_CELLS},
                 meta_keys={HPC_META_ENVIRONMENTS},
+            )
+        )
+
+    if not REGISTRY.has("hpc_place_metrics"):
+        REGISTRY.register(
+            FigureSpec(
+                name="hpc_place_metrics",
+                description=(
+                    "Quantitative place-cell metrics: spatial information "
+                    "distribution, field-center coverage, and top place-like "
+                    "rate-map examples."
+                ),
+                plot=hpc_place_metrics.plot,
+                default_filename="hpc_place_metrics",
+                maturity="experimental",
+                allowed_surfaces={"report"},
+                input_contract="evaluation_artifact",
+                tags={"hpc", "ehc", "report"},
+                trace_keys={HPC_TRACE_LOCATION_IDS, TRACE_KEY_HPC_CELLS},
+                meta_keys={HPC_META_ENVIRONMENTS},
+            )
+        )
+
+    if not REGISTRY.has("hpc_rate_map_mosaic"):
+        REGISTRY.register(
+            FigureSpec(
+                name="hpc_rate_map_mosaic",
+                description=(
+                    "Population rate-map mosaic for HPC cells, ordered by "
+                    "spatial information descending.  Shows place-like rate "
+                    "maps across many cells."
+                ),
+                plot=hpc_rate_map_mosaic.plot,
+                default_filename="hpc_rate_map_mosaic",
+                maturity="experimental",
+                allowed_surfaces={"report", "diagnostic"},
+                input_contract="evaluation_artifact",
+                tags={"hpc", "ehc", "report"},
+                trace_keys={HPC_TRACE_LOCATION_IDS, TRACE_KEY_HPC_CELLS},
+                meta_keys={HPC_META_ENVIRONMENTS},
+            )
+        )
+
+    if not REGISTRY.has("lec_activity_trajectory"):
+        REGISTRY.register(
+            FigureSpec(
+                name="lec_activity_trajectory",
+                description=(
+                    "LEC activity trajectory: observation IDs, location IDs, "
+                    "and LEC cell/filtered activity heatmaps over the episode. "
+                    "Descriptive only — does not claim content selectivity."
+                ),
+                plot=lec_activity_trajectory.plot,
+                default_filename="lec_activity_trajectory",
+                maturity="experimental",
+                allowed_surfaces={"report", "diagnostic"},
+                input_contract="evaluation_artifact",
+                tags={"lec", "ehc", "report"},
+                trace_keys={
+                    TRACE_KEY_LEC_CELLS,
+                    TRACE_KEY_OBSERVATION,
+                    LEC_TRACE_KEY_LOCATION_IDS,
+                },
+                meta_keys={TEM_META_KEY_TARGET_OBS_ID},
+            )
+        )
+
+    if not REGISTRY.has("lec_observation_tuning"):
+        REGISTRY.register(
+            FigureSpec(
+                name="lec_observation_tuning",
+                description=(
+                    "LEC observation-ID tuning matrix. Tests whether LEC "
+                    "units are selective for observation/content identity."
+                ),
+                plot=lec_observation_tuning.plot,
+                default_filename="lec_observation_tuning",
+                maturity="experimental",
+                allowed_surfaces={"report", "diagnostic"},
+                input_contract="evaluation_artifact",
+                tags={"lec", "ehc", "report"},
+                trace_keys={
+                    TRACE_KEY_LEC_CELLS,
+                    TRACE_KEY_OBSERVATION,
+                    LEC_TRACE_KEY_LOCATION_IDS,
+                },
+                meta_keys={TEM_META_KEY_TARGET_OBS_ID},
+            )
+        )
+
+    if not REGISTRY.has("lec_content_structure_rsa"):
+        REGISTRY.register(
+            FigureSpec(
+                name="lec_content_structure_rsa",
+                description=(
+                    "Cross-system (LEC / MEC / HPC) representational "
+                    "similarity analysis. Tests whether LEC is organised "
+                    "by observation identity, MEC by location identity, "
+                    "and HPC shows mixed / conjunctive organisation."
+                ),
+                plot=lec_content_structure_rsa.plot,
+                default_filename="lec_content_structure_rsa",
+                maturity="experimental",
+                allowed_surfaces={"report", "diagnostic"},
+                input_contract="evaluation_artifact",
+                tags={"lec", "ehc", "report"},
+                trace_keys={
+                    TRACE_KEY_LEC_CELLS,
+                    LEC_TRACE_KEY_MEC_CELLS,
+                    LEC_TRACE_KEY_HPC_CELLS,
+                    TRACE_KEY_OBSERVATION,
+                    LEC_TRACE_KEY_LOCATION_IDS,
+                },
+                meta_keys={TEM_META_KEY_TARGET_OBS_ID},
             )
         )
 
