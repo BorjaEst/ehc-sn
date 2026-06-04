@@ -17,16 +17,22 @@ def register_builtin_figures() -> None:
     from ehc_sn.figures.templates import (
         arena_prediction_overlay,
         arena_task_layout,
+        h_l_residuals_over_steps,
         halt_logit_evolution,
         halting_timeline,
+        hidden_norm_histogram,
         hpc_place_metrics,
         hpc_rate_map_mosaic,
         lec_content_filtering,
         lec_content_structure_rsa,
         mazehard_prediction_evolution,
+        mazehard_solution_overlay,
+        mazehard_task_layout,
         mec_autocorr_mosaic,
         mec_grid_metrics,
+        occupancy_histogram,
         pfc_latent_dynamics,
+        prediction_accuracy_over_steps,
         q_value_evolution,
     )
     from ehc_sn.traces.keys import (
@@ -76,6 +82,25 @@ def register_builtin_figures() -> None:
             )
         )
 
+    if not REGISTRY.has("mazehard_task_layout"):
+        REGISTRY.register(
+            FigureSpec(
+                name="mazehard_task_layout",
+                description="MazeHard task layout: input grid + target path for case-level orientation",
+                plot=mazehard_task_layout.plot,
+                default_filename="mazehard_task_layout",
+                maturity="stable",
+                allowed_surfaces={"diagnostic", "report"},
+                input_contract="offline_artifact",
+                tags={"mazehard", "task-context"},
+                trace_keys=set(),
+                meta_keys={
+                    MAZEHARD_META_KEY_INPUT_IDS,
+                    MAZEHARD_META_KEY_GT_OVERLAY,
+                },
+            )
+        )
+
     if not REGISTRY.has("mazehard_prediction_evolution"):
         REGISTRY.register(
             FigureSpec(
@@ -93,6 +118,27 @@ def register_builtin_figures() -> None:
                 },
                 meta_keys={
                     MAZEHARD_META_KEY_INPUT_IDS,
+                    MAZEHARD_META_KEY_GT_OVERLAY,
+                },
+            )
+        )
+
+    if not REGISTRY.has("prediction_accuracy_over_steps"):
+        REGISTRY.register(
+            FigureSpec(
+                name="prediction_accuracy_over_steps",
+                description="MazeHard prediction accuracy and target-path recall over recurrent rollout steps",
+                plot=prediction_accuracy_over_steps.plot,
+                default_filename="prediction_accuracy_over_steps",
+                maturity="experimental",
+                allowed_surfaces={"diagnostic"},
+                input_contract="evaluation_artifact",
+                tags={"mazehard"},
+                trace_keys={
+                    MAZEHARD_TRACE_KEY_HALTED,
+                    MAZEHARD_TRACE_KEY_PRED_OVERLAY,
+                },
+                meta_keys={
                     MAZEHARD_META_KEY_GT_OVERLAY,
                 },
             )
@@ -210,6 +256,26 @@ def register_builtin_figures() -> None:
                 default_filename="pfc_latent_dynamics",
                 maturity="stable",
                 allowed_surfaces={"diagnostic", "report"},
+                input_contract="offline_artifact",
+                tags={"hrm", "dynamics", "latent"},
+                trace_keys={"pfc/z_H", "pfc/z_L"},
+                meta_keys=set(),
+            )
+        )
+
+    if not REGISTRY.has("h_l_residuals_over_steps"):
+        REGISTRY.register(
+            FigureSpec(
+                name="h_l_residuals_over_steps",
+                description=(
+                    "HRM H/L residual dynamics: forward residuals, "
+                    "cosine similarity, and H/L separation over "
+                    "fixed-budget recurrent rollout steps"
+                ),
+                plot=h_l_residuals_over_steps.plot,
+                default_filename="h_l_residuals_over_steps",
+                maturity="experimental",
+                allowed_surfaces={"diagnostic"},
                 input_contract="offline_artifact",
                 tags={"hrm", "dynamics", "latent"},
                 trace_keys={"pfc/z_H", "pfc/z_L"},

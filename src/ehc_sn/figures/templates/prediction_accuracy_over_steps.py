@@ -120,7 +120,7 @@ class MazehardPredictionAccuracyFigure(BaseFigureTemplate):
         best_rec = rec[best_step_recall]
         final_rec = rec[-1]
 
-        info_lines = [
+        lines = [
             "Token accuracy",
             f"  initial: {initial_acc:.4f}",
             f"  best:    {best_acc:.4f} (step {best_step})",
@@ -136,9 +136,10 @@ class MazehardPredictionAccuracyFigure(BaseFigureTemplate):
         ax.text(
             0.08,
             0.92,
-            "\n".join(info_lines),
+            "\n".join(lines),
             transform=ax.transAxes,
             fontsize=5.5,
             verticalalignment="top",
             fontfamily="monospace",
         )
+        ax.set_title("Acc overview")

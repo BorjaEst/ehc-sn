@@ -97,6 +97,7 @@ def build_mazehard_hrm_trace_meta(batch: Batch) -> dict[str, object]:
         root_key: {
             leaf_key: (batch["labels"] == O_ID).to(torch.uint8),
         },
+        "input_ids": batch["input_ids"],
     }
 
 

@@ -276,18 +276,20 @@ class ACTController[ModelState](
             q_logits, done_action=self.config.done_action
         )
 
+        max_step_done = steps >= self.config.max_halt_steps
+
         if allow_halt:
-            halt = maybe_flip_halt_decision(
+            learned_done = maybe_flip_halt_decision(
                 scores.greedy_halt,
                 steps=steps,
                 explore=explore,
                 exploration_prob=self.config.exploration_prob,
                 max_halt_steps=self.config.max_halt_steps,
             )
-            halt = halt | (steps >= self.config.max_halt_steps)
         else:
-            halt = torch.zeros_like(scores.greedy_halt, dtype=torch.bool)
+            learned_done = torch.zeros_like(max_step_done, dtype=torch.bool)
 
+        halt = learned_done | max_step_done
         return halt.to(dtype=torch.bool)
 
 

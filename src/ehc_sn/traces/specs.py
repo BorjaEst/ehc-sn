@@ -436,6 +436,13 @@ HRM_HIDDEN_STATE_FIELDS: tuple[TraceField, ...] = (
     TRACE_HRM_Z_L,
 )
 
+# Shared HRM reasoning fields — available to any HRM-family paradigm
+# (act and rl are controller variants; the hidden-state and task-metadata
+# surface is the same across ACT-style and RL-style HRM models.)
+HRM_REASONING_TRACE_FIELDS: tuple[TraceField, ...] = (
+    HRM_HIDDEN_STATE_FIELDS + WM_TASK_METADATA_FIELDS
+)
+
 
 # =============================================================================
 # TEM-specific — TEM uses only the rollout-safe baseline fields for now.
@@ -496,11 +503,13 @@ def build_trace_spec(  # ------------------------------------------------------
     """
     if paradigm == "act":
         fields = _select_trace_fields(
-            COMMON_TRACE_FIELDS + ACT_TRACE_FIELDS, include_keys
+            COMMON_TRACE_FIELDS + ACT_TRACE_FIELDS + HRM_REASONING_TRACE_FIELDS,
+            include_keys,
         )
     elif paradigm == "rl":
         fields = _select_trace_fields(
-            COMMON_TRACE_FIELDS + RL_TRACE_FIELDS, include_keys
+            COMMON_TRACE_FIELDS + RL_TRACE_FIELDS + HRM_REASONING_TRACE_FIELDS,
+            include_keys,
         )
     elif paradigm == "tem":
         fields = _select_trace_fields(TEM_TRACE_FIELDS, include_keys)
@@ -521,6 +530,8 @@ __all__ = [
     "COMMON_TRACE_FIELDS",
     "ACT_TRACE_FIELDS",
     "RL_TRACE_FIELDS",
+    "HRM_HIDDEN_STATE_FIELDS",
+    "HRM_REASONING_TRACE_FIELDS",
     "TEM_TRACE_FIELDS",
     "build_trace_spec",
 ]

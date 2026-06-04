@@ -33,7 +33,7 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 
 from ehc_sn.eval.contracts import EvaluationCaseResult
-from ehc_sn.figures import REGISTRY, FigureContext, render
+from ehc_sn.figures import REGISTRY, FigureContext, list_figures, render
 from ehc_sn.figures.sinks import _persist_named_figure_artifacts
 
 
@@ -96,6 +96,8 @@ def render_regime_preview_figures(
     if max_cases < 1:
         raise ValueError(f"max_cases must be >= 1, got {max_cases}.")
 
+    # Ensure built-in figures are registered before validation.
+    list_figures()
     _validate_figure_names(figure_names)
 
     if figure_ctx is None:

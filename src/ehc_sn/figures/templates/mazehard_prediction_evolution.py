@@ -43,7 +43,7 @@ class MazehardPredictionEvolutionFigure(BaseFigureTemplate):
         gt_overlay = reshape_grid(self.data.gt_overlay)
         plot_maze_with_overlay(ax, input_grid, gt_overlay, title="GT")
 
-    @panel()
+    @panel(slots=["mazehard_prediction_evolution"])
     def evolution(self, ax: Axes) -> None:
         axs = subdivide_axes(ax, nrows=2, ncols=8, wspace=0.02)
         input_grid = reshape_grid(self.data.input_ids[self.data.sample_idx])

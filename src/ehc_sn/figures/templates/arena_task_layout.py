@@ -62,18 +62,20 @@ class ArenaTaskLayoutFigure(BaseFigureTemplate):
     """Three-panel paradigm figure for the Arena evaluation task."""
 
     HEIGHT_FRAC: float = 0.22
-
     MOSAIC = [["environment", "trajectory", "summary_text"]]
     MOSAIC_KWARGS = {"gridspec_kw": {"wspace": 0.08}}
 
     # Rendering parameters scoped to this figure — no global changes.
     _TRAJECTORY_LW: float = 2.0
 
-    def __init__(self, data: ArenaTaskOverviewData, ctx: FigureContext) -> None:
+    def __init__(
+        self,
+        data: ArenaTaskOverviewData,
+        ctx: FigureContext,
+    ) -> None:
         super().__init__(data, ctx)
 
     # ── Panel (a): Environment ──────────────────────────────────────────
-
     @panel(order=0)
     def environment(self, ax: Axes) -> None:
         """Panel (a): Dungeon topology with per-cell observation IDs."""
@@ -101,7 +103,6 @@ class ArenaTaskLayoutFigure(BaseFigureTemplate):
         ax.axis("off")
 
     # ── Panel (b): Trajectory ───────────────────────────────────────────
-
     @panel(order=1)
     def trajectory(self, ax: Axes) -> None:
         """Panel (b): Agent trajectory with start, end, and revisit rings."""
@@ -126,16 +127,6 @@ class ArenaTaskLayoutFigure(BaseFigureTemplate):
             ax, world, data.trajectory_locations, data.revisit_mask
         )
 
-        # Compact legend inside the trajectory panel.
-        # ax.legend(
-        #     loc="lower left",
-        #     fontsize=5,
-        #     framealpha=0.85,
-        #     borderpad=0.3,
-        #     handlelength=0.8,
-        #     handletextpad=0.4,
-        # )
-
         ax.legend(
             loc="upper center",
             bbox_to_anchor=(0.5, -0.06),
@@ -150,7 +141,6 @@ class ArenaTaskLayoutFigure(BaseFigureTemplate):
         ax.set_title("(b) Agent Trajectory (time-coloured)", fontsize=7)
 
     # ── Panel (c): Summary ──────────────────────────────────────────────
-
     @panel(order=2)
     def summary_text(self, ax: Axes) -> None:
         """Text summary panel: task description and statistics."""
@@ -167,7 +157,7 @@ class ArenaTaskLayoutFigure(BaseFigureTemplate):
 
         revisit_pct = 100.0 * n_revisits / max(n_steps, 1)
 
-        info_lines = [
+        lines = [
             "Arena Replay Task",
             "",
             f"Grid: {H}\u2009\u00d7\u2009{W}",
@@ -188,7 +178,7 @@ class ArenaTaskLayoutFigure(BaseFigureTemplate):
         ax.text(
             0.08,
             0.92,
-            "\n".join(info_lines),
+            "\n".join(lines),
             transform=ax.transAxes,
             fontsize=5.5,
             verticalalignment="top",

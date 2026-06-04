@@ -40,6 +40,7 @@ from torchmetrics import MetricCollection
 
 from ehc_sn import utils
 from ehc_sn.adapters.mazehard.hrm import (
+    MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
     MazeHardHRMAdapterSettings,
     MazeHardHRMV2BridgeAdapter,
     MazeHardHRMV2HybridTaskBinding,
@@ -226,6 +227,9 @@ class HRMV2TrainingModel(L.LightningModule):
             enabled=False, max_batches=2, keys=()
         )
         self._diagnostic_traces: list[Any] = []
+
+        # Adapter-specific trace fields for the HRM reasoning report contract.
+        self._extra_trace_fields = MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS
 
         # Bounded diagnostic reducers (hidden-state norm histogram).
         self._val_hidden_norms = HiddenNormHistogram(
@@ -578,6 +582,13 @@ class HRMV2TrainingModel(L.LightningModule):
         if self.controller is None or self.val_scorer is None:
             raise RuntimeError(
                 "HRM v2 runtime is not initialized. Call setup() before evaluation."
+            )
+
+        # Attach batch-dependent trace metadata (required for mazehard figures).
+        if trace_request is not None:
+            trace_request = EvaluationTraceRequest(
+                trace_spec=trace_request.trace_spec,
+                trace_meta=dict(build_mazehard_hrm_trace_meta(case.batch)),
             )
 
         return execute_replay_evaluation_batch(

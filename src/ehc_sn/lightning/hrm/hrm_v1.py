@@ -24,6 +24,7 @@ with keys ``"input_ids"`` and ``"labels"``.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,7 @@ from ehc_sn.adapters.mazehard.hrm import (
     MazeHardHRMV1BridgeAdapter,
     build_mazehard_hrm_trace_meta,
 )
+from ehc_sn.adapters.mazehard.hrm.traces import MAZE_HARD_HRM_ACT_TRACE_FIELDS
 from ehc_sn.controllers.deliberation.act import (
     ACTController,
     ACTControllerConfig,
@@ -56,6 +58,7 @@ from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.reducers import HiddenNormHistogram, compute_nonempty
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.routes.act import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
+from ehc_sn.metrics.step_metrics import StepMetrics
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
 from ehc_sn.objectives.act import ACTObjective, ACTObjectiveConfig
 from ehc_sn.rollouts.buffers import FifoBuffer
@@ -205,6 +208,7 @@ class HRMV1TrainingModel(L.LightningModule):
             prefix="val/"
         )
         self._trace_paradigm: str = "act"
+        self._extra_trace_fields: tuple = MAZE_HARD_HRM_ACT_TRACE_FIELDS
         self.diagnostic_trace_spec: DiagnosticTraceSpec = DiagnosticTraceSpec(
             enabled=False,
             max_batches=2,
@@ -462,12 +466,19 @@ class HRMV1TrainingModel(L.LightningModule):
         trace_request: EvaluationTraceRequest | None = None,
     ) -> EvaluationCaseResult:
         """Execute one provider-owned replay case through the ACT eval path."""
-        carry0 = self.controller.initial_state(case.batch)
+
+        # Attach batch-dependent trace metadata (required by mazehard_solution_overlay figure).
+        if trace_request is not None:
+            trace_request = EvaluationTraceRequest(
+                trace_spec=trace_request.trace_spec,
+                trace_meta=dict(build_mazehard_hrm_trace_meta(case.batch)),
+            )
+
         return execute_replay_evaluation_batch(
             case=case,
             runner=self._eval_runner,
             controller=self.controller,
-            carry=carry0,
+            carry=self.controller.initial_state(case.batch),
             objective=self.objective,
             max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
             hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
@@ -478,6 +489,64 @@ class HRMV1TrainingModel(L.LightningModule):
             },
             trace_request=trace_request,
         )
+
+    def aggregate_evaluation_case_metrics(  # ---------------------------------
+        self,
+        *,
+        task: str,
+        regime_id: str,
+        regime_kind: str,
+        case_results: Sequence[EvaluationCaseResult],
+    ) -> dict[str, float | int]:
+        """Aggregate per-case MazeHard step metrics into a regime summary dict.
+
+        Reads ``StepMetrics`` from each case's evaluated chunk and sums
+        episode-level aggregate counters across all cases.  Accuracy ratios
+        are computed once over the full set of cases.
+
+        Metrics whose denominator is zero are omitted.
+        """
+        _ = task, regime_id, regime_kind
+        total_completed_count: int = 0
+        total_eligible_count: int = 0
+        total_accuracy_sum: float = 0.0
+        total_exact_sum: float = 0.0
+        total_token_correct: int = 0
+        total_token_count: int = 0
+
+        for case in case_results:
+            for step in case.evaluated.steps:
+                metrics = step.outputs.metrics
+                if not isinstance(metrics, StepMetrics):
+                    raise TypeError(
+                        f"Expected StepMetrics, got {type(metrics).__name__}."
+                    )
+                ep = metrics.episode
+                ep_tok = metrics.episode_tokens
+                total_completed_count += int(ep.completed_count.item())
+                total_eligible_count += int(ep.eligible_count.item())
+                total_accuracy_sum += float(ep.accuracy_sum.item())
+                total_exact_sum += float(ep.exact_sum.item())
+                total_token_correct += int(ep_tok.token_correct_sum.item())
+                total_token_count += int(ep_tok.token_count_sum.item())
+
+        result: dict[str, float | int] = {
+            "n_sequence_completed": total_completed_count,
+            "n_sequence_eligible": total_eligible_count,
+            "n_token_correct": total_token_correct,
+            "n_token_total": total_token_count,
+        }
+
+        if total_completed_count > 0:
+            result["sequence_accuracy"] = (
+                total_accuracy_sum / total_completed_count
+            )
+            result["sequence_exact"] = total_exact_sum / total_completed_count
+
+        if total_token_count > 0:
+            result["token_accuracy"] = total_token_correct / total_token_count
+
+        return result
 
 
 # =============================================================================
