@@ -34,6 +34,7 @@ def register_builtin_figures() -> None:
         pfc_latent_dynamics,
         prediction_accuracy_over_steps,
         q_value_evolution,
+        reasoning_budget_summary,
     )
     from ehc_sn.traces.keys import (
         ARENA_TRACE_KEY_OBSERVATION_IDS,
@@ -279,6 +280,25 @@ def register_builtin_figures() -> None:
                 input_contract="offline_artifact",
                 tags={"hrm", "dynamics", "latent"},
                 trace_keys={"pfc/z_H", "pfc/z_L"},
+                meta_keys=set(),
+            )
+        )
+
+    if not REGISTRY.has("reasoning_budget_summary"):
+        REGISTRY.register(
+            FigureSpec(
+                name="reasoning_budget_summary",
+                description=(
+                    "MazeHard reasoning budget: recurrent budget ruler, "
+                    "termination event marker, and computation policy summary"
+                ),
+                plot=reasoning_budget_summary.plot,
+                default_filename="reasoning_budget_summary",
+                maturity="stable",
+                allowed_surfaces={"diagnostic", "report"},
+                input_contract="offline_artifact",
+                tags={"hrm", "reasoning"},
+                trace_keys={"act/halted"},
                 meta_keys=set(),
             )
         )

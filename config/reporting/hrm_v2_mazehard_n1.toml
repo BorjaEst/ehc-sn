@@ -17,7 +17,6 @@ figures = [
     "mazehard_prediction_evolution",
     "pfc_latent_dynamics",
     "h_l_residuals_over_steps", 
-    "halting_timeline",
     "prediction_accuracy_over_steps",
 ]
 formats = ["png", "pdf"]
