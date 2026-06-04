@@ -13,6 +13,7 @@ regime_ids = ["mazehard_n1"]
 
 [figures]
 figures = [
+    "mazehard_task_layout",
     "mazehard_prediction_evolution",
     "pfc_latent_dynamics",
     "h_l_residuals_over_steps", 
