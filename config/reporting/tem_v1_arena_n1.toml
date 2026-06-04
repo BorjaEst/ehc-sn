@@ -13,13 +13,13 @@ regime_ids = ["arena_n1"]
 
 [figures]
 figures = [
-    "arena_task_overview",
+    "arena_task_layout",
     "arena_prediction_overlay",
     "mec_grid_metrics",
     "mec_autocorr_mosaic",
     "hpc_place_metrics",
     "hpc_rate_map_mosaic",
-    "lec_content_filtering_diagnostic",
+    "lec_content_filtering",
     "lec_content_structure_rsa",
 ]
 formats = ["png", "pdf"]
