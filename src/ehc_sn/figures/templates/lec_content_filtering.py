@@ -1,10 +1,10 @@
 """LEC content filtering diagnostic — report-facing figure template.
 
-Shows model activation dimensions in the LEC/x content stream:
+Shows the LEC transformation cascade across three panels:
 
-    a. content-state activations
-    b. filtered-state activations
-    c. filter effect = filtered - content
+    A. Sensory code c       — raw input entering LEC
+    B. EMA-filtered state   — output of the stateful EMA filter
+    C. Final LEC cells      — after norm (mean-sub + ReLU + L2) + sigmoid(w_f) scaling
 
 Rows are activation dimensions grouped by LEC frequency/filter band.
 Columns are rollout time. This is a model-internal activation-flow figure,
@@ -32,10 +32,7 @@ from ehc_sn.figures.utils.colors import (
     colormap_with_nan_color,
 )
 from ehc_sn.figures.utils.labels import format_panel_title, set_panel_title
-from ehc_sn.figures.utils.scales import (
-    build_shared_minmax,
-    symmetric_diverging_limit,
-)
+from ehc_sn.figures.utils.scales import build_shared_minmax
 from ehc_sn.traces.trace_tree import TraceTree
 
 
@@ -46,27 +43,30 @@ class _StackedBands:
     labels: list[str]
 
 
-def _band_label(idx: int, alpha: np.ndarray, w_f: np.ndarray) -> str:
-    """Build a compact frequency-band label.
+def _freq_label(idx: int) -> str:
+    """Frequency-only label for Panel A."""
+    return f"$f_{idx}$"
 
-    Examples
-    --------
-    f0
-    f0  α=0.82  w=0.34
-    """
-    label = f"f{idx}"
+
+def _alpha_label(idx: int, alpha: np.ndarray) -> str:
+    """Alpha-only label for Panel B."""
+    label = ""
     if len(alpha) > idx and np.isfinite(alpha[idx]):
-        label += f"  α={float(alpha[idx]):.2f}"
+        label = f"$\\alpha=${float(alpha[idx]): .2f}, $f_{idx}$"
+    return label
+
+
+def _wf_label(idx: int, w_f: np.ndarray) -> str:
+    """Sigmoid-weight label for Panel C, rendered with KaTeX subscript."""
+    label = ""
     if len(w_f) > idx and np.isfinite(w_f[idx]):
-        label += f"  w={float(w_f[idx]): .2f}"
+        label = f"$\\sigma(w_{{\\!f}})=${float(w_f[idx]): .2f}, $f_{idx}$"
     return label
 
 
 def _stack_bands(
     bands: list[np.ndarray],
-    *,
-    alpha: np.ndarray,
-    w_f: np.ndarray,
+    label_fn,
 ) -> _StackedBands:
     """Stack per-frequency arrays into a rows × time activation matrix.
 
@@ -75,6 +75,9 @@ def _stack_bands(
     bands:
         List of arrays shaped (T, n_units). Each list element is one
         frequency/filter band.
+    label_fn:
+        Callable ``(band_index) -> str`` that produces the y-axis label
+        for each band.
 
     Returns
     -------
@@ -84,7 +87,7 @@ def _stack_bands(
         boundaries:
             Inclusive/exclusive row spans for each real frequency band.
         labels:
-            Frequency labels, optionally including gate values.
+            Per-band labels produced by ``label_fn``.
     """
     if not bands:
         return _StackedBands(
@@ -110,7 +113,7 @@ def _stack_bands(
     row_offset = 0
 
     for i, arr in enumerate(bands):
-        labels.append(_band_label(i, alpha, w_f))
+        labels.append(label_fn(i))
 
         if arr.size == 0:
             # Missing band: one NaN row so the band is visible but not fake data.
@@ -158,53 +161,54 @@ def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
 
 
 class LECContentFilteringFigure(BaseFigureTemplate):
-    """LEC / x content-state filtering across frequency bands."""
+    """LEC transformation cascade: sensory code → EMA filter → final cells."""
 
     # Three compact horizontal panels. Keep height moderate; the panel content
     # is dense but should not dominate the notebook vertically.
     HEIGHT_FRAC: float = 0.30
-    MOSAIC = [["content"], ["filtered"], ["effect"]]
+    MOSAIC = [["sensory"], ["filtered"], ["cells"]]
     MOSAIC_KWARGS = {"gridspec_kw": {"wspace": 0.0, "hspace": 0.0}}
     SHAREX: bool = True
 
     _CMAP = "GnBu"
-    _CMAP_DIVERGING = "RdBu_r"
 
     def __init__(
         self, data: LECContentFilteringFigureData, ctx: FigureContext
     ) -> None:
         super().__init__(data, ctx)
-        self._gates_available = len(data.alpha) > 0 or len(data.w_f) > 0
+
+    # -- Stack helpers ---------------------------------------------------------
 
     @cached_property
-    def _content(self) -> _StackedBands:
-        return _stack_bands(
-            self.data.cells_by_freq,
-            alpha=self.data.alpha,
-            w_f=self.data.w_f,
-        )
+    def _sensory(self) -> _StackedBands:
+        return _stack_bands(self.data.sensory_by_freq, label_fn=_freq_label)
 
     @cached_property
     def _filtered(self) -> _StackedBands:
         return _stack_bands(
             self.data.filtered_by_freq,
-            alpha=self.data.alpha,
-            w_f=self.data.w_f,
+            label_fn=lambda i: _alpha_label(i, self.data.alpha),
         )
 
     @cached_property
-    def _activation_limits(self) -> tuple[float, float]:
-        return build_shared_minmax(
-            [self._content.matrix, self._filtered.matrix],
-            percentile=(1.0, 99.0),
-            domain=(0.0, 1.0),
+    def _cells(self) -> _StackedBands:
+        return _stack_bands(
+            self.data.cells_by_freq,
+            label_fn=lambda i: _wf_label(i, self.data.w_f),
         )
 
-    def _activation_cmap(self):
-        return colormap_with_nan_color(self._CMAP)
+    # -- Color limits ----------------------------------------------------------
 
-    def _effect_cmap(self):
-        return colormap_with_nan_color(self._CMAP_DIVERGING)
+    @cached_property
+    def _activation_limits(self) -> tuple[float, float]:
+        """Single shared robust limits across all three panels."""
+        return build_shared_minmax(
+            [self._sensory.matrix, self._filtered.matrix, self._cells.matrix],
+            percentile=(1.0, 99.0),
+        )
+
+    def _cmap(self):
+        return colormap_with_nan_color(self._CMAP)
 
     @staticmethod
     def _draw_band_separators(
@@ -219,35 +223,39 @@ class LECContentFilteringFigure(BaseFigureTemplate):
             ax.axhline(start - 0.5, color="white", linewidth=0.6, alpha=0.9)
             ax.axhline(end - 0.5, color="white", linewidth=0.6, alpha=0.9)
 
-    def _draw_unavailable_note(self, ax: Axes) -> None:
-        if self._gates_available:
-            return
-        ax.text(
-            0.995,
-            0.02,
-            "gate params unavailable",
-            ha="right",
-            va="bottom",
-            transform=ax.transAxes,
-            fontsize=7,
-            style="italic",
-            color="0.25",
-            bbox={
-                "facecolor": "white",
-                "alpha": 0.65,
-                "edgecolor": "none",
-                "pad": 1.2,
-            },
+    def _draw_panel(
+        self,
+        ax: Axes,
+        *,
+        matrix: np.ndarray,
+        boundaries: list[tuple[int, int]],
+        labels: list[str],
+        vmin: float,
+        vmax: float,
+    ) -> None:
+        """Common imshow + separators + ytick logic for all panels."""
+        im = ax.imshow(
+            np.ma.masked_invalid(matrix),
+            aspect="auto",
+            cmap=self._cmap(),
+            vmin=vmin,
+            vmax=vmax,
+            interpolation="nearest",
         )
+        self._draw_band_separators(ax, boundaries=boundaries)
+        ypos = _ytick_positions(boundaries)
+        ax.set_yticks(ypos)
+        ax.set_yticklabels(labels, fontsize=7, family="monospace")
+        attach_aligned_colorbar_fmt(im, vmax)
+        return im
 
     def _apply_colorbars(self, colorbar_groups):
-        """Override base-class colorbar application with tick formatting.
+        """Apply a single colorbar with aligned decimal-point formatting.
 
-        Creates colorbars identically to the base class, then applies
-        ``FormatStrFormatter`` to the effect-panel colorbar for aligned
-        decimal points.
+        Adds ``FormatStrFormatter`` to the colorbar ticks so that decimal
+        points are vertically aligned regardless of minus signs or digit
+        count.
         """
-        # Replicate base _apply_colorbars logic so we can capture the cbar.
         for group_state in colorbar_groups.values():
             mappable = group_state.get("mappable")
             axes = group_state.get("axes", [])
@@ -259,112 +267,67 @@ class LECContentFilteringFigure(BaseFigureTemplate):
             tick_labelsize = group_state.get("tick_labelsize", None)
             if tick_labelsize is not None:
                 cbar.ax.tick_params(labelsize=tick_labelsize)
-            # Apply custom formatter if stored on the mappable.
             fmt = getattr(mappable, "_tem_cbar_fmt", None)
             if fmt is not None:
                 cbar.ax.yaxis.set_major_formatter(fmt)
 
-    # -- Panel a: content-state activations ------------------------------------
+    # -- Panel A: Sensory code c -----------------------------------------------
 
     @colorbar(group="activation", label="Activation")
     @panel()
-    def content(self, ax: Axes) -> None:
-        set_panel_title(
-            ax, format_panel_title("a", "Content-state activations")
-        )
+    def sensory(self, ax: Axes) -> None:
+        set_panel_title(ax, format_panel_title("a", "Sensory code c"))
 
         vmin, vmax = self._activation_limits
-        ax.imshow(
-            np.ma.masked_invalid(self._content.matrix),
-            aspect="auto",
-            cmap=self._activation_cmap(),
+        self._draw_panel(
+            ax,
+            matrix=self._sensory.matrix,
+            boundaries=self._sensory.boundaries,
+            labels=self._sensory.labels,
             vmin=vmin,
             vmax=vmax,
-            interpolation="nearest",
         )
-
-        self._draw_band_separators(ax, boundaries=self._content.boundaries)
-        self._draw_unavailable_note(ax)
-
-        # Frequency-band ytick labels.
-        ypos = _ytick_positions(self._content.boundaries)
-        ax.set_yticks(ypos)
-        ax.set_yticklabels(self._content.labels, fontsize=7, family="monospace")
-
-        # Upper panel: no x-axis labels/ticks
         ax.tick_params(axis="x", which="both", bottom=True, top=False)
         ax.margins(x=0, y=0)
 
-    # -- Panel b: filtered-state activations -----------------------------------
+    # -- Panel B: EMA-filtered state -------------------------------------------
 
     @colorbar(group="activation", label="Activation")
     @panel()
     def filtered(self, ax: Axes) -> None:
-        set_panel_title(
-            ax, format_panel_title("b", "Filtered-state activations")
-        )
+        set_panel_title(ax, format_panel_title("b", "EMA-filtered state"))
 
         vmin, vmax = self._activation_limits
-        ax.imshow(
-            np.ma.masked_invalid(self._filtered.matrix),
-            aspect="auto",
-            cmap=self._activation_cmap(),
+        self._draw_panel(
+            ax,
+            matrix=self._filtered.matrix,
+            boundaries=self._filtered.boundaries,
+            labels=self._filtered.labels,
             vmin=vmin,
             vmax=vmax,
-            interpolation="nearest",
         )
-
-        self._draw_band_separators(ax, boundaries=self._filtered.boundaries)
-
-        # Frequency-band ytick labels.
-        ypos = _ytick_positions(self._content.boundaries)
-        ax.set_yticks(ypos)
-        ax.set_yticklabels(self._content.labels, fontsize=7, family="monospace")
-
-        # Upper panel: no x-axis labels/ticks
         ax.tick_params(axis="x", which="both", bottom=True, top=False)
         ax.margins(x=0, y=0)
 
-    # -- Panel c: filter effect ------------------------------------------------
+    # -- Panel C: Final LEC cells ----------------------------------------------
 
-    @colorbar(group="effect", label="Filtered")
+    @colorbar(group="activation", label="Activation")
     @panel()
-    def effect(self, ax: Axes) -> None:
-        set_panel_title(ax, format_panel_title("c", "Filter effect"))
-
-        content = self._content.matrix
-        filtered = self._filtered.matrix
-
-        if content.shape != filtered.shape:
-            raise ValueError(
-                "Content and filtered LEC stacks must have the same shape "
-                f"for the filter-effect panel. Got content={content.shape}, "
-                f"filtered={filtered.shape}."
-            )
-
-        diff = filtered - content
-        vmax = symmetric_diverging_limit(diff)
-
-        im = ax.imshow(
-            np.ma.masked_invalid(diff),
-            aspect="auto",
-            cmap=self._effect_cmap(),
-            vmin=-vmax,
-            vmax=vmax,
-            interpolation="nearest",
+    def cells(self, ax: Axes) -> None:
+        set_panel_title(
+            ax,
+            format_panel_title("c", "Final LEC cells"),
         )
 
-        self._draw_band_separators(ax, boundaries=self._content.boundaries)
-
-        # Frequency-band ytick labels.
-        ypos = _ytick_positions(self._content.boundaries)
-        ax.set_yticks(ypos)
-        ax.set_yticklabels(self._content.labels, fontsize=7, family="monospace")
-
-        # Upper panel: no x-axis labels/ticks
+        vmin, vmax = self._activation_limits
+        self._draw_panel(
+            ax,
+            matrix=self._cells.matrix,
+            boundaries=self._cells.boundaries,
+            labels=self._cells.labels,
+            vmin=vmin,
+            vmax=vmax,
+        )
         ax.set_xlabel("Time step", fontsize=8)
         ax.tick_params(axis="x", labelsize=7, bottom=True, top=False)
         ax.margins(x=0, y=0)
-
-        # -- Align colorbar tick decimals --------------------------------------
-        attach_aligned_colorbar_fmt(im, vmax)

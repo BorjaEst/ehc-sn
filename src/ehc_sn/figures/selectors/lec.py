@@ -46,6 +46,7 @@ from ehc_sn.traces.keys import (
     LEC_META_KEY_WF,
     LEC_TRACE_KEY_CELLS,
     LEC_TRACE_KEY_FILTERED,
+    LEC_TRACE_KEY_SENSORY_CODE,
     WORLD_TRACE_KEY_LOCATION_IDS,
     WORLD_TRACE_KEY_OBSERVATION,
 )
@@ -304,10 +305,21 @@ class LECContentFilteringFigureData:
     env_idx: int
     n_freq: int
     freq_idxs: list[int]
+    sensory_by_freq: list[NDArray]  # per-frequency (T, n_units) raw c
     cells_by_freq: list[NDArray]  # per-frequency (T, n_units) float arrays
     filtered_by_freq: list[NDArray]  # per-frequency (T, n_units) or empty
     alpha: NDArray  # (n_freq,) or empty
     w_f: NDArray  # (n_freq,) or empty
+
+    @property
+    def has_sensory(self) -> bool:
+        """True when sensory_code data is available (non-empty)."""
+        return bool(self.sensory_by_freq) and self.sensory_by_freq[0].size > 0
+
+    @property
+    def has_filtered(self) -> bool:
+        """True when filtered-state data is available (non-empty)."""
+        return bool(self.filtered_by_freq) and self.filtered_by_freq[0].size > 0
 
 
 def select_lec_content_filtering(
@@ -333,25 +345,34 @@ def select_lec_content_filtering(
         trace.validate_freq_idx(LEC_TRACE_KEY_CELLS, f) for f in range(n_freq)
     ]
 
+    sensory_by_freq = []
     cells_by_freq = []
     filtered_by_freq = []
     for f in freq_idxs:
+        sensory_key = f"{LEC_TRACE_KEY_SENSORY_CODE}/{f}"
+        if trace.has(sensory_key):
+            sensory_by_freq.append(
+                np.asarray(
+                    to_cpu(trace.get(sensory_key)[:, env_idx, :])
+                )
+            )
+        else:
+            sensory_by_freq.append(np.empty((0, 0), dtype=float))
+
         cells_by_freq.append(
             np.asarray(
                 to_cpu(trace.get(f"{LEC_TRACE_KEY_CELLS}/{f}")[:, env_idx, :])
             )
         )
-        try:
+
+        filtered_key = f"{LEC_TRACE_KEY_FILTERED}/{f}"
+        if trace.has(filtered_key):
             filtered_by_freq.append(
                 np.asarray(
-                    to_cpu(
-                        trace.get(f"{LEC_TRACE_KEY_FILTERED}/{f}")[
-                            :, env_idx, :
-                        ]
-                    )
+                    to_cpu(trace.get(filtered_key)[:, env_idx, :])
                 )
             )
-        except (KeyError, FileNotFoundError):
+        else:
             filtered_by_freq.append(np.empty((0, 0), dtype=float))
 
     alpha = _require_param_vector(trace, LEC_META_KEY_ALPHA)
@@ -361,6 +382,7 @@ def select_lec_content_filtering(
         env_idx=env_idx,
         n_freq=n_freq,
         freq_idxs=freq_idxs,
+        sensory_by_freq=sensory_by_freq,
         cells_by_freq=cells_by_freq,
         filtered_by_freq=filtered_by_freq,
         alpha=alpha,
