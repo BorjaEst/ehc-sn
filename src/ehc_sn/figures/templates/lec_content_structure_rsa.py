@@ -9,13 +9,13 @@ sensory identity or by arena location.  For each stream, we compute cosine
 similarity between all pairs of time-step states.  The *content effect* is
 defined as:
 
-    mean(same observation) − mean(different observation)
+    mean(same observation) - mean(different observation)
 
 The *location effect* is defined as:
 
-    mean(same location) − mean(different location)
+    mean(same location) - mean(different location)
 
-A TEM-style factorisation predicts a relative dissociation:
+A TEM-style factorization predicts a relative dissociation:
     - LEC should carry more content information.
     - MEC should carry more structural/location information.
     - HPC may combine both.
@@ -69,13 +69,11 @@ class LECContentStructureRSAFigure(BaseFigureTemplate):
     ) -> None:
         super().__init__(data, ctx)
 
-    # -- Panel A: same/different observation similarity per stream --------------
+    # -- Panel A: same/different observation similarity per stream ------------
 
     @panel()
     def by_obs(self, ax: Axes) -> None:
-        ax.set_title(
-            format_panel_title("a", "Observation grouping"), fontsize=10
-        )
+        ax.set_title(format_panel_title("a", "Observation group"), fontsize=10)
         names = self._SYS_NAMES
         x = np.arange(len(names))
         width = 0.35
@@ -90,6 +88,7 @@ class LECContentStructureRSAFigure(BaseFigureTemplate):
             self.data.mec.different_observation,
             self.data.hpc.different_observation,
         ]
+
         ax.bar(
             x - width / 2,
             same,
@@ -109,13 +108,13 @@ class LECContentStructureRSAFigure(BaseFigureTemplate):
         ax.set_xticks(x)
         ax.set_xticklabels(names, fontsize=8)
         ax.set_ylabel("Cos. sim.", fontsize=9)
-        ax.legend(fontsize=6)
+        ax.legend(fontsize=6, frameon=True, framealpha=0.4, edgecolor="gray")
 
-    # -- Panel B: same/different location similarity per stream -----------------
+    # -- Panel B: same/different location similarity per stream ---------------
 
     @panel()
     def by_loc(self, ax: Axes) -> None:
-        ax.set_title(format_panel_title("b", "Location grouping"), fontsize=10)
+        ax.set_title(format_panel_title("b", "Location group"), fontsize=10)
         names = self._SYS_NAMES
         x = np.arange(len(names))
         width = 0.35
@@ -130,6 +129,7 @@ class LECContentStructureRSAFigure(BaseFigureTemplate):
             self.data.mec.different_location,
             self.data.hpc.different_location,
         ]
+
         ax.bar(
             x - width / 2,
             same,
@@ -149,15 +149,13 @@ class LECContentStructureRSAFigure(BaseFigureTemplate):
         ax.set_xticks(x)
         ax.set_xticklabels(names, fontsize=8)
         ax.set_ylabel("Cos. sim.", fontsize=9)
-        ax.legend(fontsize=6)
+        ax.legend(fontsize=6, frameon=True, framealpha=0.4, edgecolor="gray")
 
-    # -- Panel C: content minus location effect per stream ----------------------
+    # -- Panel C: content minus location effect per stream --------------------
 
     @panel()
     def summary_contrast(self, ax: Axes) -> None:
-        ax.set_title(
-            format_panel_title("c", "Content vs. location"), fontsize=10
-        )
+        ax.set_title(format_panel_title("c", "Content vs. loc."), fontsize=10)
         names = self._SYS_NAMES
         x = np.arange(len(names))
         width = 0.35
@@ -192,5 +190,5 @@ class LECContentStructureRSAFigure(BaseFigureTemplate):
         ax.axhline(0.0, color="gray", linewidth=0.5)
         ax.set_xticks(x)
         ax.set_xticklabels(names, fontsize=8)
-        ax.set_ylabel("Effect\n(same − diff)", fontsize=8)
-        ax.legend(fontsize=6)
+        ax.set_ylabel("Effect (same - diff)", fontsize=8)
+        ax.legend(fontsize=6, frameon=True, framealpha=0.4, edgecolor="gray")
