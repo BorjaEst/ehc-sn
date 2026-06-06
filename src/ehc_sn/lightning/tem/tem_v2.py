@@ -38,8 +38,12 @@ from ehc_sn.lightning.tem.core.runtime import (
 )
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.keys import (
+    TEM_ACC_OBS_ANCESTRAL_ALL,
+    TEM_ACC_OBS_ANCESTRAL_REVISIT,
     TEM_ACC_OBS_INFERENCE_ALL,
     TEM_ACC_OBS_INFERENCE_REVISIT,
+    TEM_ACC_OBS_RETRIEVED_ALL,
+    TEM_ACC_OBS_RETRIEVED_REVISIT,
 )
 from ehc_sn.metrics.reducers import (
     HiddenNormHistogram,
@@ -653,39 +657,113 @@ class TEMV2TrainingModel(L.LightningModule):
         """Aggregate per-case Arena observation accuracy into a regime summary."""
         _ = task, regime_id, regime_kind
 
-        total_correct_all = 0.0
-        total_count_all = 0.0
-        total_correct_revisit = 0.0
-        total_count_revisit = 0.0
+        total_correct_ancestral_all = 0.0
+        total_count_ancestral_all = 0.0
+        total_correct_ancestral_revisit = 0.0
+        total_count_ancestral_revisit = 0.0
+        total_correct_retrieved_all = 0.0
+        total_count_retrieved_all = 0.0
+        total_correct_retrieved_revisit = 0.0
+        total_count_retrieved_revisit = 0.0
+        total_correct_inference_all = 0.0
+        total_count_inference_all = 0.0
+        total_correct_inference_revisit = 0.0
+        total_count_inference_revisit = 0.0
 
         for case in case_results:
             for step in case.evaluated.steps:
                 metrics = step.outputs.metrics
 
-                ratio_all = metrics.extras.get(TEM_ACC_OBS_INFERENCE_ALL)
-                if ratio_all is not None:
-                    total_correct_all += float(ratio_all.numerator_sum.item())
-                    total_count_all += float(ratio_all.denominator_sum.item())
+                ratio_anc_all = metrics.extras.get(TEM_ACC_OBS_ANCESTRAL_ALL)
+                if ratio_anc_all is not None:
+                    total_correct_ancestral_all += float(
+                        ratio_anc_all.numerator_sum.item()
+                    )
+                    total_count_ancestral_all += float(
+                        ratio_anc_all.denominator_sum.item()
+                    )
 
-                ratio_revisit = metrics.extras.get(
+                ratio_anc_revisit = metrics.extras.get(
+                    TEM_ACC_OBS_ANCESTRAL_REVISIT
+                )
+                if ratio_anc_revisit is not None:
+                    total_correct_ancestral_revisit += float(
+                        ratio_anc_revisit.numerator_sum.item()
+                    )
+                    total_count_ancestral_revisit += float(
+                        ratio_anc_revisit.denominator_sum.item()
+                    )
+
+                ratio_ret_all = metrics.extras.get(TEM_ACC_OBS_RETRIEVED_ALL)
+                if ratio_ret_all is not None:
+                    total_correct_retrieved_all += float(
+                        ratio_ret_all.numerator_sum.item()
+                    )
+                    total_count_retrieved_all += float(
+                        ratio_ret_all.denominator_sum.item()
+                    )
+
+                ratio_ret_revisit = metrics.extras.get(
+                    TEM_ACC_OBS_RETRIEVED_REVISIT
+                )
+                if ratio_ret_revisit is not None:
+                    total_correct_retrieved_revisit += float(
+                        ratio_ret_revisit.numerator_sum.item()
+                    )
+                    total_count_retrieved_revisit += float(
+                        ratio_ret_revisit.denominator_sum.item()
+                    )
+
+                ratio_inf_all = metrics.extras.get(TEM_ACC_OBS_INFERENCE_ALL)
+                if ratio_inf_all is not None:
+                    total_correct_inference_all += float(
+                        ratio_inf_all.numerator_sum.item()
+                    )
+                    total_count_inference_all += float(
+                        ratio_inf_all.denominator_sum.item()
+                    )
+
+                ratio_inf_revisit = metrics.extras.get(
                     TEM_ACC_OBS_INFERENCE_REVISIT
                 )
-                if ratio_revisit is not None:
-                    total_correct_revisit += float(
-                        ratio_revisit.numerator_sum.item()
+                if ratio_inf_revisit is not None:
+                    total_correct_inference_revisit += float(
+                        ratio_inf_revisit.numerator_sum.item()
                     )
-                    total_count_revisit += float(
-                        ratio_revisit.denominator_sum.item()
+                    total_count_inference_revisit += float(
+                        ratio_inf_revisit.denominator_sum.item()
                     )
 
         result: dict[str, float | int] = {}
 
-        if total_count_all > 0:
-            result["accuracy_all"] = total_correct_all / total_count_all
+        if total_count_ancestral_all > 0:
+            result["accuracy_ancestral_all"] = (
+                total_correct_ancestral_all / total_count_ancestral_all
+            )
 
-        if total_count_revisit > 0:
-            result["accuracy_revisit"] = (
-                total_correct_revisit / total_count_revisit
+        if total_count_ancestral_revisit > 0:
+            result["accuracy_ancestral_revisit"] = (
+                total_correct_ancestral_revisit / total_count_ancestral_revisit
+            )
+
+        if total_count_retrieved_all > 0:
+            result["accuracy_retrieved_all"] = (
+                total_correct_retrieved_all / total_count_retrieved_all
+            )
+
+        if total_count_retrieved_revisit > 0:
+            result["accuracy_retrieved_revisit"] = (
+                total_correct_retrieved_revisit / total_count_retrieved_revisit
+            )
+
+        if total_count_inference_all > 0:
+            result["accuracy_inference_all"] = (
+                total_correct_inference_all / total_count_inference_all
+            )
+
+        if total_count_inference_revisit > 0:
+            result["accuracy_inference_revisit"] = (
+                total_correct_inference_revisit / total_count_inference_revisit
             )
 
         return result

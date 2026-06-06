@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -101,7 +102,26 @@ class ValidationRuntimeConfig(BaseModel, extra="forbid"):
 
 # =============================================================================
 class RuntimeConfig(BaseModel, extra="forbid"):
-    """Step-based runtime schedules for TEM training dynamics and validation safety."""
+    """TEM runtime configuration with configurable resolution semantics.
+
+    - ``"scheduled"`` (default): step-dependent schedules — ``resolve_tem_runtime``
+      applies ramps, sigmoid gates, and progress fractions via the current step.
+    - ``"fixed"``: the schedule targets are applied directly as the runtime state —
+      ``resolve_tem_runtime`` returns ``eta=config.memory.eta``,
+      ``hebbian_decay=config.memory.hebbian_decay``, ``p2g_use=1.0`` (the sigmoid
+      asymptote), ``p2g_uncertainty_offset=config.uncertainty.offset_min`` (the
+      schedule floor).  The ``step`` argument is ignored.
+
+    The TOML layout (``[runtime.memory]``, ``[runtime.uncertainty]``, …) is
+    identical for both modes — only the ``kind`` value differs.
+    """
+
+    kind: Literal["scheduled", "fixed"] = Field(
+        default="scheduled",
+        description="Runtime resolution mode.  ``'scheduled'`` applies "
+        "step-dependent schedules; ``'fixed'`` applies schedule targets "
+        "directly (step is ignored).",
+    )
 
     memory: MemoryRuntimeConfig = Field(
         default_factory=MemoryRuntimeConfig,
@@ -137,7 +157,20 @@ def resolve_tem_runtime(  # ---------------------------------------------------
     step: int,
     config: RuntimeConfig,
 ) -> TEMRuntimeState:
-    """Resolve TEM runtime values from the current global training step."""
+    """Resolve TEM runtime values from the current global training step.
+
+    When ``config.kind == "fixed"`` the ``step`` argument is ignored and the
+    schedule target values in the config are applied directly — evaluation
+    should not simulate training step progression.
+    """
+    if config.kind == "fixed":
+        return TEMRuntimeState(
+            eta=config.memory.eta,
+            hebbian_decay=config.memory.hebbian_decay,
+            p2g_use=1.0,
+            p2g_uncertainty_offset=config.uncertainty.offset_min,
+        )
+
     if step < 0:
         raise ValueError(f"step must be non-negative, got {step}.")
 
