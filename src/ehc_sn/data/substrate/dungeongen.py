@@ -24,10 +24,22 @@ from typing import Final, Iterator
 
 import numpy as np
 
-from ehc_sn.data.lifecycle import extract_version, staging_root, write_index_at_root, write_split
+from ehc_sn.data.lifecycle import (
+    extract_version,
+    staging_root,
+    write_index_at_root,
+    write_split,
+)
 from ehc_sn.data.manifest import write_manifest
-from ehc_sn.data.substrate._common import binary_structural_landmarks, largest_component_mask, sample_observations
-from ehc_sn.data.substrate._dungeongen_raw import ensure_raw_snapshot, iter_raw_topologies
+from ehc_sn.data.substrate._common import (
+    binary_structural_landmarks,
+    largest_component_mask,
+    sample_observations,
+)
+from ehc_sn.data.substrate._dungeongen_raw import (
+    ensure_raw_snapshot,
+    iter_raw_topologies,
+)
 from ehc_sn.data.substrate.grid2d import TOPOLOGY_KIND as _GRID2D_KIND
 from ehc_sn.data.substrate.grid2d import validate_grid2d_sample
 
@@ -45,7 +57,11 @@ SHARED_CHANNELS: Final[list[str]] = [
 """Shared-substrate channels (task-neutral layout data)."""
 
 _SPLITS: tuple[str, ...] = ("train", "val", "test")
-_SPLIT_SEED_OFFSET: dict[str, int] = {"train": 0, "val": 100_000, "test": 200_000}
+_SPLIT_SEED_OFFSET: dict[str, int] = {
+    "train": 0,
+    "val": 100_000,
+    "test": 200_000,
+}
 _SOURCE_ID: Final[str] = "dungeongen"
 
 
@@ -110,7 +126,9 @@ def prepare_interim(
         topologies: list[np.ndarray] = []
         regions_list: list[np.ndarray] = []
 
-        for idx, (topology, regions, seed) in enumerate(iter_raw_topologies(raw_root, split)):
+        for idx, (topology, regions, seed) in enumerate(
+            iter_raw_topologies(raw_root, split)
+        ):
             if idx >= n:
                 break
             sample_ids.append(idx)
@@ -122,13 +140,17 @@ def prepare_interim(
 
         count = len(sample_ids)
         if count < n:
-            raise RuntimeError(f"Interim: only {count} raw topologies found for '{split}', need {n}.")
+            raise RuntimeError(
+                f"Interim: only {count} raw topologies found for '{split}', need {n}."
+            )
 
         h_max = int(max(h for h in heights))
         w_max = int(max(w for w in widths))
         topo_arr = np.zeros((count, h_max, w_max), dtype=bool)
         reg_arr = np.full((count, h_max, w_max), -1, dtype=np.int32)
-        for i, (topo, reg, h, w) in enumerate(zip(topologies, regions_list, heights, widths)):
+        for i, (topo, reg, h, w) in enumerate(
+            zip(topologies, regions_list, heights, widths)
+        ):
             topo_arr[i, :h, :w] = topo
             reg_arr[i, :h, :w] = reg
 
@@ -144,7 +166,9 @@ def prepare_interim(
         )
 
 
-def _iter_interim_topologies(interim_root: Path, split: str) -> Iterator[tuple[np.ndarray, np.ndarray, int]]:
+def _iter_interim_topologies(
+    interim_root: Path, split: str
+) -> Iterator[tuple[np.ndarray, np.ndarray, int]]:
     """Yield ``(topology, regions, seed)`` from the dungeongen interim split file.
 
     Args:
@@ -159,7 +183,9 @@ def _iter_interim_topologies(interim_root: Path, split: str) -> Iterator[tuple[n
     """
     split_path = interim_root / f"{split}.npz"
     if not split_path.exists():
-        raise FileNotFoundError(f"Interim split file not found: {split_path}.  Run prepare-interim first.")
+        raise FileNotFoundError(
+            f"Interim split file not found: {split_path}.  Run prepare-interim first."
+        )
     data = np.load(split_path)
     heights = data["height"]
     widths = data["width"]
@@ -172,10 +198,15 @@ def _iter_interim_topologies(interim_root: Path, split: str) -> Iterator[tuple[n
 
 
 # ---------------------------------------------------------------------------
-def _pad_to_shape(arr: np.ndarray, target_h: int, target_w: int, *, fill: int | bool) -> np.ndarray:
+def _pad_to_shape(
+    arr: np.ndarray, target_h: int, target_w: int, *, fill: int | bool
+) -> np.ndarray:
     h, w = arr.shape
     if h > target_h or w > target_w:
-        raise ValueError(f"Source shape ({h}, {w}) exceeds target ({target_h}, {target_w}). " "Increase --height/--width.")
+        raise ValueError(
+            f"Source shape ({h}, {w}) exceeds target ({target_h}, {target_w}). "
+            "Increase --height/--width."
+        )
     if h == target_h and w == target_w:
         return arr
     out = np.full((target_h, target_w), fill, dtype=arr.dtype)
@@ -196,10 +227,14 @@ def _build_substrate_sample(
     rng = np.random.default_rng(seed)
 
     topology = _pad_to_shape(topology, target_h, target_w, fill=False)
-    regions = _pad_to_shape(dungeongen_regions, target_h, target_w, fill=-1).astype(np.int32)
+    regions = _pad_to_shape(
+        dungeongen_regions, target_h, target_w, fill=-1
+    ).astype(np.int32)
 
     mask_valid = largest_component_mask(topology)
-    observations = sample_observations(mask_valid, n_observations, seed=int(rng.integers(2**31)))
+    observations = sample_observations(
+        mask_valid, n_observations, seed=int(rng.integers(2**31))
+    )
     landmarks = binary_structural_landmarks(mask_valid)
 
     return {
@@ -223,7 +258,9 @@ def _infer_shape(
     max_h = 0
     max_w = 0
     for split, n in split_counts.items():
-        for idx, (topology, _, _) in enumerate(_iter_interim_topologies(interim_root, split)):
+        for idx, (topology, _, _) in enumerate(
+            _iter_interim_topologies(interim_root, split)
+        ):
             if idx >= n:
                 break
             h, w = topology.shape
@@ -239,7 +276,7 @@ def build_shared_substrate(
     version_root: Path,
     *,
     interim_root: Path,
-    n_train: int = 200,
+    n_train: int = 1000,
     n_val: int = 40,
     n_test: int = 40,
     height: int | None = None,
@@ -317,7 +354,9 @@ def build_shared_substrate(
         all_entries = []
         for split in _SPLITS:
             n = split_counts[split]
-            interim_topologies = list(_iter_interim_topologies(interim_root, split))[:n]
+            interim_topologies = list(
+                _iter_interim_topologies(interim_root, split)
+            )[:n]
             samples = [
                 _build_substrate_sample(
                     topology,
@@ -327,7 +366,9 @@ def build_shared_substrate(
                     n_observations=n_observations,
                     seed=_sample_seed(seed, split, idx),
                 )
-                for idx, (topology, dungeon_regions, _) in enumerate(interim_topologies)
+                for idx, (topology, dungeon_regions, _) in enumerate(
+                    interim_topologies
+                )
             ]
             entries = write_split(
                 tmp,
@@ -362,7 +403,9 @@ def build_shared_substrate(
         )
 
     n_total = n_train + n_val + n_test
-    print(f"dungeongen shared substrate written to {version_root}  ({n_total} samples.)")
+    print(
+        f"dungeongen shared substrate written to {version_root}  ({n_total} samples.)"
+    )
 
 
 def validate_dungeongen_shared_root(root: Path) -> dict:
@@ -385,12 +428,18 @@ def validate_dungeongen_shared_root(root: Path) -> dict:
 
     manifest = validate_version_root(root)
     if manifest.get("family") != SHARED_FAMILY:
-        raise ValueError(f"Root family is {manifest.get('family')!r}, expected {SHARED_FAMILY!r}.")
+        raise ValueError(
+            f"Root family is {manifest.get('family')!r}, expected {SHARED_FAMILY!r}."
+        )
     if manifest.get("topology_kind") != _GRID2D_KIND:
-        raise ValueError(f"Root topology_kind is {manifest.get('topology_kind')!r}, expected {_GRID2D_KIND!r}.")
+        raise ValueError(
+            f"Root topology_kind is {manifest.get('topology_kind')!r}, expected {_GRID2D_KIND!r}."
+        )
     missing_ch = set(SHARED_CHANNELS) - set(manifest.get("channels", []))
     if missing_ch:
-        raise ValueError(f"Manifest missing required dungeongen channels: {sorted(missing_ch)}")
+        raise ValueError(
+            f"Manifest missing required dungeongen channels: {sorted(missing_ch)}"
+        )
     return manifest
 
 

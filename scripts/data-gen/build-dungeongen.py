@@ -48,7 +48,10 @@ from typing import Annotated
 import typer
 
 from ehc_sn.data.lifecycle import validate_version_root
-from ehc_sn.data.substrate.dungeongen import SHARED_FAMILY, build_shared_substrate
+from ehc_sn.data.substrate.dungeongen import (
+    SHARED_FAMILY,
+    build_shared_substrate,
+)
 from ehc_sn.data.substrate.dungeongen import ensure_raw as _ensure_raw
 from ehc_sn.data.substrate.dungeongen import prepare_interim as _prepare_interim
 
@@ -64,7 +67,7 @@ app = typer.Typer(add_completion=False, help=__doc__)
 @app.command("fetch-raw")
 def fetch_raw(
     raw_root: Annotated[Path, typer.Option("--raw-root")] = _DEFAULT_RAW_ROOT,
-    n_train: Annotated[int, typer.Option("--n-train")] = 200,
+    n_train: Annotated[int, typer.Option("--n-train")] = 1000,
     n_val: Annotated[int, typer.Option("--n-val")] = 40,
     n_test: Annotated[int, typer.Option("--n-test")] = 40,
     seed: Annotated[int, typer.Option("--seed")] = 42,
@@ -75,7 +78,9 @@ def fetch_raw(
     If it exists and the manifest identity matches the request, this is a no-op.
     If it exists with a mismatched identity, exits with an actionable error.
     """
-    _ensure_raw(raw_root, seed, {"train": n_train, "val": n_val, "test": n_test})
+    _ensure_raw(
+        raw_root, seed, {"train": n_train, "val": n_val, "test": n_test}
+    )
     typer.echo(f"Raw corpus at {raw_root}")
 
 
@@ -83,8 +88,10 @@ def fetch_raw(
 @app.command("prepare-interim")
 def prepare_interim(
     raw_root: Annotated[Path, typer.Option("--raw-root")] = _DEFAULT_RAW_ROOT,
-    interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
-    n_train: Annotated[int, typer.Option("--n-train")] = 200,
+    interim_root: Annotated[
+        Path, typer.Option("--interim-root")
+    ] = _DEFAULT_INTERIM_ROOT,
+    n_train: Annotated[int, typer.Option("--n-train")] = 1000,
     n_val: Annotated[int, typer.Option("--n-val")] = 40,
     n_test: Annotated[int, typer.Option("--n-test")] = 40,
 ) -> None:
@@ -107,20 +114,30 @@ def prepare_interim(
 # ---------------------------------------------------------------------------
 @app.command("materialize-shared")
 def materialize_shared(
-    interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
-    n_train: Annotated[int, typer.Option("--n-train")] = 200,
+    interim_root: Annotated[
+        Path, typer.Option("--interim-root")
+    ] = _DEFAULT_INTERIM_ROOT,
+    n_train: Annotated[int, typer.Option("--n-train")] = 1000,
     n_val: Annotated[int, typer.Option("--n-val")] = 40,
     n_test: Annotated[int, typer.Option("--n-test")] = 40,
     height: Annotated[
         int | None,
-        typer.Option("--height", help="Target grid height. Inferred from interim slice when omitted."),
+        typer.Option(
+            "--height",
+            help="Target grid height. Inferred from interim slice when omitted.",
+        ),
     ] = None,
     width: Annotated[
         int | None,
-        typer.Option("--width", help="Target grid width. Inferred from interim slice when omitted."),
+        typer.Option(
+            "--width",
+            help="Target grid width. Inferred from interim slice when omitted.",
+        ),
     ] = None,
     n_observations: Annotated[int, typer.Option("--n-observations")] = 45,
-    version: Annotated[int, typer.Option("--version")] = _DEFAULT_SHARED_VERSION,
+    version: Annotated[
+        int, typer.Option("--version")
+    ] = _DEFAULT_SHARED_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
 ) -> None:
     """Build the dungeongen shared substrate.
@@ -145,7 +162,10 @@ def materialize_shared(
 # ---------------------------------------------------------------------------
 @app.command("validate")
 def validate(
-    root: Annotated[Path, typer.Argument(help="Dungeongen shared-substrate root to validate.")],
+    root: Annotated[
+        Path,
+        typer.Argument(help="Dungeongen shared-substrate root to validate."),
+    ],
 ) -> None:
     """Validate a dungeongen shared-substrate version root.
 
@@ -178,20 +198,30 @@ def validate(
 @app.command("build-all")
 def build_all(
     raw_root: Annotated[Path, typer.Option("--raw-root")] = _DEFAULT_RAW_ROOT,
-    interim_root: Annotated[Path, typer.Option("--interim-root")] = _DEFAULT_INTERIM_ROOT,
-    n_train: Annotated[int, typer.Option("--n-train")] = 200,
+    interim_root: Annotated[
+        Path, typer.Option("--interim-root")
+    ] = _DEFAULT_INTERIM_ROOT,
+    n_train: Annotated[int, typer.Option("--n-train")] = 1000,
     n_val: Annotated[int, typer.Option("--n-val")] = 40,
     n_test: Annotated[int, typer.Option("--n-test")] = 40,
     height: Annotated[
         int | None,
-        typer.Option("--height", help="Target grid height. Inferred from interim slice when omitted."),
+        typer.Option(
+            "--height",
+            help="Target grid height. Inferred from interim slice when omitted.",
+        ),
     ] = None,
     width: Annotated[
         int | None,
-        typer.Option("--width", help="Target grid width. Inferred from interim slice when omitted."),
+        typer.Option(
+            "--width",
+            help="Target grid width. Inferred from interim slice when omitted.",
+        ),
     ] = None,
     n_observations: Annotated[int, typer.Option("--n-observations")] = 45,
-    version: Annotated[int, typer.Option("--version")] = _DEFAULT_SHARED_VERSION,
+    version: Annotated[
+        int, typer.Option("--version")
+    ] = _DEFAULT_SHARED_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
 ) -> None:
     """Shared-family pipeline: fetch-raw → prepare-interim → materialize-shared.
@@ -202,8 +232,20 @@ def build_all(
         python build-arena.py build-all --shared-version <version>
         python build-dungeon.py build-all --shared-version <version>
     """
-    fetch_raw(raw_root=raw_root, n_train=n_train, n_val=n_val, n_test=n_test, seed=seed)
-    prepare_interim(raw_root=raw_root, interim_root=interim_root, n_train=n_train, n_val=n_val, n_test=n_test)
+    fetch_raw(
+        raw_root=raw_root,
+        n_train=n_train,
+        n_val=n_val,
+        n_test=n_test,
+        seed=seed,
+    )
+    prepare_interim(
+        raw_root=raw_root,
+        interim_root=interim_root,
+        n_train=n_train,
+        n_val=n_val,
+        n_test=n_test,
+    )
     materialize_shared(
         interim_root=interim_root,
         n_train=n_train,

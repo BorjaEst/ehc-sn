@@ -65,7 +65,7 @@ _DEFAULT_TASK_VERSION = 1
 _DEFAULT_CORPUS = "default"
 _DEFAULT_START_POLICY = "random_valid"
 _DEFAULT_WALK_POLICY = "uniform"
-_DEFAULT_MAX_STEPS = 600
+_DEFAULT_MAX_STEPS = 2000
 
 app = typer.Typer(add_completion=False, help=__doc__)
 
@@ -77,11 +77,11 @@ def materialize_task(  # ------------------------------------------------------
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
     start_policy: Annotated[str, typer.Option("--start-policy")] = _DEFAULT_START_POLICY,
     walk_policy: Annotated[str, typer.Option("--walk-policy")] = _DEFAULT_WALK_POLICY,
-    train_parent_maps: Annotated[int, typer.Option("--train-parent-maps")] = 100,
+    train_parent_maps: Annotated[int, typer.Option("--train-parent-maps")] = 1000,
     val_parent_maps: Annotated[int, typer.Option("--val-parent-maps")] = 10,
     test_parent_maps: Annotated[int, typer.Option("--test-parent-maps")] = 10,
-    train_episodes_per_parent: Annotated[int, typer.Option("--train-episodes-per-parent")] = 10,
-    val_episodes_per_parent: Annotated[int, typer.Option("--val-episodes-per-parent")] = 4,
+    train_episodes_per_parent: Annotated[int, typer.Option("--train-episodes-per-parent")] = 2,
+    val_episodes_per_parent: Annotated[int, typer.Option("--val-episodes-per-parent")] = 1,
     test_episodes_per_parent: Annotated[int, typer.Option("--test-episodes-per-parent")] = 1,
     max_steps: Annotated[int, typer.Option("--max-steps")] = _DEFAULT_MAX_STEPS,
     shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
@@ -150,11 +150,11 @@ def build_all(  # -------------------------------------------------------------
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
     start_policy: Annotated[str, typer.Option("--start-policy")] = _DEFAULT_START_POLICY,
     walk_policy: Annotated[str, typer.Option("--walk-policy")] = _DEFAULT_WALK_POLICY,
-    train_parent_maps: Annotated[int, typer.Option("--train-parent-maps")] = 100,
+    train_parent_maps: Annotated[int, typer.Option("--train-parent-maps")] = 1000,
     val_parent_maps: Annotated[int, typer.Option("--val-parent-maps")] = 10,
     test_parent_maps: Annotated[int, typer.Option("--test-parent-maps")] = 10,
-    train_episodes_per_parent: Annotated[int, typer.Option("--train-episodes-per-parent")] = 10,
-    val_episodes_per_parent: Annotated[int, typer.Option("--val-episodes-per-parent")] = 4,
+    train_episodes_per_parent: Annotated[int, typer.Option("--train-episodes-per-parent")] = 2,
+    val_episodes_per_parent: Annotated[int, typer.Option("--val-episodes-per-parent")] = 1,
     test_episodes_per_parent: Annotated[int, typer.Option("--test-episodes-per-parent")] = 1,
     max_steps: Annotated[int, typer.Option("--max-steps")] = _DEFAULT_MAX_STEPS,
     shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,

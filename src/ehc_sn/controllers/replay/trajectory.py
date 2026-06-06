@@ -83,7 +83,7 @@ class ReplayTrajectoryControllerConfig(BaseModel, extra="forbid"):
         description=(
             "Maximum steps to replay per window.  None = full-episode replay "
             "(canonical benchmark mode).  A positive integer enables fixed "
-            "contiguous windows for training optimisation."
+            "contiguous windows for training optimization."
         ),
     )
 
