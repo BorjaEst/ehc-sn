@@ -224,7 +224,9 @@ class HPCAttention(HPCBase):
         """
         del n_stages, f_initial
         super().__init__(config, device=device, dtype=dtype)
-        self.retrieval_module = FactorRead(config.read)
+        self.retrieval_module = FactorRead(
+            config.read, feature_dim=sum(self.shape)
+        )
         self.write_module = EpisodicWrite(config.write)
         self.store_backend = FactorAppendStoreBackend(
             self.write_module,
@@ -307,13 +309,13 @@ class HPCAttention(HPCBase):
             for bank_name, bank_value in named_writes.items():
                 if bank_name in g_cued.bank_names:
                     g_cued = self.store_backend.append_write(
-                        g_cued, key, bank_value, bank_name=bank_name
+                        g_cued, bank_value, bank_value, bank_name=bank_name
                     )
                 if self.config.common_memory:
                     x_cued = g_cued
                 elif bank_name in x_cued.bank_names:
                     x_cued = self.store_backend.append_write(
-                        x_cued, key, bank_value, bank_name=bank_name
+                        x_cued, bank_value, bank_value, bank_name=bank_name
                     )
 
         return MemoryState(g_cued=g_cued, x_cued=x_cued)

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Annotated, Literal, Optional, TypeAlias
 
 import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from torch import Tensor
 from torch import device as Device
 from torch import dtype as Dtype
@@ -110,6 +110,12 @@ class TargetRead(BaseModel, extra="forbid"):
     target: CueFamily
     target_init: Optional[CueFamily] = None
     read_bank: str = DEFAULT_FACTOR_BANK_NAME
+
+    @model_validator(mode="after")
+    def _default_read_bank_to_target(self) -> "TargetRead":
+        if self.read_bank == DEFAULT_FACTOR_BANK_NAME:
+            object.__setattr__(self, "read_bank", self.target)
+        return self
 
 
 # =============================================================================

@@ -17,19 +17,19 @@ enable_sensory_recall   = true
 [hpc.read]
     beta            = 1.0
     empty_retrieval = "query"
-    beta_scaling    = "log_memory_count"
+    beta_scaling    = "none"
     iterations      = 1
     recurrence      = "none"
 
 [hpc.write]
-    policy             = "append_if_novel"
+    policy             = "append_all"
     novelty_similarity = "cosine"
     novelty_threshold  = 0.95
     write_bank         = "default"
 
 [hpc.store]
-    memory_capacity = 1024
-    bank_names      = [ ]
+    memory_capacity = 200
+    bank_names      = ["g", "x"]
 
 [lec]
     feature_dim = 10

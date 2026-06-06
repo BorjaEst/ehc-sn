@@ -70,6 +70,7 @@ class LECState(DetachMixin):
 
     features: MultiScaleCode  # LEC activations per frequency
     filtered_features: MultiScaleCode  # Unweighted filtered features
+    sensory_code: MultiScaleCode  # Raw sensory code c entering inference()
 
     @property
     def cells(self) -> MultiScaleCode:
@@ -86,10 +87,14 @@ class LECState(DetachMixin):
         *,
         features: MultiScaleCode,
         filtered_features: MultiScaleCode,
+        sensory_code: MultiScaleCode,
     ) -> LECState:
         """Return a copy with updated feature tensors."""
         return replace(
-            self, features=features, filtered_features=filtered_features
+            self,
+            features=features,
+            filtered_features=filtered_features,
+            sensory_code=sensory_code,
         )
 
     def replace_rows(self, flag: Tensor, fresh: "LECState") -> "LECState":
@@ -100,6 +105,9 @@ class LECState(DetachMixin):
             ),
             filtered_features=utils.merge_multiscale_rows(
                 flag, self.filtered_features, fresh.filtered_features
+            ),
+            sensory_code=utils.merge_multiscale_rows(
+                flag, self.sensory_code, fresh.sensory_code
             ),
         )
 
@@ -172,7 +180,7 @@ class LECModel(nn.Module):
             An initialized `LECState`.
         """
         x0 = [torch.zeros((batch_size, n), device=device) for n in self.shape]
-        return LECState(features=x0, filtered_features=x0)
+        return LECState(features=x0, filtered_features=x0, sensory_code=x0)
 
     def reset_state(  # -------------------------------------------------------
         self,
@@ -240,7 +248,13 @@ class LECModel(nn.Module):
             torch.sigmoid(self.w_f[f]) * normalized[f]
             for f in range(self.n_freq)
         ]
-        return x_inf, state.new(features=next_cells, filtered_features=filtered)
+        # Detach sensory code for diagnostic trace (no gradient needed).
+        c_detached = [freq.detach() for freq in c]
+        return x_inf, state.new(
+            features=next_cells,
+            filtered_features=filtered,
+            sensory_code=c_detached,
+        )
 
 
 # =============================================================================

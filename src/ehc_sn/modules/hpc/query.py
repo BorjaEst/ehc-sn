@@ -56,7 +56,10 @@ class AttractorRead(nn.Module):
     stage-specific update masks.
     """
 
-    def __init__(self, config: AttractorReadSettings) -> None:
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: AttractorReadSettings,
+    ) -> None:
         """Initialize attractor retrieval dynamics from the provided settings."""
         super().__init__()
         self._config = config
@@ -73,9 +76,7 @@ class AttractorRead(nn.Module):
         memory_view: LinearMemoryView,
         *,
         masks: Sequence[Tensor],
-    ) -> (
-        Tensor
-    ):  # -------------------------------------------------------------------------------
+    ) -> Tensor:
         """Run staged attractor dynamics over a linear memory view.
 
         Args:
@@ -98,12 +99,10 @@ class AttractorRead(nn.Module):
             state = (1 - mask) * state + mask * self.activation(field)
         return state
 
-    def activation(
+    def activation(  # --------------------------------------------------------
         self,
         code: Tensor,
-    ) -> (
-        Tensor
-    ):  # ----------------------------------------------------------------------------
+    ) -> Tensor:
         """Clamp a code tensor and apply the configured attractor activation."""
         code = torch.clamp(
             code, min=self.config.clamp_min, max=self.config.clamp_max
@@ -151,10 +150,23 @@ class FactorRead(nn.Module):
     retrieval over named factor-memory banks.
     """
 
-    def __init__(self, config: FactorReadSettings) -> None:
-        """Initialize factor-memory retrieval from the provided settings."""
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: FactorReadSettings,
+        *,
+        feature_dim: int,
+    ) -> None:
+        """Initialize factor-memory retrieval from the provided settings.
+
+        Args:
+            config: Static retrieval hyperparameters.
+            feature_dim: Flattened feature dimension ``S`` used for query
+                and key LayerNorm modules.
+        """
         super().__init__()
         self._config = config
+        self.query_norm = nn.LayerNorm(feature_dim)
+        self.key_norm = nn.LayerNorm(feature_dim)
 
     @property
     def config(self) -> FactorReadSettings:
@@ -165,9 +177,7 @@ class FactorRead(nn.Module):
         self,
         query: Tensor,
         memory_view: FactorMemoryView,
-    ) -> (
-        Tensor
-    ):  # -------------------------------------------------------------------------------
+    ) -> Tensor:
         """Retrieve a flattened value code from factor memory.
 
         Args:
@@ -184,13 +194,11 @@ class FactorRead(nn.Module):
             valid_mask=memory_view.valid_mask,
         )
 
-    def recall_from_evidence(
+    def recall_from_evidence(  # ----------------------------------------------
         self,
         evidence: PreparedRead,
         memory_view: FactorMemoryView,
-    ) -> (
-        Tensor
-    ):  # ------------------------------------------------------------------
+    ) -> Tensor:
         """Execute retrieval from one prepared read-evidence payload."""
         if isinstance(evidence, PreparedTargetRead):
             return self._recall_iterative_targeted(evidence, memory_view)
@@ -209,22 +217,29 @@ class FactorRead(nn.Module):
             valid_mask=read_bank.valid_mask,
         )
 
-    def compute_logits(self, query: Tensor, memory_bank: Tensor) -> Tensor:
-        """Compute scaled query-key similarity logits for factor slots."""
-        query = query.to(dtype=memory_bank.dtype)
-        scale = math.sqrt(max(query.shape[1], 1))
-        return torch.einsum("bs,bts->bt", query, memory_bank) * (
-            self.config.beta / scale
-        )
+    def compute_logits(  # ----------------------------------------------------
+        self,
+        query: Tensor,
+        memory_bank: Tensor,
+    ) -> Tensor:
+        """Compute scaled query-key similarity logits for factor slots.
 
-    def weights_from_logits(
+        Queries and keys are layer-normalised before the dot-product (per
+        the paper's requirement that positional/structure codes be normalised
+        before attention), so the score reflects feature correlation rather
+        than norm-biased inner products.
+        """
+        query = self.query_norm(query.to(dtype=memory_bank.dtype))
+        memory_bank = self.key_norm(memory_bank)
+        scale = self.config.beta / math.sqrt(max(query.shape[-1], 1))
+        return torch.einsum("bs,bts->bt", query, memory_bank) * scale
+
+    def weights_from_logits(  # -----------------------------------------------
         self,
         logits: Tensor,
         *,
         valid_mask: Tensor,
-    ) -> tuple[
-        Tensor, Tensor
-    ]:  # -------------------------------------------------------------------
+    ) -> tuple[Tensor, Tensor]:
         """Convert logits into masked retrieval weights and valid-row indicators."""
         scaled_logits = logits * self._memory_count_multiplier(valid_mask)
         has_valid_slot = valid_mask.any(dim=1, keepdim=True)
@@ -242,20 +257,22 @@ class FactorRead(nn.Module):
         weights = torch.where(valid_mask, weights, torch.zeros_like(weights))
         return weights, has_valid_slot
 
-    def read_values(self, weights: Tensor, values: Tensor) -> Tensor:
+    def read_values(  # -------------------------------------------------------
+        self,
+        weights: Tensor,
+        values: Tensor,
+    ) -> Tensor:
         """Read factor values with the provided slot weights."""
         return torch.einsum("bt,bts->bs", weights, values)
 
-    def recall_from_logits(
+    def recall_from_logits(  # ------------------------------------------------
         self,
         logits: Tensor,
         values: Tensor,
         *,
         valid_mask: Tensor,
         fallback_query: Tensor,
-    ) -> (
-        Tensor
-    ):  # --------------------------------------------------------------------
+    ) -> Tensor:
         """Read from factor memory using precomputed logits and fallback behavior."""
         weights, has_valid_slot = self.weights_from_logits(
             logits, valid_mask=valid_mask
@@ -264,14 +281,14 @@ class FactorRead(nn.Module):
         fallback = self._empty_fallback(fallback_query)
         return torch.where(has_valid_slot, recalled, fallback)
 
-    def _recall_iterative_resolved(
+    def _recall_iterative_resolved(  # ----------------------------------------
         self,
         anchor_query: Tensor,
         keys: Tensor,
         values: Tensor,
         *,
         valid_mask: Tensor,
-    ) -> Tensor:  # ------------------------------------------------------------
+    ) -> Tensor:
         """Execute iterative retrieval for one resolved cue query."""
         logits = self.compute_logits(anchor_query, keys)
         recalled = self.recall_from_logits(
@@ -288,7 +305,7 @@ class FactorRead(nn.Module):
             )
         return recalled
 
-    def _recall_iterative_targeted(
+    def _recall_iterative_targeted(  # ----------------------------------------
         self, evidence: PreparedTargetRead, memory_view: FactorMemoryView
     ) -> Tensor:
         """Execute iterative targeted retrieval from source cues into one bank."""
@@ -336,16 +353,14 @@ class FactorRead(nn.Module):
             )
         return recalled
 
-    def compose_source_logits(
+    def compose_source_logits(  # ---------------------------------------------
         self,
         *,
         source_queries: dict[str, Tensor],
         memory_view: FactorMemoryView,
         target: str,
         target_shape: torch.Size,
-    ) -> (
-        Tensor
-    ):  # -----------------------------------------------------------------
+    ) -> Tensor:
         """Return composed source logits from all non-target cue families."""
         source_logits: list[Tensor] = []
         for family, query in source_queries.items():
@@ -364,7 +379,10 @@ class FactorRead(nn.Module):
             )
         return self._compose_logits(source_logits)
 
-    def _compose_logits(self, score_terms: list[Tensor]) -> Tensor:
+    def _compose_logits(  # ---------------------------------------------------
+        self,
+        score_terms: list[Tensor],
+    ) -> Tensor:
         """Compose score terms for targeted retrieval."""
         if len(score_terms) == 1:
             return score_terms[0]
@@ -376,7 +394,10 @@ class FactorRead(nn.Module):
             composed = composed * term
         return composed
 
-    def _memory_count_multiplier(self, valid_mask: Tensor) -> Tensor:
+    def _memory_count_multiplier(  # ------------------------------------------
+        self,
+        valid_mask: Tensor,
+    ) -> Tensor:
         """Return the optional sharpening multiplier based on populated slot count."""
         if self.config.beta_scaling == "none":
             return torch.ones(
@@ -390,8 +411,12 @@ class FactorRead(nn.Module):
             torch.log(safe_count), torch.ones_like(valid_count)
         )
 
-    def _validate_logit_shape(
-        self, logits: Tensor, target_shape: torch.Size, *, label: str
+    def _validate_logit_shape(  # ---------------------------------------------
+        self,
+        logits: Tensor,
+        target_shape: torch.Size,
+        *,
+        label: str,
     ) -> None:
         """Validate that one logit tensor matches the target-bank slot axis."""
         expected_shape = tuple(int(dim) for dim in target_shape)
@@ -400,15 +425,20 @@ class FactorRead(nn.Module):
                 f"{label} logits must match target-bank slot shape {expected_shape}, got {tuple(logits.shape)}."
             )
 
-    def _recurrent_query(
-        self, anchor_query: Tensor, recalled: Tensor
+    def _recurrent_query(  # --------------------------------------------------
+        self,
+        anchor_query: Tensor,
+        recalled: Tensor,
     ) -> Tensor:
         """Return the query used for the next retrieval iteration."""
         if self.config.recurrence == "none":
             return anchor_query
         return anchor_query * recalled
 
-    def _empty_fallback(self, query: Tensor) -> Tensor:
+    def _empty_fallback(  # ---------------------------------------------------
+        self,
+        query: Tensor,
+    ) -> Tensor:
         """Return the configured value for rows with no populated memory slots."""
         if self.config.empty_retrieval == "zeros":
             return torch.zeros_like(query)
