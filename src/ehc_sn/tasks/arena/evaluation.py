@@ -19,6 +19,13 @@ from ehc_sn.objectives.rollout import EvaluatedChunk
 
 from .contracts import ArenaTargets, ArenaTaskInput
 
+ARENA_PRIMARY_METRIC_NAME: str = "accuracy_ancestral_revisit"
+"""Canonical primary benchmark metric for Arena: ancestral-pathway revisit accuracy.
+
+This tests prediction from structural state alone on the steps most relevant
+to memory.
+"""
+
 
 # =============================================================================
 @dataclass(frozen=True)

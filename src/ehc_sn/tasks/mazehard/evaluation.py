@@ -11,7 +11,14 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from .contracts import MAZE_HARD_IGNORE_LABEL_ID, MazeHardTargets, MazeHardTaskOutput
+from .contracts import (
+    MAZE_HARD_IGNORE_LABEL_ID,
+    MazeHardTargets,
+    MazeHardTaskOutput,
+)
+
+MAZEHARD_PRIMARY_METRIC_NAME: str = "token_accuracy"
+"""Canonical primary benchmark metric for MazeHard: token-level accuracy."""
 
 
 # =============================================================================
@@ -57,7 +64,9 @@ class MazeHardStepScore:
     @property
     def sequence_accuracy(self) -> Tensor:
         """Return per-sequence token accuracy over non-ignored labels."""
-        token_count = self.valid_token_count.clamp_min(1).to(dtype=torch.float32)
+        token_count = self.valid_token_count.clamp_min(1).to(
+            dtype=torch.float32
+        )
         correct = self.token_is_correct.to(dtype=torch.float32).sum(dim=-1)
         return correct / token_count
 
@@ -76,11 +85,15 @@ def build_maze_hard_step_score(  # --------------------------------------------
     ignore_label_id: int = MAZE_HARD_IGNORE_LABEL_ID,
 ) -> MazeHardStepScore:
     """Return masked token-correctness metrics for a MazeHard batch."""
-    logits = output.task_logits if isinstance(output, MazeHardTaskOutput) else output
+    logits = (
+        output.task_logits if isinstance(output, MazeHardTaskOutput) else output
+    )
     labels = targets.labels if isinstance(targets, MazeHardTargets) else targets
     valid_mask = labels != ignore_label_id
     token_is_correct = valid_mask & logits.argmax(dim=-1).eq(labels)
-    return MazeHardStepScore(valid_mask=valid_mask, token_is_correct=token_is_correct)
+    return MazeHardStepScore(
+        valid_mask=valid_mask, token_is_correct=token_is_correct
+    )
 
 
 # =============================================================================
@@ -126,12 +139,19 @@ def build_maze_hard_score_report(  # ------------------------------------------
         :class:`MazeHardScoreReport` with scalar accuracy fields.
     """
     token_correct_sum = metrics.token_is_correct.to(dtype=torch.float32).sum()
-    token_count_sum = metrics.valid_mask.to(dtype=torch.float32).sum().clamp_min(1.0)
-    sequence_count = metrics.sequence_accuracy.new_tensor(float(metrics.sequence_accuracy.shape[0])).clamp_min(1.0)
+    token_count_sum = (
+        metrics.valid_mask.to(dtype=torch.float32).sum().clamp_min(1.0)
+    )
+    sequence_count = metrics.sequence_accuracy.new_tensor(
+        float(metrics.sequence_accuracy.shape[0])
+    ).clamp_min(1.0)
     return MazeHardScoreReport(
         tokens_accuracy=token_correct_sum / token_count_sum,
         sequences_accuracy=metrics.sequence_accuracy.sum() / sequence_count,
-        sequences_exact=metrics.sequence_is_correct.to(dtype=torch.float32).sum() / sequence_count,
+        sequences_exact=metrics.sequence_is_correct.to(
+            dtype=torch.float32
+        ).sum()
+        / sequence_count,
     )
 
 

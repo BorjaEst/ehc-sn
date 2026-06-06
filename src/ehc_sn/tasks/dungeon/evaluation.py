@@ -10,6 +10,9 @@ from dataclasses import dataclass
 
 from torch import Tensor
 
+DUNGEON_PRIMARY_METRIC_NAME: str = "success_rate"
+"""Canonical primary benchmark metric for Dungeon: episode success rate."""
+
 
 # =============================================================================
 @dataclass(frozen=True)
@@ -77,7 +80,10 @@ def build_dungeon_score_report(
     """
     return DungeonScoreReport(
         success_rate=step_scores.success.float().mean(),
-        mean_score=(step_scores.success.float() / step_scores.episode_steps.float().clamp_min(1.0)).mean(),
+        mean_score=(
+            step_scores.success.float()
+            / step_scores.episode_steps.float().clamp_min(1.0)
+        ).mean(),
         mean_steps=step_scores.episode_steps.float().mean(),
     )
 

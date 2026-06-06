@@ -37,12 +37,30 @@ from typing import Final, Literal, TypeAlias
 import numpy as np
 
 from ehc_sn.data.index import read_index
-from ehc_sn.data.lifecycle import extract_version, staging_root, validate_version_root, write_index_at_root, write_split
+from ehc_sn.data.lifecycle import (
+    extract_version,
+    staging_root,
+    validate_version_root,
+    write_index_at_root,
+    write_split,
+)
 from ehc_sn.data.manifest import write_manifest
-from ehc_sn.data.substrate.dungeongen import SHARED_CHANNELS as DUNGEON_SUBSTRATE_CHANNELS
-from ehc_sn.data.substrate.dungeongen import SHARED_FAMILY as DUNGEON_SHARED_FAMILY
-from ehc_sn.data.substrate.reader import iter_substrate_entries_and_samples, load_substrate_manifest
-from ehc_sn.tasks._replay_build import first_true_cell, random_valid_cell, random_walk, random_walk_no_backtrack
+from ehc_sn.data.substrate.dungeongen import (
+    SHARED_CHANNELS as DUNGEON_SUBSTRATE_CHANNELS,
+)
+from ehc_sn.data.substrate.dungeongen import (
+    SHARED_FAMILY as DUNGEON_SHARED_FAMILY,
+)
+from ehc_sn.data.substrate.reader import (
+    iter_substrate_entries_and_samples,
+    load_substrate_manifest,
+)
+from ehc_sn.tasks._replay_build import (
+    first_true_cell,
+    random_valid_cell,
+    random_walk,
+    random_walk_no_backtrack,
+)
 
 # =============================================================================
 # Protocol constants (frozen for task_protocol_version = 1)
@@ -54,15 +72,21 @@ TASK_PROTOCOL_VERSION: Final[int] = 1
 
 ArenaStartPolicy: TypeAlias = Literal["random_valid", "canonical_entrance"]
 ArenaWalkPolicy: TypeAlias = Literal["no_immediate_backtrack", "uniform"]
-ArenaWalkFn: TypeAlias = Callable[..., tuple[np.ndarray, np.ndarray, np.ndarray]]
+ArenaWalkFn: TypeAlias = Callable[
+    ..., tuple[np.ndarray, np.ndarray, np.ndarray]
+]
 
 DEFAULT_START_POLICY: Final[ArenaStartPolicy] = "random_valid"
 DEFAULT_WALK_POLICY: Final[ArenaWalkPolicy] = "no_immediate_backtrack"
 DEFAULT_MAX_STEPS: Final[int] = 250
 
 START_POLICY_RANDOM_VALID_ID: Final[str] = "random_valid_cell_v1"
-START_POLICY_CANONICAL_ENTRANCE_ID: Final[str] = "dungeongen_canonical_entrance_v1"
-WALK_POLICY_NO_IMMEDIATE_BACKTRACK_ID: Final[str] = "random_walk_no_immediate_backtrack_v1"
+START_POLICY_CANONICAL_ENTRANCE_ID: Final[str] = (
+    "dungeongen_canonical_entrance_v1"
+)
+WALK_POLICY_NO_IMMEDIATE_BACKTRACK_ID: Final[str] = (
+    "random_walk_no_immediate_backtrack_v1"
+)
 WALK_POLICY_UNIFORM_ID: Final[str] = "random_walk_uniform_v1"
 
 _START_POLICY_ID_BY_NAME: Final[dict[str, str]] = {
@@ -77,8 +101,12 @@ _WALK_FUNCTION_BY_NAME: Final[dict[str, ArenaWalkFn]] = {
     "no_immediate_backtrack": random_walk_no_backtrack,
     "uniform": random_walk,
 }
-_ALLOWED_START_POLICY_IDS: Final[frozenset[str]] = frozenset(_START_POLICY_ID_BY_NAME.values())
-_ALLOWED_WALK_POLICY_IDS: Final[frozenset[str]] = frozenset(_WALK_POLICY_ID_BY_NAME.values())
+_ALLOWED_START_POLICY_IDS: Final[frozenset[str]] = frozenset(
+    _START_POLICY_ID_BY_NAME.values()
+)
+_ALLOWED_WALK_POLICY_IDS: Final[frozenset[str]] = frozenset(
+    _WALK_POLICY_ID_BY_NAME.values()
+)
 
 ACTION_COUNT: Final[int] = 5
 ACTION_ID_SPACE: Final[str] = "STAY=0,UP=1,RIGHT=2,DOWN=3,LEFT=4"
@@ -134,7 +162,11 @@ _ARENA_TRAJECTORY_DTYPES: Final[dict[str, np.dtype]] = {
 }
 
 _SPLITS: Final[tuple[str, ...]] = ("train", "val", "test")
-_DUNGEONGEN_SPLIT_SEED_OFFSET: Final[dict[str, int]] = {"train": 0, "val": 100_000, "test": 200_000}
+_DUNGEONGEN_SPLIT_SEED_OFFSET: Final[dict[str, int]] = {
+    "train": 0,
+    "val": 100_000,
+    "test": 200_000,
+}
 
 
 # =============================================================================
@@ -225,8 +257,12 @@ def _build_episode(
     )
 
     # Precompute model-visible ids from parent spatial maps.
-    obs_ids = np.array([observations[r, c] for r, c in zip(rows, cols)], dtype=np.int32)
-    lm_ids = np.array([landmarks[r, c] for r, c in zip(rows, cols)], dtype=np.int32)
+    obs_ids = np.array(
+        [observations[r, c] for r, c in zip(rows, cols)], dtype=np.int32
+    )
+    lm_ids = np.array(
+        [landmarks[r, c] for r, c in zip(rows, cols)], dtype=np.int32
+    )
     # Normalize landmark sentinel: dungeongen uses 0 for "no landmark"; Arena v1 uses -1.
     lm_ids[lm_ids == 0] = -1
 
@@ -240,7 +276,9 @@ def _build_episode(
 
     episode_start = np.zeros(max_steps, dtype=bool)
     episode_start[0] = True
-    valid_step = np.ones(max_steps, dtype=bool)  # no padding; caller handles T_max
+    valid_step = np.ones(
+        max_steps, dtype=bool
+    )  # no padding; caller handles T_max
     traj_length = np.int32(max_steps)
 
     return {
@@ -256,17 +294,25 @@ def _build_episode(
     }
 
 
-def _dungeongen_parent_seed(parent_manifest: dict, *, split: str, parent_index: int) -> int:
+def _dungeongen_parent_seed(
+    parent_manifest: dict, *, split: str, parent_index: int
+) -> int:
     """Return the raw dungeongen seed for one parent sample position."""
     base_seed = parent_manifest.get("seed")
     if not isinstance(base_seed, int):
-        raise ValueError("Arena task corpus requires integer 'seed' in the parent dungeongen manifest.")
+        raise ValueError(
+            "Arena task corpus requires integer 'seed' in the parent dungeongen manifest."
+        )
     if split not in _DUNGEONGEN_SPLIT_SEED_OFFSET:
-        raise ValueError(f"Unsupported split {split!r} for dungeongen seed derivation.")
+        raise ValueError(
+            f"Unsupported split {split!r} for dungeongen seed derivation."
+        )
     return base_seed + _DUNGEONGEN_SPLIT_SEED_OFFSET[split] + parent_index
 
 
-def _dungeongen_room_center(dungeon: object, room_id: str) -> tuple[int, int] | None:
+def _dungeongen_room_center(
+    dungeon: object, room_id: str
+) -> tuple[int, int] | None:
     """Return the integer world-space center of the room attached to one exit."""
     room = getattr(dungeon, "rooms", {}).get(room_id)
     if room is None:
@@ -299,7 +345,9 @@ def _dungeongen_map_exit_to_valid_cell(
     if world_x is None or world_y is None:
         return None
 
-    room_center = _dungeongen_room_center(dungeon, getattr(exit_obj, "room_id", ""))
+    room_center = _dungeongen_room_center(
+        dungeon, getattr(exit_obj, "room_id", "")
+    )
     candidates: list[tuple[int, int, int, int]] = []
     for cand_x, cand_y in (
         (world_x, world_y),
@@ -310,7 +358,12 @@ def _dungeongen_map_exit_to_valid_cell(
     ):
         row = int(cand_y - origin_y)
         col = int(cand_x - origin_x)
-        if row < 0 or row >= mask_valid.shape[0] or col < 0 or col >= mask_valid.shape[1]:
+        if (
+            row < 0
+            or row >= mask_valid.shape[0]
+            or col < 0
+            or col >= mask_valid.shape[1]
+        ):
             continue
         if mask_valid[row, col]:
             candidates.append((row, col, int(cand_x), int(cand_y)))
@@ -324,24 +377,36 @@ def _dungeongen_map_exit_to_valid_cell(
     center_x, center_y = room_center
     row, col, _, _ = min(
         candidates,
-        key=lambda cell: (abs(cell[2] - center_x) + abs(cell[3] - center_y), (cell[0], cell[1])),
+        key=lambda cell: (
+            abs(cell[2] - center_x) + abs(cell[3] - center_y),
+            (cell[0], cell[1]),
+        ),
     )
     return row, col
 
 
-def _dungeongen_canonical_entrance_cell(dungeon: object, mask_valid: np.ndarray) -> tuple[int, int]:
+def _dungeongen_canonical_entrance_cell(
+    dungeon: object, mask_valid: np.ndarray
+) -> tuple[int, int]:
     """Return the canonical entrance cell for one processed dungeongen sample."""
     min_x, min_y, *_ = getattr(dungeon, "bounds")
     raw_exits = list(getattr(dungeon, "exits", {}).values())
     priorities = (
         lambda exit_obj: bool(getattr(exit_obj, "is_main", False)),
         _dungeongen_is_entrance_exit,
-        lambda exit_obj: getattr(exit_obj, "room_id", "") == getattr(dungeon, "spine_start_room", None),
+        lambda exit_obj: getattr(exit_obj, "room_id", "")
+        == getattr(dungeon, "spine_start_room", None),
     )
 
     for predicate in priorities:
         mapped = [
-            _dungeongen_map_exit_to_valid_cell(exit_obj, dungeon, mask_valid, origin_x=int(min_x), origin_y=int(min_y))
+            _dungeongen_map_exit_to_valid_cell(
+                exit_obj,
+                dungeon,
+                mask_valid,
+                origin_x=int(min_x),
+                origin_y=int(min_y),
+            )
             for exit_obj in raw_exits
             if predicate(exit_obj)
         ]
@@ -351,7 +416,9 @@ def _dungeongen_canonical_entrance_cell(dungeon: object, mask_valid: np.ndarray)
 
     fallback = first_true_cell(mask_valid)
     if fallback is None:
-        raise RuntimeError("Cannot derive a canonical entrance cell from an empty valid mask.")
+        raise RuntimeError(
+            "Cannot derive a canonical entrance cell from an empty valid mask."
+        )
     return fallback
 
 
@@ -370,7 +437,9 @@ def _resolve_canonical_entrance_start_cell(
             "Arena canonical-entrance start generation requires dungeongen to be installed in the active environment."
         ) from exc
 
-    dungeon_seed = _dungeongen_parent_seed(parent_manifest, split=split, parent_index=parent_index)
+    dungeon_seed = _dungeongen_parent_seed(
+        parent_manifest, split=split, parent_index=parent_index
+    )
     dungeon = DungeonGenerator().generate(seed=dungeon_seed)
     return _dungeongen_canonical_entrance_cell(dungeon, mask_valid)
 
@@ -379,7 +448,10 @@ def _resolve_start_policy_id(start_policy: str) -> str:
     """Resolve one public start-policy name to its frozen manifest id."""
     policy_id = _START_POLICY_ID_BY_NAME.get(start_policy)
     if policy_id is None:
-        raise ValueError(f"Unsupported Arena start_policy {start_policy!r}. " f"Expected one of {sorted(_START_POLICY_ID_BY_NAME)}.")
+        raise ValueError(
+            f"Unsupported Arena start_policy {start_policy!r}. "
+            f"Expected one of {sorted(_START_POLICY_ID_BY_NAME)}."
+        )
     return policy_id
 
 
@@ -387,7 +459,10 @@ def _resolve_walk_policy_id(walk_policy: str) -> str:
     """Resolve one public walk-policy name to its frozen manifest id."""
     policy_id = _WALK_POLICY_ID_BY_NAME.get(walk_policy)
     if policy_id is None:
-        raise ValueError(f"Unsupported Arena walk_policy {walk_policy!r}. " f"Expected one of {sorted(_WALK_POLICY_ID_BY_NAME)}.")
+        raise ValueError(
+            f"Unsupported Arena walk_policy {walk_policy!r}. "
+            f"Expected one of {sorted(_WALK_POLICY_ID_BY_NAME)}."
+        )
     return policy_id
 
 
@@ -395,7 +470,10 @@ def _resolve_walk_function(walk_policy: str) -> ArenaWalkFn:
     """Resolve one public walk-policy name to its trajectory sampler."""
     walk_fn = _WALK_FUNCTION_BY_NAME.get(walk_policy)
     if walk_fn is None:
-        raise ValueError(f"Unsupported Arena walk_policy {walk_policy!r}. " f"Expected one of {sorted(_WALK_FUNCTION_BY_NAME)}.")
+        raise ValueError(
+            f"Unsupported Arena walk_policy {walk_policy!r}. "
+            f"Expected one of {sorted(_WALK_FUNCTION_BY_NAME)}."
+        )
     return walk_fn
 
 
@@ -417,7 +495,10 @@ def _resolve_start_cell(
             parent_index=parent_index,
             parent_manifest=parent_manifest,
         )
-    raise ValueError(f"Unsupported Arena start_policy {start_policy!r}. " f"Expected one of {sorted(_START_POLICY_ID_BY_NAME)}.")
+    raise ValueError(
+        f"Unsupported Arena start_policy {start_policy!r}. "
+        f"Expected one of {sorted(_START_POLICY_ID_BY_NAME)}."
+    )
 
 
 # =============================================================================
@@ -440,24 +521,32 @@ def validate_arena_task_sample(data: dict[str, np.ndarray]) -> None:
     """
     missing = set(ARENA_TASK_CHANNELS) - data.keys()
     if missing:
-        raise ValueError(f"Arena task sample missing channels: {sorted(missing)}")
+        raise ValueError(
+            f"Arena task sample missing channels: {sorted(missing)}"
+        )
 
     length = int(np.asarray(data[CHANNEL_TRAJECTORY_LENGTH]).flat[0])
     valid_step = data[CHANNEL_TRAJECTORY_VALID_STEP]
     T = valid_step.shape[-1]
     expected_valid = np.arange(T) < length
     if not np.array_equal(valid_step, expected_valid):
-        raise ValueError("trajectory_valid_step must equal (t < trajectory_length).")
+        raise ValueError(
+            "trajectory_valid_step must equal (t < trajectory_length)."
+        )
 
     episode_start = data[CHANNEL_TRAJECTORY_EPISODE_START]
     if not bool(episode_start.flat[0]):
         raise ValueError("trajectory_episode_start[0] must be True.")
     if T > 1 and episode_start[1:].any():
-        raise ValueError("trajectory_episode_start must be False at all steps except 0.")
+        raise ValueError(
+            "trajectory_episode_start must be False at all steps except 0."
+        )
 
     prev_action = data[CHANNEL_TRAJECTORY_PREVIOUS_ACTION]
     if int(prev_action.flat[0]) != _ACTION_STAY:
-        raise ValueError(f"trajectory_previous_action[0] must be STAY ({_ACTION_STAY}).")
+        raise ValueError(
+            f"trajectory_previous_action[0] must be STAY ({_ACTION_STAY})."
+        )
 
     # Check padded sentinels.
     if length < T:
@@ -470,14 +559,24 @@ def validate_arena_task_sample(data: dict[str, np.ndarray]) -> None:
         ]:
             arr = data[ch]
             if not np.all(arr[length:] == sentinel):
-                raise ValueError(f"{ch}: padded positions (t >= {length}) must be {sentinel}.")
-        for ch in (CHANNEL_TRAJECTORY_IS_REVISIT, CHANNEL_TRAJECTORY_EPISODE_START, CHANNEL_TRAJECTORY_VALID_STEP):
+                raise ValueError(
+                    f"{ch}: padded positions (t >= {length}) must be {sentinel}."
+                )
+        for ch in (
+            CHANNEL_TRAJECTORY_IS_REVISIT,
+            CHANNEL_TRAJECTORY_EPISODE_START,
+            CHANNEL_TRAJECTORY_VALID_STEP,
+        ):
             arr = data[ch]
             if arr[length:].any():
-                raise ValueError(f"{ch}: padded positions (t >= {length}) must be False.")
+                raise ValueError(
+                    f"{ch}: padded positions (t >= {length}) must be False."
+                )
 
 
-def validate_arena_task_root(root: Path, *, _repo_root: Path | None = None) -> dict:
+def validate_arena_task_root(
+    root: Path, *, _repo_root: Path | None = None
+) -> dict:
     """Validate an Arena task corpus root against task-owned semantics.
 
     Checks required manifest constants, channel array shapes/dtypes, per-sample
@@ -500,7 +599,9 @@ def validate_arena_task_root(root: Path, *, _repo_root: Path | None = None) -> d
     if manifest.get("dataset_class") != "task_corpus":
         raise ValueError("Root is not a task_corpus.")
     if manifest.get("task") != TASK_FAMILY:
-        raise ValueError(f"Root task is {manifest.get('task')!r}, expected {TASK_FAMILY!r}.")
+        raise ValueError(
+            f"Root task is {manifest.get('task')!r}, expected {TASK_FAMILY!r}."
+        )
     if ARENA_SPATIAL_CHANNELS:
         raise ValueError("ARENA_SPATIAL_CHANNELS must be empty for Arena v1.")
 
@@ -517,22 +618,30 @@ def validate_arena_task_root(root: Path, *, _repo_root: Path | None = None) -> d
     for field, expected in _required_manifest_constants.items():
         actual = manifest.get(field)
         if actual != expected:
-            raise ValueError(f"Manifest field {field!r}: expected {expected!r}, got {actual!r}.")
+            raise ValueError(
+                f"Manifest field {field!r}: expected {expected!r}, got {actual!r}."
+            )
     start_policy_id = manifest.get("start_policy_id")
     if start_policy_id not in _ALLOWED_START_POLICY_IDS:
         raise ValueError(
-            "Manifest field 'start_policy_id': expected one of " f"{sorted(_ALLOWED_START_POLICY_IDS)!r}, got {start_policy_id!r}."
+            "Manifest field 'start_policy_id': expected one of "
+            f"{sorted(_ALLOWED_START_POLICY_IDS)!r}, got {start_policy_id!r}."
         )
     walk_policy_id = manifest.get("walk_policy_id")
     if walk_policy_id not in _ALLOWED_WALK_POLICY_IDS:
         raise ValueError(
-            "Manifest field 'walk_policy_id': expected one of " f"{sorted(_ALLOWED_WALK_POLICY_IDS)!r}, got {walk_policy_id!r}."
+            "Manifest field 'walk_policy_id': expected one of "
+            f"{sorted(_ALLOWED_WALK_POLICY_IDS)!r}, got {walk_policy_id!r}."
         )
     if "observation_vocab_size" not in manifest:
-        raise ValueError("Manifest missing required field 'observation_vocab_size'.")
+        raise ValueError(
+            "Manifest missing required field 'observation_vocab_size'."
+        )
     obs_vocab = manifest["observation_vocab_size"]
     if not isinstance(obs_vocab, int) or obs_vocab < 1:
-        raise ValueError(f"Manifest 'observation_vocab_size' must be a positive int, got {obs_vocab!r}.")
+        raise ValueError(
+            f"Manifest 'observation_vocab_size' must be a positive int, got {obs_vocab!r}."
+        )
 
     # Validate per-split channel arrays.
     for split, n in manifest["n_samples"].items():
@@ -541,19 +650,32 @@ def validate_arena_task_root(root: Path, *, _repo_root: Path | None = None) -> d
         for ch in ARENA_TASK_CHANNELS:
             ch_file = split_dir / f"{ch}.npy"
             if not ch_file.exists():
-                raise FileNotFoundError(f"Missing task channel '{ch}' in {split_dir}.")
+                raise FileNotFoundError(
+                    f"Missing task channel '{ch}' in {split_dir}."
+                )
             arrays[ch] = np.load(ch_file, mmap_mode="r")
             expected_dtype = _ARENA_TRAJECTORY_DTYPES[ch]
             if arrays[ch].dtype != expected_dtype:
-                raise ValueError(f"Channel '{ch}' in split '{split}' has dtype {arrays[ch].dtype}, " f"expected {expected_dtype}.")
+                raise ValueError(
+                    f"Channel '{ch}' in split '{split}' has dtype {arrays[ch].dtype}, "
+                    f"expected {expected_dtype}."
+                )
             expected_ndim = 1 if ch == CHANNEL_TRAJECTORY_LENGTH else 2
             if arrays[ch].ndim != expected_ndim:
-                raise ValueError(f"Channel '{ch}' in split '{split}' has rank {arrays[ch].ndim}, " f"expected {expected_ndim}.")
+                raise ValueError(
+                    f"Channel '{ch}' in split '{split}' has rank {arrays[ch].ndim}, "
+                    f"expected {expected_ndim}."
+                )
             if arrays[ch].shape[0] != n:
-                raise ValueError(f"Channel '{ch}' in split '{split}' has {arrays[ch].shape[0]} samples, " f"manifest declares {n}.")
+                raise ValueError(
+                    f"Channel '{ch}' in split '{split}' has {arrays[ch].shape[0]} samples, "
+                    f"manifest declares {n}."
+                )
 
         for i in range(n):
-            validate_arena_task_sample({ch: arrays[ch][i] for ch in ARENA_TASK_CHANNELS})
+            validate_arena_task_sample(
+                {ch: arrays[ch][i] for ch in ARENA_TASK_CHANNELS}
+            )
 
     # Validate parent substrate lineage via per-sample index metadata.
     all_entries = read_index(root / "index.jsonl")
@@ -561,8 +683,12 @@ def validate_arena_task_root(root: Path, *, _repo_root: Path | None = None) -> d
     if not parent_substrate_rel:
         raise ValueError("Manifest missing required field 'parent_substrate'.")
 
-    resolved_repo_root = _repo_root if _repo_root is not None else _find_repo_root(root)
-    parent_index_path = resolved_repo_root / parent_substrate_rel / "index.jsonl"
+    resolved_repo_root = (
+        _repo_root if _repo_root is not None else _find_repo_root(root)
+    )
+    parent_index_path = (
+        resolved_repo_root / parent_substrate_rel / "index.jsonl"
+    )
 
     if not parent_index_path.exists():
         raise FileNotFoundError(
@@ -585,19 +711,28 @@ def validate_arena_task_root(root: Path, *, _repo_root: Path | None = None) -> d
         for entry in split_entries:
             meta = entry.task_metadata
             if meta is None:
-                raise ValueError(f"Arena index entry {entry.id!r} missing task_metadata.")
+                raise ValueError(
+                    f"Arena index entry {entry.id!r} missing task_metadata."
+                )
             pid = meta["parent_sample_id"]
             ep_idx = meta["episode_index"]
             wseed = meta["walk_seed"]
             if pid not in valid_parent_ids:
-                raise ValueError(f"Arena entry {entry.id!r}: parent_sample_id {pid!r} not found " f"in parent index split '{split}'.")
+                raise ValueError(
+                    f"Arena entry {entry.id!r}: parent_sample_id {pid!r} not found "
+                    f"in parent index split '{split}'."
+                )
             ep_set = episode_indices_by_parent.setdefault(pid, set())
             if ep_idx in ep_set:
-                raise ValueError(f"Duplicate episode_index {ep_idx} for parent_sample_id {pid!r} in split {split!r}.")
+                raise ValueError(
+                    f"Duplicate episode_index {ep_idx} for parent_sample_id {pid!r} in split {split!r}."
+                )
             ep_set.add(ep_idx)
             ws_set = walk_seeds_by_parent.setdefault(pid, set())
             if wseed in ws_set:
-                raise ValueError(f"Duplicate walk_seed {wseed} for parent_sample_id {pid!r} in split {split!r}.")
+                raise ValueError(
+                    f"Duplicate walk_seed {wseed} for parent_sample_id {pid!r} in split {split!r}."
+                )
             ws_set.add(wseed)
 
     return manifest
@@ -629,7 +764,7 @@ def build_arena_task_corpus(
     train_parent_maps: int = 200,
     val_parent_maps: int = 40,
     test_parent_maps: int = 40,
-    train_episodes_per_parent: int = 100,
+    train_episodes_per_parent: int = 10,
     val_episodes_per_parent: int = 4,
     test_episodes_per_parent: int = 1,
     max_steps: int = 250,
@@ -673,7 +808,8 @@ def build_arena_task_corpus(
 
     if parent_manifest.get("family") != DUNGEON_SHARED_FAMILY:
         raise ValueError(
-            f"Arena task corpus requires a {DUNGEON_SHARED_FAMILY!r} shared substrate, " f"got family={parent_manifest.get('family')!r}."
+            f"Arena task corpus requires a {DUNGEON_SHARED_FAMILY!r} shared substrate, "
+            f"got family={parent_manifest.get('family')!r}."
         )
 
     split_parent_maps = {
@@ -696,13 +832,18 @@ def build_arena_task_corpus(
                 f"substrate only has {avail} entries. Reduce --{split}-parent-maps."
             )
 
-    split_counts = {split: split_parent_maps[split] * split_episodes_per_parent[split] for split in _SPLITS}
+    split_counts = {
+        split: split_parent_maps[split] * split_episodes_per_parent[split]
+        for split in _SPLITS
+    }
 
     # Derive observation_vocab_size from parent manifest; compute from data if absent.
     if "n_observations" in parent_manifest:
         observation_vocab_size = int(parent_manifest["n_observations"])
     else:
-        observation_vocab_size = _compute_observation_vocab_size(parent_substrate)
+        observation_vocab_size = _compute_observation_vocab_size(
+            parent_substrate
+        )
 
     canonical_parent = f"data/processed/{parent_manifest['family']}/v{parent_manifest['version']}"
 
@@ -742,9 +883,13 @@ def build_arena_task_corpus(
             per_sample_ids: list[str] = []
             per_sample_extra: list[dict] = []
 
-            parent_iter = iter_substrate_entries_and_samples(parent_substrate, split, _PARENT_CHANNELS)
+            parent_iter = iter_substrate_entries_and_samples(
+                parent_substrate, split, _PARENT_CHANNELS
+            )
 
-            for parent_idx, (parent_entry, parent_sample) in enumerate(parent_iter):
+            for parent_idx, (parent_entry, parent_sample) in enumerate(
+                parent_iter
+            ):
                 if parent_idx >= n_parent:
                     break
 
@@ -766,9 +911,17 @@ def build_arena_task_corpus(
                         walk_policy_id=walk_policy_id,
                         max_steps=max_steps,
                     )
-                    episode = _build_episode(parent_sample, max_steps, walk_seed, start_cell=start_cell, walk_fn=walk_fn)
+                    episode = _build_episode(
+                        parent_sample,
+                        max_steps,
+                        walk_seed,
+                        start_cell=start_cell,
+                        walk_fn=walk_fn,
+                    )
                     samples.append(episode)
-                    per_sample_ids.append(f"arena-{split}-{parent_entry.id}-ep{ep_idx:04d}")
+                    per_sample_ids.append(
+                        f"arena-{split}-{parent_entry.id}-ep{ep_idx:04d}"
+                    )
                     per_sample_extra.append(
                         {
                             "task_metadata": {
@@ -841,5 +994,7 @@ def _compute_observation_vocab_size(substrate_root: Path) -> int:
             split_max = int(arr.max())
             max_id = max(max_id, split_max)
     if max_id < 0:
-        raise RuntimeError("Could not compute observation_vocab_size: no observations.npy found.")
+        raise RuntimeError(
+            "Could not compute observation_vocab_size: no observations.npy found."
+        )
     return max_id + 1
