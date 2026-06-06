@@ -243,6 +243,13 @@ def _get_diagnostic_lec_filtered_tem(ctx: _TEMTraceContext) -> TraceValue:
     return [cell.detach().cpu() for cell in ctx.carry.model_state.lec.filtered]
 
 
+def _get_diagnostic_lec_sensory_code_tem(ctx: _TEMTraceContext) -> TraceValue:
+    """Replayable raw sensory code entering LEC inference by frequency."""
+    return [
+        cell.detach().cpu() for cell in ctx.carry.model_state.lec.sensory_code
+    ]
+
+
 def _get_diagnostic_mec_location_mean_tem(ctx: _TEMTraceContext) -> TraceValue:
     """Replayable MEC location codes by frequency for diagnostic figures."""
     return [cell.detach().cpu() for cell in ctx.carry.model_state.mec.cells]
@@ -327,6 +334,11 @@ TRACE_DIAGNOSTIC_LEC_CELLS_TEM = TraceField(
 TRACE_DIAGNOSTIC_LEC_FILTERED_TEM = TraceField(
     name="diagnostic/lec/filtered",
     get=_get_diagnostic_lec_filtered_tem,
+    requires_model_state=True,
+)
+TRACE_DIAGNOSTIC_LEC_SENSORY_CODE_TEM = TraceField(
+    name="diagnostic/lec/sensory_code",
+    get=_get_diagnostic_lec_sensory_code_tem,
     requires_model_state=True,
 )
 TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM = TraceField(
@@ -436,6 +448,13 @@ HRM_HIDDEN_STATE_FIELDS: tuple[TraceField, ...] = (
     TRACE_HRM_Z_L,
 )
 
+# WM task metadata — ground-truth labels for cue-dependent recall / working
+# memory tasks.  These are placeholders; the full set of WM-specific fields
+# will be populated when the cue-recall evaluation pipeline is implemented.
+# For now, this tuple is deliberately empty to avoid NameError from the
+# HRM_REASONING_TRACE_FIELDS reference below.
+WM_TASK_METADATA_FIELDS: tuple[TraceField, ...] = ()
+
 # Shared HRM reasoning fields — available to any HRM-family paradigm
 # (act and rl are controller variants; the hidden-state and task-metadata
 # surface is the same across ACT-style and RL-style HRM models.)
@@ -456,6 +475,7 @@ TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
     TRACE_WORLD_LOCATION_IDS_TEM,
     TRACE_DIAGNOSTIC_LEC_CELLS_TEM,
     TRACE_DIAGNOSTIC_LEC_FILTERED_TEM,
+    TRACE_DIAGNOSTIC_LEC_SENSORY_CODE_TEM,
     TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
     TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM,
     TRACE_DIAGNOSTIC_HPC_MEMORY_TEM,

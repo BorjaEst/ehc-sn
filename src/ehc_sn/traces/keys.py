@@ -45,6 +45,7 @@ WORLD_TRACE_KEY_OBSERVATION = "world_step/observation"
 # ── LEC ──────────────────────────────────────────────────────────────────────
 LEC_TRACE_KEY_CELLS = "diagnostic/lec/cells"
 LEC_TRACE_KEY_FILTERED = "diagnostic/lec/filtered"
+LEC_TRACE_KEY_SENSORY_CODE = "diagnostic/lec/sensory_code"
 LEC_META_KEY_ALPHA = "lec/filter/alpha_sigmoid"
 LEC_META_KEY_WF = "lec/w_f_sigmoid"
 

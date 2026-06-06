@@ -140,6 +140,31 @@ class TraceTree:
             raise ValueError(f"Dense key '{path}' is missing data")
         return leaf
 
+    def has(  # ---------------------------------------------------------------
+        self,
+        path: str,
+    ) -> bool:
+        """Return True if a dense numeric key exists with non-None data.
+
+        This is the *explicit availability check* counterpart to :meth:`get`.
+        Use it instead of try/except when the key may legitimately be absent.
+        """
+        if not self.path_to_index:
+            return False
+        idx = self.path_to_index.get(path)
+        if idx is None:
+            return False
+        if not self.leaf_is_numeric[idx]:
+            return False
+        dense_leaves = (
+            self._build_dense_leaves(clear=False)
+            if self.dense_leaves is None
+            else self.dense_leaves
+        )
+        if idx >= len(dense_leaves):
+            return False
+        return dense_leaves[idx] is not None
+
     def export_dense_tree(  # -------------------------------------------------
         self,
     ) -> Any:
