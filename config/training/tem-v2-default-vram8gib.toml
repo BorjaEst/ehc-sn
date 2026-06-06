@@ -10,7 +10,7 @@ model_config_path = "config/models/tem-v2-base.toml"
 
 # -- General settings ---------------------------------------------------------
 dataset_path         = "data/processed/arena/default/v1"
-global_batch_size    = 10
+global_batch_size    = 32
 max_epochs           = 200
 max_steps            = 200000
 seed                 = 42
@@ -54,11 +54,12 @@ non_finite_policy    = "raise"
 
 # -- Controller ---------------------------------------------------------------
 [controller]
-    # window_size = None  # Controller sees the entire history.
+    # window_size = 200  # Prevent model to learn dungeon structure
 
 # -- Optimization -------------------------------------------------------------
 [optimizer]
     lr           = 9.4e-4
+    weight_decay = 0.00
     betas        = [0.9, 0.98]
 
 [scheduler]
@@ -78,10 +79,10 @@ non_finite_policy    = "raise"
     offset_max       = 10000.0
 
 [runtime.sequence]
-    tbptt_steps = 75
+    tbptt_steps = 25
 
 [runtime.validation]
-    hard_max_rollout_steps = 6000
+    hard_max_rollout_steps = 2200
     seed = 42
 
 # -- Objective ----------------------------------------------------------------
@@ -128,7 +129,7 @@ enabled    = false
 context    = "validation"
 every_n_epochs = 5
 every_n_steps  = 0
-figures    = ["halting_timeline"]
+figures    = [ ]
 max_cases  = 2
 save_pdf   = true
 save_png   = false
