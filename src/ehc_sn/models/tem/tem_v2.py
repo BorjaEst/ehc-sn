@@ -278,9 +278,6 @@ class TEMModelV2(nn.Module):
         g_query_prior = self.mec_to_hpc(g_prior)
 
         # 2. Read sensory-cued place from the previous memory state.
-        # Sensory-cued recall uses CueRead against the inference (x-cued)
-        # memory entry: the query and the retrieval target both live in the
-        # sensory field, so no cross-field reinstatement is needed.
         x_, state.lec = self.lec.inference(observation_embedding, state.lec)
         x_query = self.lec_to_hpc(x_)
         p_sensory_read = None
@@ -289,7 +286,7 @@ class TEMModelV2(nn.Module):
                 read_cues=ReadCues(families={"x": x_query}),
                 state=state.hpc,
                 role="inference",
-                read=CueRead(kind="cue", cue="x"),  # target default --> p
+                read=TargetRead(sources=("x",), target="default"),
             )
 
         # 3. Read ancestral place from the grid prior:
@@ -297,7 +294,7 @@ class TEMModelV2(nn.Module):
             read_cues=ReadCues(families={"g": g_query_prior}),
             state=state.hpc,
             role="generative",
-            read=TargetRead(kind="target", sources=("g",), target="x"),
+            read=TargetRead(sources=("g",), target="default"),
         )
 
         # 4. Correct the grid prior using sensory recall:
@@ -314,7 +311,7 @@ class TEMModelV2(nn.Module):
             read_cues=ReadCues(families={"g": g_query_post}),
             state=state.hpc,
             role="generative",
-            read=TargetRead(kind="target", sources=("g",), target="x"),
+            read=TargetRead(sources=("g",), target="default"),
         )
 
         # 6. Form ancestral and retrieved place beliefs from the two structural recalls.
@@ -331,11 +328,9 @@ class TEMModelV2(nn.Module):
         )
 
         # 8. Update memory only after all current-step reads are complete.
-        # Each slot stores the fused place code (default bank) alongside
-        # factorized cortical fields in named banks "g" and "x".
         payload = WritePayload(
-            generative=p_retrieved,
-            inference=p_sensory_read,
+            generative=p_post,
+            inference=p_post,
             named_writes={"g": g_query_post, "x": x_query},
         )
         state.hpc = self.hpc.update(p_post, payload, state=state.hpc)

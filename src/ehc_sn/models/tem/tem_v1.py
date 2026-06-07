@@ -344,7 +344,10 @@ class TEMModelV1(nn.Module):
         )
 
         # 8. Update memory only after all current-step reads are complete:
-        payload = WritePayload(generative=p_retrieved, inference=p_sensory_read)
+        payload = WritePayload(
+            generative=p_retrieved,
+            inference=p_sensory_read,
+        )
         state.hpc = self.hpc.update(p_post, payload, state=state.hpc)
 
         # 9. Decode the place codes back to sensory space for output:
