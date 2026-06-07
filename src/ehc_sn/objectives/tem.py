@@ -32,24 +32,15 @@ from ehc_sn.loss.regularization import (
     sum_regularization_terms,
 )
 from ehc_sn.metrics.keys import (
-    TEM_LOSS_GRID_KL_ALL,
-    TEM_LOSS_GRID_KL_REVISIT,
-    TEM_LOSS_OBS_ANCESTRAL_ALL,
-    TEM_LOSS_OBS_ANCESTRAL_REVISIT,
-    TEM_LOSS_OBS_INFERENCE_ALL,
-    TEM_LOSS_OBS_INFERENCE_REVISIT,
-    TEM_LOSS_OBS_NLL_ALL,
-    TEM_LOSS_OBS_NLL_REVISIT,
-    TEM_LOSS_OBS_RETRIEVED_ALL,
-    TEM_LOSS_OBS_RETRIEVED_REVISIT,
-    TEM_LOSS_PLACE_CONSISTENCY_ALL,
-    TEM_LOSS_PLACE_CONSISTENCY_REVISIT,
-    TEM_LOSS_PLACE_SENSORY_ALL,
-    TEM_LOSS_PLACE_SENSORY_REVISIT,
-    TEM_LOSS_PLACE_TRANSITION_ALL,
-    TEM_LOSS_PLACE_TRANSITION_REVISIT,
-    TEM_LOSS_REG_ALL,
-    TEM_LOSS_REG_REVISIT,
+    TEM_LOSS_GRID_KL,
+    TEM_LOSS_OBS_ANCESTRAL,
+    TEM_LOSS_OBS_INFERENCE,
+    TEM_LOSS_OBS_NLL,
+    TEM_LOSS_OBS_RETRIEVED,
+    TEM_LOSS_PLACE_CONSISTENCY,
+    TEM_LOSS_PLACE_SENSORY,
+    TEM_LOSS_PLACE_TRANSITION,
+    TEM_LOSS_REG,
 )
 from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
 from ehc_sn.objectives._variational import (
@@ -606,86 +597,46 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
 
         revisit = context.protocol_mask.float()
         revisit_count = revisit.sum().detach()
-        batch_count = revisit.new_tensor(float(revisit.shape[0]))
 
         def _rev_sum(t: Tensor) -> Tensor:
             return (t * revisit).sum().detach()
 
-        def _all_sum(t: Tensor) -> Tensor:
-            return t.sum().detach()
-
         loss_extras = {
-            TEM_LOSS_OBS_NLL_REVISIT: RatioStat(
+            TEM_LOSS_OBS_NLL: RatioStat(
                 numerator_sum=_rev_sum(terms.obs_nll),
                 denominator_sum=revisit_count,
             ),
-            TEM_LOSS_OBS_NLL_ALL: RatioStat(
-                numerator_sum=_all_sum(terms.obs_nll),
-                denominator_sum=batch_count,
-            ),
-            TEM_LOSS_OBS_INFERENCE_REVISIT: RatioStat(
+            TEM_LOSS_OBS_INFERENCE: RatioStat(
                 numerator_sum=_rev_sum(terms.obs_inference),
                 denominator_sum=revisit_count,
             ),
-            TEM_LOSS_OBS_INFERENCE_ALL: RatioStat(
-                numerator_sum=_all_sum(terms.obs_inference),
-                denominator_sum=batch_count,
-            ),
-            TEM_LOSS_OBS_RETRIEVED_REVISIT: RatioStat(
+            TEM_LOSS_OBS_RETRIEVED: RatioStat(
                 numerator_sum=_rev_sum(terms.obs_retrieved),
                 denominator_sum=revisit_count,
             ),
-            TEM_LOSS_OBS_RETRIEVED_ALL: RatioStat(
-                numerator_sum=_all_sum(terms.obs_retrieved),
-                denominator_sum=batch_count,
-            ),
-            TEM_LOSS_OBS_ANCESTRAL_REVISIT: RatioStat(
+            TEM_LOSS_OBS_ANCESTRAL: RatioStat(
                 numerator_sum=_rev_sum(terms.obs_ancestral),
                 denominator_sum=revisit_count,
             ),
-            TEM_LOSS_OBS_ANCESTRAL_ALL: RatioStat(
-                numerator_sum=_all_sum(terms.obs_ancestral),
-                denominator_sum=batch_count,
-            ),
-            TEM_LOSS_GRID_KL_REVISIT: RatioStat(
+            TEM_LOSS_GRID_KL: RatioStat(
                 numerator_sum=_rev_sum(terms.grid_kl),
                 denominator_sum=revisit_count,
             ),
-            TEM_LOSS_GRID_KL_ALL: RatioStat(
-                numerator_sum=_all_sum(terms.grid_kl),
-                denominator_sum=batch_count,
-            ),
-            TEM_LOSS_PLACE_SENSORY_REVISIT: RatioStat(
+            TEM_LOSS_PLACE_SENSORY: RatioStat(
                 numerator_sum=_rev_sum(terms.place_sensory),
                 denominator_sum=revisit_count,
             ),
-            TEM_LOSS_PLACE_SENSORY_ALL: RatioStat(
-                numerator_sum=_all_sum(terms.place_sensory),
-                denominator_sum=batch_count,
-            ),
-            TEM_LOSS_PLACE_TRANSITION_REVISIT: RatioStat(
+            TEM_LOSS_PLACE_TRANSITION: RatioStat(
                 numerator_sum=_rev_sum(terms.place_transition),
                 denominator_sum=revisit_count,
             ),
-            TEM_LOSS_PLACE_TRANSITION_ALL: RatioStat(
-                numerator_sum=_all_sum(terms.place_transition),
-                denominator_sum=batch_count,
-            ),
-            TEM_LOSS_PLACE_CONSISTENCY_REVISIT: RatioStat(
+            TEM_LOSS_PLACE_CONSISTENCY: RatioStat(
                 numerator_sum=_rev_sum(terms.place_consistency),
                 denominator_sum=revisit_count,
             ),
-            TEM_LOSS_PLACE_CONSISTENCY_ALL: RatioStat(
-                numerator_sum=_all_sum(terms.place_consistency),
-                denominator_sum=batch_count,
-            ),
-            TEM_LOSS_REG_REVISIT: RatioStat(
+            TEM_LOSS_REG: RatioStat(
                 numerator_sum=_rev_sum(terms.reg),
                 denominator_sum=revisit_count,
-            ),
-            TEM_LOSS_REG_ALL: RatioStat(
-                numerator_sum=_all_sum(terms.reg),
-                denominator_sum=batch_count,
             ),
         }
         return build_variational_step_metrics({**acc_extras, **loss_extras})

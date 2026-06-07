@@ -11,18 +11,12 @@ ACT_LOSS_Q_CONTINUE: str = "loss_q_continue"
 RL_LOSS_STATE_VALUE: str = "rl_loss_state_value"
 RL_LOSS_Q_VALUE: str = "rl_loss_q_value"
 
-TEM_LOSS_OBS_NLL_REVISIT: str = "loss_obs_nll_revisit"
-TEM_LOSS_OBS_NLL_ALL: str = "loss_obs_nll_all"
-TEM_LOSS_GRID_KL_REVISIT: str = "loss_grid_kl_revisit"
-TEM_LOSS_GRID_KL_ALL: str = "loss_grid_kl_all"
-TEM_LOSS_PLACE_TRANSITION_ALL: str = "loss_place_transition_all"
-TEM_LOSS_PLACE_TRANSITION_REVISIT: str = "loss_place_transition_revisit"
-TEM_LOSS_PLACE_SENSORY_ALL: str = "loss_place_sensory_all"
-TEM_LOSS_PLACE_SENSORY_REVISIT: str = "loss_place_sensory_revisit"
-TEM_LOSS_PLACE_CONSISTENCY_REVISIT: str = "loss_place_consistency_revisit"
-TEM_LOSS_PLACE_CONSISTENCY_ALL: str = "loss_place_consistency_all"
-TEM_LOSS_REG_REVISIT: str = "loss_reg_revisit"
-TEM_LOSS_REG_ALL: str = "loss_reg_all"
+TEM_LOSS_OBS_NLL: str = "loss_obs_nll_revisit"
+TEM_LOSS_GRID_KL: str = "loss_grid_kl_revisit"
+TEM_LOSS_PLACE_TRANSITION: str = "loss_place_transition_revisit"
+TEM_LOSS_PLACE_SENSORY: str = "loss_place_sensory_revisit"
+TEM_LOSS_PLACE_CONSISTENCY: str = "loss_place_consistency_revisit"
+TEM_LOSS_REG: str = "loss_reg_revisit"
 TEM_ACC_OBS_INFERENCE_REVISIT: str = "accuracy_obs_inference_revisit"
 TEM_ACC_OBS_INFERENCE_ALL: str = "accuracy_obs_inference_all"
 TEM_ACC_OBS_RETRIEVED_REVISIT: str = "accuracy_obs_retrieved_revisit"
@@ -30,12 +24,9 @@ TEM_ACC_OBS_RETRIEVED_ALL: str = "accuracy_obs_retrieved_all"
 TEM_ACC_OBS_ANCESTRAL_REVISIT: str = "accuracy_obs_ancestral_revisit"
 TEM_ACC_OBS_ANCESTRAL_ALL: str = "accuracy_obs_ancestral_all"
 
-TEM_LOSS_OBS_INFERENCE_REVISIT: str = "loss_obs_inference_revisit"
-TEM_LOSS_OBS_RETRIEVED_REVISIT: str = "loss_obs_retrieved_revisit"
-TEM_LOSS_OBS_ANCESTRAL_REVISIT: str = "loss_obs_ancestral_revisit"
-TEM_LOSS_OBS_INFERENCE_ALL: str = "loss_obs_inference_all"
-TEM_LOSS_OBS_RETRIEVED_ALL: str = "loss_obs_retrieved_all"
-TEM_LOSS_OBS_ANCESTRAL_ALL: str = "loss_obs_ancestral_all"
+TEM_LOSS_OBS_INFERENCE: str = "loss_obs_inference_revisit"
+TEM_LOSS_OBS_RETRIEVED: str = "loss_obs_retrieved_revisit"
+TEM_LOSS_OBS_ANCESTRAL: str = "loss_obs_ancestral_revisit"
 
 EHC_LOSS_OBS_NLL_REVISIT: str = "ehc_loss_obs_nll_revisit"
 EHC_LOSS_OBS_NLL_ALL: str = "ehc_loss_obs_nll_all"
@@ -89,19 +80,12 @@ __all__ = [
     "TEM_ACC_OBS_INFERENCE_REVISIT",
     "TEM_ACC_OBS_RETRIEVED_ALL",
     "TEM_ACC_OBS_RETRIEVED_REVISIT",
-    "TEM_LOSS_GRID_KL_ALL",
-    "TEM_LOSS_GRID_KL_REVISIT",
-    "TEM_LOSS_OBS_NLL_ALL",
-    "TEM_LOSS_OBS_NLL_REVISIT",
-    "TEM_LOSS_PLACE_CONSISTENCY_ALL",
-    "TEM_LOSS_PLACE_CONSISTENCY_REVISIT",
-    "TEM_LOSS_REG_ALL",
-    "TEM_LOSS_REG_REVISIT",
-    "TEM_LOSS_OBS_INFERENCE_REVISIT",
-    "TEM_LOSS_OBS_RETRIEVED_REVISIT",
-    "TEM_LOSS_OBS_ANCESTRAL_REVISIT",
-    "TEM_LOSS_OBS_INFERENCE_ALL",
-    "TEM_LOSS_OBS_RETRIEVED_ALL",
-    "TEM_LOSS_OBS_ANCESTRAL_ALL",
+    "TEM_LOSS_GRID_KL",
+    "TEM_LOSS_OBS_NLL",
+    "TEM_LOSS_PLACE_CONSISTENCY",
+    "TEM_LOSS_REG",
+    "TEM_LOSS_OBS_INFERENCE",
+    "TEM_LOSS_OBS_RETRIEVED",
+    "TEM_LOSS_OBS_ANCESTRAL",
     "extra_ratio_paths",
 ]
