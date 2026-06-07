@@ -20,6 +20,10 @@ from ehc_sn.metrics.keys import (
     TEM_LOSS_OBS_RETRIEVED_REVISIT,
     TEM_LOSS_PLACE_CONSISTENCY_ALL,
     TEM_LOSS_PLACE_CONSISTENCY_REVISIT,
+    TEM_LOSS_PLACE_SENSORY_ALL,
+    TEM_LOSS_PLACE_SENSORY_REVISIT,
+    TEM_LOSS_PLACE_TRANSITION_ALL,
+    TEM_LOSS_PLACE_TRANSITION_REVISIT,
     TEM_LOSS_REG_ALL,
     TEM_LOSS_REG_REVISIT,
     extra_ratio_paths,
@@ -39,13 +43,10 @@ def _with_namespace(  # -------------------------------------------------------
 
 # =============================================================================
 TEM_STEP_ROUTES: tuple[Route, ...] = (
+    # -- Accuracy routes ------------------------------------------------------
     Route(
-        "accuracy/obs_inference_revisit",
-        *extra_ratio_paths(TEM_ACC_OBS_INFERENCE_REVISIT),
-    ),
-    Route(
-        "accuracy/obs_retrieved_revisit",
-        *extra_ratio_paths(TEM_ACC_OBS_RETRIEVED_REVISIT),
+        "accuracy/obs_ancestral_all",
+        *extra_ratio_paths(TEM_ACC_OBS_ANCESTRAL_ALL),
     ),
     Route(
         "accuracy/obs_ancestral_revisit",
@@ -56,68 +57,92 @@ TEM_STEP_ROUTES: tuple[Route, ...] = (
         *extra_ratio_paths(TEM_ACC_OBS_INFERENCE_ALL),
     ),
     Route(
+        "accuracy/obs_inference_revisit",
+        *extra_ratio_paths(TEM_ACC_OBS_INFERENCE_REVISIT),
+    ),
+    Route(
         "accuracy/obs_retrieved_all",
         *extra_ratio_paths(TEM_ACC_OBS_RETRIEVED_ALL),
     ),
     Route(
-        "accuracy/obs_ancestral_all",
-        *extra_ratio_paths(TEM_ACC_OBS_ANCESTRAL_ALL),
+        "accuracy/obs_retrieved_revisit",
+        *extra_ratio_paths(TEM_ACC_OBS_RETRIEVED_REVISIT),
+    ),
+    # -- Loss grid routes -----------------------------------------------------
+    Route(
+        "loss/grid_kl_all",
+        *extra_ratio_paths(TEM_LOSS_GRID_KL_ALL),
     ),
     Route(
-        "loss/obs_nll_revisit",
-        *extra_ratio_paths(TEM_LOSS_OBS_NLL_REVISIT),
+        "loss/grid_kl_revisit",
+        *extra_ratio_paths(TEM_LOSS_GRID_KL_REVISIT),
     ),
+    # -- Loss observation routes ----------------------------------------------
     Route(
-        "loss/obs_inference_revisit",
-        *extra_ratio_paths(TEM_LOSS_OBS_INFERENCE_REVISIT),
-    ),
-    Route(
-        "loss/obs_retrieved_revisit",
-        *extra_ratio_paths(TEM_LOSS_OBS_RETRIEVED_REVISIT),
+        "loss/obs_ancestral_all",
+        *extra_ratio_paths(TEM_LOSS_OBS_ANCESTRAL_ALL),
     ),
     Route(
         "loss/obs_ancestral_revisit",
         *extra_ratio_paths(TEM_LOSS_OBS_ANCESTRAL_REVISIT),
     ),
     Route(
-        "loss/grid_kl_revisit",
-        *extra_ratio_paths(TEM_LOSS_GRID_KL_REVISIT),
+        "loss/obs_inference_all",
+        *extra_ratio_paths(TEM_LOSS_OBS_INFERENCE_ALL),
     ),
     Route(
-        "loss/place_consistency_revisit",
-        *extra_ratio_paths(TEM_LOSS_PLACE_CONSISTENCY_REVISIT),
-    ),
-    Route(
-        "loss/reg_revisit",
-        *extra_ratio_paths(TEM_LOSS_REG_REVISIT),
+        "loss/obs_inference_revisit",
+        *extra_ratio_paths(TEM_LOSS_OBS_INFERENCE_REVISIT),
     ),
     Route(
         "loss/obs_nll_all",
         *extra_ratio_paths(TEM_LOSS_OBS_NLL_ALL),
     ),
     Route(
-        "loss/obs_inference_all",
-        *extra_ratio_paths(TEM_LOSS_OBS_INFERENCE_ALL),
+        "loss/obs_nll_revisit",
+        *extra_ratio_paths(TEM_LOSS_OBS_NLL_REVISIT),
     ),
     Route(
         "loss/obs_retrieved_all",
         *extra_ratio_paths(TEM_LOSS_OBS_RETRIEVED_ALL),
     ),
     Route(
-        "loss/obs_ancestral_all",
-        *extra_ratio_paths(TEM_LOSS_OBS_ANCESTRAL_ALL),
+        "loss/obs_retrieved_revisit",
+        *extra_ratio_paths(TEM_LOSS_OBS_RETRIEVED_REVISIT),
     ),
-    Route(
-        "loss/grid_kl_all",
-        *extra_ratio_paths(TEM_LOSS_GRID_KL_ALL),
-    ),
+    # -- Loss place consistency routes ----------------------------------------
     Route(
         "loss/place_consistency_all",
         *extra_ratio_paths(TEM_LOSS_PLACE_CONSISTENCY_ALL),
     ),
     Route(
+        "loss/place_consistency_revisit",
+        *extra_ratio_paths(TEM_LOSS_PLACE_CONSISTENCY_REVISIT),
+    ),
+    Route(
+        "loss/place_sensory_revisit",
+        *extra_ratio_paths(TEM_LOSS_PLACE_SENSORY_ALL),
+    ),
+    Route(
+        "loss/place_sensory_all",
+        *extra_ratio_paths(TEM_LOSS_PLACE_SENSORY_REVISIT),
+    ),
+    Route(
+        "loss/place_transition_all",
+        *extra_ratio_paths(TEM_LOSS_PLACE_TRANSITION_ALL),
+    ),
+    Route(
+        "loss/place_transition_revisit",
+        *extra_ratio_paths(TEM_LOSS_PLACE_TRANSITION_REVISIT),
+    ),
+    # -- Loss regularization routes -------------------------------------------
+    Route(
         "loss/reg_all",
         *extra_ratio_paths(TEM_LOSS_REG_ALL),
+    ),
+    Route(
+        "loss/reg_revisit",
+        *extra_ratio_paths(TEM_LOSS_REG_REVISIT),
     ),
 )
 

@@ -44,6 +44,10 @@ from ehc_sn.metrics.keys import (
     TEM_LOSS_OBS_RETRIEVED_REVISIT,
     TEM_LOSS_PLACE_CONSISTENCY_ALL,
     TEM_LOSS_PLACE_CONSISTENCY_REVISIT,
+    TEM_LOSS_PLACE_SENSORY_ALL,
+    TEM_LOSS_PLACE_SENSORY_REVISIT,
+    TEM_LOSS_PLACE_TRANSITION_ALL,
+    TEM_LOSS_PLACE_TRANSITION_REVISIT,
     TEM_LOSS_REG_ALL,
     TEM_LOSS_REG_REVISIT,
 )
@@ -649,6 +653,22 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
             ),
             TEM_LOSS_GRID_KL_ALL: RatioStat(
                 numerator_sum=_all_sum(terms.grid_kl),
+                denominator_sum=batch_count,
+            ),
+            TEM_LOSS_PLACE_SENSORY_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.place_sensory),
+                denominator_sum=revisit_count,
+            ),
+            TEM_LOSS_PLACE_SENSORY_ALL: RatioStat(
+                numerator_sum=_all_sum(terms.place_sensory),
+                denominator_sum=batch_count,
+            ),
+            TEM_LOSS_PLACE_TRANSITION_REVISIT: RatioStat(
+                numerator_sum=_rev_sum(terms.place_transition),
+                denominator_sum=revisit_count,
+            ),
+            TEM_LOSS_PLACE_TRANSITION_ALL: RatioStat(
+                numerator_sum=_all_sum(terms.place_transition),
                 denominator_sum=batch_count,
             ),
             TEM_LOSS_PLACE_CONSISTENCY_REVISIT: RatioStat(
