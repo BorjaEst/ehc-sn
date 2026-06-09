@@ -13,7 +13,7 @@ build-all         Convenience alias: materialize-task (requires substrate to exi
 
 Default paths
 -------------
-Shared substrate:  data/processed/dungeongen/v1
+Shared substrate:  data/interim/dungeongen/v1
 Task corpus:       data/processed/dungeon/default/v1
 
 Prerequisites
@@ -48,7 +48,10 @@ import typer
 from ehc_sn.data.lifecycle import validate_version_root
 from ehc_sn.data.substrate.dungeongen import SHARED_FAMILY
 from ehc_sn.tasks.dungeon import TASK_FAMILY as DUNGEON_TASK_FAMILY
-from ehc_sn.tasks.dungeon import build_dungeon_task_corpus, validate_dungeon_task_root
+from ehc_sn.tasks.dungeon import (
+    build_dungeon_task_corpus,
+    validate_dungeon_task_root,
+)
 
 # ---------------------------------------------------------------------------
 _DEFAULT_SHARED_VERSION = 1
@@ -66,7 +69,8 @@ def _require_shared_substrate(shared_root: Path) -> None:
             "Build it first with:\n"
             "    python scripts/data-gen/build-dungeongen.py build-all\n"
             "or:\n"
-            f"    python scripts/data-gen/build-dungeongen.py materialize-shared",
+            f"    python scripts/data-gen/build-dungeongen.py materialize-layouts\n"
+            "Requires fetch-raw + prepare-interim first.",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -80,12 +84,14 @@ def materialize_task(
     n_val: Annotated[int, typer.Option("--n-val")] = 40,
     n_test: Annotated[int, typer.Option("--n-test")] = 40,
     max_steps: Annotated[int, typer.Option("--max-steps")] = 50,
-    shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
+    shared_version: Annotated[
+        int, typer.Option("--shared-version")
+    ] = _DEFAULT_SHARED_VERSION,
     version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
     seed: Annotated[int, typer.Option("--seed")] = 42,
 ) -> None:
     """Build the Dungeon task corpus over a dungeongen shared substrate."""
-    shared_root = Path(f"data/processed/{SHARED_FAMILY}/v{shared_version}")
+    shared_root = Path(f"data/interim/{SHARED_FAMILY}/v{shared_version}")
     task_root = Path(f"data/processed/dungeon/{corpus}/v{version}")
     _require_shared_substrate(shared_root.resolve())
     build_dungeon_task_corpus(
@@ -103,28 +109,15 @@ def materialize_task(
 # ---------------------------------------------------------------------------
 @app.command("validate")
 def validate(
-    root: Annotated[Path, typer.Argument(help="Dungeon task-corpus root to validate.")],
+    root: Annotated[
+        Path, typer.Argument(help="Dungeon task-corpus root to validate.")
+    ],
 ) -> None:
     """Validate a Dungeon task-corpus version root.
 
     Raises an error if the root is not a valid Dungeon task_corpus.
     """
-    manifest = validate_version_root(root.resolve())
-    if manifest.get("dataset_class") != "task_corpus":
-        typer.echo(
-            f"Error: expected dataset_class 'task_corpus', "
-            f"got '{manifest.get('dataset_class')}'. "
-            "Use build-dungeongen.py to validate shared-substrate roots.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    if manifest.get("task") != DUNGEON_TASK_FAMILY:
-        typer.echo(
-            f"Error: expected task '{DUNGEON_TASK_FAMILY}', got '{manifest.get('task')}'.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    validate_dungeon_task_root(root.resolve())
+    manifest = validate_dungeon_task_root(root.resolve())
     typer.echo(f"OK  {root}")
     typer.echo(f"    dataset_class : {manifest['dataset_class']}")
     typer.echo(f"    task          : {manifest['task']}")
@@ -133,35 +126,7 @@ def validate(
     typer.echo(f"    n_samples     : {manifest['n_samples']}")
 
 
-# ---------------------------------------------------------------------------
-@app.command("build-all")
-def build_all(
-    corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
-    n_train: Annotated[int, typer.Option("--n-train")] = 200,
-    n_val: Annotated[int, typer.Option("--n-val")] = 40,
-    n_test: Annotated[int, typer.Option("--n-test")] = 40,
-    max_steps: Annotated[int, typer.Option("--max-steps")] = 50,
-    shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
-    version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
-    seed: Annotated[int, typer.Option("--seed")] = 42,
-) -> None:
-    """Build the Dungeon task corpus (alias for materialize-task).
-
-    Requires the parent dungeongen shared substrate to exist.  Build it first::
-
-        python scripts/data-gen/build-dungeongen.py build-all
-    """
-    materialize_task(
-        corpus=corpus,
-        n_train=n_train,
-        n_val=n_val,
-        n_test=n_test,
-        max_steps=max_steps,
-        shared_version=shared_version,
-        version=version,
-        seed=seed,
-    )
-
+# build-all removed — this script has a single stage: materialize-task.
 
 if __name__ == "__main__":
     app()

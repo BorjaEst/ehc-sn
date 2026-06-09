@@ -142,11 +142,23 @@ def validate(
     root: Annotated[Path, typer.Argument(help="Versioned root to validate.")],
 ) -> None:
     """Validate the manifest and data of a versioned root."""
+    from ehc_sn.data.lifecycle import validate_version_root
+    from ehc_sn.data.substrate.maze_nd import SHARED_FAMILY as MAZEND_FAMILY
+
     manifest = validate_version_root(root.resolve())
-    if manifest["dataset_class"] == "task_corpus":
+    dc = manifest["dataset_class"]
+    if dc == "task_corpus":
         from ehc_sn.tasks.mazehard import validate_mazehard_task_root
 
-        validate_mazehard_task_root(root.resolve())
+        manifest = validate_mazehard_task_root(root.resolve())
+    elif dc == "shared_substrate":
+        family = manifest.get("family", "")
+        if family != MAZEND_FAMILY:
+            typer.echo(
+                f"Error: expected family '{MAZEND_FAMILY}', got '{family}'.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
     typer.echo(f"OK  {root}")
     typer.echo(f"    dataset_class : {manifest['dataset_class']}")
     typer.echo(f"    family        : {manifest['family']}")
@@ -163,7 +175,7 @@ def build_all(
         Path, typer.Option("--interim-root")
     ] = _DEFAULT_INTERIM_ROOT,
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
-    n_train: Annotated[int, typer.Option("--n-train")] = 1000,
+    n_train: Annotated[int, typer.Option("--n-train")] = 200,
     n_val: Annotated[int, typer.Option("--n-val")] = 100,
     n_test: Annotated[int, typer.Option("--n-test")] = 10,
     shared_version: Annotated[
@@ -196,5 +208,4 @@ def build_all(
 
 
 if __name__ == "__main__":
-    app()
     app()

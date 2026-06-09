@@ -1,50 +1,53 @@
-"""Staged CLI for building the Arena task corpus (v1, topology-free).
+"""Staged CLI for building the Arena task corpus from layout datasets.
 
-Arena consumes the dungeongen shared substrate and generates topology-free
-episode trajectories. This CLI owns only the Arena task corpus slice; the
-shared dungeongen pipeline (raw, interim, substrate) is owned by
-scripts/data-gen/build-dungeongen.py.
+Arena consumes an interim layout dataset root and generates topology-free
+episode trajectories.  Layout generation is owned by the respective layout
+CLIs (build-dungeongen.py, build-openfield.py).
+
+This CLI has no source-specific code.  It reads the layout manifest to
+determine the action space, topology type, and observation vocabulary size,
+then calls :func:`build_arena_corpus_from_layouts`.
 
 Stages
 ------
-materialize-task   Build an Arena task corpus over a dungeongen shared substrate.
+materialize-task   Build an Arena task corpus over a layout dataset.
 validate           Validate an Arena task-corpus version root.
-build-all          Convenience alias: materialize-task (requires substrate to exist).
+
 
 Default paths
 -------------
-Shared substrate:  data/processed/dungeongen/v1
-Task corpus:       data/processed/arena/default/v1
+Interim:           <user-specified --layout-root>
+Task corpus:       data/processed/arena/<corpus>/v<version>
 
 Documented recipes
 ------------------
-Standard Arena recipe:
-    --start-policy random_valid --walk-policy no_immediate_backtrack
+Openfield square (TEM reproduction)::
 
-Canonical-entrance uniform recipe:
-    --start-policy canonical_entrance --walk-policy uniform
+    python build-arena.py materialize-task \\
+        --layout-root data/interim/openfield/square/v1 \\
+        --corpus openfield-square \\
+        --walk-policy legacy_angle_bias
 
-Arena v1 always materializes 250 steps per episode.
+Standard dungeongen recipe::
 
-Prerequisites
--------------
-A dungeongen shared substrate must exist before running any command here.
-Build it first::
-
-    python scripts/data-gen/build-dungeongen.py build-all
+    python build-arena.py materialize-task \\
+        --layout-root data/interim/dungeongen/v1 \\
+        --corpus dungeons \\
+        --walk-policy no_immediate_backtrack
 
 Examples
 --------
-Build the default Arena task corpus against the shared substrate::
+Build from openfield square layouts::
 
-    python build-arena.py build-all
+    python build-arena.py materialize-task \\
+        --layout-root data/interim/openfield/square/v1 \\
+        --corpus openfield-square
 
-Build the canonical-entrance uniform recipe into a descriptive corpus label::
+Build from dungeongen layouts::
 
-    python build-arena.py materialize-task \
-        --corpus canonical_entrance_uniform \
-        --start-policy canonical_entrance \
-        --walk-policy uniform
+    python build-arena.py materialize-task \\
+        --layout-root data/interim/dungeongen/v1 \\
+        --corpus dungeons
 """
 
 from __future__ import annotations
@@ -54,57 +57,68 @@ from typing import Annotated
 
 import typer
 
+from ehc_sn.data.layout.io import load_layout_dataset
 from ehc_sn.data.lifecycle import validate_version_root
-from ehc_sn.data.substrate.dungeongen import SHARED_FAMILY
 from ehc_sn.tasks.arena import TASK_FAMILY as ARENA_TASK_FAMILY
-from ehc_sn.tasks.arena import build_arena_task_corpus, validate_arena_task_root
+from ehc_sn.tasks.arena import (
+    build_arena_corpus_from_layouts,
+    validate_arena_task_root,
+)
 
 # ---------------------------------------------------------------------------
-_DEFAULT_SHARED_VERSION = 1
 _DEFAULT_TASK_VERSION = 1
 _DEFAULT_CORPUS = "default"
-_DEFAULT_START_POLICY = "random_valid"
 _DEFAULT_WALK_POLICY = "uniform"
-_DEFAULT_MAX_STEPS = 2000
+_DEFAULT_MAX_STEPS = 250
+_DEFAULT_N_EPISODES = 10
 
 app = typer.Typer(add_completion=False, help=__doc__)
-
 
 
 # =============================================================================
 @app.command("materialize-task")
 def materialize_task(  # ------------------------------------------------------
+    layout_root: Annotated[
+        Path, typer.Option("--layout-root", help="Interim layout dataset root.")
+    ],
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
-    start_policy: Annotated[str, typer.Option("--start-policy")] = _DEFAULT_START_POLICY,
-    walk_policy: Annotated[str, typer.Option("--walk-policy")] = _DEFAULT_WALK_POLICY,
-    train_parent_maps: Annotated[int, typer.Option("--train-parent-maps")] = 1000,
-    val_parent_maps: Annotated[int, typer.Option("--val-parent-maps")] = 10,
-    test_parent_maps: Annotated[int, typer.Option("--test-parent-maps")] = 10,
-    train_episodes_per_parent: Annotated[int, typer.Option("--train-episodes-per-parent")] = 2,
-    val_episodes_per_parent: Annotated[int, typer.Option("--val-episodes-per-parent")] = 1,
-    test_episodes_per_parent: Annotated[int, typer.Option("--test-episodes-per-parent")] = 1,
+    walk_policy: Annotated[
+        str, typer.Option("--walk-policy")
+    ] = _DEFAULT_WALK_POLICY,
+    n_episodes: Annotated[
+        int, typer.Option("--n-episodes", help="Number of episodes per layout.")
+    ] = _DEFAULT_N_EPISODES,
     max_steps: Annotated[int, typer.Option("--max-steps")] = _DEFAULT_MAX_STEPS,
-    shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
     version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
-    seed: Annotated[int, typer.Option("--seed")] = 42,
-) -> None:  # fmt: skip
-    """Build the Arena task corpus (v1, topology-free) over a dungeongen shared substrate."""
-    shared_root = Path(f"data/processed/{SHARED_FAMILY}/v{shared_version}")
+    seed: Annotated[int, typer.Option("--seed")] = 45,
+) -> None:
+    """Build the Arena task corpus from an interim layout dataset."""
+    if not layout_root.exists():
+        typer.echo(
+            f"Error: layout root not found at {layout_root.resolve()}.\n"
+            "Build layouts first with:\n"
+            "    python scripts/data-gen/build-openfield.py build-all\n"
+            "or:\n"
+            "    python scripts/data-gen/build-dungeongen.py build-all\n"
+            "or:\n"
+            "    python scripts/data-gen/build-dungeongen.py materialize-layouts",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
     task_root = Path(f"data/processed/arena/{corpus}/v{version}")
-    _require_shared_substrate(shared_root.resolve())
-    build_arena_task_corpus(
-        task_root.resolve(),
+
+    print(f"Loading layouts from {layout_root.resolve()}...")
+    layouts = load_layout_dataset(layout_root.resolve())
+    print(f"  {len(layouts)} layouts loaded.")
+
+    build_arena_corpus_from_layouts(
+        version_root=task_root.resolve(),
+        layouts=layouts,
         corpus=corpus,
-        start_policy=start_policy,
         walk_policy=walk_policy,
-        train_parent_maps=train_parent_maps,
-        val_parent_maps=val_parent_maps,
-        test_parent_maps=test_parent_maps,
-        train_episodes_per_parent=train_episodes_per_parent,
-        val_episodes_per_parent=val_episodes_per_parent,
-        test_episodes_per_parent=test_episodes_per_parent,
+        n_episodes_per_layout=n_episodes,
         max_steps=max_steps,
-        parent_substrate=shared_root.resolve(),
         seed=seed,
     )
 
@@ -112,94 +126,30 @@ def materialize_task(  # ------------------------------------------------------
 # =============================================================================
 @app.command("validate")
 def validate(  # --------------------------------------------------------------
-    root: Annotated[Path, typer.Argument(help="Arena task-corpus root to validate.")],
-) -> None:  # fmt: skip
+    root: Annotated[
+        Path, typer.Argument(help="Arena task-corpus root to validate.")
+    ],
+) -> None:
     """Validate an Arena task-corpus version root.
 
     Raises an error if the root is not a valid Arena task_corpus.
     """
-    manifest = validate_version_root(root.resolve())
-    if manifest.get("dataset_class") != "task_corpus":
-        typer.echo(
-            f"Error: expected dataset_class 'task_corpus', "
-            f"got '{manifest.get('dataset_class')}'. "
-            "Use build-dungeongen.py to validate shared-substrate roots.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    if manifest.get("task") != ARENA_TASK_FAMILY:
-        typer.echo(
-            f"Error: expected task '{ARENA_TASK_FAMILY}', got '{manifest.get('task')}'.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-    validate_arena_task_root(root.resolve())
+    manifest = validate_arena_task_root(root.resolve())
     typer.echo(f"OK  {root}")
     typer.echo(f"    dataset_class          : {manifest['dataset_class']}")
     typer.echo(f"    task                   : {manifest['task']}")
-    typer.echo(f"    task_protocol_version  : {manifest.get('task_protocol_version')}")
+    typer.echo(
+        f"    task_protocol_version  : {manifest.get('task_protocol_version')}"
+    )
     typer.echo(f"    version                : {manifest['version']}")
     typer.echo(f"    channels               : {manifest['channels']}")
     typer.echo(f"    n_samples              : {manifest['n_samples']}")
-    typer.echo(f"    observation_vocab_size : {manifest.get('observation_vocab_size')}")
-
-
-# =============================================================================
-@app.command("build-all")
-def build_all(  # -------------------------------------------------------------
-    corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
-    start_policy: Annotated[str, typer.Option("--start-policy")] = _DEFAULT_START_POLICY,
-    walk_policy: Annotated[str, typer.Option("--walk-policy")] = _DEFAULT_WALK_POLICY,
-    train_parent_maps: Annotated[int, typer.Option("--train-parent-maps")] = 1000,
-    val_parent_maps: Annotated[int, typer.Option("--val-parent-maps")] = 10,
-    test_parent_maps: Annotated[int, typer.Option("--test-parent-maps")] = 10,
-    train_episodes_per_parent: Annotated[int, typer.Option("--train-episodes-per-parent")] = 2,
-    val_episodes_per_parent: Annotated[int, typer.Option("--val-episodes-per-parent")] = 1,
-    test_episodes_per_parent: Annotated[int, typer.Option("--test-episodes-per-parent")] = 1,
-    max_steps: Annotated[int, typer.Option("--max-steps")] = _DEFAULT_MAX_STEPS,
-    shared_version: Annotated[int, typer.Option("--shared-version")] = _DEFAULT_SHARED_VERSION,
-    version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
-    seed: Annotated[int, typer.Option("--seed")] = 42,
-) -> None:  # fmt: skip
-    """Build the Arena task corpus (alias for materialize-task).
-
-    Requires the parent dungeongen shared substrate to exist.  Build it first::
-
-        python scripts/data-gen/build-dungeongen.py build-all
-    """
-    materialize_task(
-        corpus=corpus,
-        start_policy=start_policy,
-        walk_policy=walk_policy,
-        train_parent_maps=train_parent_maps,
-        val_parent_maps=val_parent_maps,
-        test_parent_maps=test_parent_maps,
-        train_episodes_per_parent=train_episodes_per_parent,
-        val_episodes_per_parent=val_episodes_per_parent,
-        test_episodes_per_parent=test_episodes_per_parent,
-        max_steps=max_steps,
-        shared_version=shared_version,
-        version=version,
-        seed=seed,
+    typer.echo(
+        f"    observation_vocab_size : {manifest.get('observation_vocab_size')}"
     )
 
 
-# =============================================================================
-def _require_shared_substrate(  # ---------------------------------------------
-    shared_root: Path,
-) -> None:  # fmt: skip
-    """Fail fast with an actionable error when the parent substrate is missing."""
-    if not shared_root.exists():
-        typer.echo(
-            f"Error: parent shared substrate not found at {shared_root}.\n"
-            "Build it first with:\n"
-            "    python scripts/data-gen/build-dungeongen.py build-all\n"
-            "or:\n"
-            f"    python scripts/data-gen/build-dungeongen.py materialize-shared",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
+# build-all removed — this script has a single stage: materialize-task.
 
 # =============================================================================
 if __name__ == "__main__":

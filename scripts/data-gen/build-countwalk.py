@@ -66,7 +66,9 @@ _DEFAULT_TASK_VERSION = 1
 _DEFAULT_CORPUS = "default"
 _DEFAULT_N_EPISODES_PER_WORLD = 40  # must be divisible by 4; benchmark default
 _DEFAULT_ID_MAX_STEPS = 8  # horizon cap for ID and range-OOD buckets
-_DEFAULT_OOD_MAX_STEPS = 16  # horizon cap for horizon-OOD, joint-OOD, stretch-OOD
+_DEFAULT_OOD_MAX_STEPS = (
+    16  # horizon cap for horizon-OOD, joint-OOD, stretch-OOD
+)
 _DEFAULT_SEED = 42
 
 app = typer.Typer(add_completion=False, help=__doc__)
@@ -75,21 +77,45 @@ app = typer.Typer(add_completion=False, help=__doc__)
 # ---------------------------------------------------------------------------
 @app.command("materialize-task")
 def materialize_task(
-    shared_version: Annotated[int, typer.Option("--shared-version", help="Parent numberline substrate version.")] = _DEFAULT_SHARED_VERSION,
-    version: Annotated[int, typer.Option("--version", help="Task corpus version.")] = _DEFAULT_TASK_VERSION,
-    corpus: Annotated[str, typer.Option("--corpus", help="Corpus label.")] = _DEFAULT_CORPUS,
+    shared_version: Annotated[
+        int,
+        typer.Option(
+            "--shared-version", help="Parent numberline substrate version."
+        ),
+    ] = _DEFAULT_SHARED_VERSION,
+    version: Annotated[
+        int, typer.Option("--version", help="Task corpus version.")
+    ] = _DEFAULT_TASK_VERSION,
+    corpus: Annotated[
+        str, typer.Option("--corpus", help="Corpus label.")
+    ] = _DEFAULT_CORPUS,
     n_episodes_per_world: Annotated[
-        int, typer.Option("--n-episodes-per-world", help="Episodes per world per split per bucket. Must be a positive multiple of 4.")
+        int,
+        typer.Option(
+            "--n-episodes-per-world",
+            help="Episodes per world per split per bucket. Must be a positive multiple of 4.",
+        ),
     ] = _DEFAULT_N_EPISODES_PER_WORLD,
     id_max_steps: Annotated[
-        int, typer.Option("--id-max-steps", help="Max horizon for ID and range-OOD buckets (benchmark default: 8).")
+        int,
+        typer.Option(
+            "--id-max-steps",
+            help="Max horizon for ID and range-OOD buckets (benchmark default: 8).",
+        ),
     ] = _DEFAULT_ID_MAX_STEPS,
     ood_max_steps: Annotated[
         int,
-        typer.Option("--ood-max-steps", help="Max horizon for horizon-OOD, joint-OOD, and stretch-OOD buckets (benchmark default: 16)."),
+        typer.Option(
+            "--ood-max-steps",
+            help="Max horizon for horizon-OOD, joint-OOD, and stretch-OOD buckets (benchmark default: 16).",
+        ),
     ] = _DEFAULT_OOD_MAX_STEPS,
-    seed: Annotated[int, typer.Option("--seed", help="Deterministic base seed.")] = _DEFAULT_SEED,
-    processed_root: Annotated[Path, typer.Option("--processed-root", help="Processed data root.")] = Path("data/processed"),
+    seed: Annotated[
+        int, typer.Option("--seed", help="Deterministic base seed.")
+    ] = _DEFAULT_SEED,
+    processed_root: Annotated[
+        Path, typer.Option("--processed-root", help="Processed data root.")
+    ] = Path("data/processed"),
 ) -> None:
     """Build the Countwalk task corpus over a NumberLine shared substrate."""
     parent_substrate = processed_root / NUMBERLINE_FAMILY / f"v{shared_version}"
@@ -110,51 +136,16 @@ def materialize_task(
 
 @app.command("validate")
 def validate(
-    version: Annotated[int, typer.Option("--version", help="Task corpus version to validate.")] = _DEFAULT_TASK_VERSION,
-    corpus: Annotated[str, typer.Option("--corpus", help="Corpus label.")] = _DEFAULT_CORPUS,
-    processed_root: Annotated[Path, typer.Option("--processed-root", help="Processed data root.")] = Path("data/processed"),
+    root: Annotated[
+        Path, typer.Argument(help="Countwalk task-corpus root to validate.")
+    ],
 ) -> None:
-    """Validate a Countwalk task corpus root (generic + Countwalk family validators)."""
-    version_root = processed_root / TASK_FAMILY / corpus / f"v{version}"
-    typer.echo(f"Validating {version_root} …")
-    validate_countwalk_task_root(version_root)
-    typer.echo("Validation passed.")
+    """Validate a Countwalk task-corpus version root (generic + Countwalk family validators)."""
+    validate_countwalk_task_root(root.resolve())
+    typer.echo(f"OK  {root}")
 
 
-@app.command("build-all")
-def build_all(
-    shared_version: Annotated[int, typer.Option("--shared-version", help="Parent numberline substrate version.")] = _DEFAULT_SHARED_VERSION,
-    version: Annotated[int, typer.Option("--version", help="Task corpus version.")] = _DEFAULT_TASK_VERSION,
-    corpus: Annotated[str, typer.Option("--corpus", help="Corpus label.")] = _DEFAULT_CORPUS,
-    n_episodes_per_world: Annotated[
-        int, typer.Option("--n-episodes-per-world", help="Episodes per world per split per bucket. Must be a positive multiple of 4.")
-    ] = _DEFAULT_N_EPISODES_PER_WORLD,
-    id_max_steps: Annotated[
-        int, typer.Option("--id-max-steps", help="Max horizon for ID and range-OOD buckets (benchmark default: 8).")
-    ] = _DEFAULT_ID_MAX_STEPS,
-    ood_max_steps: Annotated[
-        int,
-        typer.Option("--ood-max-steps", help="Max horizon for horizon-OOD, joint-OOD, and stretch-OOD buckets (benchmark default: 16)."),
-    ] = _DEFAULT_OOD_MAX_STEPS,
-    seed: Annotated[int, typer.Option("--seed", help="Deterministic base seed.")] = _DEFAULT_SEED,
-    processed_root: Annotated[Path, typer.Option("--processed-root", help="Processed data root.")] = Path("data/processed"),
-) -> None:
-    """Build the Countwalk task corpus (alias for materialize-task)."""
-    parent_substrate = processed_root / NUMBERLINE_FAMILY / f"v{shared_version}"
-    version_root = processed_root / TASK_FAMILY / corpus / f"v{version}"
-    typer.echo(f"Building Countwalk task corpus → {version_root}")
-    typer.echo(f"  Parent substrate: {parent_substrate}")
-    build_countwalk_task_corpus(
-        version_root,
-        parent_substrate=parent_substrate,
-        corpus=corpus,
-        n_episodes_per_world=n_episodes_per_world,
-        id_max_steps=id_max_steps,
-        ood_max_steps=ood_max_steps,
-        seed=seed,
-    )
-    typer.echo("Done.")
-
+# build-all removed — this script has a single stage: materialize-task.
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":

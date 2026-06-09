@@ -50,11 +50,28 @@ app = typer.Typer(add_completion=False, help=__doc__)
 # ---------------------------------------------------------------------------
 @app.command("materialize-shared")
 def materialize_shared(
-    version: Annotated[int, typer.Option("--version", help="Version integer for the substrate root.")] = _DEFAULT_VERSION,
-    n_states: Annotated[int, typer.Option("--n-states", help="Number of states on the number line.")] = _DEFAULT_N_STATES,
-    n_worlds: Annotated[int, typer.Option("--n-worlds", help="Total number of world samples to materialise.")] = _DEFAULT_N_WORLDS,
-    seed: Annotated[int, typer.Option("--seed", help="Deterministic base seed.")] = _DEFAULT_SEED,
-    output_root: Annotated[Path, typer.Option("--output-root", help="Processed data root.")] = Path("data/processed"),
+    version: Annotated[
+        int,
+        typer.Option(
+            "--version", help="Version integer for the substrate root."
+        ),
+    ] = _DEFAULT_VERSION,
+    n_states: Annotated[
+        int,
+        typer.Option("--n-states", help="Number of states on the number line."),
+    ] = _DEFAULT_N_STATES,
+    n_worlds: Annotated[
+        int,
+        typer.Option(
+            "--n-worlds", help="Total number of world samples to materialise."
+        ),
+    ] = _DEFAULT_N_WORLDS,
+    seed: Annotated[
+        int, typer.Option("--seed", help="Deterministic base seed.")
+    ] = _DEFAULT_SEED,
+    output_root: Annotated[
+        Path, typer.Option("--output-root", help="Processed data root.")
+    ] = Path("data/processed"),
 ) -> None:
     """Synthesize the NumberLine shared substrate."""
     version_root = output_root / SHARED_FAMILY / f"v{version}"
@@ -70,35 +87,17 @@ def materialize_shared(
 
 @app.command("validate")
 def validate(
-    version: Annotated[int, typer.Option("--version", help="Version integer to validate.")] = _DEFAULT_VERSION,
-    output_root: Annotated[Path, typer.Option("--output-root", help="Processed data root.")] = Path("data/processed"),
+    root: Annotated[
+        Path,
+        typer.Argument(help="NumberLine shared-substrate root to validate."),
+    ],
 ) -> None:
-    """Validate a NumberLine shared substrate version root."""
-    version_root = output_root / SHARED_FAMILY / f"v{version}"
-    typer.echo(f"Validating {version_root} …")
-    validate_numberline_shared_root(version_root)
-    typer.echo("Validation passed.")
+    """Validate a NumberLine shared-substrate version root."""
+    validate_numberline_shared_root(root.resolve())
+    typer.echo(f"OK  {root}")
 
 
-@app.command("build-all")
-def build_all(
-    version: Annotated[int, typer.Option("--version", help="Version integer for the substrate root.")] = _DEFAULT_VERSION,
-    n_states: Annotated[int, typer.Option("--n-states", help="Number of states on the number line.")] = _DEFAULT_N_STATES,
-    n_worlds: Annotated[int, typer.Option("--n-worlds", help="Total number of world samples.")] = _DEFAULT_N_WORLDS,
-    seed: Annotated[int, typer.Option("--seed", help="Deterministic base seed.")] = _DEFAULT_SEED,
-    output_root: Annotated[Path, typer.Option("--output-root", help="Processed data root.")] = Path("data/processed"),
-) -> None:
-    """Build the NumberLine shared substrate (alias for materialize-shared)."""
-    version_root = output_root / SHARED_FAMILY / f"v{version}"
-    typer.echo(f"Building NumberLine shared substrate → {version_root}")
-    build_shared_substrate(
-        version_root,
-        n_states=n_states,
-        n_worlds=n_worlds,
-        seed=seed,
-    )
-    typer.echo("Done.")
-
+# build-all removed — this script has a single stage: materialize-shared.
 
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
