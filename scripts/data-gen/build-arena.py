@@ -68,9 +68,11 @@ from ehc_sn.tasks.arena import (
 # ---------------------------------------------------------------------------
 _DEFAULT_TASK_VERSION = 1
 _DEFAULT_CORPUS = "default"
-_DEFAULT_WALK_POLICY = "uniform"
-_DEFAULT_MAX_STEPS = 250
-_DEFAULT_N_EPISODES = 10
+_DEFAULT_WALK_POLICY = "legacy_angle_bias"
+_DEFAULT_MAX_STEPS = 2000
+_DEFAULT_N_EPISODES = 4
+_DEFAULT_WALK_SEED = 45
+
 
 app = typer.Typer(add_completion=False, help=__doc__)
 
@@ -79,20 +81,58 @@ app = typer.Typer(add_completion=False, help=__doc__)
 @app.command("materialize-task")
 def materialize_task(  # ------------------------------------------------------
     layout_root: Annotated[
-        Path, typer.Option("--layout-root", help="Interim layout dataset root.")
+        Path,
+        typer.Option(
+            "--layout-root",
+            help="Interim layout dataset root.",
+        ),
     ],
-    corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
+    corpus: Annotated[
+        str,
+        typer.Option(
+            "--corpus",
+            help="Corpus name (e.g. 'openfield-square' or 'dungeons').",
+        ),
+    ] = _DEFAULT_CORPUS,
     walk_policy: Annotated[
-        str, typer.Option("--walk-policy")
+        str,
+        typer.Option(
+            "--walk-policy",
+            help="Walk policy for trajectory generation (default: legacy_angle_bias).",
+        ),
     ] = _DEFAULT_WALK_POLICY,
     n_episodes: Annotated[
-        int, typer.Option("--n-episodes", help="Number of episodes per layout.")
+        int,
+        typer.Option(
+            "--n-episodes",
+            help="Number of episodes per layout.",
+        ),
     ] = _DEFAULT_N_EPISODES,
-    max_steps: Annotated[int, typer.Option("--max-steps")] = _DEFAULT_MAX_STEPS,
-    version: Annotated[int, typer.Option("--version")] = _DEFAULT_TASK_VERSION,
-    seed: Annotated[int, typer.Option("--seed")] = 45,
+    max_steps: Annotated[
+        int,
+        typer.Option(
+            "--max-steps",
+            help="Maximum steps per episode.",
+        ),
+    ] = _DEFAULT_MAX_STEPS,
+    version: Annotated[
+        int,
+        typer.Option(
+            "--version",
+            help="Version number for the generated task corpus (default: 1).",
+        ),
+    ] = _DEFAULT_TASK_VERSION,
+    seed: Annotated[
+        int,
+        typer.Option(
+            "--seed",
+            help="Random seed for trajectory generation (default: 45).",
+        ),
+    ] = _DEFAULT_WALK_SEED,
 ) -> None:
-    """Build the Arena task corpus from an interim layout dataset."""
+    """Build the Arena task corpus from an interim layout dataset.
+    ...
+    """
     if not layout_root.exists():
         typer.echo(
             f"Error: layout root not found at {layout_root.resolve()}.\n"

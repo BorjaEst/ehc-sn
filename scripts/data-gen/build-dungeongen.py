@@ -64,9 +64,9 @@ _DEFAULT_PRESET = "default"
 _DEFAULT_S_SIZE = 45
 _DEFAULT_N_SENSORY_INSTANCES = 1
 _DEFAULT_TOPOLOGY_SEED = 42
-_DEFAULT_N_TRAIN = 1000
-_DEFAULT_N_VAL = 40
-_DEFAULT_N_TEST = 40
+_DEFAULT_N_TRAIN = 250
+_DEFAULT_N_VAL = 10
+_DEFAULT_N_TEST = 10
 
 
 app = typer.Typer(add_completion=False, help=__doc__)
@@ -103,18 +103,6 @@ def generate_topology(  # ----------------------------------------------------
             help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
         ),
     ] = _DEFAULT_N_TEST,
-    height: Annotated[
-        int | None,
-        typer.Option(
-            "--height", help="Target grid height. Inferred when omitted."
-        ),
-    ] = None,
-    width: Annotated[
-        int | None,
-        typer.Option(
-            "--width", help="Target grid width. Inferred when omitted."
-        ),
-    ] = None,
     topology_seed: Annotated[
         int,
         typer.Option(
@@ -146,19 +134,21 @@ def generate_topology(  # ----------------------------------------------------
 ) -> None:
     """Ensure raw snapshot exists + normalize to interim topology records.
 
-    If the raw corpus does not exist, generates it.  Then normalizes the raw
-    topologies into per-split NPZ files under ``{interim_root}/{preset}/interim/v{version}/``.
+    Raw snapshot is written to ``{raw_root}/{preset}/v{version}/``.
+    Interim topology NPZ files are written to
+    ``{interim_root}/{preset}/interim/v{version}/``.
     """
+    raw_leaf = raw_root / preset / f"v{version}"
     _ensure_raw(
-        raw_root,
+        raw_leaf,
         topology_seed,
         {"train": n_train, "val": n_val, "test": n_test},
     )
-    print(f"Raw corpus at {raw_root}")
+    print(f"Raw corpus at {raw_leaf}")
     interim_path = interim_root / preset / "interim" / f"v{version}"
     interim_path.mkdir(parents=True, exist_ok=True)
     _prepare_interim(
-        raw_root.resolve(),
+        raw_leaf.resolve(),
         interim_path.resolve(),
         n_train=n_train,
         n_val=n_val,
@@ -401,15 +391,13 @@ def build_all(
     """Full pipeline: generate-topology -> materialize-layouts.
 
     Grid shape is inferred from the interim slice unless --height/--width
-    are given explicitly.
+    are given explicitly on the materialize-layouts stage.
     """
     generate_topology(
         preset=preset,
         n_train=n_train,
         n_val=n_val,
         n_test=n_test,
-        height=height,
-        width=width,
         topology_seed=topology_seed,
         version=version,
         raw_root=raw_root,

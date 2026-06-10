@@ -40,6 +40,7 @@ from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryControllerConfig,
 )
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
+from ehc_sn.data.manifest import read_manifest
 from ehc_sn.lightning.tem.core._base import (
     VALID_INIT_GROUPS,
     load_weights_from_checkpoint,
@@ -333,6 +334,26 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
                     f"Unknown init_weights_groups: {unknown!r}. "
                     f"Valid groups: {sorted(VALID_INIT_GROUPS)!r}."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_action_count_with_corpus(self) -> "RunArguments":
+        """Assert that ``adapter.action_count`` matches the corpus manifest.
+
+        Reads ``manifest.json`` from ``dataset_path`` and checks the stored
+        ``action_count`` field agrees with the model adapter's setting.  This
+        catches mismatches when switching between corpora with different action
+        spaces (e.g. square dungeon v1 = 5 actions, hex openfield = 7 actions).
+        """
+        manifest = read_manifest(self.dataset_path)
+        corpus_action_count = int(manifest["action_count"])
+        if corpus_action_count != self.adapter.action_count:
+            raise ValueError(
+                f"Action-count mismatch: corpus at {self.dataset_path} declares "
+                f"action_count={corpus_action_count} but adapter config has "
+                f"action_count={self.adapter.action_count}. "
+                f"Update the training config to match the target corpus."
+            )
         return self
 
     # -------------------------------------------------------------------------
