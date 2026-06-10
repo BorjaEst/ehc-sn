@@ -13,9 +13,9 @@ from typing import Final
 
 from torch import Tensor
 
-from ehc_sn.tasks._movement import MOVEMENT_ACTION_COUNT, MovementAction
+from ehc_sn.tasks._movement import DEFAULT_GRID_ACTION_COUNT, MovementAction
 
-DUNGEON_ACTION_COUNT: Final[int] = MOVEMENT_ACTION_COUNT
+DUNGEON_ACTION_COUNT: Final[int] = DEFAULT_GRID_ACTION_COUNT
 
 DungeonAction = MovementAction
 """Canonical movement action type for dungeon navigation tasks."""

@@ -14,6 +14,9 @@ from torch import Tensor
 
 from .contracts import COUNTWALK_IGNORE_DIGIT, DIGIT_WIDTH, N_BUCKETS
 
+COUNTWALK_PRIMARY_METRIC_NAME: str = "value_accuracy"
+"""Canonical primary benchmark metric for Countwalk: exact numeric value accuracy."""
+
 
 # =============================================================================
 @dataclass(frozen=True)
@@ -154,10 +157,16 @@ def score_countwalk_batch(
         :class:`CountwalkScoreReport` with all scalar metrics.
     """
     return CountwalkScoreReport(
-        digit_accuracy=float(digit_accuracy(digit_logits, target_digits, target_digit_mask)),
-        sequence_accuracy=float(sequence_accuracy(digit_logits, target_digits, target_digit_mask)),
+        digit_accuracy=float(
+            digit_accuracy(digit_logits, target_digits, target_digit_mask)
+        ),
+        sequence_accuracy=float(
+            sequence_accuracy(digit_logits, target_digits, target_digit_mask)
+        ),
         value_accuracy=float(value_accuracy(digit_logits, target_value)),
-        mean_absolute_error=float(mean_absolute_error(digit_logits, target_value)),
+        mean_absolute_error=float(
+            mean_absolute_error(digit_logits, target_value)
+        ),
         n_episodes=int(digit_logits.shape[0]),
     )
 
@@ -214,7 +223,10 @@ def score_countwalk_stratified(
             target_value[idx],
         )
 
-    from ehc_sn.tasks.countwalk.contracts import N_ANCHOR_REGIMES, N_CUE_SURFACES
+    from ehc_sn.tasks.countwalk.contracts import (
+        N_ANCHOR_REGIMES,
+        N_CUE_SURFACES,
+    )
 
     by_cue: dict[str, CountwalkScoreReport] = {}
     for cid in range(N_CUE_SURFACES):

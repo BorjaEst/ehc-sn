@@ -60,8 +60,12 @@ def _build_task_evidence_arrays(
 
     # Shared environment arrays (same for all B episodes — take first).
     wall_mask = topology_all[sample_position]
-    obs_map = np.load(split_dir / "observations.npy", mmap_mode="r")[sample_position]
-    valid_mask = np.load(split_dir / "mask_valid.npy", mmap_mode="r")[sample_position]
+    obs_map = np.load(split_dir / "observations.npy", mmap_mode="r")[
+        sample_position
+    ]
+    valid_mask = np.load(split_dir / "mask_valid.npy", mmap_mode="r")[
+        sample_position
+    ]
 
     # Per-episode trajectory: take the first episode for the overview.
     rows = batch["trajectory_row"][0].detach().cpu().numpy()  # (T,)

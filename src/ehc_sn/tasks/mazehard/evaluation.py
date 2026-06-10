@@ -11,6 +11,8 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
+from ehc_sn.metrics.spec import MetricSpec
+
 from .contracts import (
     MAZE_HARD_IGNORE_LABEL_ID,
     MazeHardTargets,
@@ -19,6 +21,37 @@ from .contracts import (
 
 MAZEHARD_PRIMARY_METRIC_NAME: str = "token_accuracy"
 """Canonical primary benchmark metric for MazeHard: token-level accuracy."""
+
+MAZEHARD_METRIC_SPECS: list[MetricSpec] = [
+    MetricSpec(
+        name="token_accuracy",
+        label="Token accuracy",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=True,
+        description="Token-level accuracy over all supervised tokens.",
+    ),
+    MetricSpec(
+        name="sequences_accuracy",
+        label="Sequence accuracy",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=True,
+        description="Mean per-sequence token accuracy.",
+    ),
+    MetricSpec(
+        name="sequences_exact",
+        label="Exact sequence accuracy",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=True,
+        description="Fraction of fully correct sequences "
+        "(stricter than token-accuracy; used by mazehard-delib track).",
+    ),
+]
 
 
 # =============================================================================

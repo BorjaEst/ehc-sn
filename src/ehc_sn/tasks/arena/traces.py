@@ -161,9 +161,7 @@ def build_arena_trace_supplements(
     # ── 3. Load spatial arrays from arena split dir (self-contained) ─────────
     arena_split_dir = dataset_path / split
     topology_all = np.load(arena_split_dir / "topology.npy", mmap_mode="r")
-    mask_valid_all = np.load(
-        arena_split_dir / "mask_valid.npy", mmap_mode="r"
-    )
+    mask_valid_all = np.load(arena_split_dir / "mask_valid.npy", mmap_mode="r")
     _h, _w = topology_all.shape[1], topology_all.shape[2]
 
     # ── 4. Load Arena trajectory arrays (mmap, sliced per sample) ────────────
