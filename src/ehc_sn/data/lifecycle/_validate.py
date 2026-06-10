@@ -58,9 +58,33 @@ _TASK_REQUIRED: frozenset[str] = _SHARED_REQUIRED | frozenset(
     }
 )
 
-_KNOWN_DATASET_CLASSES: frozenset[str] = frozenset({"shared_substrate", "task_corpus"})
+_SOURCE_SPEC_REQUIRED: frozenset[str] = frozenset(
+    {
+        "schema_version",
+        "dataset_class",
+        "family",
+        "preset",
+        "version",
+        "n_samples",
+        "source_id",
+        "builder",
+        "seed",
+        "stage_params",
+        "producer_revision",
+        "input_fingerprint",
+        "spec_schema_version",
+    }
+)
+"""Required manifest fields for source_spec datasets."""
 
-_FORBIDDEN_FIELDS: frozenset[str] = frozenset({"lineage", "created_at", "build_host", "build_time", "shape"})
+
+_KNOWN_DATASET_CLASSES: frozenset[str] = frozenset(
+    {"shared_substrate", "task_corpus", "layout_dataset", "source_spec"}
+)
+
+_FORBIDDEN_FIELDS: frozenset[str] = frozenset(
+    {"lineage", "created_at", "build_host", "build_time", "shape"}
+)
 
 
 def _validate_structure(root: Path) -> dict[str, Any]:
@@ -94,13 +118,20 @@ def _validate_structure(root: Path) -> dict[str, Any]:
             f"Manifest contains forbidden fields: {sorted(present_forbidden)}"
         )
 
-    required = _TASK_REQUIRED if dataset_class == "task_corpus" else _SHARED_REQUIRED
+    if dataset_class == "source_spec":
+        required = _SOURCE_SPEC_REQUIRED
+    elif dataset_class == "task_corpus":
+        required = _TASK_REQUIRED
+    else:
+        required = _SHARED_REQUIRED
     missing = required - manifest.keys()
     if missing:
         raise ValueError(f"manifest missing required fields: {sorted(missing)}")
 
-    channels: list[str] = manifest["channels"]
     n_samples: dict[str, int] = manifest["n_samples"]
+
+    if dataset_class != "source_spec":
+        channels: list[str] = manifest["channels"]
 
     if dataset_class == "task_corpus":
         ps: str = manifest["parent_substrate"]
@@ -109,45 +140,67 @@ def _validate_structure(root: Path) -> dict[str, Any]:
                 f"parent_substrate must be a repo-relative path, got absolute: {ps!r}"
             )
 
-    index_path = root / "index.jsonl"
-    if not index_path.exists():
-        raise FileNotFoundError(f"Missing index: {index_path}")
+    # source_spec roots use per-split specs.jsonl, not a root index.jsonl.
+    if dataset_class != "source_spec":
+        index_path = root / "index.jsonl"
+        if not index_path.exists():
+            raise FileNotFoundError(f"Missing index: {index_path}")
 
-    split_counts_from_index: dict[str, int] = {}
-    with index_path.open() as fh:
-        for line in fh:
-            entry = json.loads(line)
-            split = entry.get("split", "")
-            split_counts_from_index[split] = split_counts_from_index.get(split, 0) + 1
+        split_counts_from_index: dict[str, int] = {}
+        with index_path.open() as fh:
+            for line in fh:
+                entry = json.loads(line)
+                split = entry.get("split", "")
+                split_counts_from_index[split] = (
+                    split_counts_from_index.get(split, 0) + 1
+                )
 
-    for split, n in n_samples.items():
-        if split_counts_from_index.get(split, 0) != n:
-            raise ValueError(
-                f"index.jsonl has {split_counts_from_index.get(split, 0)} entries for split "
-                f"'{split}', manifest declares {n}"
-            )
+        for split, n in n_samples.items():
+            if split_counts_from_index.get(split, 0) != n:
+                raise ValueError(
+                    f"index.jsonl has {split_counts_from_index.get(split, 0)} entries for "
+                    f"split '{split}', manifest declares {n}"
+                )
 
-    for split, n in n_samples.items():
-        split_dir = root / split
-        if not split_dir.is_dir():
-            raise FileNotFoundError(f"Missing split directory: {split_dir}")
+    # source_spec datasets use per-split specs.jsonl files.
+    if dataset_class == "source_spec":
+        for split, n in n_samples.items():
+            spec_file = root / split / "specs.jsonl"
+            if not spec_file.exists():
+                raise FileNotFoundError(
+                    f"Missing source spec file: {spec_file}"
+                )
+            n_found = sum(1 for _ in spec_file.open())
+            if n_found != n:
+                raise ValueError(
+                    f"{spec_file}: {n_found} records, manifest declares {n}"
+                )
 
-        dataset_json = split_dir / "dataset.json"
-        if not dataset_json.exists():
-            raise FileNotFoundError(f"Missing dataset.json: {dataset_json}")
-        split_meta = json.loads(dataset_json.read_text())
-        if split_meta.get("n_samples") != n:
-            raise ValueError(
-                f"{dataset_json}: n_samples={split_meta.get('n_samples')}, manifest declares {n}"
-            )
+    # Layout datasets use a flat layout/ directory, not split subdirectories.
+    if dataset_class != "layout_dataset" and dataset_class != "source_spec":
+        for split, n in n_samples.items():
+            split_dir = root / split
+            if not split_dir.is_dir():
+                raise FileNotFoundError(f"Missing split directory: {split_dir}")
 
-        for ch in channels:
-            ch_file = split_dir / f"{ch}.npy"
-            if not ch_file.exists():
-                raise FileNotFoundError(f"Missing channel file: {ch_file}")
-            arr = np.load(ch_file, mmap_mode="r")
-            if arr.shape[0] != n:
-                raise ValueError(f"{ch_file}: has {arr.shape[0]} samples, manifest declares {n}")
+            dataset_json = split_dir / "dataset.json"
+            if not dataset_json.exists():
+                raise FileNotFoundError(f"Missing dataset.json: {dataset_json}")
+            split_meta = json.loads(dataset_json.read_text())
+            if split_meta.get("n_samples") != n:
+                raise ValueError(
+                    f"{dataset_json}: n_samples={split_meta.get('n_samples')}, manifest declares {n}"
+                )
+
+            for ch in channels:
+                ch_file = split_dir / f"{ch}.npy"
+                if not ch_file.exists():
+                    raise FileNotFoundError(f"Missing channel file: {ch_file}")
+                arr = np.load(ch_file, mmap_mode="r")
+                if arr.shape[0] != n:
+                    raise ValueError(
+                        f"{ch_file}: has {arr.shape[0]} samples, manifest declares {n}"
+                    )
 
     return manifest
 
@@ -198,6 +251,49 @@ def _validate_path_grammar(root: Path, manifest: dict[str, Any]) -> None:
         if ps != expected_ps:
             raise ValueError(
                 f"parent_substrate {ps!r} does not match expected {expected_ps!r}."
+            )
+    elif dataset_class == "source_spec":
+        preset = manifest.get("preset", "")
+        family = manifest["family"]
+        if root.parent.name != preset:
+            raise ValueError(
+                f"Source spec path grammar violation: "
+                f"parent dir is {root.parent.name!r}, manifest preset is {preset!r}."
+            )
+        if root.parent.parent.name != family:
+            raise ValueError(
+                f"Source spec path grammar violation: "
+                f"grandparent dir is {root.parent.parent.name!r}, manifest family is {family!r}."
+            )
+    elif dataset_class == "layout_dataset":
+        preset = manifest.get("preset", "")
+        if not preset:
+            return  # legacy layout datasets without preset field
+        # Topology-only layouts: {family}/{preset}/topology/v{version}
+        # Materialized layouts:  {family}/{preset}/v{version}
+        # Walk up to find the {family} ancestor.
+        family = manifest["family"]
+        # Check that the root's parent or grandparent matches the preset.
+        preset_match = (
+            root.parent.name == preset or root.parent.parent.name == preset
+        )
+        if not preset_match:
+            raise ValueError(
+                f"Layout dataset path grammar violation: "
+                f"root parent is {root.parent.name!r}, grandparent is "
+                f"{root.parent.parent.name!r}, manifest preset is {preset!r}."
+            )
+        # Check that the grandparent or great-grandparent matches the family.
+        family_match = (
+            root.parent.parent.name == family
+            or root.parent.parent.parent.name == family
+        )
+        if not family_match:
+            raise ValueError(
+                f"Layout dataset path grammar violation: "
+                f"expected family dir '{family}', got "
+                f"'{root.parent.parent.name}' or "
+                f"'{root.parent.parent.parent.name}'."
             )
 
 

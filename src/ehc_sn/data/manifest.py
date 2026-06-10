@@ -55,16 +55,16 @@ def write_manifest(
     dataset_class: str,
     family: str,
     version: int,
-    channels: list[str],
-    topology_kind: str,
-    n_states: int,
-    extent: list[int],
+    channels: list[str] | None = None,
+    topology_kind: str | None = None,
+    n_states: int | None = None,
+    extent: list[int] | None = None,
     n_samples: dict[str, int],
     source_id: str,
     builder: str,
     seed: int,
-    normalization_version: int = 1,
-    shared_schema_version: int = 1,
+    normalization_version: int | None = 1,
+    shared_schema_version: int | None = 1,
     stage_params: dict[str, Any] | None = None,
     source_revision: str | None = None,
     # task-corpus-only fields
@@ -119,7 +119,8 @@ def write_manifest(
     dest = version_root / MANIFEST_FILENAME
     if dest.exists():
         raise FileExistsError(
-            f"Manifest already exists (dataset roots are immutable): {dest}\n" "Bump the version integer to create a new version."
+            f"Manifest already exists (dataset roots are immutable): {dest}\n"
+            "Bump the version integer to create a new version."
         )
 
     if stage_params is None:
@@ -130,20 +131,26 @@ def write_manifest(
         "dataset_class": dataset_class,
         "family": family,
         "version": version,
-        "channels": channels,
-        "topology_kind": topology_kind,
-        "n_states": n_states,
-        "extent": list(extent),
         "n_samples": n_samples,
         "source_id": source_id,
         "builder": builder,
         "seed": seed,
-        "normalization_version": normalization_version,
-        "shared_schema_version": shared_schema_version,
         "stage_params": stage_params,
         "producer_revision": _read_producer_revision(),
         "input_fingerprint": _fingerprint(stage_params),
     }
+    if channels is not None:
+        manifest["channels"] = channels
+    if topology_kind is not None:
+        manifest["topology_kind"] = topology_kind
+    if n_states is not None:
+        manifest["n_states"] = n_states
+    if extent is not None:
+        manifest["extent"] = list(extent)
+    if normalization_version is not None:
+        manifest["normalization_version"] = normalization_version
+    if shared_schema_version is not None:
+        manifest["shared_schema_version"] = shared_schema_version
     if source_revision is not None:
         manifest["source_revision"] = source_revision
     if task is not None:
@@ -180,7 +187,9 @@ def read_manifest(version_root: Path) -> dict[str, Any]:
     """
     path = version_root / MANIFEST_FILENAME
     if not path.exists():
-        raise FileNotFoundError(f"No manifest at {path}.  Is '{version_root}' a valid versioned dataset root?")
+        raise FileNotFoundError(
+            f"No manifest at {path}.  Is '{version_root}' a valid versioned dataset root?"
+        )
     return json.loads(path.read_text())
 
 

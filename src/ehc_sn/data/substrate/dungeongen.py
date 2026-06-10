@@ -24,6 +24,12 @@ from typing import Final, Iterator
 
 import numpy as np
 
+from ehc_sn.data.layout import (
+    DEFAULT_GRID_ACTION_SPACE,
+    SpatialLayout,
+    validate_spatial_layout,
+    write_layout_dataset,
+)
 from ehc_sn.data.lifecycle import (
     extract_version,
     staging_root,
@@ -220,11 +226,11 @@ def _build_substrate_sample(
     *,
     target_h: int,
     target_w: int,
-    n_observations: int,
-    seed: int,
+    s_size: int,
+    topology_seed: int,
 ) -> dict[str, np.ndarray]:
     """Normalize a raw dungeongen topology into shared-substrate channels."""
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(topology_seed)
 
     topology = _pad_to_shape(topology, target_h, target_w, fill=False)
     regions = _pad_to_shape(
@@ -233,7 +239,7 @@ def _build_substrate_sample(
 
     mask_valid = largest_component_mask(topology)
     observations = sample_observations(
-        mask_valid, n_observations, seed=int(rng.integers(2**31))
+        mask_valid, s_size, seed=int(rng.integers(2**31))
     )
     landmarks = binary_structural_landmarks(mask_valid)
 
@@ -443,9 +449,191 @@ def validate_dungeongen_shared_root(root: Path) -> dict:
     return manifest
 
 
+# =============================================================================
+# Layout dataset builder (converts shared-substrate records to SpatialLayout)
+# =============================================================================
+
+
+def build_dungeongen_layouts(
+    version_root: Path,
+    *,
+    interim_root: Path,
+    n_train: int = 1000,
+    n_val: int = 40,
+    n_test: int = 40,
+    height: int | None = None,
+    width: int | None = None,
+    s_size: int = 45,
+    topology_seed: int = 42,
+    n_sensory_instances: int = 1,
+    preset: str = "default",
+) -> None:
+    """Build a dungeongen layout dataset at *version_root*.
+
+    Reads topology files from *interim_root*, pads each topology, assigns
+    shared-substrate channels, and converts each sample into one or more
+    :class:`SpatialLayout` records written via :func:`write_layout_dataset`.
+
+    This is the dungeongen-specific producer that feeds into the common
+    layout dataset contract consumed by ``build-arena.py``.
+
+    Args:
+        version_root: Destination versioned root
+            (e.g. ``data/interim/dungeongen/v1``).  Must not already exist.
+        interim_root: Interim leaf (e.g. ``data/interim/dungeongen``).
+        n_train: Number of training samples.
+        n_val: Number of validation samples.
+        n_test: Number of test samples.
+        height: Target grid height after padding.  When ``None``, inferred.
+        width: Target grid width after padding.  When ``None``, inferred.
+        s_size: Number of distinct observation ids to assign (sensory vocab size).
+        topology_seed: Base RNG seed for topology and sensory assignment.
+        n_sensory_instances: Number of sensory realizations per topology sample.
+            Must be >= 1.
+
+    Raises:
+        ValueError: When explicit height/width is smaller than the inferred max, or
+            ``n_sensory_instances < 1``.
+    """
+    split_counts = {"train": n_train, "val": n_val, "test": n_test}
+    inferred_h, inferred_w = _infer_shape(interim_root, split_counts)
+
+    if height is None:
+        resolved_h = inferred_h
+    else:
+        if height < inferred_h:
+            raise ValueError(
+                f"Explicit height={height} is smaller than the required maximum shape "
+                f"({inferred_h}, {inferred_w}) from the selected interim slice."
+            )
+        resolved_h = height
+    if width is None:
+        resolved_w = inferred_w
+    else:
+        if width < inferred_w:
+            raise ValueError(
+                f"Explicit width={width} is smaller than the required maximum shape "
+                f"({inferred_h}, {inferred_w}) from the selected interim slice."
+            )
+        resolved_w = width
+
+    if n_sensory_instances < 1:
+        raise ValueError(
+            f"n_sensory_instances must be >= 1, got {n_sensory_instances}."
+        )
+
+    layouts: list[SpatialLayout] = []
+    topology_type = "grid2d"
+
+    for split in _SPLITS:
+        n = split_counts[split]
+        interim_topologies = list(
+            _iter_interim_topologies(interim_root, split)
+        )[:n]
+        for idx, (topology, dungeon_regions, _) in enumerate(
+            interim_topologies
+        ):
+            sample = _build_substrate_sample(
+                topology,
+                dungeon_regions,
+                target_h=resolved_h,
+                target_w=resolved_w,
+                s_size=s_size,
+                topology_seed=_sample_seed(topology_seed, split, idx),
+            )
+
+            mask_valid = sample["mask_valid"]
+            observations = sample["observations"]
+            landmarks = sample["landmarks"]
+            regions = sample["regions"]
+
+            # Build a valid-state index: flatten the 2D mask.
+            coords = np.argwhere(mask_valid)
+            n_states = len(coords)
+
+            state_to_row_col = np.zeros((n_states, 2), dtype=np.int32)
+            valid_state_mask = np.ones(n_states, dtype=bool)
+            region_id = np.full(n_states, -1, dtype=np.int32)
+            landmark_id = np.full(n_states, -1, dtype=np.int32)
+
+            for i, (r, c) in enumerate(coords):
+                state_to_row_col[i, 0] = int(r)
+                state_to_row_col[i, 1] = int(c)
+                region_id[i] = int(regions[r, c])
+                landmark_id[i] = int(landmarks[r, c])
+
+            # Build adjacency over the valid-state index (4-neighbor).
+            adj = np.zeros((n_states, n_states), dtype=bool)
+            for i, (r, c) in enumerate(coords):
+                adj[i, i] = True  # stay-still
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nr, nc = int(r + dr), int(c + dc)
+                    if 0 <= nr < resolved_h and 0 <= nc < resolved_w:
+                        if mask_valid[nr, nc]:
+                            j = np.where(
+                                (coords[:, 0] == nr) & (coords[:, 1] == nc)
+                            )[0][0]
+                            adj[i, j] = True
+
+            # Transition matrix from adjacency.
+            tm = adj.astype(np.float64)
+            row_sums = tm.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1.0
+            tm = tm / row_sums
+
+            for inst_idx in range(n_sensory_instances):
+                sensory_seed = (
+                    _sample_seed(topology_seed, split, idx) + inst_idx
+                )
+                sensory_rng = np.random.default_rng(np.uint64(sensory_seed))
+                obs_ids = sensory_rng.integers(0, s_size, size=n_states).astype(
+                    np.int32
+                )
+
+                layout_id = (
+                    f"dungeongen-{split}-{idx:06d}" f"-sens{inst_idx:02d}"
+                )
+
+                layout: SpatialLayout = {
+                    "layout_id": layout_id,
+                    "layout_family": "dungeongen",
+                    "topology_type": topology_type,
+                    "graph_state_count": n_states,
+                    "valid_state_mask": valid_state_mask,
+                    "state_to_row_col": state_to_row_col,
+                    "observation_id": obs_ids,
+                    "adjacency": adj,
+                    "action_space": dict(DEFAULT_GRID_ACTION_SPACE),
+                    "transition_matrix": tm,
+                    "topology_seed": topology_seed,
+                    "sensory_seed": sensory_seed,
+                    "sensory_vocab_size": s_size,
+                    "split": split,
+                }
+                # Attach optional dungeon-specific fields.
+                layout["region_id"] = region_id
+                layout["landmark_id"] = landmark_id
+
+                validate_spatial_layout(layout)
+                layouts.append(layout)
+
+    # Write through the common writer.
+    write_layout_dataset(
+        layouts,
+        version_root,
+        topology_type=topology_type,
+        s_size=s_size,
+        topology_seed=topology_seed,
+        version=extract_version(version_root),
+        layout_family="dungeongen",
+        preset=preset,
+    )
+
+
 __all__ = [
     "SHARED_FAMILY",
     "SHARED_CHANNELS",
+    "build_dungeongen_layouts",
     "ensure_raw",
     "prepare_interim",
     "build_shared_substrate",
