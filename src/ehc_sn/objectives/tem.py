@@ -472,7 +472,7 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
                 labels=context.labels,
             )
             * self.config.c_obs,
-            # Grid and place consistency terms under the current config and schedules.
+            # Grid and place consistency terms to converge latent repr.
             grid_kl=self.latent_loss_fn(
                 relation=context.grid_relation,
             )

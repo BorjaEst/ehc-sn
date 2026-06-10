@@ -28,61 +28,24 @@ from ehc_sn.tasks.arena.traces import ArenaEvaluationSourceContext
 
 
 # =============================================================================
-def _resolve_parent_substrate_root(arena_root: Path) -> Path:
-    """Resolve the parent dungeon shared-substrate root from the Arena manifest.
-
-    The Arena manifest declares ``parent_substrate`` as a relative path from
-    the repository root.  This helper locates the repo root by walking up from
-    *arena_root* and returns the resolved absolute path.
-    """
-    manifest = read_manifest(arena_root)
-    parent_rel = manifest["parent_substrate"]
-    # Walk up from the dataset path to find the repo root.
-    for candidate in (arena_root, *arena_root.parents):
-        if (candidate / "src").exists() and (candidate / "config").exists():
-            return (candidate / parent_rel).resolve()
-    raise FileNotFoundError(
-        f"Cannot resolve repo root from {arena_root} to locate parent "
-        f"substrate at {parent_rel!r}."
-    )
-
-
-# =============================================================================
-def _load_shared_substrate(
-    parent_root: Path, split: str
-) -> dict[str, np.ndarray]:
-    """Load shared dungeon substrate arrays for one split.
-
-    Returns a dict with ``"topology"``, ``"observations"``, ``"mask_valid"``
-    arrays memory-mapped from the parent substrate root.
-    """
-    split_dir = parent_root / split
-    return {
-        "topology": np.load(split_dir / "topology.npy", mmap_mode="r"),
-        "observations": np.load(split_dir / "observations.npy", mmap_mode="r"),
-        "mask_valid": np.load(split_dir / "mask_valid.npy", mmap_mode="r"),
-    }
-
-
-# =============================================================================
 def _build_task_evidence_arrays(
     batch: dict[str, torch.Tensor],
-    substrate_arrays: dict[str, np.ndarray],
+    split_dir: Path,
     sample_position: int,
     n_observations: int,
 ) -> dict[str, np.ndarray]:
     """Build ``arena/*`` trace arrays for one evaluation case batch.
 
-    Extracts the shared environment layout (wall mask, observation map) and
+    Extracts the environment layout (wall mask, observation map) and
     the per-episode trajectory data (visited locations, actions, revisit mask)
-    from the given batch data.
+    from the given batch data.  Spatial arrays are loaded directly from the
+    arena split directory (self-contained task corpus).
 
     Args:
         batch: Raw arena channel tensors from the ProcessedDataset DataLoader.
-        substrate_arrays: Shared dungeon substrate arrays (topology, observations).
-        sample_position: Index of this sample in the substrate split arrays.
+        split_dir: Path to the arena split directory (contains topology.npy, etc.).
+        sample_position: Index of this sample in the split arrays.
         n_observations: Number of unique observation IDs in the environment.
-        shape: (H, W) for the grid layout.
 
     Returns:
         Dict of arena/* trace key → numpy array, or empty dict if any required
@@ -91,14 +54,14 @@ def _build_task_evidence_arrays(
     if "trajectory_row" not in batch or "trajectory_col" not in batch:
         return {}
 
-    B = batch["trajectory_row"].shape[0]
-    H = substrate_arrays["topology"].shape[1]
-    W = substrate_arrays["topology"].shape[2]
+    topology_all = np.load(split_dir / "topology.npy", mmap_mode="r")
+    H = topology_all.shape[1]
+    W = topology_all.shape[2]
 
     # Shared environment arrays (same for all B episodes — take first).
-    wall_mask = substrate_arrays["topology"][sample_position]
-    obs_map = substrate_arrays["observations"][sample_position]
-    valid_mask = substrate_arrays["mask_valid"][sample_position]
+    wall_mask = topology_all[sample_position]
+    obs_map = np.load(split_dir / "observations.npy", mmap_mode="r")[sample_position]
+    valid_mask = np.load(split_dir / "mask_valid.npy", mmap_mode="r")[sample_position]
 
     # Per-episode trajectory: take the first episode for the overview.
     rows = batch["trajectory_row"][0].detach().cpu().numpy()  # (T,)
@@ -200,12 +163,9 @@ class ArenaReplayProvider:
         """
         data_root = self._dataset_path
 
-        # Lazy-load shared substrate arrays once.
+        # Lazy-load arena manifest once.
         if self._substrate_arrays is None:
-            parent_root = _resolve_parent_substrate_root(data_root)
-            self._substrate_arrays = _load_shared_substrate(
-                parent_root, self._split
-            )
+            self._substrate_arrays = {}
             arena_manifest = read_manifest(data_root)
             self._n_observations = arena_manifest.get(
                 "observation_vocab_size", 1
@@ -235,9 +195,10 @@ class ArenaReplayProvider:
             ids_in_batch = [e.id for e in entries[start : start + n_episodes]]
 
             # Build task evidence arrays for the first episode in this batch.
+            # Load spatial arrays directly from the arena split directory.
             task_arrays = _build_task_evidence_arrays(
                 batch,
-                self._substrate_arrays,
+                data_root / self._split,
                 sample_position=start,
                 n_observations=self._n_observations,
             )

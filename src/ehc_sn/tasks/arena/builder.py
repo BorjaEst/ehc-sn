@@ -1,8 +1,9 @@
-"""Arena task corpus materialization — v1 (topology-free, frozen).
+"""Arena task corpus materialization — v1 (spatial arrays embedded).
 
-Arena replay v1 is topology-free inside the Arena task corpus.  The parent
-dungeongen substrate is the sole owner of spatial geometry.  One stored Arena
-sample equals one episode.  Training uses a fixed offline corpus only.
+Arena replay v1 embeds spatial geometry (topology, observations, mask_valid)
+directly in the task corpus alongside trajectory channels.  These arrays are
+reconstructed from layout data at build time and stored per-episode so that
+evaluation providers and trace builders never need external parent resolution.
 
 Task corpus channels (exact frozen order):
 
@@ -15,9 +16,12 @@ Task corpus channels (exact frozen order):
 - ``trajectory_episode_start``    — (N, T_max) bool,  True only at step 0
 - ``trajectory_valid_step``       — (N, T_max) bool,  = (t < trajectory_length)
 - ``trajectory_length``           — (N,)       int32
+- ``topology``                    — (N, H, W) bool,   wall mask
+- ``observations``                — (N, H, W) int32,  observation id per cell
+- ``mask_valid``                  — (N, H, W) bool,   valid cell mask
 
 Provenance lives in root metadata and per-sample index task_metadata.
-ARENA_SPATIAL_CHANNELS is empty.
+ARENA_SPATIAL_CHANNELS is non-empty (topology, observations, mask_valid).
 
 Path written: ``data/processed/arena/<corpus>/v<version>/``
 
@@ -37,6 +41,7 @@ from typing import Final, Literal, TypeAlias
 import numpy as np
 
 from ehc_sn.data.index import read_index
+from ehc_sn.data.layout import SpatialLayout, validate_spatial_layout
 from ehc_sn.data.lifecycle import (
     extract_version,
     staging_root,
@@ -45,21 +50,12 @@ from ehc_sn.data.lifecycle import (
     write_split,
 )
 from ehc_sn.data.manifest import write_manifest
-from ehc_sn.data.substrate.dungeongen import (
-    SHARED_CHANNELS as DUNGEON_SUBSTRATE_CHANNELS,
-)
-from ehc_sn.data.substrate.dungeongen import (
-    SHARED_FAMILY as DUNGEON_SHARED_FAMILY,
-)
-from ehc_sn.data.substrate.reader import (
-    iter_substrate_entries_and_samples,
-    load_substrate_manifest,
-)
 from ehc_sn.tasks._replay_build import (
     first_true_cell,
     random_valid_cell,
     random_walk,
     random_walk_no_backtrack,
+    random_walk_straight_bias,
 )
 
 # =============================================================================
@@ -71,7 +67,9 @@ TASK_SCHEMA_VERSION: Final[int] = 1
 TASK_PROTOCOL_VERSION: Final[int] = 1
 
 ArenaStartPolicy: TypeAlias = Literal["random_valid", "canonical_entrance"]
-ArenaWalkPolicy: TypeAlias = Literal["no_immediate_backtrack", "uniform"]
+ArenaWalkPolicy: TypeAlias = Literal[
+    "no_immediate_backtrack", "uniform", "legacy_angle_bias"
+]
 ArenaWalkFn: TypeAlias = Callable[
     ..., tuple[np.ndarray, np.ndarray, np.ndarray]
 ]
@@ -93,13 +91,19 @@ _START_POLICY_ID_BY_NAME: Final[dict[str, str]] = {
     "random_valid": START_POLICY_RANDOM_VALID_ID,
     "canonical_entrance": START_POLICY_CANONICAL_ENTRANCE_ID,
 }
+WALK_POLICY_LEGACY_ANGLE_BIAS_ID: Final[str] = (
+    "random_walk_legacy_angle_bias_v1"
+)
+
 _WALK_POLICY_ID_BY_NAME: Final[dict[str, str]] = {
     "no_immediate_backtrack": WALK_POLICY_NO_IMMEDIATE_BACKTRACK_ID,
     "uniform": WALK_POLICY_UNIFORM_ID,
+    "legacy_angle_bias": WALK_POLICY_LEGACY_ANGLE_BIAS_ID,
 }
 _WALK_FUNCTION_BY_NAME: Final[dict[str, ArenaWalkFn]] = {
     "no_immediate_backtrack": random_walk_no_backtrack,
     "uniform": random_walk,
+    "legacy_angle_bias": random_walk_straight_bias,
 }
 _ALLOWED_START_POLICY_IDS: Final[frozenset[str]] = frozenset(
     _START_POLICY_ID_BY_NAME.values()
@@ -108,10 +112,6 @@ _ALLOWED_WALK_POLICY_IDS: Final[frozenset[str]] = frozenset(
     _WALK_POLICY_ID_BY_NAME.values()
 )
 
-ACTION_COUNT: Final[int] = 5
-ACTION_ID_SPACE: Final[str] = "STAY=0,UP=1,RIGHT=2,DOWN=3,LEFT=4"
-
-_ACTION_STAY: Final[int] = 0
 _ACTION_DELTAS: Final[tuple[tuple[int, int], ...]] = (
     (0, 0),  # STAY
     (-1, 0),  # UP
@@ -134,6 +134,10 @@ CHANNEL_TRAJECTORY_EPISODE_START: Final[str] = "trajectory_episode_start"
 CHANNEL_TRAJECTORY_VALID_STEP: Final[str] = "trajectory_valid_step"
 CHANNEL_TRAJECTORY_LENGTH: Final[str] = "trajectory_length"
 
+CHANNEL_TOPOLOGY: Final[str] = "topology"
+CHANNEL_OBSERVATIONS: Final[str] = "observations"
+CHANNEL_MASK_VALID: Final[str] = "mask_valid"
+
 ARENA_TASK_CHANNELS: Final[list[str]] = [
     CHANNEL_TRAJECTORY_ROW,
     CHANNEL_TRAJECTORY_COL,
@@ -144,10 +148,17 @@ ARENA_TASK_CHANNELS: Final[list[str]] = [
     CHANNEL_TRAJECTORY_EPISODE_START,
     CHANNEL_TRAJECTORY_VALID_STEP,
     CHANNEL_TRAJECTORY_LENGTH,
+    CHANNEL_TOPOLOGY,
+    CHANNEL_OBSERVATIONS,
+    CHANNEL_MASK_VALID,
 ]
 
-ARENA_SPATIAL_CHANNELS: Final[list[str]] = []
-"""Arena replay v1 carries no spatial channels. Parent substrate owns all geometry."""
+ARENA_SPATIAL_CHANNELS: Final[list[str]] = [
+    CHANNEL_TOPOLOGY,
+    CHANNEL_OBSERVATIONS,
+    CHANNEL_MASK_VALID,
+]
+"""Arena spatial channels embedded in the task corpus for self-contained evaluation."""
 
 _ARENA_TRAJECTORY_DTYPES: Final[dict[str, np.dtype]] = {
     CHANNEL_TRAJECTORY_ROW: np.dtype(np.int32),
@@ -159,6 +170,9 @@ _ARENA_TRAJECTORY_DTYPES: Final[dict[str, np.dtype]] = {
     CHANNEL_TRAJECTORY_EPISODE_START: np.dtype(bool),
     CHANNEL_TRAJECTORY_VALID_STEP: np.dtype(bool),
     CHANNEL_TRAJECTORY_LENGTH: np.dtype(np.int32),
+    CHANNEL_TOPOLOGY: np.dtype(bool),
+    CHANNEL_OBSERVATIONS: np.dtype(np.int32),
+    CHANNEL_MASK_VALID: np.dtype(bool),
 }
 
 _SPLITS: Final[tuple[str, ...]] = ("train", "val", "test")
@@ -215,58 +229,78 @@ def derive_walk_seed(
 # =============================================================================
 
 
-def _build_episode(
-    parent_sample: dict[str, np.ndarray],
+def _build_episode_from_layout(
+    layout: SpatialLayout,
     max_steps: int,
     walk_seed: int,
     *,
     start_cell: tuple[int, int] | None = None,
     walk_fn=random_walk_no_backtrack,
+    target_shape: tuple[int, int] | None = None,
 ) -> dict[str, np.ndarray]:
-    """Build one Arena episode from a parent substrate sample.
+    """Build one Arena episode from an openfield :class:`SpatialLayout`.
+
+    Constructs a 2-D ``mask_valid`` from the layout's row/col mapping and
+    ``valid_state_mask``, then samples a walk using the same protocol as
+    dungeongen-based :func:`_build_episode`.
 
     Args:
-        parent_sample: Dict with at least ``mask_valid``, ``observations``,
-            and ``landmarks`` from the dungeongen substrate.
+        layout: Spatial layout record (validated).
         max_steps: Number of steps in the trajectory.
         walk_seed: Deterministic RNG seed for this episode.
+        target_shape: Optional ``(H, W)`` to pad spatial arrays to.
+            When ``None``, spatial arrays use the layout's native size.
 
     Returns:
         Dict of Arena channel arrays (no padding — caller stacks later).
-
-    Raises:
-        RuntimeError: When ``mask_valid`` has no passable cells.
     """
     rng = np.random.default_rng(np.uint64(walk_seed))
-    mask_valid: np.ndarray = parent_sample["mask_valid"]
-    observations: np.ndarray = parent_sample["observations"]
-    landmarks: np.ndarray = parent_sample["landmarks"]
+    N = layout["graph_state_count"]
+    row_col = layout["state_to_row_col"]
+    valid_mask = layout["valid_state_mask"]
+    obs_ids_src = layout["observation_id"]
+    as_ = layout["action_space"]
+    deltas = as_["action_deltas"]
+    stay_a = as_["stay_action"] if as_["stay_action"] is not None else -1
+
+    # Build a 2-D mask_valid for the walk function.
+    max_row = int(row_col[:, 0].max()) + 1
+    max_col = int(row_col[:, 1].max()) + 1
+    mask_valid_2d = np.zeros((max_row, max_col), dtype=bool)
+    for s in range(N):
+        if valid_mask[s]:
+            r, c = int(row_col[s, 0]), int(row_col[s, 1])
+            mask_valid_2d[r, c] = True
 
     if start_cell is None:
-        start_r, start_c = random_valid_cell(mask_valid, rng)
+        start_r, start_c = random_valid_cell(mask_valid_2d, rng)
     else:
         start_r, start_c = start_cell
 
     rows, cols, prev_actions = walk_fn(
-        mask_valid,
+        mask_valid_2d,
         (start_r, start_c),
         max_steps,
         rng=rng,
-        action_deltas=_ACTION_DELTAS,
-        stay_action=_ACTION_STAY,
+        action_deltas=tuple(deltas),
+        stay_action=stay_a,
     )
 
-    # Precompute model-visible ids from parent spatial maps.
-    obs_ids = np.array(
-        [observations[r, c] for r, c in zip(rows, cols)], dtype=np.int32
-    )
-    lm_ids = np.array(
-        [landmarks[r, c] for r, c in zip(rows, cols)], dtype=np.int32
-    )
-    # Normalize landmark sentinel: dungeongen uses 0 for "no landmark"; Arena v1 uses -1.
-    lm_ids[lm_ids == 0] = -1
+    # Map (row, col) → observation_id via layout's state index.
+    obs_ids = np.zeros(max_steps, dtype=np.int32)
+    lm_ids = np.full(
+        max_steps, -1, dtype=np.int32
+    )  # openfield has no landmarks
+    for t in range(max_steps):
+        r, c = int(rows[t]), int(cols[t])
+        # Find the state index for this (row, col).
+        match = np.where((row_col[:, 0] == r) & (row_col[:, 1] == c))[0]
+        if len(match) > 0:
+            obs_ids[t] = obs_ids_src[match[0]]
+        else:
+            obs_ids[t] = -1  # sentinel (should not happen for valid walks)
 
-    # Precompute revisit flags (True iff state at step t appeared earlier).
+    # Revisit flags.
     visited: set[tuple[int, int]] = set()
     is_revisit = np.zeros(max_steps, dtype=bool)
     for t in range(max_steps):
@@ -276,10 +310,29 @@ def _build_episode(
 
     episode_start = np.zeros(max_steps, dtype=bool)
     episode_start[0] = True
-    valid_step = np.ones(
-        max_steps, dtype=bool
-    )  # no padding; caller handles T_max
+    valid_step = np.ones(max_steps, dtype=bool)
     traj_length = np.int32(max_steps)
+
+    # Build grid-space spatial arrays from layout data.
+    # topology: (H, W) bool — passable cells = True.
+    # observations: (H, W) int32 — observation id per cell, -1 for walls.
+    # mask_valid: (H, W) bool — valid-state mask (same as mask_valid_2d).
+    if target_shape is not None:
+        th, tw = target_shape
+        topology = np.zeros((th, tw), dtype=bool)
+        observations = np.full((th, tw), -1, dtype=np.int32)
+        topology[:max_row, :max_col] = mask_valid_2d
+        observations[:max_row, :max_col] = -1
+        m_valid_pad = np.zeros((th, tw), dtype=bool)
+        m_valid_pad[:max_row, :max_col] = mask_valid_2d
+    else:
+        topology = np.zeros((max_row, max_col), dtype=bool)
+        observations = np.full((max_row, max_col), -1, dtype=np.int32)
+        m_valid_pad = mask_valid_2d
+    for s in range(N):
+        r, c = int(row_col[s, 0]), int(row_col[s, 1])
+        topology[r, c] = valid_mask[s]
+        observations[r, c] = obs_ids_src[s]
 
     return {
         CHANNEL_TRAJECTORY_ROW: rows,
@@ -291,157 +344,10 @@ def _build_episode(
         CHANNEL_TRAJECTORY_EPISODE_START: episode_start,
         CHANNEL_TRAJECTORY_VALID_STEP: valid_step,
         CHANNEL_TRAJECTORY_LENGTH: np.array(traj_length, dtype=np.int32),
+        CHANNEL_TOPOLOGY: topology,
+        CHANNEL_OBSERVATIONS: observations,
+        CHANNEL_MASK_VALID: m_valid_pad,
     }
-
-
-def _dungeongen_parent_seed(
-    parent_manifest: dict, *, split: str, parent_index: int
-) -> int:
-    """Return the raw dungeongen seed for one parent sample position."""
-    base_seed = parent_manifest.get("seed")
-    if not isinstance(base_seed, int):
-        raise ValueError(
-            "Arena task corpus requires integer 'seed' in the parent dungeongen manifest."
-        )
-    if split not in _DUNGEONGEN_SPLIT_SEED_OFFSET:
-        raise ValueError(
-            f"Unsupported split {split!r} for dungeongen seed derivation."
-        )
-    return base_seed + _DUNGEONGEN_SPLIT_SEED_OFFSET[split] + parent_index
-
-
-def _dungeongen_room_center(
-    dungeon: object, room_id: str
-) -> tuple[int, int] | None:
-    """Return the integer world-space center of the room attached to one exit."""
-    room = getattr(dungeon, "rooms", {}).get(room_id)
-    if room is None:
-        return None
-    x = int(getattr(room, "x", 0))
-    y = int(getattr(room, "y", 0))
-    width = int(getattr(room, "width", 1))
-    height = int(getattr(room, "height", 1))
-    return x + width // 2, y + height // 2
-
-
-def _dungeongen_is_entrance_exit(exit_obj: object) -> bool:
-    """Return ``True`` when one raw dungeongen exit should be treated as an entrance."""
-    exit_type = getattr(exit_obj, "exit_type", None)
-    type_name = getattr(exit_type, "name", str(exit_type))
-    return type_name == "ENTRANCE"
-
-
-def _dungeongen_map_exit_to_valid_cell(
-    exit_obj: object,
-    dungeon: object,
-    mask_valid: np.ndarray,
-    *,
-    origin_x: int,
-    origin_y: int,
-) -> tuple[int, int] | None:
-    """Map one raw dungeongen exit to a valid processed-grid cell."""
-    world_x = getattr(exit_obj, "x", None)
-    world_y = getattr(exit_obj, "y", None)
-    if world_x is None or world_y is None:
-        return None
-
-    room_center = _dungeongen_room_center(
-        dungeon, getattr(exit_obj, "room_id", "")
-    )
-    candidates: list[tuple[int, int, int, int]] = []
-    for cand_x, cand_y in (
-        (world_x, world_y),
-        (world_x - 1, world_y),
-        (world_x + 1, world_y),
-        (world_x, world_y - 1),
-        (world_x, world_y + 1),
-    ):
-        row = int(cand_y - origin_y)
-        col = int(cand_x - origin_x)
-        if (
-            row < 0
-            or row >= mask_valid.shape[0]
-            or col < 0
-            or col >= mask_valid.shape[1]
-        ):
-            continue
-        if mask_valid[row, col]:
-            candidates.append((row, col, int(cand_x), int(cand_y)))
-
-    if not candidates:
-        return None
-    if room_center is None:
-        row, col, _, _ = min(candidates)
-        return row, col
-
-    center_x, center_y = room_center
-    row, col, _, _ = min(
-        candidates,
-        key=lambda cell: (
-            abs(cell[2] - center_x) + abs(cell[3] - center_y),
-            (cell[0], cell[1]),
-        ),
-    )
-    return row, col
-
-
-def _dungeongen_canonical_entrance_cell(
-    dungeon: object, mask_valid: np.ndarray
-) -> tuple[int, int]:
-    """Return the canonical entrance cell for one processed dungeongen sample."""
-    min_x, min_y, *_ = getattr(dungeon, "bounds")
-    raw_exits = list(getattr(dungeon, "exits", {}).values())
-    priorities = (
-        lambda exit_obj: bool(getattr(exit_obj, "is_main", False)),
-        _dungeongen_is_entrance_exit,
-        lambda exit_obj: getattr(exit_obj, "room_id", "")
-        == getattr(dungeon, "spine_start_room", None),
-    )
-
-    for predicate in priorities:
-        mapped = [
-            _dungeongen_map_exit_to_valid_cell(
-                exit_obj,
-                dungeon,
-                mask_valid,
-                origin_x=int(min_x),
-                origin_y=int(min_y),
-            )
-            for exit_obj in raw_exits
-            if predicate(exit_obj)
-        ]
-        mapped = [cell for cell in mapped if cell is not None]
-        if mapped:
-            return min(mapped)
-
-    fallback = first_true_cell(mask_valid)
-    if fallback is None:
-        raise RuntimeError(
-            "Cannot derive a canonical entrance cell from an empty valid mask."
-        )
-    return fallback
-
-
-def _resolve_canonical_entrance_start_cell(
-    mask_valid: np.ndarray,
-    *,
-    split: str,
-    parent_index: int,
-    parent_manifest: dict,
-) -> tuple[int, int]:
-    """Resolve the canonical-entrance start cell for one Arena parent map."""
-    try:
-        from dungeongen.layout import DungeonGenerator
-    except Exception as exc:
-        raise RuntimeError(
-            "Arena canonical-entrance start generation requires dungeongen to be installed in the active environment."
-        ) from exc
-
-    dungeon_seed = _dungeongen_parent_seed(
-        parent_manifest, split=split, parent_index=parent_index
-    )
-    dungeon = DungeonGenerator().generate(seed=dungeon_seed)
-    return _dungeongen_canonical_entrance_cell(dungeon, mask_valid)
 
 
 def _resolve_start_policy_id(start_policy: str) -> str:
@@ -477,33 +383,22 @@ def _resolve_walk_function(walk_policy: str) -> ArenaWalkFn:
     return walk_fn
 
 
-def _resolve_start_cell(
-    *,
-    start_policy: str,
-    mask_valid: np.ndarray,
-    split: str,
-    parent_index: int,
-    parent_manifest: dict,
-) -> tuple[int, int] | None:
-    """Resolve one parent-level start cell, or ``None`` for per-episode sampling."""
-    if start_policy == "random_valid":
-        return None
-    if start_policy == "canonical_entrance":
-        return _resolve_canonical_entrance_start_cell(
-            mask_valid,
-            split=split,
-            parent_index=parent_index,
-            parent_manifest=parent_manifest,
-        )
-    raise ValueError(
-        f"Unsupported Arena start_policy {start_policy!r}. "
-        f"Expected one of {sorted(_START_POLICY_ID_BY_NAME)}."
-    )
-
-
 # =============================================================================
 # Validation
 # =============================================================================
+
+# STAY action id (used by the per-sample validator below).
+_ACTION_STAY: int = 0
+
+
+def _find_repo_root(start: Path) -> Path:
+    """Walk up from ``start`` to find the repo root (contains pyproject.toml)."""
+    current = start.resolve()
+    for _ in range(20):
+        if (current / "pyproject.toml").exists():
+            return current
+        current = current.parent
+    return Path.cwd()
 
 
 def validate_arena_task_sample(data: dict[str, np.ndarray]) -> None:
@@ -602,18 +497,14 @@ def validate_arena_task_root(
         raise ValueError(
             f"Root task is {manifest.get('task')!r}, expected {TASK_FAMILY!r}."
         )
-    if ARENA_SPATIAL_CHANNELS:
-        raise ValueError("ARENA_SPATIAL_CHANNELS must be empty for Arena v1.")
+    # Remove the guard that rejected spatial channels (they are now populated).
 
     # Validate required manifest constants.
+    # action_count and parent_family are layout-dependent, not global constants.
     _required_manifest_constants = {
         "task_schema_version": TASK_SCHEMA_VERSION,
         "task_protocol_version": TASK_PROTOCOL_VERSION,
-        "parent_family": DUNGEON_SHARED_FAMILY,
-        "action_count": ACTION_COUNT,
-        "action_id_space": ACTION_ID_SPACE,
         "store_row_col": True,
-        "store_landmark_id": True,
     }
     for field, expected in _required_manifest_constants.items():
         actual = manifest.get(field)
@@ -621,6 +512,24 @@ def validate_arena_task_root(
             raise ValueError(
                 f"Manifest field {field!r}: expected {expected!r}, got {actual!r}."
             )
+    # store_landmark_id must be present (layout-dependent).
+    sli = manifest.get("store_landmark_id")
+    if not isinstance(sli, bool):
+        raise ValueError(
+            f"Manifest 'store_landmark_id' must be a bool, got {sli!r}."
+        )
+    # action_count must be present and positive (value is layout-dependent).
+    act_count = manifest.get("action_count")
+    if not isinstance(act_count, int) or act_count < 1:
+        raise ValueError(
+            f"Manifest 'action_count' must be a positive int, got {act_count!r}."
+        )
+    # parent_family must be present (value is layout-dependent).
+    parent_family = manifest.get("parent_family")
+    if not isinstance(parent_family, str) or not parent_family:
+        raise ValueError(
+            f"Manifest 'parent_family' must be a non-empty string, got {parent_family!r}."
+        )
     start_policy_id = manifest.get("start_policy_id")
     if start_policy_id not in _ALLOWED_START_POLICY_IDS:
         raise ValueError(
@@ -643,6 +552,13 @@ def validate_arena_task_root(
             f"Manifest 'observation_vocab_size' must be a positive int, got {obs_vocab!r}."
         )
 
+    # Spatial channels are (N, H, W); all others are (N, T) or (N,) for length.
+    _SPATIAL_CHANNELS = {
+        CHANNEL_TOPOLOGY,
+        CHANNEL_OBSERVATIONS,
+        CHANNEL_MASK_VALID,
+    }
+
     # Validate per-split channel arrays.
     for split, n in manifest["n_samples"].items():
         split_dir = root / split
@@ -660,7 +576,10 @@ def validate_arena_task_root(
                     f"Channel '{ch}' in split '{split}' has dtype {arrays[ch].dtype}, "
                     f"expected {expected_dtype}."
                 )
-            expected_ndim = 1 if ch == CHANNEL_TRAJECTORY_LENGTH else 2
+            if ch in _SPATIAL_CHANNELS:
+                expected_ndim = 3
+            else:
+                expected_ndim = 1 if ch == CHANNEL_TRAJECTORY_LENGTH else 2
             if arrays[ch].ndim != expected_ndim:
                 raise ValueError(
                     f"Channel '{ch}' in split '{split}' has rank {arrays[ch].ndim}, "
@@ -691,10 +610,10 @@ def validate_arena_task_root(
     )
 
     if not parent_index_path.exists():
-        raise FileNotFoundError(
-            f"Parent substrate index not found at {parent_index_path}. "
-            "Build the parent substrate first or check 'parent_substrate' in the manifest."
-        )
+        # Layout sources without a parent shared substrate (e.g. openfield)
+        # do not have a parent index to validate against.  parent_substrate
+        # is provenance metadata only — skip lineage checks.
+        return manifest
 
     parent_all_entries = read_index(parent_index_path)
     # Build a split-keyed lookup so validation is split-matched (a train Arena
@@ -738,194 +657,132 @@ def validate_arena_task_root(
     return manifest
 
 
-def _find_repo_root(start: Path) -> Path:
-    """Walk up from ``start`` to find the repo root (contains pyproject.toml)."""
-    current = start.resolve()
-    for _ in range(20):
-        if (current / "pyproject.toml").exists():
-            return current
-        current = current.parent
-    # Fallback: return cwd.
-    return Path.cwd()
-
-
 # =============================================================================
-# Builder
+# Unified arena builder (consumes any list[SpatialLayout])
 # =============================================================================
 
 
 def build_arena_task_corpus(
     version_root: Path,
     *,
-    parent_substrate: Path,
+    layouts: list[SpatialLayout],
     corpus: str = "default",
-    start_policy: ArenaStartPolicy = DEFAULT_START_POLICY,
-    walk_policy: ArenaWalkPolicy = DEFAULT_WALK_POLICY,
-    train_parent_maps: int = 200,
-    val_parent_maps: int = 40,
-    test_parent_maps: int = 40,
-    train_episodes_per_parent: int = 10,
-    val_episodes_per_parent: int = 4,
-    test_episodes_per_parent: int = 1,
+    walk_policy: ArenaWalkPolicy = "legacy_angle_bias",
+    n_episodes_per_layout: int = 10,
     max_steps: int = 250,
     seed: int = 42,
 ) -> None:
-    """Build the Arena task corpus at *version_root* (topology-free, frozen v1).
+    """Build an Arena task corpus from :class:`SpatialLayout` records.
 
-    Layout: map-major.  For each selected parent map, ``K`` episodes are
-    generated in sequence, so sample index ``i * K + k`` is episode ``k`` of
-    parent map ``i``.  Total samples per split = ``parent_maps * episodes_per_parent``.
+    Three-seed hierarchy: each layout (topology + sensory assignment) produces
+    ``n_episodes_per_layout`` walk episodes, each with a different ``walk_seed``.
 
-    Parent-map selection is deterministic: the first ``parent_maps`` entries
-    in canonical parent index order for each split.
+    This is the single unified entry point for any layout source.  Source-
+    specific builders (dungeongen, openfield) should produce
+    ``list[SpatialLayout]`` and then call this function.
 
     Args:
-        version_root: Destination versioned root (e.g. ``data/processed/arena/default/v1``).
-        parent_substrate: Path to the parent dungeongen shared substrate root.
-        corpus: Corpus label (e.g. ``"default"``).
-        start_policy: Parent-map reset policy name.
-        walk_policy: Trajectory walk policy name.
-        train_parent_maps: Number of parent maps to use for training.
-        val_parent_maps: Number of parent maps to use for validation.
-        test_parent_maps: Number of parent maps to use for testing.
-        train_episodes_per_parent: Episodes per parent map in the training split.
-        val_episodes_per_parent: Episodes per parent map in the validation split.
-        test_episodes_per_parent: Episodes per parent map in the test split.
-        max_steps: Trajectory length (same for all splits).
-        seed: Base RNG seed used in walk-seed derivation.
+        version_root: Destination versioned root.
+        layouts: Validated spatial layout records.
+        corpus: Corpus label (e.g. ``"dungeons"``, ``"openfield-square"``).
+        walk_policy: Walk policy name (default ``\"legacy_angle_bias\"``).
+        n_episodes_per_layout: Walk episodes per layout instance.
+        max_steps: Trajectory length.
+        seed: Base RNG seed for walk-seed derivation.
 
     Raises:
         FileExistsError: When *version_root* already exists.
-        ValueError: When the parent is not a dungeongen shared substrate, or
-            the parent split has fewer entries than requested.
     """
-    start_policy_id = _resolve_start_policy_id(start_policy)
     walk_policy_id = _resolve_walk_policy_id(walk_policy)
     walk_fn = _resolve_walk_function(walk_policy)
 
     version = extract_version(version_root)
-    parent_manifest = load_substrate_manifest(parent_substrate)
+    for layout in layouts:
+        validate_spatial_layout(layout)
 
-    if parent_manifest.get("family") != DUNGEON_SHARED_FAMILY:
-        raise ValueError(
-            f"Arena task corpus requires a {DUNGEON_SHARED_FAMILY!r} shared substrate, "
-            f"got family={parent_manifest.get('family')!r}."
-        )
+    action_count = layouts[0]["action_space"]["action_count"]
+    action_id_space_str = ",".join(
+        f"{n}={i}"
+        for i, n in enumerate(layouts[0]["action_space"]["action_names"])
+    )
+    sensory_vocab_size = layouts[0]["sensory_vocab_size"]
+    topology_type = layouts[0]["topology_type"]
+    layout_family = layouts[0]["layout_family"]
 
-    split_parent_maps = {
-        "train": train_parent_maps,
-        "val": val_parent_maps,
-        "test": test_parent_maps,
-    }
-    split_episodes_per_parent = {
-        "train": train_episodes_per_parent,
-        "val": val_episodes_per_parent,
-        "test": test_episodes_per_parent,
-    }
-    parent_n = parent_manifest.get("n_samples", {})
-    for split in _SPLITS:
-        avail = parent_n.get(split, 0)
-        requested = split_parent_maps[split]
-        if requested > avail:
-            raise ValueError(
-                f"Requested {requested} parent maps for split {split!r} but parent "
-                f"substrate only has {avail} entries. Reduce --{split}-parent-maps."
-            )
+    # Group layouts by split (default to "train" when absent).
+    layout_splits: dict[str, list[tuple[int, SpatialLayout]]] = {}
+    for li, layout in enumerate(layouts):
+        split = layout.get("split", "train")
+        layout_splits.setdefault(split, []).append((li, layout))
 
+    total_episodes = len(layouts) * n_episodes_per_layout
     split_counts = {
-        split: split_parent_maps[split] * split_episodes_per_parent[split]
-        for split in _SPLITS
+        split: len(group) * n_episodes_per_layout
+        for split, group in layout_splits.items()
     }
-
-    # Derive observation_vocab_size from parent manifest; compute from data if absent.
-    if "n_observations" in parent_manifest:
-        observation_vocab_size = int(parent_manifest["n_observations"])
-    else:
-        observation_vocab_size = _compute_observation_vocab_size(
-            parent_substrate
-        )
-
-    canonical_parent = f"data/processed/{parent_manifest['family']}/v{parent_manifest['version']}"
 
     stage_params = {
         "corpus": corpus,
         "max_steps": max_steps,
         "seed": seed,
-        "start_policy": start_policy,
         "walk_policy": walk_policy,
-        "test_episodes_per_parent": test_episodes_per_parent,
-        "test_parent_maps": test_parent_maps,
-        "train_episodes_per_parent": train_episodes_per_parent,
-        "train_parent_maps": train_parent_maps,
-        "val_episodes_per_parent": val_episodes_per_parent,
-        "val_parent_maps": val_parent_maps,
-        "parent_version": parent_manifest["version"],
-        "start_policy_id": start_policy_id,
+        "n_episodes_per_layout": n_episodes_per_layout,
+        "n_layouts": len(layouts),
         "walk_policy_id": walk_policy_id,
     }
 
-    # We need parent topology_kind/n_states/extent for dataset.json provenance.
-    parent_topology_kind: str = parent_manifest["topology_kind"]
-    parent_n_states: int = parent_manifest["n_states"]
-    parent_extent: list[int] = parent_manifest["extent"]
-
-    # Channels to load from parent substrate per sample.
-    _PARENT_CHANNELS = ["mask_valid", "observations", "landmarks"]
-
     with staging_root(version_root) as tmp:
-        all_entries = []
+        # Compute the maximum grid extent across all layouts for padding
+        # spatial arrays to a uniform shape.
+        max_grid_h = 0
+        max_grid_w = 0
+        for layout in layouts:
+            rc = layout["state_to_row_col"]
+            h = int(rc[:, 0].max()) + 1
+            w = int(rc[:, 1].max()) + 1
+            max_grid_h = max(max_grid_h, h)
+            max_grid_w = max(max_grid_w, w)
+        target_shape = (max_grid_h, max_grid_w)
 
-        for split in _SPLITS:
-            n_parent = split_parent_maps[split]
-            k_ep = split_episodes_per_parent[split]
+        all_entries: list = []
 
+        for split in sorted(layout_splits):
             samples: list[dict[str, np.ndarray]] = []
             per_sample_ids: list[str] = []
             per_sample_extra: list[dict] = []
+            split_layouts = layout_splits[split]
 
-            parent_iter = iter_substrate_entries_and_samples(
-                parent_substrate, split, _PARENT_CHANNELS
-            )
-
-            for parent_idx, (parent_entry, parent_sample) in enumerate(
-                parent_iter
-            ):
-                if parent_idx >= n_parent:
-                    break
-
-                start_cell = _resolve_start_cell(
-                    start_policy=start_policy,
-                    mask_valid=parent_sample["mask_valid"],
-                    split=split,
-                    parent_index=parent_idx,
-                    parent_manifest=parent_manifest,
-                )
-
-                for ep_idx in range(k_ep):
+            for li, layout in split_layouts:
+                start_cell = None  # random uniformly from valid states
+                for ep_idx in range(n_episodes_per_layout):
                     walk_seed = derive_walk_seed(
                         seed=seed,
                         split=split,
-                        parent_sample_id=parent_entry.id,
+                        parent_sample_id=layout["layout_id"],
                         episode_index=ep_idx,
-                        start_policy_id=start_policy_id,
+                        start_policy_id=START_POLICY_RANDOM_VALID_ID,
                         walk_policy_id=walk_policy_id,
                         max_steps=max_steps,
                     )
-                    episode = _build_episode(
-                        parent_sample,
+                    episode = _build_episode_from_layout(
+                        layout,
                         max_steps,
                         walk_seed,
                         start_cell=start_cell,
                         walk_fn=walk_fn,
+                        target_shape=target_shape,
                     )
                     samples.append(episode)
                     per_sample_ids.append(
-                        f"arena-{split}-{parent_entry.id}-ep{ep_idx:04d}"
+                        f"arena-{corpus}-{li:04d}-ep{ep_idx:04d}"
                     )
                     per_sample_extra.append(
                         {
                             "task_metadata": {
-                                "parent_sample_id": parent_entry.id,
+                                "layout_instance_id": layout["layout_id"],
+                                "topology_type": topology_type,
+                                "topology_seed": layout["topology_seed"],
+                                "sensory_seed": layout["sensory_seed"],
                                 "episode_index": ep_idx,
                                 "walk_seed": walk_seed,
                             }
@@ -938,9 +795,9 @@ def build_arena_task_corpus(
                 samples,
                 source=TASK_FAMILY,
                 channels=ARENA_TASK_CHANNELS,
-                topology_kind=parent_topology_kind,
-                n_states=parent_n_states,
-                extent=parent_extent,
+                topology_kind=topology_type,
+                n_states=layouts[0]["graph_state_count"],
+                extent=[max_grid_h],
                 index_kwargs={},
                 per_sample_ids=per_sample_ids,
                 per_sample_extra=per_sample_extra,
@@ -956,45 +813,33 @@ def build_arena_task_corpus(
             family=TASK_FAMILY,
             version=version,
             channels=ARENA_TASK_CHANNELS,
-            topology_kind=parent_topology_kind,
-            n_states=parent_n_states,
-            extent=parent_extent,
+            topology_kind=topology_type,
+            n_states=layouts[0]["graph_state_count"],
+            extent=[int(layouts[0]["state_to_row_col"][:, 0].max()) + 1],
             n_samples=split_counts,
-            source_id=DUNGEON_SHARED_FAMILY,
+            source_id=layout_family,
             builder="ehc_sn.tasks.arena.build_arena_task_corpus",
             seed=seed,
             stage_params=stage_params,
-            parent_family=parent_manifest["family"],
-            parent_version=parent_manifest["version"],
+            parent_family=layout_family,
+            parent_version="1",
             task_schema_version=TASK_SCHEMA_VERSION,
             task_protocol_version=TASK_PROTOCOL_VERSION,
             task=TASK_FAMILY,
             corpus=corpus,
-            parent_substrate=canonical_parent,
-            start_policy_id=start_policy_id,
+            parent_substrate=f"data/processed/{layout_family}/v1",
+            start_policy_id=START_POLICY_RANDOM_VALID_ID,
             walk_policy_id=walk_policy_id,
-            action_count=ACTION_COUNT,
-            action_id_space=ACTION_ID_SPACE,
+            action_count=action_count,
+            action_id_space=action_id_space_str,
             store_row_col=True,
-            store_landmark_id=True,
-            observation_vocab_size=observation_vocab_size,
+            store_landmark_id=False,
+            observation_vocab_size=sensory_vocab_size,
         )
 
     n_total = sum(split_counts.values())
-    print(f"Arena task corpus written to {version_root}  ({n_total} samples).")
-
-
-def _compute_observation_vocab_size(substrate_root: Path) -> int:
-    """Compute observation vocabulary size by scanning all splits."""
-    max_id = -1
-    for split in _SPLITS:
-        obs_file = substrate_root / split / "observations.npy"
-        if obs_file.exists():
-            arr = np.load(obs_file, mmap_mode="r")
-            split_max = int(arr.max())
-            max_id = max(max_id, split_max)
-    if max_id < 0:
-        raise RuntimeError(
-            "Could not compute observation_vocab_size: no observations.npy found."
-        )
-    return max_id + 1
+    print(
+        f"Arena corpus written to {version_root}  "
+        f"({n_total} samples, {len(layouts)} layouts, "
+        f"{n_episodes_per_layout} episodes/layout)."
+    )

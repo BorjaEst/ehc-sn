@@ -14,17 +14,115 @@ from typing import Mapping
 import torch
 from torch import Tensor
 
+from ehc_sn.metrics.spec import MetricSpec
 from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
 from ehc_sn.objectives.rollout import EvaluatedChunk
 
 from .contracts import ArenaTargets, ArenaTaskInput
 
-ARENA_PRIMARY_METRIC_NAME: str = "accuracy_ancestral_revisit"
-"""Canonical primary benchmark metric for Arena: ancestral-pathway revisit accuracy.
+ARENA_PRIMARY_METRIC_NAME: str = "accuracy_revisit"
+"""Canonical primary benchmark metric for Arena: per-step observation accuracy
+restricted to revisit steps (a field on :class:`ArenaScoreReport`).
 
-This tests prediction from structural state alone on the steps most relevant
-to memory.
+This is the model-agnostic task-level primary metric — any Arena model family
+can produce it.  Family-specific pathway metrics (e.g.
+``accuracy_ancestral_revisit`` for TEM/EHC models) are supplementary
+diagnostics emitted at the adapter or Lightning layer and are not the
+canonical task-level primary.
 """
+
+ARENA_METRIC_SPECS: list[MetricSpec] = [
+    # Task-level (model-agnostic) metrics — benchmark-eligible.
+    MetricSpec(
+        name="accuracy_revisit",
+        label="Revisit accuracy",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=True,
+        description="Mean per-step observation accuracy restricted to "
+        "revisit steps (task-level, model-agnostic).",
+    ),
+    MetricSpec(
+        name="accuracy_all",
+        label="All-step accuracy",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=True,
+        description="Mean per-step observation accuracy across all steps.",
+    ),
+    MetricSpec(
+        name="correct_all",
+        label="Correct predictions (all steps)",
+        higher_is_better=True,
+        unit="count",
+        scope="task",
+        benchmark_eligible=False,
+        description="Raw correct-prediction count across all steps.",
+    ),
+    MetricSpec(
+        name="count_all",
+        label="Total steps",
+        higher_is_better=False,
+        unit="count",
+        scope="task",
+        benchmark_eligible=False,
+        description="Raw total-step count across all steps.",
+    ),
+    MetricSpec(
+        name="correct_revisit",
+        label="Correct predictions (revisit steps)",
+        higher_is_better=True,
+        unit="count",
+        scope="task",
+        benchmark_eligible=False,
+        description="Raw correct-prediction count on revisit steps only.",
+    ),
+    MetricSpec(
+        name="count_revisit",
+        label="Revisit step count",
+        higher_is_better=False,
+        unit="count",
+        scope="task",
+        benchmark_eligible=False,
+        description="Raw revisit-step count.",
+    ),
+    # Diagnostic (pathway-specific) metrics — not benchmark-eligible by default.
+    MetricSpec(
+        name="accuracy_ancestral_revisit",
+        label="Ancestral revisit accuracy",
+        higher_is_better=True,
+        unit="proportion",
+        scope="diagnostic",
+        benchmark_eligible=False,
+        description="Pathway-specific diagnostic: revisit accuracy "
+        "when attributing to the ancestral pathway. TEM/EHC family.",
+    ),
+    MetricSpec(
+        name="accuracy_retrieved_revisit",
+        label="Retrieved revisit accuracy",
+        higher_is_better=True,
+        unit="proportion",
+        scope="diagnostic",
+        benchmark_eligible=False,
+        description="Pathway-specific diagnostic: revisit accuracy "
+        "when attributing to the retrieved pathway. TEM/EHC family.",
+    ),
+    MetricSpec(
+        name="accuracy_ancestral_all",
+        label="Ancestral all-step accuracy",
+        higher_is_better=True,
+        unit="proportion",
+        scope="diagnostic",
+        benchmark_eligible=False,
+        description="Pathway-specific diagnostic: all-step accuracy "
+        "when attributing to the ancestral pathway. TEM/EHC family.",
+    ),
+]
+
+
+
 
 
 # =============================================================================

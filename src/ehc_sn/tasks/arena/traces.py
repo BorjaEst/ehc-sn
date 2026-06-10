@@ -7,7 +7,8 @@ This module owns:
 - :func:`build_arena_trace_supplements` — constructs supplements from source context.
 - :func:`apply_arena_trace_supplements` — attaches supplement data to a :class:`TraceTree`.
 
-The supplement builder owns reconstruction from the Arena corpus and parent substrate.
+The supplement builder reconstructs spatial geometry and trajectory data from
+the arena corpus (self-contained — no parent substrate resolution).
 The primary concept is *trace supplements* — not figure join, not callback patches.
 
 Canonical trace keys produced:
@@ -109,8 +110,12 @@ def build_arena_trace_supplements(
 ) -> ArenaTraceSupplements:
     """Build Arena world/context supplements from a typed source context.
 
-    Reconstructs geometry and trajectory data from the Arena corpus and parent
-    substrate. This is the producer-side owner of all Arena enrichment logic.
+    Reconstructs geometry and trajectory data from the arena corpus.
+    Spatial arrays are loaded directly from the arena split directory
+    (self-contained task corpus — no parent substrate resolution).
+
+    The ``repo_root`` parameter is accepted for backward compatibility
+    but is unused (deprecated).
 
     Args:
         source_context: Typed Arena evaluation source context.
@@ -122,7 +127,7 @@ def build_arena_trace_supplements(
         :class:`ArenaTraceSupplements` with world dicts and dense arrays.
 
     Raises:
-        FileNotFoundError: When the Arena root or parent substrate is absent.
+        FileNotFoundError: When the arena root or required spatial array is absent.
         ValueError: When sample ids are not found in the index.
     """
     dataset_path = source_context.dataset_path
@@ -131,15 +136,12 @@ def build_arena_trace_supplements(
     # ── 1. Load Arena manifest ────────────────────────────────────────────────
     arena_manifest = read_manifest(dataset_path)
     observation_vocab_size: int = arena_manifest["observation_vocab_size"]
-    parent_substrate_rel: str = arena_manifest["parent_substrate"]
 
-    # ── 2. Resolve parent substrate root ─────────────────────────────────────
-    resolved_repo_root = (
-        repo_root if repo_root is not None else _find_repo_root(dataset_path)
-    )
-    parent_root = resolved_repo_root / parent_substrate_rel
+    # parent_substrate is provenance metadata only — spatial arrays are loaded
+    # directly from the arena corpus (self-contained task corpus).
+    _ = arena_manifest.get("parent_substrate")  # unused, kept for provenance.
 
-    # ── 3. Load Arena index → sample order and parent_sample_id mapping ───────
+    # ── 2. Load Arena index → sample order ────────────────────────────────────
     arena_all = read_index(dataset_path / "index.jsonl")
     arena_by_id = {e.id: e for e in arena_all}
 
@@ -155,31 +157,16 @@ def build_arena_trace_supplements(
     split_entries = [e for e in arena_all if e.split == split]
     arena_split_pos = {e.id: i for i, e in enumerate(split_entries)}
     arena_positions = [arena_split_pos[sid] for sid in sample_ids]
-    parent_sample_ids = [e.task_metadata["parent_sample_id"] for e in ordered_entries]  # type: ignore[index]
 
-    # ── 4. Load parent substrate index → split position mapping ──────────────
-    parent_all = read_index(parent_root / "index.jsonl")
-    parent_split_entries = [e for e in parent_all if e.split == split]
-    parent_split_pos = {e.id: i for i, e in enumerate(parent_split_entries)}
-
-    missing_parent = [
-        pid for pid in parent_sample_ids if pid not in parent_split_pos
-    ]
-    if missing_parent:
-        raise ValueError(
-            "build_arena_trace_supplements: parent sample ids not found in "
-            f"parent index (split={split!r}): {missing_parent}"
-        )
-    parent_positions = [parent_split_pos[pid] for pid in parent_sample_ids]
-
-    # ── 5. Load parent channels (mmap, sliced per sample) ────────────────────
-    parent_split_dir = parent_root / split
-    topology_all = np.load(parent_split_dir / "topology.npy", mmap_mode="r")
-    mask_valid_all = np.load(parent_split_dir / "mask_valid.npy", mmap_mode="r")
+    # ── 3. Load spatial arrays from arena split dir (self-contained) ─────────
+    arena_split_dir = dataset_path / split
+    topology_all = np.load(arena_split_dir / "topology.npy", mmap_mode="r")
+    mask_valid_all = np.load(
+        arena_split_dir / "mask_valid.npy", mmap_mode="r"
+    )
     _h, _w = topology_all.shape[1], topology_all.shape[2]
 
-    # ── 6. Load Arena trajectory arrays (mmap, sliced per sample) ────────────
-    arena_split_dir = dataset_path / split
+    # ── 4. Load Arena trajectory arrays (mmap, sliced per sample) ────────────
     traj_row_all = np.load(
         arena_split_dir / "trajectory_row.npy", mmap_mode="r"
     )
@@ -195,13 +182,13 @@ def build_arena_trace_supplements(
     T = min(trace_length, t_max)
     V = observation_vocab_size
 
-    # ── 7. Build per-episode World dicts and dense arrays ────────────────────
+    # ── 5. Build per-episode World dicts and dense arrays ────────────────────
     worlds: list[dict[str, Any]] = []
     location_ids_buf = np.empty((B, T), dtype=np.int32)
     observation_onehot_buf = np.zeros((B, T, V), dtype=np.float32)
 
-    for b, (ap, pp) in enumerate(zip(arena_positions, parent_positions)):
-        mask_valid = np.asarray(mask_valid_all[pp], dtype=bool)  # (H, W)
+    for b, ap in enumerate(arena_positions):
+        mask_valid = np.asarray(mask_valid_all[ap], dtype=bool)  # (H, W)
         worlds.append(_build_world(mask_valid, _h, _w))
 
         row_seq = np.asarray(traj_row_all[ap, :T], dtype=np.int32)
@@ -276,19 +263,6 @@ def _build_world(  # ----------------------------------------------------------
         "n_locations": h * w,
         "spatial_geometry": "grid2d",
     }
-
-
-# =============================================================================
-def _find_repo_root(  # -------------------------------------------------------
-    start: Path,
-) -> Path:
-    """Walk up from ``start`` to find the repo root (directory with pyproject.toml)."""
-    current = start.resolve()
-    for _ in range(20):
-        if (current / "pyproject.toml").exists():
-            return current
-        current = current.parent
-    return Path.cwd()
 
 
 # =============================================================================

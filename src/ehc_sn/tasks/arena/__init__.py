@@ -37,7 +37,6 @@ from .builder import (
 )
 from .capabilities.replay import ArenaReplayCapability
 from .contracts import (
-    ARENA_ACTION_COUNT,
     ArenaAction,
     ArenaTargets,
     ArenaTaskInput,
@@ -53,7 +52,6 @@ from .traces import (
 )
 
 __all__ = [
-    "ARENA_ACTION_COUNT",
     "ArenaAction",
     "ARENA_SPATIAL_CHANNELS",
     "ARENA_TASK_CHANNELS",
