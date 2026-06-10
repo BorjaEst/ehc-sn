@@ -352,9 +352,7 @@ def select_lec_content_filtering(
         sensory_key = f"{LEC_TRACE_KEY_SENSORY_CODE}/{f}"
         if trace.has(sensory_key):
             sensory_by_freq.append(
-                np.asarray(
-                    to_cpu(trace.get(sensory_key)[:, env_idx, :])
-                )
+                np.asarray(to_cpu(trace.get(sensory_key)[:, env_idx, :]))
             )
         else:
             sensory_by_freq.append(np.empty((0, 0), dtype=float))
@@ -368,9 +366,7 @@ def select_lec_content_filtering(
         filtered_key = f"{LEC_TRACE_KEY_FILTERED}/{f}"
         if trace.has(filtered_key):
             filtered_by_freq.append(
-                np.asarray(
-                    to_cpu(trace.get(filtered_key)[:, env_idx, :])
-                )
+                np.asarray(to_cpu(trace.get(filtered_key)[:, env_idx, :]))
             )
         else:
             filtered_by_freq.append(np.empty((0, 0), dtype=float))

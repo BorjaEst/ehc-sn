@@ -349,9 +349,9 @@ def register_builtin_figures() -> None:
             FigureSpec(
                 name="lec_content_filtering",
                 description=(
-                    "LEC / x content-state filtering per frequency band: "
-                    "content-state activity, filtered diagnostic state, "
-                    "and alpha_f/w_f gate parameters when available. "
+                    "LEC transformation cascade: sensory code → "
+                    "EMA-filtered state → final LEC cells "
+                    "(mean sub + ReLU + L2 norm + sigmoid(w_f) scaling). "
                     "Mechanism diagnostic for the sensory/content stream, "
                     "not a spatial-cell diagnostic."
                 ),
@@ -361,7 +361,11 @@ def register_builtin_figures() -> None:
                 allowed_surfaces={"report", "diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"lec", "ehc", "report"},
-                trace_keys={WORLD_TRACE_KEY_OBSERVATION, LEC_TRACE_KEY_CELLS},
+                trace_keys={
+                    WORLD_TRACE_KEY_OBSERVATION,
+                    LEC_TRACE_KEY_CELLS,
+                    LEC_TRACE_KEY_FILTERED,
+                },
                 meta_keys={LEC_META_KEY_ALPHA, LEC_META_KEY_WF},
             )
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import (
     Any,
     Callable,
@@ -99,6 +100,16 @@ class FigureContext:
     # Optional training context
     global_step: Optional[int] = None
     split_name: Optional[str] = None
+
+    # Eval-artifact root for probe-backed figures
+    artifact_path: Path | None = None
+    """Path to the evaluation artifact root directory.
+
+    Probe-backed figures (e.g. ``pfc_path_memory_probe``) use this to
+    resolve compact probe artifacts (``probes/*.npz``) relative to the
+    eval artifact directory.  Set by ``ReportFigureRenderer`` during
+    report builds; ``None`` in diagnostic/training surfaces.
+    """
 
 
 @dataclass(frozen=True)
