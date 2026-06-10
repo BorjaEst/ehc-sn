@@ -161,7 +161,7 @@ class ReportFigureRenderer:
                 case_results=case_results,
                 figure_names=[figure_name],
                 figure_dir=output_dir,
-                figure_ctx=FigureContext(),
+                figure_ctx=FigureContext(artifact_path=artifact.path),
                 max_cases=max_cases,
                 save_pdf=save_pdf,
                 save_png=save_png,

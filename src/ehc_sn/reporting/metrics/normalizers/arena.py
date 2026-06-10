@@ -3,10 +3,11 @@
 Converts the ``manifest["summary"]`` dict produced by Arena evaluation
 into :class:`MetricRecord` rows for report consumption.
 
-The normalizer preserves pre-computed values from the summary. If
-``accuracy_all`` and ``accuracy_revisit`` are already present they are
-used as-is; if only count fields exist a fallback recomputation would
-be needed — but that is a future concern.
+The normalizer preserves pre-computed values from the summary. Accuracy
+ratio fields use pathway-qualified names (``accuracy_inference_*``,
+``accuracy_retrieved_*``, ``accuracy_ancestral_*``) as emitted by the
+TEM adapter.  Count fields use model-agnostic names (``correct_all``,
+``count_all``, etc.) from the task-level ``ArenaScoreReport``.
 """
 
 from __future__ import annotations
@@ -23,10 +24,9 @@ from ehc_sn.reporting.schema import EvalArtifactReference, MetricRecord
 
 # ---------------------------------------------------------------------------
 # The ``aggregate_evaluation_case_metrics`` hook on TEM-style models emits
-# only ``accuracy_all`` and ``accuracy_revisit`` (not raw counts).  The count
-# fields below are marked ``required=False`` so the normalizer accepts the
-# reduced summary dict without raising.  A future hook that also emits raw
-# counts will produce richer metric records.
+# pathway-qualified ratio metrics. The model-agnostic count fields below
+# are marked ``required=False`` so the normalizer accepts the reduced
+# summary dict without raising.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -35,18 +35,46 @@ from ehc_sn.reporting.schema import EvalArtifactReference, MetricRecord
 
 _ARENA_METRICS: list[MetricSummaryField] = [
     MetricSummaryField(
-        source_key="accuracy_all",
-        metric="accuracy_all",
+        source_key="accuracy_inference_all",
+        metric="accuracy_inference_all",
         unit="ratio",
         higher_is_better=True,
-        required=True,
+        required=False,
     ),
     MetricSummaryField(
-        source_key="accuracy_revisit",
-        metric="accuracy_revisit",
+        source_key="accuracy_inference_revisit",
+        metric="accuracy_inference_revisit",
         unit="ratio",
         higher_is_better=True,
-        required=True,
+        required=False,
+    ),
+    MetricSummaryField(
+        source_key="accuracy_retrieved_all",
+        metric="accuracy_retrieved_all",
+        unit="ratio",
+        higher_is_better=True,
+        required=False,
+    ),
+    MetricSummaryField(
+        source_key="accuracy_retrieved_revisit",
+        metric="accuracy_retrieved_revisit",
+        unit="ratio",
+        higher_is_better=True,
+        required=False,
+    ),
+    MetricSummaryField(
+        source_key="accuracy_ancestral_all",
+        metric="accuracy_ancestral_all",
+        unit="ratio",
+        higher_is_better=True,
+        required=False,
+    ),
+    MetricSummaryField(
+        source_key="accuracy_ancestral_revisit",
+        metric="accuracy_ancestral_revisit",
+        unit="ratio",
+        higher_is_better=True,
+        required=False,
     ),
     MetricSummaryField(
         source_key="correct_all",

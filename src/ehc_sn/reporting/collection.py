@@ -65,7 +65,9 @@ class ReportCollection:
             self._md(f"**Question:** {self.question}")
             self._md("")
 
-    def display_evidence_plan(self, primary_metric: str = "To be specified") -> None:
+    def display_evidence_plan(
+        self, primary_metric: str = "To be specified"
+    ) -> None:
         """Print a table of subjects, benchmark, task, split, and primary metric.
 
         Parameters
@@ -106,7 +108,9 @@ class ReportCollection:
             rows.append(row)
         self._print_table(rows)
 
-    def display_primary_metrics(self, primary_metric: str | None = None) -> None:
+    def display_primary_metrics(
+        self, primary_metric: str | None = None
+    ) -> None:
         """Print a DataFrame of subjects × primary metric.
 
         Parameters
@@ -136,9 +140,7 @@ class ReportCollection:
         try:
             import pandas as pd
         except ImportError:
-            self._md(
-                "*pandas is not installed — cannot render metric table.*"
-            )
+            self._md("*pandas is not installed — cannot render metric table.*")
             return
 
         data = {}
@@ -151,7 +153,9 @@ class ReportCollection:
         df.columns = [primary_metric]
         self._display_dataframe(df)
 
-    def display_secondary_metrics(self, metric_names: list[str] | None = None) -> None:
+    def display_secondary_metrics(
+        self, metric_names: list[str] | None = None
+    ) -> None:
         """Print a DataFrame of subjects × secondary metrics.
 
         Parameters
@@ -170,9 +174,7 @@ class ReportCollection:
         try:
             import pandas as pd
         except ImportError:
-            self._md(
-                "*pandas is not installed — cannot render metric table.*"
-            )
+            self._md("*pandas is not installed — cannot render metric table.*")
             return
 
         # Group all metric names across all reports if no explicit list.
@@ -194,9 +196,98 @@ class ReportCollection:
         df = pd.DataFrame(records).set_index("Subject")
         self._display_dataframe(df)
 
-    def display_figures(self) -> None:
-        """Placeholder — real figure display is not yet implemented."""
-        self._md("> ⚠️ Not yet implemented.")
+    def display_figure_availability(self) -> None:
+        """Print a table of figure_ids × subjects with available/missing status.
+
+        Reads each report's :class:`~ehc_sn.reporting.schema.FigureIndex` via
+        :meth:`OpenReport.figures`.  A figure is ``available`` when
+        ``figure_entry(figure_id)`` returns a non-``None`` entry.
+        """
+        self._require_reports()
+        self._md("### Figure Availability")
+        self._md("")
+
+        # Collect all figure IDs across all reports.  Preserve insertion
+        # order (first report's figure order determines row sequence).
+        all_ids: list[str] = []
+        seen: set[str] = set()
+        for r in self.reports:
+            fig_index = r.figures()
+            if fig_index is None:
+                continue
+            for entry in fig_index.entries:
+                fid = entry.figure_id
+                if fid not in seen:
+                    seen.add(fid)
+                    all_ids.append(fid)
+
+        if not all_ids:
+            self._md("*No figure entries found in any report.*")
+            self._md("")
+            return
+
+        rows: list[dict[str, object]] = []
+        for fid in all_ids:
+            row: dict[str, object] = {"Figure": fid}
+            for r in self.reports:
+                entry = r.figure_entry(fid, preferred_format="png")
+                row[r.model_family] = "available" if entry else "missing"
+            rows.append(row)
+
+        self._print_table(rows)
+        self._md("")
+
+    def display_evidence_status(
+        self,
+        evidence_axes: list[dict[str, str]],
+    ) -> None:
+        """Print a table of evidence axes × subjects with per-axis status.
+
+        Each entry in *evidence_axes* is a dict with keys:
+
+        - ``"axis"`` (required): display label for the evidence row.
+        - ``"figure_id"`` (optional): figure ID to check availability against
+          each report's :class:`~ehc_sn.reporting.schema.FigureIndex`.  When
+          provided, the cell value is ``"available"`` or ``"missing"``.
+        - ``"status"`` (optional, per-report): a dict mapping model family
+          names to explicit status strings (e.g. ``{"HRM v1": "available",
+          "HRM v2": "warning"}``).  When both ``figure_id`` and
+          ``status`` are omitted, the cell shows ``"manual"``.
+
+        Parameters
+        ----------
+        evidence_axes:
+            List of evidence-axis descriptors.  See above for key semantics.
+        """
+        self._require_reports()
+        self._md("### Evidence Status")
+        self._md("")
+
+        if not evidence_axes:
+            self._md("*No evidence axes provided.*")
+            self._md("")
+            return
+
+        model_names = [r.model_family for r in self.reports]
+        rows: list[dict[str, object]] = []
+
+        for ax in evidence_axes:
+            row: dict[str, object] = {"Evidence axis": ax.get("axis", "—")}
+            figure_id = ax.get("figure_id")
+            explicit_status: dict[str, str] = ax.get("status", {})
+
+            for r in self.reports:
+                mf = r.model_family
+                if mf in explicit_status:
+                    row[mf] = explicit_status[mf]
+                elif figure_id:
+                    entry = r.figure_entry(figure_id, preferred_format="png")
+                    row[mf] = "available" if entry else "missing"
+                else:
+                    row[mf] = "manual"
+            rows.append(row)
+
+        self._print_table(rows)
         self._md("")
 
     def display_failure_cases(self) -> None:
@@ -257,9 +348,7 @@ class ReportCollection:
         print("| " + " | ".join("---" for _ in headers) + " |")
         for row in rows:
             print(
-                "| "
-                + " | ".join(str(row.get(h, "")) for h in headers)
-                + " |"
+                "| " + " | ".join(str(row.get(h, "")) for h in headers) + " |"
             )
         print("")
 
