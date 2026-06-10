@@ -4,13 +4,19 @@
 
 Task name: `seqmaze`
 
-Benchmark family:
+Benchmark family: sequence reasoning / transition-graph inference
 
-| Symbol   | Description                                            |
-| -------- | ------------------------------------------------------ |
-| $obs[t]$ | observation identifier at time t                       |
-| $x'[t]$  | full token information for at time t (decoded sensory) |
-| $x[t]$   | embedding for token node at time t (embedding sensory) |
+| Symbol   | Surface | Description                                                  |
+| -------- | ------- | ------------------------------------------------------------ |
+| $obs[t]$ | yes     | observation identifier at time t                             |
+| $x'[t]$  | yes     | observation token at time t (decoded, including metadata)    |
+| $x[t]$   | —       | embedding for token node at time t (model-internal encoding) |
+
+_Surface_ symbols appear in the task input/output contract.
+_Model-internal_ symbols (—) are emergent representations the model learns
+but are not part of the task-level data contract.
+$g[t]$, $p[t]$, $M$, and $a[t]$ are genuinely absent — `seqmaze` has no
+spatial component, no actions, and no episodic memory.
 
 Canonical package path:
 
@@ -18,18 +24,28 @@ Canonical package path:
 src/ehc_sn/tasks/seqmaze/
 ```
 
-The task is built around the idea of 2D mazes, but the model does not receive any explicit spatial information. Instead, the model receives a set of observation tokens and valid successor transitions between those tokens. The model must infer the correct sequence of observations that leads from a start token to a goal token, given the valid transitions.
-
-The task is designed to test the model's ability to reason about sequences and transitions, rather than relying on spatial memory. The model must learn to read the graph of valid transitions and infer the correct path from start to goal, without any explicit spatial grounding. To do so, the model receives the start (obs[0]) and goal (obs[n]) observation tokens together with all the information needed to infer the correct sequence of observations.
+`seqmaze` tests whether a model can reason about sequences and transitions
+without any spatial grounding. The model receives a set of observation-node
+tokens and the valid successor transitions between them. It must infer the
+shortest valid observation sequence from a start token to a goal token, purely
+from the transition-graph structure. No spatial coordinates, grid cells, or
+location encodings are provided — the transition structure is encoded entirely
+inside the node tokens.
 
 The core problem is:
 
 ```text
-given the start (obs[0]) and goal (obs[n]) observation tokens
-the candidate set of observation tokens (obs[0:n+m])
-and valid successor transitions for each token (obs[i] → obs[j])
-predict the shortest valid observation sequence from start to goal (obs[0] → obs[1] → ... → obs[n])
+given the start token (obs[0]), the goal token (obs[n]),
+a candidate set of observation tokens (obs[0:n+m]),
+and valid successor transitions for each token (obs[i] → obs[j]),
+predict the shortest valid observation sequence from start to goal
+(obs[0] → obs[1] → ... → obs[n]).
 ```
+
+The task forces the model to _infer_ the path rather than _recall_ it.
+Each sample is generated with sample-local structure (permuted candidates,
+remapped ids, per-sample successor graph) so the model cannot memorize
+fixed transitions.
 
 ---
 
@@ -37,46 +53,59 @@ predict the shortest valid observation sequence from start to goal (obs[0] → o
 
 ### MazeHard analogy
 
-In `mazehard`, each token corresponds to a fixed grid cell, which provides a strong spatial grounding. The model can learn to navigate the maze by learning the spatial layout and the transitions between cells because the embedding adds the "what" (wall, open, start, goal) and the "where" (cell location).
+In `mazehard`, each token corresponds to a fixed grid cell with strong spatial
+grounding — the embedding carries both "what" (wall, open, start, goal) and
+"where" (cell location). The model navigates a known spatial layout.
 
 ```text
 MazeHard:
-  cell tokens + wall/open status + start + goal → route
+  cell tokens + wall/open status + start + goal → spatial route
 ```
 
-In `seqmaze`, each token corresponds to an observation node.
+In `seqmaze`, each token corresponds to an observation node with no spatial
+anchor:
 
 ```text
 seqmaze:
-  observation-node tokens + valid successor information + start + goal → token route
+  observation-node tokens + valid successor information + start + goal
+  → token route (no spatial coordinates)
 ```
 
-The key difference is that `seqmaze` has no fixed 2D position. Therefore, transition structure must be encoded inside the node tokens.
+### Relationship to `arena`
+
+`arena` provides spatial grounding — the model learns grid-cell-like encodings
+($g[t]$) and observation-location bindings ($M$) through structural learning
+(see `docs/docs/tasks/arena.md`). `seqmaze` deliberately removes all spatial
+information to isolate pure transition-graph reasoning. The two tasks bookend
+the spatial-reasoning spectrum: arena is grounded, seqmaze is abstract.
+
+### Relationship to `goalchain`
+
+`goalchain` (see `docs/docs/tasks/goalchain.md`) combines spatial memory from
+arena with goal-conditioned reasoning — it uses episodic memory ($M$) and
+location belief ($g$) to plan shortest-walk navigation. `seqmaze` isolates the
+reasoning component alone, without memory or space, serving as a potential
+pre-training step for the PFC-like inference that `goalchain` demands.
 
 ### Anti-memorization contract
 
-The model must not solve the task by memorizing fixed transitions such as:
+The model must not solve the task by memorizing fixed transition patterns
+(e.g., _obs_5 always goes to obs_3_). Every sample uses sample-local structure:
 
-```text
-obs_5 always goes to obs_3
-```
-
-So each sample should be generated with sample-local structure:
-
-```text
-candidate order is permuted
-obs ids may be remapped
-successor graph is generated per sample
-shortest path is computed offline
-```
+- candidate order is permuted
+- observation ids may be remapped
+- successor graph is generated per sample
+- shortest path is computed offline and guaranteed unique
 
 ---
 
 ## Scientific purpose
 
-`seqmaze` is designed to test the model's ability to reason about sequences and transitions in a non-spatial, non-memorization-based way. The model must learn to read the graph of valid transitions and infer the correct path from start to goal, without any explicit spatial grounding. This tests the model's ability to perform reasoning over a structured graph of tokens, which is a fundamental aspect of many cognitive tasks.
+`seqmaze` tests whether a model can perform structured reasoning over a graph
+of tokens without spatial grounding or memorization. The model must learn to
+read the transition graph and infer the correct path from start to goal.
 
-The relevant HRM computation is not:
+The relevant computation is not:
 
 ```text
 read this graph → memorize/recall the path
@@ -88,53 +117,74 @@ It is:
 read this graph → infer the path
 ```
 
-This is needed so the model can perform the PFC-like reasoning process of inferring the correct sequence of observations that leads to a goal, based on the structure of valid transitions (in the future provided by the HPC-EC). This is a key aspect of the reasoning process that we want to test, and it is important to have a task that isolates this reasoning ability without confounding it with spatial memory or other factors.
+This isolates the PFC-like reasoning process — inferring the correct sequence
+of steps toward a goal from structured transition knowledge — without
+confounding it with spatial memory, location encoding, or episodic recall.
+
+Interpretation:
+
+| Component              | Role in `seqmaze`                                             |
+| ---------------------- | ------------------------------------------------------------- |
+| PFC / reasoning module | infers the correct sequence from the transition graph.        |
+| Token structure        | encodes valid successors entirely within node-token metadata. |
+| Generation             | autoregressive token prediction with EOS termination.         |
+
+### Why this is reasoning, not recall
+
+In a standard supervised task, the model learns a mapping $x \rightarrow y$
+and stores it in its weights. At inference, one forward pass produces the
+answer from parametric memory.
+
+In `seqmaze`, the transition graph is novel per sample. The model
+received no training example of this specific graph. The answer cannot be
+retrieved from weights — it must be computed from the input data
+through multiple autoregressive steps, each conditioned on the previous.
+This multi-step inference-time computation over novel structured input is
+the operational definition of reasoning that `seqmaze` tests.
+
+---
 
 ## Input and output
 
-Adapter input (task-data output):
+### Adapter input (task-data → model)
 
-| Variable    | Description                                                    |
-| ----------- | -------------------------------------------------------------- |
-| $x'[0:n+m]$ | candidate set of observation tokens (including start and goal) |
+The model receives a set of structured node tokens describing the full
+transition graph. Each token carries its own successor information.
 
-The token info contains all the information needed to describe the valid transitions between tokens, such as successor indices and masks. The model must use this information to infer the correct sequence of observations that leads from the start token to the goal token. The model should not rely on any external spatial information or memory of specific locations, but rather on the reasoning process of inferring the correct path through the graph of tokens and transitions.
+| Variable    | Description                                                 |
+| ----------- | ----------------------------------------------------------- |
+| $x'[0:n+m]$ | candidate set of observation tokens (start + goal + others) |
 
-Adapter output (evaluation input):
+Each node token encodes:
 
-| Variable  | Description                                                         |
-| --------- | ------------------------------------------------------------------- |
-| $x'[0:T]$ | predicted sequence of observation tokens (including start and goal) |
+| Attribute           | Description                                                      |
+| ------------------- | ---------------------------------------------------------------- |
+| `obs_id`            | unique observation identifier (e.g., `obs_5`)                    |
+| `candidate_index`   | index of the token in the candidate set (0 to N−1)               |
+| `start_flag`        | `True` if this token is the start token                          |
+| `goal_flag`         | `True` if this token is the goal token                           |
+| `successor_indices` | list of indices of valid successor tokens (PAD for unused slots) |
+| `successor_mask`    | binary mask marking valid successor slots                        |
 
-Use one array of structured node tokens:
+### Adapter output (model → evaluation)
 
-```text
-[N, F]
-```
+| Variable  | Description                                                 |
+| --------- | ----------------------------------------------------------- |
+| $x'[0:T]$ | predicted sequence of observation tokens (start → … → goal) |
 
-where `N` is the number of candidate observations.
+The output is a variable-length token sequence terminated by EOS, padded with
+PAD tokens. The model generates autoregressively, one token per step.
 
-Each node token should contain:
-
-| Attribute           | Description                                                        |
-| ------------------- | ------------------------------------------------------------------ |
-| `obs_id`            | unique identifier for the observation token (e.g., obs_5)          |
-| `candidate_index`   | index of the token in the candidate set (0 to N-1)                 |
-| `start_flag`        | binary flag indicating if this token is the start token            |
-| `goal_flag`         | binary flag indicating if this token is the goal token             |
-| `successor_indices` | list of indices of valid successor tokens (e.g., [2, 3, PAD, PAD]) |
-| `successor_mask`    | binary mask indicating valid successors (e.g., [1, 1, 0, 0])       |
-
-Example:
+### Example
 
 ```text
-tokens:
+candidate tokens:
   obs_5, obs_3, obs_4, obs_0, obs_1, obs_2
 
-start:
+start token:
   obs_0
 
-goal:
+goal token:
   obs_3
 
 valid transitions:
@@ -144,47 +194,89 @@ valid transitions:
   obs_4 → obs_1
   obs_4 → obs_3
 
-target:
+target sequence:
   obs_0 → obs_4 → obs_3, EOS, PAD, PAD, ...
 ```
 
+---
+
+## Corpus and data generation
+
+Each sample is a self-contained transition-graph problem. The corpus stores
+the token array, start/goal indices, successor adjacency, and the precomputed
+shortest-path target sequence.
+
+### Key invariants
+
+- Every sample has a **unique shortest path** from start to goal.
+  Multiple valid solutions may be added in a future protocol version.
+- Transition graphs are generated per sample; no global transition table
+  is shared across samples.
+- Observation ids are remapped per sample to prevent memorization.
+
+### Build
+
+```bash
+python scripts/data-gen/build-seqmaze.py build-all
+```
+
+Output path: `data/processed/seqmaze/<corpus>/v<version>/`
+
+---
+
 ## Benchmark and evaluation
 
-The main target is a variable-length token sequence:
+### SeqMaze-Reason track
 
-```text
-[obs_0, obs_4, ..., obs_T, EOS, PAD, PAD, ...]
-```
+| Aspect             | Value                                           |
+| ------------------ | ----------------------------------------------- |
+| Benchmark track    | SeqMaze-Reason                                  |
+| Claim family       | `sequence_reasoning`                            |
+| Execution mode     | generation (autoregressive, teacher-forced)     |
+| Primary metric     | `sequence_exact`                                |
+| Secondary metrics  | `next_token_accuracy`, `valid_transition_rate`, |
+|                    | `reaches_goal`, `path_length_regret`            |
+| Supported families | HRM v1, HRM v2 (current)                        |
+| Readiness          | `design`                                        |
 
-- Like in LLM generation tasks, the model should generate the sequence token by token until it generates an EOS token. Therefore the correct way to evaluate is to compare the generated sequence with the target sequence using sequence-level exact match (sequence_exact) as the primary metric. This means that the generated sequence must exactly match the target sequence, including the order of tokens and the presence of EOS and PAD tokens.
+### Primary metric: `sequence_exact`
 
-- Like in LLM training, we can also evaluate next-token accuracy (next_token_accuracy) as a secondary metric, which measures the accuracy of predicting the next token in the sequence at each step. This provides a more fine-grained evaluation of the model's performance in generating the correct sequence.
+The generated sequence must exactly match the target sequence, including
+token order, EOS placement, and PAD placement. This is a strict sequence-level
+exact-match metric, analogous to LLM generation evaluation.
 
-Use teacher-forced sequence cross-entropy with padding masks.
+### Secondary metrics
 
-For `seqmaze`, keep the generation constrained so each sample has a **unique shortest path**. Multiple valid solutions can be added later.
+| Metric                  | Description                                        |
+| ----------------------- | -------------------------------------------------- |
+| `next_token_accuracy`   | per-step accuracy of predicting the next token     |
+| `valid_transition_rate` | proportion of generated transitions that are valid |
+| `reaches_goal`          | proportion of sequences that reach the goal token  |
+| `path_length_regret`    | extra steps beyond the shortest-path length        |
 
-The primary metric should be the exact match of the generated sequence with the target sequence:
+### Training loss
 
-```text
-sequence_exact
-```
-
-Secondary metrics can be
-
-```text
-next_token_accuracy
-valid_transition_rate
-reaches_goal
-path_length_regret
-```
+Teacher-forced sequence cross-entropy with padding masks. Loss is computed
+only on non-PAD, non-EOS positions.
 
 ---
 
 ## Open questions
 
-Here are the open questions that need to be resolved to finalize the task design:
+1. **Transition-graph generation**: Should graphs be purely random, or should
+   they follow specific structures (tree, DAG, cyclic) to study how graph
+   topology affects reasoning capability?
 
-- How to generate the valid transition graph for each sample? Should it be random, or should it follow some specific structure (e.g., tree, DAG, cyclic graph)?
+2. **Multiple valid solutions**: The current contract requires a unique
+   shortest path. How should the task handle graphs with multiple equally
+   valid shortest paths? Accept any valid solution, or require a specific
+   tie-breaking convention?
 
----
+3. **Scaling graph size**: How does performance degrade as the number of
+   candidate tokens (N) grows? Is there a phase transition where inference
+   breaks down?
+
+4. **Transfer from arena**: Does spatial structural knowledge acquired during
+   `arena` training transfer to improved `seqmaze` reasoning, even though
+   `seqmaze` has no spatial component? This would test whether structural
+   learning produces general-purpose reasoning improvements.
