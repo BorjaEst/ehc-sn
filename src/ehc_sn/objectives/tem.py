@@ -417,12 +417,12 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
             ),
             # Relation extraction is delegated to the binding
             grid_relation=require_latent_relation(
-                outputs.latent_relations,
-                GRID_TRANSITION_RELATION,
+                relations=outputs.latent_relations,
+                key=GRID_TRANSITION_RELATION,
             ),
             place_transition_relation=require_latent_relation(
-                outputs.latent_relations,
-                PLACE_TRANSITION_RELATION,
+                relations=outputs.latent_relations,
+                key=PLACE_TRANSITION_RELATION,
             ),
             place_sensory_relation=outputs.latent_relations.get(
                 PLACE_SENSORY_RELATION,
