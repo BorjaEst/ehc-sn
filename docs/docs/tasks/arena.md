@@ -171,18 +171,16 @@ Output path: `data/processed/arena/<corpus>/v<version>/`
 
 ### Arena-Struct track
 
-| Aspect             | Value                                           |
-| ------------------ | ----------------------------------------------- |
-| Benchmark track    | Arena-Struct                                    |
-| Claim family       | `structural_representation`                     |
-| Execution mode     | replay                                          |
-| Primary metric     | `accuracy_revisit`                              |
-| Secondary metrics  | `accuracy_all`, `correct_all`, `count_all`,     |
-|                    | `correct_revisit`, `count_revisit`              |
-| Diagnostic metrics | `accuracy_ancestral_revisit` (TEM/EHC pathway), |
-|                    | `accuracy_retrieved_revisit` (TEM/EHC pathway)  |
-| Supported families | TEM v1, TEM v2, EHC v1                          |
-| Readiness          | `ready`                                         |
+| Aspect             | Value                                       |
+| ------------------ | ------------------------------------------- |
+| Benchmark track    | Arena-Struct                                |
+| Claim family       | `structural_representation`                 |
+| Execution mode     | replay                                      |
+| Primary metric     | `accuracy_revisit`                          |
+| Secondary metrics  | `accuracy_all`, `correct_all`, `count_all`, |
+|                    | `correct_revisit`, `count_revisit`          |
+| Diagnostic metrics | `accuracy_ancestral_revisit`                |
+|                    | `accuracy_retrieved_revisit`                |
 
 ### Score accumulation
 

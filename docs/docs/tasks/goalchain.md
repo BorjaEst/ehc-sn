@@ -217,7 +217,6 @@ Output path: `data/processed/goalchain/<corpus>/v<version>/`
 |                   | `next_observation_accuracy`,                |
 |                   | `next_location_accuracy`,                   |
 |                   | `path_length_regret`                        |
-| Readiness         | `design`                                    |
 
 ### Evaluation axes
 

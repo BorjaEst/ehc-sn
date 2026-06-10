@@ -228,16 +228,14 @@ Output path: `data/processed/seqmaze/<corpus>/v<version>/`
 
 ### SeqMaze-Reason track
 
-| Aspect             | Value                                           |
-| ------------------ | ----------------------------------------------- |
-| Benchmark track    | SeqMaze-Reason                                  |
-| Claim family       | `sequence_reasoning`                            |
-| Execution mode     | generation (autoregressive, teacher-forced)     |
-| Primary metric     | `sequence_exact`                                |
-| Secondary metrics  | `next_token_accuracy`, `valid_transition_rate`, |
-|                    | `reaches_goal`, `path_length_regret`            |
-| Supported families | HRM v1, HRM v2 (current)                        |
-| Readiness          | `design`                                        |
+| Aspect            | Value                                           |
+| ----------------- | ----------------------------------------------- |
+| Benchmark track   | SeqMaze-Reason                                  |
+| Claim family      | `sequence_reasoning`                            |
+| Execution mode    | generation (autoregressive, teacher-forced)     |
+| Primary metric    | `sequence_exact`                                |
+| Secondary metrics | `next_token_accuracy`, `valid_transition_rate`, |
+|                   | `reaches_goal`, `path_length_regret`            |
 
 ### Primary metric: `sequence_exact`
 
