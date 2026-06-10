@@ -45,6 +45,9 @@ model_config_path = "config/models/tem-v1-base.toml"
     g_reg_it         = 40000000
     p_reg_it         = 4000
 
+[runtime]
+    kind = "fixed"
+
 [runtime.memory]
     eta           = 0.5
     eta_it        = 16000
