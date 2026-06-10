@@ -10,7 +10,7 @@ ACTION_UP: Final[int] = 1
 ACTION_RIGHT: Final[int] = 2
 ACTION_DOWN: Final[int] = 3
 ACTION_LEFT: Final[int] = 4
-MOVEMENT_ACTION_COUNT: Final[int] = 5
+DEFAULT_GRID_ACTION_COUNT: Final[int] = 5
 
 # Row/column deltas indexed by action id: stay, up, right, down, left.
 _ACTION_DELTAS: Final[tuple[tuple[int, int], ...]] = (
@@ -32,12 +32,25 @@ class MovementAction(IntEnum):
     LEFT = ACTION_LEFT
 
 
+class HexMovementAction(IntEnum):
+    """Hex-grid movement action for openfield hex layouts."""
+
+    STAY = 0
+    DOWN_LEFT = 1
+    DOWN_RIGHT = 2
+    UP_LEFT = 3
+    UP_RIGHT = 4
+    LEFT = 5
+    RIGHT = 6
+
+
 __all__ = [
     "ACTION_DOWN",
     "ACTION_LEFT",
     "ACTION_RIGHT",
     "ACTION_STAY",
     "ACTION_UP",
-    "MOVEMENT_ACTION_COUNT",
+    "DEFAULT_GRID_ACTION_COUNT",
     "MovementAction",
+    "HexMovementAction",
 ]
