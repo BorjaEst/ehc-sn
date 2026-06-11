@@ -14,6 +14,7 @@ import torch
 
 from ehc_sn.tasks.arena.evaluation import ArenaScoreReport
 from ehc_sn.tasks.mazehard.evaluation import MazeHardScoreReport
+from ehc_sn.tasks.scoring import scoring_spec_for_task
 
 # =============================================================================
 READY_TRACKS: tuple[str, ...] = (
@@ -34,11 +35,6 @@ _TRACK_TO_TASK_FAMILY: dict[str, str] = {
 _TRACK_TO_CLAIM_FAMILY: dict[str, str] = {
     "arena-struct": "structural_representation",
     "mazehard-delib": "deliberative_reasoning",
-}
-
-_TRACK_TO_PRIMARY_METRIC: dict[str, str] = {
-    "arena-struct": "accuracy_revisit",
-    "mazehard-delib": "sequences_exact",
 }
 
 _TRACK_TO_SECONDARY_METRICS: dict[str, tuple[str, ...]] = {
@@ -71,7 +67,6 @@ class TrackDefinition:
     claim_family: str
     compared_artifact_type: str
     readiness_state: str
-    primary_metric: str
     secondary_metrics: tuple[str, ...]
     supported_models: tuple[str, ...]
 
@@ -82,6 +77,7 @@ def build_track_report(  # ----------------------------------------------------
     model_family: str,
     score_report: ArenaScoreReport | MazeHardScoreReport,
     *,
+    primary_metric: str,
     fixed_recipe: str,
     seed_count: int = 1,
     ood_slice: str | None = None,
@@ -103,8 +99,8 @@ def build_track_report(  # ----------------------------------------------------
         "model_family": canonical_model,
         "fixed_recipe": fixed_recipe,
         "primary_metric": {
-            "name": track.primary_metric,
-            "value": metrics[track.primary_metric],
+            "name": primary_metric,
+            "value": metrics[primary_metric],
         },
         "secondary_metrics": {
             metric_name: metrics[metric_name]
@@ -124,6 +120,7 @@ def build_track_report_from_seed_scores(
     model_family: str,
     seed_scores: tuple[ArenaScoreReport | MazeHardScoreReport, ...],
     *,
+    primary_metric: str,
     fixed_recipe: str,
     ood_slice: str | None = None,
 ) -> dict[str, object]:
@@ -132,11 +129,16 @@ def build_track_report_from_seed_scores(
         raise ValueError("seed_scores must contain at least one score report.")
 
     track = _resolve_track_definition(track_id)
+    # Validate that the recipe's primary_metric is a known benchmark-eligible
+    # metric for this track's task family.
+    scoring_spec_for_task(track.task_family).require_benchmark_metric(
+        primary_metric
+    )
     canonical_model = _validate_model_support(track, model_family)
     per_seed_metrics = [
         _metrics_from_score(track, seed_score) for seed_score in seed_scores
     ]
-    metric_names = (track.primary_metric, *track.secondary_metrics)
+    metric_names = (primary_metric, *track.secondary_metrics)
     metric_summaries = {
         metric_name: _summarize_seed_values(
             tuple(
@@ -159,9 +161,9 @@ def build_track_report_from_seed_scores(
         "model_family": canonical_model,
         "fixed_recipe": fixed_recipe,
         "primary_metric": {
-            "name": track.primary_metric,
-            "value": metric_summaries[track.primary_metric]["mean"],
-            **metric_summaries[track.primary_metric],
+            "name": primary_metric,
+            "value": metric_summaries[primary_metric]["mean"],
+            **metric_summaries[primary_metric],
         },
         "secondary_metrics": {
             metric_name: {
@@ -289,7 +291,6 @@ def _resolve_track_definition(  # ---------------------------------------------
         claim_family=_TRACK_TO_CLAIM_FAMILY[canonical_track],
         compared_artifact_type="within-task architecture comparison",
         readiness_state="ready",
-        primary_metric=_TRACK_TO_PRIMARY_METRIC[canonical_track],
         secondary_metrics=_TRACK_TO_SECONDARY_METRICS[canonical_track],
         supported_models=tuple(sorted(_TRACK_MODEL_SUPPORT[canonical_track])),
     )
@@ -435,11 +436,20 @@ def _metrics_from_score(  # ---------------------------------------------------
 
 
 # =============================================================================
+# =============================================================================
+def task_family_for_track(track_id: str) -> str:
+    """Return the task-family name for a ready-track id, or raise."""
+    canonical = resolve_track_id(track_id)
+    return _TRACK_TO_TASK_FAMILY[canonical]
+
+
+# =============================================================================
 __all__ = [
     "READY_TRACKS",
     "build_score_report",
     "build_track_report",
     "build_track_report_from_seed_scores",
     "resolve_track_id",
+    "task_family_for_track",
     "write_track_report",
 ]

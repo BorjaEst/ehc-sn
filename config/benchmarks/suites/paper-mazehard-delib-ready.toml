@@ -11,8 +11,8 @@ track_ids = ["mazehard-delib"]
 recipe_paths = ["config/benchmarks/recipes/mazehard-delib.toml"]
 fixed_recipe_labels = ["mazehard-delib-hrm-v1"]
 artifact_manifest_ids = [
-  "mazehard-delib-hrm-v1-default",
-  "mazehard-delib-hrm-v2-default",
+  "mazehard-delib-hrm-v1-default-vram8gib",
+  "mazehard-delib-hrm-v2-default-vram8gib",
 ]
 artifact_manifest_paths = [
   "config/benchmarks/manifests/mazehard-delib-hrm-v1.toml",

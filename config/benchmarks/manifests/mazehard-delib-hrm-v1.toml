@@ -6,7 +6,7 @@
 # =============================================================================
 
 schema_version = "1"
-artifact_id = "mazehard-delib-hrm-v1-default"
+artifact_id = "mazehard-delib-hrm-v1-default-vram8gib"
 artifact_type = "model_core"
 model_family = "hrm-v1"
 model_config_path = "config/models/hrm-v1-base.toml"

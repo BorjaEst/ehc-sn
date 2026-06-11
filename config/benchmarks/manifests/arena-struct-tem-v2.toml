@@ -6,7 +6,7 @@
 # =============================================================================
 
 schema_version = "1"
-artifact_id = "arena-struct-tem-v2-default"
+artifact_id = "arena-struct-tem-v2-default-vram8gib"
 artifact_type = "model_core"
 model_family = "tem-v2"
 model_config_path = "config/models/tem-v2-base.toml"

@@ -151,6 +151,7 @@ def _run() -> int:
         track,
         str(model_family),
         score_report,
+        primary_metric="sequences_exact",
         fixed_recipe=fixed_recipe,
         seed_count=seed_count,
         ood_slice=None if ood_slice is None else str(ood_slice),

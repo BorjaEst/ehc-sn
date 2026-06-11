@@ -140,6 +140,7 @@ def _run() -> int:
         track,
         model_family,
         seed_scores,
+        primary_metric=recipe.primary_metric,
         fixed_recipe=fixed_recipe,
         ood_slice=None if ood_slice is None else str(ood_slice),
     )

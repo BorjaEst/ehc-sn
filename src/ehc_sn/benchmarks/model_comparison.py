@@ -27,9 +27,13 @@ from ehc_sn.benchmarks.contracts import (
     TrackRecipe,
     validate_model_comparison_pair,
 )
+from ehc_sn.benchmarks.runner import task_family_for_track
+from ehc_sn.tasks.scoring import scoring_spec_for_task
 from ehc_sn.eval.contracts import EvaluationCaseResult
 from ehc_sn.eval.executor import execute_replay_evaluation_batch
 from ehc_sn.tasks.arena.evaluation import (
+    ArenaCaseMetrics,
+    aggregate_arena_case_metrics,
     build_arena_score_report,
     build_arena_step_score,
 )
@@ -50,6 +54,13 @@ def run_ready_track_model_comparison(
 ) -> ScoreReport:
     """Run deterministic ready-track model-comparison from manifest+recipe."""
     validate_model_comparison_pair(manifest, recipe)
+
+    # Validate recipe primary_metric against the task scoring spec before
+    # any execution — fail fast with a clear error.
+    task_family = task_family_for_track(recipe.track_id)
+    scoring_spec_for_task(task_family).require_benchmark_metric(
+        recipe.primary_metric
+    )
 
     seed = recipe.execution.seed
     if seed is None:
@@ -106,7 +117,11 @@ def run_ready_track_model_comparison(
                     "td_target": False,
                 },
             )
-            score_reports.append(_score_evaluated_case(result, recipe.track_id))
+            score_reports.append(
+                _score_evaluated_case(
+                    result, recipe.track_id, model_family=manifest.model_family
+                )
+            )
 
     if not score_reports:
         raise ValueError("Benchmark evaluation produced no score reports.")
@@ -292,13 +307,30 @@ def _build_provider(
 
 
 # =============================================================================
+# Metric-key lookup for per-case aggregation across arena families.
+_ARENA_ACC_KEYS: dict[str, tuple[str, str]] = {
+    "tem-v1": ("accuracy_obs_inference_all", "accuracy_obs_inference_revisit"),
+    "tem-v2": ("accuracy_obs_inference_all", "accuracy_obs_inference_revisit"),
+    "ehc-v1": (
+        "ehc_accuracy_obs_inference_all",
+        "ehc_accuracy_obs_inference_revisit",
+    ),
+}
+
+
 def _score_evaluated_case(
     result: EvaluationCaseResult,
     track_id: str,
+    *,
+    model_family: str | None = None,
 ) -> ScoreReport:
-    """Build one task-owned score report from an evaluated rollout."""
+    """Build one task-owned score report from an evaluated rollout.
+
+    For arena-struct, passes *model_family* to select the correct per-case
+    metric keys.
+    """
     if track_id == "arena-struct":
-        return _score_arena_evaluated_case(result)
+        return _score_arena_evaluated_case(result, model_family=model_family)
     if track_id == "mazehard-delib":
         return _score_mazehard_evaluated_case(result)
     raise ValueError(f"Unsupported ready-track id for scoring: {track_id!r}.")
@@ -307,22 +339,39 @@ def _score_evaluated_case(
 # =============================================================================
 def _score_arena_evaluated_case(
     result: EvaluationCaseResult,
+    *,
+    model_family: str | None = None,
 ) -> ArenaScoreReport:
-    """Build one task-owned Arena score report from an evaluated rollout."""
-    observed = result.evaluated.last_step
-    objective_step = observed.outputs
-    step_outputs = objective_step.outputs
-    if step_outputs is None:
-        raise ValueError(
-            "Arena objective step did not retain controller outputs for scoring."
-        )
+    """Build one task-owned Arena score report from an evaluated rollout.
 
-    logits = getattr(step_outputs, "logits_inference", None)
-    if logits is None:
-        raise ValueError("Arena objective output must expose logits_inference.")
-
-    targets = coerce_arena_targets(observed.batch)
-    return build_arena_score_report(build_arena_step_score(logits, targets))
+    Uses per-step :class:`~ehc_sn.metrics.step_metrics.RatioStat` extras
+    accumulated across all steps in the evaluated chunk rather than the last
+    step only.
+    """
+    evaluated = result.evaluated
+    model_family_normalized = (
+        model_family.strip().lower().replace("_", "-")
+        if model_family
+        else "tem-v1"
+    )
+    acc_keys = _ARENA_ACC_KEYS.get(
+        model_family_normalized,
+        ("accuracy_obs_inference_all", "accuracy_obs_inference_revisit"),
+    )
+    case = aggregate_arena_case_metrics(
+        evaluated,
+        case_id=result.case_id,
+        acc_all_key=acc_keys[0],
+        acc_revisit_key=acc_keys[1],
+    )
+    return ArenaScoreReport(
+        accuracy_all=torch.tensor(case.accuracy_all),
+        accuracy_revisit=torch.tensor(case.accuracy_revisit),
+        correct_all=torch.tensor(case.correct_all),
+        count_all=torch.tensor(case.count_all),
+        correct_revisit=torch.tensor(case.correct_revisit),
+        count_revisit=torch.tensor(case.count_revisit),
+    )
 
 
 # =============================================================================

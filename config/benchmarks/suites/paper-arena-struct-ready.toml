@@ -12,7 +12,7 @@ recipe_paths = ["config/benchmarks/recipes/arena-struct.toml"]
 fixed_recipe_labels = ["arena-struct-tem-v1"]
 artifact_manifest_ids = [
   "arena-struct-tem-v1-default",
-  "arena-struct-tem-v2-default",
+  "arena-struct-tem-v2-default-vram8gib",
   "arena-struct-ehc-v1-default",
 ]
 artifact_manifest_paths = [

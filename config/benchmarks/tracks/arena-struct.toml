@@ -6,7 +6,7 @@ claim_family = "structural_representation"
 compared_artifact_type = "within-task architecture comparison"
 readiness_state = "ready"
 execution_mode = "replay"
-primary_metric = "accuracy_revisit"
+primary_metric = "accuracy_ancestral"
 secondary_metrics = [
   "accuracy_all",
   "correct_all",
