@@ -11,24 +11,24 @@ enable_sensory_recall   = true
 
 [hpc]
     shape         = [100, 100, 80, 60, 60]
-    common_memory = false
+    common_memory = true
     do_sample     = false
 
 [hpc.read]
     beta            = 1.0
-    empty_retrieval = "query"
+    empty_retrieval = "zeros"
     beta_scaling    = "none"
     iterations      = 1
     recurrence      = "none"
 
 [hpc.write]
-    policy             = "append_all"
+    policy             = "append_if_novel"
     novelty_similarity = "cosine"
-    novelty_threshold  = 0.95
+    novelty_threshold  = 0.985
     write_bank         = "default"
 
 [hpc.store]
-    memory_capacity = 200
+    memory_capacity = 250
     bank_names      = ["g", "x"]
 
 [lec]
