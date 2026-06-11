@@ -32,6 +32,7 @@ def register_builtin_figures() -> None:
         mec_grid_metrics,
         occupancy_histogram,
         pfc_latent_dynamics,
+        pfc_path_memory_probe,
         prediction_accuracy_over_steps,
         q_value_evolution,
         reasoning_budget_summary,
@@ -142,6 +143,26 @@ def register_builtin_figures() -> None:
                 meta_keys={
                     MAZEHARD_META_KEY_GT_OVERLAY,
                 },
+            )
+        )
+
+    if not REGISTRY.has("pfc_path_memory_probe"):
+        REGISTRY.register(
+            FigureSpec(
+                name="pfc_path_memory_probe",
+                description=(
+                    "Linear decoding of target-path information from "
+                    "z_H and z_L across recurrent steps — "
+                    "probe-backed evidence for working memory content"
+                ),
+                plot=pfc_path_memory_probe.plot,
+                default_filename="pfc_path_memory_probe",
+                maturity="experimental",
+                allowed_surfaces={"diagnostic", "report"},
+                input_contract="offline_artifact",
+                tags={"hrm", "probe", "working_memory"},
+                trace_keys=set(),
+                meta_keys=set(),
             )
         )
 

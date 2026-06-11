@@ -30,9 +30,6 @@ from pydantic import (
     model_validator,
 )
 
-from ehc_sn.model_families import ALL_FAMILIES
-from ehc_sn.task_families import KNOWN_TASKS
-
 # ---------------------------------------------------------------------------
 # Metric role
 # ---------------------------------------------------------------------------
@@ -124,14 +121,6 @@ class RegimeSelector(BaseModel, extra="forbid"):
             "Must be non-empty when present."
         ),
     )
-
-    @field_validator("task")
-    @classmethod
-    def _validate_task(cls, v: str | None) -> str | None:
-        if v is not None and v not in KNOWN_TASKS:
-            known = ", ".join(sorted(KNOWN_TASKS))
-            raise ValueError(f"Unknown task {v!r}. Known tasks: {known}.")
-        return v
 
     @field_validator("regime_ids")
     @classmethod
@@ -232,14 +221,6 @@ class MetricSuiteSpec(BaseModel, extra="forbid"):
         default_factory=tuple,
         description="Metric names that may appear in normalized records.",
     )
-
-    @field_validator("task")
-    @classmethod
-    def _validate_task(cls, v: str) -> str:
-        if v not in KNOWN_TASKS:
-            known = ", ".join(sorted(KNOWN_TASKS))
-            raise ValueError(f"Unknown task {v!r}. Known tasks: {known}.")
-        return v
 
     @model_validator(mode="after")
     def _reject_overlap(self) -> MetricSuiteSpec:
@@ -349,16 +330,6 @@ class ReportSpec(BaseModel, extra="forbid"):
 
         return data
 
-    @field_validator("model_family")
-    @classmethod
-    def _validate_model_family(cls, v: str) -> str:
-        if v not in ALL_FAMILIES:
-            known = ", ".join(sorted(ALL_FAMILIES))
-            raise ValueError(
-                f"Unknown model_family {v!r}. Known families: {known}."
-            )
-        return v
-
     @model_validator(mode="after")
     def _reject_duplicate_metric_suites(self) -> ReportSpec:
         """Reject duplicate (task, regime_kind) in metric_suites."""
@@ -396,14 +367,6 @@ class EvalArtifactReference(BaseModel, extra="forbid"):
     regime_kind: RegimeKind
     path: Path
 
-    @field_validator("task")
-    @classmethod
-    def _validate_task(cls, v: str) -> str:
-        if v not in KNOWN_TASKS:
-            known = ", ".join(sorted(KNOWN_TASKS))
-            raise ValueError(f"Unknown task {v!r}. Known tasks: {known}.")
-        return v
-
 
 # ---------------------------------------------------------------------------
 # Normalized metric record
@@ -426,24 +389,19 @@ class MetricRecord(BaseModel, extra="forbid"):
     higher_is_better: bool | None = None
     is_primary: bool = Field(
         default=False,
-        description="True when this metric is the canonical primary benchmark score for the task.",
+        description="True when this metric is the canonical primary benchmark "
+        "score for the task.",
     )
     normalized_value: float | None = Field(
         default=None,
-        description="Score normalised to [0, 1] for cross-task comparison, or ``None``.",
+        description="Score normalized to [0, 1] for cross-task comparison, or "
+        "``None``.",
     )
     role: MetricRole | None = Field(
         default=None,
-        description="Classifier for the metric's purpose in the benchmark report.",
+        description="Classifier for the metric's purpose in the benchmark "
+        "report.",
     )
-
-    @field_validator("task")
-    @classmethod
-    def _validate_task(cls, v: str | None) -> str | None:
-        if v is not None and v not in KNOWN_TASKS:
-            known = ", ".join(sorted(KNOWN_TASKS))
-            raise ValueError(f"Unknown task {v!r}. Known tasks: {known}.")
-        return v
 
 
 # ---------------------------------------------------------------------------
@@ -478,14 +436,6 @@ class FigureIndexEntry(BaseModel, extra="forbid"):
         default=None,
         description="Provenance classification for this figure entry.",
     )
-
-    @field_validator("task")
-    @classmethod
-    def _validate_task(cls, v: str) -> str:
-        if v not in KNOWN_TASKS:
-            known = ", ".join(sorted(KNOWN_TASKS))
-            raise ValueError(f"Unknown task {v!r}. Known tasks: {known}.")
-        return v
 
 
 class FigureIndex(BaseModel, extra="forbid"):
@@ -554,16 +504,6 @@ class ReportRunManifest(BaseModel, extra="forbid"):
             "manifest."
         ),
     )
-
-    @field_validator("model_family")
-    @classmethod
-    def _validate_model_family(cls, v: str) -> str:
-        if v not in ALL_FAMILIES:
-            known = ", ".join(sorted(ALL_FAMILIES))
-            raise ValueError(
-                f"Unknown model_family {v!r}. Known families: {known}."
-            )
-        return v
 
 
 # ---------------------------------------------------------------------------
