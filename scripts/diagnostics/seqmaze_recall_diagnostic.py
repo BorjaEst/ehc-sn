@@ -21,12 +21,11 @@ from torch.utils.data import DataLoader
 from ehc_sn.adapters.seqmaze.hrm import SeqMazeProbeAdapterSettings
 from ehc_sn.adapters.seqmaze.hrm.hrm_v2 import SeqMazeProbeHRMV2BridgeAdapter
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
-from ehc_sn.tasks.seqmaze._data import SeqMazeProbeIterableDataset
-from ehc_sn.tasks.seqmaze._graph_utils import (
+from ehc_sn.tasks.seqmaze.runtime import extract_seqmaze_probe_targets
+from ehc_sn.utils.graph import (
     generate_transition_dag,
     shortest_path,
 )
-from ehc_sn.tasks.seqmaze.runtime import extract_seqmaze_probe_targets
 
 
 # =============================================================================
