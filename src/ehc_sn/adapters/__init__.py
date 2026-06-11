@@ -5,6 +5,6 @@ symbols live in family barrels such as ``ehc_sn.adapters.arena.tem`` and
 ``ehc_sn.adapters.mazehard.hrm``.
 """
 
-from . import arena, mazehard
+from . import arena, mazehard, seqmaze
 
-__all__ = ["arena", "mazehard"]
+__all__ = ["arena", "mazehard", "seqmaze"]
