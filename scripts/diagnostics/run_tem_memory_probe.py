@@ -25,13 +25,13 @@ from pprint import pprint
 import torch
 
 from ehc_sn.diagnostics.tem_memory_probe import (
-    produce_tem_memory_probe,
-    persist_tem_memory_probe,
     format_memory_probe_table,
+    persist_tem_memory_probe,
+    produce_tem_memory_probe,
 )
-from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1, TEMInputV1
-from ehc_sn.tasks.arena.runtime import ARENA_REPLAY_REQUIRED_KEYS
+from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMInputV1, TEMModelV1
 from ehc_sn.modules.autoencoder import TwoHotEncoder
+from ehc_sn.tasks.arena.runtime import ARENA_REPLAY_REQUIRED_KEYS
 
 # Arena replay does not use landmarks (values are -1/1 sentinels only).
 # We pass None to skip OVC correction and avoid shape mismatches in the MEC
@@ -104,15 +104,18 @@ def _batch_to_tem_input(
     encoder = TwoHotEncoder(observation_dim, feature_dim)
     device = next(model.parameters()).device
 
-    obs_ids = batch["trajectory_observation_id"][0, :T].long().to(device)  # (T,)
+    obs_ids = (
+        batch["trajectory_observation_id"][0, :T].long().to(device)
+    )  # (T,)
     prev_actions = batch["trajectory_previous_action"][0, :T].to(device)  # (T,)
-    episode_starts = (
-        batch.get("trajectory_episode_start", torch.zeros(T, dtype=torch.bool))[0, :T]
-        .to(device)
-    )
+    episode_starts = batch.get(
+        "trajectory_episode_start", torch.zeros(T, dtype=torch.bool)
+    )[0, :T].to(device)
 
     # Encode observations: one-hot → two-hot → replicate per frequency.
-    one_hot = torch.nn.functional.one_hot(obs_ids, num_classes=observation_dim).float()
+    one_hot = torch.nn.functional.one_hot(
+        obs_ids, num_classes=observation_dim
+    ).float()
     code = encoder(one_hot)  # (T, feature_dim)
 
     observation_embedding = [code.clone() for _ in range(n_freq)]
@@ -179,13 +182,12 @@ def main() -> None:
 
     print(f"Loading dataset from {args.dataset}")
     batch = _load_static_batch(args.dataset)
-    print(
-        f"  Episode steps: {batch['trajectory_observation_id'].shape[1]}"
-    )
+    print(f"  Episode steps: {batch['trajectory_observation_id'].shape[1]}")
 
     print("Building TEM input...")
     tem_input = _batch_to_tem_input(
-        batch, model,
+        batch,
+        model,
         observation_dim=args.observation_dim,
         feature_dim=args.feature_dim,
     )
@@ -203,7 +205,8 @@ def main() -> None:
     print("Running memory probe...")
     with torch.no_grad():
         result = produce_tem_memory_probe(
-            model, tem_input,
+            model,
+            tem_input,
             observation_ids=obs_ids,
             position_ids=position_ids,
         )
@@ -240,14 +243,24 @@ def main() -> None:
         print(f"\nNN Error Characterisation:")
         print(f"  top5_accuracy:             {sr.top5_accuracy:.3f}")
         print(f"  top10_accuracy:            {sr.top10_accuracy:.3f}")
-        print(f"  nn_temporal_dist_mean:     {sr.nn_temporal_distance_mean:.1f}")
-        print(f"  nn_temporal_dist_median:   {sr.nn_temporal_distance_median:.1f}")
+        print(
+            f"  nn_temporal_dist_mean:     {sr.nn_temporal_distance_mean:.1f}"
+        )
+        print(
+            f"  nn_temporal_dist_median:   {sr.nn_temporal_distance_median:.1f}"
+        )
         if sr.nn_same_observation_fraction is not None:
-            print(f"  nn_same_obs_fraction:      {sr.nn_same_observation_fraction:.3f}")
+            print(
+                f"  nn_same_obs_fraction:      {sr.nn_same_observation_fraction:.3f}"
+            )
         if sr.nn_same_position_fraction is not None:
-            print(f"  nn_same_position_fraction: {sr.nn_same_position_fraction:.3f}")
+            print(
+                f"  nn_same_position_fraction: {sr.nn_same_position_fraction:.3f}"
+            )
         if sr.nn_spatial_distance_mean is not None:
-            print(f"  nn_spatial_distance_mean:  {sr.nn_spatial_distance_mean:.3f}")
+            print(
+                f"  nn_spatial_distance_mean:  {sr.nn_spatial_distance_mean:.3f}"
+            )
 
     print(f"\nPersisting memory probe to {args.output_dir}")
     out_path = persist_tem_memory_probe(result, args.output_dir)
@@ -258,11 +271,11 @@ def main() -> None:
 
     # Build the full adapter, load its state dict, and use it directly.
     # This guarantees parity with the eval path encoder + decoder.
-    from ehc_sn.adapters.arena.tem import (
+    from ehc_sn.adapters.tem import (
         ArenaTEMAdapterSettings,
         ArenaTEMV1BridgeAdapter,
     )
-    from ehc_sn.adapters.arena.tem.core import ArenaEncoderConfig, ArenaDecoderConfig
+    from ehc_sn.adapters.tem._base import ArenaDecoderConfig, ArenaEncoderConfig
 
     adapter_config = ArenaTEMAdapterSettings(
         observation_dim=args.observation_dim,
@@ -273,7 +286,9 @@ def main() -> None:
     adapter = ArenaTEMV1BridgeAdapter(model, adapter_config)
 
     # Load adapter weights from the same checkpoint.
-    sd_full = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    sd_full = torch.load(
+        args.checkpoint, map_location="cpu", weights_only=False
+    )
     sd = sd_full.get("state_dict", sd_full)
     # Strip 'adapter.' prefix from keys that have it.
     adapter_sd = {}
@@ -290,12 +305,14 @@ def main() -> None:
     decoder_module = adapter._decoder.decoder
     w_x_val = float(adapter._decoder.w_x.item())
     b_x_tensor = adapter._decoder.b_x.detach().cpu()
-    print(f"  Decoder loaded: w_x={w_x_val:.4f}, b_x_norm={b_x_tensor.norm():.4f}")
+    print(
+        f"  Decoder loaded: w_x={w_x_val:.4f}, b_x_norm={b_x_tensor.norm():.4f}"
+    )
 
     from ehc_sn.diagnostics.tem_pathway_probe import (
-        produce_tem_pathway_probe,
-        persist_pathway_probe,
         format_pathway_probe_table,
+        persist_pathway_probe,
+        produce_tem_pathway_probe,
     )
 
     # Produce the pathway probe with the correctly-loaded adapter decoder.
@@ -303,7 +320,9 @@ def main() -> None:
     # but the decoder chain now uses the adapter's trained parameters.
     with torch.no_grad():
         pw_result = produce_tem_pathway_probe(
-            model, tem_input, obs_ids,
+            model,
+            tem_input,
+            obs_ids,
             prediction_freq=0,
             w_x_val=w_x_val,
             b_x=b_x_tensor,

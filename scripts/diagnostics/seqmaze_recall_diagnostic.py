@@ -18,8 +18,8 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from ehc_sn.adapters.seqmaze.hrm import SeqMazeProbeAdapterSettings
-from ehc_sn.adapters.seqmaze.hrm.hrm_v2 import SeqMazeProbeHRMV2BridgeAdapter
+from ehc_sn.adapters.hrm import SeqMazeProbeAdapterSettings
+from ehc_sn.adapters.hrm.seqmaze import SeqMazeProbeHRMV2BridgeAdapter
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
 from ehc_sn.tasks.seqmaze.runtime import extract_seqmaze_probe_targets
 from ehc_sn.utils.graph import (

@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from ehc_sn.adapters.mazehard.hrm import (
+from ehc_sn.adapters.hrm import (
     MazeHardHRMAdapterSettings,
     MazeHardHRMV1ACTTaskBinding,
     MazeHardHRMV1BridgeAdapter,

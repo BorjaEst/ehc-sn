@@ -4,16 +4,21 @@ This page renders the public Lightning package surface.
 
 ::: ehc_sn.lightning
 
-## Selected Lightning Modules
+## Regime Modules
 
-The Lightning family modules provide executable training orchestration and
-connect model families to adapters.
+`lightning/modules/` provides reusable LightningModules organized by
+training regime, not by task or model family. Each module is parameterized
+by component classes injected via a `Components` bundle.
 
-::: ehc_sn.lightning.tem.tem_v1
+::: ehc_sn.lightning.modules
 
-::: ehc_sn.lightning.hrm
+## Experiment Compositions
 
-::: ehc_sn.lightning.ehc
+`experiments/` provides explicit composition modules — one per
+`(task, family, version)` triple. Each module wires concrete model,
+adapter, controller, and objective classes into a regime module.
+
+::: ehc_sn.experiments
 
 ## Runtime Notes
 
@@ -21,10 +26,14 @@ connect model families to adapters.
   replay-evaluation integration.
 - Training callbacks schedule logging, checkpoints, figures, and evaluation
   regimes.
+- Training scripts import from `experiments/`, not from `lightning/`
+  directly.
 
 ## Related Modules
 
 - `ehc_sn.callbacks`
 - `ehc_sn.eval`
+- `ehc_sn.experiments`
 - `ehc_sn.objectives`
 - `ehc_sn.controllers`
+- `ehc_sn.training`

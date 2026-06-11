@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from ehc_sn.adapters.arena.ehc import (
+from ehc_sn.adapters.ehp import (
     ArenaEHCAdapterSettings,
     ArenaEHCTaskBinding,
     ArenaEHCV1BridgeAdapter,
 )
-from ehc_sn.adapters.arena.tem import (
+from ehc_sn.adapters.tem import (
     ArenaTEMAdapterSettings,
     ArenaTEMTaskBinding,
     ArenaTEMV1BridgeAdapter,

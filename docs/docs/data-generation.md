@@ -23,7 +23,7 @@ Stages:
 
 - fetch-raw
 - prepare-interim
-- materialize-shared
+- materialize-layouts
 - validate
 - build-all
 

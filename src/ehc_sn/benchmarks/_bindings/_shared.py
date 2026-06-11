@@ -6,15 +6,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ehc_sn.benchmarks.contracts import ArtifactManifest, TrackRecipe
-from ehc_sn.lightning.ehc.core._base import (
-    load_weights_from_checkpoint as load_ehc_weights,
-)
-from ehc_sn.lightning.hrm.core._base import (
-    load_weights_from_checkpoint as load_hrm_weights,
-)
-from ehc_sn.lightning.tem.core._base import (
-    load_weights_from_checkpoint as load_tem_weights,
-)
 from ehc_sn.models.ehc.ehc_v1 import EHCModelV1
 from ehc_sn.models.ehc.ehc_v1 import ModelSettingsV1 as EHCModelSettingsV1
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1
@@ -25,6 +16,9 @@ from ehc_sn.models.tem.tem_v1 import ModelSettingsV1 as TEMModelSettingsV1
 from ehc_sn.models.tem.tem_v1 import TEMModelV1
 from ehc_sn.models.tem.tem_v2 import ModelSettingsV2 as TEMModelSettingsV2
 from ehc_sn.models.tem.tem_v2 import TEMModelV2
+from ehc_sn.training.ehc import load_weights_from_checkpoint as load_ehc_weights
+from ehc_sn.training.hrm import load_weights_from_checkpoint as load_hrm_weights
+from ehc_sn.training.tem import load_weights_from_checkpoint as load_tem_weights
 
 
 # =============================================================================

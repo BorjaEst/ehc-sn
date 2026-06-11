@@ -332,53 +332,29 @@ def _build_executor_from_family_artifact(
     }
     paradigm = _FAMILY_TO_PARADIGM.get(model_family, model_family.split("-")[0])
 
-    if model_family == "ehc-v1":
-        from ehc_sn.lightning.ehc.ehc_v1 import (
-            EHCV1TrainingModel,
-            parse_ehc_v1_config,
+    if model_family == "hrm-v1":
+        from ehc_sn.experiments.mazehard.hrm_v1 import (
+            build_experiment as _build,
         )
 
-        executor = EHCV1TrainingModel(parse_ehc_v1_config(config_map))
-
-    elif model_family == "hrm-v1":
-        from ehc_sn.lightning.hrm.hrm_v1 import (
-            HRMV1ModelConfig,
-            HRMV1TrainingModel,
-        )
-
-        executor = HRMV1TrainingModel(
-            _build_model_config(config_map, HRMV1ModelConfig)
-        )
+        executor = _build(config_map)
 
     elif model_family == "hrm-v2":
-        from ehc_sn.lightning.hrm.hrm_v2 import (
-            HRMV2ModelConfig,
-            HRMV2TrainingModel,
+        from ehc_sn.experiments.mazehard.hrm_v2 import (
+            build_experiment as _build,
         )
 
-        executor = HRMV2TrainingModel(
-            _build_model_config(config_map, HRMV2ModelConfig)
-        )
+        executor = _build(config_map)
 
     elif model_family == "tem-v1":
-        from ehc_sn.lightning.tem.tem_v1 import (
-            TEMV1ModelConfig,
-            TEMV1TrainingModel,
-        )
+        from ehc_sn.experiments.arena.tem_v1 import build_experiment as _build
 
-        executor = TEMV1TrainingModel(
-            _build_model_config(config_map, TEMV1ModelConfig)
-        )
+        executor = _build(config_map)
 
     elif model_family == "tem-v2":
-        from ehc_sn.lightning.tem.tem_v2 import (
-            TEMV2ModelConfig,
-            TEMV2TrainingModel,
-        )
+        from ehc_sn.experiments.arena.tem_v2 import build_experiment as _build
 
-        executor = TEMV2TrainingModel(
-            _build_model_config(config_map, TEMV2ModelConfig)
-        )
+        executor = _build(config_map)
 
     else:
         raise ValueError(

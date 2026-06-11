@@ -45,19 +45,18 @@ flowchart LR
 
 ### 1. Figure Kind: Intended Use
 
-- **`dev`**: Testing-only placeholders (e.g. `dummy`).
 - **`diagnostic`**: Analysis figures used during development, evaluation, and experiments. The majority of registered figures.
-- **`report`**: Publication-quality figures (e.g. `overlay`). Only rendered through the offline report pipeline.
+- **`report`**: Publication-quality figures (e.g. `mazehard_solution_overlay`). Only rendered through the offline report pipeline.
 
 ### 2. Input Contract: Fidelity Required
 
 The contract determines **where** a figure can render:
 
-| Contract              | Produced By                                       | Can Render In                                                            | Examples                                                        |
-| --------------------- | ------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| `bounded_trace`       | Module diagnostic trace capture (validation step) | `FigureGenerationCallback`                                               | `halting_timeline`, `q_value_evolution`, `halt_logit_evolution` |
-| `evaluation_artifact` | Full evaluation regime run (provider + executor)  | `EvaluationRegimesCallback`, offline via `render_case` / `render_report` | `lec_summary`, `hpc_cells`, `evolution`, `occupancy_histogram`  |
-| `offline_artifact`    | Persisted artifact loaded from disk               | Offline via `render_report` only                                         | `overlay`                                                       |
+| Contract              | Produced By                                       | Can Render In                                                            | Examples                                                            |
+| --------------------- | ------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| `bounded_trace`       | Module diagnostic trace capture (validation step) | `FigureGenerationCallback`                                               | `halting_timeline`, `q_value_evolution`, `halt_logit_evolution`     |
+| `evaluation_artifact` | Full evaluation regime run (provider + executor)  | `EvaluationRegimesCallback`, offline via `render_case` / `render_report` | `hpc_cells`, `mazehard_prediction_evolution`, `occupancy_histogram` |
+| `offline_artifact`    | Persisted artifact loaded from disk               | Offline via `render_report` only                                         | `mazehard_solution_overlay`                                         |
 
 ## Figure Registry
 
@@ -78,22 +77,10 @@ list_figure_specs(input_contract="bounded_trace")
 
 ### All Registered Figures
 
-| Figure                  | Kind       | Contract              | Tags                                     | Required Trace Keys                                                                                |
-| ----------------------- | ---------- | --------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `dummy`                 | dev        | `bounded_trace`       | `episode`                                | `act/halted`                                                                                       |
-| `halting_timeline`      | diagnostic | `bounded_trace`       | `hrm`, `ehc`, `reasoning`, `halting`     | `act/halted`                                                                                       |
-| `halt_logit_evolution`  | diagnostic | `bounded_trace`       | `hrm`, `act`, `reasoning`, `halting`     | `value/q_logits`                                                                                   |
-| `q_value_evolution`     | diagnostic | `bounded_trace`       | `hrm`, `ehc`, `rl`, `reasoning`, `value` | `value/q_values`                                                                                   |
-| `lec_summary`           | diagnostic | `evaluation_artifact` | `lec`, `ehc`                             | `world_step/observation`, `diagnostic/lec/cells`, `lec/filter/alpha_sigmoid`, `lec/w_f_sigmoid`    |
-| `mec_summary`           | diagnostic | `evaluation_artifact` | `mec`, `ehc`                             | `world_step/location_ids`, `diagnostic/mec/location_mean`, `environments`                          |
-| `hpc_summary`           | diagnostic | `evaluation_artifact` | `hpc`, `ehc`                             | `world_step/location_ids`, `diagnostic/hpc/location_mean`, `diagnostic/hpc/memory`, `environments` |
-| `lec_pipeline`          | diagnostic | `evaluation_artifact` | `lec`, `ehc`                             | `world_step/observation`, `diagnostic/lec/cells`, `diagnostic/lec/filtered`                        |
-| `mec_cells`             | diagnostic | `evaluation_artifact` | `mec`, `ehc`                             | `world_step/location_ids`, `diagnostic/mec/location_mean`, `environments`                          |
-| `hpc_cells`             | diagnostic | `evaluation_artifact` | `hpc`, `ehc`                             | `world_step/location_ids`, `diagnostic/hpc/location_mean`, `environments`                          |
-| `evolution`             | diagnostic | `evaluation_artifact` | `mazehard`                               | `act/halted`, `pred/solution_overlay`, `input_ids`, `target/solution_overlay`                      |
-| `occupancy_histogram`   | diagnostic | `evaluation_artifact` | `tem`, `ehc`, `spatial`, `summary`       | `diagnostic/occupancy`                                                                             |
-| `hidden_norm_histogram` | diagnostic | `evaluation_artifact` | `tem`, `ehc`, `spatial`, `summary`       | `diagnostic/hidden_norms`, `diagnostic/hidden_norms_density`                                       |
-| `overlay`               | report     | `offline_artifact`    | `paper`, `mazehard`                      | `act/halted`, `pred/solution_overlay`, `input_ids`, `target/solution_overlay`                      |
+| Figure | Kind | Contract | Tags | Required Trace Keys |
+| ------ | ---- | -------- | ---- | ------------------- |
+
+TODO: update
 
 ### Capability-First Compatibility
 
@@ -152,7 +139,7 @@ trainer = Trainer(
 ```
 FigureGenerationCallback only supports bounded_trace figures.
 
-  lec_summary
+  lec_figure_example
     requires: evaluation_artifact
     Use: add this figure to an EvaluationRegimesCallback regime to capture
     full eval artifacts, then render it offline with render_report().
@@ -230,7 +217,7 @@ from ehc_sn.eval import render_report
 
 result = render_report(
     artifact_run="runs/.../artifacts/diagnostic/arena_diag/epoch-0005_step-00015000_epoch",
-    figures=["hpc_cells", "mec_cells", "lec_summary"],
+    figures=[...],
     output_dir="reports/arena_epoch_0005",
 )
 ```
@@ -280,7 +267,7 @@ are separate from full report rendering.
 ```python
 [eval_regimes.regimes.figure_request]
 enabled  = true
-figures  = ["lec_summary", "mec_summary", "hpc_summary"]
+figures  = [...]
 save_pdf = true
 ```
 
@@ -324,7 +311,7 @@ flowchart TB
 
         subgraph Plot["Plot Layer"]
             P1["plots/ratemap.py\nrate-map rendering"]
-            P2["plots/trajectory.py\ntime-coloured path overlay"]
+            P2["plots/trajectory.py\ntime-coloured path mazehard_solution_overlay"]
         end
 
         subgraph Core["Core Templates"]
