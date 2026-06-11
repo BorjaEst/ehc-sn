@@ -13,7 +13,7 @@ a persisted eval artifact (v3) compatible with the reporting system.
 
 Uses `ehc_sn.eval.offline.run_offline_eval`.
 
-### Usage
+### Evaluation Usage
 
 ```bash
 # TEM v1 Arena diagnostic (1 case, with traces for overlays)
@@ -26,7 +26,8 @@ python scripts/evaluation/run_eval.py \
     --provider-settings '{"dataset_path": "data/processed/arena/default/v1", "split": "test", "n_cases": 1}' \
     --regime-id arena_n1 --regime-kind diagnostic \
     --output artifacts/evaluation/tem_v1/arena_n1 --device cpu \
-    --trace-keys '["diagnostic/mec/location_mean","diagnostic/hpc/location_mean","diagnostic/lec/cells","diagnostic/lec/filtered","world_step/observation","pred/observation_id/inference","pred/observation_id/retrieved","pred/observation_id/ancestral"]'
+    --trace-keys '["diagnostic/mec/location_mean","diagnostic/hpc/location_mean","diagnostic/lec/cells","diagnostic/lec/filtered","diagnostic/lec/sensory_code","world_step/observation","pred/observation_id/inference","pred/observation_id/retrieved","pred/observation_id/ancestral"]'
+
 
 # TEM v2 Arena diagnostic (1 case, with traces for overlays)
 python scripts/evaluation/run_eval.py \
@@ -38,7 +39,7 @@ python scripts/evaluation/run_eval.py \
     --provider-settings '{"dataset_path": "data/processed/arena/default/v1", "split": "test", "n_cases": 1}' \
     --regime-id arena_n1 --regime-kind diagnostic \
     --output artifacts/evaluation/tem_v2/arena_n1 --device cpu \
-    --trace-keys '["diagnostic/mec/location_mean","diagnostic/hpc/location_mean","diagnostic/lec/cells","diagnostic/lec/filtered","world_step/observation","pred/observation_id/inference","pred/observation_id/retrieved","pred/observation_id/ancestral"]'
+    --trace-keys '["diagnostic/mec/location_mean","diagnostic/hpc/location_mean","diagnostic/lec/cells","diagnostic/lec/filtered","diagnostic/lec/sensory_code","world_step/observation","pred/observation_id/inference","pred/observation_id/retrieved","pred/observation_id/ancestral"]'
 
 # HRM v1 MazeHard full diagnostic (4 case, with traces)
 python scripts/evaluation/run_eval.py \
@@ -62,14 +63,14 @@ python scripts/evaluation/run_eval.py \
     --task mazehard \
     --provider-ref ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider \
     --provider-settings '{"dataset_path": "data/processed/mazehard/default/v1", "split": "test", "n_cases": 4}' \
-    --regime-id mazehard_n4 \
+    --regime-id mazehard_n1 \
     --regime-kind diagnostic \
-    --output artifacts/evaluation/hrm_v2/mazehard_n4 \
+    --output artifacts/evaluation/hrm_v2/mazehard_n1 \
     --trace-keys "pred/solution_overlay,act/halted" \
     --device cpu
 ```
 
-### Key Flags
+### Evaluation Key Flags
 
 | Flag                  | Description                                                    |
 | --------------------- | -------------------------------------------------------------- |
@@ -93,7 +94,7 @@ python scripts/evaluation/run_eval.py \
 Assembles a report run from existing eval artifacts using a `ReportSpec`
 TOML config. Calls `ehc_sn.reporting.builder.build_report_run`.
 
-### Usage
+### Report Usage
 
 ```bash
 # Assemble a report from existing eval artifacts
@@ -102,7 +103,7 @@ python scripts/reporting/run_report.py \
 
 # Override the output directory
 python scripts/reporting/run_report.py \
-    --config config/reporting/hrm_v2_mazehard_n4.toml \
+    --config config/reporting/hrm_v2_mazehard_n1.toml \
     --output /tmp/my_custom_report
 
 # Skip figure rendering (metrics only, faster)
@@ -116,7 +117,7 @@ python scripts/reporting/run_report.py \
     --no-metrics
 ```
 
-### Key Flags
+### Report Key Flags
 
 | Flag           | Description                                          |
 | -------------- | ---------------------------------------------------- |
@@ -127,7 +128,7 @@ python scripts/reporting/run_report.py \
 
 ### What It Produces
 
-```
+```text
 <output_dir>/
 ├── report_manifest.json      # authoritative artifact list
 ├── provenance.json           # creation metadata
