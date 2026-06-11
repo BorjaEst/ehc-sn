@@ -22,12 +22,17 @@ from ehc_sn.adapters.seqmaze import SeqMazeProbeAdapterSettings
 from ehc_sn.adapters.seqmaze.hrm_v2 import SeqMazeProbeHRMV2BridgeAdapter
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
 from ehc_sn.tasks.seqmaze._data import SeqMazeProbeIterableDataset
-from ehc_sn.tasks.seqmaze._graph_utils import generate_transition_dag, shortest_path
+from ehc_sn.tasks.seqmaze._graph_utils import (
+    generate_transition_dag,
+    shortest_path,
+)
 from ehc_sn.tasks.seqmaze.runtime import extract_seqmaze_probe_targets
 
 
 # =============================================================================
-def load_trained_adapter(device: torch.device) -> SeqMazeProbeHRMV2BridgeAdapter:
+def load_trained_adapter(
+    device: torch.device,
+) -> SeqMazeProbeHRMV2BridgeAdapter:
     """Load the already-trained probe adapter from its config and weights.
 
     Since the probe script saves no checkpoint, we retrain a minimal model
@@ -59,7 +64,9 @@ def load_trained_adapter(device: torch.device) -> SeqMazeProbeHRMV2BridgeAdapter
 
 
 # =============================================================================
-def train_diagnostic_model(device: torch.device) -> SeqMazeProbeHRMV2BridgeAdapter:
+def train_diagnostic_model(
+    device: torch.device,
+) -> SeqMazeProbeHRMV2BridgeAdapter:
     """Train a fresh probe model for diagnostic analysis."""
     config_path = "config/training/seqmaze-probe.toml"
     with Path(config_path).open("rb") as f:
@@ -88,16 +95,25 @@ def train_diagnostic_model(device: torch.device) -> SeqMazeProbeHRMV2BridgeAdapt
     adapter.to(device)
 
     train_dataset = SeqMazeProbeIterableDataset(
-        n_max=n_max, k_max=k_max, mode="train",
-        seed_start=0, n_samples=2000,
-        obs_vocab_size=vocab_size_obs, candidate_vocab_size=n_max + 1,
+        n_max=n_max,
+        k_max=k_max,
+        mode="train",
+        seed_start=0,
+        n_samples=2000,
+        obs_vocab_size=vocab_size_obs,
+        candidate_vocab_size=n_max + 1,
     )
     train_loader = DataLoader(
-        train_dataset, batch_size=global_batch_size,
-        num_workers=num_workers, shuffle=False, drop_last=True,
+        train_dataset,
+        batch_size=global_batch_size,
+        num_workers=num_workers,
+        shuffle=False,
+        drop_last=True,
     )
 
-    optimizer = torch.optim.AdamW(adapter.parameters(), lr=1e-3, weight_decay=1e-5)
+    optimizer = torch.optim.AdamW(
+        adapter.parameters(), lr=1e-3, weight_decay=1e-5
+    )
 
     for epoch in range(max_epochs):
         adapter.train()
@@ -112,7 +128,9 @@ def train_diagnostic_model(device: torch.device) -> SeqMazeProbeHRMV2BridgeAdapt
                 targets.edge_label.reshape(-1),
                 reduction="none",
             )
-            loss = (loss * targets.edge_mask.reshape(-1)).sum() / targets.edge_mask.sum().clamp(min=1)
+            loss = (
+                loss * targets.edge_mask.reshape(-1)
+            ).sum() / targets.edge_mask.sum().clamp(min=1)
 
             optimizer.zero_grad()
             loss.backward()
@@ -129,7 +147,9 @@ def train_diagnostic_model(device: torch.device) -> SeqMazeProbeHRMV2BridgeAdapt
                     bridge_out, _ = adapter(batch, state=None)
                     preds = bridge_out.probe.edge_logits.argmax(dim=-1)
                     mask = targets.edge_mask
-                    correct += ((preds == targets.edge_label) & mask).sum().item()
+                    correct += (
+                        ((preds == targets.edge_label) & mask).sum().item()
+                    )
                     total += mask.sum().item()
             acc = correct / max(total, 1)
             print(f"  Epoch {epoch:3d}: train_acc={acc:.4f}")
@@ -156,12 +176,17 @@ def diagnose_embedding_collisions(
     k_max = adapter.config.k_max
 
     eval_dataset = SeqMazeProbeIterableDataset(
-        n_max=n_max, k_max=k_max, mode="eval",
-        seed_start=10000, n_samples=500,
+        n_max=n_max,
+        k_max=k_max,
+        mode="eval",
+        seed_start=10000,
+        n_samples=500,
         obs_vocab_size=adapter.config.vocab_size_obs,
         candidate_vocab_size=n_max + 1,
     )
-    loader = DataLoader(eval_dataset, batch_size=32, shuffle=False, drop_last=False)
+    loader = DataLoader(
+        eval_dataset, batch_size=32, shuffle=False, drop_last=False
+    )
 
     adapter.eval()
 
@@ -176,8 +201,8 @@ def diagnose_embedding_collisions(
         bridge_out, _ = adapter(batch, state=None)
         logits = bridge_out.probe.edge_logits
         preds = logits.argmax(dim=-1)  # (B, N, N)
-        labels = targets.edge_label   # (B, N, N)
-        mask = targets.edge_mask      # (B, N, N)
+        labels = targets.edge_label  # (B, N, N)
+        mask = targets.edge_mask  # (B, N, N)
 
         # For each true positive edge, check if predicted correctly
         true_pos = (labels == 1) & mask  # (B, N, N)
@@ -201,11 +226,15 @@ def diagnose_embedding_collisions(
                     # Check if model predicted edge (ni -> sj) correctly
                     if not mask[bi, ni, sj].item():
                         continue
-                    correct = preds[bi, ni, sj].item() == labels[bi, ni, sj].item()
+                    correct = (
+                        preds[bi, ni, sj].item() == labels[bi, ni, sj].item()
+                    )
                     if not correct:
                         miss_count[key] = miss_count.get(key, 0) + 1
 
-    print(f"\nMiss rate by successor candidate index (eval, {sum(total_count.values())} total edges):")
+    print(
+        f"\nMiss rate by successor candidate index (eval, {sum(total_count.values())} total edges):"
+    )
     hit_rates = []
     for idx in sorted(total_count.keys()):
         total = total_count[idx]
@@ -213,26 +242,38 @@ def diagnose_embedding_collisions(
         hit_rate = 1.0 - misses / max(total, 1)
         hit_rates.append(hit_rate)
         bar = "#" * int(hit_rate * 30)
-        print(f"  succ_idx={idx:2d}: hit={hit_rate:.3f} ({total - misses}/{total}) {bar}")
+        print(
+            f"  succ_idx={idx:2d}: hit={hit_rate:.3f} ({total - misses}/{total}) {bar}"
+        )
 
     avg_hit = sum(hit_rates) / max(len(hit_rates), 1)
-    std_hit = (sum((h - avg_hit) ** 2 for h in hit_rates) / max(len(hit_rates), 1)) ** 0.5
-    print(f"\n  Mean hit rate across successor indices: {avg_hit:.3f} ± {std_hit:.3f}")
+    std_hit = (
+        sum((h - avg_hit) ** 2 for h in hit_rates) / max(len(hit_rates), 1)
+    ) ** 0.5
+    print(
+        f"\n  Mean hit rate across successor indices: {avg_hit:.3f} ± {std_hit:.3f}"
+    )
     if std_hit > 0.05:
-        print("  ⚠️  High variance — some successor indices are harder than others (collision risk).")
+        print(
+            "  ⚠️  High variance — some successor indices are harder than others (collision risk)."
+        )
     else:
-        print("  ✅ Low variance — misses are uniformly distributed across successor indices.")
+        print(
+            "  ✅ Low variance — misses are uniformly distributed across successor indices."
+        )
 
     # Also check E_candidate_index embedding cosine similarity
     print("\nE_candidate_index embedding cosine similarity matrix:")
-    emb = adapter._encoder.E_candidate_index.weight.data[:n_max + 1]
+    emb = adapter._encoder.E_candidate_index.weight.data[: n_max + 1]
     emb_norm = emb / emb.norm(dim=-1, keepdim=True)
     sim = emb_norm @ emb_norm.T
     for i in range(n_max + 1):
         others = [f"{sim[i,j]:.3f}" for j in range(n_max + 1) if j != i]
         max_sim = sim[i].clone()
         max_sim[i] = -1
-        print(f"  idx={i:2d}: max_cos_sim={max_sim.max():.3f}, mean_cos_sim={sim[i].mean():.3f}")
+        print(
+            f"  idx={i:2d}: max_cos_sim={max_sim.max():.3f}, mean_cos_sim={sim[i].mean():.3f}"
+        )
 
 
 # =============================================================================
@@ -250,12 +291,17 @@ def diagnose_degree_saturation(
     k_max = adapter.config.k_max
 
     eval_dataset = SeqMazeProbeIterableDataset(
-        n_max=n_max, k_max=k_max, mode="eval",
-        seed_start=10000, n_samples=500,
+        n_max=n_max,
+        k_max=k_max,
+        mode="eval",
+        seed_start=10000,
+        n_samples=500,
         obs_vocab_size=adapter.config.vocab_size_obs,
         candidate_vocab_size=n_max + 1,
     )
-    loader = DataLoader(eval_dataset, batch_size=32, shuffle=False, drop_last=False)
+    loader = DataLoader(
+        eval_dataset, batch_size=32, shuffle=False, drop_last=False
+    )
 
     adapter.eval()
 
@@ -265,7 +311,7 @@ def diagnose_degree_saturation(
     for batch in loader:
         batch = {k: v.to(device) for k, v in batch.items()}
         succ_indices = batch["successor_indices"]  # (B, N, K)
-        succ_mask = batch["successor_mask"]        # (B, N, K)
+        succ_mask = batch["successor_mask"]  # (B, N, K)
         targets = extract_seqmaze_probe_targets(batch)
         bridge_out, _ = adapter(batch, state=None)
         preds = bridge_out.probe.edge_logits.argmax(dim=-1)
@@ -282,8 +328,8 @@ def diagnose_degree_saturation(
                 if deg not in recall_by_deg:
                     recall_by_deg[deg] = []
                 # Recall for this node: fraction of true successors correctly predicted
-                true_succ = (labels[bi, ni, :] == 1)  # (N,)
-                pred_succ = (preds[bi, ni, :] == 1)   # (N,)
+                true_succ = labels[bi, ni, :] == 1  # (N,)
+                pred_succ = preds[bi, ni, :] == 1  # (N,)
                 n_true = true_succ.sum().item()
                 if n_true > 0:
                     n_correct = (true_succ & pred_succ).sum().item()
@@ -294,14 +340,21 @@ def diagnose_degree_saturation(
         values = recall_by_deg[deg]
         mean_recall = sum(values) / max(len(values), 1)
         bar = "#" * int(mean_recall * 30)
-        print(f"  degree={deg}: recall={mean_recall:.3f} (n={len(values)}) {bar}")
+        print(
+            f"  degree={deg}: recall={mean_recall:.3f} (n={len(values)}) {bar}"
+        )
 
     # Test: is there a monotonic degradation?
     if len(recall_by_deg) >= 2:
         sorted_deg = sorted(recall_by_deg.keys())
-        means = [sum(recall_by_deg[d]) / max(len(recall_by_deg[d]), 1) for d in sorted_deg]
+        means = [
+            sum(recall_by_deg[d]) / max(len(recall_by_deg[d]), 1)
+            for d in sorted_deg
+        ]
         if len(means) >= 2 and means[-1] < means[0] * 0.85:
-            print("  ⚠️  Significant recall degradation at higher degrees — degree saturation confirmed.")
+            print(
+                "  ⚠️  Significant recall degradation at higher degrees — degree saturation confirmed."
+            )
         else:
             print("  ✅ No significant degree saturation effect.")
 
@@ -326,12 +379,17 @@ def diagnose_random_scatter(
     k_max = adapter.config.k_max
 
     eval_dataset = SeqMazeProbeIterableDataset(
-        n_max=n_max, k_max=k_max, mode="eval",
-        seed_start=10000, n_samples=500,
+        n_max=n_max,
+        k_max=k_max,
+        mode="eval",
+        seed_start=10000,
+        n_samples=500,
         obs_vocab_size=adapter.config.vocab_size_obs,
         candidate_vocab_size=n_max + 1,
     )
-    loader = DataLoader(eval_dataset, batch_size=32, shuffle=False, drop_last=False)
+    loader = DataLoader(
+        eval_dataset, batch_size=32, shuffle=False, drop_last=False
+    )
 
     adapter.eval()
 
@@ -366,12 +424,22 @@ def diagnose_random_scatter(
             per_graph_precisions.append(precision)
 
     mean_recall = sum(per_graph_recalls) / max(len(per_graph_recalls), 1)
-    std_recall = (sum((r - mean_recall) ** 2 for r in per_graph_recalls) / max(len(per_graph_recalls), 1)) ** 0.5
-    mean_precision = sum(per_graph_precisions) / max(len(per_graph_precisions), 1)
-    std_precision = (sum((p - mean_precision) ** 2 for p in per_graph_precisions) / max(len(per_graph_precisions), 1)) ** 0.5
+    std_recall = (
+        sum((r - mean_recall) ** 2 for r in per_graph_recalls)
+        / max(len(per_graph_recalls), 1)
+    ) ** 0.5
+    mean_precision = sum(per_graph_precisions) / max(
+        len(per_graph_precisions), 1
+    )
+    std_precision = (
+        sum((p - mean_precision) ** 2 for p in per_graph_precisions)
+        / max(len(per_graph_precisions), 1)
+    ) ** 0.5
 
     print(f"\nPer-graph recall:  mean={mean_recall:.3f} ± {std_recall:.3f}")
-    print(f"Per-graph precision: mean={mean_precision:.3f} ± {std_precision:.3f}")
+    print(
+        f"Per-graph precision: mean={mean_precision:.3f} ± {std_precision:.3f}"
+    )
 
     # Expected std if binomial with mean recall and varying edge counts
     # For a graph with n nodes and avg k edges per node: E[edges_per_graph] ≈ n * k * 0.5
@@ -384,9 +452,13 @@ def diagnose_random_scatter(
     expected_std = mean_recall * (1 - mean_recall) ** 0.5  # upper bound
 
     if std_recall > 2 * expected_std:
-        print("  ⚠️  Variance exceeds binomial expectation — systematic per-graph bias (structure matters).")
+        print(
+            "  ⚠️  Variance exceeds binomial expectation — systematic per-graph bias (structure matters)."
+        )
     else:
-        print("  ✅ Variance consistent with random scatter — no systematic per-graph bias.")
+        print(
+            "  ✅ Variance consistent with random scatter — no systematic per-graph bias."
+        )
 
 
 # =============================================================================
@@ -431,19 +503,35 @@ def simulate_edge_drop_path_survival(
 
     survival_rate = still_has_unique_path / max(total_examined, 1) * 100
     increased_rate = path_length_increased / max(total_examined, 1) * 100
-    lost_rate = (total_examined - still_has_unique_path - path_length_increased) / max(total_examined, 1) * 100
+    lost_rate = (
+        (total_examined - still_has_unique_path - path_length_increased)
+        / max(total_examined, 1)
+        * 100
+    )
 
     print(f"\nTrials examined: {total_examined}")
-    print(f"  Path survived at same length: {survival_rate:.1f}% ({still_has_unique_path})")
-    print(f"  Path survived but longer:     {increased_rate:.1f}% ({path_length_increased})")
-    print(f"  No path remains:              {lost_rate:.1f}% ({total_examined - still_has_unique_path - path_length_increased})")
+    print(
+        f"  Path survived at same length: {survival_rate:.1f}% ({still_has_unique_path})"
+    )
+    print(
+        f"  Path survived but longer:     {increased_rate:.1f}% ({path_length_increased})"
+    )
+    print(
+        f"  No path remains:              {lost_rate:.1f}% ({total_examined - still_has_unique_path - path_length_increased})"
+    )
 
     if survival_rate > 70:
-        print("\n✅ Path survival >70% — 62% recall is tolerable for path inference.")
+        print(
+            "\n✅ Path survival >70% — 62% recall is tolerable for path inference."
+        )
     elif survival_rate > 40:
-        print("\n⚠️  Moderate path survival — recall gap is a real concern but may be manageable.")
+        print(
+            "\n⚠️  Moderate path survival — recall gap is a real concern but may be manageable."
+        )
     else:
-        print("\n❌ Low path survival — recall gap is CRITICAL and must be addressed before full seqmaze.")
+        print(
+            "\n❌ Low path survival — recall gap is CRITICAL and must be addressed before full seqmaze."
+        )
 
 
 # =============================================================================
@@ -461,12 +549,17 @@ def simulate_learned_edge_drop_path_survival(
     k_max = adapter.config.k_max
 
     eval_dataset = SeqMazeProbeIterableDataset(
-        n_max=n_max, k_max=k_max, mode="eval",
-        seed_start=10000, n_samples=n_samples,
+        n_max=n_max,
+        k_max=k_max,
+        mode="eval",
+        seed_start=10000,
+        n_samples=n_samples,
         obs_vocab_size=adapter.config.vocab_size_obs,
         candidate_vocab_size=n_max + 1,
     )
-    loader = DataLoader(eval_dataset, batch_size=1, shuffle=False, drop_last=False)
+    loader = DataLoader(
+        eval_dataset, batch_size=1, shuffle=False, drop_last=False
+    )
 
     adapter.eval()
 
@@ -481,13 +574,13 @@ def simulate_learned_edge_drop_path_survival(
         targets = extract_seqmaze_probe_targets(batch_dev)
         bridge_out, _ = adapter(batch_dev, state=None)
         preds = bridge_out.probe.edge_logits.argmax(dim=-1)  # (1, N, N)
-        labels = targets.edge_label                          # (1, N, N)
-        node_mask = batch_dev["node_mask"]                   # (1, N)
+        labels = targets.edge_label  # (1, N, N)
+        node_mask = batch_dev["node_mask"]  # (1, N)
 
         # Reconstruct adjacency from batch
         succ_indices = batch_cpu["successor_indices"][0]  # (N, K)
-        succ_mask = batch_cpu["successor_mask"][0]         # (N, K)
-        n_mask = node_mask[0]                               # (N,)
+        succ_mask = batch_cpu["successor_mask"][0]  # (N, K)
+        n_mask = node_mask[0]  # (N,)
         n = int(n_mask.sum().item())
 
         # Ground-truth adjacency (within the n actual nodes)
@@ -537,15 +630,29 @@ def simulate_learned_edge_drop_path_survival(
 
     survival_rate = still_has_unique_path / max(total_examined, 1) * 100
     increased_rate = path_length_increased / max(total_examined, 1) * 100
-    lost_rate = (total_examined - still_has_unique_path - path_length_increased) / max(total_examined, 1) * 100
+    lost_rate = (
+        (total_examined - still_has_unique_path - path_length_increased)
+        / max(total_examined, 1)
+        * 100
+    )
 
     print(f"\nSamples examined: {total_examined}")
-    print(f"  Path survived at same length:   {survival_rate:.1f}% ({still_has_unique_path})")
-    print(f"  Path survived but longer:       {increased_rate:.1f}% ({path_length_increased})")
-    print(f"  No path remains:                {lost_rate:.1f}% ({total_examined - still_has_unique_path - path_length_increased})")
-    print(f"  FP edges enabled new path:      {false_positives_creating_new_path}")
+    print(
+        f"  Path survived at same length:   {survival_rate:.1f}% ({still_has_unique_path})"
+    )
+    print(
+        f"  Path survived but longer:       {increased_rate:.1f}% ({path_length_increased})"
+    )
+    print(
+        f"  No path remains:                {lost_rate:.1f}% ({total_examined - still_has_unique_path - path_length_increased})"
+    )
+    print(
+        f"  FP edges enabled new path:      {false_positives_creating_new_path}"
+    )
     if survival_rate > 70:
-        print("\n✅ Path survival >70% — recall gap is tolerable for path inference.")
+        print(
+            "\n✅ Path survival >70% — recall gap is tolerable for path inference."
+        )
     elif survival_rate > 40:
         print("\n⚠️  Moderate path survival — recall gap is a real concern.")
     else:
