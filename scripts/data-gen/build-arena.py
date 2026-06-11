@@ -6,7 +6,7 @@ CLIs (build-dungeongen.py, build-openfield.py).
 
 This CLI has no source-specific code.  It reads the layout manifest to
 determine the action space, topology type, and observation vocabulary size,
-then calls :func:`build_arena_corpus_from_layouts`.
+then calls :func:`build_arena_task_corpus`.
 
 Stages
 ------
@@ -61,7 +61,7 @@ from ehc_sn.data.layout.io import load_layout_dataset
 from ehc_sn.data.lifecycle import validate_version_root
 from ehc_sn.tasks.arena import TASK_FAMILY as ARENA_TASK_FAMILY
 from ehc_sn.tasks.arena import (
-    build_arena_corpus_from_layouts,
+    build_arena_task_corpus,
     validate_arena_task_root,
 )
 
@@ -152,7 +152,7 @@ def materialize_task(  # ------------------------------------------------------
     layouts = load_layout_dataset(layout_root.resolve())
     print(f"  {len(layouts)} layouts loaded.")
 
-    build_arena_corpus_from_layouts(
+    build_arena_task_corpus(
         version_root=task_root.resolve(),
         layouts=layouts,
         corpus=corpus,
