@@ -112,9 +112,9 @@ declares report outputs (metrics, figures, rendered formats). Consumed by
 
 Files are named `{family}_{task}_n{cases}.toml`.
 
-| File                      | Model  | Task     | Cases | Figures                    |
-| ------------------------- | ------ | -------- | ----: | -------------------------- |
-| `tem_v1_arena_n4.toml`    | TEM v1 | Arena    |     4 | `arena_prediction_overlay` |
-| `tem_v2_arena_n4.toml`    | TEM v2 | Arena    |     4 | `arena_prediction_overlay` |
-| `hrm_v1_mazehard_n4.toml` | HRM v1 | MazeHard |     4 | `overlay`                  |
-| `hrm_v2_mazehard_n4.toml` | HRM v2 | MazeHard |     4 | `overlay`                  |
+| File                      | Model  | Task     | Cases | Figures |
+| ------------------------- | ------ | -------- | ----: | ------- |
+| `tem_v1_arena_n1.toml`    | TEM v1 | Arena    |     1 | TODO    |
+| `tem_v2_arena_n1.toml`    | TEM v2 | Arena    |     1 | TODO    |
+| `hrm_v1_mazehard_n1.toml` | HRM v1 | MazeHard |     1 | TODO    |
+| `hrm_v2_mazehard_n1.toml` | HRM v2 | MazeHard |     1 | TODO    |
