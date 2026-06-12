@@ -132,15 +132,15 @@ class ArenaEHCDiagnostics(DetachMixin):
         """Named latent consistency relations expected by :class:`~ehc_sn.objectives.ehc.EHCObjective`."""
         relations: dict[str, LatentRelation] = {
             GRID_TRANSITION_RELATION: LatentRelation(
-                lhs=self.grid_codes.posterior, rhs=self.grid_codes.prior
+                lhs=self.grid_codes.post, rhs=self.grid_codes.prior
             ),
             PLACE_TRANSITION_RELATION: LatentRelation(
-                lhs=self.place_codes.posterior, rhs=self.place_codes.retrieved
+                lhs=self.place_codes.post, rhs=self.place_codes.recall
             ),
         }
         if self.place_codes.sensory is not None:
             relations[PLACE_SENSORY_RELATION] = LatentRelation(
-                lhs=self.place_codes.posterior, rhs=self.place_codes.sensory
+                lhs=self.place_codes.post, rhs=self.place_codes.sensory
             )
         return relations
 

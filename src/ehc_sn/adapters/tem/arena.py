@@ -100,13 +100,13 @@ class ArenaOutputsDecoderV1(nn.Module):
         model_output: TEMOutputV1,
     ) -> ArenaTEMBridgeOutput:
         """Decode all three place pathways and return the split task + TEM surfaces."""
-        obs_inference = self._decode(model_output.pred_codes.inference)
+        obs_inference = self._decode(model_output.pred_codes.post)
         obs_retrieved = (
-            self._decode(model_output.pred_codes.retrieved)
-            if model_output.pred_codes.retrieved is not None
+            self._decode(model_output.pred_codes.recall)
+            if model_output.pred_codes.recall is not None
             else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)
         )
-        obs_ancestral = self._decode(model_output.pred_codes.ancestral)
+        obs_ancestral = self._decode(model_output.pred_codes.path)
 
         task = _base.ArenaTaskOutput(obs_logits=obs_inference)
         tem = _base.ArenaTEMDiagnostics(
@@ -285,13 +285,13 @@ class ArenaOutputsDecoderV2(nn.Module):
         model_output: TEMOutputV2,
     ) -> ArenaTEMBridgeOutput:
         """Decode all three place pathways and return the split task + TEM surfaces."""
-        obs_inference = self._decode(model_output.pred_codes.inference)
+        obs_inference = self._decode(model_output.pred_codes.post)
         obs_retrieved = (
-            self._decode(model_output.pred_codes.retrieved)
-            if model_output.pred_codes.retrieved is not None
+            self._decode(model_output.pred_codes.recall)
+            if model_output.pred_codes.recall is not None
             else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)
         )
-        obs_ancestral = self._decode(model_output.pred_codes.ancestral)
+        obs_ancestral = self._decode(model_output.pred_codes.path)
 
         task = _base.ArenaTaskOutput(obs_logits=obs_inference)
         tem = _base.ArenaTEMDiagnostics(
