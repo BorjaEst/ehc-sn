@@ -85,8 +85,14 @@ Generate datasets using the scripts under `scripts/data-gen/`.
 Example:
 
 ```bash
+# Build the shared substrate
+python scripts/data-gen/build-maze-nd.py --help
+python scripts/data-gen/build-maze-nd.py build-all
+
+# Then build the task corpus
 python scripts/data-gen/build-mazehard.py --help
-python scripts/data-gen/build-mazehard.py --output data/processed/mazehard
+python scripts/data-gen/build-mazehard.py materialize-task \
+    --parent-substrate data/processed/maze-nd/v1
 ```
 
 Other generators include:

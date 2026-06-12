@@ -10,6 +10,7 @@ python scripts/training/tem_v2_softmax.py --help
 python scripts/training/hrm_v1_baseline.py --help
 python scripts/training/hrm_v2_rl-striatum.py --help
 python scripts/training/ehc_v1_pretraining.py --help
+python scripts/data-gen/build-maze-nd.py --help
 python scripts/data-gen/build-mazehard.py --help
 python scripts/benchmarks/b0-mazehard.py --help
 python scripts/diagnostics/collect_artifact_bundle.py --help
@@ -20,10 +21,15 @@ python scripts/diagnostics/collect_artifact_bundle.py --help
 Generate datasets with the scripts in `scripts/data-gen/`.
 
 ```bash
-python scripts/data-gen/build-mazehard.py --output data/processed/mazehard
-python scripts/data-gen/build-arena.py --output data/processed/arena
-python scripts/data-gen/build-numberline.py --output data/processed/numberline
-python scripts/data-gen/build-dungeon.py --output data/processed/dungeon
+# Build shared substrates first
+python scripts/data-gen/build-maze-nd.py build-all
+
+# Then build task corpora
+python scripts/data-gen/build-mazehard.py materialize-task \
+    --parent-substrate data/processed/maze-nd/v1
+python scripts/data-gen/build-arena.py materialize-task ...
+python scripts/data-gen/build-numberline.py build-all
+python scripts/data-gen/build-dungeon.py materialize-task ...
 ```
 
 Generated data is typically stored under `data/processed/` and can be consumed by

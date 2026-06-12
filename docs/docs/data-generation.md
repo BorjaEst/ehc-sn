@@ -29,16 +29,26 @@ Stages:
 
 ### maze-nd (MazeHard substrate)
 
-Script: scripts/data-gen/build-mazehard.py
+Script: scripts/data-gen/build-maze-nd.py
 
 Stages:
 
 - fetch-raw
 - prepare-interim
 - materialize-shared
-- materialize-task
 - validate
 - build-all
+
+### mazehard
+
+Script: scripts/data-gen/build-mazehard.py
+
+Stages:
+
+- materialize-task
+- validate
+
+Requires maze-nd shared substrate.
 
 ### numberline
 
@@ -60,9 +70,8 @@ Stages:
 
 - materialize-task
 - validate
-- build-all
 
-Requires dungeongen shared substrate.
+Requires layout dataset from dungeongen or openfield.
 
 ### dungeon
 
@@ -72,7 +81,6 @@ Stages:
 
 - materialize-task
 - validate
-- build-all
 
 Requires dungeongen shared substrate.
 
@@ -84,7 +92,6 @@ Stages:
 
 - materialize-task
 - validate
-- build-all
 
 Requires numberline shared substrate.
 
@@ -94,15 +101,22 @@ Example for Arena or Dungeon:
 
 ```bash
 python scripts/data-gen/build-dungeongen.py build-all
-python scripts/data-gen/build-arena.py build-all
-python scripts/data-gen/build-dungeon.py build-all
+python scripts/data-gen/build-arena.py materialize-task ...
+python scripts/data-gen/build-dungeon.py materialize-task ...
 ```
 
 Example for Countwalk:
 
 ```bash
 python scripts/data-gen/build-numberline.py build-all
-python scripts/data-gen/build-countwalk.py build-all
+python scripts/data-gen/build-countwalk.py materialize-task ...
+```
+
+Example for MazeHard:
+
+```bash
+python scripts/data-gen/build-maze-nd.py build-all
+python scripts/data-gen/build-mazehard.py materialize-task ...
 ```
 
 ## Validation
