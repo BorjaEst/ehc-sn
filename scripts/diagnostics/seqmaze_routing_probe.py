@@ -358,7 +358,9 @@ class GraphPathEncoder(nn.Module):
         # (B, S, D)
 
         # Full mask: graph slots use schema_mask, path slots are always valid
-        path_mask = torch.ones(B, T, dtype=torch.bool, device=graph_tokens.device)
+        path_mask = torch.ones(
+            B, T, dtype=torch.bool, device=graph_tokens.device
+        )
         schema_mask_full = torch.cat([schema_mask, path_mask], dim=1)
 
         return schema_tokens, schema_mask_full
@@ -387,7 +389,9 @@ class PathProbeClassifier(nn.Module):
 
         self.heads = nn.ModuleList(
             [
-                nn.Linear(hidden_size, self.vocab_size, device=device, dtype=dtype)
+                nn.Linear(
+                    hidden_size, self.vocab_size, device=device, dtype=dtype
+                )
                 for _ in range(t_max)
             ]
         )
