@@ -7,11 +7,13 @@ Orchestrates the shared-substrate pipeline for the maze-nd source family:
 3. :func:`build_shared_substrate` — build the versioned immutable substrate root.
 
 Public surface: MazeNdSourceRecord, SHARED_FAMILY, SHARED_CHANNELS, ensure_raw,
-prepare_interim, build_shared_substrate, read_source_record_index.
+prepare_interim, build_shared_substrate.
 
-Shared-substrate channels (topology, mask_valid) are task-neutral.
-Task-owned channels (start, goals, solution) belong in the MazeHard task
-corpus; see ``ehc_sn.tasks.mazehard``.
+Shared-substrate channels include source problem annotations (start,
+goals, solution) in addition to structural channels (topology,
+mask_valid).  These are reusable source facts needed by downstream task
+builders, not task-owned labels.  Task protocol (episode encoding,
+target format) belongs in the respective task corpus.
 
 Interim layer: ``data/interim/maze-nd/`` — one JSONL file per raw split.
 Shared substrate: ``data/processed/maze-nd/v<version>/``
@@ -25,17 +27,38 @@ from typing import TypedDict
 
 import numpy as np
 
-from ehc_sn.data.lifecycle import extract_version, staging_root, write_index_at_root, write_split
+from ehc_sn.data.lifecycle import (
+    extract_version,
+    staging_root,
+    write_index_at_root,
+    write_split,
+)
 from ehc_sn.data.manifest import write_manifest
-from ehc_sn.data.substrate._maze_nd_raw import ensure_raw_corpus, iter_raw_records, normalize_raw_record
+from ehc_sn.data.substrate._maze_nd_raw import (
+    ensure_raw_corpus,
+    iter_raw_records,
+    normalize_raw_record,
+)
 from ehc_sn.data.substrate.grid2d import TOPOLOGY_KIND as _GRID2D_KIND
 from ehc_sn.data.substrate.grid2d import validate_grid2d_sample
 
 SHARED_FAMILY: str = "maze-nd"
 """Shared-substrate family name for the HuggingFace maze-nd source."""
 
-SHARED_CHANNELS: list[str] = ["topology", "mask_valid"]
-"""Shared-substrate channels. Task-owned channels live in the task corpus."""
+SHARED_CHANNELS: list[str] = [
+    "topology",
+    "mask_valid",
+    "start",
+    "goals",
+    "solution",
+]
+"""Shared-substrate channels including source problem annotations.
+
+Structural channels (topology, mask_valid) describe the maze layout.
+Source annotation channels (start, goals, solution) are reusable
+problem-instance facts from the upstream source, preserved so that
+downstream task builders do not depend on interim or raw records.
+"""
 
 _SPLITS: tuple[str, ...] = ("train", "val", "test")
 _SOURCE_ID: str = "huggingface/maze_hard_augmented"
@@ -66,7 +89,9 @@ class MazeNdSourceRecord(TypedDict):
 
 
 # ---------------------------------------------------------------------------
-def ensure_raw(raw_root: Path, *, repo_id: str = "flaitenberger/maze_hard_augmented") -> None:
+def ensure_raw(
+    raw_root: Path, *, repo_id: str = "flaitenberger/maze_hard_augmented"
+) -> None:
     """Download the maze-nd raw corpus into *raw_root* if not already present.
 
     Args:
@@ -94,7 +119,9 @@ def prepare_interim(raw_root: Path, interim_root: Path) -> None:
     for split in ("train", "test"):
         records = list(iter_raw_records(raw_root, split))
         if not records:
-            raise RuntimeError(f"No raw records for split '{split}' in {raw_root}.")
+            raise RuntimeError(
+                f"No raw records for split '{split}' in {raw_root}."
+            )
         out = interim_root / f"{split}.jsonl"
         with out.open("w") as fh:
             for r in records:
@@ -105,7 +132,9 @@ def _iter_interim_records(interim_root: Path, split: str):
     """Yield records from the maze-nd interim leaf."""
     path = interim_root / f"{split}.jsonl"
     if not path.exists():
-        raise FileNotFoundError(f"Interim file not found: {path}.  Run prepare-interim first.")
+        raise FileNotFoundError(
+            f"Interim file not found: {path}.  Run prepare-interim first."
+        )
     with path.open() as fh:
         for line in fh:
             yield json.loads(line)
@@ -122,30 +151,6 @@ def _sample_records(
         return list(records)
     indices = rng.choice(len(records), size=n, replace=False)
     return [records[int(i)] for i in indices]
-
-
-def read_source_record_index(interim_root: Path) -> dict[str, MazeNdSourceRecord]:
-    """Return a dict mapping source_record_id to :class:`MazeNdSourceRecord`.
-
-    Reads both interim splits (train and test) eagerly and builds a lookup
-    table keyed by ``"<split>:<puzzle_index>"`` — the same stable identity
-    stored in the substrate index.
-
-    Args:
-        interim_root: Directory containing the interim ``.jsonl`` files.
-
-    Returns:
-        ``{"train:N": MazeNdSourceRecord, "test:N": MazeNdSourceRecord, ...}``
-
-    Raises:
-        FileNotFoundError: When an interim JSONL file is missing.
-    """
-    raw_by_id: dict[str, MazeNdSourceRecord] = {}
-    for split in ("train", "test"):
-        for record in _iter_interim_records(interim_root, split):
-            rid = f"{split}:{record['puzzle_index']}"
-            raw_by_id[rid] = record  # type: ignore[assignment]
-    return raw_by_id
 
 
 def build_shared_substrate(
@@ -207,7 +212,9 @@ def build_shared_substrate(
     test_rng = np.random.default_rng(test_seq)
 
     raw_train_records = _sample_records(train_population, n_train, train_rng)
-    val_test_records = _sample_records(test_population, raw_test_needed, test_rng)
+    val_test_records = _sample_records(
+        test_population, raw_test_needed, test_rng
+    )
     raw_val_records = val_test_records[:n_val]
     raw_test_records = val_test_records[n_val:]
 
@@ -221,14 +228,28 @@ def build_shared_substrate(
     topo_shape: tuple[int, int] = first_normalized["topology"].shape
     n_states = topo_shape[0] * topo_shape[1]
 
-    stage_params = {"n_train": n_train, "n_val": n_val, "n_test": n_test, "seed": seed}
+    stage_params = {
+        "n_train": n_train,
+        "n_val": n_val,
+        "n_test": n_test,
+        "seed": seed,
+    }
 
     with staging_root(version_root) as tmp:
         all_entries = []
         for split, records in raw_by_split.items():
-            samples = [{ch: normalize_raw_record(r)[ch] for ch in SHARED_CHANNELS} for r in records]
+            samples = [
+                {ch: normalize_raw_record(r)[ch] for ch in SHARED_CHANNELS}
+                for r in records
+            ]
             raw_split = "test" if split in ("val", "test") else "train"
-            per_sample_extra = [{"source_record_id": f"{raw_split}:{r['puzzle_index']}"} for r in records]
+            per_sample_extra = [
+                {
+                    "source_record_id": f"{raw_split}:{r['puzzle_index']}",
+                    "task_metadata": {"group_index": r["group_index"]},
+                }
+                for r in records
+            ]
             entries = write_split(
                 tmp,
                 split,
@@ -260,10 +281,13 @@ def build_shared_substrate(
             builder="ehc_sn.data.substrate.maze_nd.build_shared_substrate",
             seed=seed,
             stage_params=stage_params,
+            shared_schema_version=2,
         )
 
     n_total = n_train + n_val + n_test
-    print(f"maze-nd shared substrate written to {version_root}  ({n_total} samples).")
+    print(
+        f"maze-nd shared substrate written to {version_root}  ({n_total} samples)."
+    )
 
 
 def validate_maze_nd_shared_root(root: Path) -> dict:
@@ -283,12 +307,19 @@ def validate_maze_nd_shared_root(root: Path) -> dict:
 
     manifest = validate_version_root(root)
     if manifest.get("family") != SHARED_FAMILY:
-        raise ValueError(f"Root family is {manifest.get('family')!r}, expected {SHARED_FAMILY!r}.")
+        raise ValueError(
+            f"Root family is {manifest.get('family')!r}, expected {SHARED_FAMILY!r}."
+        )
     if manifest.get("topology_kind") != _GRID2D_KIND:
-        raise ValueError(f"Root topology_kind is {manifest.get('topology_kind')!r}, expected {_GRID2D_KIND!r}.")
+        raise ValueError(
+            f"Root topology_kind is {manifest.get('topology_kind')!r}, expected {_GRID2D_KIND!r}."
+        )
     missing_ch = set(SHARED_CHANNELS) - set(manifest.get("channels", []))
     if missing_ch:
-        raise ValueError(f"Manifest missing required maze-nd channels: {sorted(missing_ch)}")
+        raise ValueError(
+            f"Manifest missing required maze-nd channels: {sorted(missing_ch)}"
+        )  # noqa: E501
+
     return manifest
 
 
@@ -299,6 +330,5 @@ __all__ = [
     "ensure_raw",
     "prepare_interim",
     "build_shared_substrate",
-    "read_source_record_index",
     "validate_maze_nd_shared_root",
 ]
