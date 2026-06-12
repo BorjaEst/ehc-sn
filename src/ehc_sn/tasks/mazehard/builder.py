@@ -3,17 +3,10 @@
 Owns MazeHard-specific task channel schema, validation, and the builder that
 produces the MazeHard task corpus over a parent maze-nd shared substrate.
 
-Task corpus channels extend the shared substrate (topology, mask_valid) with
-task-owned semantics:
-
-- ``start``: Agent start position(s) -- from source encoding 'S'.
-- ``goals``: Target goal position(s) -- from source encoding 'G'.
-- ``solution``: Supervised shortest-path labels -- from source labels field.
-
-The task builder joins by stable source identity: each substrate index entry
-carries a ``source_record_id`` (e.g. ``"train:12345"``) that maps back to the
-raw puzzle_index.  The raw corpus is indexed on first use and looked up by
-identity, not by split-local position.
+All channels (topology, mask_valid, start, goals, solution) are read from
+the parent substrate, which is enriched with source problem annotations from
+schema version 2 onward.  The task builder does not depend on interim or raw
+records.
 
 Path written: ``data/processed/mazehard/<corpus>/v<version>/``
 """
@@ -33,18 +26,11 @@ from ehc_sn.data.lifecycle import (
     write_split,
 )
 from ehc_sn.data.manifest import write_manifest
-from ehc_sn.data.substrate.maze_nd import (
-    SHARED_CHANNELS as MAZE_ND_SUBSTRATE_CHANNELS,
-)
 from ehc_sn.data.substrate.maze_nd import SHARED_FAMILY as MAZE_ND_SHARED_FAMILY
-from ehc_sn.data.substrate.maze_nd import (
-    read_source_record_index,
-)
 from ehc_sn.data.substrate.reader import (
     iter_substrate_entries_and_samples,
     load_substrate_manifest,
 )
-from ehc_sn.tasks.mazehard._source_record import source_record_to_task_channels
 
 # =============================================================================
 TASK_FAMILY: Final[str] = "mazehard"
@@ -64,6 +50,15 @@ Task-owned channels (start, goals, solution) encode the navigation goal and
 supervised path, read from the raw source by stable source identity.
 """
 
+_MAZEHARD_REQUIRED_PARENT_CHANNELS: tuple[str, ...] = (
+    "topology",
+    "mask_valid",
+    "start",
+    "goals",
+    "solution",
+)
+"""Channels the mazehard task builder requires in the parent maze-nd substrate."""
+
 MAZEHARD_TASK_CHANNEL_DTYPES: dict[str, np.dtype] = {
     "topology": np.dtype(bool),
     "mask_valid": np.dtype(bool),
@@ -74,8 +69,6 @@ MAZEHARD_TASK_CHANNEL_DTYPES: dict[str, np.dtype] = {
 """Expected numpy dtypes for MazeHard task corpus channels."""
 
 _SPLITS: tuple[str, ...] = ("train", "val", "test")
-_SUBSTRATE_CHANNELS: list[str] = ["topology", "mask_valid"]
-_TASK_OWNED_CHANNELS: list[str] = ["start", "goals", "solution"]
 
 
 # =============================================================================
@@ -175,7 +168,6 @@ def build_mazehard_task_corpus(
     version_root: Path,
     *,
     parent_substrate: Path,
-    interim_root: Path,
     corpus: str = "default",
     n_train: int = 200,
     n_val: int = 40,
@@ -184,11 +176,9 @@ def build_mazehard_task_corpus(
 ) -> None:
     """Build the MazeHard task corpus at *version_root*.
 
-    Reads topology and mask_valid from the parent maze-nd shared substrate by
-    stable source identity (``source_record_id`` in the substrate index), then
-    joins with the corresponding interim records to recover start, goals, and
-    solution channels.  Writes a versioned, immutable task corpus with per-sample
-    provenance retained in the task index.
+    All channels (topology, mask_valid, start, goals, solution) are read
+    from the parent maze-nd shared substrate.  The task builder does not
+    depend on interim or raw records.
 
     The version integer is derived from the ``v<N>`` leaf of *version_root*;
     there is no separate ``version`` parameter.
@@ -197,9 +187,8 @@ def build_mazehard_task_corpus(
         version_root: Destination versioned root
             (e.g. ``data/processed/mazehard/default/v1``).  Must not exist.
         parent_substrate: Path to the parent maze-nd shared substrate version
-            root.  Must contain a ``manifest.json``.
-        interim_root: Path to the interim MazeHard directory (containing
-            ``train.jsonl`` and ``test.jsonl``).
+            root.  Must contain a ``manifest.json`` with all required
+            channels (topology, mask_valid, start, goals, solution).
         corpus: Corpus label (e.g. ``"default"``).
         n_train: Number of training samples (capped by substrate split size).
         n_val: Number of validation samples (capped by substrate split size).
@@ -208,11 +197,10 @@ def build_mazehard_task_corpus(
 
     Raises:
         FileExistsError: When *version_root* already exists (immutable root).
-        FileNotFoundError: When *parent_substrate* has no manifest, or interim
-            files are missing.
-        ValueError: When the parent is not a ``maze-nd`` shared_substrate,
-            or a substrate entry has no ``source_record_id``, or a
-            source_record_id is not found in the interim index.
+        FileNotFoundError: When *parent_substrate* has no manifest.
+        ValueError: When the parent is not a ``maze-nd`` shared_substrate, or
+            the parent lacks required source annotation channels (start,
+            goals, solution), or requested split counts exceed availability.
     """
     version = extract_version(version_root)
     parent_manifest = load_substrate_manifest(parent_substrate)
@@ -221,6 +209,21 @@ def build_mazehard_task_corpus(
         raise ValueError(
             f"MazeHard task corpus requires a {MAZE_ND_SHARED_FAMILY!r} shared "
             f"substrate, got family={parent_manifest.get('family')!r}."
+        )
+
+    # Validate parent substrate has all required channels.
+    parent_channels = set(parent_manifest.get("channels", []))
+    missing = [
+        ch
+        for ch in _MAZEHARD_REQUIRED_PARENT_CHANNELS
+        if ch not in parent_channels
+    ]
+    if missing:
+        raise ValueError(
+            f"Parent substrate is maze-nd but lacks required source annotation "
+            f"channels: {', '.join(missing)}. "
+            f"Rebuild the maze-nd substrate with shared_schema_version >= 2.\n"
+            f"    python scripts/data-gen/build-maze-nd.py build-all"
         )
 
     split_counts = {"train": n_train, "val": n_val, "test": n_test}
@@ -235,8 +238,6 @@ def build_mazehard_task_corpus(
     parent_extent: list[int] = parent_manifest["extent"]
     parent_topology_kind: str = parent_manifest["topology_kind"]
     parent_n_states: int = parent_manifest["n_states"]
-
-    raw_by_id = read_source_record_index(interim_root)
 
     stage_params = {
         "corpus": corpus,
@@ -265,7 +266,9 @@ def build_mazehard_task_corpus(
             n = split_counts[split]
             entry_sample_pairs = list(
                 iter_substrate_entries_and_samples(
-                    parent_substrate, split, _SUBSTRATE_CHANNELS
+                    parent_substrate,
+                    split,
+                    list(_MAZEHARD_REQUIRED_PARENT_CHANNELS),
                 )
             )
             entry_sample_pairs = _sample_entry_pairs(
@@ -282,22 +285,21 @@ def build_mazehard_task_corpus(
                         f"Substrate entry {entry.id!r} has no source_record_id. "
                         "Rebuild the parent substrate."
                     )
-                raw_record = raw_by_id.get(entry.source_record_id)
-                if raw_record is None:
-                    raise ValueError(
-                        f"source_record_id {entry.source_record_id!r} "
-                        f"not found in interim at {interim_root}."
-                    )
-                task_channels = source_record_to_task_channels(raw_record)
-                sample = {**substrate_sample, **task_channels}
-                samples.append(sample)
+                samples.append(substrate_sample)
+                group_index = (
+                    entry.task_metadata.get("group_index")
+                    if entry.task_metadata
+                    else None
+                )
                 per_sample_extra.append(
                     {
                         "source_record_id": entry.source_record_id,
                         "task_metadata": {
-                            "puzzle_index": raw_record["puzzle_index"],
-                            "group_index": raw_record["group_index"],
-                            "raw_split": raw_record["set"],
+                            "puzzle_index": int(
+                                entry.source_record_id.split(":")[1]
+                            ),
+                            "group_index": group_index,
+                            "raw_split": entry.source_record_id.split(":")[0],
                         },
                     }
                 )
