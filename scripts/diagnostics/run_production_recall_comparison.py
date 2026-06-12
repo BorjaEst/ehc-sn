@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Quick comparison: raw grid query vs production p_retrieved vs p_post.
+"""Quick comparison: raw grid query vs production p_recall vs p_post.
 
 Measures how the production AttractorRead (one pass, hierarchical masks)
 changes the grid query relative to the posterior bank.
@@ -125,7 +125,7 @@ def main() -> None:
     state = model.init_state(1, device=device)
 
     p_post_flat_list = []
-    p_retrieved_flat_list = []
+    p_recall_flat_list = []
     g_query_post_flat_list = []
     g_query_prior_flat_list = []
     all_obs = []
@@ -152,7 +152,7 @@ def main() -> None:
                     dim=-1,
                 )
             )
-            p_retrieved_flat_list.append(
+            p_recall_flat_list.append(
                 torch.cat(
                     [p.clone().cpu() for p in output.place_codes.retrieved],
                     dim=-1,
@@ -173,7 +173,7 @@ def main() -> None:
             all_obs.append(batch["trajectory_observation_id"][0, t].item())
 
     p_post = torch.cat(p_post_flat_list, dim=0)
-    p_retrieved = torch.cat(p_retrieved_flat_list, dim=0)
+    p_recall = torch.cat(p_recall_flat_list, dim=0)
     g_query_post = torch.cat(g_query_post_flat_list, dim=0)
     g_query_prior = torch.cat(g_query_prior_flat_list, dim=0)
 
@@ -238,7 +238,7 @@ def main() -> None:
         "p_post (target)": _nn_metrics(p_post, p_post),
         "raw g_query_post  ": _nn_metrics(g_query_post, p_post),
         "raw g_query_prior ": _nn_metrics(g_query_prior, p_post),
-        "prod p_retrieved  ": _nn_metrics(p_retrieved, p_post),
+        "prod p_recall  ": _nn_metrics(p_recall, p_post),
     }
 
     print(
@@ -252,8 +252,8 @@ def main() -> None:
 
     # Direction: does production improve over raw query?
     g = metrics["raw g_query_post  "]
-    p = metrics["prod p_retrieved  "]
-    print(f"\n  delta (p_retrieved - g_query_post):")
+    p = metrics["prod p_recall  "]
+    print(f"\n  delta (p_recall - g_query_post):")
     print(f"    cos_match: {p['cos_match'] - g['cos_match']:+.4f}")
     print(f"    nn_acc:    {p['nn_acc'] - g['nn_acc']:+.4f}")
     print(f"    same_obs:  {p['same_obs'] - g['same_obs']:+.4f}")
@@ -261,7 +261,7 @@ def main() -> None:
 
     # Also check delta from raw to production for g_prior
     g2 = metrics["raw g_query_prior "]
-    print(f"\n  delta (p_retrieved - g_query_prior):")
+    print(f"\n  delta (p_recall - g_query_prior):")
     print(f"    cos_match: {p['cos_match'] - g2['cos_match']:+.4f}")
     print(f"    nn_acc:    {p['nn_acc'] - g2['nn_acc']:+.4f}")
     print(f"    same_obs:  {p['same_obs'] - g2['same_obs']:+.4f}")
