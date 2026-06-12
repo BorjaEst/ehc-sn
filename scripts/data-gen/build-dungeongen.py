@@ -35,7 +35,7 @@ With explicit grid shape override::
 
 Build an Arena corpus from dungeongen layouts::
 
-    python build-arena.py build-all \\
+    python build-arena.py materialize-task \
         --layout-root data/interim/dungeongen/default/v1 \\
         --corpus dungeons
 """

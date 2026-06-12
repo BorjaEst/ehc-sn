@@ -16,8 +16,8 @@ validate           Validate an Arena task-corpus version root.
 
 Default paths
 -------------
-Interim:           <user-specified --layout-root>
-Task corpus:       data/processed/arena/<corpus>/v<version>
+Parent layout dataset:  <user-specified --layout-root>
+Task corpus:            data/processed/arena/<corpus>/v<version>
 
 Documented recipes
 ------------------
@@ -31,7 +31,7 @@ Openfield square (TEM reproduction)::
 Standard dungeongen recipe::
 
     python build-arena.py materialize-task \\
-        --layout-root data/interim/dungeongen/v1 \\
+        --layout-root data/interim/dungeongen/default/v1 \\
         --corpus dungeons \\
         --walk-policy no_immediate_backtrack
 
@@ -40,13 +40,13 @@ Examples
 Build from openfield square layouts::
 
     python build-arena.py materialize-task \\
-        --layout-root data/interim/openfield/square/v1 \\
+        --layout-root data/interim/openfield/tem-square/v1 \\
         --corpus openfield-square
 
 Build from dungeongen layouts::
 
     python build-arena.py materialize-task \\
-        --layout-root data/interim/dungeongen/v1 \\
+        --layout-root data/interim/dungeongen/default/v1 \\
         --corpus dungeons
 """
 
