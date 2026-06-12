@@ -7,7 +7,7 @@ The decoder chain is::
 
     p_*  →  lec_to_hpc.inverse(p_*)  →  prediction_freq slice  →  w_x * code + b_x  →  MLPDecoder  →  logits
 
-Stage 0: Place code (p_post / p_retrieved / p_prior)
+Stage 0: Place code (p_post / p_recall / p_path)
 Stage 1: Inverse-projected sensory code (lec_to_hpc.inverse)
 Stage 2: Single-frequency slice (prediction_freq)
 Stage 3: Decoder input after w_x/b_x transform
@@ -33,9 +33,8 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.models.tem.tem_v1 import TEMModelV1, TEMInputV1
+from ehc_sn.models.tem.tem_v1 import TEMInputV1, TEMModelV1
 from ehc_sn.types import DenseMemoryStore
-
 
 # =============================================================================
 # Stage schema
@@ -166,7 +165,9 @@ def _effective_rank(z: Tensor) -> float:
 def _stage_metrics(code: Tensor) -> StageMetrics:
     """Compute StageMetrics from a ``(T, D)`` code tensor."""
     if code.ndim != 2:
-        raise ValueError(f"Expected rank-2 (T, D) tensor, got shape {tuple(code.shape)}.")
+        raise ValueError(
+            f"Expected rank-2 (T, D) tensor, got shape {tuple(code.shape)}."
+        )
     T = int(code.shape[0])
     if T < 2:
         return StageMetrics()
@@ -270,8 +271,8 @@ def produce_tem_pathway_probe(  # -------------------------------------------
 
     # ---- Forward pass: collect intermediate codes per step ----
     all_p_post: list[list[Tensor]] = []
-    all_p_retrieved: list[list[Tensor]] = []
-    all_p_prior: list[list[Tensor]] = []
+    all_p_recall: list[list[Tensor]] = []
+    all_p_path: list[list[Tensor]] = []
 
     with torch.no_grad():
         for t in range(T):
@@ -293,24 +294,25 @@ def produce_tem_pathway_probe(  # -------------------------------------------
             all_p_post.append(
                 [p.clone().cpu() for p in output.place_codes.posterior]
             )
-            all_p_prior.append(
+            all_p_path.append(
                 [p.clone().cpu() for p in output.place_codes.prior]
             )
             if output.place_codes.retrieved is not None:
-                all_p_retrieved.append(
+                all_p_recall.append(
                     [p.clone().cpu() for p in output.place_codes.retrieved]
                 )
 
     # Stack per-step codes: list of (T, D_f) per frequency
     def _stack(bundle: list[list[Tensor]]) -> list[Tensor]:
         return [
-            torch.cat([step[f] for step in bundle], dim=0) for f in range(n_freq)
+            torch.cat([step[f] for step in bundle], dim=0)
+            for f in range(n_freq)
         ]
 
     p_post = _stack(all_p_post)
-    p_prior = _stack(all_p_prior)
-    has_retrieved = len(all_p_retrieved) == T
-    p_retrieved = _stack(all_p_retrieved) if has_retrieved else p_post
+    p_path = _stack(all_p_path)
+    has_retrieved = len(all_p_recall) == T
+    p_recall = _stack(all_p_recall) if has_retrieved else p_post
 
     obs_ids = observation_ids.to(device="cpu", dtype=torch.long)
 
@@ -319,13 +321,13 @@ def produce_tem_pathway_probe(  # -------------------------------------------
         return torch.cat(bundle, dim=-1)  # (T, S)
 
     s0_post = _stage_metrics(_flatten(p_post))
-    s0_ret = _stage_metrics(_flatten(p_retrieved))
-    s0_pri = _stage_metrics(_flatten(p_prior))
+    s0_ret = _stage_metrics(_flatten(p_recall))
+    s0_pri = _stage_metrics(_flatten(p_path))
 
     # ---- Stage 1: Inverse projection (lec_to_hpc.inverse) ----
     inv_post = model.lec_to_hpc.inverse(p_post)  # list of (T, D_f) in LEC space
-    inv_ret = model.lec_to_hpc.inverse(p_retrieved)
-    inv_pri = model.lec_to_hpc.inverse(p_prior)
+    inv_ret = model.lec_to_hpc.inverse(p_recall)
+    inv_pri = model.lec_to_hpc.inverse(p_path)
 
     s1_post = _stage_metrics(torch.cat(inv_post, dim=-1))
     s1_ret = _stage_metrics(torch.cat(inv_ret, dim=-1))
@@ -447,24 +449,40 @@ def format_pathway_probe_table(  # --------------------------------------------
     ]
 
     def _row(
-        stage: int, name: str, inf: StageMetrics, ret: StageMetrics, pri: StageMetrics
+        stage: int,
+        name: str,
+        inf: StageMetrics,
+        ret: StageMetrics,
+        pri: StageMetrics,
     ) -> str:
         pc_inf = _fmt(inf.pairwise_cosine_mean)
         pc_ret = _fmt(ret.pairwise_cosine_mean)
         pc_pri = _fmt(pri.pairwise_cosine_mean)
-        return (
-            f"| {stage} | {name:<20s} | {pc_inf:>8s} | {pc_ret:>8s} | {pc_pri:>8s} |"
-        )
+        return f"| {stage} | {name:<20s} | {pc_inf:>8s} | {pc_ret:>8s} | {pc_pri:>8s} |"
 
-    lines.append("| Stage | Name                 | inference | retrieved | ancestral |")
-    lines.append("| ----- | -------------------- | --------- | --------- | --------- |")
+    lines.append(
+        "| Stage | Name                 | inference | retrieved | ancestral |"
+    )
+    lines.append(
+        "| ----- | -------------------- | --------- | --------- | --------- |"
+    )
     for s in range(N_STAGES):
         lines.append(
-            _row(s, STAGE_NAMES[s], result.inference[s], result.retrieved[s], result.ancestral[s])
+            _row(
+                s,
+                STAGE_NAMES[s],
+                result.inference[s],
+                result.retrieved[s],
+                result.ancestral[s],
+            )
         )
     lines.append("")
-    lines.append("| Stage | Name                 | contrast inf/ret | contrast inf/pri |")
-    lines.append("| ----- | -------------------- | ---------------- | ---------------- |")
+    lines.append(
+        "| Stage | Name                 | contrast inf/ret | contrast inf/pri |"
+    )
+    lines.append(
+        "| ----- | -------------------- | ---------------- | ---------------- |"
+    )
     for s in range(N_STAGES):
         cr = _fmt(result.contrast_inference_vs_retrieved[s])
         ca = _fmt(result.contrast_inference_vs_ancestral[s])

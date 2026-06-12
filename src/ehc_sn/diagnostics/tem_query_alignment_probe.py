@@ -581,8 +581,8 @@ def produce_tem_query_alignment_probe(  # --------------------------------------
 
     # Per-timestep storage: each is a list of frequency bundles.
     p_post_store: list[list[Tensor]] = []
-    p_retrieved_store: list[list[Tensor]] = []
-    p_prior_store: list[list[Tensor]] = []
+    p_recall_store: list[list[Tensor]] = []
+    p_path_store: list[list[Tensor]] = []
     g_post_store: list[list[Tensor]] = []
     g_prior_store: list[list[Tensor]] = []
 
@@ -612,15 +612,15 @@ def produce_tem_query_alignment_probe(  # --------------------------------------
             p_post_store.append(
                 [p.clone().cpu() for p in output.place_codes.posterior]
             )
-            p_prior_store.append(
+            p_path_store.append(
                 [p.clone().cpu() for p in output.place_codes.prior]
             )
             if output.place_codes.retrieved is not None:
-                p_retrieved_store.append(
+                p_recall_store.append(
                     [p.clone().cpu() for p in output.place_codes.retrieved]
                 )
             else:
-                p_retrieved_store.append(
+                p_recall_store.append(
                     [p.clone().cpu() for p in output.place_codes.prior]
                 )
 
@@ -640,15 +640,15 @@ def produce_tem_query_alignment_probe(  # --------------------------------------
         ]
 
     p_post_bundle = _stack_bundle(p_post_store)
-    p_retrieved_bundle = _stack_bundle(p_retrieved_store)
-    p_prior_bundle = _stack_bundle(p_prior_store)
+    p_recall_bundle = _stack_bundle(p_recall_store)
+    p_path_bundle = _stack_bundle(p_path_store)
     g_post_bundle = _stack_bundle(g_post_store)
     g_prior_bundle = _stack_bundle(g_prior_store)
 
     # ---- Flatten to (T, S) ----
     p_post_flat = torch.cat(p_post_bundle, dim=-1)
-    p_retrieved_flat = torch.cat(p_retrieved_bundle, dim=-1)
-    p_prior_flat = torch.cat(p_prior_bundle, dim=-1)
+    p_recall_flat = torch.cat(p_recall_bundle, dim=-1)
+    p_path_flat = torch.cat(p_path_bundle, dim=-1)
 
     # ---- Project grid codes into HPC space ----
     g_query_post_bundle = model.mec_to_hpc(g_post_bundle)
@@ -680,8 +680,8 @@ def produce_tem_query_alignment_probe(  # --------------------------------------
     # ---- Assemble queries ----
     queries: dict[str, Tensor] = {
         "p_post": p_post_flat,
-        "p_retrieved": p_retrieved_flat,
-        "p_prior": p_prior_flat,
+        "p_recall": p_recall_flat,
+        "p_path": p_path_flat,
         "mec_to_hpc_g_post": g_query_post_flat,
         "mec_to_hpc_g_prior": g_query_prior_flat,
         "lec_to_hpc_x": x_query_flat,
@@ -1029,8 +1029,8 @@ def produce_tem_attractor_field_probe(  # --------------------------------------
     state = model.init_state(1, device=device)
 
     p_post_store: list[list[Tensor]] = []
-    p_retrieved_store: list[list[Tensor]] = []
-    p_prior_store: list[list[Tensor]] = []
+    p_recall_store: list[list[Tensor]] = []
+    p_path_store: list[list[Tensor]] = []
     g_post_store: list[list[Tensor]] = []
     g_prior_store: list[list[Tensor]] = []
 
@@ -1059,15 +1059,15 @@ def produce_tem_attractor_field_probe(  # --------------------------------------
             p_post_store.append(
                 [p.clone().cpu() for p in output.place_codes.posterior]
             )
-            p_prior_store.append(
+            p_path_store.append(
                 [p.clone().cpu() for p in output.place_codes.prior]
             )
             if output.place_codes.retrieved is not None:
-                p_retrieved_store.append(
+                p_recall_store.append(
                     [p.clone().cpu() for p in output.place_codes.retrieved]
                 )
             else:
-                p_retrieved_store.append(
+                p_recall_store.append(
                     [p.clone().cpu() for p in output.place_codes.prior]
                 )
             g_post_store.append(
@@ -1085,14 +1085,14 @@ def produce_tem_attractor_field_probe(  # --------------------------------------
         ]
 
     p_post_bundle = _stack_bundle(p_post_store)
-    p_retrieved_bundle = _stack_bundle(p_retrieved_store)
-    p_prior_bundle = _stack_bundle(p_prior_store)
+    p_recall_bundle = _stack_bundle(p_recall_store)
+    p_path_bundle = _stack_bundle(p_path_store)
     g_post_bundle = _stack_bundle(g_post_store)
     g_prior_bundle = _stack_bundle(g_prior_store)
 
     p_post_flat = torch.cat(p_post_bundle, dim=-1)
-    p_retrieved_flat = torch.cat(p_retrieved_bundle, dim=-1)
-    p_prior_flat = torch.cat(p_prior_bundle, dim=-1)
+    p_recall_flat = torch.cat(p_recall_bundle, dim=-1)
+    p_path_flat = torch.cat(p_path_bundle, dim=-1)
 
     g_query_post_bundle = model.mec_to_hpc(g_post_bundle)
     g_query_prior_bundle = model.mec_to_hpc(g_prior_bundle)
@@ -1121,8 +1121,8 @@ def produce_tem_attractor_field_probe(  # --------------------------------------
     # ---- Assemble queries ----
     queries: dict[str, Tensor] = {
         "p_post": p_post_flat,
-        "p_retrieved": p_retrieved_flat,
-        "p_prior": p_prior_flat,
+        "p_recall": p_recall_flat,
+        "p_path": p_path_flat,
         "mec_to_hpc_g_post": g_query_post_flat,
         "mec_to_hpc_g_prior": g_query_prior_flat,
         "lec_to_hpc_x": x_query_flat,

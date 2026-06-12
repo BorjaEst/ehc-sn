@@ -34,9 +34,8 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.models.tem.tem_v1 import TEMModelV1, TEMInputV1
+from ehc_sn.models.tem.tem_v1 import TEMInputV1, TEMModelV1
 from ehc_sn.types import DenseMemoryStore
-
 
 # =============================================================================
 # Probe result schema
@@ -125,9 +124,7 @@ class RetrievalResult(BaseModel, extra="forbid"):
 
     cosine_mean: float = Field(default=float("nan"))
     cosine_std: float = Field(default=float("nan"))
-    nn_accuracy: Optional[float] = Field(
-        default=None, ge=0.0, le=1.0
-    )
+    nn_accuracy: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     nn_temporal_distance_mean: Optional[float] = Field(default=None)
     nn_temporal_distance_median: Optional[float] = Field(default=None)
     nn_same_observation_fraction: Optional[float] = Field(default=None)
@@ -149,13 +146,13 @@ class MemoryProbeResult(BaseModel, extra="forbid"):
         feature_dim: Flattened memory-code dimension *S*.
         memory_stats: Hebbian memory matrix health.
         p_post: Place-code diversity for the posterior (inference) pathway.
-        p_retrieved: Place-code diversity for the generative (retrieved)
+        p_recall: Place-code diversity for the generative (retrieved)
             pathway.
-        p_prior: Place-code diversity for the ancestral (prior) pathway.
+        p_path: Place-code diversity for the ancestral (prior) pathway.
         self_retrieval: Self-retrieval result — query *M* with ``p_post``.
         grid_retrieval: Optional grid-query retrieval result.
-        retrieved_vs_ancestral_delta: Mean L2 distance between ``p_retrieved``
-            and ``p_prior`` in flattened code space.  Near zero indicates
+        retrieved_vs_ancestral_delta: Mean L2 distance between ``p_recall``
+            and ``p_path`` in flattened code space.  Near zero indicates
             that sensory correction is functionally inactive.
     """
 
@@ -167,8 +164,8 @@ class MemoryProbeResult(BaseModel, extra="forbid"):
 
     memory_stats: MemoryStats = Field(default_factory=MemoryStats)
     p_post: PlaceCodeStats = Field(default_factory=PlaceCodeStats)
-    p_retrieved: PlaceCodeStats = Field(default_factory=PlaceCodeStats)
-    p_prior: PlaceCodeStats = Field(default_factory=PlaceCodeStats)
+    p_recall: PlaceCodeStats = Field(default_factory=PlaceCodeStats)
+    p_path: PlaceCodeStats = Field(default_factory=PlaceCodeStats)
     self_retrieval: RetrievalResult = Field(default_factory=RetrievalResult)
     grid_retrieval: Optional[RetrievalResult] = None
     retrieved_vs_ancestral_delta: float = Field(default=float("nan"))
@@ -219,7 +216,9 @@ def _place_code_stats(code_bundle: list[Tensor]) -> PlaceCodeStats:
     )
 
 
-def _memory_stats(m: Tensor, clamp_min: float = -1.0, clamp_max: float = 1.0) -> MemoryStats:
+def _memory_stats(
+    m: Tensor, clamp_min: float = -1.0, clamp_max: float = 1.0
+) -> MemoryStats:
     """Compute memory matrix health statistics.
 
     Args:
@@ -300,11 +299,15 @@ def _retrieval_result(
 
     # Nearest-neighbour indices from retrieved to candidates.
     retrieved_norm = retrieved / (retrieved.norm(dim=-1, keepdim=True) + 1e-8)
-    candidates_norm = candidates / (candidates.norm(dim=-1, keepdim=True) + 1e-8)
+    candidates_norm = candidates / (
+        candidates.norm(dim=-1, keepdim=True) + 1e-8
+    )
     sim_matrix = retrieved_norm @ candidates_norm.T  # (T, T)
     # Exclude self-pair for NN depth analysis (the diagonal is always 1.0).
     arange = torch.arange(T, device=device)
-    nn_indices = sim_matrix.argmax(dim=-1)  # (T,)  — includes self when self is in candidates
+    nn_indices = sim_matrix.argmax(
+        dim=-1
+    )  # (T,)  — includes self when self is in candidates
     nn_acc = float((nn_indices == arange).float().mean().item())
 
     # NN temporal distance.
@@ -324,7 +327,10 @@ def _retrieval_result(
     gt_obs_acc: float | None = None
     if observation_ids is not None:
         same_obs_frac = float(
-            (observation_ids[nn_indices] == observation_ids).float().mean().item()
+            (observation_ids[nn_indices] == observation_ids)
+            .float()
+            .mean()
+            .item()
         )
         # "GT observation accuracy": does the retrieved code's nearest
         # candidate share the same observation ID as the query?
@@ -418,7 +424,9 @@ def produce_tem_memory_probe(  # -----------------------------------------------
     elif mask_kind == "hierarchical":
         masks = hpc.masks_hierarchical
     else:
-        raise ValueError(f"Unknown mask_kind: {mask_kind!r}. Use 'full' or 'hierarchical'.")
+        raise ValueError(
+            f"Unknown mask_kind: {mask_kind!r}. Use 'full' or 'hierarchical'."
+        )
 
     # Run the forward pass one step at a time (TEM is recurrent).  Each step
     # gets the same batch-size-1 state so memory accumulates across the episode.
@@ -433,7 +441,8 @@ def produce_tem_memory_probe(  # -----------------------------------------------
             # Build a single-step input for this timestep.
             step_input = TEMInputV1(
                 observation_embedding=[
-                    freq_t[t : t + 1] for freq_t in input_batch.observation_embedding
+                    freq_t[t : t + 1]
+                    for freq_t in input_batch.observation_embedding
                 ],
                 previous_action=input_batch.previous_action[t : t + 1],
                 episode_start=(
@@ -461,18 +470,23 @@ def produce_tem_memory_probe(  # -----------------------------------------------
 
     # Stack per-step codes into bundles of (T, D_f).
     def _stack_bundle(bundle: list[list[Tensor]]) -> list[Tensor]:
-        return [torch.cat([step[f] for step in bundle], dim=0) for f in range(n_freq)]
+        return [
+            torch.cat([step[f] for step in bundle], dim=0)
+            for f in range(n_freq)
+        ]
 
     p_post_bundle = _stack_bundle(place_codes_post)
-    p_prior_bundle = _stack_bundle(place_codes_prior)
+    p_path_bundle = _stack_bundle(place_codes_prior)
 
     has_retrieved = len(place_codes_retrieved) == T
-    p_retrieved_bundle = _stack_bundle(place_codes_retrieved) if has_retrieved else p_post_bundle
+    p_recall_bundle = (
+        _stack_bundle(place_codes_retrieved) if has_retrieved else p_post_bundle
+    )
 
     # Flatten to (T, S) for self-retrieval.
     p_post_flat = torch.cat(p_post_bundle, dim=-1)  # (T, S)
-    p_prior_flat = torch.cat(p_prior_bundle, dim=-1)
-    p_retrieved_flat = torch.cat(p_retrieved_bundle, dim=-1)
+    p_path_flat = torch.cat(p_path_bundle, dim=-1)
+    p_recall_flat = torch.cat(p_recall_bundle, dim=-1)
 
     # Extract Hebbian memory matrix from the HPC state.
     memory_entry = state.hpc.memory.g_cued
@@ -488,20 +502,20 @@ def produce_tem_memory_probe(  # -----------------------------------------------
     # Use batch index 0 for probe statistics.
     M0 = M[0]  # (S, S)
     p_post_flat = p_post_flat.to(dtype=M0.dtype)
-    p_prior_flat = p_prior_flat.to(dtype=M0.dtype)
-    p_retrieved_flat = p_retrieved_flat.to(dtype=M0.dtype)
+    p_path_flat = p_path_flat.to(dtype=M0.dtype)
+    p_recall_flat = p_recall_flat.to(dtype=M0.dtype)
 
     # ---- Memory stats ----
     mem_stats = _memory_stats(M, clamp_min=clamp_min, clamp_max=clamp_max)
 
     # ---- Place-code diversity ----
     p_post_stats = _place_code_stats(p_post_bundle)
-    p_prior_stats = _place_code_stats(p_prior_bundle)
-    p_retrieved_stats = _place_code_stats(p_retrieved_bundle)
+    p_path_stats = _place_code_stats(p_path_bundle)
+    p_recall_stats = _place_code_stats(p_recall_bundle)
 
     # ---- Retrieved vs ancestral delta ----
     retrieved_ancestral_delta = float(
-        (p_retrieved_flat - p_prior_flat).norm(dim=-1).mean().item()
+        (p_recall_flat - p_path_flat).norm(dim=-1).mean().item()
     )
 
     # ---- Self-retrieval: query M with p_post ----
@@ -513,21 +527,23 @@ def produce_tem_memory_probe(  # -----------------------------------------------
     kappa = float(hpc.retrieval_module.config.kappa)
     state_attractor = hpc.retrieval_module.activation(p_post_flat)
     for stage_mask in masks:
-        field = kappa * state_attractor + (p_post_flat.unsqueeze(1) @ M0.to(dtype=p_post_flat.dtype)).squeeze(1)
+        field = kappa * state_attractor + (
+            p_post_flat.unsqueeze(1) @ M0.to(dtype=p_post_flat.dtype)
+        ).squeeze(1)
         # stage_mask is (S,) — unsqueeze to (1, S) for broadcasting over (T, S).
         mask = stage_mask.to(dtype=state_attractor.dtype).unsqueeze(0)
-        state_attractor = (1 - mask) * state_attractor + mask * hpc.retrieval_module.activation(field)
+        state_attractor = (
+            1 - mask
+        ) * state_attractor + mask * hpc.retrieval_module.activation(field)
 
     p_self_retrieved = state_attractor  # (T, S)
 
     # Move optional metadata to CPU for the retrieval analysis.
     obs_ids_cpu = (
-        observation_ids.detach().cpu()
-        if observation_ids is not None else None
+        observation_ids.detach().cpu() if observation_ids is not None else None
     )
     pos_ids_cpu = (
-        position_ids.detach().cpu()
-        if position_ids is not None else None
+        position_ids.detach().cpu() if position_ids is not None else None
     )
 
     self_retrieval_res = _retrieval_result(
@@ -547,8 +563,8 @@ def produce_tem_memory_probe(  # -----------------------------------------------
         feature_dim=feature_dim,
         memory_stats=mem_stats,
         p_post=p_post_stats,
-        p_retrieved=p_retrieved_stats,
-        p_prior=p_prior_stats,
+        p_recall=p_recall_stats,
+        p_path=p_path_stats,
         self_retrieval=self_retrieval_res,
         grid_retrieval=None,
         retrieved_vs_ancestral_delta=retrieved_ancestral_delta,
@@ -630,8 +646,8 @@ def format_memory_probe_table(  # ----------------------------------------------
         f"| memory_effective_rank | {_fmt(result.memory_stats.memory_effective_rank, 4)} |",
         f"| memory_saturation_fraction | {_fmt(result.memory_stats.memory_saturation_fraction)} |",
         f"| p_post_pairwise_cosine_mean | {_fmt(result.p_post.pairwise_cosine_mean)} |",
-        f"| p_retrieved_pairwise_cosine_mean | {_fmt(result.p_retrieved.pairwise_cosine_mean)} |",
-        f"| p_prior_pairwise_cosine_mean | {_fmt(result.p_prior.pairwise_cosine_mean)} |",
+        f"| p_recall_pairwise_cosine_mean | {_fmt(result.p_recall.pairwise_cosine_mean)} |",
+        f"| p_path_pairwise_cosine_mean | {_fmt(result.p_path.pairwise_cosine_mean)} |",
         f"| self_retrieval_cosine_mean | {_fmt(sr.cosine_mean)} |",
         f"| self_retrieval_nn_accuracy | {_fmt(sr.nn_accuracy)} |",
         f"| self_retrieval_nn_temp_dist_mean | {_fmt(sr.nn_temporal_distance_mean)} |",
