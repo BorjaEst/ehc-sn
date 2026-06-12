@@ -10,9 +10,9 @@ Cue-timing contract (V2 — explicit difference from V2):
 
         Stage 1 — Cue generation pass:
             Run the full TEM-style bottom-up pipeline (g_prior, x_query,
-            p_sensory_read, g_post, p_prior, p_retrieved, p_post) to ground
+            p_sensory_recall, g_post, p_path, p_recall, p_post) to ground
             the hippocampal state.  Build a provisional PFC body workspace
-            using p_post as state, p_retrieved as a non-contextual replay
+            using p_post as state, p_recall as a non-contextual replay
             baseline, and a projected zero vector as the cue.  Run one PFC
             step to obtain the current-step cortical summary.
             Set c_prop = pfc_to_hpc(first-pass summary), c_use = c_prop.
@@ -539,7 +539,7 @@ class EHCModelV2(nn.Module):
         x_query = self.lec_to_hpc(x_)
 
         # 3. Sensory-cued recall (read-only on state.hpc) ---------------------
-        p_sensory_read = self.hpc.recall(
+        p_sensory_recall = self.hpc.recall(
             read_cues=ReadCues(families={"x": x_query}),
             state=state.hpc,
             role="inference",
@@ -548,12 +548,12 @@ class EHCModelV2(nn.Module):
 
         # 4. MEC correction: grid posterior from sensory recall ---------------
         g_post, state.mec = self.mec.inference(
-            p_sensory_read, landmark_id, state=state.mec
+            p_sensory_recall, landmark_id, state=state.mec
         )
         g_query_post = self.mec_to_hpc(g_post)
 
         # 5. Grid-cued ancestral recall (prior, read-only) --------------------
-        p_grid_prior_read = self.hpc.recall(
+        p_grid_prior_recall = self.hpc.recall(
             read_cues=ReadCues(families={"g": g_query_prior}),
             state=state.hpc,
             role="generative",
@@ -561,7 +561,7 @@ class EHCModelV2(nn.Module):
         )
 
         # 6. Grid-cued retrieved recall (posterior, read-only) ----------------
-        p_grid_post_read = self.hpc.recall(
+        p_grid_post_recall = self.hpc.recall(
             read_cues=ReadCues(families={"g": g_query_post}),
             state=state.hpc,
             role="generative",
@@ -570,13 +570,13 @@ class EHCModelV2(nn.Module):
 
         # 7. Form place beliefs and update HPC grounded-belief state ----------
         # (In V2 this is step 8; in V2 it precedes the provisional PFC pass so
-        # p_post and p_retrieved are available for building the cue-generation
+        # p_post and p_recall are available for building the cue-generation
         # workspace.)
-        p_prior, state.hpc = self.hpc.generative(
-            p_grid_prior_read, state=state.hpc
+        p_path, state.hpc = self.hpc.generative(
+            p_grid_prior_recall, state=state.hpc
         )
-        p_retrieved, state.hpc = self.hpc.generative(
-            p_grid_post_read, state=state.hpc
+        p_recall, state.hpc = self.hpc.generative(
+            p_grid_post_recall, state=state.hpc
         )
         p_post, state.hpc = self.hpc.inference(
             x_query, g_query_post, state=state.hpc
@@ -586,14 +586,12 @@ class EHCModelV2(nn.Module):
         # Stage 1 — Cue-generation PFC pass (V2 explicit delta).
         # Build a provisional workspace with:
         #   state  = projected p_post
-        #   replay = projected p_retrieved (non-contextual current-step baseline)
+        #   replay = projected p_recall (non-contextual current-step baseline)
         #   cue    = projected zero (HPC flat, then through hpc_to_pfc)
         #   content = previous-step content family (unchanged external contract)
         # =====================================================================
         p_post_flat: Tensor = torch.cat(p_post, dim=-1)  # (B, hpc_flat)
-        p_retrieved_flat: Tensor = torch.cat(
-            p_retrieved, dim=-1
-        )  # (B, hpc_flat)
+        p_recall_flat: Tensor = torch.cat(p_recall, dim=-1)  # (B, hpc_flat)
         zero_c_flat: Tensor = torch.zeros(
             batch_size,
             self._config.hpc_flat_dim,
@@ -603,7 +601,7 @@ class EHCModelV2(nn.Module):
 
         # Stack into (B, 3, hpc_flat) and project through the workspace edge.
         hpc_slots_prov: Tensor = torch.stack(
-            [p_post_flat, p_retrieved_flat, zero_c_flat], dim=1
+            [p_post_flat, p_recall_flat, zero_c_flat], dim=1
         )
         hpc_slots_prov_out: Tensor = self.hpc_to_pfc(
             hpc_slots_prov
@@ -710,19 +708,19 @@ class EHCModelV2(nn.Module):
         # 12. HPC memory write ------------------------------------------------
         # Bank-c write contract: c_use (current-step cue) is written under key c.
         write_payload = WritePayload(
-            generative=p_retrieved,
-            inference=p_sensory_read,
+            generative=p_recall,
+            inference=p_sensory_recall,
             named_writes={"c": c_use},
         )
         state.hpc = self.hpc.update(p_post, write_payload, state=state.hpc)
 
         # 13. Package and return outputs --------------------------------------
-        grid_codes = GridCodes(prior=g_prior, posterior=g_post)
+        grid_codes = GridCodes(prior=g_prior, post=g_post)
         place_codes = PlaceCodes(
-            posterior=p_post,
-            prior=p_prior,
-            retrieved=p_retrieved,
-            sensory=p_sensory_read,
+            post=p_post,
+            path=p_path,
+            recall=p_recall,
+            sensory=p_sensory_recall,
         )
 
         # EHCContentV2 exposes post-reasoning PFC workspace slots (second pass).

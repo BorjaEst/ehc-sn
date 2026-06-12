@@ -532,7 +532,7 @@ class EHCModelV1(nn.Module):
         x_query = self.lec_to_hpc(x_)
 
         # 3. Sensory-cued recall (read-only on state.hpc) ---------------------
-        p_sensory_read = self.hpc.recall(
+        p_sensory_recall = self.hpc.recall(
             read_cues=ReadCues(families={"x": x_query}),
             state=state.hpc,
             role="inference",
@@ -541,12 +541,12 @@ class EHCModelV1(nn.Module):
 
         # 4. MEC correction: grid posterior from sensory recall ---------------
         g_post, state.mec = self.mec.inference(
-            p_sensory_read, landmark_id, state=state.mec
+            p_sensory_recall, landmark_id, state=state.mec
         )
         g_query_post = self.mec_to_hpc(g_post)
 
         # 5. Grid-cued ancestral recall (prior, read-only) --------------------
-        p_grid_prior_read = self.hpc.recall(
+        p_grid_prior_recall = self.hpc.recall(
             read_cues=ReadCues(families={"g": g_query_prior}),
             state=state.hpc,
             role="generative",
@@ -554,7 +554,7 @@ class EHCModelV1(nn.Module):
         )
 
         # 6. Grid-cued retrieved recall (posterior, read-only) ----------------
-        p_grid_post_read = self.hpc.recall(
+        p_grid_post_recall = self.hpc.recall(
             read_cues=ReadCues(families={"g": g_query_post}),
             state=state.hpc,
             role="generative",
@@ -573,11 +573,11 @@ class EHCModelV1(nn.Module):
         )
 
         # 8. Form place beliefs and update HPC grounded-belief state ----------
-        p_prior, state.hpc = self.hpc.generative(
-            p_grid_prior_read, state=state.hpc
+        p_path, state.hpc = self.hpc.generative(
+            p_grid_prior_recall, state=state.hpc
         )
-        p_retrieved, state.hpc = self.hpc.generative(
-            p_grid_post_read, state=state.hpc
+        p_recall, state.hpc = self.hpc.generative(
+            p_grid_post_recall, state=state.hpc
         )
         p_post, state.hpc = self.hpc.inference(
             x_query, g_query_post, state=state.hpc
@@ -632,30 +632,28 @@ class EHCModelV1(nn.Module):
         )
 
         # 12. HPC memory write ------------------------------------------------
-        # generative = p_retrieved (corrected-grid replay value).
-        # inference  = p_sensory_read (sensory-cued recall value).
+        # generative = p_recall (corrected-grid replay value).
+        # inference  = p_sensory_recall (sensory-cued recall value).
         # named_writes["c"] = c_use (contextual cue written into bank c).
         write_payload = WritePayload(
-            generative=p_retrieved,
-            inference=p_sensory_read,
+            generative=p_recall,
+            inference=p_sensory_recall,
             named_writes={"c": c_use},
         )
         state.hpc = self.hpc.update(p_post, write_payload, state=state.hpc)
 
         # 13. Package and return outputs --------------------------------------
-        grid_codes = GridCodes(prior=g_prior, posterior=g_post)
+        grid_codes = GridCodes(prior=g_prior, post=g_post)
         place_codes = PlaceCodes(
-            posterior=p_post,
-            prior=p_prior,
-            retrieved=p_retrieved,
-            sensory=p_sensory_read,
+            post=p_post,
+            path=p_path,
+            recall=p_recall,
+            sensory=p_sensory_recall,
         )
-        x_inference = self.projections.lec_to_hpc.inverse(p_post)
-        x_ancestral = self.projections.lec_to_hpc.inverse(p_prior)
-        x_retrieved = self.projections.lec_to_hpc.inverse(p_retrieved)
-        pred_codes = PredCodes(
-            inference=x_inference, ancestral=x_ancestral, retrieved=x_retrieved
-        )
+        x_post = self.projections.lec_to_hpc.inverse(p_post)
+        x_path = self.projections.lec_to_hpc.inverse(p_path)
+        x_recall = self.projections.lec_to_hpc.inverse(p_recall)
+        pred_codes = PredCodes(post=x_post, path=x_path, recall=x_recall)
 
         # EHCContentV1 exposes post-reasoning PFC workspace slots.
         content = EHCContentV1(
