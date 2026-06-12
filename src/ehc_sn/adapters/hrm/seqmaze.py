@@ -1,6 +1,7 @@
-"""SeqMaze probe bridge adapter for HRM v2.
+"""SeqMaze probe and v1 bridge adapters for HRM v2.
 
-Binds the seqmaze phase-0 edge-lookup probe to HRModelV2.
+Phase 0: edge-lookup probe (SeqMazeProbeHRMV2BridgeAdapter).
+Phase 1: path-prediction adapter (SeqMazeHRMV2BridgeAdapter).
 """
 
 from __future__ import annotations
@@ -11,6 +12,9 @@ import torch
 from torch import Tensor, nn
 
 from ehc_sn.adapters.hrm._base import (
+    SeqMazeAdapterSettings,
+    SeqMazeDecoder,
+    SeqMazeEncoder,
     SeqMazeProbeAdapterSettings,
     SeqMazeProbeDecoder,
     SeqMazeProbeEncoder,
@@ -21,8 +25,15 @@ from ehc_sn.models.hrm.hrm_v2 import (
     HRMOutputV2,
     HRMStateV2,
 )
-from ehc_sn.tasks.seqmaze.contracts import SeqMazeProbeInput, SeqMazeProbeOutput
-from ehc_sn.tasks.seqmaze.runtime import extract_seqmaze_probe_input
+from ehc_sn.tasks.seqmaze.contracts import (
+    SeqMazeProbeInput,
+    SeqMazeProbeOutput,
+    SeqMazeTaskOutput,
+)
+from ehc_sn.tasks.seqmaze.runtime import (
+    extract_seqmaze_probe_input,
+    extract_seqmaze_task_input,
+)
 from ehc_sn.types import Batch
 
 
@@ -99,3 +110,105 @@ class SeqMazeProbeHRMV2BridgeAdapter(nn.Module):
         outputs, next_state = self.model(inputs, state=state)
         bridge_out = self.postprocess(outputs)
         return bridge_out, next_state
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class SeqMazeBridgeOutput:
+    """V1 path-prediction bridge output bundle."""
+
+    task: SeqMazeTaskOutput
+
+
+# =============================================================================
+class SeqMazeHRMV2BridgeAdapter(nn.Module):
+    """SeqMaze v1 path-prediction bridge over HRM v2.
+
+    Wraps HRModelV2, encodes graph nodes + path queries into schema tokens,
+    runs HRM deliberation, and decodes path-region slots into path logits.
+
+    Validates at construction that:
+        n_max + t_max == model.config.num_schema_slots
+    """
+
+    def __init__(
+        self,
+        model: HRModelV2,
+        config: SeqMazeAdapterSettings | None = None,
+    ) -> None:
+        super().__init__()
+        self._config = config or SeqMazeAdapterSettings()
+        self.model = model
+
+        # Validate profile coupling: N + T == S
+        expected_slots = self._config.n_max + self._config.t_max
+        if model.config.num_schema_slots != expected_slots:
+            raise ValueError(
+                f"Model seq_length ({model.config.num_schema_slots}) must equal "
+                f"n_max + t_max ({self._config.n_max} + {self._config.t_max}"
+                f" = {expected_slots}) for v1 path-prediction mode."
+            )
+
+        self._encoder = SeqMazeEncoder(self._config)
+
+        # Build decoder with optional weight-sharing
+        if self._config.share_path_position_embeddings:
+            path_position_emb = self._encoder.E_path_position
+        else:
+            path_position_emb = None
+        self._decoder = SeqMazeDecoder(
+            self._config,
+            path_position_emb=path_position_emb,
+        )
+
+    @property
+    def config(self) -> SeqMazeAdapterSettings:
+        return self._config
+
+    def init_state(self, batch_size: int) -> HRMStateV2:
+        return self.model.init_state(batch_size)
+
+    def prepare_inputs(self, batch: Batch) -> HRMInputV2:
+        """Extract task input from batch and encode into schema tokens."""
+        task_input = extract_seqmaze_task_input(batch)
+        schema_tokens, schema_mask = self._encoder(
+            node_obs_id=task_input.node_obs_id,
+            node_candidate_index=task_input.node_candidate_index,
+            node_start_flag=task_input.node_start_flag,
+            node_goal_flag=task_input.node_goal_flag,
+            successor_indices=task_input.successor_indices,
+            successor_mask=task_input.successor_mask,
+            node_mask=task_input.node_mask,
+        )
+        return HRMInputV2(schema_tokens=schema_tokens)
+
+    def postprocess(self, outputs: HRMOutputV2) -> SeqMazeBridgeOutput:
+        """Decode path-region schema slots into path logits."""
+        path_logits = self._decoder(
+            outputs.schema_slots,
+            n_max=self._config.n_max,
+            t_max=self._config.t_max,
+        )
+        return SeqMazeBridgeOutput(
+            task=SeqMazeTaskOutput(path_logits=path_logits),
+        )
+
+    def forward(
+        self,
+        batch: Batch,
+        state: HRMStateV2 | None = None,
+    ) -> tuple[SeqMazeBridgeOutput, HRMStateV2]:
+        """Run a forward pass on one batch of v1 path-prediction samples."""
+        inputs = self.prepare_inputs(batch)
+        outputs, next_state = self.model(inputs, state=state)
+        bridge_out = self.postprocess(outputs)
+        return bridge_out, next_state
+
+
+# =============================================================================
+__all__ = [
+    "SeqMazeProbeBridgeOutput",
+    "SeqMazeProbeHRMV2BridgeAdapter",
+    "SeqMazeBridgeOutput",
+    "SeqMazeHRMV2BridgeAdapter",
+]

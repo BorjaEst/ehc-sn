@@ -687,17 +687,6 @@ class VariationalReplayModule(L.LightningModule):
             )
             apply_arena_trace_supplements(result.trace, supplements)
 
-        if result.trace is not None and self._diag_params_cache is not None:
-            diag = self._diag_params_cache
-            lec_meta = {
-                "filter": {"alpha_sigmoid": diag["lec_alpha_sigmoid"]},
-                "w_f": {"sigmoid": diag["lec_w_f_sigmoid"]},
-            }
-            for step in result.trace.iter_steps():
-                if step.meta is None:
-                    continue
-                step.meta["lec"] = lec_meta
-
         return result
 
     def aggregate_evaluation_case_metrics(  # ---------------------------------

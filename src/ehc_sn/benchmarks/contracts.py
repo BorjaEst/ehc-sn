@@ -33,7 +33,7 @@ from ehc_sn.tasks.mazehard.runtime import MAZE_HARD_BATCH_KEYS
 ModelComparisonMode: TypeAlias = Literal["model-comparison"]
 CapabilityKind: TypeAlias = Literal[
     "arena_replay",
-    "mazehard_deliberation",
+    "mazehard_step_evaluator",
 ]
 ScoreReport: TypeAlias = ArenaScoreReport | MazeHardScoreReport
 
@@ -236,9 +236,9 @@ class TrackRecipe(BaseModel, extra="forbid"):
             )
 
         if self.track_id == "mazehard-delib":
-            if self.capability_kind != "mazehard_deliberation":
+            if self.capability_kind != "mazehard_step_evaluator":
                 raise ValueError(
-                    "mazehard-delib requires capability_kind='mazehard_deliberation'."
+                    "mazehard-delib requires capability_kind='mazehard_step_evaluator'."
                 )
             if not self.artifact_rules.require_frozen_core:
                 raise ValueError(
@@ -309,11 +309,13 @@ class ArenaReplayCapabilityContract:
 
 # =============================================================================
 @dataclass(frozen=True)
-class MazeHardDeliberationCapabilityContract:
-    """Benchmark-facing capability contract for MazeHard deliberation."""
+class MazeHardStepEvaluatorContract:
+    """Benchmark-facing step-evaluator contract for MazeHard."""
 
     track_id: Literal["mazehard-delib"] = "mazehard-delib"
-    capability_kind: Literal["mazehard_deliberation"] = "mazehard_deliberation"
+    capability_kind: Literal["mazehard_step_evaluator"] = (
+        "mazehard_step_evaluator"
+    )
     required_batch_keys: tuple[str, ...] = MAZE_HARD_BATCH_KEYS
     optional_batch_keys: tuple[str, ...] = ()
     score_report_type: type[MazeHardScoreReport] = MazeHardScoreReport
@@ -321,10 +323,10 @@ class MazeHardDeliberationCapabilityContract:
 
 READY_CAPABILITY_CONTRACTS: dict[
     CapabilityKind,
-    ArenaReplayCapabilityContract | MazeHardDeliberationCapabilityContract,
+    ArenaReplayCapabilityContract | MazeHardStepEvaluatorContract,
 ] = {
     "arena_replay": ArenaReplayCapabilityContract(),
-    "mazehard_deliberation": MazeHardDeliberationCapabilityContract(),
+    "mazehard_step_evaluator": MazeHardStepEvaluatorContract(),
 }
 
 
@@ -444,7 +446,7 @@ __all__ = [
     "ArtifactManifest",
     "ArtifactProvenance",
     "CapabilityKind",
-    "MazeHardDeliberationCapabilityContract",
+    "MazeHardStepEvaluatorContract",
     "ModelComparisonBinding",
     "ModelComparisonExecution",
     "ModelComparisonExecutionBundle",

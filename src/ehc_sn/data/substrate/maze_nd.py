@@ -166,7 +166,8 @@ def build_shared_substrate(
 
     Reads normalized records from *interim_root* (produced by
     :func:`prepare_interim`) and writes a versioned, immutable dataset root
-    containing only the shared-substrate channels (``topology``, ``mask_valid``).
+    containing structural channels (``topology``, ``mask_valid``) and source
+    problem annotations (``start``, ``goals``, ``solution``).
 
     The raw source provides ``train`` and ``test`` splits only. ``n_train``
     records are sampled deterministically from the training population.

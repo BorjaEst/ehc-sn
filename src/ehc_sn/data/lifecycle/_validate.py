@@ -247,7 +247,12 @@ def _validate_path_grammar(root: Path, manifest: dict[str, Any]) -> None:
         ps: str = manifest["parent_substrate"]
         parent_family = manifest["parent_family"]
         parent_version = manifest["parent_version"]
-        expected_ps = f"data/processed/{parent_family}/v{parent_version}"
+        if parent_family in {"dagflow", "openfield", "dungeongen"}:
+            expected_ps = (
+                f"data/interim/{parent_family}/default/v{parent_version}"
+            )
+        else:
+            expected_ps = f"data/processed/{parent_family}/v{parent_version}"
         if ps != expected_ps:
             raise ValueError(
                 f"parent_substrate {ps!r} does not match expected {expected_ps!r}."

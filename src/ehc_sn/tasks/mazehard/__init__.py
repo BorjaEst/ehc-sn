@@ -13,10 +13,10 @@ Stable task surface:
   (:class:`~ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider`,
   :class:`~ehc_sn.tasks.mazehard.providers.MazeHardFixedProbeProvider`).
 
-Execution-binding capability:
+Step evaluator (RL-feedback seam):
 
-- :class:`MazeHardDeliberationCapability` — deliberation actor-critic capability.
-  Full module: :mod:`ehc_sn.tasks.mazehard.capabilities.deliberation`.
+- :class:`MazeHardStepEvaluator` — task-owned ``TaskStepEvaluator`` implementation.
+  Full module: :mod:`ehc_sn.tasks.mazehard.evaluators.step`.
 
 Raw channel-to-batch coercion lives in :mod:`ehc_sn.tasks.mazehard.runtime`.
 """
@@ -28,7 +28,6 @@ from .builder import (
     validate_mazehard_task_root,
     validate_mazehard_task_sample,
 )
-from .capabilities.deliberation import MazeHardDeliberationCapability
 from .contracts import (
     MAZE_HARD_IGNORE_LABEL_ID,
     MazeHardTargets,
@@ -36,6 +35,7 @@ from .contracts import (
     MazeHardTaskOutput,
 )
 from .evaluation import MazeHardScoreReport, MazeHardStepScore
+from .evaluators.step import MazeHardStepEvaluator
 from .reward import MazeHardRewardConfig, MazeHardRewardProjector
 from .traces import (
     MazeHardEvaluationSourceContext,
@@ -47,7 +47,7 @@ from .traces import (
 __all__ = [
     "MAZE_HARD_IGNORE_LABEL_ID",
     "MAZEHARD_TASK_CHANNELS",
-    "MazeHardDeliberationCapability",
+    "MazeHardStepEvaluator",
     "MazeHardEvaluationSourceContext",
     "MazeHardRewardConfig",
     "MazeHardRewardProjector",

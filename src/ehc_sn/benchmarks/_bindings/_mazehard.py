@@ -111,10 +111,10 @@ class MazeHardDelibHRMV1ModelComparisonBinding(ModelComparisonBinding):
                 "MazeHardDelibHRMV1ModelComparisonBinding only supports track "
                 f"'mazehard-delib', got {recipe.track_id!r}."
             )
-        if recipe.capability_kind != "mazehard_deliberation":
+        if recipe.capability_kind != "mazehard_step_evaluator":
             raise ValueError(
                 "MazeHardDelibHRMV1ModelComparisonBinding requires "
-                "capability_kind='mazehard_deliberation'."
+                "capability_kind='mazehard_step_evaluator'."
             )
 
         model_family = normalize_model_family(manifest.model_family)

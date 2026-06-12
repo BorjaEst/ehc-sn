@@ -41,8 +41,8 @@ from ehc_sn.rollouts.buffers import FifoBuffer
 from ehc_sn.rollouts.partial_reset import PartialResetBatchAssembler
 from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
 from ehc_sn.rollouts.sources import PartialResetSource
-from ehc_sn.tasks.mazehard.capabilities.deliberation import (
-    MazeHardDeliberationConfig,
+from ehc_sn.tasks.mazehard.evaluators.step import (
+    MazeHardStepEvaluatorConfig,
 )
 from ehc_sn.tasks.mazehard.reward import MazeHardRewardConfig
 from ehc_sn.traces import build_trace_spec
@@ -99,9 +99,9 @@ class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
         ...,
         description="Adapter settings for the MazeHard ↔ HRM bridge.",
     )
-    deliberation: MazeHardDeliberationConfig = Field(
+    deliberation: MazeHardStepEvaluatorConfig = Field(
         ...,
-        description="Deliberation capability config (halt_action, episode_horizon).",
+        description="Step evaluator config (halt_action, episode_horizon).",
     )
     reward: MazeHardRewardConfig = Field(
         ...,

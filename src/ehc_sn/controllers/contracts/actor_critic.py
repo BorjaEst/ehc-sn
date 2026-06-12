@@ -5,9 +5,9 @@ actor-critic rollout family.  They are **not** online-RL-specific: any
 controller that drives a policy-plus-value backbone and emits interaction
 records may use them.
 
-Online RL runtime pieces (``RLTaskRuntime``, ``RLRolloutState``,
-``RLController``) live in :mod:`ehc_sn.controllers.online.actor_critic` and
-remain responsible only for env-step shaping and next-observation extraction.
+Online RL pieces (``RLRolloutState``, ``RLController``) live in
+:mod:`ehc_sn.controllers.online.actor_critic`; the task-environment adapter
+lives in :mod:`ehc_sn.contracts.task_environment`.
 
 The two minimal bootstrap protocols (:class:`OnlineBootstrapCarry` and
 :class:`OnlineBootstrapRuntime`) are defined here so that both the training
@@ -82,7 +82,7 @@ class ActorCriticExecutionSnapshot(Protocol):
     satisfies this protocol.
     """
 
-    steps: Tensor   # (B,) per-slot step counters
+    steps: Tensor  # (B,) per-slot step counters
     halted: Tensor  # (B,) per-slot halt flags
 
 
@@ -107,7 +107,7 @@ class OnlineBootstrapRuntime(Protocol):
     """Minimal task-runtime surface required for online TD(0) bootstrap extraction.
 
     Implement this protocol in the task-runtime layer (e.g.
-    :class:`~ehc_sn.controllers.online.actor_critic.RLTaskRuntime`) to expose
+    :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter`) to expose
     only the one method that the learner requires.  The full env-step shaping
     contract is not needed by the training layer.
     """
@@ -132,16 +132,18 @@ class ActorCriticInteractionRecord(DetachMixin):
     backbone forward pass — threaded explicitly, not reconstructed from carry.
     """
 
-    observation_used_for_decision: dict[str, Tensor]  # exact batch used for model step
-    policy_logits: Tensor                              # (B, A) actor-head policy logits
-    sampled_action: Tensor                             # (B,) sampled action indices
-    reward: Tensor                                     # (B, 1) task-finalized reward
-    done: Tensor                                       # (B,) combined termination flag
-    terminated: Tensor                                 # (B,) episode terminated flag
-    truncated: Tensor                                  # (B,) episode truncated flag
-    value_estimate: Tensor                             # (B, 1) critic state value
-    policy_decision: PolicyDecision                    # rollout-time log_prob, entropy
-    task_output: object | None = None                  # optional task-side model output
+    observation_used_for_decision: dict[
+        str, Tensor
+    ]  # exact batch used for model step
+    policy_logits: Tensor  # (B, A) actor-head policy logits
+    sampled_action: Tensor  # (B,) sampled action indices
+    reward: Tensor  # (B, 1) task-finalized reward
+    done: Tensor  # (B,) combined termination flag
+    terminated: Tensor  # (B,) episode terminated flag
+    truncated: Tensor  # (B,) episode truncated flag
+    value_estimate: Tensor  # (B, 1) critic state value
+    policy_decision: PolicyDecision  # rollout-time log_prob, entropy
+    task_output: object | None = None  # optional task-side model output
 
 
 # =============================================================================

@@ -7,13 +7,13 @@ per step.
 
 Neutral actor-critic contracts live in
 :mod:`ehc_sn.controllers.contracts.actor_critic`.  RL-specific pieces kept
-here: ``RLTaskRuntime``, ``RLRolloutState``, ``RLControllerConfig``,
+here: ``RLRolloutState``, ``RLControllerConfig``,
 ``RLController``.
 
 Canonical import path::
 
     from ehc_sn.controllers.online.actor_critic import (
-        RLController, RLControllerConfig, RLTaskRuntime, RLRolloutState,
+        RLController, RLControllerConfig, RLRolloutState,
     )
     from ehc_sn.controllers.contracts.actor_critic import (
         ActorCriticInteractionRecord, ActorCriticBackboneOutput,
@@ -24,7 +24,7 @@ Canonical import path::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, cast
+from typing import Any, Optional, cast
 
 import torch
 from pydantic import BaseModel, Field
@@ -32,6 +32,7 @@ from tensordict import TensorDictBase
 from torch import Tensor
 from torchrl.envs import EnvBase
 
+from ehc_sn.contracts.task_environment import TaskEnvironmentAdapter
 from ehc_sn.controllers._base import BaseController, RolloutState
 from ehc_sn.controllers._env_rollout import initial_env_reset
 from ehc_sn.controllers.contracts.actor_critic import (
@@ -62,38 +63,6 @@ class RLControllerConfig(BaseModel, extra="forbid"):
 
 
 # =============================================================================
-class RLTaskRuntime(Protocol):
-    """Task-owned environment TensorDict shaping used by :class:`RLController`."""
-
-    def build_reset_td(self, batch: Batch) -> TensorDictBase: ...
-
-    def build_env_step_td(
-        self,
-        env_td: TensorDictBase,
-        *,
-        reset_mask: Tensor,
-        action: Tensor,
-        task_output: object,
-        data: Batch,
-    ) -> TensorDictBase: ...
-
-    def finalize_env_transition(
-        self,
-        previous_env_td: TensorDictBase,
-        next_env_td: TensorDictBase,
-        *,
-        reset_mask: Tensor,
-        action: Tensor,
-        task_output: object,
-        data: Batch,
-    ) -> TensorDictBase: ...
-
-    def extract_next_step_obs(self, carry: OnlineBootstrapCarry) -> Batch:
-        """Extract the next-step observation batch from the post-step carry."""
-        ...
-
-
-# =============================================================================
 @dataclass
 class RLRolloutState[ModelState](RolloutState[ModelState]):
     """Controller carry/state for RL rollouts."""
@@ -110,7 +79,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         backbone: ActorCriticRolloutBackbone[ModelState],
         env: EnvBase,
         config: RLControllerConfig,
-        runtime: RLTaskRuntime,
+        runtime: TaskEnvironmentAdapter,
     ) -> None:
         """Create an RL controller."""
         super().__init__(backbone=cast(Any, backbone), config=config)
@@ -129,7 +98,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         return self._env
 
     @property
-    def runtime(self) -> RLTaskRuntime:
+    def runtime(self) -> TaskEnvironmentAdapter:
         """Return the task-owned environment TensorDict runtime."""
         return self._runtime
 
@@ -266,5 +235,4 @@ __all__ = [
     "RLController",
     "RLControllerConfig",
     "RLRolloutState",
-    "RLTaskRuntime",
 ]

@@ -1,7 +1,10 @@
-"""SeqMaze probe task-owned contracts.
+"""SeqMaze probe and v1 task-owned contracts.
 
 Phase 0 edge-lookup probe contracts: input graph structure, supervised edge
 targets, and model output shape.
+
+Phase 1 (v1) path-prediction contracts: graph-task input (shared fields with
+probe), path supervision targets, and path-logit output.
 """
 
 from __future__ import annotations
@@ -59,3 +62,74 @@ class SeqMazeProbeOutput:
     """
 
     edge_logits: Tensor
+
+
+# =============================================================================
+# Phase 1 -- Path prediction (v1)
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class SeqMazeTaskInput:
+    """Task input for seqmaze v1 path prediction.
+
+    Shares the same graph-structure fields as the probe input.  The adapter
+    packs these into both the graph region and the path region of the schema.
+
+    Attributes:
+        node_obs_id: (B, N) int64 -- observation ids for candidate nodes.
+        node_candidate_index: (B, N) int64 -- candidate index (0..N-1).
+        node_start_flag: (B, N) bool -- is this the start node?
+        node_goal_flag: (B, N) bool -- is this the goal node?
+        successor_indices: (B, N, K) int64 -- successor candidate indices (padded).
+        successor_mask: (B, N, K) bool -- valid successor slots.
+        node_mask: (B, N) bool -- valid nodes (padding).
+    """
+
+    node_obs_id: Tensor
+    node_candidate_index: Tensor
+    node_start_flag: Tensor
+    node_goal_flag: Tensor
+    successor_indices: Tensor
+    successor_mask: Tensor
+    node_mask: Tensor
+
+
+@dataclass(frozen=True)
+class SeqMazeTargets:
+    """Path supervision targets for seqmaze v1.
+
+    Attributes:
+        path_index: (B, T) int64 -- target path token indices in [0, N_max+1].
+            N_max = EOS token, N_max+1 = PAD token.
+        path_mask: (B, T) bool -- True for supervised positions (includes EOS,
+            excludes PAD).
+        path_length: (B,) int64 -- length of the path including EOS.
+    """
+
+    path_index: Tensor
+    path_mask: Tensor
+    path_length: Tensor
+
+
+@dataclass(frozen=True)
+class SeqMazeTaskOutput:
+    """Path prediction output for seqmaze v1.
+
+    Attributes:
+        path_logits: (B, T, N_max+2) float32 -- logits over the path vocabulary
+            for each output position.
+    """
+
+    path_logits: Tensor
+
+
+# =============================================================================
+__all__ = [
+    "SeqMazeProbeInput",
+    "SeqMazeProbeTargets",
+    "SeqMazeProbeOutput",
+    "SeqMazeTaskInput",
+    "SeqMazeTargets",
+    "SeqMazeTaskOutput",
+]

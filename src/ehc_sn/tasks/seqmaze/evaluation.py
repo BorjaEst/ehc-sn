@@ -1,6 +1,8 @@
-"""SeqMaze probe evaluation — binary edge-prediction score report.
+"""SeqMaze probe and v1 evaluation — edge-prediction and path-prediction score reports.
 
 Phase 0 metrics: accuracy, precision, recall, F1 over edge predictions.
+Phase 1 metrics: sequence_exact, path_position_accuracy, valid_transition_rate,
+    reaches_goal, path_length_regret, eos_accuracy.
 """
 
 from __future__ import annotations
@@ -9,6 +11,10 @@ from dataclasses import dataclass, field
 
 import torch
 from torch import Tensor
+
+from ehc_sn.metrics.spec import MetricSpec, TaskScoringSpec
+
+from .contracts import SeqMazeTargets
 
 
 # =============================================================================
@@ -109,3 +115,368 @@ def compute_edge_score_report(
         f1=f1,
         total_valid_pairs=total,
     )
+
+
+# =============================================================================
+# Phase 1 — Path prediction (v1) evaluation
+# =============================================================================
+
+SEQMAZE_V1_METRIC_SPECS: list[MetricSpec] = [
+    MetricSpec(
+        name="sequence_exact",
+        label="Exact sequence accuracy",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=True,
+        description=(
+            "Fraction of sequences that exactly match the target after "
+            "EOS canonicalization."
+        ),
+    ),
+    MetricSpec(
+        name="path_position_accuracy",
+        label="Path position accuracy",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=True,
+        description=(
+            "Fraction of non-PAD target positions predicted correctly "
+            "(including EOS)."
+        ),
+    ),
+    MetricSpec(
+        name="valid_transition_rate",
+        label="Valid transition rate",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=True,
+        description=(
+            "Proportion of adjacent candidate-token pairs (before first EOS) "
+            "that are valid graph edges."
+        ),
+    ),
+    MetricSpec(
+        name="reaches_goal",
+        label="Reaches goal rate",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=True,
+        description=(
+            "Proportion of sequences where the goal token appears "
+            "before the first EOS."
+        ),
+    ),
+    MetricSpec(
+        name="path_length_regret",
+        label="Path length regret",
+        higher_is_better=False,
+        unit="count",
+        scope="task",
+        benchmark_eligible=True,
+        description=(
+            "Extra tokens beyond the shortest-path length in the "
+            "candidate-token prefix before first EOS."
+        ),
+    ),
+    MetricSpec(
+        name="eos_accuracy",
+        label="EOS position accuracy",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=True,
+        description=(
+            "Fraction of samples where the first predicted EOS position "
+            "matches the target EOS position."
+        ),
+    ),
+]
+
+SEQMAZE_V1_SCORING_SPEC: TaskScoringSpec = TaskScoringSpec(
+    task_name="seqmaze",
+    metrics={spec.name: spec for spec in SEQMAZE_V1_METRIC_SPECS},
+    default_score="sequence_exact",
+)
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class SeqMazeScoreReport:
+    """Aggregate path-prediction scores for one seqmaze v1 evaluation pass.
+
+    All fields are scalar (0-d) float32 tensors except path_length_regret,
+    which is a scalar float32.
+
+    Attributes:
+        sequence_exact: Fraction of exactly correct sequences.
+        path_position_accuracy: Fraction of non-PAD positions correct.
+        valid_transition_rate: Fraction of valid adjacent transitions.
+        reaches_goal: Fraction of sequences reaching the goal.
+        path_length_regret: Mean extra tokens beyond shortest path.
+        eos_accuracy: Fraction of correct EOS positions.
+    """
+
+    sequence_exact: Tensor = field(default_factory=lambda: torch.tensor(0.0))
+    path_position_accuracy: Tensor = field(
+        default_factory=lambda: torch.tensor(0.0)
+    )
+    valid_transition_rate: Tensor = field(
+        default_factory=lambda: torch.tensor(0.0)
+    )
+    reaches_goal: Tensor = field(default_factory=lambda: torch.tensor(0.0))
+    path_length_regret: Tensor = field(
+        default_factory=lambda: torch.tensor(0.0)
+    )
+    eos_accuracy: Tensor = field(default_factory=lambda: torch.tensor(0.0))
+
+    # ------------------------------------------------------------------ #
+    def __str__(self) -> str:
+        parts = [
+            f"sequence_exact={self.sequence_exact.item():.4f}",
+            f"path_position_accuracy={self.path_position_accuracy.item():.4f}",
+            f"valid_transition_rate={self.valid_transition_rate.item():.4f}",
+            f"reaches_goal={self.reaches_goal.item():.4f}",
+            f"path_length_regret={self.path_length_regret.item():.4f}",
+            f"eos_accuracy={self.eos_accuracy.item():.4f}",
+        ]
+        return "SeqMazeScoreReport(" + ", ".join(parts) + ")"
+
+    # ------------------------------------------------------------------ #
+    def as_dict(self) -> dict[str, Tensor]:
+        """Return the canonical key-value dict for logging."""
+        return {
+            "seqmaze/sequence_exact": self.sequence_exact,
+            "seqmaze/path_position_accuracy": self.path_position_accuracy,
+            "seqmaze/valid_transition_rate": self.valid_transition_rate,
+            "seqmaze/reaches_goal": self.reaches_goal,
+            "seqmaze/path_length_regret": self.path_length_regret,
+            "seqmaze/eos_accuracy": self.eos_accuracy,
+        }
+
+
+# =============================================================================
+def _canonicalize(
+    pred: Tensor,  # (B, T) int64 — argmax path token indices
+    eos_id: int,
+    pad_id: int,
+) -> Tensor:
+    """Truncate predictions after first EOS; replace remaining positions with PAD.
+
+    Args:
+        pred: (B, T) argmax prediction indices.
+        eos_id: EOS token id.
+        pad_id: PAD token id.
+
+    Returns:
+        (B, T) canonicalized prediction.
+    """
+    B, T = pred.shape
+    device = pred.device
+
+    # Find first EOS position per batch row
+    is_eos = pred == eos_id  # (B, T)
+    # For rows with no EOS, use T as the cutoff (no truncation)
+    has_eos = is_eos.any(dim=-1)  # (B,)
+    first_eos_pos = is_eos.to(torch.int64).argmax(dim=-1)  # (B,) — T if none
+
+    # Build range mask: positions <= first_eos_pos are kept
+    range_idx = torch.arange(T, device=device).unsqueeze(0).expand(B, -1)
+    # For rows with EOS: keep up to and including first EOS
+    # For rows without EOS: keep everything
+    cutoff = torch.where(has_eos, first_eos_pos + 1, T)  # (B,)
+    keep_mask = range_idx < cutoff.unsqueeze(-1)  # (B, T)
+
+    canonical = torch.where(
+        keep_mask, pred, torch.tensor(pad_id, device=device)
+    )
+    return canonical
+
+
+# =============================================================================
+def _extract_eos_position(
+    tokens: Tensor,  # (B, T) int64
+    eos_id: int,
+) -> Tensor:
+    """Return the index of the first EOS in each row, or T if not found."""
+    is_eos = tokens == eos_id
+    has_eos = is_eos.any(dim=-1)
+    first_pos = is_eos.to(torch.int64).argmax(dim=-1)
+    return torch.where(
+        has_eos, first_pos, torch.tensor(tokens.shape[1], device=tokens.device)
+    )
+
+
+# =============================================================================
+def _build_adjacency(
+    successor_indices: Tensor,  # (B, N, K)
+    successor_mask: Tensor,  # (B, N, K)
+    n_max: int,
+) -> Tensor:
+    """Build a dense (B, N, N) adjacency matrix from successor indices.
+
+    adj[b, i, j] = 1 if node j is a valid successor of node i.
+    """
+    B, N, K = successor_indices.shape
+    adj = torch.zeros(
+        B, N, n_max, dtype=torch.bool, device=successor_indices.device
+    )
+    valid = successor_mask  # (B, N, K)
+    idx = successor_indices  # (B, N, K)
+    # Clamp indices to valid range to avoid scatter OOB
+    idx_clamped = idx.clamp(min=0, max=n_max - 1)
+    # Expand dims for scatter
+    batch_arange = torch.arange(B, device=idx.device).view(-1, 1, 1)
+    node_arange = torch.arange(N, device=idx.device).view(1, -1, 1)
+    adj[batch_arange, node_arange, idx_clamped] = valid
+    return adj
+
+
+# =============================================================================
+def compute_seqmaze_score_report(
+    logits: Tensor,  # (B, T, V) — path logits, V = N_max + 2
+    targets: SeqMazeTargets,
+    successor_indices: Tensor,  # (B, N, K)
+    successor_mask: Tensor,  # (B, N, K)
+    goal_candidate_index: Tensor,  # (B, N) — one-hot or index; we take argmax
+    eos_id: int,
+    pad_id: int,
+    n_max: int,
+) -> SeqMazeScoreReport:
+    """Compute all six seqmaze v1 evaluation metrics.
+
+    All metrics are computed on the canonicalized prediction (truncated
+    after first EOS, replaced with PAD).
+
+    Args:
+        logits: (B, T, V) raw path logits.
+        targets: Path supervision targets.
+        successor_indices: (B, N, K) successor candidate indices.
+        successor_mask: (B, N, K) valid successor slots.
+        goal_candidate_index: (B, N) one-hot or index of the goal token.
+        eos_id: EOS token id (= N_max).
+        pad_id: PAD token id (= N_max + 1).
+        n_max: Maximum candidate nodes.
+
+    Returns:
+        SeqMazeScoreReport with all six metrics as scalar float32 tensors.
+    """
+    B, T, V = logits.shape
+    device = logits.device
+
+    # Argmax prediction
+    pred = logits.argmax(dim=-1)  # (B, T)
+
+    # Canonicalize
+    canonical_pred = _canonicalize(pred, eos_id, pad_id)  # (B, T)
+
+    # Target values
+    target = targets.path_index  # (B, T)
+    target_mask = targets.path_mask  # (B, T) — True for supervised positions
+    target_length = targets.path_length  # (B,)
+
+    # --- sequence_exact ---
+    # Canonicalize target too (it should already be canonical, but for safety)
+    canonical_target = _canonicalize(target, eos_id, pad_id)
+    seq_exact = (
+        (canonical_pred == canonical_target).all(dim=-1).to(torch.float32)
+    )  # (B,)
+
+    # --- path_position_accuracy ---
+    # Count correct positions over supervised (masked) positions
+    correct_pos = (canonical_pred == canonical_target) & target_mask  # (B, T)
+    supervised_count = target_mask.sum(dim=-1).clamp(min=1).to(torch.float32)
+    pos_acc = (
+        correct_pos.to(torch.float32).sum(dim=-1) / supervised_count
+    )  # (B,)
+
+    # --- valid_transition_rate ---
+    # Build adjacency matrix
+    adj = _build_adjacency(
+        successor_indices, successor_mask, n_max
+    )  # (B, N, N)
+
+    # Extract prefix before first EOS from canonical prediction
+    pred_eos_pos = _extract_eos_position(canonical_pred, eos_id)  # (B,)
+    T_actual = torch.where(pred_eos_pos < T, pred_eos_pos, T)  # cap at T
+
+    # For each sample, count valid transitions in the prefix
+    # TODO(perf): vectorize the per-sample loops below.  Acceptable for v1
+    # research baseline but will bottleneck eval at large batch sizes.
+    valid_trans_rates = torch.zeros(B, device=device)
+    for b in range(B):
+        t_len = int(T_actual[b].item())
+        if t_len < 2:
+            # 0 or 1 token — no transitions to evaluate
+            valid_trans_rates[b] = 1.0
+        else:
+            prefix = canonical_pred[b, :t_len]  # (t_len,)
+            # Filter to candidate indices (ignore EOS in middle counting)
+            is_candidate = prefix < n_max
+            cand_tokens = prefix[is_candidate]
+            if cand_tokens.shape[0] < 2:
+                valid_trans_rates[b] = 1.0
+            else:
+                valid_count = 0
+                total_trans = cand_tokens.shape[0] - 1
+                for t_idx in range(total_trans):
+                    src = int(cand_tokens[t_idx].item())
+                    dst = int(cand_tokens[t_idx + 1].item())
+                    if src < n_max and dst < n_max and adj[b, src, dst]:
+                        valid_count += 1
+                valid_trans_rates[b] = (
+                    valid_count / total_trans if total_trans > 0 else 1.0
+                )
+
+    # --- reaches_goal ---
+    # Goal token is the one with goal_flag. We get the candidate index from goal_candidate_index.
+    goal_idx = (
+        goal_candidate_index.argmax(dim=-1)
+        if goal_candidate_index.ndim == 2
+        else goal_candidate_index
+    )  # (B,)
+    goal_reached = torch.zeros(B, device=device)
+    for b in range(B):
+        t_len = int(T_actual[b].item())
+        prefix = canonical_pred[b, :t_len]
+        goal_reached[b] = 1.0 if (prefix == goal_idx[b]).any() else 0.0
+
+    # --- path_length_regret ---
+    # Target path length is the number of candidate tokens before EOS
+    target_eos_pos = _extract_eos_position(canonical_target, eos_id)
+    # Predicted EOS position (before canonicalization already)
+    pred_prefix_len = pred_eos_pos.to(torch.float32)
+    target_prefix_len = target_eos_pos.to(torch.float32)
+    # Regret = max(0, pred_len - target_len)
+    regret = (pred_prefix_len - target_prefix_len).clamp(min=0.0)
+
+    # --- eos_accuracy ---
+    # Is the first predicted EOS at the same position as the first target EOS?
+    target_eos = _extract_eos_position(canonical_target, eos_id)
+    pred_eos = _extract_eos_position(canonical_pred, eos_id)
+    eos_acc = (pred_eos == target_eos).to(torch.float32)
+
+    # Aggregate
+    n = float(B)
+    return SeqMazeScoreReport(
+        sequence_exact=seq_exact.mean(),
+        path_position_accuracy=pos_acc.mean(),
+        valid_transition_rate=valid_trans_rates.mean(),
+        reaches_goal=goal_reached.mean(),
+        path_length_regret=regret.mean(),
+        eos_accuracy=eos_acc.mean(),
+    )
+
+
+# =============================================================================
+__all__ = [
+    "SeqMazeProbeScoreReport",
+    "compute_edge_score_report",
+    "SeqMazeScoreReport",
+    "compute_seqmaze_score_report",
+    "SEQMAZE_V1_METRIC_SPECS",
+    "SEQMAZE_V1_SCORING_SPEC",
+]

@@ -1,16 +1,17 @@
-"""Mazehard mechanical environment kernel (TorchRL).
+"""TorchRL EnvBase for experimental MazeHard online rollouts.
 
-This module is a low-level env scaffold: static token tape, step count, and
-halt/truncation transitions only. It is **not** the canonical task surface and
-**not** the active HRM v2 deliberation training path.
+This module exposes MazeHard as an interactive environment interface for the
+deferred EnvBase-backed RL path.  The production HRM v2 reasoning path uses
+:class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationACController`
+with :class:`~ehc_sn.tasks.mazehard.evaluators.step.MazeHardStepEvaluator`
+instead, because MazeHard currently behaves as a fixed-instance deliberation
+task rather than a mutable closed-loop world.
 
-The active HRM v2 path uses :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationACController`
-injected with :class:`~ehc_sn.tasks.mazehard.capabilities.deliberation.MazeHardDeliberationCapability`
-as the :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationStepFinalizer`.
-That path does not step through this env.
+Use this environment only for experiments that explicitly need EnvBase/TensorDict
+rollout semantics.
 
 MazeHard supervision labels, accuracy tracking, and reward shaping are
-task-owned; they belong in the capability/finalizer layer, not here.
+task-owned; they belong in the evaluation layer, not here.
 
 TensorDict contract:
     state_spec / observation_spec:
@@ -73,7 +74,7 @@ class MazeHardEnv(EnvBase):
     labels and accuracy tracking are task-owned.
 
     This class is **not** the active HRM v2 deliberation surface. The active
-    training path uses ``DeliberationACController`` + ``MazeHardDeliberationCapability``
+    training path uses ``DeliberationACController`` with ``MazeHardStepEvaluator``
     and does not step through this env.
 
     The environment is batch-locked: all B slots step simultaneously.

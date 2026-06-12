@@ -45,9 +45,9 @@ MAZEHARD_TASK_CHANNELS: Final[list[str]] = [
 ]
 """All channels in the MazeHard task corpus.
 
-Shared channels (topology, mask_valid) come from the parent maze-nd substrate.
-Task-owned channels (start, goals, solution) encode the navigation goal and
-supervised path, read from the raw source by stable source identity.
+All channels are read from the parent maze-nd shared substrate, which
+preserves source problem annotations from :attr:`shared_schema_version`
+2 onward.  The task builder does not depend on interim or raw records.
 """
 
 _MAZEHARD_REQUIRED_PARENT_CHANNELS: tuple[str, ...] = (

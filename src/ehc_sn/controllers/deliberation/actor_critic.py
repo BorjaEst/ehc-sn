@@ -1,31 +1,32 @@
 """Deliberation value-control rollout controller — canonical owner.
 
 This controller drives an actor-critic backbone through slot-based deliberation
-steps without an environment.  Reward and termination finalization are delegated
-to an injected :class:`DeliberationStepFinalizer`, keeping the controller
-generic over task semantics.
+steps without an environment.  Reward and termination are delegated to an
+injected :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`, keeping the
+controller generic over task semantics.
 
 Emits one :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`
-per step.  No ``env_td``, no :class:`~ehc_sn.controllers.online.actor_critic.RLTaskRuntime`,
+per step.  No ``env_td``, no :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter`,
 no TorchRL dependency.
 
 Canonical import path::
 
     from ehc_sn.controllers.deliberation.actor_critic import (
         DeliberationACController, DeliberationACControllerConfig,
-        DeliberationACRolloutState, DeliberationStepFinalizer, DeliberationStepResult,
+        DeliberationACRolloutState,
     )
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
+from ehc_sn.contracts.task_step import StepEvaluation, TaskStepEvaluator
 from ehc_sn.controllers._base import BaseController, RolloutState
 from ehc_sn.controllers.contracts.value_control import (
     ValueControlInteractionRecord,
@@ -41,62 +42,6 @@ from ehc_sn.policies.categorical import (
     PolicyInput,
 )
 from ehc_sn.types import Batch
-
-
-# =============================================================================
-@dataclass(frozen=True)
-class DeliberationStepResult:
-    """Per-step finalization output produced by :class:`DeliberationStepFinalizer`.
-
-    Attributes:
-        reward: Task-finalized reward tensor of shape ``(B, 1)``.
-        terminated: Per-slot episode termination flag of shape ``(B,)``.
-        truncated: Per-slot episode truncation flag of shape ``(B,)``.
-        next_runtime_state: Updated lightweight runtime carry, or ``None`` if
-            the finalizer is stateless.
-    """
-
-    reward: Tensor  # (B, 1)
-    terminated: Tensor  # (B,)
-    truncated: Tensor  # (B,)
-    next_runtime_state: object | None = None
-
-
-# =============================================================================
-class DeliberationStepFinalizer(Protocol):
-    """Step-finalization seam injected into :class:`DeliberationACController`.
-
-    Owns semantic reward and termination flag production given the current-step
-    task output and batch.  The controller calls this after the backbone forward
-    pass and policy sampling; the finalizer must not access controller-internal
-    data structures.
-
-    Implementations belong in task-owned or adapter-owned layers, not in the
-    controller itself.
-    """
-
-    def finalize_step(
-        self,
-        data: Batch,
-        task_output: object,
-        action: Tensor,
-        steps: Tensor,
-        runtime_state: object | None,
-    ) -> DeliberationStepResult:
-        """Produce reward and termination flags for the current step.
-
-        Args:
-            data: Current per-slot batch.
-            task_output: Task-side model output from ``backbone_output.task``.
-            action: Sampled action tensor of shape ``(B,)``.
-            steps: Per-slot step counters of shape ``(B,)`` after advancing.
-            runtime_state: Lightweight runtime carry from the previous step.
-
-        Returns:
-            :class:`DeliberationStepResult` with reward, termination flags, and
-            the updated runtime state.
-        """
-        ...
 
 
 # =============================================================================
@@ -119,13 +64,13 @@ class DeliberationACRolloutState[ModelState](RolloutState[ModelState]):
     """Controller carry/state for deliberation actor-critic rollouts.
 
     Does not contain ``env_td`` and does not depend on
-    :class:`~ehc_sn.controllers.online.actor_critic.RLTaskRuntime` or
+    :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter` or
     :class:`~ehc_sn.controllers.online.actor_critic.RLRolloutState`.
 
     Attributes:
         runtime_state: Lightweight carry owned by the injected
-            :class:`DeliberationStepFinalizer`.  ``None`` for stateless
-            finalizers.
+            :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`.  ``None`` for stateless
+            evaluators.
     """
 
     runtime_state: object | None = None
@@ -141,17 +86,17 @@ class DeliberationACController[ModelState](
         - maintains per-slot buffers across steps via the inherited slot lifecycle
         - resets backbone state for halted slots
         - samples actions from ``q_values`` via :class:`~ehc_sn.policies.categorical.CategoricalPolicy`
-        - delegates reward and termination to the injected :class:`DeliberationStepFinalizer`
+        - delegates reward and termination to the injected :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`
         - emits one :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord` per step
 
-    No TorchRL environment, no ``env_td``, no :class:`~ehc_sn.controllers.online.actor_critic.RLTaskRuntime`.
+    No TorchRL environment, no ``env_td``, no :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter`.
     """
 
     def __init__(  # ----------------------------------------------------------
         self,
         backbone: ValueControlRolloutBackbone[ModelState],
         config: DeliberationACControllerConfig,
-        finalizer: DeliberationStepFinalizer,
+        finalizer: TaskStepEvaluator,
     ) -> None:
         """Create a deliberation actor-critic controller."""
         super().__init__(backbone=cast(Any, backbone), config=config)
@@ -164,8 +109,8 @@ class DeliberationACController[ModelState](
         return cast(ValueControlRolloutBackbone[ModelState], super().backbone)
 
     @property
-    def finalizer(self) -> DeliberationStepFinalizer:
-        """Return the injected step finalizer."""
+    def finalizer(self) -> TaskStepEvaluator:
+        """Return the injected step evaluator."""
         return self._finalizer
 
     def initial_state(  # -----------------------------------------------------
@@ -202,7 +147,7 @@ class DeliberationACController[ModelState](
             2. Reset backbone state for halted rows.
             3. Run the backbone forward pass.
             4. Sample an action via :class:`~ehc_sn.policies.categorical.CategoricalPolicy`.
-            5. Call :meth:`DeliberationStepFinalizer.finalize_step` for reward/termination.
+            5. Call :meth:`TaskStepEvaluator.evaluate_step` for reward/termination.
             6. Compute ``done`` as ``(terminated | truncated)``.
             7. Emit :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`.
 
@@ -267,7 +212,7 @@ class DeliberationACController[ModelState](
         policy_decision = self._policy(policy_input, explore=explore)
         action = policy_decision.action.to(torch.int64)
 
-        step_result = self._finalizer.finalize_step(
+        step_result = self._finalizer.evaluate_step(
             data,
             backbone_output.task,
             action,
@@ -312,6 +257,4 @@ __all__ = [
     "DeliberationACController",
     "DeliberationACControllerConfig",
     "DeliberationACRolloutState",
-    "DeliberationStepFinalizer",
-    "DeliberationStepResult",
 ]

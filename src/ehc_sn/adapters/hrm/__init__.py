@@ -1,12 +1,18 @@
-"""TODO"""
+"""HRM bridge adapters for MazeHard and SeqMaze task families."""
 
-from ._base import MazeHardHRMAdapterSettings, SeqMazeProbeAdapterSettings
+from ._base import (
+    MazeHardHRMAdapterSettings,
+    SeqMazeAdapterSettings,
+    SeqMazeProbeAdapterSettings,
+)
 from .mazehard import MazeHardHRMV1BridgeAdapter, MazeHardHRMV2BridgeAdapter
 from .objectives import (
     MazeHardHRMV1ACTTaskBinding,
     MazeHardHRMV2HybridTaskBinding,
 )
 from .seqmaze import (
+    SeqMazeBridgeOutput,
+    SeqMazeHRMV2BridgeAdapter,
     SeqMazeProbeHRMV2BridgeAdapter,
     SeqMazeProbeOutput,
 )
@@ -27,6 +33,9 @@ __all__ = [
     "MAZE_HARD_HRM_ACT_TRACE_FIELDS",
     "MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY",
     "build_mazehard_hrm_trace_meta",
+    "SeqMazeAdapterSettings",
+    "SeqMazeBridgeOutput",
+    "SeqMazeHRMV2BridgeAdapter",
     "SeqMazeProbeAdapterSettings",
     "SeqMazeProbeHRMV2BridgeAdapter",
     "SeqMazeProbeOutput",

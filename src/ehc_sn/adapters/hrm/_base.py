@@ -410,6 +410,357 @@ class SeqMazeProbeDecoder(nn.Module):
 
 
 # =============================================================================
+class SeqMazeAdapterSettings(BaseModel, extra="forbid"):
+    """Adapter configuration for seqmaze v1 path prediction.
+
+    Attributes:
+        n_max: Maximum candidate nodes per batch (N).
+        t_max: Maximum generated path length (T).
+        k_max: Maximum out-degree per node (K).
+        vocab_size_obs: Vocabulary size for observation-id embeddings.
+        vocab_size_candidate: Vocabulary size for candidate-index embeddings.
+        edge_encoding: Edge encoding mode.
+            - "successor_index_embedding": v1 default. Embeds adjacency list
+              as E_slot(k) + E_index(succ[i,k]), pooled per node.
+            - "successor_node_pool": Pools successor node base embeddings
+              for one-hop structural summary.
+            - "none": Negative control. Removes all transition information.
+        hidden_size: Embedding dimension (must match PFC hidden size).
+        share_path_position_embeddings: Whether E_decode_position shares
+            weights with E_path_position.
+    """
+
+    n_max: int = Field(default=32, ge=1)
+    t_max: int = Field(default=32, ge=1)
+    k_max: int = Field(default=4, ge=1)
+    vocab_size_obs: int = Field(default=64, ge=1)
+    vocab_size_candidate: int = Field(default=64, ge=1)
+    edge_encoding: Literal[
+        "successor_index_embedding",
+        "successor_node_pool",
+        "none",
+    ] = Field(default="successor_index_embedding")
+    hidden_size: int = Field(default=128, ge=1)
+    share_path_position_embeddings: bool = Field(default=True)
+
+
+# =============================================================================
+class SeqMazeEncoder(nn.Module):
+    """Encoder that packs graph nodes + path queries into HRM schema tokens.
+
+    Schema layout (S = N + T):
+
+        positions [0 : N):
+            graph region — node embeddings for candidate graph nodes.
+
+        positions [N : N + T):
+            path region — learned query embeddings for output positions.
+
+    The graph region uses the same successor-index embedding as the probe
+    encoder.  The path region uses learned position-specific query embeddings.
+    A region tag embedding is added to every slot.
+    """
+
+    def __init__(
+        self,
+        config: SeqMazeAdapterSettings,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self.config = config
+
+        D = config.hidden_size
+
+        # --- Graph region: content embeddings ---
+        self.E_obs = nn.Embedding(
+            config.vocab_size_obs, D, device=device, dtype=dtype
+        )
+        self.E_candidate = nn.Embedding(
+            max(config.n_max + 1, config.vocab_size_candidate),
+            D,
+            device=device,
+            dtype=dtype,
+        )
+        # Flag embeddings (2 values: False=0, True=1)
+        self.E_start = nn.Embedding(2, D, device=device, dtype=dtype)
+        self.E_goal = nn.Embedding(2, D, device=device, dtype=dtype)
+
+        # --- Graph region: edge encoding ---
+        self.E_successor_slot = nn.Embedding(
+            config.k_max, D, device=device, dtype=dtype
+        )
+        self.E_candidate_index = nn.Embedding(
+            config.n_max + 1, D, device=device, dtype=dtype
+        )
+
+        # --- Graph region: successor_node_pool encoding ---
+        # Shared with candidate-index embedding above (same index space)
+        # Pooled by mean over valid successors
+
+        # --- Path region: learned query embeddings ---
+        self.E_path_query = nn.Embedding(1, D, device=device, dtype=dtype)
+        self.E_path_position = nn.Embedding(
+            config.t_max, D, device=device, dtype=dtype
+        )
+
+        # --- Region embeddings ---
+        self.E_region_graph = nn.Embedding(1, D, device=device, dtype=dtype)
+        self.E_region_path = nn.Embedding(1, D, device=device, dtype=dtype)
+
+        # Scaling
+        self.embedding_scale = D**0.5
+
+    def forward(
+        self,
+        # Graph region inputs
+        node_obs_id: Tensor,  # (B, N)
+        node_candidate_index: Tensor,  # (B, N)
+        node_start_flag: Tensor,  # (B, N)
+        node_goal_flag: Tensor,  # (B, N)
+        successor_indices: Tensor,  # (B, N, K)
+        successor_mask: Tensor,  # (B, N, K)
+        node_mask: Tensor,  # (B, N)
+    ) -> tuple[Tensor, Tensor]:
+        """Encode graph nodes and path queries into schema tokens.
+
+        Returns:
+            schema_tokens: (B, S, D) — full schema token sequence.
+            schema_mask: (B, S) — True for valid tokens.
+        """
+        config = self.config
+        B, N, K = successor_indices.shape
+        T = config.t_max
+        S = N + T
+        D = config.hidden_size
+        device = successor_indices.device
+
+        # ---- Graph region ----
+        # Content embedding
+        obs_emb = self.E_obs(node_obs_id)  # (B, N, D)
+        cand_emb = self.E_candidate(node_candidate_index)  # (B, N, D)
+        start_emb = self.E_start(node_start_flag.to(torch.int64))  # (B, N, D)
+        goal_emb = self.E_goal(node_goal_flag.to(torch.int64))  # (B, N, D)
+        content = obs_emb + cand_emb + start_emb + goal_emb
+
+        # Edge embedding
+        edge_emb = self._encode_edges(
+            successor_indices, successor_mask, node_candidate_index, node_obs_id
+        )  # (B, N, D)
+
+        # Region tag
+        region_graph = self.E_region_graph.weight.unsqueeze(0)  # (1, 1, D)
+
+        # Final node embedding
+        graph_tokens = (
+            self.embedding_scale * (content + edge_emb) + region_graph
+        )  # (B, N, D)
+
+        # Graph mask
+        graph_mask = node_mask  # (B, N)
+
+        # ---- Path region ----
+        # Learned query embedding (same for all path slots)
+        query = self.E_path_query.weight.unsqueeze(
+            0
+        )  # (1, 1, D) — weight is (1, D)
+        query = query.expand(B, T, -1)  # (B, T, D)
+
+        # Position embedding
+        pos_ids = torch.arange(T, device=device).unsqueeze(0).expand(B, -1)
+        pos_emb = self.E_path_position(pos_ids)  # (B, T, D)
+
+        region_path = self.E_region_path.weight.unsqueeze(0)  # (1, 1, D)
+
+        path_tokens = (
+            self.embedding_scale * (query + pos_emb) + region_path
+        )  # (B, T, D)
+
+        # Path mask: path positions are always valid
+        path_mask = torch.ones(B, T, dtype=torch.bool, device=device)
+
+        # ---- Concatenate ----
+        schema_tokens = torch.cat(
+            [graph_tokens, path_tokens], dim=1
+        )  # (B, S, D)
+        schema_mask = torch.cat([graph_mask, path_mask], dim=1)  # (B, S)
+
+        return schema_tokens, schema_mask
+
+    def _encode_edges(
+        self,
+        successor_indices: Tensor,  # (B, N, K)
+        successor_mask: Tensor,  # (B, N, K)
+        node_candidate_index: Tensor,  # (B, N)
+        node_obs_id: Tensor,  # (B, N)
+    ) -> Tensor:
+        """Encode transition structure into per-node edge embeddings.
+
+        Returns:
+            edge_emb: (B, N, D)
+        """
+        config = self.config
+        B, N, K = successor_indices.shape
+        D = config.hidden_size
+
+        if config.edge_encoding == "none":
+            return torch.zeros(B, N, D, device=successor_indices.device)
+
+        if config.edge_encoding == "successor_index_embedding":
+            return self._encode_successor_index_embedding(
+                successor_indices, successor_mask
+            )
+
+        if config.edge_encoding == "successor_node_pool":
+            return self._encode_successor_node_pool(
+                successor_indices, successor_mask, node_obs_id
+            )
+
+        raise ValueError(f"Unknown edge_encoding: {config.edge_encoding!r}")
+
+    def _encode_successor_index_embedding(
+        self,
+        successor_indices: Tensor,  # (B, N, K)
+        successor_mask: Tensor,  # (B, N, K)
+    ) -> Tensor:
+        """Encode edges as pooled slot+index embeddings.
+
+        edge_embedding_i =
+            Pool_k [ E_successor_slot(k) + E_candidate_index(succ[i,k]) ]
+            masked by successor_mask[i, k]
+        """
+        config = self.config
+        B, N, K = successor_indices.shape
+        D = config.hidden_size
+
+        succ_idx_clamped = successor_indices.clamp(min=0, max=config.n_max)
+        succ_idx_mask = successor_mask
+
+        # E_successor_slot(k) — broadcast over (B, N)
+        slot_emb = self.E_successor_slot.weight.unsqueeze(0).unsqueeze(0)
+        slot_emb = slot_emb.expand(B, N, -1, -1)  # (B, N, K, D)
+
+        # E_candidate_index(succ[i,k])
+        index_emb = self.E_candidate_index(succ_idx_clamped)  # (B, N, K, D)
+
+        # Sum slot + index, then mean-pool over K
+        edge_per_slot = slot_emb + index_emb  # (B, N, K, D)
+        edge_emb = edge_per_slot * succ_idx_mask.unsqueeze(-1)
+        denom = succ_idx_mask.sum(dim=-1, keepdim=True).clamp(min=1)
+        edge_emb = edge_emb.sum(dim=-2) / denom  # (B, N, D)
+
+        return edge_emb
+
+    def _encode_successor_node_pool(
+        self,
+        successor_indices: Tensor,  # (B, N, K)
+        successor_mask: Tensor,  # (B, N, K)
+        node_obs_id: Tensor,  # (B, N)
+    ) -> Tensor:
+        """Encode edges by pooling successor node base embeddings.
+
+        edge_embedding_i =
+            Pool_k [ E_obs(obs_id[succ[i,k]]) ]
+            masked by successor_mask[i, k]
+        """
+        config = self.config
+        B, N, K = successor_indices.shape
+        D = config.hidden_size
+
+        # Clamp indices to valid range
+        succ_idx_clamped = successor_indices.clamp(min=0, max=N - 1)
+        succ_idx_mask = successor_mask  # (B, N, K)
+
+        # Gather obs_id of successors: node_obs_id[b, succ[i,k]]
+        # Expand node_obs_id to (B, N, 1) -> gather along dim=1 with succ indices
+        batch_idx = (
+            torch.arange(B, device=node_obs_id.device)
+            .unsqueeze(1)
+            .unsqueeze(2)
+            .expand(-1, N, K)
+        )
+        node_idx = succ_idx_clamped  # (B, N, K)
+        succ_obs_id = node_obs_id[batch_idx, node_idx]  # (B, N, K)
+
+        # Embed and mean-pool
+        obs_emb = self.E_obs(succ_obs_id)  # (B, N, K, D)
+        obs_emb = obs_emb * succ_idx_mask.unsqueeze(-1)
+        denom = succ_idx_mask.sum(dim=-1, keepdim=True).clamp(min=1)
+        edge_emb = obs_emb.sum(dim=-2) / denom  # (B, N, D)
+
+        return edge_emb
+
+
+# =============================================================================
+class SeqMazeDecoder(nn.Module):
+    """Decoder that reads path-region slots and produces path logits.
+
+    Applies an explicit output-position embedding before the linear head:
+
+        decoder_input_t = path_states[:, t, :] + E_decode_position(t)
+        path_logits = Linear(D, N_max + 2)(decoder_input)
+
+    E_decode_position optionally shares weights with E_path_position
+    (controlled by share_path_position_embeddings in the config).
+    """
+
+    def __init__(
+        self,
+        config: SeqMazeAdapterSettings,
+        path_position_emb: nn.Embedding | None = None,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self.config = config
+        D = config.hidden_size
+        V = config.n_max + 2  # path vocabulary size
+
+        if (
+            config.share_path_position_embeddings
+            and path_position_emb is not None
+        ):
+            self.E_decode_position = path_position_emb
+        else:
+            self.E_decode_position = nn.Embedding(
+                config.t_max, D, device=device, dtype=dtype
+            )
+
+        self.lm_head = nn.Linear(D, V, bias=False, device=device, dtype=dtype)
+
+    def forward(
+        self,
+        schema_slots: Tensor,  # (B, S, D) — full schema output from HRM
+        n_max: int,
+        t_max: int,
+    ) -> Tensor:
+        """Decode path-region schema slots into path logits.
+
+        Args:
+            schema_slots: (B, S, D) — all schema slots from HRM output.
+            n_max: Number of graph region slots (N).
+            t_max: Number of path region slots (T).
+
+        Returns:
+            path_logits: (B, T, N+2) float32.
+        """
+        # Extract path region
+        path_states = schema_slots[:, n_max : n_max + t_max, :]  # (B, T, D)
+        B, T, D = path_states.shape
+
+        # Position embedding
+        device = schema_slots.device
+        pos_ids = torch.arange(T, device=device).unsqueeze(0).expand(B, -1)
+        pos_emb = self.E_decode_position(pos_ids)  # (B, T, D)
+
+        decoder_input = path_states + pos_emb  # (B, T, D)
+        path_logits = self.lm_head(decoder_input)  # (B, T, N+2)
+        return path_logits
+
+
+# =============================================================================
 __all__ = [
     "O_ID",
     "DEFAULT_MAZE_HARD_HRM_VOCAB_SIZE",
@@ -423,4 +774,7 @@ __all__ = [
     "SeqMazeProbeAdapterSettings",
     "SeqMazeProbeEncoder",
     "SeqMazeProbeDecoder",
+    "SeqMazeAdapterSettings",
+    "SeqMazeEncoder",
+    "SeqMazeDecoder",
 ]

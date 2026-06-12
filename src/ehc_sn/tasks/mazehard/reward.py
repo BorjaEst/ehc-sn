@@ -9,8 +9,8 @@ Reward formula: terminal success reward plus explicit continue cost, incorrect
 halt penalty, and truncation penalty.
 
 The projector is injected into
-:class:`~ehc_sn.tasks.mazehard.capabilities.deliberation.MazeHardDeliberationCapability`
-at construction; the capability remains thin mode wiring only.
+:class:`~ehc_sn.tasks.mazehard.evaluators.step.MazeHardStepEvaluator`
+at construction; the evaluator remains thin mode wiring only.
 """
 
 from __future__ import annotations

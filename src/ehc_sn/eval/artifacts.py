@@ -893,6 +893,24 @@ def _read_dense_npz(path: Path) -> dict[str, np.ndarray]:
     return dict(np.load(path, allow_pickle=True))
 
 
+def _nest_slash_paths(flat: dict[str, Any]) -> dict[str, Any]:
+    """Convert flat slash-delimited keys into nested dicts.
+
+    ``{"lec/filter/alpha_sigmoid": [0.99]}`` becomes
+    ``{"lec": {"filter": {"alpha_sigmoid": [0.99]}}}`` so that
+    ``_lookup_meta_path`` (which traverses slash-separated segments as
+    nested dict levels) can resolve them.
+    """
+    nested: dict[str, Any] = {}
+    for path, value in flat.items():
+        target = nested
+        *segments, leaf = path.split("/")
+        for seg in segments:
+            target = target.setdefault(seg, {})
+        target[leaf] = value
+    return nested
+
+
 def _rehydrate_trace_tree(
     dense: dict[str, np.ndarray],
     meta: dict[str, Any],
@@ -926,7 +944,7 @@ def _rehydrate_trace_tree(
     trace.dense_leaves = dense_leaves
 
     if meta:
-        trace.attached_meta.update(meta)
+        trace.attached_meta.update(_nest_slash_paths(meta))
 
     trace._rehydrated_dense = dense  # type: ignore[attr-defined]
     return trace

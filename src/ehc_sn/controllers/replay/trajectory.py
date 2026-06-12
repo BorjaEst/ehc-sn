@@ -340,6 +340,7 @@ class ReplayTrajectoryController[ModelState](
             steps=steps,
             halted=new_halted,
             data=current_data,
+            static_data=state.static_data,
             cursor=cursor,
             trajectory_length=traj_len,
             trajectory_id=trajectory_id,
