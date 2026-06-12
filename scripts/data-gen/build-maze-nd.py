@@ -55,9 +55,9 @@ from ehc_sn.data.substrate.maze_nd import (
     validate_maze_nd_shared_root,
 )
 
-# ---------------------------------------------------------------------------
-_DEFAULT_RAW_ROOT = Path("data/raw/huggingface/maze_hard_augmented")
+# =============================================================================
 _DEFAULT_INTERIM_ROOT = Path("data/interim/maze-nd")
+_DEFAULT_RAW_ROOT = Path("data/raw/huggingface/maze_hard_augmented")
 _DEFAULT_VERSION = 1
 _DEFAULT_N_TRAIN = 200
 _DEFAULT_N_VAL = 40
@@ -84,14 +84,15 @@ def fetch_raw(
     typer.echo(f"Raw corpus at {raw_root}")
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 @app.command("prepare-interim")
 def prepare_interim(
     raw_root: Annotated[
         Path,
         typer.Option(
             "--raw-root",
-            help="Root path for raw corpus (default: data/raw/huggingface/maze_hard_augmented).",
+            help="Root path for raw corpus "
+            "(default: data/raw/huggingface/maze_hard_augmented).",
         ),
     ] = _DEFAULT_RAW_ROOT,
     interim_root: Annotated[
@@ -110,7 +111,7 @@ def prepare_interim(
     typer.echo(f"Interim written to {interim_root}")
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 @app.command("materialize-shared")
 def materialize_shared(
     interim_root: Annotated[
@@ -173,6 +174,7 @@ def materialize_shared(
 
 
 # ---------------------------------------------------------------------------
+# =============================================================================
 @app.command("validate")
 def validate(
     root: Annotated[
@@ -197,6 +199,7 @@ def validate(
 
 
 # ---------------------------------------------------------------------------
+# =============================================================================
 @app.command("build-all")
 def build_all(
     raw_root: Annotated[
@@ -262,5 +265,6 @@ def build_all(
     )
 
 
+# =============================================================================
 if __name__ == "__main__":
     app()
