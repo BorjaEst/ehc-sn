@@ -16,8 +16,16 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.contracts.task_runtime import RuntimeReset, StepFeedback, TaskRuntime
-from ehc_sn.tasks.mazehard.contracts import MazeHardTargets, MazeHardTaskInput, MazeHardTaskOutput
+from ehc_sn.contracts.task_runtime import (
+    RuntimeReset,
+    StepFeedback,
+    TaskRuntime,
+)
+from ehc_sn.tasks.mazehard.contracts import (
+    MazeHardTargets,
+    MazeHardTaskInput,
+    MazeHardTaskOutput,
+)
 from ehc_sn.tasks.mazehard.evaluation import build_maze_hard_step_score
 from ehc_sn.tasks.mazehard.reward import MazeHardRewardProjector
 from ehc_sn.types import Batch
@@ -298,7 +306,7 @@ class MazeHardRuntime(TaskRuntime["_MazeHardRuntimeState"]):
                 batch[key],
                 state.static_data[key],
             )
-            for key in state.static_data
+            for key, value in state.static_data.items()
         }
 
         new_state = _MazeHardRuntimeState(

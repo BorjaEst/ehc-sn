@@ -24,6 +24,8 @@ from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.controllers.deliberation.actor_critic import (
     DeliberationACControllerConfig,
 )
+from ehc_sn.data.datasets import ProcessedDataset
+from ehc_sn.data.episode_sources import ShuffledEpisodeSource
 from ehc_sn.eval.contracts import (
     EvaluationCaseBatch,
     EvaluationCaseResult,
@@ -37,12 +39,10 @@ from ehc_sn.metrics.reducers import HiddenNormHistogram, compute_nonempty
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.step_metrics import StepMetrics
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig
-from ehc_sn.rollouts.buffers import FifoBuffer
-from ehc_sn.rollouts.partial_reset import PartialResetBatchAssembler
 from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
-from ehc_sn.rollouts.sources import PartialResetSource
-from ehc_sn.tasks.mazehard.runtime import MazeHardRuntimeConfig
+from ehc_sn.rollouts.sources import DemandDrivenReplaySource, _move_batch_to
 from ehc_sn.tasks.mazehard.reward import MazeHardRewardConfig
+from ehc_sn.tasks.mazehard.runtime import MazeHardRuntimeConfig
 from ehc_sn.traces import build_trace_spec
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
@@ -196,6 +196,8 @@ class ActorCriticModule(L.LightningModule):
 
         self.automatic_optimization = False
         self._train_carry = None
+        self._train_source: DemandDrivenReplaySource | None = None
+        self._episode_source: ShuffledEpisodeSource | None = None
 
         self.train_metrics = build_train_metrics(bindings.step_routes).clone(
             prefix="train/"
@@ -218,15 +220,7 @@ class ActorCriticModule(L.LightningModule):
             prefix="val_diag/",
         )
 
-        self._train_buffer = FifoBuffer(
-            capacity_rows=4 * config.global_batch_size,
-            keys=("input_ids", "labels"),
-            pin_memory=True,
-        )
-        self._train_batch_assembler = PartialResetBatchAssembler(
-            buffer=self._train_buffer,
-            keys=("input_ids", "labels"),
-        )
+        # No batch buffer — demand-driven admission.
 
     @property
     def config(self) -> ActorCriticConfig:
@@ -236,9 +230,7 @@ class ActorCriticModule(L.LightningModule):
         """Initialize controller, objective, learner, and val scorer."""
         runtime = self._bindings.runtime_cls(
             self._component_configs.runtime,
-            self._bindings.reward_projector_cls(
-                self._component_configs.reward
-            ),
+            self._bindings.reward_projector_cls(self._component_configs.reward),
         )
         self.controller = self._bindings.controller_cls(
             self.adapter,
@@ -323,9 +315,9 @@ class ActorCriticModule(L.LightningModule):
         return [opt_sup, opt_rl, opt_qv], schedulers
 
     def on_train_epoch_start(self) -> None:
-        self._train_carry = None
-        self._train_buffer.clear()
-        self.train_metrics.reset()
+        # Carry persists across all DataLoader boundaries per legacy HRM
+        # contract — do NOT reset. Buffer is managed by FIFO eviction.
+        pass
 
     def on_validation_epoch_start(self) -> None:
         self.val_metrics.reset()
@@ -339,6 +331,33 @@ class ActorCriticModule(L.LightningModule):
     def reset_diagnostic_traces(self) -> None:
         self._diagnostic_traces.clear()
 
+    def _ensure_episode_source(  # -------------------------------------------
+        self,
+    ) -> ShuffledEpisodeSource:
+        """Return or create the demand-driven episode source."""
+        if self._episode_source is not None:
+            return self._episode_source
+        datamodule: Any = getattr(self.trainer, "datamodule", None)
+        if datamodule is None:
+            raise RuntimeError(
+                "Demand-driven episode flow requires a DataModule to be "
+                "attached to the trainer."
+            )
+        train_dataset = getattr(datamodule, "_train", None)
+        if train_dataset is None:
+            raise RuntimeError(
+                "DataModule has no training dataset; call setup('fit') first."
+            )
+        world_size = max(getattr(self.trainer, "world_size", 1), 1)
+        rank = getattr(self.trainer, "global_rank", 0)
+        self._episode_source = ShuffledEpisodeSource(
+            train_dataset,
+            rank=rank,
+            world_size=world_size,
+            seed=self._component_configs.hrm_runtime.validation.seed or 42,
+        )
+        return self._episode_source
+
     def training_step(  # -----------------------------------------------------
         self,
         batch: Batch,
@@ -347,15 +366,22 @@ class ActorCriticModule(L.LightningModule):
         self._assert_setup()
 
         if self._train_carry is None:
-            self._train_carry = self.controller.initial_state(batch)
+            init_batch = self._ensure_episode_source().take(
+                self.config.global_batch_size
+            )
+            init_batch = _move_batch_to(init_batch, self.device)
+            self._train_carry = self.controller.initial_state(init_batch)
+
+            # Create the persistent rollout source, lifetime = training run.
+            self._train_source = DemandDrivenReplaySource(
+                episode_source=self._ensure_episode_source(),
+                carry0=self._train_carry,
+                device=self.device,
+            )
+
+        source = self._train_source
 
         is_warmup = self.global_step < self.config.supervised_only_warmup_steps
-
-        source = PartialResetSource(
-            incoming=batch,
-            assembler=self._train_batch_assembler,
-            carry0=self._train_carry,
-        )
         execution = run_captured_rollout(
             runner=self._train_runner,
             source=source,
@@ -369,6 +395,7 @@ class ActorCriticModule(L.LightningModule):
             },
         )
         self._train_carry = execution.final_carry.detach()
+        self._train_source.update(carry=self._train_carry)
 
         record = execution.last_record
         if record.snapshot.steps is None:
@@ -387,7 +414,11 @@ class ActorCriticModule(L.LightningModule):
         )
         step_output = self.objective.compute_step(ac_batch, is_warmup=is_warmup)
 
-        local_bs = int(batch["input_ids"].shape[0])
+        local_bs = max(
+            self.config.global_batch_size
+            // max(getattr(self.trainer, "world_size", 1), 1),
+            1,
+        )
         loss = normalize_loss_for_backward(step_output.loss, local_bs=local_bs)
 
         optimizer_list = self.optimizers()
@@ -421,14 +452,14 @@ class ActorCriticModule(L.LightningModule):
             self._bindings.step_routes,
         )
         self.log(
-            "train/loss",
-            loss.detach(),
-            on_step=True,
-            on_epoch=False,
-            prog_bar=True,
-            logger=True,
-        )
-        return {"loss": loss.detach(), "signals": step_output.signals}
+            "train/loss", loss.detach(),
+            on_step=True, on_epoch=False, prog_bar=True, logger=True,
+        )  # fmt: skip
+
+        return {
+            "loss": loss.detach(),
+            "signals": step_output.signals,
+        }
 
     def validation_step(  # ---------------------------------------------------
         self,
