@@ -70,7 +70,7 @@ def _require_shared_substrate(shared_root: Path) -> None:
             "    python scripts/data-gen/build-dungeongen.py build-all\n"
             "or:\n"
             f"    python scripts/data-gen/build-dungeongen.py materialize-layouts\n"
-            "Requires fetch-raw + prepare-interim first.",
+            "Requires generate-topology first.",
             err=True,
         )
         raise typer.Exit(code=1)

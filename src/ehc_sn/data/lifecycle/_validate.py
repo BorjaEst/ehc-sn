@@ -231,6 +231,17 @@ def _validate_path_grammar(root: Path, manifest: dict[str, Any]) -> None:
                 f"Shared substrate path grammar violation: "
                 f"parent dir is {root.parent.name!r}, manifest family is {family!r}."
             )
+        # Enforce root placement: shared_substrate must resolve under data/interim/.
+        try:
+            rel = root.relative_to(root.anchor)
+        except ValueError:
+            rel = root
+        parts = rel.parts
+        if "interim" not in parts:
+            raise ValueError(
+                f"Shared substrate root must reside under data/interim/, "
+                f"got path {root}."
+            )
     elif dataset_class == "task_corpus":
         corpus = manifest["corpus"]
         task = manifest["task"]
@@ -244,6 +255,17 @@ def _validate_path_grammar(root: Path, manifest: dict[str, Any]) -> None:
                 f"Task corpus path grammar violation: "
                 f"grandparent dir is {root.parent.parent.name!r}, manifest task is {task!r}."
             )
+        # Enforce root placement: task_corpus must resolve under data/processed/.
+        try:
+            rel = root.relative_to(root.anchor)
+        except ValueError:
+            rel = root
+        parts = rel.parts
+        if "processed" not in parts:
+            raise ValueError(
+                f"Task corpus root must reside under data/processed/, "
+                f"got path {root}."
+            )
         ps: str = manifest["parent_substrate"]
         parent_family = manifest["parent_family"]
         parent_version = manifest["parent_version"]
@@ -251,6 +273,8 @@ def _validate_path_grammar(root: Path, manifest: dict[str, Any]) -> None:
             expected_ps = (
                 f"data/interim/{parent_family}/default/v{parent_version}"
             )
+        elif parent_family in {"maze-nd", "numberline"}:
+            expected_ps = f"data/interim/{parent_family}/v{parent_version}"
         else:
             expected_ps = f"data/processed/{parent_family}/v{parent_version}"
         if ps != expected_ps:

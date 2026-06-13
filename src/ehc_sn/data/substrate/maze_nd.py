@@ -3,7 +3,7 @@
 Orchestrates the shared-substrate pipeline for the maze-nd source family:
 
 1. :func:`ensure_raw` — download HuggingFace raw files.
-2. :func:`prepare_interim` — validate and normalize raw records to interim.
+2. :func:`prepare_interim` — validate and normalize raw records to staging.
 3. :func:`build_shared_substrate` — build the versioned immutable substrate root.
 
 Public surface: MazeNdSourceRecord, SHARED_FAMILY, SHARED_CHANNELS, ensure_raw,
@@ -15,8 +15,8 @@ mask_valid).  These are reusable source facts needed by downstream task
 builders, not task-owned labels.  Task protocol (episode encoding,
 target format) belongs in the respective task corpus.
 
-Interim layer: ``data/interim/maze-nd/`` — one JSONL file per raw split.
-Shared substrate: ``data/processed/maze-nd/v<version>/``
+Normalized staging: ``data/raw/maze-nd/`` — one JSONL file per raw split.
+Shared substrate:   ``data/interim/maze-nd/v<version>/``
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ def ensure_raw(
 
 
 def prepare_interim(raw_root: Path, interim_root: Path) -> None:
-    """Validate and write raw maze-nd records to the interim leaf.
+    """Validate and write raw maze-nd records to the normalized staging leaf.
 
     Reads both raw splits (``"train"`` and ``"test"``), validates they are
     non-empty, then writes one uncompressed JSONL file per split under
@@ -110,7 +110,7 @@ def prepare_interim(raw_root: Path, interim_root: Path) -> None:
 
     Args:
         raw_root: Directory containing the raw HuggingFace corpus files.
-        interim_root: Destination interim leaf (e.g. ``data/interim/maze-nd``).
+        interim_root: Destination normalized staging leaf (e.g. ``data/raw/maze-nd``).
 
     Raises:
         RuntimeError: When a raw split is empty.
@@ -133,7 +133,7 @@ def _iter_interim_records(interim_root: Path, split: str):
     path = interim_root / f"{split}.jsonl"
     if not path.exists():
         raise FileNotFoundError(
-            f"Interim file not found: {path}.  Run prepare-interim first."
+            f"Interim file not found: {path}.  Run normalize first."
         )
     with path.open() as fh:
         for line in fh:
@@ -179,8 +179,8 @@ def build_shared_substrate(
 
     Args:
         version_root: Destination versioned root
-            (e.g. ``data/processed/maze-nd/v1``).  Must not already exist.
-        interim_root: Interim leaf (e.g. ``data/interim/maze-nd``).
+            (e.g. ``data/interim/maze-nd/v1``).  Must not already exist.
+        interim_root: Normalized staging leaf (e.g. ``data/raw/maze-nd``).
         n_train: Number of training samples.
         n_val: Number of validation samples.
         n_test: Number of test samples.

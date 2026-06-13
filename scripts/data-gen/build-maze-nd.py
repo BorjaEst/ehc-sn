@@ -7,16 +7,16 @@ task CLIs (build-mazehard.py).
 Stages
 ------
 fetch-raw            Download raw maze-nd corpus from HuggingFace.
-prepare-interim      Normalize raw corpus to a deterministic interim artifact.
+normalize            Normalize raw corpus to raw staging records.
 materialize-shared   Build the maze-nd shared substrate (consumable by build-mazehard).
 validate             Validate a maze-nd shared-substrate version root.
-build-all            Convenience alias: fetch-raw -> prepare-interim -> materialize-shared.
+build-all            Convenience alias: fetch-raw -> normalize -> materialize-shared.
 
 Default paths
 -------------
-Raw corpus:      data/raw/huggingface/maze_hard_augmented
-Interim:         data/interim/maze-nd
-Shared substrate:  data/processed/maze-nd/v{version}
+Raw corpus:           data/external/maze_hard_augmented
+Normalized staging:   data/raw/maze-nd
+Shared substrate:     data/interim/maze-nd/v{version}
 
 Examples
 --------
@@ -31,12 +31,12 @@ Custom sizes::
 
 Validate an existing shared substrate::
 
-    python build-maze-nd.py validate data/processed/maze-nd/v2
+    python build-maze-nd.py validate data/interim/maze-nd/v2
 
 Build a MazeHard task corpus from the shared substrate::
 
     python build-mazehard.py materialize-task \\
-        --parent-substrate data/processed/maze-nd/v2
+        --parent-substrate data/interim/maze-nd/v2
 """
 
 from __future__ import annotations
@@ -48,18 +48,20 @@ import typer
 
 from ehc_sn.data.lifecycle import validate_version_root
 from ehc_sn.data.substrate.maze_nd import (
-    SHARED_FAMILY,
     build_shared_substrate,
     ensure_raw,
-    prepare_interim,
+)
+from ehc_sn.data.substrate.maze_nd import prepare_interim as _normalize
+from ehc_sn.data.substrate.maze_nd import (
     validate_maze_nd_shared_root,
 )
 
 # =============================================================================
 _DEFAULT_INTERIM_ROOT = Path("data/interim/maze-nd")
-_DEFAULT_RAW_ROOT = Path("data/raw/huggingface/maze_hard_augmented")
+_DEFAULT_RAW_ROOT = Path("data/raw/maze-nd")
+_DEFAULT_EXTERNAL_ROOT = Path("data/external/maze_hard_augmented")
 _DEFAULT_VERSION = 1
-_DEFAULT_N_TRAIN = 200
+_DEFAULT_N_TRAIN = 1000
 _DEFAULT_N_VAL = 40
 _DEFAULT_N_TEST = 40
 _DEFAULT_SEED = 42
@@ -75,9 +77,9 @@ def fetch_raw(
         Path,
         typer.Option(
             "--raw-root",
-            help="Root path for raw corpus (default: data/raw/huggingface/maze_hard_augmented).",
+            help="Root path for raw corpus (default: data/external/maze_hard_augmented).",
         ),
-    ] = _DEFAULT_RAW_ROOT,
+    ] = _DEFAULT_EXTERNAL_ROOT,
 ) -> None:
     """Download raw maze-nd corpus from HuggingFace."""
     ensure_raw(raw_root.resolve())
@@ -85,30 +87,30 @@ def fetch_raw(
 
 
 # =============================================================================
-@app.command("prepare-interim")
-def prepare_interim(
+@app.command("normalize")
+def normalize(
     raw_root: Annotated[
         Path,
         typer.Option(
             "--raw-root",
             help="Root path for raw corpus "
-            "(default: data/raw/huggingface/maze_hard_augmented).",
+            "(default: data/external/maze_hard_augmented).",
         ),
-    ] = _DEFAULT_RAW_ROOT,
-    interim_root: Annotated[
+    ] = _DEFAULT_EXTERNAL_ROOT,
+    normalize_root: Annotated[
         Path,
         typer.Option(
-            "--interim-root",
-            help="Destination interim leaf (default: data/interim/maze-nd).",
+            "--normalize-root",
+            help="Destination normalized staging root (default: data/raw/maze-nd).",
         ),
-    ] = _DEFAULT_INTERIM_ROOT,
+    ] = _DEFAULT_RAW_ROOT,
 ) -> None:
-    """Normalize raw corpus to a deterministic interim artifact.
+    """Normalize raw corpus to a deterministic normalized staging artifact.
 
-    Writes one uncompressed JSONL file per split under *interim_root*.
+    Writes one uncompressed JSONL file per split under *normalize_root*.
     """
-    prepare_interim(raw_root.resolve(), interim_root.resolve())
-    typer.echo(f"Interim written to {interim_root}")
+    _normalize(raw_root.resolve(), normalize_root.resolve())
+    typer.echo(f"Normalized staging written to {normalize_root}")
 
 
 # =============================================================================
@@ -118,9 +120,16 @@ def materialize_shared(
         Path,
         typer.Option(
             "--interim-root",
-            help="Root path for interim files (default: data/interim/maze-nd).",
+            help="Output root for shared substrate (default: data/interim/maze-nd).",
         ),
     ] = _DEFAULT_INTERIM_ROOT,
+    normalize_root: Annotated[
+        Path,
+        typer.Option(
+            "--normalize-root",
+            help="Root path for normalized staging files (default: data/raw/maze-nd).",
+        ),
+    ] = _DEFAULT_RAW_ROOT,
     n_train: Annotated[
         int,
         typer.Option(
@@ -157,15 +166,15 @@ def materialize_shared(
         ),
     ] = _DEFAULT_SEED,
 ) -> None:
-    """Build the maze-nd shared substrate from interim records.
+    """Build the maze-nd shared substrate from normalized staging records.
 
     Writes a versioned, immutable shared substrate to
-    ``data/processed/maze-nd/v{version}/``.
+    ``{interim_root}/v{version}/``.
     """
-    shared_root = Path(f"data/processed/{SHARED_FAMILY}/v{version}")
+    shared_root = interim_root / f"v{version}"
     build_shared_substrate(
         shared_root.resolve(),
-        interim_root=interim_root.resolve(),
+        interim_root=normalize_root.resolve(),
         n_train=n_train,
         n_val=n_val,
         n_test=n_test,
@@ -206,14 +215,21 @@ def build_all(
         Path,
         typer.Option(
             "--raw-root",
-            help="Root path for raw corpus (default: data/raw/huggingface/maze_hard_augmented).",
+            help="Root path for raw corpus (default: data/external/maze_hard_augmented).",
+        ),
+    ] = _DEFAULT_EXTERNAL_ROOT,
+    normalize_root: Annotated[
+        Path,
+        typer.Option(
+            "--normalize-root",
+            help="Root path for normalized staging files (default: data/raw/maze-nd).",
         ),
     ] = _DEFAULT_RAW_ROOT,
     interim_root: Annotated[
         Path,
         typer.Option(
             "--interim-root",
-            help="Root path for interim files (default: data/interim/maze-nd).",
+            help="Output root for shared substrate (default: data/interim/maze-nd).",
         ),
     ] = _DEFAULT_INTERIM_ROOT,
     n_train: Annotated[
@@ -252,10 +268,11 @@ def build_all(
         ),
     ] = _DEFAULT_SEED,
 ) -> None:
-    """Full pipeline: fetch-raw -> prepare-interim -> materialize-shared."""
+    """Full pipeline: fetch-raw -> normalize -> materialize-shared."""
     fetch_raw(raw_root=raw_root)
-    prepare_interim(raw_root=raw_root, interim_root=interim_root)
+    normalize(raw_root=raw_root, normalize_root=normalize_root)
     materialize_shared(
+        normalize_root=normalize_root,
         interim_root=interim_root,
         n_train=n_train,
         n_val=n_val,

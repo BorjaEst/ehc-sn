@@ -49,12 +49,6 @@ _SOLUTION_CHARS: frozenset[str] = frozenset({"o", "S", "G"})
 
 
 # =============================================================================
-def default_raw_root() -> Path:
-    """Return the canonical raw root relative to the repo data directory."""
-    return Path("data/raw/huggingface/maze_hard_augmented")
-
-
-# =============================================================================
 def ensure_raw_corpus(raw_root: Path, *, repo_id: str = HF_REPO_ID) -> None:
     """Download the MazeHard raw corpus into *raw_root* if not already present.
 
@@ -75,6 +69,7 @@ def ensure_raw_corpus(raw_root: Path, *, repo_id: str = HF_REPO_ID) -> None:
             continue
         local = hf.hf_hub_download(repo_id, filename, repo_type="dataset")
         import shutil
+
         shutil.copy2(local, dest)
 
 
@@ -95,7 +90,9 @@ def iter_raw_records(raw_root: Path, split: str) -> Iterator[dict]:
         FileNotFoundError: When the raw corpus file is missing.
     """
     if split not in _RAW_FILES:
-        raise KeyError(f"MazeHard raw corpus has no split {split!r}. Available: {sorted(_RAW_FILES)}.")
+        raise KeyError(
+            f"MazeHard raw corpus has no split {split!r}. Available: {sorted(_RAW_FILES)}."
+        )
 
     corpus_file = raw_root / _RAW_FILES[split]
     if not corpus_file.exists():
@@ -144,7 +141,9 @@ def normalize_raw_record(record: dict) -> dict[str, np.ndarray]:
             f"{inputs.shape} vs {labels.shape}."
         )
     if inputs.ndim != 2:
-        raise ValueError(f"MazeHard inputs must be a 2-D grid, got shape {inputs.shape}.")
+        raise ValueError(
+            f"MazeHard inputs must be a 2-D grid, got shape {inputs.shape}."
+        )
 
     topology = inputs != "#"
     mask_valid = topology.copy()
@@ -184,7 +183,6 @@ def count_raw_records(raw_root: Path, split: str) -> int:
 # =============================================================================
 __all__ = [
     "HF_REPO_ID",
-    "default_raw_root",
     "ensure_raw_corpus",
     "iter_raw_records",
     "normalize_raw_record",

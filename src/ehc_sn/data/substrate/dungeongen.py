@@ -190,7 +190,7 @@ def _iter_interim_topologies(
     split_path = interim_root / f"{split}.npz"
     if not split_path.exists():
         raise FileNotFoundError(
-            f"Interim split file not found: {split_path}.  Run prepare-interim first."
+            f"Interim split file not found: {split_path}.  Run generate-topology first."
         )
     data = np.load(split_path)
     heights = data["height"]

@@ -21,12 +21,12 @@ Examples
 Build the MazeHard task corpus against a maze-nd shared substrate::
 
     python build-mazehard.py materialize-task \\
-        --parent-substrate data/processed/maze-nd/v2
+        --parent-substrate data/interim/maze-nd/v2
 
 With custom sizes::
 
     python build-mazehard.py materialize-task \\
-        --parent-substrate data/processed/maze-nd/v2 \\
+        --parent-substrate data/interim/maze-nd/v2 \\
         --n-train 4000 --n-val 500 --n-test 500 --seed 7
 
 Validate an existing task corpus::
