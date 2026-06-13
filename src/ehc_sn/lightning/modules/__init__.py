@@ -12,7 +12,7 @@ Sub-modules:
   (HRM v1-like: halting, partial reset, target network).
 - :mod:`~ehc_sn.lightning.modules.actor_critic` — RL actor-critic training
   (HRM v2-like: deliberation, three-optimizer, warmup gating).
-- (future) ``hybrid`` — combined memory-reasoning training (EHC-like).
+- (future) ``hybrid`` — combined memory-reasoning training (EHP-like).
 """
 
 from ehc_sn.lightning.modules.act_supervised import (

@@ -1,6 +1,6 @@
-"""EHC v1 backbone model, settings, state, and forward I/O.
+"""EHP v1 backbone model, settings, state, and forward I/O.
 
-EHC v1 (Entorhinal-Hippocampal Circuit, version 2) extends the base TEM
+EHP v1 (Entorhinal-Hippocampal Circuit, version 2) extends the base TEM
 circuit with a Prefrontal Cortex (PFC) reasoning module and a Striatum (STR)
 reward-prediction head.
 
@@ -46,7 +46,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.models.ehc.core.ehc_base import (
+from ehc_sn.models.ehp.core.ehp_base import (
     FAMILY_CONTENT,
     SLOT_CUE,
     SLOT_REPLAY,
@@ -83,7 +83,7 @@ from ehc_sn.utils.detach import DetachMixin
 
 # =============================================================================
 class ModelSettingsV1(BaseModel, extra="forbid", strict=False):
-    """Canonical EHC v1 model settings.
+    """Canonical EHP v1 model settings.
 
     All architectural dimensions are resolved from this config; no magic
     numbers appear in ``EHCModelV1``.
@@ -223,7 +223,7 @@ class EHCContentV1:
 # =============================================================================
 @dataclass
 class EHCOutputV1(DetachMixin):
-    """Task-agnostic output payload for one EHC v1 forward step.
+    """Task-agnostic output payload for one EHP v1 forward step.
 
     Attributes:
         control:     PFC/STR control-pathway outputs.
@@ -243,7 +243,7 @@ class EHCOutputV1(DetachMixin):
 # =============================================================================
 @dataclass
 class EHCInputV1(DetachMixin):
-    """Task-agnostic input payload for EHC v1 forward steps.
+    """Task-agnostic input payload for EHP v1 forward steps.
 
     Attributes:
         observation_embedding:   Multi-scale sensory observation codes.
@@ -265,7 +265,7 @@ class EHCInputV1(DetachMixin):
 # =============================================================================
 @dataclass
 class EHCStateV1(DetachMixin):
-    """Container for the full recurrent state across all EHC region modules.
+    """Container for the full recurrent state across all EHP region modules.
 
     Attributes:
         pfc: State of the Prefrontal Cortex reasoning module.
@@ -284,7 +284,7 @@ class EHCStateV1(DetachMixin):
 
 # =============================================================================
 class EHCModelV1(nn.Module):
-    """EHC v1 backbone: TEM circuit with PFC reasoning and STR control.
+    """EHP v1 backbone: TEM circuit with PFC reasoning and STR control.
 
     Region modules:
         - LEC  sensory-feature pathway (lateral entorhinal cortex).
@@ -310,7 +310,7 @@ class EHCModelV1(nn.Module):
         device: Optional[Device] = None,
         dtype: Optional[Dtype] = None,
     ) -> None:
-        """Construct EHC v1 from resolved model settings."""
+        """Construct EHP v1 from resolved model settings."""
         super().__init__()
         self._config = config
         n_freq = len(config.hpc.shape)
@@ -364,7 +364,7 @@ class EHCModelV1(nn.Module):
 
     @property
     def config(self) -> ModelSettingsV1:
-        """Return the parsed EHC v1 model settings."""
+        """Return the parsed EHP v1 model settings."""
         return self._config
 
     @property
@@ -388,7 +388,7 @@ class EHCModelV1(nn.Module):
         return self.projections["hpc_to_pfc"]
 
     def reset_parameters(self) -> None:
-        """Reset all projection parameters owned directly by EHC."""
+        """Reset all projection parameters owned directly by EHP."""
         self.projections.reset_parameters()
 
     def init_state(  # -----------------------------------------------------------
@@ -398,7 +398,7 @@ class EHCModelV1(nn.Module):
         memory: Optional[MemoryState] = None,
         device: Optional[Device] = None,
     ) -> EHCStateV1:
-        """Create an initial full-batch recurrent EHC v1 state.
+        """Create an initial full-batch recurrent EHP v1 state.
 
         Args:
             batch_size: Number of parallel sequences.
@@ -469,7 +469,7 @@ class EHCModelV1(nn.Module):
         inputs: EHCInputV1,
         state: Optional[EHCStateV1] = None,
     ) -> tuple[EHCOutputV1, EHCStateV1]:
-        """Run one EHC v1 step and return architecture-native latents.
+        """Run one EHP v1 step and return architecture-native latents.
 
         Cue-timing (V1 contract):
             ``c_prop`` is derived from *previous*-step ``state.pfc.summary``.
@@ -480,7 +480,7 @@ class EHCModelV1(nn.Module):
         so they read the prior memory state (same ordering as TEM v1).
 
         Args:
-            inputs: Task-agnostic EHC v1 input payload.
+            inputs: Task-agnostic EHP v1 input payload.
             state:  Optional prior recurrent state.  ``None`` allocates a fresh
                 state.  Episode resets must be applied by the caller via
                 :meth:`reset_state` before this call.

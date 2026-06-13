@@ -15,11 +15,11 @@ import argparse
 from pathlib import Path
 
 import torch
+from torch import Tensor
 
 from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMInputV1, TEMModelV1
 from ehc_sn.modules.autoencoder import TwoHotEncoder
 from ehc_sn.tasks.arena.runtime import ARENA_REPLAY_REQUIRED_KEYS
-from ehc_sn.types import DenseMemoryStore
 
 _LANDMARK_ID = None
 
@@ -148,13 +148,13 @@ def main() -> None:
             # Collect flattened codes
             p_post_flat_list.append(
                 torch.cat(
-                    [p.clone().cpu() for p in output.place_codes.posterior],
+                    [p.clone().cpu() for p in output.place_codes.post],
                     dim=-1,
                 )
             )
             p_recall_flat_list.append(
                 torch.cat(
-                    [p.clone().cpu() for p in output.place_codes.retrieved],
+                    [p.clone().cpu() for p in output.place_codes.recall],
                     dim=-1,
                 )
             )

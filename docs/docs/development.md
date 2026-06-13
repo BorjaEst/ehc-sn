@@ -92,7 +92,7 @@ python scripts/data-gen/build-maze-nd.py build-all
 # Then build the task corpus
 python scripts/data-gen/build-mazehard.py --help
 python scripts/data-gen/build-mazehard.py materialize-task \
-    --parent-substrate data/processed/maze-nd/v1
+    --parent-substrate data/interim/maze-nd/v1
 ```
 
 Other generators include:

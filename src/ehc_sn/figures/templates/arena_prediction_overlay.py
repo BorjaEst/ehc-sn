@@ -50,9 +50,9 @@ class ArenaObservationOverlayFigure(BaseFigureTemplate):
         # Pre-compute colormap for the full observation-ID range.
         max_id = max(
             int(data.gt_obs_ids.max()),
-            int(data.pred_inference.max()),
-            int(data.pred_retrieved.max()),
-            int(data.pred_ancestral.max()),
+            int(data.pred_post.max()),
+            int(data.pred_recall.max()),
+            int(data.pred_path.max()),
         )
         n_obs = max_id + 1
         cmap, norm = categorical_id_colormap(n_obs)
@@ -70,9 +70,9 @@ class ArenaObservationOverlayFigure(BaseFigureTemplate):
         grid = np.stack(
             [
                 data.gt_obs_ids,
-                data.pred_inference,
-                data.pred_retrieved,
-                data.pred_ancestral,
+                data.pred_post,
+                data.pred_recall,
+                data.pred_path,
             ],
             axis=0,
         )  # (4, n, T)

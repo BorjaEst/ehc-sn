@@ -1,4 +1,4 @@
-"""Occupancy histogram figure — bounded online summary for TEM/EHC spatial.
+"""Occupancy histogram figure — bounded online summary for TEM/EHP spatial.
 
 Wraps the existing ``render_occupancy_histogram`` as a ``bounded_trace``
 figure that consumes a ``diagnostic/occupancy`` trace leaf.

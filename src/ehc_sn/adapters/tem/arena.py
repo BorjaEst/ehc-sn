@@ -112,17 +112,17 @@ class ArenaOutputsDecoderV1(nn.Module):
         model_output: TEMOutputV1,
     ) -> ArenaTEMBridgeOutput:
         """Decode all three place pathways and return the split task + TEM surfaces."""
-        obs_inference = self.decode(model_output.pred_codes.post)
-        obs_retrieved = (
+        obs_post = self.decode(model_output.pred_codes.post)
+        obs_recall = (
             self.decode(model_output.pred_codes.recall)
             if model_output.pred_codes.recall is not None
-            else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)
+            else obs_post.new_zeros(obs_post.shape[0], self._obs_dim)
         )
-        obs_ancestral = self.decode(model_output.pred_codes.path)
+        obs_path = self.decode(model_output.pred_codes.path)
 
-        task = _base.ArenaTaskOutput(obs_logits=obs_inference)
+        task = _base.ArenaTaskOutput(obs_logits=obs_post)
         tem = _base.ArenaTEMDiagnostics(
-            obs_logits=(obs_inference, obs_retrieved, obs_ancestral),
+            obs_logits=(obs_post, obs_recall, obs_path),
             grid_codes=model_output.grid_codes,
             place_codes=model_output.place_codes,
             pred_codes=model_output.pred_codes,
@@ -297,17 +297,17 @@ class ArenaOutputsDecoderV2(nn.Module):
         model_output: TEMOutputV2,
     ) -> ArenaTEMBridgeOutput:
         """Decode all three place pathways and return the split task + TEM surfaces."""
-        obs_inference = self._decode(model_output.pred_codes.post)
-        obs_retrieved = (
+        obs_post = self._decode(model_output.pred_codes.post)
+        obs_recall = (
             self._decode(model_output.pred_codes.recall)
             if model_output.pred_codes.recall is not None
-            else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)
+            else obs_post.new_zeros(obs_post.shape[0], self._obs_dim)
         )
-        obs_ancestral = self._decode(model_output.pred_codes.path)
+        obs_path = self._decode(model_output.pred_codes.path)
 
-        task = _base.ArenaTaskOutput(obs_logits=obs_inference)
+        task = _base.ArenaTaskOutput(obs_logits=obs_post)
         tem = _base.ArenaTEMDiagnostics(
-            obs_logits=(obs_inference, obs_retrieved, obs_ancestral),
+            obs_logits=(obs_post, obs_recall, obs_path),
             grid_codes=model_output.grid_codes,
             place_codes=model_output.place_codes,
             pred_codes=model_output.pred_codes,

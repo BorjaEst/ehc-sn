@@ -16,7 +16,7 @@ TARGET_SOLUTION_OVERLAY_META_KEY = "target/solution_overlay"
 
 
 # =============================================================================
-# Minimal typed context for MazeHard+EHC actor-critic trace getters
+# Minimal typed context for MazeHard+EHP actor-critic trace getters
 # =============================================================================
 
 
@@ -51,7 +51,7 @@ def _get_maze_hard_solution_overlay_actor_critic(
 
 
 def build_mazehard_ehc_trace_meta(batch: Batch) -> dict[str, object]:
-    """Return out-of-band trace metadata required by MazeHard+EHC figures."""
+    """Return out-of-band trace metadata required by MazeHard+EHP figures."""
     root_key, leaf_key = TARGET_SOLUTION_OVERLAY_META_KEY.split("/", maxsplit=1)
     return {
         root_key: {
@@ -64,13 +64,13 @@ def build_mazehard_ehc_trace_meta(batch: Batch) -> dict[str, object]:
 # Named field objects
 # =============================================================================
 
-_MAZE_HARD_EHC_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC = TraceField(
+_MAZE_HARD_EHP_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC = TraceField(
     name="pred/solution_overlay",
     get=_get_maze_hard_solution_overlay_actor_critic,
 )
 
-MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS: tuple[TraceField, ...] = (
-    _MAZE_HARD_EHC_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC,
+MAZE_HARD_EHP_ACTOR_CRITIC_TRACE_FIELDS: tuple[TraceField, ...] = (
+    _MAZE_HARD_EHP_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC,
 )
 
 
@@ -111,75 +111,75 @@ def _get_is_revisit(ctx: _ArenaEHCTraceContext) -> TraceValue:
     return is_revisit.view(-1).bool().detach()
 
 
-def _get_pred_obs_id_inference(ctx: _ArenaEHCTraceContext) -> TraceValue:
+def _get_pred_obs_id_post(ctx: _ArenaEHCTraceContext) -> TraceValue:
     return ctx.outputs.backbone_output.obs_logits[0].detach().argmax(dim=-1)
 
 
-def _get_pred_obs_id_retrieved(ctx: _ArenaEHCTraceContext) -> TraceValue:
+def _get_pred_obs_id_recall(ctx: _ArenaEHCTraceContext) -> TraceValue:
     return ctx.outputs.backbone_output.obs_logits[1].detach().argmax(dim=-1)
 
 
-def _get_pred_obs_id_ancestral(ctx: _ArenaEHCTraceContext) -> TraceValue:
+def _get_pred_obs_id_path(ctx: _ArenaEHCTraceContext) -> TraceValue:
     return ctx.outputs.backbone_output.obs_logits[2].detach().argmax(dim=-1)
 
 
 # =============================================================================
-ARENA_EHC_TRACE_WORLD_OBS_ID = TraceField(
+ARENA_EHP_TRACE_WORLD_OBS_ID = TraceField(
     name="world_step/observation_id",
     get=_get_world_observation_id,
 )
 
-ARENA_EHC_TRACE_IS_REVISIT = TraceField(
+ARENA_EHP_TRACE_IS_REVISIT = TraceField(
     name="protocol/is_revisit",
     get=_get_is_revisit,
 )
 
-ARENA_EHC_TRACE_PRED_INFERENCE = TraceField(
-    name="pred/observation_id/inference",
-    get=_get_pred_obs_id_inference,
+ARENA_EHP_TRACE_PRED_POST = TraceField(
+    name="pred/observation_id/post",
+    get=_get_pred_obs_id_post,
 )
 
-ARENA_EHC_TRACE_PRED_RETRIEVED = TraceField(
-    name="pred/observation_id/retrieved",
-    get=_get_pred_obs_id_retrieved,
+ARENA_EHP_TRACE_PRED_RECALL = TraceField(
+    name="pred/observation_id/recall",
+    get=_get_pred_obs_id_recall,
 )
 
-ARENA_EHC_TRACE_PRED_ANCESTRAL = TraceField(
-    name="pred/observation_id/ancestral",
-    get=_get_pred_obs_id_ancestral,
+ARENA_EHP_TRACE_PRED_PATH = TraceField(
+    name="pred/observation_id/path",
+    get=_get_pred_obs_id_path,
 )
 
-ARENA_EHC_TRACE_FIELDS: tuple[TraceField, ...] = (
-    ARENA_EHC_TRACE_WORLD_OBS_ID,
-    ARENA_EHC_TRACE_IS_REVISIT,
-    ARENA_EHC_TRACE_PRED_INFERENCE,
-    ARENA_EHC_TRACE_PRED_RETRIEVED,
-    ARENA_EHC_TRACE_PRED_ANCESTRAL,
+ARENA_EHP_TRACE_FIELDS: tuple[TraceField, ...] = (
+    ARENA_EHP_TRACE_WORLD_OBS_ID,
+    ARENA_EHP_TRACE_IS_REVISIT,
+    ARENA_EHP_TRACE_PRED_POST,
+    ARENA_EHP_TRACE_PRED_RECALL,
+    ARENA_EHP_TRACE_PRED_PATH,
 )
-"""All Arena EHC trace fields in canonical order."""
+"""All Arena EHP trace fields in canonical order."""
 
 
 # =============================================================================
 def select_arena_ehc_trace_fields(
     include_keys: Iterable[str] | None,
 ) -> tuple[TraceField, ...]:
-    """Return the Arena EHC trace fields matching a requested key set."""
+    """Return the Arena EHP trace fields matching a requested key set."""
     if include_keys is None:
-        return ARENA_EHC_TRACE_FIELDS
+        return ARENA_EHP_TRACE_FIELDS
     requested = set(include_keys)
-    return tuple(f for f in ARENA_EHC_TRACE_FIELDS if f.name in requested)
+    return tuple(f for f in ARENA_EHP_TRACE_FIELDS if f.name in requested)
 
 
 # =============================================================================
 __all__ = [
     "build_mazehard_ehc_trace_meta",
-    "MAZE_HARD_EHC_ACTOR_CRITIC_TRACE_FIELDS",
+    "MAZE_HARD_EHP_ACTOR_CRITIC_TRACE_FIELDS",
     "TARGET_SOLUTION_OVERLAY_META_KEY",
-    "ARENA_EHC_TRACE_FIELDS",
-    "ARENA_EHC_TRACE_WORLD_OBS_ID",
-    "ARENA_EHC_TRACE_IS_REVISIT",
-    "ARENA_EHC_TRACE_PRED_INFERENCE",
-    "ARENA_EHC_TRACE_PRED_RETRIEVED",
-    "ARENA_EHC_TRACE_PRED_ANCESTRAL",
+    "ARENA_EHP_TRACE_FIELDS",
+    "ARENA_EHP_TRACE_WORLD_OBS_ID",
+    "ARENA_EHP_TRACE_IS_REVISIT",
+    "ARENA_EHP_TRACE_PRED_POST",
+    "ARENA_EHP_TRACE_PRED_RECALL",
+    "ARENA_EHP_TRACE_PRED_PATH",
     "select_arena_ehc_trace_fields",
 ]

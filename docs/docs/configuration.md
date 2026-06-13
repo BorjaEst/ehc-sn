@@ -35,7 +35,7 @@ Training scripts support environment variable configuration path overrides:
 - TEM_V2_CONFIGURATION_PATH
 - HRM_V1_CONFIGURATION_PATH
 - HRM_V2_CONFIGURATION_PATH
-- EHC_V1_CONFIGURATION_PATH
+- EHP_V1_CONFIGURATION_PATH
 
 ## Benchmark Config
 

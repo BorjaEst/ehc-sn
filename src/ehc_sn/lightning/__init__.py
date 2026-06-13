@@ -1,4 +1,4 @@
-"""Lightning training surfaces for EHC-SN.
+"""Lightning training surfaces for EHP-SN.
 
 Sub-packages (organized by runtime concern):
 

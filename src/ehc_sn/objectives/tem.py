@@ -33,10 +33,10 @@ from ehc_sn.loss.regularization import (
 )
 from ehc_sn.metrics.keys import (
     TEM_LOSS_GRID_KL,
-    TEM_LOSS_OBS_ANCESTRAL,
-    TEM_LOSS_OBS_INFERENCE,
     TEM_LOSS_OBS_NLL,
-    TEM_LOSS_OBS_RETRIEVED,
+    TEM_LOSS_OBS_PATH,
+    TEM_LOSS_OBS_POST,
+    TEM_LOSS_OBS_RECALL,
     TEM_LOSS_PLACE_CONSISTENCY,
     TEM_LOSS_PLACE_SENSORY,
     TEM_LOSS_PLACE_TRANSITION,
@@ -145,17 +145,17 @@ class TEMStepOutput(Protocol):
     """Objective-facing output contract for TEM-family rollout steps."""
 
     @property
-    def logits_inference(self) -> Tensor:
+    def logits_post(self) -> Tensor:
         """Return posterior-path observation logits of shape ``(B, V)``."""
         ...
 
     @property
-    def logits_retrieved(self) -> Tensor:
+    def logits_recall(self) -> Tensor:
         """Return sensory-recall-path observation logits of shape ``(B, V)``."""
         ...
 
     @property
-    def logits_ancestral(self) -> Tensor:
+    def logits_path(self) -> Tensor:
         """Return structural-prior-path observation logits of shape ``(B, V)``."""
         ...
 
@@ -240,17 +240,17 @@ class TEMLosses(VariationalLosses):
     """
 
     # Per-pathway observation sums (masked, weighted by c_obs)
-    loss_obs_inference_sum: Tensor
-    loss_obs_retrieved_sum: Tensor
-    loss_obs_ancestral_sum: Tensor
+    loss_obs_post_sum: Tensor
+    loss_obs_recall_sum: Tensor
+    loss_obs_path_sum: Tensor
 
     @property
     def loss_obs_nll_sum(self) -> Tensor:
         """Return the aggregate observation negative for the current TEM step."""
         return (
-            self.loss_obs_inference_sum
-            + self.loss_obs_retrieved_sum
-            + self.loss_obs_ancestral_sum
+            self.loss_obs_post_sum
+            + self.loss_obs_recall_sum
+            + self.loss_obs_path_sum
         )
 
     # Per-component place-consistency sums (masked, weighted by c_place * temp)
@@ -286,14 +286,14 @@ class TEMTerms:
     """Scored per-example TEM loss terms shared across projections."""
 
     # Per-pathway observation terms (unmasked, unaggregated, weighted by c_obs)
-    obs_inference: Tensor
-    obs_retrieved: Tensor
-    obs_ancestral: Tensor
+    obs_post: Tensor
+    obs_recall: Tensor
+    obs_path: Tensor
 
     @property
     def obs_nll(self) -> Tensor:
         """Return the aggregate per-example observation loss across all pathways."""
-        return self.obs_inference + self.obs_retrieved + self.obs_ancestral
+        return self.obs_post + self.obs_recall + self.obs_path
 
     # Place-consistency terms (unmasked, unaggregated, weighted by c_place * temp)
     place_transition: Tensor
@@ -457,18 +457,18 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
 
         return TEMTerms(
             # Compute the per-example observation loss terms for each pathway.
-            obs_inference=self.obs_loss_fn(
-                logits=outputs.logits_inference,
+            obs_post=self.obs_loss_fn(
+                logits=outputs.logits_post,
                 labels=context.labels,
             )
             * self.config.c_obs,
-            obs_retrieved=self.obs_loss_fn(
-                logits=outputs.logits_retrieved,
+            obs_recall=self.obs_loss_fn(
+                logits=outputs.logits_recall,
                 labels=context.labels,
             )
             * self.config.c_obs,
-            obs_ancestral=self.obs_loss_fn(
-                logits=outputs.logits_ancestral,
+            obs_path=self.obs_loss_fn(
+                logits=outputs.logits_path,
                 labels=context.labels,
             )
             * self.config.c_obs,
@@ -546,16 +546,16 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
     ) -> TEMLosses:
         """Compute TEM losses for a single step under the current config and schedules."""
         return TEMLosses(
-            loss_obs_inference_sum=_masked_mean(
-                values=terms.obs_inference,
+            loss_obs_post_sum=_masked_mean(
+                values=terms.obs_post,
                 mask=context.protocol_mask,
             ),
-            loss_obs_retrieved_sum=_masked_mean(
-                values=terms.obs_retrieved,
+            loss_obs_recall_sum=_masked_mean(
+                values=terms.obs_recall,
                 mask=context.protocol_mask,
             ),
-            loss_obs_ancestral_sum=_masked_mean(
-                values=terms.obs_ancestral,
+            loss_obs_path_sum=_masked_mean(
+                values=terms.obs_path,
                 mask=context.protocol_mask,
             ),
             loss_place_transition_sum=_masked_mean(
@@ -606,16 +606,16 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
                 numerator_sum=_rev_sum(terms.obs_nll),
                 denominator_sum=revisit_count,
             ),
-            TEM_LOSS_OBS_INFERENCE: RatioStat(
-                numerator_sum=_rev_sum(terms.obs_inference),
+            TEM_LOSS_OBS_POST: RatioStat(
+                numerator_sum=_rev_sum(terms.obs_post),
                 denominator_sum=revisit_count,
             ),
-            TEM_LOSS_OBS_RETRIEVED: RatioStat(
-                numerator_sum=_rev_sum(terms.obs_retrieved),
+            TEM_LOSS_OBS_RECALL: RatioStat(
+                numerator_sum=_rev_sum(terms.obs_recall),
                 denominator_sum=revisit_count,
             ),
-            TEM_LOSS_OBS_ANCESTRAL: RatioStat(
-                numerator_sum=_rev_sum(terms.obs_ancestral),
+            TEM_LOSS_OBS_PATH: RatioStat(
+                numerator_sum=_rev_sum(terms.obs_path),
                 denominator_sum=revisit_count,
             ),
             TEM_LOSS_GRID_KL: RatioStat(
@@ -686,9 +686,9 @@ class TEMObjective(VariationalObjectiveBase[TEMObjectiveConfig]):
             S.LOSS_GRID_KL: losses.loss_grid_kl_sum.detach(),
             S.LOSS_PLACE_CONSISTENCY: losses.loss_place_consistency_sum.detach(),
             # Observation loss components for diagnosing pathway-specific failures;
-            S.LOSS_OBS_INFER: losses.loss_obs_inference_sum.detach(),
-            S.LOSS_OBS_RETRIEVED: losses.loss_obs_retrieved_sum.detach(),
-            S.LOSS_OBS_ANCESTRAL: losses.loss_obs_ancestral_sum.detach(),
+            S.LOSS_OBS_INFER: losses.loss_obs_post_sum.detach(),
+            S.LOSS_OBS_RECALL: losses.loss_obs_recall_sum.detach(),
+            S.LOSS_OBS_PATH: losses.loss_obs_path_sum.detach(),
             # Place-consistency components for diagnosing relation-specific failures.
             S.LOSS_PLACE_TRANSITION: losses.loss_place_transition_sum.detach(),
             S.LOSS_PLACE_SENSORY: losses.loss_place_sensory_sum.detach(),

@@ -2,17 +2,17 @@
 
 from ehc_sn.metrics.adapter import Route
 from ehc_sn.metrics.keys import (
-    TEM_ACC_OBS_ANCESTRAL_ALL,
-    TEM_ACC_OBS_ANCESTRAL_REVISIT,
-    TEM_ACC_OBS_INFERENCE_ALL,
-    TEM_ACC_OBS_INFERENCE_REVISIT,
-    TEM_ACC_OBS_RETRIEVED_ALL,
-    TEM_ACC_OBS_RETRIEVED_REVISIT,
+    TEM_ACC_OBS_PATH_ALL,
+    TEM_ACC_OBS_PATH_REVISIT,
+    TEM_ACC_OBS_POST_ALL,
+    TEM_ACC_OBS_POST_REVISIT,
+    TEM_ACC_OBS_RECALL_ALL,
+    TEM_ACC_OBS_RECALL_REVISIT,
     TEM_LOSS_GRID_KL,
-    TEM_LOSS_OBS_ANCESTRAL,
-    TEM_LOSS_OBS_INFERENCE,
     TEM_LOSS_OBS_NLL,
-    TEM_LOSS_OBS_RETRIEVED,
+    TEM_LOSS_OBS_PATH,
+    TEM_LOSS_OBS_POST,
+    TEM_LOSS_OBS_RECALL,
     TEM_LOSS_PLACE_CONSISTENCY,
     TEM_LOSS_PLACE_SENSORY,
     TEM_LOSS_PLACE_TRANSITION,
@@ -36,28 +36,28 @@ def _with_namespace(  # -------------------------------------------------------
 TEM_STEP_ROUTES: tuple[Route, ...] = (
     # -- Accuracy routes ------------------------------------------------------
     Route(
-        "accuracy/obs_ancestral_all",
-        *extra_ratio_paths(TEM_ACC_OBS_ANCESTRAL_ALL),
+        "accuracy/obs_path_all",
+        *extra_ratio_paths(TEM_ACC_OBS_PATH_ALL),
     ),
     Route(
-        "accuracy/obs_ancestral_revisit",
-        *extra_ratio_paths(TEM_ACC_OBS_ANCESTRAL_REVISIT),
+        "accuracy/obs_path_revisit",
+        *extra_ratio_paths(TEM_ACC_OBS_PATH_REVISIT),
     ),
     Route(
-        "accuracy/obs_inference_all",
-        *extra_ratio_paths(TEM_ACC_OBS_INFERENCE_ALL),
+        "accuracy/obs_post_all",
+        *extra_ratio_paths(TEM_ACC_OBS_POST_ALL),
     ),
     Route(
-        "accuracy/obs_inference_revisit",
-        *extra_ratio_paths(TEM_ACC_OBS_INFERENCE_REVISIT),
+        "accuracy/obs_post_revisit",
+        *extra_ratio_paths(TEM_ACC_OBS_POST_REVISIT),
     ),
     Route(
-        "accuracy/obs_retrieved_all",
-        *extra_ratio_paths(TEM_ACC_OBS_RETRIEVED_ALL),
+        "accuracy/obs_recall_all",
+        *extra_ratio_paths(TEM_ACC_OBS_RECALL_ALL),
     ),
     Route(
-        "accuracy/obs_retrieved_revisit",
-        *extra_ratio_paths(TEM_ACC_OBS_RETRIEVED_REVISIT),
+        "accuracy/obs_recall_revisit",
+        *extra_ratio_paths(TEM_ACC_OBS_RECALL_REVISIT),
     ),
     # -- Loss grid routes -----------------------------------------------------
     Route(
@@ -66,20 +66,20 @@ TEM_STEP_ROUTES: tuple[Route, ...] = (
     ),
     # -- Loss observation routes ----------------------------------------------
     Route(
-        "loss/obs_ancestral_revisit",
-        *extra_ratio_paths(TEM_LOSS_OBS_ANCESTRAL),
+        "loss/obs_path_revisit",
+        *extra_ratio_paths(TEM_LOSS_OBS_PATH),
     ),
     Route(
-        "loss/obs_inference_revisit",
-        *extra_ratio_paths(TEM_LOSS_OBS_INFERENCE),
+        "loss/obs_post_revisit",
+        *extra_ratio_paths(TEM_LOSS_OBS_POST),
     ),
     Route(
         "loss/obs_nll_revisit",
         *extra_ratio_paths(TEM_LOSS_OBS_NLL),
     ),
     Route(
-        "loss/obs_retrieved_revisit",
-        *extra_ratio_paths(TEM_LOSS_OBS_RETRIEVED),
+        "loss/obs_recall_revisit",
+        *extra_ratio_paths(TEM_LOSS_OBS_RECALL),
     ),
     # -- Loss place consistency routes ----------------------------------------
     Route(
@@ -106,7 +106,7 @@ TEM_EPISODE_ROUTES: tuple[Route, ...] = _with_namespace(
     "episode", TEM_STEP_ROUTES
 )
 
-TEM_PRIMARY_VAL_ROUTE_KEY: str = "episode/accuracy/obs_ancestral_revisit"
+TEM_PRIMARY_VAL_ROUTE_KEY: str = "episode/accuracy/obs_path_revisit"
 
 # =============================================================================
 __all__ = ["TEM_EPISODE_ROUTES", "TEM_PRIMARY_VAL_ROUTE_KEY", "TEM_STEP_ROUTES"]

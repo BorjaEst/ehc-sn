@@ -4,8 +4,8 @@ Converts the ``manifest["summary"]`` dict produced by Arena evaluation
 into :class:`MetricRecord` rows for report consumption.
 
 The normalizer preserves pre-computed values from the summary. Accuracy
-ratio fields use pathway-qualified names (``accuracy_inference_*``,
-``accuracy_retrieved_*``, ``accuracy_ancestral_*``) as emitted by the
+ratio fields use pathway-qualified names (``accuracy_post_*``,
+``accuracy_recall_*``, ``accuracy_path_*``) as emitted by the
 TEM adapter.  Count fields use model-agnostic names (``correct_all``,
 ``count_all``, etc.) from the task-level ``ArenaScoreReport``.
 """
@@ -35,43 +35,43 @@ from ehc_sn.reporting.schema import EvalArtifactReference, MetricRecord
 
 _ARENA_METRICS: list[MetricSummaryField] = [
     MetricSummaryField(
-        source_key="accuracy_inference_all",
-        metric="accuracy_inference_all",
+        source_key="accuracy_post_all",
+        metric="accuracy_post_all",
         unit="ratio",
         higher_is_better=True,
         required=False,
     ),
     MetricSummaryField(
-        source_key="accuracy_inference_revisit",
-        metric="accuracy_inference_revisit",
+        source_key="accuracy_post_revisit",
+        metric="accuracy_post_revisit",
         unit="ratio",
         higher_is_better=True,
         required=False,
     ),
     MetricSummaryField(
-        source_key="accuracy_retrieved_all",
-        metric="accuracy_retrieved_all",
+        source_key="accuracy_recall_all",
+        metric="accuracy_recall_all",
         unit="ratio",
         higher_is_better=True,
         required=False,
     ),
     MetricSummaryField(
-        source_key="accuracy_retrieved_revisit",
-        metric="accuracy_retrieved_revisit",
+        source_key="accuracy_recall_revisit",
+        metric="accuracy_recall_revisit",
         unit="ratio",
         higher_is_better=True,
         required=False,
     ),
     MetricSummaryField(
-        source_key="accuracy_ancestral_all",
-        metric="accuracy_ancestral_all",
+        source_key="accuracy_path_all",
+        metric="accuracy_path_all",
         unit="ratio",
         higher_is_better=True,
         required=False,
     ),
     MetricSummaryField(
-        source_key="accuracy_ancestral_revisit",
-        metric="accuracy_ancestral_revisit",
+        source_key="accuracy_path_revisit",
+        metric="accuracy_path_revisit",
         unit="ratio",
         higher_is_better=True,
         required=False,

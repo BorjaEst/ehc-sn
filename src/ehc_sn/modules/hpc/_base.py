@@ -227,7 +227,7 @@ class HPCTransitionResult:
     grid_prior_recall: list[Tensor]
     grid_posterior_recall: list[Tensor]
     place_prior: list[Tensor]
-    place_retrieved: list[Tensor]
+    place_recall: list[Tensor]
     place_post: list[Tensor]
     state: HPCState
 
@@ -630,7 +630,7 @@ class HPCBase(nn.Module, ABC):
             read=transition.posterior_read,
         )
 
-        place_retrieved, state = self.generative(grid_posterior_recall, state)
+        place_recall, state = self.generative(grid_posterior_recall, state)
         place_prior, state = self.generative(grid_prior_recall, state)
         place_post, state = self.inference(
             transition.inference_sensory_query,
@@ -638,7 +638,7 @@ class HPCBase(nn.Module, ABC):
             state,
         )
         payload = WritePayload(
-            generative=place_retrieved,
+            generative=place_recall,
             inference=transition.sensory.recall,
             named_writes=transition.named_writes,
         )
@@ -649,7 +649,7 @@ class HPCBase(nn.Module, ABC):
             grid_prior_recall=grid_prior_recall,
             grid_posterior_recall=grid_posterior_recall,
             place_prior=place_prior,
-            place_retrieved=place_retrieved,
+            place_recall=place_recall,
             place_post=place_post,
             state=state,
         )

@@ -21,8 +21,7 @@ Script: scripts/data-gen/build-dungeongen.py
 
 Stages:
 
-- fetch-raw
-- prepare-interim
+- generate-topology
 - materialize-layouts
 - validate
 - build-all
@@ -34,7 +33,7 @@ Script: scripts/data-gen/build-maze-nd.py
 Stages:
 
 - fetch-raw
-- prepare-interim
+- normalize
 - materialize-shared
 - validate
 - build-all

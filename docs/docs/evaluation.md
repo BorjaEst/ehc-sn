@@ -42,7 +42,7 @@ loading helpers.
 
 Supported artifact families include:
 
-- ehc-v1
+- ehp-v1
 - hrm-v1
 - hrm-v2
 - tem-v1

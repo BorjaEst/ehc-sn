@@ -1,6 +1,6 @@
-"""MazeHard plus EHC v1 bridge implementation.
+"""MazeHard plus EHP v1 bridge implementation.
 
-Binds model-native EHC v1 types to the MazeHard task family.
+Binds model-native EHP v1 types to the MazeHard task family.
 
 Optimizer ownership in phase 2 (mazehard_reason_pretrain):
     - Trained:  model.pfc (excl. pfc.estimator), model.pfc.estimator,
@@ -26,7 +26,7 @@ from ehc_sn.adapters.ehp._base import MazeHardEHCAdapterSettings
 from ehc_sn.adapters.ehp.objectives import (
     MazeHardEHCV1HybridTaskBinding,
 )
-from ehc_sn.models.ehc.ehc_v1 import (
+from ehc_sn.models.ehp.ehp_v1 import (
     EHCInputV1,
     EHCModelV1,
     EHCOutputV1,
@@ -39,7 +39,7 @@ from ehc_sn.types import Batch
 # =============================================================================
 @dataclass(frozen=True)
 class MazeHardEHCV1PolicyOutput:
-    """Value-control readouts emitted by the MazeHard EHC v1 bridge."""
+    """Value-control readouts emitted by the MazeHard EHP v1 bridge."""
 
     q_values: Tensor
     valid_action_mask: Tensor | None = None
@@ -48,7 +48,7 @@ class MazeHardEHCV1PolicyOutput:
 # =============================================================================
 @dataclass(frozen=True)
 class MazeHardEHCV1CriticOutput:
-    """Critic readouts emitted by the MazeHard EHC v1 bridge.
+    """Critic readouts emitted by the MazeHard EHP v1 bridge.
 
     re-exposes EHCControlV1.reward_prediction as the canonical actor-critic
     critic surface.  STR is the V(s) owner in this codebase; the field name
@@ -63,7 +63,7 @@ class MazeHardEHCV1CriticOutput:
 # =============================================================================
 @dataclass(frozen=True)
 class MazeHardEHCV1BridgeOutput:
-    """Controller-consumable MazeHard EHC v1 bridge output bundle."""
+    """Controller-consumable MazeHard EHP v1 bridge output bundle."""
 
     task: MazeHardTaskOutput
     policy: MazeHardEHCV1PolicyOutput
@@ -128,7 +128,7 @@ class MazeHardEHCV1Encoder(nn.Module):
 
 # =============================================================================
 class MazeHardEHCV1TaskDecoder(nn.Module):
-    """Decodes EHC v1 PFC body workspace tokens into MazeHard task logits.
+    """Decodes EHP v1 PFC body workspace tokens into MazeHard task logits.
 
     Stacks the three fixed body slots (state, replay, cue) with the content
     family to recover the full (B, pfc.seq_length, D) body tensor, then
@@ -170,9 +170,9 @@ class MazeHardEHCV1TaskDecoder(nn.Module):
 
 # =============================================================================
 class MazeHardEHCV1BridgeAdapter(nn.Module):
-    """MazeHard plus EHC v1 model-task binding over the EHC v1 backbone.
+    """MazeHard plus EHP v1 model-task binding over the EHP v1 backbone.
 
-    Bridges the horizon-1 MazeHard deliberation controller to EHC v1.
+    Bridges the horizon-1 MazeHard deliberation controller to EHP v1.
     The encoder and decoder are trained in phase 2; the spatial pathway
     (LEC, MEC, HPC, and all four inter-region projections) is frozen by
     the phase-2 Lightning surface.
@@ -188,7 +188,7 @@ class MazeHardEHCV1BridgeAdapter(nn.Module):
         config: MazeHardEHCAdapterSettings | None = None,
     ) -> None:
         super().__init__()
-        """Initialize the MazeHard EHC v1 bridge adapter with the given model and settings."""
+        """Initialize the MazeHard EHP v1 bridge adapter with the given model and settings."""
         self._config = config or MazeHardEHCAdapterSettings()
         self.model = model
 
@@ -220,7 +220,7 @@ class MazeHardEHCV1BridgeAdapter(nn.Module):
         self,
         batch_size: int,
     ) -> EHCStateV1:
-        """Create a fresh EHC recurrent state for one rollout batch."""
+        """Create a fresh EHP recurrent state for one rollout batch."""
         return self.model.init_state(batch_size)
 
     def reset_state(  # -------------------------------------------------------
@@ -228,21 +228,21 @@ class MazeHardEHCV1BridgeAdapter(nn.Module):
         reset_flag: Tensor,
         state: EHCStateV1,
     ) -> EHCStateV1:
-        """Reset halted rows of the EHC recurrent state."""
+        """Reset halted rows of the EHP recurrent state."""
         return self.model.reset_state(reset_flag, state)
 
     def prepare_inputs(  # ----------------------------------------------------
         self,
         batch: Batch,
     ) -> EHCInputV1:
-        """Prepare the EHC-native input payload from one generic rollout batch."""
+        """Prepare the EHP-native input payload from one generic rollout batch."""
         return self._encoder(batch)
 
     def postprocess(  # -------------------------------------------------------
         self,
         output: EHCOutputV1,
     ) -> MazeHardEHCV1BridgeOutput:
-        """Split one EHC step output into task, policy, and critic surfaces."""
+        """Split one EHP step output into task, policy, and critic surfaces."""
         return MazeHardEHCV1BridgeOutput(
             task=self._decoder(output),
             policy=MazeHardEHCV1PolicyOutput(
@@ -259,7 +259,7 @@ class MazeHardEHCV1BridgeAdapter(nn.Module):
         batch: Batch,
         state: EHCStateV1 | None = None,
     ) -> tuple[MazeHardEHCV1BridgeOutput, EHCStateV1]:
-        """Run a forward pass of the EHC v1 bridge adapter on a MazeHard batch."""
+        """Run a forward pass of the EHP v1 bridge adapter on a MazeHard batch."""
         inputs = self.prepare_inputs(batch)
         output, next_state = self.model(inputs, state=state)
         return self.postprocess(output), next_state

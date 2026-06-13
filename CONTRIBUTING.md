@@ -1,9 +1,9 @@
-# Contributing to ehc-sn
+# Contributing to ehp-sn
 
 ## Scope
 
 This guide covers local setup, coding conventions, testing, and documentation
-expectations for contributions to ehc-sn.
+expectations for contributions to ehp-sn.
 
 ## Development Setup
 

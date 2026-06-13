@@ -13,11 +13,6 @@ from torch import Tensor, nn
 from ehc_sn.loss.consistency import LatentRelation
 from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes
 from ehc_sn.modules.autoencoder import TwoHotEncoder
-from ehc_sn.objectives.ehc import (
-    GRID_TRANSITION_RELATION,
-    PLACE_SENSORY_RELATION,
-    PLACE_TRANSITION_RELATION,
-)
 from ehc_sn.tasks.arena.contracts import ArenaTaskOutput
 from ehc_sn.tasks.mazehard.runtime import MAZE_HARD_VOCAB_SIZE
 from ehc_sn.types import Batch, MultiScaleCode
@@ -25,10 +20,10 @@ from ehc_sn.utils.detach import DetachMixin
 
 
 # =============================================================================
-# Config types — shared across all Arena EHC versions
+# Config types — shared across all Arena EHP versions
 # =============================================================================
 class ArenaEncoderConfig(BaseModel, extra="forbid"):
-    """Encoder strategy config for the arena-to-EHC sensory pathway.
+    """Encoder strategy config for the arena-to-EHP sensory pathway.
 
     Only ``kind='two_hot'`` with ``layout='replicated'`` is implemented.
     """
@@ -44,7 +39,7 @@ class ArenaEncoderConfig(BaseModel, extra="forbid"):
 
 
 class ArenaDecoderConfig(BaseModel, extra="forbid"):
-    """Decoder strategy config for the EHC-to-arena output pathway."""
+    """Decoder strategy config for the EHP-to-arena output pathway."""
 
     kind: Literal["single_scale", "multi_scale"] = Field(
         default="single_scale",
@@ -67,9 +62,9 @@ class ArenaDecoderConfig(BaseModel, extra="forbid"):
 
 
 class ArenaEHCAdapterSettings(BaseModel, extra="forbid"):
-    """Task-side Arena settings required to bind any Arena EHC version.
+    """Task-side Arena settings required to bind any Arena EHP version.
 
-    Both EHC v1 and EHC v2 use identical adapter settings.
+    Both EHP v1 and EHP v2 use identical adapter settings.
     """
 
     observation_dim: int = Field(
@@ -96,12 +91,12 @@ class ArenaEHCAdapterSettings(BaseModel, extra="forbid"):
 # =============================================================================
 @dataclass(frozen=True)
 class ArenaEHCDiagnostics(DetachMixin):
-    """EHC-family diagnostic surface for controller and objective consumption.
+    """EHP-family diagnostic surface for controller and objective consumption.
 
-    Satisfies :class:`~ehc_sn.objectives.ehc.EHCStepOutput` via computed
+    Satisfies :class:`~ehc_sn.objectives.ehp.EHCStepOutput` via computed
     properties that map bridge-native fields to the protocol's attribute names.
 
-    Used by both EHC v1 and EHC v2 bridge adapters.
+    Used by both EHP v1 and EHP v2 bridge adapters.
     """
 
     obs_logits: tuple[Tensor, Tensor, Tensor]
@@ -113,23 +108,23 @@ class ArenaEHCDiagnostics(DetachMixin):
     # -- EHCStepOutput protocol surface -----------------------------------------
 
     @property
-    def logits_inference(self) -> Tensor:
+    def logits_post(self) -> Tensor:
         """Observation logits from the HPC inference (posterior) pathway."""
         return self.obs_logits[0]
 
     @property
-    def logits_retrieved(self) -> Tensor:
+    def logits_recall(self) -> Tensor:
         """Observation logits from the HPC retrieved (corrected-grid) pathway."""
         return self.obs_logits[1]
 
     @property
-    def logits_ancestral(self) -> Tensor:
+    def logits_path(self) -> Tensor:
         """Observation logits from the HPC ancestral (structural prior) pathway."""
         return self.obs_logits[2]
 
     @property
     def latent_relations(self) -> dict[str, LatentRelation]:
-        """Named latent consistency relations expected by :class:`~ehc_sn.objectives.ehc.EHCObjective`."""
+        """Named latent consistency relations expected by :class:`~ehc_sn.objectives.ehp.EHCObjective`."""
         relations: dict[str, LatentRelation] = {
             GRID_TRANSITION_RELATION: LatentRelation(
                 lhs=self.grid_codes.post, rhs=self.grid_codes.prior
@@ -152,48 +147,48 @@ class ArenaEHCDiagnostics(DetachMixin):
 
 @dataclass(frozen=True)
 class ArenaEHCBridgeOutput(DetachMixin):
-    """Split bridge output: canonical task surface plus EHC-family diagnostics.
+    """Split bridge output: canonical task surface plus EHP-family diagnostics.
 
-    Used by both EHC v1 and EHC v2 bridge adapters.
+    Used by both EHP v1 and EHP v2 bridge adapters.
     """
 
     task: ArenaTaskOutput
-    ehc: ArenaEHCDiagnostics
+    ehp: ArenaEHCDiagnostics
 
     @property
     def obs_logits(self) -> tuple[Tensor, Tensor, Tensor]:
         """Return pathway logits on the bridge output's public surface."""
-        return self.ehc.obs_logits
+        return self.ehp.obs_logits
 
     @property
-    def logits_inference(self) -> Tensor:
+    def logits_post(self) -> Tensor:
         """Return posterior-path observation logits."""
-        return self.ehc.logits_inference
+        return self.ehp.logits_post
 
     @property
-    def logits_retrieved(self) -> Tensor:
+    def logits_recall(self) -> Tensor:
         """Return sensory-recall-path observation logits."""
-        return self.ehc.logits_retrieved
+        return self.ehp.logits_recall
 
     @property
-    def logits_ancestral(self) -> Tensor:
+    def logits_path(self) -> Tensor:
         """Return structural-prior-path observation logits."""
-        return self.ehc.logits_ancestral
+        return self.ehp.logits_path
 
     @property
     def latent_relations(self) -> dict[str, LatentRelation]:
-        """Expose EHC latent-consistency relations on the bridge output."""
-        return self.ehc.latent_relations
+        """Expose EHP latent-consistency relations on the bridge output."""
+        return self.ehp.latent_relations
 
     @property
     def reg_terms(self) -> None:
-        """Expose optional EHC regularization-code overrides on the bridge output."""
-        return self.ehc.reg_terms
+        """Expose optional EHP regularization-code overrides on the bridge output."""
+        return self.ehp.reg_terms
 
     @property
     def theta_cls(self) -> Tensor | None:
         """Return the optional theta-classifier state used for diagnostics."""
-        return self.ehc.theta_cls
+        return self.ehp.theta_cls
 
 
 # =============================================================================
@@ -242,16 +237,16 @@ class ArenaTwoHotEncoder(nn.Module):
 
 
 # =============================================================================
-DEFAULT_MAZE_HARD_EHC_VOCAB_SIZE: int = MAZE_HARD_VOCAB_SIZE
-"""Default vocabulary size for MazeHard+EHC bridges (task-owned canonical value)."""
+DEFAULT_MAZE_HARD_EHP_VOCAB_SIZE: int = MAZE_HARD_VOCAB_SIZE
+"""Default vocabulary size for MazeHard+EHP bridges (task-owned canonical value)."""
 
 
 # =============================================================================
 class MazeHardEHCAdapterSettings(BaseModel, extra="forbid"):
-    """Task-side MazeHard settings for the EHC bridge family."""
+    """Task-side MazeHard settings for the EHP bridge family."""
 
     vocab_size: int = Field(
-        default=DEFAULT_MAZE_HARD_EHC_VOCAB_SIZE,
+        default=DEFAULT_MAZE_HARD_EHP_VOCAB_SIZE,
         ge=1,
         description="MazeHard token vocabulary size used by encoder and "
         "decoder heads. Defaults to the canonical vocabulary including the "

@@ -1,6 +1,6 @@
-"""EHC v2 backbone model, settings, state, and forward I/O.
+"""EHP v2 backbone model, settings, state, and forward I/O.
 
-EHC v2 (Entorhinal-Hippocampal Circuit, version 3) extends EHC v2 with a
+EHP v2 (Entorhinal-Hippocampal Circuit, version 3) extends EHP v2 with a
 Zheng-style current-step cortical cue path.  It is otherwise identical to v2.
 
 Cue-timing contract (V2 — explicit difference from V2):
@@ -61,7 +61,7 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
-from ehc_sn.models.ehc.core.ehc_base import (
+from ehc_sn.models.ehp.core.ehp_base import (
     FAMILY_CONTENT,
     SLOT_CUE,
     SLOT_REPLAY,
@@ -145,7 +145,7 @@ class EHCContentV2:
 # =============================================================================
 @dataclass
 class EHCOutputV2(DetachMixin):
-    """Task-agnostic output payload for one EHC v2 forward step.
+    """Task-agnostic output payload for one EHP v2 forward step.
 
     Attributes:
         control:     PFC/STR control-pathway outputs.
@@ -163,7 +163,7 @@ class EHCOutputV2(DetachMixin):
 # =============================================================================
 @dataclass
 class EHCInputV2(DetachMixin):
-    """Task-agnostic input payload for EHC v2 forward steps.
+    """Task-agnostic input payload for EHP v2 forward steps.
 
     Attributes:
         observation_embedding:   Multi-scale sensory observation codes.
@@ -185,7 +185,7 @@ class EHCInputV2(DetachMixin):
 # =============================================================================
 @dataclass
 class EHCStateV2(DetachMixin):
-    """Container for the full recurrent state across all EHC region modules.
+    """Container for the full recurrent state across all EHP region modules.
 
     Attributes:
         pfc: State of the Prefrontal Cortex reasoning module.
@@ -204,7 +204,7 @@ class EHCStateV2(DetachMixin):
 
 # =============================================================================
 class ModelSettingsV2(BaseModel, extra="forbid", strict=False):
-    """Canonical EHC v2 model settings.
+    """Canonical EHP v2 model settings.
 
     All architectural dimensions are resolved from this config; no magic
     numbers appear in ``EHCModelV2``.
@@ -298,9 +298,9 @@ class ModelSettingsV2(BaseModel, extra="forbid", strict=False):
 
 # =============================================================================
 class EHCModelV2(nn.Module):
-    """EHC v2 backbone: TEM circuit with PFC reasoning and STR control.
+    """EHP v2 backbone: TEM circuit with PFC reasoning and STR control.
 
-    Identical to EHC v2 in region modules, projection edges, and output surface.
+    Identical to EHP v2 in region modules, projection edges, and output surface.
     The only architectural difference is the cue-timing contract (see module
     docstring).
 
@@ -328,7 +328,7 @@ class EHCModelV2(nn.Module):
         device: Optional[Device] = None,
         dtype: Optional[Dtype] = None,
     ) -> None:
-        """Construct EHC v2 from resolved model settings."""
+        """Construct EHP v2 from resolved model settings."""
         super().__init__()
         self._config = config
         n_freq = len(config.hpc.shape)
@@ -382,7 +382,7 @@ class EHCModelV2(nn.Module):
 
     @property
     def config(self) -> ModelSettingsV2:
-        """Return the parsed EHC v2 model settings."""
+        """Return the parsed EHP v2 model settings."""
         return self._config
 
     @property
@@ -406,7 +406,7 @@ class EHCModelV2(nn.Module):
         return self.projections["hpc_to_pfc"]
 
     def reset_parameters(self) -> None:
-        """Reset all projection parameters owned directly by EHC."""
+        """Reset all projection parameters owned directly by EHP."""
         self.projections.reset_parameters()
 
     def init_state(  # -----------------------------------------------------------
@@ -416,7 +416,7 @@ class EHCModelV2(nn.Module):
         memory: Optional[MemoryState] = None,
         device: Optional[Device] = None,
     ) -> EHCStateV2:
-        """Create an initial full-batch recurrent EHC v2 state.
+        """Create an initial full-batch recurrent EHP v2 state.
 
         Args:
             batch_size: Number of parallel sequences.
@@ -485,7 +485,7 @@ class EHCModelV2(nn.Module):
         inputs: EHCInputV2,
         state: Optional[EHCStateV2] = None,
     ) -> tuple[EHCOutputV2, EHCStateV2]:
-        """Run one EHC v2 step and return architecture-native latents.
+        """Run one EHP v2 step and return architecture-native latents.
 
         Cue-timing (V2 contract — explicit delta from V2):
             V2 derives ``c_prop`` from *previous*-step ``state.pfc.summary``.
@@ -495,12 +495,12 @@ class EHCModelV2(nn.Module):
             source in V2.
 
         All HPC recall calls in stage 1 are placed before the generative/inference
-        updates so they read the prior memory state (same as TEM v2 / EHC v2).
+        updates so they read the prior memory state (same as TEM v2 / EHP v2).
         The contextual replay read in stage 2 reads from the post-update state
         because it requires c_use, which is only available after the first PFC pass.
 
         Args:
-            inputs: Task-agnostic EHC v2 input payload.
+            inputs: Task-agnostic EHP v2 input payload.
             state:  Optional prior recurrent state.  ``None`` allocates a fresh
                 state.  Episode resets must be applied by the caller via
                 :meth:`reset_state` before this call.

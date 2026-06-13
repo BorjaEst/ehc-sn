@@ -1,6 +1,6 @@
 # Scripts
 
-CLI entry points for the EHC-SN project. Scripts call library APIs from
+CLI entry points for the EHP-SN project. Scripts call library APIs from
 `ehc_sn.*` — they contain no business logic, metric computation, adapter
 dispatch, or figure rendering.
 
@@ -26,8 +26,7 @@ python scripts/evaluation/run_eval.py \
     --provider-settings '{"dataset_path": "data/processed/arena/default/v1", "split": "test", "n_cases": 1}' \
     --regime-id arena_n1 --regime-kind diagnostic \
     --output artifacts/evaluation/tem_v1/arena_n1 --device cpu \
-    --trace-keys '["diagnostic/mec/location_mean","diagnostic/hpc/location_mean","diagnostic/lec/cells","diagnostic/lec/filtered","diagnostic/lec/sensory_code","world_step/observation","pred/observation_id/inference","pred/observation_id/retrieved","pred/observation_id/ancestral"]'
-
+    --trace-keys '["diagnostic/mec/location_mean","diagnostic/hpc/location_mean","diagnostic/lec/cells","diagnostic/lec/filtered","diagnostic/lec/sensory_code","world_step/observation","pred/observation_id/post","pred/observation_id/recall","pred/observation_id/path","lec/filter/alpha_sigmoid","lec/w_f_sigmoid"]'
 
 # TEM v2 Arena diagnostic (1 case, with traces for overlays)
 python scripts/evaluation/run_eval.py \
@@ -39,7 +38,7 @@ python scripts/evaluation/run_eval.py \
     --provider-settings '{"dataset_path": "data/processed/arena/default/v1", "split": "test", "n_cases": 1}' \
     --regime-id arena_n1 --regime-kind diagnostic \
     --output artifacts/evaluation/tem_v2/arena_n1 --device cpu \
-    --trace-keys '["diagnostic/mec/location_mean","diagnostic/hpc/location_mean","diagnostic/lec/cells","diagnostic/lec/filtered","diagnostic/lec/sensory_code","world_step/observation","pred/observation_id/inference","pred/observation_id/retrieved","pred/observation_id/ancestral"]'
+    --trace-keys '["diagnostic/mec/location_mean","diagnostic/hpc/location_mean","diagnostic/lec/cells","diagnostic/lec/filtered","diagnostic/lec/sensory_code","world_step/observation","pred/observation_id/post","pred/observation_id/recall","pred/observation_id/path","lec/filter/alpha_sigmoid","lec/w_f_sigmoid"]'
 
 # HRM v1 MazeHard full diagnostic (4 case, with traces)
 python scripts/evaluation/run_eval.py \
@@ -74,7 +73,7 @@ python scripts/evaluation/run_eval.py \
 
 | Flag                  | Description                                                    |
 | --------------------- | -------------------------------------------------------------- |
-| `--model-family`      | One of `tem-v1`, `tem-v2`, `hrm-v1`, `hrm-v2`, `ehc-v1`        |
+| `--model-family`      | One of `tem-v1`, `tem-v2`, `hrm-v1`, `hrm-v2`, `ehp-v1`        |
 | `--checkpoint`        | Path to a **weights-only** `.pt` file                          |
 | `--config`            | Path to an executor TOML from `config/evaluation/`             |
 | `--task`              | `arena` or `mazehard`                                          |

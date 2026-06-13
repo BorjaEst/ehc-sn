@@ -26,7 +26,7 @@ python scripts/data-gen/build-maze-nd.py build-all
 
 # Then build task corpora
 python scripts/data-gen/build-mazehard.py materialize-task \
-    --parent-substrate data/processed/maze-nd/v1
+    --parent-substrate data/interim/maze-nd/v1
 python scripts/data-gen/build-arena.py materialize-task ...
 python scripts/data-gen/build-numberline.py build-all
 python scripts/data-gen/build-dungeon.py materialize-task ...
@@ -68,17 +68,17 @@ export HRM_V2_CONFIGURATION_PATH=config/training/hrm-v2-default-vram8gib.toml
 python scripts/training/hrm_v2_rl-striatum.py
 ```
 
-### EHC v1 spatial pretraining
+### EHP v1 spatial pretraining
 
 ```bash
-export EHC_V1_CONFIGURATION_PATH=config/training/ehc-v1-spatial-vram8gib.toml
+export EHP_V1_CONFIGURATION_PATH=config/training/ehp-v1-spatial-vram8gib.toml
 python scripts/training/ehc_v1_pretraining.py
 ```
 
-### EHC v1 reason pretraining
+### EHP v1 reason pretraining
 
 ```bash
-export EHC_V1_CONFIGURATION_PATH=config/training/ehc-v1-reason-default.toml
+export EHP_V1_CONFIGURATION_PATH=config/training/ehp-v1-reason-default.toml
 python scripts/training/ehc_v1_pretraining.py
 ```
 
@@ -125,7 +125,7 @@ python scripts/training/tem_v1_baseline.py --checkpoint-dir checkpoints/tem_v1
 
 To select a model family, choose the matching training entrypoint and config.
 For example, use `tem_v1_baseline.py` for TEM v1, `hrm_v1_baseline.py` for HRM
-v1, and `ehc_v1_pretraining.py` for EHC pretraining.
+v1, and `ehc_v1_pretraining.py` for EHP pretraining.
 
 ## Common Notes
 

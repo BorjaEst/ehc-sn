@@ -55,9 +55,9 @@ def register_builtin_figures() -> None:
         MEC_TRACE_KEY_CELLS,
         META_KEY_ENVIRONMENTS,
         TEM_META_KEY_TARGET_OBS_ID,
-        TEM_TRACE_KEY_PRED_ANCESTRAL,
-        TEM_TRACE_KEY_PRED_INFERENCE,
-        TEM_TRACE_KEY_PRED_RETRIEVED,
+        TEM_TRACE_KEY_PRED_PATH,
+        TEM_TRACE_KEY_PRED_POST,
+        TEM_TRACE_KEY_PRED_RECALL,
         WORLD_TRACE_KEY_LOCATION_IDS,
         WORLD_TRACE_KEY_OBSERVATION,
     )
@@ -175,7 +175,7 @@ def register_builtin_figures() -> None:
                     "observation IDs (inference / retrieved / ancestral) "
                     "across the full episode. Mismatched cells are outlined "
                     "in black. Family-neutral; compatible with TEM-style "
-                    "and EHC-style Arena traces. Does NOT show confidence "
+                    "and EHP-style Arena traces. Does NOT show confidence "
                     "or pathway uncertainty."
                 ),
                 plot=arena_prediction_overlay.plot,
@@ -185,9 +185,9 @@ def register_builtin_figures() -> None:
                 input_contract="evaluation_artifact",
                 tags={"arena"},
                 trace_keys={
-                    TEM_TRACE_KEY_PRED_INFERENCE,
-                    TEM_TRACE_KEY_PRED_RETRIEVED,
-                    TEM_TRACE_KEY_PRED_ANCESTRAL,
+                    TEM_TRACE_KEY_PRED_POST,
+                    TEM_TRACE_KEY_PRED_RECALL,
+                    TEM_TRACE_KEY_PRED_PATH,
                 },
                 meta_keys={TEM_META_KEY_TARGET_OBS_ID},
             )
@@ -228,7 +228,7 @@ def register_builtin_figures() -> None:
                 maturity="stable",
                 allowed_surfaces={"training", "diagnostic"},
                 input_contract="bounded_trace",
-                tags={"hrm", "ehc", "reasoning", "halting"},
+                tags={"hrm", "ehp", "reasoning", "halting"},
                 trace_keys={"act/halted"},
                 meta_keys=set(),
             )
@@ -238,13 +238,13 @@ def register_builtin_figures() -> None:
         REGISTRY.register(
             FigureSpec(
                 name="q_value_evolution",
-                description="Q-values over rollout steps (RL/EHC-reason/HRM-v2)",
+                description="Q-values over rollout steps (RL/EHP-reason/HRM-v2)",
                 plot=q_value_evolution.plot,
                 default_filename="q_value_evolution",
                 maturity="experimental",
                 allowed_surfaces={"training", "diagnostic"},
                 input_contract="bounded_trace",
-                tags={"hrm", "ehc", "rl", "reasoning", "value"},
+                tags={"hrm", "ehp", "rl", "reasoning", "value"},
                 trace_keys={"value/q_values"},
                 meta_keys=set(),
             )
@@ -337,7 +337,7 @@ def register_builtin_figures() -> None:
                 maturity="stable",
                 allowed_surfaces={"training", "diagnostic"},
                 input_contract="evaluation_artifact",
-                tags={"tem", "ehc", "spatial", "summary"},
+                tags={"tem", "ehp", "spatial", "summary"},
                 trace_keys={"diagnostic/occupancy"},
                 meta_keys=set(),
             )
@@ -356,7 +356,7 @@ def register_builtin_figures() -> None:
                 maturity="experimental",
                 allowed_surfaces={"training", "diagnostic"},
                 input_contract="evaluation_artifact",
-                tags={"tem", "ehc", "spatial", "summary"},
+                tags={"tem", "ehp", "spatial", "summary"},
                 trace_keys={
                     "diagnostic/hidden_norms",
                     "diagnostic/hidden_norms_density",
@@ -381,7 +381,7 @@ def register_builtin_figures() -> None:
                 maturity="experimental",
                 allowed_surfaces={"report", "diagnostic"},
                 input_contract="evaluation_artifact",
-                tags={"lec", "ehc", "report"},
+                tags={"lec", "ehp", "report"},
                 trace_keys={
                     WORLD_TRACE_KEY_OBSERVATION,
                     LEC_TRACE_KEY_CELLS,
@@ -405,7 +405,7 @@ def register_builtin_figures() -> None:
                 maturity="experimental",
                 allowed_surfaces={"report"},
                 input_contract="evaluation_artifact",
-                tags={"mec", "ehc", "report"},
+                tags={"mec", "ehp", "report"},
                 trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, MEC_TRACE_KEY_CELLS},
                 meta_keys={META_KEY_ENVIRONMENTS},
             )
@@ -425,7 +425,7 @@ def register_builtin_figures() -> None:
                 maturity="experimental",
                 allowed_surfaces={"report", "diagnostic"},
                 input_contract="evaluation_artifact",
-                tags={"mec", "ehc", "report"},
+                tags={"mec", "ehp", "report"},
                 trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, MEC_TRACE_KEY_CELLS},
                 meta_keys={META_KEY_ENVIRONMENTS},
             )
@@ -445,7 +445,7 @@ def register_builtin_figures() -> None:
                 maturity="experimental",
                 allowed_surfaces={"report"},
                 input_contract="evaluation_artifact",
-                tags={"hpc", "ehc", "report"},
+                tags={"hpc", "ehp", "report"},
                 trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, HPC_TRACE_KEY_CELLS},
                 meta_keys={META_KEY_ENVIRONMENTS},
             )
@@ -465,7 +465,7 @@ def register_builtin_figures() -> None:
                 maturity="experimental",
                 allowed_surfaces={"report", "diagnostic"},
                 input_contract="evaluation_artifact",
-                tags={"hpc", "ehc", "report"},
+                tags={"hpc", "ehp", "report"},
                 trace_keys={WORLD_TRACE_KEY_LOCATION_IDS, HPC_TRACE_KEY_CELLS},
                 meta_keys={META_KEY_ENVIRONMENTS},
             )
@@ -486,7 +486,7 @@ def register_builtin_figures() -> None:
                 maturity="experimental",
                 allowed_surfaces={"report", "diagnostic"},
                 input_contract="evaluation_artifact",
-                tags={"lec", "ehc", "report"},
+                tags={"lec", "ehp", "report"},
                 trace_keys={
                     LEC_TRACE_KEY_CELLS,
                     MEC_TRACE_KEY_CELLS,

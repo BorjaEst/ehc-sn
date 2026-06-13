@@ -385,8 +385,8 @@ class ReportCollection:
         mf = report.model_family
         if mf in ("tem-v1", "tem-v2"):
             return "arena/tem"
-        if mf == "ehc-v1":
-            return "arena/ehc"
+        if mf == "ehp-v1":
+            return "arena/ehp"
         return "—"
 
 

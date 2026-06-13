@@ -4,7 +4,7 @@ This page summarizes canonical boundaries from spec/spec-architecture.md.
 
 ## Project Identity
 
-ehc-sn is a multi-task, multi-model research library.
+ehp-sn is a multi-task, multi-model research library.
 
 - Models own architecture.
 - Tasks own semantics.

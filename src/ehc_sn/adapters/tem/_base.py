@@ -121,17 +121,17 @@ class ArenaTEMDiagnostics(DetachMixin):
     # -- TEMStepOutput protocol surface -----------------------------------------
 
     @property
-    def logits_inference(self) -> Tensor:
+    def logits_post(self) -> Tensor:
         """Observation logits from the HPC inference (posterior) pathway."""
         return self.obs_logits[0]
 
     @property
-    def logits_retrieved(self) -> Tensor:
+    def logits_recall(self) -> Tensor:
         """Observation logits from the HPC retrieved (corrected-grid) pathway."""
         return self.obs_logits[1]
 
     @property
-    def logits_ancestral(self) -> Tensor:
+    def logits_path(self) -> Tensor:
         """Observation logits from the HPC ancestral (structural prior) pathway."""
         return self.obs_logits[2]
 
@@ -174,19 +174,19 @@ class ArenaTEMBridgeOutput(DetachMixin):
         return self.tem.obs_logits
 
     @property
-    def logits_inference(self) -> Tensor:
+    def logits_post(self) -> Tensor:
         """Return posterior-path observation logits."""
-        return self.tem.logits_inference
+        return self.tem.logits_post
 
     @property
-    def logits_retrieved(self) -> Tensor:
+    def logits_recall(self) -> Tensor:
         """Return sensory-recall-path observation logits."""
-        return self.tem.logits_retrieved
+        return self.tem.logits_recall
 
     @property
-    def logits_ancestral(self) -> Tensor:
+    def logits_path(self) -> Tensor:
         """Return structural-prior-path observation logits."""
-        return self.tem.logits_ancestral
+        return self.tem.logits_path
 
     @property
     def latent_relations(self) -> dict[str, LatentRelation]:

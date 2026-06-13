@@ -15,12 +15,12 @@ import torch
 from torch import Tensor
 
 from ehc_sn.metrics.keys import (
-    TEM_ACC_OBS_ANCESTRAL_ALL,
-    TEM_ACC_OBS_ANCESTRAL_REVISIT,
-    TEM_ACC_OBS_INFERENCE_ALL,
-    TEM_ACC_OBS_INFERENCE_REVISIT,
-    TEM_ACC_OBS_RETRIEVED_ALL,
-    TEM_ACC_OBS_RETRIEVED_REVISIT,
+    TEM_ACC_OBS_PATH_ALL,
+    TEM_ACC_OBS_PATH_REVISIT,
+    TEM_ACC_OBS_POST_ALL,
+    TEM_ACC_OBS_POST_REVISIT,
+    TEM_ACC_OBS_RECALL_ALL,
+    TEM_ACC_OBS_RECALL_REVISIT,
 )
 from ehc_sn.metrics.step_metrics import RatioStat
 from ehc_sn.objectives.tem import TEMStepOutput
@@ -99,9 +99,9 @@ class ArenaTEMTaskBinding:
         targets: ArenaTargets,
     ) -> dict[str, RatioStat]:
         """Return TEM-pathway count-bearing accuracy metrics for one step."""
-        m_inf = build_arena_step_score(step_output.logits_inference, targets)
-        m_ret = build_arena_step_score(step_output.logits_retrieved, targets)
-        m_anc = build_arena_step_score(step_output.logits_ancestral, targets)
+        m_inf = build_arena_step_score(step_output.logits_post, targets)
+        m_ret = build_arena_step_score(step_output.logits_recall, targets)
+        m_anc = build_arena_step_score(step_output.logits_path, targets)
 
         batch_count = m_inf.is_correct.new_tensor(
             float(m_inf.is_correct.shape[0]), dtype=torch.float32
@@ -121,27 +121,27 @@ class ArenaTEMTaskBinding:
             return (m.is_correct & m.is_revisit).sum().float()
 
         return {
-            TEM_ACC_OBS_INFERENCE_REVISIT: RatioStat(
+            TEM_ACC_OBS_POST_REVISIT: RatioStat(
                 numerator_sum=_correct_revisit(m_inf),
                 denominator_sum=protocol_count,
             ),
-            TEM_ACC_OBS_RETRIEVED_REVISIT: RatioStat(
+            TEM_ACC_OBS_RECALL_REVISIT: RatioStat(
                 numerator_sum=_correct_revisit(m_ret),
                 denominator_sum=protocol_count,
             ),
-            TEM_ACC_OBS_ANCESTRAL_REVISIT: RatioStat(
+            TEM_ACC_OBS_PATH_REVISIT: RatioStat(
                 numerator_sum=_correct_revisit(m_anc),
                 denominator_sum=protocol_count,
             ),
-            TEM_ACC_OBS_INFERENCE_ALL: RatioStat(
+            TEM_ACC_OBS_POST_ALL: RatioStat(
                 numerator_sum=_correct(m_inf),
                 denominator_sum=batch_count,
             ),
-            TEM_ACC_OBS_RETRIEVED_ALL: RatioStat(
+            TEM_ACC_OBS_RECALL_ALL: RatioStat(
                 numerator_sum=_correct(m_ret),
                 denominator_sum=batch_count,
             ),
-            TEM_ACC_OBS_ANCESTRAL_ALL: RatioStat(
+            TEM_ACC_OBS_PATH_ALL: RatioStat(
                 numerator_sum=_correct(m_anc),
                 denominator_sum=batch_count,
             ),

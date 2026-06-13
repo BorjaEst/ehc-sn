@@ -30,7 +30,7 @@ from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryController,
     ReplayTrajectoryControllerConfig,
 )
-from ehc_sn.objectives.ehc import EHCObjective, EHCObjectiveConfig
+from ehc_sn.objectives.ehp import EHCObjective, EHCObjectiveConfig
 from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts.runtime import RecurrentRunner
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
@@ -44,13 +44,13 @@ from ._shared import (
 )
 
 _ARENA_MODEL_FAMILIES: frozenset[str] = frozenset(
-    {"tem-v1", "tem-v2", "ehc-v1"}
+    {"tem-v1", "tem-v2", "ehp-v1"}
 )
 
 
 # =============================================================================
 class SharedArenaReplayModelComparisonBinding(ModelComparisonBinding):
-    """Shared Arena replay benchmark binding for TEM v1/v2 and EHC v1."""
+    """Shared Arena replay benchmark binding for TEM v1/v2 and EHP v1."""
 
     def bind_model_comparison(
         self,
@@ -127,7 +127,7 @@ def _build_arena_bridge(
     if model_family == "tem-v2":
         settings = ArenaTEMAdapterSettings.model_validate(adapter_cfg)
         return ArenaTEMV2BridgeAdapter(model, settings)
-    if model_family == "ehc-v1":
+    if model_family == "ehp-v1":
         settings = ArenaEHCAdapterSettings.model_validate(adapter_cfg)
         return ArenaEHCV1BridgeAdapter(model, settings)
     raise ValueError(f"Unsupported Arena model family: {model_family!r}.")
@@ -182,7 +182,7 @@ def _build_arena_objective(model_family: str) -> object:
             TEMObjectiveConfig(),
             task_binding=ArenaTEMTaskBinding(),
         )
-    if model_family == "ehc-v1":
+    if model_family == "ehp-v1":
         return EHCObjective(
             EHCObjectiveConfig(),
             task_binding=ArenaEHCTaskBinding(),

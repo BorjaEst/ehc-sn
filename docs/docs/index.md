@@ -1,10 +1,10 @@
-# ehc-sn Documentation
+# ehp-sn Documentation
 
-Entorhinal-Hippocampal Circuit (EHC) Spatial Navigation library.
+Entorhinal-Hippocampal Circuit (EHP) Spatial Navigation library.
 
 ## What This Project Contains
 
-- Multi-family model implementations for TEM, HRM, and EHC.
+- Multi-family model implementations for TEM, HRM, and EHP.
 - Task, adapter, and controller abstractions with explicit ownership boundaries.
 - Training, benchmark, evaluation, and figure workflows.
 - Canonical architecture and operational contracts under `spec/`.
@@ -31,12 +31,12 @@ Entorhinal-Hippocampal Circuit (EHC) Spatial Navigation library.
 
 ## Canonical Specs
 
-- [Architecture spec](https://github.com/BorjaEst/ehc-sn/blob/main/spec/spec-architecture.md)
-- [Requirements spec](https://github.com/BorjaEst/ehc-sn/blob/main/spec/spec-requirements.md)
-- [Standards spec](https://github.com/BorjaEst/ehc-sn/blob/main/spec/spec-standards.md)
+- [Architecture spec](https://github.com/BorjaEst/ehp-sn/blob/main/spec/spec-architecture.md)
+- [Requirements spec](https://github.com/BorjaEst/ehp-sn/blob/main/spec/spec-requirements.md)
+- [Standards spec](https://github.com/BorjaEst/ehp-sn/blob/main/spec/spec-standards.md)
 
 ## Theory References
 
-- [EHC Theory Foundations](ehc-theory-foundations.md)
+- [EHP Theory Foundations](ehp-theory-foundations.md)
 - [Notation Map](notation-map.md)
 - [PFC Working Memory Theory](pfc-working-memory-theory.md)

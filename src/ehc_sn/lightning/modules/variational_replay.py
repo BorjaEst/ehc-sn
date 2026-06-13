@@ -35,12 +35,12 @@ from ehc_sn.eval.executor import execute_replay_evaluation_batch
 from ehc_sn.lightning.diagnostics import DiagnosticTraceSpec
 from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.keys import (
-    TEM_ACC_OBS_ANCESTRAL_ALL,
-    TEM_ACC_OBS_ANCESTRAL_REVISIT,
-    TEM_ACC_OBS_INFERENCE_ALL,
-    TEM_ACC_OBS_INFERENCE_REVISIT,
-    TEM_ACC_OBS_RETRIEVED_ALL,
-    TEM_ACC_OBS_RETRIEVED_REVISIT,
+    TEM_ACC_OBS_PATH_ALL,
+    TEM_ACC_OBS_PATH_REVISIT,
+    TEM_ACC_OBS_POST_ALL,
+    TEM_ACC_OBS_POST_REVISIT,
+    TEM_ACC_OBS_RECALL_ALL,
+    TEM_ACC_OBS_RECALL_REVISIT,
 )
 from ehc_sn.metrics.reducers import (
     HiddenNormHistogram,
@@ -805,14 +805,12 @@ class VariationalReplayModule(L.LightningModule):
             for step in case.evaluated.steps:
                 metrics = step.outputs.metrics
 
-                ratio_all = metrics.extras.get(TEM_ACC_OBS_INFERENCE_ALL)
+                ratio_all = metrics.extras.get(TEM_ACC_OBS_POST_ALL)
                 if ratio_all is not None:
                     total_correct_all += float(ratio_all.numerator_sum.item())
                     total_count_all += float(ratio_all.denominator_sum.item())
 
-                ratio_revisit = metrics.extras.get(
-                    TEM_ACC_OBS_INFERENCE_REVISIT
-                )
+                ratio_revisit = metrics.extras.get(TEM_ACC_OBS_POST_REVISIT)
                 if ratio_revisit is not None:
                     total_correct_revisit += float(
                         ratio_revisit.numerator_sum.item()

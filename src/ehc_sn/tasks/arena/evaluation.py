@@ -26,7 +26,7 @@ restricted to revisit steps (a field on :class:`ArenaScoreReport`).
 
 This is the model-agnostic task-level primary metric — any Arena model family
 can produce it.  Family-specific pathway metrics (e.g.
-``accuracy_ancestral_revisit`` for TEM/EHC models) are supplementary
+``accuracy_path_revisit`` for TEM/EHP models) are supplementary
 diagnostics emitted at the adapter or Lightning layer and are not the
 canonical task-level primary.
 """
@@ -90,39 +90,36 @@ ARENA_METRIC_SPECS: list[MetricSpec] = [
     ),
     # Diagnostic (pathway-specific) metrics — not benchmark-eligible by default.
     MetricSpec(
-        name="accuracy_ancestral_revisit",
+        name="accuracy_path_revisit",
         label="Ancestral revisit accuracy",
         higher_is_better=True,
         unit="proportion",
         scope="diagnostic",
         benchmark_eligible=False,
         description="Pathway-specific diagnostic: revisit accuracy "
-        "when attributing to the ancestral pathway. TEM/EHC family.",
+        "when attributing to the ancestral pathway. TEM/EHP family.",
     ),
     MetricSpec(
-        name="accuracy_retrieved_revisit",
+        name="accuracy_recall_revisit",
         label="Retrieved revisit accuracy",
         higher_is_better=True,
         unit="proportion",
         scope="diagnostic",
         benchmark_eligible=False,
         description="Pathway-specific diagnostic: revisit accuracy "
-        "when attributing to the retrieved pathway. TEM/EHC family.",
+        "when attributing to the retrieved pathway. TEM/EHP family.",
     ),
     MetricSpec(
-        name="accuracy_ancestral_all",
+        name="accuracy_path_all",
         label="Ancestral all-step accuracy",
         higher_is_better=True,
         unit="proportion",
         scope="diagnostic",
         benchmark_eligible=False,
         description="Pathway-specific diagnostic: all-step accuracy "
-        "when attributing to the ancestral pathway. TEM/EHC family.",
+        "when attributing to the ancestral pathway. TEM/EHP family.",
     ),
 ]
-
-
-
 
 
 # =============================================================================
@@ -321,8 +318,8 @@ def aggregate_arena_case_metrics(
     evaluated: EvaluatedChunk,
     case_id: str,
     *,
-    acc_all_key: str = "accuracy_obs_inference_all",
-    acc_revisit_key: str = "accuracy_obs_inference_revisit",
+    acc_all_key: str = "accuracy_obs_post_all",
+    acc_revisit_key: str = "accuracy_obs_post_revisit",
     failure_threshold_revisit: float = 0.5,
 ) -> ArenaCaseMetrics:
     """Return per-case scalar aggregates from an evaluated Arena rollout.

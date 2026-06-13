@@ -6,7 +6,7 @@ Model implementations live under src/ehc_sn/models.
 
 - TEM family: src/ehc_sn/models/tem
 - HRM family: src/ehc_sn/models/hrm
-- EHC family: src/ehc_sn/models/ehc
+- EHP family: src/ehc_sn/models/ehp
 
 ## Contract Summary
 

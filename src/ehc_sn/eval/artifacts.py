@@ -34,7 +34,7 @@ _ARTIFACT_SCHEMA = "ehc_sn.eval.artifact.v3"
 _MANIFEST_FILENAME = "manifest.json"
 _SUCCESS_FILENAME = "_SUCCESS"
 _SUPPORTED_EXECUTOR_FAMILIES: frozenset[str] = frozenset(
-    {"ehc-v1", "hrm-v1", "hrm-v2", "tem-v1", "tem-v2"}
+    {"ehp-v1", "hrm-v1", "hrm-v2", "tem-v1", "tem-v2"}
 )
 
 
@@ -328,7 +328,7 @@ def _build_executor_from_family_artifact(
         "tem-v2": "tem",
         "hrm-v1": "act",
         "hrm-v2": "rl",
-        "ehc-v1": "ehc",
+        "ehp-v1": "ehp",
     }
     paradigm = _FAMILY_TO_PARADIGM.get(model_family, model_family.split("-")[0])
 

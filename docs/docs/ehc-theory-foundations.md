@@ -1,7 +1,7 @@
-## EHC Theory Foundations
+## EHP Theory Foundations
 
 This note explains the main theoretical lines that motivate the
-entorhinal-hippocampal-prefrontal synthesis used in EHC-style models.
+entorhinal-hippocampal-prefrontal synthesis used in EHP-style models.
 
 It focuses on five ingredients:
 
@@ -18,7 +18,7 @@ be composed without collapsing their differences.
 
 ### Source Map
 
-| Source                                                                   | Core claim                                                                           | Main contribution to EHC-style thinking                                                |
+| Source                                                                   | Core claim                                                                           | Main contribution to EHP-style thinking                                                |
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
 | [Whittington et al., 2020](https://doi.org/10.1016/j.cell.2020.10.024)   | Hippocampal memory binds sensory content to a structural state space.                | Gives the basic entorhinal-hippocampal loop over structural state and grounded memory. |
 | [Whittington et al., 2022](https://doi.org/10.48550/arXiv.2112.04035)    | Transformer-style attention can be read as hippocampal-style associative retrieval.  | Justifies attention-like episodic memory as a hippocampal read mechanism.              |
@@ -132,7 +132,7 @@ The strongest contribution here is not that transformers replace hippocampal
 theory. It is that a standard attention mechanism can be reinterpreted as a
 memory system whose operations look strikingly similar to hippocampal recall.
 
-In an EHC-style synthesis, this theory mainly justifies using attention-like
+In an EHP-style synthesis, this theory mainly justifies using attention-like
 episodic reads rather than requiring only dense attractor dynamics.
 
 ### Structured Prefrontal Working Memory
@@ -305,7 +305,7 @@ There are still real theoretical tensions between these accounts.
 - Slow-fast recurrent reasoning explains deliberation, but it does not by
   itself explain memory indexing.
 
-These tensions are productive. They show why a full EHC-style theory needs
+These tensions are productive. They show why a full EHP-style theory needs
 more than one ingredient.
 
 ### Bottom Line

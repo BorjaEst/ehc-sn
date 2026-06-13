@@ -13,9 +13,9 @@ from numpy.typing import NDArray
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.traces.keys import (
     TEM_META_KEY_TARGET_OBS_ID,
-    TEM_TRACE_KEY_PRED_ANCESTRAL,
-    TEM_TRACE_KEY_PRED_INFERENCE,
-    TEM_TRACE_KEY_PRED_RETRIEVED,
+    TEM_TRACE_KEY_PRED_PATH,
+    TEM_TRACE_KEY_PRED_POST,
+    TEM_TRACE_KEY_PRED_RECALL,
 )
 from ehc_sn.traces.trace_tree import TraceTree
 from ehc_sn.utils import to_cpu
@@ -34,9 +34,9 @@ class TEMOverlayData:
     """
 
     gt_obs_ids: NDArray  # (n_cases, T) int
-    pred_inference: NDArray  # (n_cases, T) int
-    pred_retrieved: NDArray  # (n_cases, T) int
-    pred_ancestral: NDArray  # (n_cases, T) int
+    pred_post: NDArray  # (n_cases, T) int
+    pred_recall: NDArray  # (n_cases, T) int
+    pred_path: NDArray  # (n_cases, T) int
 
 
 # =============================================================================
@@ -69,14 +69,14 @@ def select_tem_prediction_overlay(
         )
 
     # Predictions from trace: (T, B) int each.
-    pred_inf = np.asarray(to_cpu(trace.get(TEM_TRACE_KEY_PRED_INFERENCE)))
-    pred_ret = np.asarray(to_cpu(trace.get(TEM_TRACE_KEY_PRED_RETRIEVED)))
-    pred_anc = np.asarray(to_cpu(trace.get(TEM_TRACE_KEY_PRED_ANCESTRAL)))
+    pred_inf = np.asarray(to_cpu(trace.get(TEM_TRACE_KEY_PRED_POST)))
+    pred_ret = np.asarray(to_cpu(trace.get(TEM_TRACE_KEY_PRED_RECALL)))
+    pred_anc = np.asarray(to_cpu(trace.get(TEM_TRACE_KEY_PRED_PATH)))
 
     for name, arr in [
-        (TEM_TRACE_KEY_PRED_INFERENCE, pred_inf),
-        (TEM_TRACE_KEY_PRED_RETRIEVED, pred_ret),
-        (TEM_TRACE_KEY_PRED_ANCESTRAL, pred_anc),
+        (TEM_TRACE_KEY_PRED_POST, pred_inf),
+        (TEM_TRACE_KEY_PRED_RECALL, pred_ret),
+        (TEM_TRACE_KEY_PRED_PATH, pred_anc),
     ]:
         if arr.ndim != 2:
             raise ValueError(
@@ -108,18 +108,18 @@ def select_tem_prediction_overlay(
 
     return TEMOverlayData(
         gt_obs_ids=gt_raw[start:end, :T],
-        pred_inference=pred_inf[:T, start:end].T,
-        pred_retrieved=pred_ret[:T, start:end].T,
-        pred_ancestral=pred_anc[:T, start:end].T,
+        pred_post=pred_inf[:T, start:end].T,
+        pred_recall=pred_ret[:T, start:end].T,
+        pred_path=pred_anc[:T, start:end].T,
     )
 
 
 # =============================================================================
 __all__ = [
     "TEMOverlayData",
-    "TEM_TRACE_KEY_PRED_INFERENCE",
-    "TEM_TRACE_KEY_PRED_RETRIEVED",
-    "TEM_TRACE_KEY_PRED_ANCESTRAL",
+    "TEM_TRACE_KEY_PRED_POST",
+    "TEM_TRACE_KEY_PRED_RECALL",
+    "TEM_TRACE_KEY_PRED_PATH",
     "TEM_META_KEY_TARGET_OBS_ID",
     "select_tem_prediction_overlay",
 ]

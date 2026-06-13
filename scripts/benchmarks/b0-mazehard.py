@@ -62,7 +62,7 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     model_family: str | None = Field(
         default=None,
         description="Model family identifier to evaluate (for example hrm-v1, "
-        "hrm-v2, ehc-v1).",
+        "hrm-v2, ehp-v1).",
     )
     score_json: Path | None = Field(
         default=None,

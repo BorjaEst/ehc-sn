@@ -151,7 +151,7 @@ class MemoryProbeResult(BaseModel, extra="forbid"):
         p_path: Place-code diversity for the ancestral (prior) pathway.
         self_retrieval: Self-retrieval result — query *M* with ``p_post``.
         grid_retrieval: Optional grid-query retrieval result.
-        retrieved_vs_ancestral_delta: Mean L2 distance between ``p_recall``
+        retrieved_vs_path_delta: Mean L2 distance between ``p_recall``
             and ``p_path`` in flattened code space.  Near zero indicates
             that sensory correction is functionally inactive.
     """
@@ -168,7 +168,7 @@ class MemoryProbeResult(BaseModel, extra="forbid"):
     p_path: PlaceCodeStats = Field(default_factory=PlaceCodeStats)
     self_retrieval: RetrievalResult = Field(default_factory=RetrievalResult)
     grid_retrieval: Optional[RetrievalResult] = None
-    retrieved_vs_ancestral_delta: float = Field(default=float("nan"))
+    retrieved_vs_path_delta: float = Field(default=float("nan"))
 
 
 # =============================================================================
@@ -434,7 +434,7 @@ def produce_tem_memory_probe(  # -----------------------------------------------
 
     place_codes_post: list[list[Tensor]] = []
     place_codes_prior: list[list[Tensor]] = []
-    place_codes_retrieved: list[list[Tensor]] = []
+    place_codes_recall: list[list[Tensor]] = []
 
     with torch.no_grad():
         for t in range(T):
@@ -458,14 +458,14 @@ def produce_tem_memory_probe(  # -----------------------------------------------
             )
             output, state = model(step_input, state=state)
             place_codes_post.append(
-                [p.clone().cpu() for p in output.place_codes.posterior]
+                [p.clone().cpu() for p in output.place_codes.post]
             )
             place_codes_prior.append(
-                [p.clone().cpu() for p in output.place_codes.prior]
+                [p.clone().cpu() for p in output.place_codes.path]
             )
-            if output.place_codes.retrieved is not None:
-                place_codes_retrieved.append(
-                    [p.clone().cpu() for p in output.place_codes.retrieved]
+            if output.place_codes.recall is not None:
+                place_codes_recall.append(
+                    [p.clone().cpu() for p in output.place_codes.recall]
                 )
 
     # Stack per-step codes into bundles of (T, D_f).
@@ -478,9 +478,9 @@ def produce_tem_memory_probe(  # -----------------------------------------------
     p_post_bundle = _stack_bundle(place_codes_post)
     p_path_bundle = _stack_bundle(place_codes_prior)
 
-    has_retrieved = len(place_codes_retrieved) == T
+    has_recall = len(place_codes_recall) == T
     p_recall_bundle = (
-        _stack_bundle(place_codes_retrieved) if has_retrieved else p_post_bundle
+        _stack_bundle(place_codes_recall) if has_recall else p_post_bundle
     )
 
     # Flatten to (T, S) for self-retrieval.
@@ -514,7 +514,7 @@ def produce_tem_memory_probe(  # -----------------------------------------------
     p_recall_stats = _place_code_stats(p_recall_bundle)
 
     # ---- Retrieved vs ancestral delta ----
-    retrieved_ancestral_delta = float(
+    retrieved_path_delta = float(
         (p_recall_flat - p_path_flat).norm(dim=-1).mean().item()
     )
 
@@ -536,7 +536,7 @@ def produce_tem_memory_probe(  # -----------------------------------------------
             1 - mask
         ) * state_attractor + mask * hpc.retrieval_module.activation(field)
 
-    p_self_retrieved = state_attractor  # (T, S)
+    p_self_recall = state_attractor  # (T, S)
 
     # Move optional metadata to CPU for the retrieval analysis.
     obs_ids_cpu = (
@@ -548,7 +548,7 @@ def produce_tem_memory_probe(  # -----------------------------------------------
 
     self_retrieval_res = _retrieval_result(
         query=p_post_flat,
-        retrieved=p_self_retrieved,
+        retrieved=p_self_recall,
         candidates=p_post_flat,
         observation_ids=obs_ids_cpu,
         position_ids=pos_ids_cpu,
@@ -567,7 +567,7 @@ def produce_tem_memory_probe(  # -----------------------------------------------
         p_path=p_path_stats,
         self_retrieval=self_retrieval_res,
         grid_retrieval=None,
-        retrieved_vs_ancestral_delta=retrieved_ancestral_delta,
+        retrieved_vs_path_delta=retrieved_path_delta,
     )
 
 
@@ -655,7 +655,7 @@ def format_memory_probe_table(  # ----------------------------------------------
         f"| self_retrieval_top5_accuracy | {_fmt(sr.top5_accuracy)} |",
         f"| self_retrieval_top10_accuracy | {_fmt(sr.top10_accuracy)} |",
         f"| self_retrieval_same_obs_frac | {_fmt(sr.nn_same_observation_fraction)} |",
-        f"| retrieved_vs_ancestral_delta | {_fmt(result.retrieved_vs_ancestral_delta)} |",
+        f"| retrieved_vs_path_delta | {_fmt(result.retrieved_vs_path_delta)} |",
         "",
     ]
     return "\n".join(lines)

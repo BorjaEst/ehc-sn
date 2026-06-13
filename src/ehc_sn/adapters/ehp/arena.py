@@ -1,6 +1,6 @@
-"""Arena plus EHC v1 bridge implementation.
+"""Arena plus EHP v1 bridge implementation.
 
-Binds model-native EHC v1 types to the shared Arena EHC family core.
+Binds model-native EHP v1 types to the shared Arena EHP family core.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from ehc_sn.adapters.ehp._base import (
     ArenaEncoderConfig,
     ArenaTwoHotEncoder,
 )
-from ehc_sn.models.ehc.ehc_v1 import (
+from ehc_sn.models.ehp.ehp_v1 import (
     EHCInputV1,
     EHCModelV1,
     EHCOutputV1,
@@ -47,7 +47,7 @@ class ArenaInputsEncoderV1(nn.Module):
         self,
         batch: Batch,
     ) -> EHCInputV1:
-        """Encode a pre-extracted arena step payload into a EHC v1 input."""
+        """Encode a pre-extracted arena step payload into a EHP v1 input."""
         observation_embedding, prev_action, episode_start, landmark_id = (
             self._core.encode(batch)
         )
@@ -89,36 +89,36 @@ class ArenaOutputsDecoderV1(nn.Module):
         self,
         model_output: EHCOutputV1,
     ) -> ArenaEHCBridgeOutput:
-        """Decode all three pred_code pathways and return the split task + EHC surfaces."""
-        obs_inference = self._decode(model_output.pred_codes.post)
-        obs_retrieved = (
+        """Decode all three pred_code pathways and return the split task + EHP surfaces."""
+        obs_post = self._decode(model_output.pred_codes.post)
+        obs_recall = (
             self._decode(model_output.pred_codes.recall)
             if model_output.pred_codes.recall is not None
-            else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)
+            else obs_post.new_zeros(obs_post.shape[0], self._obs_dim)
         )
-        obs_ancestral = self._decode(model_output.pred_codes.path)
+        obs_path = self._decode(model_output.pred_codes.path)
 
-        task = _core.ArenaTaskOutput(obs_logits=obs_inference)
-        ehc = ArenaEHCDiagnostics(
-            obs_logits=(obs_inference, obs_retrieved, obs_ancestral),
+        task = _core.ArenaTaskOutput(obs_logits=obs_post)
+        ehp = ArenaEHCDiagnostics(
+            obs_logits=(obs_post, obs_recall, obs_path),
             grid_codes=model_output.grid_codes,
             place_codes=model_output.place_codes,
             pred_codes=model_output.pred_codes,
             theta_cls=model_output.control.theta_summary,
         )
-        return ArenaEHCBridgeOutput(task=task, ehc=ehc)
+        return ArenaEHCBridgeOutput(task=task, ehp=ehp)
 
 
 # =============================================================================
 class ArenaEHCV1BridgeAdapter(nn.Module):
-    """Arena plus EHC v1 bridge adapter implementing RolloutBackbone."""
+    """Arena plus EHP v1 bridge adapter implementing RolloutBackbone."""
 
     def __init__(  # ----------------------------------------------------------
         self,
         model: EHCModelV1,
         config: ArenaEHCAdapterSettings,
     ) -> None:
-        """Initializes the adapter with the given EHC v1 model and arena adapter settings."""
+        """Initializes the adapter with the given EHP v1 model and arena adapter settings."""
         super().__init__()
         self._config = config
         self.model = model
@@ -132,7 +132,7 @@ class ArenaEHCV1BridgeAdapter(nn.Module):
     def init_state(  # --------------------------------------------------------
         self, batch_size: int, *, device: Optional[torch.device] = None
     ) -> EHCStateV1:
-        """Initializes the EHC state for a new episode."""
+        """Initializes the EHP state for a new episode."""
         return self.model.init_state(batch_size, device=device)
 
     def reset_state(  # -------------------------------------------------------
@@ -140,21 +140,21 @@ class ArenaEHCV1BridgeAdapter(nn.Module):
         reset_flag: Tensor,
         state: EHCStateV1,
     ) -> EHCStateV1:
-        """Resets the EHC state for episodes indicated by the reset_flag."""
+        """Resets the EHP state for episodes indicated by the reset_flag."""
         return self.model.reset_state(reset_flag, state)
 
     def prepare_inputs(  # ----------------------------------------------------
         self,
         batch: Batch,
     ) -> EHCInputV1:
-        """Prepares the EHC v1 input from the arena step batch."""
+        """Prepares the EHP v1 input from the arena step batch."""
         return self._encoder(batch)
 
     def postprocess(  # -------------------------------------------------------
         self,
         model_output: EHCOutputV1,
     ) -> ArenaEHCBridgeOutput:
-        """Postprocesses the EHC v1 output into the arena bridge output."""
+        """Postprocesses the EHP v1 output into the arena bridge output."""
         return self._decoder(model_output)
 
     def forward(  # -----------------------------------------------------------
@@ -173,7 +173,7 @@ def _build_encoder_v1(  # -----------------------------------------------------
     model: EHCModelV1,
     config: ArenaEHCAdapterSettings,
 ) -> ArenaInputsEncoderV1:
-    """Builds the arena inputs encoder for EHC v1."""
+    """Builds the arena inputs encoder for EHP v1."""
     return ArenaInputsEncoderV1(
         observation_dim=config.observation_dim,
         feature_dim=model.config.lec.feature_dim,
@@ -186,7 +186,7 @@ def _build_decoder_v1(  # -----------------------------------------------------
     model: EHCModelV1,
     config: ArenaEHCAdapterSettings,
 ) -> ArenaOutputsDecoderV1:
-    """Builds the arena outputs decoder for EHC v1."""
+    """Builds the arena outputs decoder for EHP v1."""
     feature_dim = model.config.lec.feature_dim
     n_freq = len(model.config.hpc.shape)
     if config.decoder.kind == "single_scale":

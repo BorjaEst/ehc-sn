@@ -1,4 +1,4 @@
-"""Hidden-state norm histogram figure — bounded online summary for TEM/EHC.
+"""Hidden-state norm histogram figure — bounded online summary for TEM/EHP.
 
 Wraps the existing ``render_hidden_norm_histogram`` as a ``bounded_trace``
 figure that consumes ``diagnostic/hidden_norms`` (bin centers) and

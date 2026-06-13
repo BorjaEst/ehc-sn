@@ -179,8 +179,8 @@ Output path: `data/processed/arena/<corpus>/v<version>/`
 | Primary metric     | `accuracy_revisit`                          |
 | Secondary metrics  | `accuracy_all`, `correct_all`, `count_all`, |
 |                    | `correct_revisit`, `count_revisit`          |
-| Diagnostic metrics | `accuracy_ancestral_revisit`                |
-|                    | `accuracy_retrieved_revisit`                |
+| Diagnostic metrics | `accuracy_path_revisit`                     |
+|                    | `accuracy_recall_revisit`                   |
 
 ### Score accumulation
 

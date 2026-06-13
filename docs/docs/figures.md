@@ -85,9 +85,9 @@ TODO: update
 ### Capability-First Compatibility
 
 Figures declare **required trace keys**, not model-family identity. A figure
-renders for any model that produces those keys. For example, EHC and TEM share
+renders for any model that produces those keys. For example, EHP and TEM share
 the same trace vocabulary (both use the `"tem"` paradigm for spatial
-diagnostics), so all `lec_*`, `mec_*`, and `hpc_*` figures work with EHC
+diagnostics), so all `lec_*`, `mec_*`, and `hpc_*` figures work with EHP
 artifacts without any family-specific configuration.
 
 The `tags` field is for **human discoverability only**—it never gates rendering.

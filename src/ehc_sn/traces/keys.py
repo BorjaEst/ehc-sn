@@ -26,9 +26,9 @@ ARENA_TRACE_KEY_ACTIONS = "arena/actions"
 ARENA_TRACE_KEY_VALID_MASK = "arena/valid_mask"
 
 # ── Arena TEM (prediction streams) ───────────────────────────────────────────
-TEM_TRACE_KEY_PRED_INFERENCE = "pred/observation_id/inference"
-TEM_TRACE_KEY_PRED_RETRIEVED = "pred/observation_id/retrieved"
-TEM_TRACE_KEY_PRED_ANCESTRAL = "pred/observation_id/ancestral"
+TEM_TRACE_KEY_PRED_POST = "pred/observation_id/post"
+TEM_TRACE_KEY_PRED_RECALL = "pred/observation_id/recall"
+TEM_TRACE_KEY_PRED_PATH = "pred/observation_id/path"
 TEM_META_KEY_TARGET_OBS_ID = "target/observation_id"
 
 # ── MazeHard ─────────────────────────────────────────────────────────────────

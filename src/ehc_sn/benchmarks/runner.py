@@ -52,8 +52,8 @@ _TRACK_TO_SECONDARY_METRICS: dict[str, tuple[str, ...]] = {
 }
 
 _TRACK_MODEL_SUPPORT: dict[str, set[str]] = {
-    "arena-struct": {"tem-v1", "tem-v2", "ehc-v1"},
-    "mazehard-delib": {"hrm-v1", "hrm-v2", "ehc-v1"},
+    "arena-struct": {"tem-v1", "tem-v2", "ehp-v1"},
+    "mazehard-delib": {"hrm-v1", "hrm-v2", "ehp-v1"},
 }
 
 

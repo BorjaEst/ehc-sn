@@ -28,7 +28,6 @@ from ehc_sn.benchmarks.contracts import (
     validate_model_comparison_pair,
 )
 from ehc_sn.benchmarks.runner import task_family_for_track
-from ehc_sn.tasks.scoring import scoring_spec_for_task
 from ehc_sn.eval.contracts import EvaluationCaseResult
 from ehc_sn.eval.executor import execute_replay_evaluation_batch
 from ehc_sn.tasks.arena.evaluation import (
@@ -42,6 +41,7 @@ from ehc_sn.tasks.mazehard.evaluation import (
     MazeHardScoreReport,
     build_maze_hard_step_score,
 )
+from ehc_sn.tasks.scoring import scoring_spec_for_task
 from ehc_sn.training.optim import Adam, AdamConfig
 
 
@@ -309,11 +309,11 @@ def _build_provider(
 # =============================================================================
 # Metric-key lookup for per-case aggregation across arena families.
 _ARENA_ACC_KEYS: dict[str, tuple[str, str]] = {
-    "tem-v1": ("accuracy_obs_inference_all", "accuracy_obs_inference_revisit"),
-    "tem-v2": ("accuracy_obs_inference_all", "accuracy_obs_inference_revisit"),
-    "ehc-v1": (
-        "ehc_accuracy_obs_inference_all",
-        "ehc_accuracy_obs_inference_revisit",
+    "tem-v1": ("accuracy_obs_post_all", "accuracy_obs_post_revisit"),
+    "tem-v2": ("accuracy_obs_post_all", "accuracy_obs_post_revisit"),
+    "ehp-v1": (
+        "ehc_accuracy_obs_post_all",
+        "ehc_accuracy_obs_post_revisit",
     ),
 }
 
@@ -356,7 +356,7 @@ def _score_arena_evaluated_case(
     )
     acc_keys = _ARENA_ACC_KEYS.get(
         model_family_normalized,
-        ("accuracy_obs_inference_all", "accuracy_obs_inference_revisit"),
+        ("accuracy_obs_post_all", "accuracy_obs_post_revisit"),
     )
     case = aggregate_arena_case_metrics(
         evaluated,

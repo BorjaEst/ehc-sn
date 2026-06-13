@@ -49,13 +49,19 @@ from typing import Any, Final, Iterator
 import numpy as np
 
 # =============================================================================
-_PASSABLE_CELL_TYPES: Final[frozenset[str]] = frozenset({"ROOM", "PASSAGE", "DOOR"})
+_PASSABLE_CELL_TYPES: Final[frozenset[str]] = frozenset(
+    {"ROOM", "PASSAGE", "DOOR"}
+)
 """OccupancyGrid cell type strings that are traversable."""
 
 _SHARD_SIZE: Final[int] = 1000
 """Number of samples per tar shard (internal constant; not a CLI param)."""
 
-_SPLIT_SEED_OFFSET: Final[dict[str, int]] = {"train": 0, "val": 100_000, "test": 200_000}
+_SPLIT_SEED_OFFSET: Final[dict[str, int]] = {
+    "train": 0,
+    "val": 100_000,
+    "test": 200_000,
+}
 """Per-split seed offsets: sample i in split uses base_seed + offset[split] + i."""
 
 _MANIFEST_FILENAME: Final[str] = "manifest.json"
@@ -147,7 +153,7 @@ def _ehc_sn_version() -> str:
     try:
         from importlib.metadata import version
 
-        return version("ehc-sn")
+        return version("ehp-sn")
     except Exception:
         # Fallback for editable installs where metadata may not be populated yet.
         try:
@@ -209,7 +215,9 @@ def _manifest_identity(manifest: dict[str, Any]) -> dict[str, Any]:
         "record_format": manifest["record_format"],
         "record_schema_version": manifest["record_schema_version"],
         "generator_params": manifest["generator_params"],
-        "split_counts": {s: v["n_samples"] for s, v in manifest["splits"].items()},
+        "split_counts": {
+            s: v["n_samples"] for s, v in manifest["splits"].items()
+        },
     }
 
 
@@ -238,7 +246,9 @@ def _write_shard(
             where ``sample_id`` determines the member name within the shard.
     """
     with tarfile.open(shard_path, "w") as tf:
-        for member_idx, (sample_id, seed, topology, regions) in enumerate(samples):
+        for member_idx, (sample_id, seed, topology, regions) in enumerate(
+            samples
+        ):
             buf = io.BytesIO()
             np.savez_compressed(
                 buf,

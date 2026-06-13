@@ -8,7 +8,7 @@ here so model files contain *no* trace wiring.
 Usage
 -----
     from ehc_sn.traces import build_trace_spec
-    self.trace_spec = build_trace_spec("act")   # or "rl" / "tem" / "ehc"
+    self.trace_spec = build_trace_spec("act")   # or "rl" / "tem" / "ehp"
 
 Naming convention
 -----------------
@@ -498,7 +498,7 @@ def _select_trace_fields(  # --------------------------------------------------
 
 # =============================================================================
 def build_trace_spec(  # ------------------------------------------------------
-    paradigm: Literal["act", "rl", "tem", "ehc"],
+    paradigm: Literal["act", "rl", "tem", "ehp"],
     *,
     include_keys: Iterable[str] | None = None,
     extra_fields: Iterable[TraceField] | None = None,
@@ -513,13 +513,13 @@ def build_trace_spec(  # ------------------------------------------------------
         paradigm: ``"act"`` for ACT-based models (hrm_v1) or
             ``"rl"`` for RL-based models (hrm_v2), or
             ``"tem"`` for TEM-based models (tem_v1), or
-            ``"ehc"`` for EHC-based models (ehc_v1).
+            ``"ehp"`` for EHP-based models (ehc_v1).
 
     Returns:
         A :class:`~ehc_sn.traces.TraceSpec` instance.
 
     Raises:
-        ValueError: If *paradigm* is not ``"act"``, ``"rl"``, ``"tem"``, or ``"ehc"``.
+        ValueError: If *paradigm* is not ``"act"``, ``"rl"``, ``"tem"``, or ``"ehp"``.
     """
     if paradigm == "act":
         fields = _select_trace_fields(
@@ -533,11 +533,11 @@ def build_trace_spec(  # ------------------------------------------------------
         )
     elif paradigm == "tem":
         fields = _select_trace_fields(TEM_TRACE_FIELDS, include_keys)
-    elif paradigm == "ehc":
+    elif paradigm == "ehp":
         fields = _select_trace_fields(TEM_TRACE_FIELDS, include_keys)
     else:
         raise ValueError(
-            f"Unknown paradigm: {paradigm!r}. Expected 'act', 'rl', 'tem', or 'ehc'."
+            f"Unknown paradigm: {paradigm!r}. Expected 'act', 'rl', 'tem', or 'ehp'."
         )
     if extra_fields is not None:
         fields = fields + tuple(extra_fields)

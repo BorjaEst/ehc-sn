@@ -5,7 +5,7 @@ Sub-modules:
 
 - :mod:`~ehc_sn.training.hrm` — HRM runtime config and weight-loading.
 - :mod:`~ehc_sn.training.tem` — TEM runtime config, schedules, and weight-loading.
-- :mod:`~ehc_sn.training.ehc` — EHC weight-loading helpers.
+- :mod:`~ehc_sn.training.ehp` — EHP weight-loading helpers.
 - :mod:`~ehc_sn.training.gradients` — gradient diagnostic helpers.
 """
 

@@ -86,21 +86,21 @@ def _get_is_revisit(  # -------------------------------------------------------
 
 
 # =============================================================================
-def _get_pred_obs_id_inference(  # --------------------------------------------
+def _get_pred_obs_id_post(  # -------------------------------------------------
     ctx: _ArenaTEMTraceContext,
 ) -> TraceValue:
     return ctx.outputs.backbone_output.obs_logits[0].detach().argmax(dim=-1)
 
 
 # =============================================================================
-def _get_pred_obs_id_retrieved(  # --------------------------------------------
+def _get_pred_obs_id_recall(  # -----------------------------------------------
     ctx: _ArenaTEMTraceContext,
 ) -> TraceValue:
     return ctx.outputs.backbone_output.obs_logits[1].detach().argmax(dim=-1)
 
 
 # =============================================================================
-def _get_pred_obs_id_ancestral(  # ---------------------------------------------
+def _get_pred_obs_id_path(  # -------------------------------------------------
     ctx: _ArenaTEMTraceContext,
 ) -> TraceValue:
     return ctx.outputs.backbone_output.obs_logits[2].detach().argmax(dim=-1)
@@ -117,27 +117,27 @@ ARENA_TEM_TRACE_IS_REVISIT = TraceField(
     get=_get_is_revisit,
 )
 
-ARENA_TEM_TRACE_PRED_INFERENCE = TraceField(
-    name="pred/observation_id/inference",
-    get=_get_pred_obs_id_inference,
+ARENA_TEM_TRACE_PRED_POST = TraceField(
+    name="pred/observation_id/post",
+    get=_get_pred_obs_id_post,
 )
 
-ARENA_TEM_TRACE_PRED_RETRIEVED = TraceField(
-    name="pred/observation_id/retrieved",
-    get=_get_pred_obs_id_retrieved,
+ARENA_TEM_TRACE_PRED_RECALL = TraceField(
+    name="pred/observation_id/recall",
+    get=_get_pred_obs_id_recall,
 )
 
-ARENA_TEM_TRACE_PRED_ANCESTRAL = TraceField(
-    name="pred/observation_id/ancestral",
-    get=_get_pred_obs_id_ancestral,
+ARENA_TEM_TRACE_PRED_PATH = TraceField(
+    name="pred/observation_id/path",
+    get=_get_pred_obs_id_path,
 )
 
 ARENA_TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
     ARENA_TEM_TRACE_WORLD_OBS_ID,
     ARENA_TEM_TRACE_IS_REVISIT,
-    ARENA_TEM_TRACE_PRED_INFERENCE,
-    ARENA_TEM_TRACE_PRED_RETRIEVED,
-    ARENA_TEM_TRACE_PRED_ANCESTRAL,
+    ARENA_TEM_TRACE_PRED_POST,
+    ARENA_TEM_TRACE_PRED_RECALL,
+    ARENA_TEM_TRACE_PRED_PATH,
     TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
     TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM,
 )
@@ -191,9 +191,9 @@ __all__ = [
     "ARENA_TEM_TRACE_FIELDS",
     "ARENA_TEM_TRACE_WORLD_OBS_ID",
     "ARENA_TEM_TRACE_IS_REVISIT",
-    "ARENA_TEM_TRACE_PRED_INFERENCE",
-    "ARENA_TEM_TRACE_PRED_RETRIEVED",
-    "ARENA_TEM_TRACE_PRED_ANCESTRAL",
+    "ARENA_TEM_TRACE_PRED_POST",
+    "ARENA_TEM_TRACE_PRED_RECALL",
+    "ARENA_TEM_TRACE_PRED_PATH",
     "select_arena_tem_trace_fields",
     "TARGET_OBSERVATION_ID_META_KEY",
     "build_arena_tem_trace_meta",

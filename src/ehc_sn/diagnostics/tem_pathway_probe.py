@@ -90,10 +90,10 @@ class PathwayProbeResult(BaseModel, extra="forbid"):
         inference: Per-stage metrics for the inference (sensory-conditioned) pathway.
         retrieved: Per-stage metrics for the retrieved (corrected-grid) pathway.
         ancestral: Per-stage metrics for the ancestral (prior) pathway.
-        contrast_inference_vs_retrieved: Ratio ``retrieved / inference`` for
+        contrast_post_vs_recall: Ratio ``retrieved / inference`` for
             each stage.  Values near 1.0 indicate the pathway is as strong as
             inference; near 0.0 indicates complete content loss.
-        contrast_inference_vs_ancestral: Same ratio for ancestral vs inference.
+        contrast_post_vs_path: Same ratio for ancestral vs inference.
     """
 
     model_family: str = "tem-v1"
@@ -107,12 +107,12 @@ class PathwayProbeResult(BaseModel, extra="forbid"):
     retrieved: list[StageMetrics] = Field(default_factory=list)
     ancestral: list[StageMetrics] = Field(default_factory=list)
 
-    logits_inference: LogitMetrics = Field(default_factory=LogitMetrics)
-    logits_retrieved: LogitMetrics = Field(default_factory=LogitMetrics)
-    logits_ancestral: LogitMetrics = Field(default_factory=LogitMetrics)
+    logits_post: LogitMetrics = Field(default_factory=LogitMetrics)
+    logits_recall: LogitMetrics = Field(default_factory=LogitMetrics)
+    logits_path: LogitMetrics = Field(default_factory=LogitMetrics)
 
-    contrast_inference_vs_retrieved: list[float] = Field(default_factory=list)
-    contrast_inference_vs_ancestral: list[float] = Field(default_factory=list)
+    contrast_post_vs_recall: list[float] = Field(default_factory=list)
+    contrast_post_vs_path: list[float] = Field(default_factory=list)
 
 
 # =============================================================================
@@ -292,14 +292,14 @@ def produce_tem_pathway_probe(  # -------------------------------------------
             output, state = model(step_input, state=state)
 
             all_p_post.append(
-                [p.clone().cpu() for p in output.place_codes.posterior]
+                [p.clone().cpu() for p in output.place_codes.post]
             )
             all_p_path.append(
-                [p.clone().cpu() for p in output.place_codes.prior]
+                [p.clone().cpu() for p in output.place_codes.path]
             )
-            if output.place_codes.retrieved is not None:
+            if output.place_codes.recall is not None:
                 all_p_recall.append(
-                    [p.clone().cpu() for p in output.place_codes.retrieved]
+                    [p.clone().cpu() for p in output.place_codes.recall]
                 )
 
     # Stack per-step codes: list of (T, D_f) per frequency
@@ -311,8 +311,8 @@ def produce_tem_pathway_probe(  # -------------------------------------------
 
     p_post = _stack(all_p_post)
     p_path = _stack(all_p_path)
-    has_retrieved = len(all_p_recall) == T
-    p_recall = _stack(all_p_recall) if has_retrieved else p_post
+    has_recall = len(all_p_recall) == T
+    p_recall = _stack(all_p_recall) if has_recall else p_post
 
     obs_ids = observation_ids.to(device="cpu", dtype=torch.long)
 
@@ -377,14 +377,14 @@ def produce_tem_pathway_probe(  # -------------------------------------------
         inference=[s0_post, s1_post, s2_post, s3_post],
         retrieved=[s0_ret, s1_ret, s2_ret, s3_ret],
         ancestral=[s0_pri, s1_pri, s2_pri, s3_pri],
-        logits_inference=logit_metrics_inf,
-        logits_retrieved=logit_metrics_ret,
-        logits_ancestral=logit_metrics_pri,
-        contrast_inference_vs_retrieved=_contrast(
+        logits_post=logit_metrics_inf,
+        logits_recall=logit_metrics_ret,
+        logits_path=logit_metrics_pri,
+        contrast_post_vs_recall=_contrast(
             [s0_ret, s1_ret, s2_ret, s3_ret],
             [s0_post, s1_post, s2_post, s3_post],
         ),
-        contrast_inference_vs_ancestral=_contrast(
+        contrast_post_vs_path=_contrast(
             [s0_pri, s1_pri, s2_pri, s3_pri],
             [s0_post, s1_post, s2_post, s3_post],
         ),
@@ -484,16 +484,16 @@ def format_pathway_probe_table(  # --------------------------------------------
         "| ----- | -------------------- | ---------------- | ---------------- |"
     )
     for s in range(N_STAGES):
-        cr = _fmt(result.contrast_inference_vs_retrieved[s])
-        ca = _fmt(result.contrast_inference_vs_ancestral[s])
+        cr = _fmt(result.contrast_post_vs_recall[s])
+        ca = _fmt(result.contrast_post_vs_path[s])
         lines.append(f"| {s} | {STAGE_NAMES[s]:<20s} | {cr:>16s} | {ca:>16s} |")
 
     lines.append("")
     lines.append("--- Logits ---")
     for label, lm in [
-        ("inference", result.logits_inference),
-        ("retrieved", result.logits_retrieved),
-        ("ancestral", result.logits_ancestral),
+        ("inference", result.logits_post),
+        ("retrieved", result.logits_recall),
+        ("ancestral", result.logits_path),
     ]:
         lines.append(
             f"  {label}: acc={_fmt(lm.accuracy)} "
@@ -507,9 +507,9 @@ def format_pathway_probe_table(  # --------------------------------------------
     lines.append("")
     lines.append("Prediction histograms (top 5 classes):")
     for label, lm in [
-        ("inference", result.logits_inference),
-        ("retrieved", result.logits_retrieved),
-        ("ancestral", result.logits_ancestral),
+        ("inference", result.logits_post),
+        ("retrieved", result.logits_recall),
+        ("ancestral", result.logits_path),
     ]:
         top5 = dict(list(lm.prediction_histogram.items())[:5])
         lines.append(f"  {label}: {top5}")

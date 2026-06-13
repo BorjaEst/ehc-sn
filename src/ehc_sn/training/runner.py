@@ -1,4 +1,4 @@
-"""Shared training-orchestration runner for EHC-SN entry-point scripts.
+"""Shared training-orchestration runner for EHP-SN entry-point scripts.
 
 Owns the duplicated ~300 lines of orchestration that were previously
 copy-pasted across four training scripts.  Scripts become thin wrappers

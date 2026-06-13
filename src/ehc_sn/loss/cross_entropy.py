@@ -1,5 +1,5 @@
 """
-Cross-entropy loss functions for EHC-SN.
+Cross-entropy loss functions for EHP-SN.
 This module provides cross-entropy loss functions for variational and rollout
 heads. Inputs are model-agnostic tensors of shape ``(B, D)`` and outputs are
 per-example loss values of shape ``(B,)``.

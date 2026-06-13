@@ -1,4 +1,4 @@
-site_name: ehc-sn
+site_name: ehp-sn
 site_description: Entorhinal-Hippocampal Circuit Spatial Navigation library
 site_author: Borja Esteban Sanchis
 docs_dir: docs
@@ -46,7 +46,7 @@ nav:
       - Specs And Governance: specs-and-governance.md
       - Legacy Context: legacy-context.md
   - Theory:
-      - EHC Theory Foundations: ehc-theory-foundations.md
+      - EHP Theory Foundations: ehp-theory-foundations.md
       - Notation Map: notation-map.md
       - PFC Working Memory Theory: pfc-working-memory-theory.md
 

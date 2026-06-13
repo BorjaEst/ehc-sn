@@ -1,4 +1,4 @@
-"""Controller families for EHC-SN rollout execution.
+"""Controller families for EHP-SN rollout execution.
 
 Canonical import paths:
 
@@ -10,6 +10,3 @@ Canonical import paths:
 
 Internal support modules: ``_base.py``, ``_env_rollout.py``.
 """
-
-
-

@@ -1,6 +1,6 @@
 ## Model Family Selection
 
-This page is a practical guide for choosing TEM, HRM, or EHC surfaces.
+This page is a practical guide for choosing TEM, HRM, or EHP surfaces.
 
 ## TEM Family
 
@@ -34,9 +34,9 @@ Entrypoints:
 - scripts/training/hrm_v1_baseline.py
 - scripts/training/hrm_v2_rl-striatum.py
 
-## EHC Family
+## EHP Family
 
-Use EHC when you need integrated PFC/STR/LEC/MEC/HPC interactions under one
+Use EHP when you need integrated PFC/STR/LEC/MEC/HPC interactions under one
 training surface.
 
 Characteristics:
@@ -53,4 +53,4 @@ Entrypoint:
 
 - Start with TEM for spatial predictive baselines.
 - Use HRM when task framing is token reasoning and halting control.
-- Move to EHC for integrated cross-region experiments and richer control routes.
+- Move to EHP for integrated cross-region experiments and richer control routes.

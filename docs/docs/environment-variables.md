@@ -10,7 +10,7 @@ This page lists high-impact environment variables used by entrypoints.
 | TEM_V2_CONFIGURATION_PATH | config/training/tem-v2-default-vram8gib.toml |
 | HRM_V1_CONFIGURATION_PATH | config/training/hrm-v1-default-vram8gib.toml |
 | HRM_V2_CONFIGURATION_PATH | config/training/hrm-v2-default-vram8gib.toml |
-| EHC_V1_CONFIGURATION_PATH | config/training/ehc-v1-spatial-vram8gib.toml |
+| EHP_V1_CONFIGURATION_PATH | config/training/ehp-v1-spatial-vram8gib.toml |
 
 Example:
 

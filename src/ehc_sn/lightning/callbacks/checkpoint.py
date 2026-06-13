@@ -97,7 +97,7 @@ def _build_eval_weights_only_state_dict(
 ) -> dict[str, object]:
     """Build deduplicated weights-only state dict for eval collection.
 
-    EHC v1 registers the same backbone under both `model.*` and
+    EHP v1 registers the same backbone under both `model.*` and
     `bridge_adapter.model.*`. For eval artifacts we keep canonical `model.*`
     keys and drop duplicate alias-backed `bridge_adapter.model.*` entries.
     """

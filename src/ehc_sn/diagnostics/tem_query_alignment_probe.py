@@ -230,7 +230,7 @@ def _retrieval_metrics(
     query_flat: Tensor,
     initial_query_flat: Tensor,
     retrieved_flat: Tensor,
-    previous_retrieved_flat: Tensor | None,
+    previous_recall_flat: Tensor | None,
     p_post_flat: Tensor,
     *,
     observation_ids: Tensor | None = None,
@@ -242,7 +242,7 @@ def _retrieval_metrics(
         query_flat: The raw query before the attractor ``(T, S)``.
         initial_query_flat: Same as query_flat (for sharpening calc).
         retrieved_flat: Attractor output ``(T, S)``.
-        previous_retrieved_flat: Attractor output from previous iteration count,
+        previous_recall_flat: Attractor output from previous iteration count,
             or ``None`` for the first iteration.
         p_post_flat: Reference posterior bank ``(T, S)``.
         observation_ids: Optional ``(T,)`` observation IDs.
@@ -296,12 +296,9 @@ def _retrieval_metrics(
 
     # Fixed-point delta.
     fpd = float("nan")
-    if previous_retrieved_flat is not None:
+    if previous_recall_flat is not None:
         fpd = float(
-            (retrieved_flat - previous_retrieved_flat)
-            .norm(dim=-1)
-            .mean()
-            .item()
+            (retrieved_flat - previous_recall_flat).norm(dim=-1).mean().item()
         )
 
     return QueryRetrievalMetrics(
@@ -610,18 +607,18 @@ def produce_tem_query_alignment_probe(  # --------------------------------------
 
             # Posterior place code (T=1 per step).
             p_post_store.append(
-                [p.clone().cpu() for p in output.place_codes.posterior]
+                [p.clone().cpu() for p in output.place_codes.post]
             )
             p_path_store.append(
-                [p.clone().cpu() for p in output.place_codes.prior]
+                [p.clone().cpu() for p in output.place_codes.path]
             )
-            if output.place_codes.retrieved is not None:
+            if output.place_codes.recall is not None:
                 p_recall_store.append(
-                    [p.clone().cpu() for p in output.place_codes.retrieved]
+                    [p.clone().cpu() for p in output.place_codes.recall]
                 )
             else:
                 p_recall_store.append(
-                    [p.clone().cpu() for p in output.place_codes.prior]
+                    [p.clone().cpu() for p in output.place_codes.path]
                 )
 
             # Grid codes (multi-scale MEC representations).
@@ -725,7 +722,7 @@ def produce_tem_query_alignment_probe(  # --------------------------------------
         )
 
         per_iter: dict[str, QueryRetrievalMetrics] = {}
-        prev_retrieved: Tensor | None = None
+        prev_recall: Tensor | None = None
 
         # Iterate attractor dynamics, recording after each milestone.
         # Follow the exact AttractorRead.forward() pattern:
@@ -756,13 +753,13 @@ def produce_tem_query_alignment_probe(  # --------------------------------------
                 query_flat=qflat,
                 initial_query_flat=qflat,
                 retrieved_flat=state_att,
-                previous_retrieved_flat=prev_retrieved,
+                previous_recall_flat=prev_recall,
                 p_post_flat=p_post_ref,
                 observation_ids=obs_ids_cpu,
                 position_ids=pos_ids_cpu,
             )
             per_iter[str(target_iter)] = metrics
-            prev_retrieved = state_att.clone()
+            prev_recall = state_att.clone()
 
         result_by_query[qkey] = QueryTypeMetrics(
             label=qkey,
@@ -1057,18 +1054,18 @@ def produce_tem_attractor_field_probe(  # --------------------------------------
             output, state = model(step_input, state=state)
 
             p_post_store.append(
-                [p.clone().cpu() for p in output.place_codes.posterior]
+                [p.clone().cpu() for p in output.place_codes.post]
             )
             p_path_store.append(
-                [p.clone().cpu() for p in output.place_codes.prior]
+                [p.clone().cpu() for p in output.place_codes.path]
             )
-            if output.place_codes.retrieved is not None:
+            if output.place_codes.recall is not None:
                 p_recall_store.append(
-                    [p.clone().cpu() for p in output.place_codes.retrieved]
+                    [p.clone().cpu() for p in output.place_codes.recall]
                 )
             else:
                 p_recall_store.append(
-                    [p.clone().cpu() for p in output.place_codes.prior]
+                    [p.clone().cpu() for p in output.place_codes.path]
                 )
             g_post_store.append(
                 [g.clone().cpu() for g in output.grid_codes.posterior]
