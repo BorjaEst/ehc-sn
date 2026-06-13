@@ -37,6 +37,7 @@ from ehc_sn.lightning.callbacks.lr_monitor import (
     LearningRateMonitorSettings,
 )
 from ehc_sn.lightning.callbacks.metrics import MetricsCallback
+from ehc_sn.lightning.callbacks.progress import StepProgressBar
 from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.training.distributed import (
     resolve_effective_world_size,
@@ -99,7 +100,7 @@ def _configure_torch() -> None:
 # =============================================================================
 
 
-def _build_callbacks(
+def _build_callbacks(  # ------------------------------------------------------
     settings: BaseModel,
 ) -> list[object]:
     """Construct callback list from readable settings fields.
@@ -107,7 +108,7 @@ def _build_callbacks(
     Each callback is optional; the method checks the appropriate settings
     field and creates the callback only when configured.
     """
-    callbacks: list[object] = [MetricsCallback()]
+    callbacks: list[object] = [MetricsCallback(), StepProgressBar()]
 
     eval_regimes: EvaluationRegimesCallbackSettings | None = getattr(
         settings, "eval_regimes", None
@@ -143,7 +144,7 @@ def _build_callbacks(
     return callbacks
 
 
-def _build_logger(
+def _build_logger(  # ---------------------------------------------------------
     settings: BaseModel,
 ) -> object | None:
     """Construct TensorBoard logger if configured."""
@@ -153,7 +154,7 @@ def _build_logger(
     return None
 
 
-def _build_trainer(
+def _build_trainer(  # --------------------------------------------------------
     settings: BaseModel,
     callbacks: list[object],
     world_size: int,
@@ -172,12 +173,10 @@ def _build_trainer(
         devices=getattr(settings, "trainer_devices", 1),
         num_nodes=getattr(settings, "trainer_num_nodes", 1),
         precision=getattr(settings, "trainer_precision", "16-mixed"),
-        max_epochs=getattr(settings, "max_epochs", 1),
+        max_epochs=-1,
         max_steps=getattr(settings, "max_steps", 200000),
-        check_val_every_n_epoch=getattr(
-            settings, "check_val_every_n_epoch", None
-        ),
-        val_check_interval=getattr(settings, "val_check_interval", 1000),
+        val_check_interval=getattr(settings, "val_check_interval", 0),
+        check_val_every_n_epoch=None,
         limit_val_batches=getattr(settings, "limit_val_batches", 1.0),
         log_every_n_steps=getattr(settings, "log_every_n_steps", 10),
         enable_progress_bar=getattr(settings, "enable_progress_bar", True),
@@ -189,7 +188,7 @@ def _build_trainer(
 # =============================================================================
 
 
-def run_training(
+def run_training(  # ----------------------------------------------------------
     settings: BaseModel,
     spec: TrainingEntrypointSpec,
 ) -> None:
@@ -255,3 +254,10 @@ def run_training(
         datamodule=datamodule,
         ckpt_path=getattr(settings, "resume_from_checkpoint", None),
     )
+
+
+# =============================================================================
+__all__ = [
+    "TrainingEntrypointSpec",
+    "run_training",
+]

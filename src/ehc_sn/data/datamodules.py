@@ -12,11 +12,29 @@ from pathlib import Path
 import lightning as L
 import numpy as np
 from pydantic import BaseModel, Field
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, IterableDataset
 
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
 from ehc_sn.data.transforms import Compose, RandomDihedral
+
+
+# =============================================================================
+class _InfiniteTickIterable(IterableDataset):
+    """Yields empty sentinels indefinitely.
+
+    ``num_workers`` MUST be 0 — multi-worker IterableDataset replicates
+    the iterator per worker, which would produce duplicate ticks and
+    break DDP step synchronization.
+
+    Termination is exclusively via ``Trainer.max_steps``.
+    """
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return {}
 
 
 # =============================================================================
@@ -172,10 +190,19 @@ class Datamodule(L.LightningDataModule):
     def train_dataloader(  # --------------------------------------------------
         self,
     ) -> DataLoader:
-        """Return the training DataLoader."""
+        """Return a tick DataLoader for demand-driven training.
+
+        Yields empty sentinels — the trainer invokes ``training_step``
+        without moving real episode data.  Admission is handled entirely
+        by the episode source inside the module.
+        """
         if self._train is None:
             raise RuntimeError("Call setup('fit') before train_dataloader()")
-        return self._make_loader(self._train, shuffle=True, drop_last=True)
+        return DataLoader(
+            _InfiniteTickIterable(),
+            batch_size=None,
+            num_workers=0,
+        )
 
     def val_dataloader(  # ----------------------------------------------------
         self,

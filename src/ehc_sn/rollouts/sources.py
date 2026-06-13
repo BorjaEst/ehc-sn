@@ -1,12 +1,11 @@
-"""Passive rollout sources used by rollout runners."""
+"""Passive and demand-driven rollout sources used by rollout runners."""
 
 from __future__ import annotations
 
 import torch
 from torch import Tensor
 
-from ehc_sn.rollouts.partial_reset import PartialResetBatchAssembler
-from ehc_sn.rollouts.runtime import HaltedCarry
+from ehc_sn.rollouts.runtime import EpisodeSource, HaltedCarry
 from ehc_sn.types import Batch
 
 
@@ -14,7 +13,7 @@ from ehc_sn.types import Batch
 class RepeatSource:
     """Yield the same batch repeatedly, optionally with a fixed horizon."""
 
-    def __init__(  # -----------------------------------------------------------
+    def __init__(  # ----------------------------------------------------------
         self,
         batch: Batch,
         *,
@@ -79,54 +78,117 @@ class RepeatSource:
 
 
 # =============================================================================
-class PartialResetSource:
-    """Passive refill source for partial-reset recurrent training."""
+class DemandDrivenReplaySource:
+    """Demand-driven replacement source for partial-reset training.
+
+    Satisfies the ``Source`` protocol.  On each ``__next__()``:
+    1. Reads the ``halted`` mask from the carry (stored by the latest
+       ``update()`` call).
+    2. Requests exactly ``n_halted`` replacement episodes from an
+       ``EpisodeSource`` (e.g. ``ShuffledEpisodeSource``).
+    3. Builds a step batch where halted rows receive new episode data
+       and active rows receive a template placeholder (the controller
+       reads ``resident_payload`` for active slots, so the placeholder
+       is never consumed).
+
+    Contract
+    --------
+    - Never discards an unconsumed episode.
+    - Advances the episode source cursor only by the number of halted
+      slots.
+    - ``__next__()`` with all slots halted returns a full batch of
+      ``B`` fresh episodes — does not raise ``StopIteration``.
+    """
 
     def __init__(  # ----------------------------------------------------------
         self,
         *,
-        incoming: Batch,
-        assembler: PartialResetBatchAssembler,
+        episode_source: EpisodeSource,
         carry0: HaltedCarry,
     ) -> None:
-        """Initialize the source with the first batch, assembler, and initial carry."""
-        self._incoming = incoming
-        self._template = incoming
-        self._assembler = assembler
-        self._reset_mask = carry0.halted
-        self._started = False
+        """Initialize with an episode source and initial carry.
 
-    def __iter__(self) -> "PartialResetSource":
+        Args:
+            episode_source: Pull-based source that provides episodes on demand.
+            carry0: Initial carry whose ``halted`` mask is ``True`` for all
+                slots, triggering a full initial admission batch.
+        """
+        self._episode_source = episode_source
+        self._carry = carry0
+        self._template: Batch | None = None
+        self._batch_size: int = int(carry0.halted.shape[0])
+        self._device: torch.device = carry0.halted.device
+
+    def __iter__(self) -> "DemandDrivenReplaySource":
         """Return self as an iterator."""
         return self
 
     def __next__(self) -> Batch:
-        """Yield the next batch, handling the initial batch and subsequent."""
-        if not self._started:
-            self._started = True
-            return self._assembler.ingest_and_make_step_batch(
-                incoming=self._incoming,
-                reset_mask=self._reset_mask,
-            )
+        """Yield the next step batch, with replacement rows for halted slots."""
+        halted = self._carry.halted  # (B,) bool
+        n_halted = int(halted.sum())
 
-        if not self._reset_mask.any():
+        if n_halted == 0:
+            # No replacements needed: return the template.
+            # The controller will read active slots from resident_payload.
+            if self._template is None:
+                raise RuntimeError(
+                    "DemandDrivenReplaySource: no template available and "
+                    "no halted slots to build one from."
+                )
             return self._template
 
-        step_batch = self._assembler.refill_only(
-            template=self._template, reset_mask=self._reset_mask
-        )
-        if step_batch is None:
-            raise StopIteration
-        return step_batch
+        replacements = self._episode_source.take(n_halted)
+        # Move replacements from CPU (episode source) to the carry's device.
+        replacements = {
+            k: v.to(self._device, non_blocking=True) if isinstance(v, Tensor) else v
+            for k, v in replacements.items()
+        }
+
+        if self._template is None:
+            # First call: build the template from first replacement keys,
+            # sized to match the full batch.
+            B = self._batch_size
+            self._template = {
+                k: torch.zeros(
+                    (B,) + tuple(v.shape[1:]),
+                    dtype=v.dtype,
+                    device=self._device,
+                )
+                for k, v in replacements.items()
+            }
+
+        # Scatter replacement rows into halted positions.
+        B = self._batch_size
+        result = dict(self._template)
+        halted_idx = halted.nonzero(as_tuple=False).flatten()
+
+        for k, replacement_tensor in replacements.items():
+            if k not in result:
+                continue
+            if isinstance(replacement_tensor, Tensor):
+                x = result[k]
+                if (
+                    isinstance(x, Tensor)
+                    and x.shape[1:] == replacement_tensor.shape[1:]
+                ):
+                    x = x.clone()
+                    x.index_copy_(0, halted_idx, replacement_tensor)
+                    result[k] = x
+        return result
 
     def update(  # ------------------------------------------------------------
         self,
         *,
         carry: HaltedCarry,
     ) -> None:
-        """Update the refill mask from the latest batch-aligned halt mask."""
-        self._reset_mask = carry.halted
+        """Store the latest controller carry for the next ``__next__()`` call.
+
+        The source must have completed at least one successful ``__next__``
+        (which builds its template) before ``update`` is called.
+        """
+        self._carry = carry
 
 
 # =============================================================================
-__all__ = ["PartialResetSource", "RepeatSource"]
+__all__ = ["DemandDrivenReplaySource", "RepeatSource"]

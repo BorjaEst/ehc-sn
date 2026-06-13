@@ -4,8 +4,6 @@
 # id: hrm-v1-default-vram8gib
 # role: entrypoint default training config for HRM v1
 # =============================================================================
-# Override any value via CLI:  --model.pfc.cortex.embedding_dim=256
-# Or via env var:              HRM_V1_CONFIGURATION_PATH=config/my_config.toml
 
 # -- Model architecture -------------------------------------------------------
 model_config_path = "config/models/hrm-v1-base.toml"
@@ -13,8 +11,7 @@ model_config_path = "config/models/hrm-v1-base.toml"
 # -- Dataset & training -------------------------------------------------------
 dataset_path      = "data/processed/mazehard/default/v1"
 global_batch_size = 25
-max_epochs        = 50000
-max_steps         = 26041
+max_steps         = 50000
 seed              = 42
 augment           = true
 
@@ -87,23 +84,21 @@ supervised_only_warmup_steps = 500
     filename                = "hrm-v1-{step:08d}"
     save_top_k              = -1
     every_n_train_steps     = 1000
-    save_on_train_epoch_end = false
     save_last               = true
     save_on_exception       = true
     save_weights_only       = false
 
 # -- Standalone scheduled figure generation -----------------------------------
 [figures]
-enabled    = false
-context    = "validation"
-every_n_epochs = 5
-every_n_steps  = 0
-figures    = ["halting_timeline", "q_value_evolution", "halt_logit_evolution"]
-max_cases  = 2
-save_pdf   = true
-save_png   = false
-png_dpi    = 160
-max_items  = 4
-max_cells  = 16
-max_retained_files = 200
-failure_policy = "warn"
+    enabled    = false
+    context    = "validation"
+    every_n_steps  = 5000
+    figures    = ["halting_timeline", "q_value_evolution", "halt_logit_evolution"]
+    max_cases  = 2
+    save_pdf   = true
+    save_png   = false
+    png_dpi    = 160
+    max_items  = 4
+    max_cells  = 16
+    max_retained_files = 200
+    failure_policy = "warn"

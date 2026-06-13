@@ -2,6 +2,7 @@
 
 from ehc_sn.rollouts.runtime import (
     CarrySnapshot,
+    EpisodeSource,
     ExecutionHaltError,
     HaltedCarry,
     RecurrentRunner,
@@ -15,13 +16,14 @@ from ehc_sn.rollouts.runtime import (
     StepRecord,
     StopReason,
 )
-from ehc_sn.rollouts.sources import PartialResetSource, RepeatSource
+from ehc_sn.rollouts.sources import DemandDrivenReplaySource, RepeatSource
 
 __all__ = [
     "CarrySnapshot",
+    "DemandDrivenReplaySource",
+    "EpisodeSource",
     "ExecutionHaltError",
     "HaltedCarry",
-    "PartialResetSource",
     "RecurrentRunner",
     "RepeatSource",
     "RolloutExecution",

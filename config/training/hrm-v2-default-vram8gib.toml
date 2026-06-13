@@ -9,12 +9,11 @@
 model_config_path = "config/models/hrm-v2-base.toml"
 
 # -- Dataset & training -------------------------------------------------------
-dataset_path       = "data/processed/mazehard/default/v1"
-global_batch_size  = 25
-max_epochs         = 100
-seed               = 42
-augment            = true
-max_steps          = 200000
+dataset_path      = "data/processed/mazehard/default/v1"
+global_batch_size = 25
+max_steps         = 50000
+seed              = 42
+augment           = true
 
 # -- DataLoader settings ------------------------------------------------------
 num_workers        = 4
@@ -102,23 +101,21 @@ non_finite_policy    = "raise"
     filename                = "hrm-v2-{step:08d}"
     save_top_k              = -1
     every_n_train_steps     = 1000
-    save_on_train_epoch_end = false
     save_last               = true
     save_on_exception       = true
     save_weights_only       = false
 
 # -- Standalone scheduled figure generation -----------------------------------
 [figures]
-enabled    = false
-context    = "validation"
-every_n_epochs = 5
-every_n_steps  = 0
-figures    = ["halting_timeline", "q_value_evolution", "halt_logit_evolution"]
-max_cases  = 2
-save_pdf   = true
-save_png   = false
-png_dpi    = 160
-max_items  = 4
-max_cells  = 16
-max_retained_files = 200
-failure_policy = "warn"
+    enabled    = false
+    context    = "validation"
+    every_n_steps  = 5000
+    figures    = ["halting_timeline", "q_value_evolution", "halt_logit_evolution"]
+    max_cases  = 2
+    save_pdf   = true
+    save_png   = false
+    png_dpi    = 160
+    max_items  = 4
+    max_cells  = 16
+    max_retained_files = 200
+    failure_policy = "warn"

@@ -49,11 +49,6 @@ class FigureGenerationSettings(BaseModel, extra="forbid"):
         default="validation",
         description="Training context that gates which hook fires.",
     )
-    every_n_epochs: int = Field(
-        default=5,
-        ge=0,
-        description="Render every N validation/testing epochs.  0 disables epoch-based cadence.",
-    )
     every_n_steps: int = Field(
         default=0,
         ge=0,
@@ -421,14 +416,9 @@ class FigureGenerationCallback(pl.Callback):
         trainer: Trainer,
     ) -> bool:
         """Return whether the schedule requests firing at this trigger point."""
-        if trigger_kind == "step":
-            return (
-                self.settings.every_n_steps > 0
-                and (trainer.global_step + 1) % self.settings.every_n_steps == 0
-            )
         return (
-            self.settings.every_n_epochs > 0
-            and (trainer.current_epoch + 1) % self.settings.every_n_epochs == 0
+            self.settings.every_n_steps > 0
+            and (trainer.global_step + 1) % self.settings.every_n_steps == 0
         )
 
     def _resolve_output_dir(  # -----------------------------------------------

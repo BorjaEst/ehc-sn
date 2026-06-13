@@ -27,6 +27,18 @@ class StopReason(str, Enum):
 
 
 # =============================================================================
+class EpisodeSource(Protocol):
+    """Pull-based episode provider consumed by demand-driven replay sources.
+
+    Conforming types must return exactly ``n`` episodes as a collated
+    ``Batch`` when ``take(n)`` is called.  The source owns its own
+    permutation, cursor, and coverage semantics.
+    """
+
+    def take(self, n: int) -> Batch: ...
+
+
+# =============================================================================
 class ExecutionHaltError(RuntimeError):
     """Raised when a runner hits a hard execution limit before halting cleanly."""
 
@@ -522,6 +534,7 @@ class RecurrentRunner:
 # =============================================================================
 __all__ = [
     "CarrySnapshot",
+    "EpisodeSource",
     "ExecutionHaltError",
     "HaltedCarry",
     "RecurrentRunner",

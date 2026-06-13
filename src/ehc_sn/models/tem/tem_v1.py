@@ -247,11 +247,12 @@ class TEMModelV1(nn.Module):
         self,
         state: TEMStateV1,
     ) -> TEMStateV1:
-        """Clamp Hebbian memory matrices at BPTT chunk boundary.
+        """Finalize HPC memory state at the end of a TBPTT chunk.
 
-        Delegates to ``HPCAttractor.finalize_memory``.  The training loop
-        calls this once per TBPTT chunk to match legacy TEM's end-of-chunk
-        clamping discipline.
+        Delegates to ``HPCBase.finalize_memory`` which applies Hebbian
+        weight clamping for dense stores and is a no-op for factor memory.
+        The training loop calls this once per TBPTT chunk to match legacy
+        TEM's end-of-chunk clamping discipline.
         """
         return replace(state, hpc=self.hpc.finalize_memory(state.hpc))
 

@@ -46,11 +46,6 @@ from ehc_sn.traces import build_trace_spec
 class EvaluationScheduleSettings(BaseModel, extra="forbid"):
     """Per-regime schedule settings for callback-owned triggering."""
 
-    every_n_epochs: int = Field(
-        default=0,
-        ge=0,
-        description="Run this regime every N validation epochs. 0 disables.",
-    )
     every_n_steps: int = Field(
         default=0,
         ge=0,
@@ -61,18 +56,6 @@ class EvaluationScheduleSettings(BaseModel, extra="forbid"):
         ge=0,
         description="Maximum provider batches per run. 0 means no cap.",
     )
-
-    @model_validator(mode="after")
-    def _validate_non_empty_schedule(  # -------------------------------------
-        self,
-    ) -> "EvaluationScheduleSettings":
-        """Validate that at least one cadence is enabled."""
-        if self.every_n_epochs == 0 and self.every_n_steps == 0:
-            raise ValueError(
-                "At least one schedule cadence must be enabled: "
-                "every_n_epochs > 0 or every_n_steps > 0."
-            )
-        return self
 
 
 # =============================================================================
@@ -348,9 +331,7 @@ class EvaluationRegimesCallback(pl.Callback):
         for regime in self.settings.regimes:
             if not _is_due(
                 regime.schedule,
-                trigger_kind=trigger_kind,
                 step=trainer.global_step + 1,
-                epoch=trainer.current_epoch + 1,
             ):
                 continue
             regime_result = self._run_one_regime(
@@ -708,14 +689,10 @@ def _resolve_regime_run_dir(  # ----------------------------------------------
 def _is_due(  # ---------------------------------------------------------------
     schedule: EvaluationScheduleSettings,
     *,
-    trigger_kind: Literal["step", "epoch"],
     step: int,
-    epoch: int,
 ) -> bool:
-    """Return whether a schedule is due for the current trigger and counters."""
-    if trigger_kind == "step":
-        return schedule.every_n_steps > 0 and step % schedule.every_n_steps == 0
-    return schedule.every_n_epochs > 0 and epoch % schedule.every_n_epochs == 0
+    """Return whether a schedule is due at the given optimizer step."""
+    return schedule.every_n_steps > 0 and step % schedule.every_n_steps == 0
 
 
 # =============================================================================

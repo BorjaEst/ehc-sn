@@ -5,6 +5,8 @@ Public surface: :class:`DatasetMetadata`, :class:`ProcessedDataset`.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -80,6 +82,41 @@ class ProcessedDataset(Dataset):
             ch: np.load(data_dir / f"{ch}.npy", mmap_mode="r")
             for ch in channels
         }
+        # Content-derived digest from the parsed index entries.
+        # Computed once at construction; depends only on entry contents.
+        self._dataset_digest: str = self._compute_digest(entries)
+
+    # ── Public properties ──────────────────────────────────────────────────
+
+    @property
+    def dataset_digest(self) -> str:
+        """SHA-256 hex digest of the normalized index entries.
+
+        Computed once at construction from the parsed entries.  Two
+        ProcessedDataset instances with identical index contents always
+        return the same digest regardless of path or construction time.
+        """
+        return self._dataset_digest
+
+    @property
+    def dataset_size(self) -> int:
+        """Number of entries (identical to ``len(self)``)."""
+        return len(self._entries)
+
+    @staticmethod
+    def _compute_digest(entries: list[DatasetIndexEntry]) -> str:
+        """Return a SHA-256 hex digest of normalized index entries.
+
+        Uses sorted ``model_dump()`` + ``json.dumps(sort_keys=True)`` for
+        each entry so the hash is deterministic and order-independent
+        within each entry.
+        """
+        hasher = hashlib.sha256()
+        for entry in sorted(entries, key=lambda e: e.id):
+            hasher.update(
+                json.dumps(entry.model_dump(), sort_keys=True).encode()
+            )
+        return hasher.hexdigest()
 
     def __len__(self) -> int:
         return len(self._entries)

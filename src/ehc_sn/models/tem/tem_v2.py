@@ -231,12 +231,11 @@ class TEMModelV2(nn.Module):
         self,
         state: TEMStateV2,
     ) -> TEMStateV2:
-        """Clamp HPC memory state at the end of a TBPTT chunk to prevent
-        gradient explosion.
+        """Finalize HPC memory state at the end of a TBPTT chunk.
 
-        Delegates to ``HPCAttractor.finalize_memory``.  The training loop
-        calls this once per TBPTT chunk to match legacy TEM's end-of-chunk
-        clamping discipline.
+        For HPCAttention this is a no-op — factor memory has no trainable
+        weight matrices that require post-chunk clamping.  Capacity
+        enforcement occurs at write time via ``EpisodicWrite.append``.
         """
         return replace(state, hpc=self.hpc.finalize_memory(state.hpc))
 

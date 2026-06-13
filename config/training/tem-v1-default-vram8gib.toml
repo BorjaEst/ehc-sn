@@ -11,8 +11,7 @@ model_config_path = "config/models/tem-v1-base.toml"
 # -- General settings ---------------------------------------------------------
 dataset_path         = "data/processed/arena/default/v1"
 global_batch_size    = 32
-max_epochs           = 500
-max_steps            = 40000
+max_steps            = 50000
 seed                 = 42
 augment              = true
 
@@ -26,7 +25,7 @@ persistent_workers   = true
 init_weights_groups  = ["all"]
 log_every_n_steps    = 10
 val_check_interval   = 1000  # int: training steps between validation runs
-limit_val_batches    = 10     # int: N validation batches per run
+limit_val_batches    = 10    # int: N validation batches per run
 enable_progress_bar  = true
 trainer_accelerator  = "gpu"
 trainer_strategy     = "ddp"
@@ -54,7 +53,7 @@ non_finite_policy    = "raise"
 
 # -- Controller ---------------------------------------------------------------
 [controller]
-    # window_size = 200  # Prevent model to learn dungeon structure
+    window_size = 2000
 
 # -- Optimization -------------------------------------------------------------
 [optimizer]
@@ -82,7 +81,8 @@ non_finite_policy    = "raise"
     tbptt_steps = 25
 
 [runtime.validation]
-    hard_max_rollout_steps = 2200
+    hard_max_rollout_steps = 6000
+    max_rollout_steps = 2000
     seed = 42
 
 # -- Objective ----------------------------------------------------------------
@@ -118,23 +118,21 @@ non_finite_policy    = "raise"
     filename                = "tem-v1-{step:08d}"
     save_top_k              = -1
     every_n_train_steps     = 1000
-    save_on_train_epoch_end = false
     save_last               = true
     save_on_exception       = true
     save_weights_only       = false
 
 # -- Standalone scheduled figure generation -----------------------------------
 [figures]
-enabled    = false
-context    = "validation"
-every_n_epochs = 1
-every_n_steps  = 0
-figures    = [ ]
-max_cases  = 1
-save_pdf   = true
-save_png   = false
-png_dpi    = 160
-max_items  = 4
-max_cells  = 16
-max_retained_files = 200
-failure_policy = "warn"
+    enabled    = false
+    context    = "validation"
+    every_n_steps  = 5000
+    figures    = [ ]
+    max_cases  = 1
+    save_pdf   = true
+    save_png   = false
+    png_dpi    = 160
+    max_items  = 4
+    max_cells  = 16
+    max_retained_files = 200
+    failure_policy = "warn"

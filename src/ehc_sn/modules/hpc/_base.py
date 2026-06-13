@@ -447,6 +447,18 @@ class HPCBase(nn.Module, ABC):
     ) -> MemoryState:
         """Initialize the concrete memory representation for a batch."""
 
+    def finalize_memory(  # ---------------------------------------------------
+        self,
+        state: HPCState,
+    ) -> HPCState:
+        """End-of-chunk memory finalization.  Default: identity (no-op).
+
+        Subclasses that accumulate unbounded state during a BPTT chunk
+        (e.g. dense Hebbian weights) should override this to apply
+        clamping or capacity enforcement before the next chunk.
+        """
+        return state
+
     def set_runtime(  # -------------------------------------------------------
         self,
         *,

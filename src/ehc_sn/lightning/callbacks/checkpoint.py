@@ -38,15 +38,6 @@ class CheckpointSettings(BaseModel, extra="forbid"):
         ge=1,
         description="Save every N training steps when set.",
     )
-    every_n_epochs: Optional[int] = Field(
-        default=None,
-        ge=1,
-        description="Checkpoint on validation boundaries for epochs divisible by this value.",
-    )
-    save_on_train_epoch_end: bool = Field(
-        default=False,
-        description="When false, save checkpoints after validation instead of at train epoch end.",
-    )
     save_last: bool = Field(
         default=True,
         description="Whether to always save the last checkpoint.",
@@ -68,14 +59,6 @@ class CheckpointSettings(BaseModel, extra="forbid"):
             raise ValueError(
                 "When checkpoint.monitor is unset, checkpoint.save_top_k must "
                 "be 0 (last-only via save_last) or -1 (keep-all)."
-            )
-        if (
-            self.every_n_train_steps is not None
-            and self.every_n_epochs is not None
-        ):
-            raise ValueError(
-                "Use at most one checkpoint cadence: every_n_train_steps or "
-                "every_n_epochs."
             )
         return self
 

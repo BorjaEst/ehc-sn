@@ -10,6 +10,7 @@ Public sub-namespaces:
 - :mod:`~ehc_sn.data.transforms` — data transforms.
 - :mod:`~ehc_sn.data.build` — versioned-root build mechanics.
 - :mod:`~ehc_sn.data.diagnostics` — dataset-level audits and diagnostics.
+- :mod:`~ehc_sn.data.episode_sources` — demand-driven shuffled episode providers.
 - :mod:`~ehc_sn.data.substrate` — shared-substrate family builders.
 """
 
@@ -17,6 +18,7 @@ from ehc_sn.data import (
     datamodules,
     datasets,
     diagnostics,
+    episode_sources,
     index,
     lifecycle,
     manifest,
@@ -35,4 +37,5 @@ __all__ = [
     "lifecycle",
     "substrate",
     "diagnostics",
+    "episode_sources",
 ]
