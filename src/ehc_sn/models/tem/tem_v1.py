@@ -243,6 +243,18 @@ class TEMModelV1(nn.Module):
         self.mec.set_runtime(p2g_uncertainty_offset=p2g_uncertainty_offset)
         self.hpc.set_runtime(eta=eta, hebbian_decay=hebbian_decay)
 
+    def finalize_memory(  # ---------------------------------------------------
+        self,
+        state: TEMStateV1,
+    ) -> TEMStateV1:
+        """Clamp Hebbian memory matrices at BPTT chunk boundary.
+
+        Delegates to ``HPCAttractor.finalize_memory``.  The training loop
+        calls this once per TBPTT chunk to match legacy TEM's end-of-chunk
+        clamping discipline.
+        """
+        return replace(state, hpc=self.hpc.finalize_memory(state.hpc))
+
     def _sensory_correction_error(  # -----------------------------------------
         self,
         sensory_features: MultiScaleCode,

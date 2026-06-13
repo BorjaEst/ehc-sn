@@ -326,18 +326,50 @@ class HPCBase(nn.Module, ABC):
             New state with flagged rows replaced by fresh initialization.
         """
         device = state.cells[0].device
+        batch_size = int(reset_flag.shape[0])
         reset_flag = reset_flag.to(device=device, dtype=torch.bool).view(-1)
         if not torch.any(reset_flag):
             return state
 
-        fresh = self.init_state(
-            int(reset_flag.shape[0]), device=device, memory=None
-        )
+        fresh = self.init_state(batch_size, memory=None, device=device)
         return state.replace_rows(
             reset_flag,
             fresh,
             merge_fn=self.merge_fn,
             common_memory=self.config.common_memory,
+        )
+
+    def reset_memory(  # ------------------------------------------------------
+        self,
+        state: HPCState,
+        reset_flag: Tensor,
+    ) -> HPCState:
+        """Zero Hebbian memory for flagged rows. Cells are preserved.
+
+        Use this when the environment layout changes and accumulated
+        structural knowledge is no longer valid.
+        """
+        device = state.cells[0].device
+        reset_flag = reset_flag.to(device=device, dtype=torch.bool).view(-1)
+        if not torch.any(reset_flag):
+            return state
+
+        empty = self.init_state(
+            int(reset_flag.shape[0]), device=device, memory=None
+        )
+        g_cued = self.merge_fn(
+            reset_flag, state.memory.g_cued, empty.memory.g_cued
+        )
+        x_cued = (
+            g_cued
+            if self.config.common_memory
+            else self.merge_fn(
+                reset_flag, state.memory.x_cued, empty.memory.x_cued
+            )
+        )
+        return HPCState(
+            state.grounded_belief,
+            _memory=MemoryState(g_cued=g_cued, x_cued=x_cued),
         )
 
     def _flatten_memory_code(  # ----------------------------------------------

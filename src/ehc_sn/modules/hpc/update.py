@@ -299,7 +299,7 @@ class HebbianWrite(nn.Module):
         update = (p_inf + p_gen).unsqueeze(2) @ (p_inf - p_gen).unsqueeze(1)
         if mask is not None:
             update = update * mask.to(device=memory.device, dtype=memory.dtype)
-        return self.clamp_memory(hebbian_decay * memory + eta * update)
+        return hebbian_decay * memory + eta * update
 
     def clamp_memory(  # --------------------------------------------------------------------------
         self, memory: Tensor,

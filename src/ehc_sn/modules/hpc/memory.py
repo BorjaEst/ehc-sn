@@ -190,6 +190,23 @@ class DenseHebbianStoreBackend(nn.Module):
             )
         )
 
+    def clamp_store(  # -------------------------------------------------------
+        self,
+        store: MemoryEntry,
+    ) -> DenseMemoryStore:
+        """Clamp one memory entry, matching legacy end-of-BPTT clamping.
+
+        Returns a new ``DenseMemoryStore`` with weights clamped to
+        ``[clamp_min, clamp_max]`` from the Hebbian write config.
+        """
+        if not isinstance(store, DenseMemoryStore):
+            raise TypeError(
+                "DenseHebbianStoreBackend expected dense memory stores."
+            )
+        return DenseMemoryStore(
+            matrix=self._write_rule.clamp_memory(store.matrix)
+        )
+
 
 # =============================================================================
 class FactorHebbianStoreBackend:

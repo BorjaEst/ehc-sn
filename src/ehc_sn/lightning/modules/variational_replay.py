@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -310,8 +310,7 @@ class VariationalReplayModule(L.LightningModule):
     def on_train_epoch_start(  # ----------------------------------------------
         self,
     ) -> None:
-        """Reset partial-reset carry and buffer at start of each epoch."""
-        self._train_carry = None
+        """Reset partial-reset buffer and metrics at start of each epoch."""
         if self._train_buffer is not None:
             self._train_buffer.clear()
         self.train_metrics.reset()
@@ -443,33 +442,27 @@ class VariationalReplayModule(L.LightningModule):
         """Run one chunked-TBPTT optimizer update through the recurrent runner."""
         runtime = self._apply_runtime(self.global_step)
         self.log(
-            "train/runtime/eta",
-            runtime.eta,
-            on_step=True,
-            on_epoch=False,
-            logger=True,
+            "train/runtime/eta", runtime.eta,
+            on_step=True, on_epoch=False, logger=True,
         )  # fmt: skip
         self.log(
-            "train/runtime/hebbian_decay",
-            runtime.hebbian_decay,
-            on_step=True,
-            on_epoch=False,
-            logger=True,
+            "train/runtime/hebbian_decay", runtime.hebbian_decay,
+            on_step=True, on_epoch=False, logger=True,
         )  # fmt: skip
         self.log(
-            "train/runtime/p2g_use",
-            runtime.p2g_use,
-            on_step=True,
-            on_epoch=False,
-            logger=True,
+            "train/runtime/p2g_use", runtime.p2g_use,
+            on_step=True, on_epoch=False, logger=True,
         )  # fmt: skip
         self.log(
             "train/runtime/p2g_uncertainty_offset",
             runtime.p2g_uncertainty_offset,
-            on_step=True,
-            on_epoch=False,
-            logger=True,
+            on_step=True, on_epoch=False, logger=True,
         )  # fmt: skip
+        self.model.set_runtime(
+            eta=runtime.eta,
+            hebbian_decay=runtime.hebbian_decay,
+            p2g_uncertainty_offset=runtime.p2g_uncertainty_offset,
+        )
         train_controller = self._require_train_controller()
         train_objective = self._require_train_objective()
         batch_assembler = self._ensure_train_batch_assembler(batch)
@@ -497,7 +490,14 @@ class VariationalReplayModule(L.LightningModule):
                 self.train_metrics, self._step_routes
             ),
         )
+
         next_carry = evaluation.execution.final_carry.detach()
+        # Deferred post-chunk Hebbian clamp (legacy parity: TEM clamps memory
+        # matrices once per BPTT chunk rather than per step).
+        if hasattr(self.model, "finalize_memory"):
+            next_state = self.model.finalize_memory(next_carry.model_state)
+            next_carry = replace(next_carry, model_state=next_state)
+
         self._train_carry = next_carry
         loss = evaluation.loss
         loss = loss / self._train_chunk_steps()
@@ -518,30 +518,19 @@ class VariationalReplayModule(L.LightningModule):
         for sch in scheduler if isinstance(scheduler, list) else [scheduler]:
             sch.step()  # type: ignore
 
-        self._train_carry = evaluation.execution.final_carry.detach()
-        final_carry = evaluation.execution.final_carry
-
         self.log(
-            "train/loss",
-            loss.detach(),
-            on_step=True,
-            on_epoch=False,
-            prog_bar=True,
-            logger=True,
+            "train/loss", loss.detach(),
+            on_step=True, on_epoch=False, prog_bar=True, logger=True,
         )  # fmt: skip
         self.log(
             "train/fit_path/halted_fraction",
-            final_carry.halted.float().mean(),
-            on_step=True,
-            on_epoch=False,
-            logger=True,
+            next_carry.halted.float().mean(),
+            on_step=True, on_epoch=False, logger=True,
         )  # fmt: skip
         self.log(
             "train/fit_path/max_cursor",
-            final_carry.cursor.max().float(),
-            on_step=True,
-            on_epoch=False,
-            logger=True,
+            next_carry.cursor.max().float(),
+            on_step=True, on_epoch=False, logger=True,
         )  # fmt: skip
 
         return {

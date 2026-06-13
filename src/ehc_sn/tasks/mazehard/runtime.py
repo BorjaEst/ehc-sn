@@ -8,15 +8,19 @@ remains task-agnostic and adapter-free.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Final
 
 import numpy as np
 import torch
+from pydantic import BaseModel, Field
 from torch import Tensor
 
+from ehc_sn.contracts.task_runtime import RuntimeReset, StepFeedback, TaskRuntime
+from ehc_sn.tasks.mazehard.contracts import MazeHardTargets, MazeHardTaskInput, MazeHardTaskOutput
+from ehc_sn.tasks.mazehard.evaluation import build_maze_hard_step_score
+from ehc_sn.tasks.mazehard.reward import MazeHardRewardProjector
 from ehc_sn.types import Batch
-
-from .contracts import MazeHardTargets, MazeHardTaskInput
 
 MAZE_HARD_BATCH_KEYS: Final[tuple[str, ...]] = ("input_ids", "labels")
 """Canonical generic batch keys required by MazeHard rollout consumers."""
@@ -175,6 +179,209 @@ def _flatten_spatial_to_tensor(
 
 
 # =============================================================================
+# MazeHardRuntime — TaskRuntime implementation
+# =============================================================================
+
+
+class MazeHardRuntimeConfig(BaseModel, extra="forbid"):
+    """Configuration for :class:`MazeHardRuntime`.
+
+    Attributes:
+        halt_action: Action index the model uses to signal 'done' for a slot.
+            Must match the action space configured in the backbone / policy head.
+        episode_horizon: Semantic step budget per slot.  When
+            ``steps >= episode_horizon`` the runtime emits ``truncated=True``.
+            Must be > 0.
+    """
+
+    halt_action: int = Field(
+        default=0,
+        ge=0,
+        description="Action index that signals episode termination for MazeHard.",
+    )
+    episode_horizon: int = Field(
+        default=16,
+        ge=1,
+        description="Task-owned semantic step budget per slot; runtime emits truncated when steps reach this value.",
+    )
+
+
+# =============================================================================
+@dataclass
+class _MazeHardRuntimeState:
+    """Internal runtime state for MazeHard deliberation.
+
+    Attributes:
+        step_count: Per-slot step counter of shape ``(B,)`` int32.
+        static_data: The static MazeHard batch (``input_ids``, ``labels``).
+            Never changes across steps — MazeHard is a static-instance task.
+    """
+
+    step_count: Tensor  # (B,) int32
+    static_data: Batch
+
+
+# =============================================================================
+class MazeHardRuntime(TaskRuntime["_MazeHardRuntimeState"]):
+    """MazeHard implementation of :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`.
+
+    Owned by the task layer; injected into
+    :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationACController`
+    at wiring time.
+
+    Responsibilities:
+        - Own runtime state: step counter plus static MazeHard batch.
+        - Delegate reward computation to :class:`~ehc_sn.tasks.mazehard.reward.MazeHardRewardProjector`.
+        - Mark per-slot termination when ``action == config.halt_action``.
+        - Mark per-slot truncation when ``steps >= config.episode_horizon``.
+        - Return the static observation unchanged on every step (static-instance
+          deliberation).
+        - Support partial reset via ``reset_slots``.
+
+    Stateless contract: no reward-local runtime state is threaded across steps
+    beyond the step counter and static data.
+    """
+
+    def __init__(  # ----------------------------------------------------------
+        self,
+        config: MazeHardRuntimeConfig,
+        reward_projector: MazeHardRewardProjector,
+    ) -> None:
+        """Create the MazeHard runtime.
+
+        Args:
+            config: Task-owned config specifying ``halt_action`` and
+                ``episode_horizon``.
+            reward_projector: Task-owned reward projector, injected at wiring
+                time.  Lives in :mod:`ehc_sn.tasks.mazehard.reward`; the runtime
+                does not construct it internally.
+        """
+        self._halt_action = config.halt_action
+        self._episode_horizon = config.episode_horizon
+        self._reward_projector = reward_projector
+
+    def reset(  # -------------------------------------------------------------
+        self,
+        batch: Batch,
+    ) -> RuntimeReset["_MazeHardRuntimeState"]:
+        """Initialise runtime for a full batch of new MazeHard episodes.
+
+        The initial observation IS the static batch (input_ids, labels).
+        """
+        B = _runtime_batch_size(batch)
+        device = _runtime_batch_device(batch)
+        state = _MazeHardRuntimeState(
+            step_count=torch.zeros(B, dtype=torch.int32, device=device),
+            static_data=batch,
+        )
+        return RuntimeReset(observation=batch, state=state)
+
+    def reset_slots(  # -------------------------------------------------------
+        self,
+        reset_mask: Tensor,  # (B,) bool
+        batch: Batch,
+        state: _MazeHardRuntimeState,
+    ) -> RuntimeReset["_MazeHardRuntimeState"]:
+        """Reset halted slots with fresh episodes; preserve continuing slots."""
+        B = _runtime_batch_size(batch)
+        device = _runtime_batch_device(batch)
+
+        step_count = torch.where(
+            reset_mask,
+            torch.zeros(B, dtype=torch.int32, device=device),
+            state.step_count,
+        )
+
+        static_data = {
+            key: torch.where(
+                reset_mask.view((-1,) + (1,) * (value.ndim - 1)),
+                batch[key],
+                state.static_data[key],
+            )
+            for key in state.static_data
+        }
+
+        new_state = _MazeHardRuntimeState(
+            step_count=step_count,
+            static_data=static_data,
+        )
+        return RuntimeReset(observation=static_data, state=new_state)
+
+    def step(  # --------------------------------------------------------------
+        self,
+        state: _MazeHardRuntimeState,
+        task_output: object,
+        action: Tensor,  # (B,) int64
+        steps: Tensor,  # (B,) int32
+    ) -> StepFeedback["_MazeHardRuntimeState"]:
+        """Compute reward and termination for one MazeHard deliberation step.
+
+        Args:
+            state: Current runtime state with static data and step count.
+            task_output: Must be a
+                :class:`~ehc_sn.tasks.mazehard.contracts.MazeHardTaskOutput`
+                with a ``task_logits`` tensor of shape ``(B, S, V)``.
+            action: Sampled action tensor of shape ``(B,)``.
+            steps: Per-slot step counters of shape ``(B,)`` (post-advance).
+
+        Returns:
+            :class:`StepFeedback` with:
+                - ``reward``: shape ``(B, 1)``, ``float32``.
+                - ``terminated``: ``action == halt_action``, shape ``(B,)``.
+                - ``truncated``: ``steps >= episode_horizon``, shape ``(B,)``.
+                - ``next_observation``: same static data (unchanged).
+                - ``next_state``: updated step count.
+                - ``metrics``: dict with ``"step_score"`` tensor.
+        """
+        if not isinstance(task_output, MazeHardTaskOutput):
+            raise TypeError(
+                f"MazeHardRuntime.step expects MazeHardTaskOutput, "
+                f"got {type(task_output).__name__}"
+            )
+        labels: Tensor = state.static_data["labels"]
+        terminated = action.eq(self._halt_action)
+        truncated = steps >= self._episode_horizon
+
+        step_score = build_maze_hard_step_score(task_output, labels)
+        reward = self._reward_projector.project_step_reward(
+            step_score,
+            terminated=terminated,
+            truncated=truncated,
+        )
+
+        next_state = _MazeHardRuntimeState(
+            step_count=state.step_count + 1,
+            static_data=state.static_data,
+        )
+
+        return StepFeedback(
+            reward=reward,
+            terminated=terminated,
+            truncated=truncated,
+            next_observation=state.static_data,
+            next_state=next_state,
+            metrics={"step_score": step_score},
+        )
+
+
+# =============================================================================
+def _runtime_batch_size(batch: Batch) -> int:
+    """Infer batch size from the first tensor-valued entry."""
+    for value in batch.values():
+        if isinstance(value, Tensor):
+            return int(value.shape[0])
+    raise ValueError("Batch must contain at least one tensor-valued entry.")
+
+
+def _runtime_batch_device(batch: Batch) -> torch.device:
+    """Infer device from the first tensor-valued entry."""
+    for value in batch.values():
+        if isinstance(value, Tensor):
+            return value.device
+    raise ValueError("Batch must contain at least one tensor-valued entry.")
+
+
+# =============================================================================
 __all__ = [
     "MAZE_HARD_BATCH_KEYS",
     "MAZE_HARD_VOCAB_SIZE",
@@ -184,6 +391,8 @@ __all__ = [
     "START_ID",
     "GOAL_ID",
     "PATH_ID",
+    "MazeHardRuntime",
+    "MazeHardRuntimeConfig",
     "coerce_maze_hard_batch",
     "extract_maze_hard_targets",
     "extract_maze_hard_task_input",

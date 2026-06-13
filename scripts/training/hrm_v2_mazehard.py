@@ -32,8 +32,8 @@ from ehc_sn.lightning.callbacks.lr_monitor import (
 )
 from ehc_sn.logging.tensorboard import LoggerSettings
 from ehc_sn.objectives import HybridRLLossConfig
-from ehc_sn.tasks.mazehard.capabilities.deliberation import (
-    MazeHardDeliberationConfig,
+from ehc_sn.tasks.mazehard.evaluators.step import (
+    MazeHardStepEvaluatorConfig,
 )
 from ehc_sn.tasks.mazehard.reward import MazeHardRewardConfig
 from ehc_sn.tasks.mazehard.runtime import coerce_maze_hard_batch
@@ -108,9 +108,9 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
         default_factory=MazeHardHRMAdapterSettings,
         description="Adapter settings for the MazeHard environment and HRM v2 model.",
     )
-    deliberation: MazeHardDeliberationConfig = Field(
+    deliberation: MazeHardStepEvaluatorConfig = Field(
         ...,
-        description="Deliberation capability config (halt_action, episode_horizon) for the MazeHard deliberation path.",
+        description="Step evaluator config (halt_action, episode_horizon) for the MazeHard deliberation path.",
     )
     reward: MazeHardRewardConfig = Field(
         default_factory=MazeHardRewardConfig,

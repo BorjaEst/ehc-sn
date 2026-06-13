@@ -73,7 +73,7 @@ non_finite_policy    = "raise"
     lambda_it     = 200
 
 [runtime.uncertainty]
-    p2g_sig_half_it  = 400
+    p2g_sig_half_it  = 0
     p2g_sig_scale_it = 200
     offset_min       = 0.0
     offset_max       = 10000.0

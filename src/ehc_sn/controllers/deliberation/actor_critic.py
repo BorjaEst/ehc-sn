@@ -1,12 +1,13 @@
 """Deliberation value-control rollout controller — canonical owner.
 
 This controller drives an actor-critic backbone through slot-based deliberation
-steps without an environment.  Reward and termination are delegated to an
-injected :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`, keeping the
+steps.  Reward, termination, and observation dynamics are delegated to an
+injected :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`, keeping the
 controller generic over task semantics.
 
 Emits one :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`
-per step.  No ``env_td``, no :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter`,
+per step.  No ``env_td``, no :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`,
+no :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter`,
 no TorchRL dependency.
 
 Canonical import path::
@@ -20,13 +21,13 @@ Canonical import path::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.contracts.task_step import StepEvaluation, TaskStepEvaluator
+from ehc_sn.contracts.task_runtime import RuntimeReset, StepFeedback, TaskRuntime
 from ehc_sn.controllers._base import BaseController, RolloutState
 from ehc_sn.controllers.contracts.value_control import (
     ValueControlInteractionRecord,
@@ -45,6 +46,10 @@ from ehc_sn.types import Batch
 
 
 # =============================================================================
+_RuntimeStateT = TypeVar("_RuntimeStateT")
+
+
+# =============================================================================
 class DeliberationACControllerConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`DeliberationACController`.
 
@@ -60,7 +65,9 @@ class DeliberationACControllerConfig(BaseModel, extra="forbid"):
 
 # =============================================================================
 @dataclass
-class DeliberationACRolloutState[ModelState](RolloutState[ModelState]):
+class DeliberationACRolloutState[ModelState, RuntimeStateT](
+    RolloutState[ModelState]
+):
     """Controller carry/state for deliberation actor-critic rollouts.
 
     Does not contain ``env_td`` and does not depend on
@@ -68,26 +75,31 @@ class DeliberationACRolloutState[ModelState](RolloutState[ModelState]):
     :class:`~ehc_sn.controllers.online.actor_critic.RLRolloutState`.
 
     Attributes:
-        runtime_state: Lightweight carry owned by the injected
-            :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`.  ``None`` for stateless
-            evaluators.
+        runtime_state: Task-owned runtime state, threaded through the
+            injected :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`.
     """
 
-    runtime_state: object | None = None
+    runtime_state: RuntimeStateT
 
 
 # =============================================================================
-class DeliberationACController[ModelState](
+class DeliberationACController[ModelState, RuntimeStateT](
     BaseController[ModelState, DeliberationACControllerConfig]
 ):
-    """Policy-driven deliberation value-control controller without an environment.
+    """Runtime-backed deliberation value-control controller.
 
     The controller:
         - maintains per-slot buffers across steps via the inherited slot lifecycle
+        - resets and refreshes halted slots via the injected :class:`TaskRuntime`
         - resets backbone state for halted slots
         - samples actions from ``q_values`` via :class:`~ehc_sn.policies.categorical.CategoricalPolicy`
-        - delegates reward and termination to the injected :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`
-        - emits one :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord` per step
+        - delegates reward, termination, and observation dynamics to the injected
+          :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`
+        - emits one :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`
+          per step
+
+    Task-agnostic: the controller imports no task-specific types.  The only
+    task surface is ``self._runtime`` typed as ``TaskRuntime[RuntimeStateT]``.
 
     No TorchRL environment, no ``env_td``, no :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter`.
     """
@@ -96,12 +108,19 @@ class DeliberationACController[ModelState](
         self,
         backbone: ValueControlRolloutBackbone[ModelState],
         config: DeliberationACControllerConfig,
-        finalizer: TaskStepEvaluator,
+        runtime: TaskRuntime[RuntimeStateT],
     ) -> None:
-        """Create a deliberation actor-critic controller."""
+        """Create a deliberation actor-critic controller.
+
+        Args:
+            backbone: The value-control backbone (task-agnostic).
+            config: Controller configuration.
+            runtime: Task-owned runtime implementing :class:`TaskRuntime`.
+                Replaces the legacy :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`.
+        """
         super().__init__(backbone=cast(Any, backbone), config=config)
         self._policy = CategoricalPolicy(config.policy)
-        self._finalizer = finalizer
+        self._runtime = runtime
 
     @property
     def backbone(self) -> ValueControlRolloutBackbone[ModelState]:
@@ -109,70 +128,91 @@ class DeliberationACController[ModelState](
         return cast(ValueControlRolloutBackbone[ModelState], super().backbone)
 
     @property
-    def finalizer(self) -> TaskStepEvaluator:
-        """Return the injected step evaluator."""
-        return self._finalizer
+    def runtime(self) -> TaskRuntime[RuntimeStateT]:
+        """Return the injected task runtime."""
+        return self._runtime
 
     def initial_state(  # -----------------------------------------------------
         self,
         batch_sample: Batch,
-        *,
-        initial_runtime_state: object | None = None,
-    ) -> DeliberationACRolloutState[ModelState]:
-        """Build an initial rollout state from a batch sample."""
-        slots = self.initial_slots(batch_sample)
+    ) -> DeliberationACRolloutState[ModelState, RuntimeStateT]:
+        """Build an initial rollout state from a batch sample.
+
+        Delegates initial observation and runtime state to
+        :meth:`TaskRuntime.reset`.
+        """
+        reset_result = self._runtime.reset(batch_sample)
+        slots = self.initial_slots(reset_result.observation)
         return DeliberationACRolloutState(
             model_state=slots.model_state,
             steps=slots.steps,
             halted=slots.halted,
-            data=slots.data,
-            runtime_state=initial_runtime_state,
+            data=reset_result.observation,
+            runtime_state=reset_result.state,
         )
 
     def step(  # ----------------------------------------------------------
         self,
-        state: DeliberationACRolloutState[ModelState],
+        state: DeliberationACRolloutState[ModelState, RuntimeStateT],
         batch: Batch,
         *,
         allow_halt: bool = True,
         explore: bool = True,
         **options: Any,
     ) -> tuple[
-        DeliberationACRolloutState[ModelState], ValueControlInteractionRecord
+        DeliberationACRolloutState[ModelState, RuntimeStateT],
+        ValueControlInteractionRecord,
     ]:
         """Advance the controller by one step.
 
         Sequence:
-            1. Refresh per-slot data for halted rows.
+            1. Refresh halted slots via :meth:`TaskRuntime.reset_slots`.
             2. Reset backbone state for halted rows.
             3. Run the backbone forward pass.
             4. Sample an action via :class:`~ehc_sn.policies.categorical.CategoricalPolicy`.
-            5. Call :meth:`TaskStepEvaluator.evaluate_step` for reward/termination.
+            5. Call :meth:`TaskRuntime.step` for reward, termination, and next observation.
             6. Compute ``done`` as ``(terminated | truncated)``.
             7. Emit :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`.
+
+        The controller interacts with the runtime at exactly two points:
+        ``reset_slots`` (step 1) and ``step`` (step 5).  No task-specific
+        types cross this boundary.
 
         Args:
             state: Current rollout state.
             batch: Incoming batch used to refresh halted slots.
-            allow_halt: If ``False``, the finalizer's ``terminated`` signal is
-                suppressed (zeroed out), preventing learned-halt termination from
-                closing slots.  Task-owned ``truncated`` from the finalizer always
-                passes through regardless of this flag.
+            allow_halt: If ``False``, the runtime's ``terminated`` signal is
+                suppressed (zeroed out), preventing learned-halt termination
+                from closing slots.  Task-owned ``truncated`` from the runtime
+                always passes through regardless of this flag.
             explore: Passed to the categorical policy.
             halt_action: Optional action index treated as the halt action when
                 applying ACT-style halt/continue semantics.
-            max_halt_steps: Optional per-slot step budget used by ACT-style halt
-                semantics to force halting.
+            max_halt_steps: Optional per-slot step budget used by ACT-style
+                halt semantics to force halting.
 
         Returns:
             ``(new_state, record)``.
         """
-        data = self.refresh_slot_data(batch, state)
+        # 1. Refresh halted slots via runtime
+        reset_result = self._runtime.reset_slots(
+            reset_mask=state.halted,
+            batch=batch,
+            state=state.runtime_state,
+        )
+        data = reset_result.observation
+        runtime_state = reset_result.state
+
+        # 2. Reset backbone state for halted rows
         model_state = self.backbone.reset_state(state.halted, state.model_state)
+
+        # 3. Backbone forward pass
         backbone_output, model_state = self.backbone(data, model_state)
 
+        # 4. Advance step counters
         steps = self.advance_steps(state)
 
+        # 5. Action selection (ACT collapse + categorical policy)
         policy = backbone_output.policy
         q_values = policy.q_values
         valid_action_mask = policy.valid_action_mask
@@ -212,37 +252,36 @@ class DeliberationACController[ModelState](
         policy_decision = self._policy(policy_input, explore=explore)
         action = policy_decision.action.to(torch.int64)
 
-        step_result = self._finalizer.evaluate_step(
-            data,
-            backbone_output.task,
-            action,
-            steps,
-            state.runtime_state,
+        # 6. Runtime step — single task-interaction point
+        feedback = self._runtime.step(
+            runtime_state, backbone_output.task, action, steps
         )
 
+        # 7. Compute done flags
         if allow_halt:
-            terminated = step_result.terminated
-            truncated = step_result.truncated
+            terminated = feedback.terminated
+            truncated = feedback.truncated
             done = terminated | truncated
         else:
             # Suppress learned-halt termination only.  Task-owned truncated
             # (e.g. episode_horizon reached) passes through unchanged.
-            terminated = torch.zeros_like(step_result.terminated)
-            truncated = step_result.truncated
+            terminated = torch.zeros_like(feedback.terminated)
+            truncated = feedback.truncated
             done = truncated
 
+        # 8. Build next state and emit record
         new_state = DeliberationACRolloutState(
             model_state=model_state,
             steps=steps,
             halted=done,
-            data=data,
-            runtime_state=step_result.next_runtime_state,
+            data=feedback.next_observation,
+            runtime_state=feedback.next_state,
         )
         record = ValueControlInteractionRecord(
             observation_used_for_decision=data,
             q_values=q_values,
             sampled_action=action,
-            reward=step_result.reward,
+            reward=feedback.reward,
             done=done,
             terminated=terminated,
             truncated=truncated,

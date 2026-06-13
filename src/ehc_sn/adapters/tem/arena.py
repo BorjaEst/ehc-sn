@@ -1,6 +1,9 @@
-"""Arena plus TEM v2 bridge implementation.
+"""Arena plus TEM bridge implementation.
 
-Binds model-native TEM v2 types to the shared Arena TEM family core.
+Binds model-native TEM types to the shared Arena TEM family core.
+The adapter owns the 1-step-lagged sensory correction error that bridges the
+legacy TEM's ``squared_error(x, f_x(p_x))`` computation (adapter-owned,
+observation-space) into the model-native ``P2GMemory`` (HPC-space).
 """
 
 from __future__ import annotations
@@ -8,8 +11,10 @@ from __future__ import annotations
 from typing import Optional
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor, nn
 
+from ehc_sn import utils
 from ehc_sn.adapters.tem import _base
 from ehc_sn.adapters.tem._base import (
     ArenaDecoderConfig,
@@ -87,12 +92,19 @@ class ArenaOutputsDecoderV1(nn.Module):
         )  # Bias for reconstructing c from x
         self.decoder = MLPDecoder(latent_dim, observation_dim)
 
-    def _decode(  # -----------------------------------------------------------
+    def decode(  # ------------------------------------------------------------
         self,
-        pred_code: list,
+        code: list[Tensor],
     ) -> Tensor:
-        """Decode a single prediction code into an observation reconstruction."""
-        recon = self.w_x * pred_code[self._single_freq] + self.b_x
+        """Decode a multi-frequency code (LEC-projected) into observation logits.
+
+        Args:
+            code: Multi-frequency code in LEC-projected space, length ``n_freq``.
+
+        Returns:
+            Observation logits with shape ``(B, obs_dim)``.
+        """
+        recon = self.w_x * code[self._single_freq] + self.b_x
         return self.decoder(recon)
 
     def forward(  # -----------------------------------------------------------
@@ -100,13 +112,13 @@ class ArenaOutputsDecoderV1(nn.Module):
         model_output: TEMOutputV1,
     ) -> ArenaTEMBridgeOutput:
         """Decode all three place pathways and return the split task + TEM surfaces."""
-        obs_inference = self._decode(model_output.pred_codes.post)
+        obs_inference = self.decode(model_output.pred_codes.post)
         obs_retrieved = (
-            self._decode(model_output.pred_codes.recall)
+            self.decode(model_output.pred_codes.recall)
             if model_output.pred_codes.recall is not None
             else obs_inference.new_zeros(obs_inference.shape[0], self._obs_dim)
         )
-        obs_ancestral = self._decode(model_output.pred_codes.path)
+        obs_ancestral = self.decode(model_output.pred_codes.path)
 
         task = _base.ArenaTaskOutput(obs_logits=obs_inference)
         tem = _base.ArenaTEMDiagnostics(

@@ -35,13 +35,13 @@ from ehc_sn.objectives.hybrid_rl import (
     HybridRLLossConfig,
     HybridRLObjective,
 )
-from ehc_sn.tasks.mazehard.capabilities.deliberation import (
-    MazeHardDeliberationCapability,
-    MazeHardDeliberationConfig,
-)
 from ehc_sn.tasks.mazehard.reward import (
     MazeHardRewardConfig,
     MazeHardRewardProjector,
+)
+from ehc_sn.tasks.mazehard.runtime import (
+    MazeHardRuntime,
+    MazeHardRuntimeConfig,
 )
 from ehc_sn.traces.specs import HRM_HIDDEN_STATE_FIELDS
 from ehc_sn.training.actor_critic import (
@@ -69,7 +69,7 @@ def build_experiment(raw_config: dict) -> ActorCriticModule:
         adapter=MazeHardHRMAdapterSettings.model_validate(
             raw_config["adapter"]
         ),
-        deliberation=MazeHardDeliberationConfig.model_validate(
+        runtime=MazeHardRuntimeConfig.model_validate(
             raw_config["deliberation"]
         ),
         reward=MazeHardRewardConfig.model_validate(raw_config["reward"]),
@@ -82,7 +82,7 @@ def build_experiment(raw_config: dict) -> ActorCriticModule:
         ),
         optimizer_rl=AdamATan2Config.model_validate(raw_config["optimizer_rl"]),
         optimizer_qv=AdamATan2Config.model_validate(raw_config["optimizer_qv"]),
-        runtime=HRMRuntimeConfig.model_validate(raw_config["runtime"]),
+        hrm_runtime=HRMRuntimeConfig.model_validate(raw_config["runtime"]),
     )
     bindings = ActorCriticBindings(
         model_cls=HRModelV2,
@@ -98,10 +98,10 @@ def build_experiment(raw_config: dict) -> ActorCriticModule:
         val_scorer_cls=ZeroBootstrapActorCriticValidationScorer,
         optimizer_cls=AdamATan2,
         optimizer_config_cls=AdamATan2Config,
-        deliberation_config_cls=MazeHardDeliberationConfig,
+        runtime_config_cls=MazeHardRuntimeConfig,
         reward_config_cls=MazeHardRewardConfig,
+        runtime_cls=MazeHardRuntime,
         reward_projector_cls=MazeHardRewardProjector,
-        capability_cls=MazeHardDeliberationCapability,
         trace_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
         build_trace_meta_fn=build_mazehard_hrm_trace_meta,
         step_routes=RL_STEP_ROUTES,

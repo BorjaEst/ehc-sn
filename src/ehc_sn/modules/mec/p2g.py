@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
+import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from scipy.stats import truncnorm
 from torch import Tensor, nn
@@ -197,7 +198,7 @@ class P2GMemory(nn.Module):
         ]
         sigma = self.MLP_sigma_g_mem(sigma_g_input)
         sigma_with_offset = [
-            sigma[f] + self.runtime.uncertainty_offset
+            F.softplus(sigma[f]) + self.runtime.uncertainty_offset
             for f in range(self._n_freq)
         ]
         return sigma_with_offset

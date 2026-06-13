@@ -151,6 +151,27 @@ class HPCAttractor(HPCBase):
         self.write_module.runtime.eta = float(eta)
         self.write_module.runtime.hebbian_decay = float(hebbian_decay)
 
+    def finalize_memory(  # ---------------------------------------------------
+        self,
+        state: HPCState,
+    ) -> HPCState:
+        """Apply deferred end-of-BPTT memory clamping (legacy parity).
+
+        Clamps both g-cued and x-cued memory matrices to ``[clamp_min,
+        clamp_max]``.  The training controller should call this once per
+        TBPTT chunk boundary.
+        """
+        g_cued = self.store_backend.clamp_store(state.memory.g_cued)
+        if self.config.common_memory:
+            x_cued = g_cued
+        else:
+            x_cued = self.store_backend.clamp_store(state.memory.x_cued)
+
+        return HPCState(
+            grounded_belief=state.grounded_belief,
+            _memory=MemoryState(g_cued=g_cued, x_cued=x_cued),
+        )
+
     def _recall_flat_impl(  # -------------------------------------------------
         self,
         query: Tensor,

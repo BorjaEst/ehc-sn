@@ -41,9 +41,7 @@ from ehc_sn.rollouts.buffers import FifoBuffer
 from ehc_sn.rollouts.partial_reset import PartialResetBatchAssembler
 from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
 from ehc_sn.rollouts.sources import PartialResetSource
-from ehc_sn.tasks.mazehard.evaluators.step import (
-    MazeHardStepEvaluatorConfig,
-)
+from ehc_sn.tasks.mazehard.runtime import MazeHardRuntimeConfig
 from ehc_sn.tasks.mazehard.reward import MazeHardRewardConfig
 from ehc_sn.traces import build_trace_spec
 from ehc_sn.training.distributed import normalize_loss_for_backward
@@ -77,10 +75,10 @@ class ActorCriticBindings:
     val_scorer_cls: type
     optimizer_cls: type[Optimizer]
     optimizer_config_cls: type[BaseModel]
-    deliberation_config_cls: type[BaseModel]
+    runtime_config_cls: type[BaseModel]
     reward_config_cls: type[BaseModel]
+    runtime_cls: type
     reward_projector_cls: type
-    capability_cls: type
     trace_fields: tuple
     build_trace_meta_fn: Callable
     step_routes: tuple
@@ -99,9 +97,9 @@ class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
         ...,
         description="Adapter settings for the MazeHard ↔ HRM bridge.",
     )
-    deliberation: MazeHardStepEvaluatorConfig = Field(
+    runtime: MazeHardRuntimeConfig = Field(
         ...,
-        description="Step evaluator config (halt_action, episode_horizon).",
+        description="Runtime config for the task environment (action semantics, step budget).",
     )
     reward: MazeHardRewardConfig = Field(
         ...,
@@ -127,9 +125,9 @@ class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
         ...,
         description="Optimizer config for vmPFC parameters.",
     )
-    runtime: HRMRuntimeConfig = Field(
+    hrm_runtime: HRMRuntimeConfig = Field(
         ...,
-        description="HRM runtime configuration.",
+        description="HRM runtime configuration (validation safety limits).",
     )
 
 
@@ -236,15 +234,16 @@ class ActorCriticModule(L.LightningModule):
 
     def setup(self, stage: Optional[str] = None) -> None:
         """Initialize controller, objective, learner, and val scorer."""
-        deliberation_config = self._component_configs.deliberation
-        finalizer = self._bindings.capability_cls(
-            deliberation_config,
-            self._bindings.reward_projector_cls(self._component_configs.reward),
+        runtime = self._bindings.runtime_cls(
+            self._component_configs.runtime,
+            self._bindings.reward_projector_cls(
+                self._component_configs.reward
+            ),
         )
         self.controller = self._bindings.controller_cls(
             self.adapter,
             self._component_configs.controller,
-            finalizer,
+            runtime,
         )
         self.objective = self._bindings.objective_cls(
             self._component_configs.objective
@@ -365,8 +364,8 @@ class ActorCriticModule(L.LightningModule):
             runner_options={
                 "allow_halt": not is_warmup,
                 "explore": True,
-                "halt_action": self._component_configs.deliberation.halt_action,
-                "max_halt_steps": self._component_configs.deliberation.episode_horizon,
+                "halt_action": self._component_configs.runtime.halt_action,
+                "max_halt_steps": self._component_configs.runtime.episode_horizon,
             },
         )
         self._train_carry = execution.final_carry.detach()
@@ -378,7 +377,7 @@ class ActorCriticModule(L.LightningModule):
             )
         if self._train_carry is None:
             raise RuntimeError("Training carry missing after rollout.")
-        next_obs = self.controller.refresh_slot_data(batch, self._train_carry)
+        next_obs = self._train_carry.data
         ac_batch = self.learner.build_deliberation_ac_batch(
             record.outputs,
             record.snapshot,
@@ -501,19 +500,19 @@ class ActorCriticModule(L.LightningModule):
             carry=self.controller.initial_state(case.batch),
             objective=self.val_scorer,
             max_rollout_steps=(
-                self._component_configs.runtime.validation.max_rollout_steps
-                if hasattr(self._component_configs.runtime, "validation")
+                self._component_configs.hrm_runtime.validation.max_rollout_steps
+                if hasattr(self._component_configs.hrm_runtime, "validation")
                 and hasattr(
-                    self._component_configs.runtime.validation,
+                    self._component_configs.hrm_runtime.validation,
                     "max_rollout_steps",
                 )
                 else None
             ),
             hard_max_rollout_steps=(
-                self._component_configs.runtime.validation.hard_max_rollout_steps
-                if hasattr(self._component_configs.runtime, "validation")
+                self._component_configs.hrm_runtime.validation.hard_max_rollout_steps
+                if hasattr(self._component_configs.hrm_runtime, "validation")
                 and hasattr(
-                    self._component_configs.runtime.validation,
+                    self._component_configs.hrm_runtime.validation,
                     "hard_max_rollout_steps",
                 )
                 else None
@@ -521,8 +520,8 @@ class ActorCriticModule(L.LightningModule):
             runner_options={
                 "explore": False,
                 "allow_halt": False,
-                "halt_action": self._component_configs.deliberation.halt_action,
-                "max_halt_steps": self._component_configs.deliberation.episode_horizon,
+                "halt_action": self._component_configs.runtime.halt_action,
+                "max_halt_steps": self._component_configs.runtime.episode_horizon,
             },
             trace_request=trace_request,
         )
