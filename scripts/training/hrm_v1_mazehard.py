@@ -188,13 +188,6 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
 
     # -------------------------------------------------------------------------
-    # Training control settings (passed as top-level settings for ease of CLI overrides)
-    max_epochs: int = Field(
-        ...,
-        description="Total number of epochs to train.",
-    )
-
-    # -------------------------------------------------------------------------
     # Core settings for model, data, and training configuration (passed as configs to modules)
     logger: Optional[LoggerSettings] = Field(
         default_factory=LoggerSettings,
@@ -242,17 +235,10 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
         default=10,
         description="Log metrics every N steps.",
     )
-    check_val_every_n_epoch: Optional[int] = Field(
-        default=None,
-        description=(
-            "Validation scheduling mode. Set to None to validate based on "
-            "total training batches across epochs (i.e., use "
-            "val_check_interval as a global step interval)."
-        ),
-    )
     val_check_interval: int = Field(
-        default=1000,
-        description="Validation check interval (in training steps).",
+        default=0,
+        description="Validation check interval (in training steps)."
+        " 0 disables validation during training.",
     )
     enable_progress_bar: bool = Field(
         default=True,
