@@ -26,6 +26,7 @@ from torchmetrics import MetricCollection
 
 from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.controllers.deliberation.act import ACTControllerConfig
+from ehc_sn.data.episode_sources import ShuffledEpisodeSource
 from ehc_sn.eval.contracts import (
     EvaluationCaseBatch,
     EvaluationCaseResult,
@@ -38,10 +39,8 @@ from ehc_sn.metrics.reducers import HiddenNormHistogram, compute_nonempty
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.step_metrics import StepMetrics
 from ehc_sn.objectives.act import ACTObjectiveConfig
-from ehc_sn.rollouts.buffers import FifoBuffer
-from ehc_sn.rollouts.partial_reset import PartialResetBatchAssembler
 from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
-from ehc_sn.rollouts.sources import PartialResetSource
+from ehc_sn.rollouts.sources import DemandDrivenReplaySource, _move_batch_to
 from ehc_sn.traces import build_trace_spec
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
@@ -190,6 +189,8 @@ class ACTSupervisedModule(L.LightningModule):
         # Manual optimization: one backward, explicit opt/scheduler steps.
         self.automatic_optimization = False
         self._train_carry = None
+        self._train_source: DemandDrivenReplaySource | None = None
+        self._episode_source: ShuffledEpisodeSource | None = None
 
         # Metrics are cloned for train/val to allow separate logging and state
         # management.
@@ -213,17 +214,6 @@ class ACTSupervisedModule(L.LightningModule):
         self._val_reducer_collection = MetricCollection(
             {"hidden_norms": self._val_hidden_norms},
             prefix="val_diag/",
-        )
-
-        # Buffer + assembler implement partial-reset batching for ACT runs.
-        self._train_buffer = FifoBuffer(
-            capacity_rows=4 * self.regime_config.global_batch_size,
-            keys=("input_ids", "labels"),
-            pin_memory=True,
-        )
-        self._train_batch_assembler = PartialResetBatchAssembler(
-            buffer=self._train_buffer,
-            keys=("input_ids", "labels"),
         )
 
         # Optional target network for TD bootstrap stabilization.
@@ -269,9 +259,9 @@ class ACTSupervisedModule(L.LightningModule):
     def on_train_epoch_start(  # ----------------------------------------------
         self,
     ) -> None:
-        self._train_carry = None
-        self._train_buffer.clear()
-        self.train_metrics.reset()
+        # Carry persists across all DataLoader boundaries per legacy HRM
+        # contract — do NOT reset. Buffer is managed by FIFO eviction.
+        pass
 
     def on_validation_epoch_start(  # -----------------------------------------
         self,
@@ -287,22 +277,56 @@ class ACTSupervisedModule(L.LightningModule):
     def reset_diagnostic_traces(self) -> None:
         self._diagnostic_traces.clear()
 
+    def _ensure_episode_source(  # -------------------------------------------
+        self,
+    ) -> ShuffledEpisodeSource:
+        """Return or create the demand-driven episode source."""
+        if self._episode_source is not None:
+            return self._episode_source
+        datamodule: Any = getattr(self.trainer, "datamodule", None)
+        if datamodule is None:
+            raise RuntimeError(
+                "Demand-driven episode flow requires a DataModule to be "
+                "attached to the trainer."
+            )
+        train_dataset = getattr(datamodule, "_train", None)
+        if train_dataset is None:
+            raise RuntimeError(
+                "DataModule has no training dataset; call setup('fit') first."
+            )
+        world_size = max(getattr(self.trainer, "world_size", 1), 1)
+        rank = getattr(self.trainer, "global_rank", 0)
+        self._episode_source = ShuffledEpisodeSource(
+            train_dataset,
+            rank=rank,
+            world_size=world_size,
+            seed=self._component_configs.runtime.validation.seed or 42,
+        )
+        return self._episode_source
+
     def training_step(  # -----------------------------------------------------
         self,
         batch: Batch,
         batch_idx: int,
     ) -> dict[str, object]:
         if self._train_carry is None:
-            self._train_carry = self.controller.initial_state(batch)
+            init_batch = self._ensure_episode_source().take(
+                self.regime_config.global_batch_size
+            )
+            init_batch = _move_batch_to(init_batch, self.device)
+            self._train_carry = self.controller.initial_state(init_batch)
+
+            # Create the persistent rollout source, lifetime = training run.
+            self._train_source = DemandDrivenReplaySource(
+                episode_source=self._ensure_episode_source(),
+                carry0=self._train_carry,
+                device=self.device,
+            )
+
+        source = self._train_source
 
         is_warmup = (
             self.global_step < self.regime_config.supervised_only_warmup_steps
-        )
-
-        source = PartialResetSource(
-            incoming=batch,
-            assembler=self._train_batch_assembler,
-            carry0=self._train_carry,
         )
 
         target_backbone: TargetAdapterModule | None = (
@@ -332,8 +356,13 @@ class ACTSupervisedModule(L.LightningModule):
             self._bindings.step_routes,
         )
         self._train_carry = evaluation.chunk.final_carry.detach()
+        self._train_source.update(carry=self._train_carry)
 
-        local_bs = int(batch["input_ids"].shape[0])
+        local_bs = max(
+            self.regime_config.global_batch_size
+            // max(getattr(self.trainer, "world_size", 1), 1),
+            1,
+        )
         loss = normalize_loss_for_backward(
             evaluation.evaluated.loss, local_bs=local_bs
         )
@@ -361,13 +390,9 @@ class ACTSupervisedModule(L.LightningModule):
             sch.step()
 
         self.log(
-            "train/loss",
-            loss.detach(),
-            on_step=True,
-            on_epoch=False,
-            prog_bar=True,
-            logger=True,
-        )
+            "train/loss", loss.detach(),
+            on_step=True, on_epoch=False, prog_bar=True, logger=True,
+        )  # fmt: skip
 
         return {
             "loss": loss.detach(),

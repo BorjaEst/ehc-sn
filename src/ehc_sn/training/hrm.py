@@ -31,6 +31,12 @@ class ValidationRuntimeConfig(BaseModel, extra="forbid"):
         ge=1,
         description="Defensive runner cap for validation rollouts. Separate from the task-owned episode_horizon.",
     )
+    seed: int | None = Field(
+        default=None,
+        ge=0,
+        description="Explicit seed for deterministic episode ordering "
+        "in training and validation. When unset, a default seed is used.",
+    )
 
     @model_validator(mode="after")
     def _validate_bounds(self) -> "ValidationRuntimeConfig":
@@ -47,8 +53,8 @@ class ValidationRuntimeConfig(BaseModel, extra="forbid"):
 
 class RuntimeConfig(BaseModel, extra="forbid"):
     """Shared runtime configuration for HRM rollouts, including validation
-    safety limits. The runner should enforce these limits during rollout
-    execution.
+    safety limits and episode admission mode. The runner should enforce these
+    limits during rollout execution.
     """
 
     validation: ValidationRuntimeConfig = Field(

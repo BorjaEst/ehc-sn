@@ -134,7 +134,14 @@ class BaseController[ModelState, ConfigT: BaseModel]:
         """
         anchor = batch_anchor_tensor(batch_sample)
         batch_size = int(anchor.shape[0])
-        device = anchor.device
+        # Use the backbone's device — carry tensors (halted, steps, cursor)
+        # participate in CUDA operations via controller.step().  The batch
+        # anchor's device is unreliable under demand-driven admission where
+        # the episode source returns CPU tensors.
+        try:
+            device = next(self.backbone.parameters()).device
+        except StopIteration:
+            device = torch.device("cpu")
         return RolloutState(
             model_state=self.backbone.init_state(batch_size),
             steps=torch.zeros((batch_size,), dtype=torch.int32, device=device),

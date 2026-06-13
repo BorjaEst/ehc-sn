@@ -105,6 +105,7 @@ class DemandDrivenReplaySource:
         *,
         episode_source: EpisodeSource,
         carry0: HaltedCarry,
+        device: torch.device | None = None,
     ) -> None:
         """Initialize with an episode source and initial carry.
 
@@ -112,12 +113,14 @@ class DemandDrivenReplaySource:
             episode_source: Pull-based source that provides episodes on demand.
             carry0: Initial carry whose ``halted`` mask is ``True`` for all
                 slots, triggering a full initial admission batch.
+            device: Target device for episode data.  When ``None``, falls
+                back to ``carry0.halted.device``.
         """
         self._episode_source = episode_source
         self._carry = carry0
         self._template: Batch | None = None
         self._batch_size: int = int(carry0.halted.shape[0])
-        self._device: torch.device = carry0.halted.device
+        self._device: torch.device = device or carry0.halted.device
 
     def __iter__(self) -> "DemandDrivenReplaySource":
         """Return self as an iterator."""
@@ -141,7 +144,11 @@ class DemandDrivenReplaySource:
         replacements = self._episode_source.take(n_halted)
         # Move replacements from CPU (episode source) to the carry's device.
         replacements = {
-            k: v.to(self._device, non_blocking=True) if isinstance(v, Tensor) else v
+            k: (
+                v.to(self._device, non_blocking=True)
+                if isinstance(v, Tensor)
+                else v
+            )
             for k, v in replacements.items()
         }
 
@@ -188,6 +195,26 @@ class DemandDrivenReplaySource:
         (which builds its template) before ``update`` is called.
         """
         self._carry = carry
+
+
+# =============================================================================
+def _move_batch_to(  # --------------------------------------------------------
+    batch: Batch,
+    device: torch.device,
+) -> Batch:
+    """Recursively move all tensors in a batch to the target device.
+
+    Non-tensor values (metadata, strings, scalars) pass through unchanged.
+    ``Tensor`` values are moved via ``.to(device, non_blocking=True)``.
+    Nested ``dict``, ``list``, and ``tuple`` containers are recursed into.
+    """
+    if isinstance(batch, Tensor):
+        return batch.to(device, non_blocking=True)
+    if isinstance(batch, dict):
+        return {k: _move_batch_to(v, device) for k, v in batch.items()}
+    if isinstance(batch, (list, tuple)):
+        return type(batch)(_move_batch_to(v, device) for v in batch)
+    return batch
 
 
 # =============================================================================

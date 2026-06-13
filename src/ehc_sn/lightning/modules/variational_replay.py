@@ -545,6 +545,7 @@ class VariationalReplayModule(L.LightningModule):
             self._train_source = DemandDrivenReplaySource(
                 episode_source=self._ensure_episode_source(),
                 carry0=self._train_carry,
+                device=self.device,
             )
 
         source = self._train_source

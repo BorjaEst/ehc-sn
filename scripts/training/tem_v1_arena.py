@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+import warnings
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -44,6 +45,19 @@ from ehc_sn.training.tem import (
     RuntimeConfig,
     load_weights_from_checkpoint,
 )
+
+# Suppress Lightning's manual-optimization checkpoint warning.
+# This architecture deliberately uses post-optimization checkpoints:
+#   model, optimizer, scheduler, episode_source cursor → all at completed step N.
+#   Resume continues from step N+1 without duplicated updates.
+#   Pre-step weight cloning would create model/optimizer inconsistency
+#   and double per-step memory.  See design doc: checkpoint-contract.md.
+warnings.filterwarnings(
+    "ignore",
+    message=".*ModelCheckpoint with manual optimization.*pre-optimization.*",
+    category=UserWarning,
+)
+
 
 CONFIGURATION_PATH = os.environ.get(
     "TEM_V1_CONFIGURATION_PATH", "config/training/tem-v1-default-vram8gib.toml"

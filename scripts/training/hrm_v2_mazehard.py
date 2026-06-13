@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+import warnings
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -45,6 +46,19 @@ from ehc_sn.training.hrm import (
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.runner import TrainingEntrypointSpec, run_training
 from ehc_sn.training.schedules import SchedulerConfig
+
+# Suppress Lightning's manual-optimization checkpoint warning.
+# This architecture deliberately uses post-optimization checkpoints:
+#   model, optimizer, scheduler, episode_source cursor → all at completed step N.
+#   Resume continues from step N+1 without duplicated updates.
+#   Pre-step weight cloning would create model/optimizer inconsistency
+#   and double per-step memory.  See design doc: checkpoint-contract.md.
+warnings.filterwarnings(
+    "ignore",
+    message=".*ModelCheckpoint with manual optimization.*pre-optimization.*",
+    category=UserWarning,
+)
+
 
 CONFIGURATION_PATH = os.environ.get(
     "HRM_V2_CONFIGURATION_PATH", "config/training/hrm-v2-default-vram8gib.toml"
