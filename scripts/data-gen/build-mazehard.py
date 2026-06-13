@@ -57,7 +57,7 @@ from ehc_sn.tasks.mazehard import build_mazehard_task_corpus
 # ---------------------------------------------------------------------------
 _DEFAULT_TASK_VERSION = 1
 _DEFAULT_CORPUS = "default"
-_DEFAULT_N_TRAIN = 200
+_DEFAULT_N_TRAIN = 1000
 _DEFAULT_N_VAL = 40
 _DEFAULT_N_TEST = 40
 _DEFAULT_SEED = 42
