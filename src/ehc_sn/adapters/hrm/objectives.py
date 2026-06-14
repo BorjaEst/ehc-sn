@@ -30,6 +30,11 @@ from ehc_sn.tasks.mazehard.contracts import (
     MazeHardTargets,
 )
 from ehc_sn.tasks.mazehard.runtime import PATH_ID
+from ehc_sn.tasks.seqmaze.contracts import (
+    SEQMAZE_IGNORE_LABEL_ID,
+    SeqMazeTargets,
+)
+from ehc_sn.tasks.seqmaze.evaluation import _canonicalize
 from ehc_sn.types import Batch
 
 
@@ -80,14 +85,26 @@ class MazeHardHRMV1ACTTaskBinding(ACTObjectiveBinding[MazeHardTargets]):
         return MazeHardTargets(labels=executed_batch["labels"])
 
     def evaluate_sequences(  # ------------------------------------------------
-        self, logits: Tensor, targets: MazeHardTargets
+        self,
+        logits: Tensor,
+        targets: MazeHardTargets,
     ) -> AccuracyStats:
         """Return masked sequence-correctness statistics for MazeHard token prediction."""
         return compute_accuracy_stats(
             logits, targets.labels, ignore_label_id=MAZE_HARD_IGNORE_LABEL_ID
         )
 
-    def build_token_weights(self, labels: Tensor) -> Tensor:
+    def extract_loss_labels(  # -----------------------------------------------
+        self,
+        targets: MazeHardTargets,
+    ) -> Tensor:
+        """Return MazeHard labels directly — already loss-compatible."""
+        return targets.labels
+
+    def build_token_weights(  # -----------------------------------------------
+        self,
+        labels: Tensor,
+    ) -> Tensor:
         """Return per-token Token weights that emphasize MazeHard PATH labels."""
         return _build_mazehard_token_weights(labels)
 
@@ -107,12 +124,13 @@ class MazeHardHRMV2HybridTaskBinding:
     """
 
     def extract_task_logits(  # -----------------------------------------------
-        self, record: ValueControlInteractionRecord
+        self,
+        record: ValueControlInteractionRecord,
     ) -> Tensor:
         """Return token-prediction logits from ``record.task_output.task_logits``."""
         return _extract_record_task_logits(record)
 
-    def extract_labels(  # -------------------------------------------------------------
+    def extract_labels(  # ----------------------------------------------------
         self,
         record: ValueControlInteractionRecord,
     ) -> Tensor:
@@ -124,8 +142,9 @@ class MazeHardHRMV2HybridTaskBinding:
             )
         return record.observation_used_for_decision["labels"]
 
-    def extract_token_weights(
-        self, record: ValueControlInteractionRecord
+    def extract_token_weights(  # ---------------------------------------------
+        self,
+        record: ValueControlInteractionRecord,
     ) -> Tensor:
         """Return per-token Token weights that emphasize MazeHard PATH labels."""
         labels = self.extract_labels(record)
@@ -178,7 +197,115 @@ def _build_mazehard_token_weights(  # -----------------------------------------
 
 
 # =============================================================================
+class _HasSeqMazeTaskPayload(Protocol):
+    """Capability protocol for task payloads that expose path logits."""
+
+    path_logits: Tensor
+
+
+# =============================================================================
+class _HasSeqMazeStepOutput(Protocol):
+    """Capability protocol for ACT step outputs with seqmaze task logits."""
+
+    task: _HasSeqMazeTaskPayload
+
+
+# =============================================================================
+def _extract_seqmaze_act_logits(  # -------------------------------------------
+    step_output: _HasSeqMazeStepOutput,
+) -> Tensor:
+    """Return path logits from a seqmaze ACT-compatible step output."""
+    return step_output.task.path_logits
+
+
+# =============================================================================
+class SeqMazeHRMV1ACTTaskBinding(ACTObjectiveBinding[SeqMazeTargets]):
+    """ACT task binding for SeqMaze path prediction via the HRM v1 family.
+
+    Extracts constrained path logits from ``step_output.task.path_logits``,
+    constructs targets from canonical SeqMaze batch fields, and evaluates
+    sequence correctness after EOS canonicalization.
+    """
+
+    def __init__(  # ----------------------------------------------------------
+        self,
+        n_max: int = 32,
+    ) -> None:
+        self._eos_id = n_max
+        self._pad_id = n_max + 1
+        self._n_max = n_max
+
+    def extract_logits(  # ----------------------------------------------------
+        self,
+        executed_batch: Batch,
+        snapshot: CarrySnapshot,
+        step_output: Any,
+    ) -> Tensor:
+        """Return constrained path logits from the seqmaze task payload."""
+        _ = executed_batch, snapshot
+        return _extract_seqmaze_act_logits(
+            cast(_HasSeqMazeStepOutput, step_output)
+        )
+
+    def extract_targets(  # ---------------------------------------------------
+        self,
+        executed_batch: Batch,
+        snapshot: CarrySnapshot,
+        step_output: Any,
+    ) -> SeqMazeTargets:
+        """Return SeqMaze path supervision targets from the executed batch."""
+        _ = snapshot, step_output
+        for key in ("target_path", "path_mask", "path_length"):
+            if key not in executed_batch:
+                raise RuntimeError(
+                    f"SeqMazeHRMV1ACTTaskBinding: '{key}' missing from executed batch. "
+                    "Ensure StepRecord.executed_frame (record.batch) includes it."
+                )
+        return SeqMazeTargets(
+            path_index=executed_batch["target_path"].to(dtype=torch.int64),
+            path_mask=executed_batch["path_mask"].to(dtype=torch.bool),
+            path_length=executed_batch["path_length"].to(dtype=torch.int64),
+        )
+
+    def evaluate_sequences(  # ------------------------------------------------
+        self,
+        logits: Tensor,
+        targets: SeqMazeTargets,
+    ) -> AccuracyStats:
+        """Evaluate sequence correctness after EOS canonicalization.
+
+        Canonicalizes predictions (truncates after first EOS), then compares
+        against the canonical target under the target's path_mask.
+        """
+        pred = logits.argmax(dim=-1)  # (B, T)
+        pred = _canonicalize(pred, self._eos_id, self._pad_id)
+
+        mask = targets.path_mask  # (B, T)
+        is_correct = mask & pred.eq(targets.path_index)
+
+        return AccuracyStats(mask=mask, is_correct=is_correct)
+
+    def extract_loss_labels(  # -----------------------------------------------
+        self,
+        targets: SeqMazeTargets,
+    ) -> Tensor:
+        """Convert structured target into loss-compatible label tensor.
+
+        PAD positions (path_mask=False) are replaced with the ignore label
+        so the loss function skips them.
+        """
+        return torch.where(
+            targets.path_mask,
+            targets.path_index,
+            torch.full_like(
+                targets.path_index, SEQMAZE_IGNORE_LABEL_ID, dtype=torch.int64
+            ),
+        )
+
+
+# =============================================================================
 __all__ = [
     "MazeHardHRMV1ACTTaskBinding",
     "MazeHardHRMV2HybridTaskBinding",
+    "SeqMazeHRMV1ACTTaskBinding",
 ]

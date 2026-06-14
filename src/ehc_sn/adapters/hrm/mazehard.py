@@ -28,6 +28,7 @@ from ehc_sn.models.hrm.hrm_v2 import (
     HRMOutputV2,
     HRMStateV2,
 )
+from ehc_sn.tasks.mazehard.contracts import MazeHardTaskOutput
 from ehc_sn.tasks.mazehard.runtime import extract_maze_hard_task_input
 from ehc_sn.types import Batch
 

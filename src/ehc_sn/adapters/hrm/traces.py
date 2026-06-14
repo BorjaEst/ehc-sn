@@ -28,6 +28,12 @@ from ehc_sn.adapters.hrm._base import O_ID
 from ehc_sn.traces import TraceField, TraceValue
 from ehc_sn.types import Batch
 
+# Metadata key that lightning modules must populate in trace_meta with the
+# ground-truth overlay mask: ``(batch["labels"] == O_ID).to(torch.uint8)``.
+# Read by figure selectors via ``trace.get_meta_path("target/solution_overlay")``.
+TARGET_SOLUTION_OVERLAY_META_KEY = "target/solution_overlay"
+
+
 # =============================================================================
 # Minimal typed context for MazeHard+HRM ACT trace getters
 # =============================================================================
@@ -125,15 +131,32 @@ MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS: tuple[TraceField, ...] = (
 
 
 # =============================================================================
+# SeqMaze trace metadata builder
+# =============================================================================
+
+
+def build_seqmaze_hrm_trace_meta(batch: Batch) -> dict[str, object]:
+    """Return out-of-band trace metadata for SeqMaze HRM v1 figures.
+
+    Includes minimal task context needed to interpret predictions without
+    duplicating large model activations.
+    """
+    return {
+        "target_path": batch["target_path"],
+        "path_mask": batch["path_mask"],
+        "path_length": batch["path_length"],
+        "node_valid_mask": batch["node_mask"],
+        "node_start_flag": batch["node_start_flag"],
+        "node_goal_flag": batch["node_goal_flag"],
+    }
+
+
+# =============================================================================
 __all__ = [
     "build_mazehard_hrm_trace_meta",
+    "build_seqmaze_hrm_trace_meta",
     "MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS",
     "MAZE_HARD_HRM_ACT_TRACE_FIELDS",
     "MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY",
     "TARGET_SOLUTION_OVERLAY_META_KEY",
 ]
-
-# Metadata key that lightning modules must populate in trace_meta with the
-# ground-truth overlay mask: ``(batch["labels"] == O_ID).to(torch.uint8)``.
-# Read by figure selectors via ``trace.get_meta_path("target/solution_overlay")``.
-TARGET_SOLUTION_OVERLAY_META_KEY = "target/solution_overlay"
