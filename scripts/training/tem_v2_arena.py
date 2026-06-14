@@ -60,7 +60,7 @@ warnings.filterwarnings(
 
 
 CONFIGURATION_PATH = os.environ.get(
-    "TEM_V2_CONFIGURATION_PATH", "config/training/tem-v2-default-vram8gib.toml"
+    "TEM_V2_CONFIGURATION_PATH", "config/training/tem-v2-arena-vram8gib.toml"
 )
 
 

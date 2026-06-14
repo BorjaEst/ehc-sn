@@ -24,12 +24,12 @@ environment-variable override of the config path.
 Examples:
 
 ```bash
-export TEM_V1_CONFIGURATION_PATH=config/training/tem-v1-default-vram8gib.toml
+export TEM_V1_CONFIGURATION_PATH=config/training/tem-v1-arena-vram8gib.toml
 python scripts/training/tem_v1_baseline.py
 ```
 
 ```bash
-export HRM_V1_CONFIGURATION_PATH=config/training/hrm-v1-default-vram8gib.toml
+export HRM_V1_CONFIGURATION_PATH=config/training/hrm-v1-mazehard-vram8gib.toml
 python scripts/training/hrm_v1_baseline.py
 ```
 

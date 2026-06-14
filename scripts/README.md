@@ -40,28 +40,28 @@ python scripts/evaluation/run_eval.py \
     --output artifacts/evaluation/tem_v2/arena_n1 --device cpu \
     --trace-keys '["diagnostic/mec/location_mean","diagnostic/hpc/location_mean","diagnostic/lec/cells","diagnostic/lec/filtered","diagnostic/lec/sensory_code","world_step/observation","pred/observation_id/post","pred/observation_id/recall","pred/observation_id/path","lec/filter/alpha_sigmoid","lec/w_f_sigmoid"]'
 
-# HRM v1 MazeHard full diagnostic (4 case, with traces)
+# HRM v1 MazeHard full diagnostic (1 case, with traces)
 python scripts/evaluation/run_eval.py \
     --model-family hrm-v1 \
     --checkpoint checkpoints/hrm-v1/eval-weights-only.pt \
     --config config/evaluation/hrm-v1-mazehard.toml \
     --task mazehard \
     --provider-ref ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider \
-    --provider-settings '{"dataset_path": "data/processed/mazehard/default/v1", "split": "test", "n_cases": 4}' \
-    --regime-id mazehard_4 \
+    --provider-settings '{"dataset_path": "data/processed/mazehard/default/v1", "split": "test", "n_cases": 1}' \
+    --regime-id mazehard_n1 \
     --regime-kind diagnostic \
-    --output artifacts/evaluation/hrm_v1/mazehard_4n \
+    --output artifacts/evaluation/hrm_v1/mazehard_n1 \
     --trace-keys "pred/solution_overlay,act/halted" \
     --device cpu
 
-# HRM v2 MazeHard diagnostic (4 cases, with traces)
+# HRM v2 MazeHard diagnostic (1 cases, with traces)
 python scripts/evaluation/run_eval.py \
     --model-family hrm-v2 \
     --checkpoint checkpoints/hrm-v2/eval-weights-only.pt \
     --config config/evaluation/hrm-v2-mazehard.toml \
     --task mazehard \
     --provider-ref ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider \
-    --provider-settings '{"dataset_path": "data/processed/mazehard/default/v1", "split": "test", "n_cases": 4}' \
+    --provider-settings '{"dataset_path": "data/processed/mazehard/default/v1", "split": "test", "n_cases": 1}' \
     --regime-id mazehard_n1 \
     --regime-kind diagnostic \
     --output artifacts/evaluation/hrm_v2/mazehard_n1 \
@@ -98,7 +98,7 @@ TOML config. Calls `ehc_sn.reporting.builder.build_report_run`.
 ```bash
 # Assemble a report from existing eval artifacts
 python scripts/reporting/run_report.py \
-    --config config/reporting/tem_v1_arena_n4.toml
+    --config config/reporting/tem_v1_arena_n1.toml
 
 # Override the output directory
 python scripts/reporting/run_report.py \
@@ -107,12 +107,12 @@ python scripts/reporting/run_report.py \
 
 # Skip figure rendering (metrics only, faster)
 python scripts/reporting/run_report.py \
-    --config config/reporting/tem_v2_arena_n4.toml \
+    --config config/reporting/tem_v2_arena_n1.toml \
     --no-figures
 
 # Skip metric normalization
 python scripts/reporting/run_report.py \
-    --config config/reporting/tem_v2_arena_n4.toml \
+    --config config/reporting/tem_v2_arena_n1.toml \
     --no-metrics
 ```
 

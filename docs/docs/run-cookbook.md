@@ -43,28 +43,28 @@ Use the defaults in `config/training/` or override with your own config file.
 ### TEM v1 baseline
 
 ```bash
-export TEM_V1_CONFIGURATION_PATH=config/training/tem-v1-default-vram8gib.toml
+export TEM_V1_CONFIGURATION_PATH=config/training/tem-v1-arena-vram8gib.toml
 python scripts/training/tem_v1_baseline.py
 ```
 
 ### TEM v2 softmax
 
 ```bash
-export TEM_V2_CONFIGURATION_PATH=config/training/tem-v2-default-vram8gib.toml
+export TEM_V2_CONFIGURATION_PATH=config/training/tem-v2-arena-vram8gib.toml
 python scripts/training/tem_v2_softmax.py
 ```
 
 ### HRM v1 baseline
 
 ```bash
-export HRM_V1_CONFIGURATION_PATH=config/training/hrm-v1-default-vram8gib.toml
+export HRM_V1_CONFIGURATION_PATH=config/training/hrm-v1-mazehard-vram8gib.toml
 python scripts/training/hrm_v1_baseline.py
 ```
 
 ### HRM v2 RL-Striatum
 
 ```bash
-export HRM_V2_CONFIGURATION_PATH=config/training/hrm-v2-default-vram8gib.toml
+export HRM_V2_CONFIGURATION_PATH=config/training/hrm-v2-mazehard-vram8gib.toml
 python scripts/training/hrm_v2_rl-striatum.py
 ```
 
@@ -119,7 +119,7 @@ Example checkpoint flow:
 
 ```bash
 mkdir -p checkpoints/tem_v1
-export TEM_V1_CONFIGURATION_PATH=config/training/tem-v1-default-vram8gib.toml
+export TEM_V1_CONFIGURATION_PATH=config/training/tem-v1-arena-vram8gib.toml
 python scripts/training/tem_v1_baseline.py --checkpoint-dir checkpoints/tem_v1
 ```
 

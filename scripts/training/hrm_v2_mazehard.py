@@ -61,7 +61,7 @@ warnings.filterwarnings(
 
 
 CONFIGURATION_PATH = os.environ.get(
-    "HRM_V2_CONFIGURATION_PATH", "config/training/hrm-v2-default-vram8gib.toml"
+    "HRM_V2_CONFIGURATION_PATH", "config/training/hrm-v2-mazehard-vram8gib.toml"
 )
 
 
