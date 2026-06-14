@@ -1,0 +1,77 @@
+# =============================================================================
+# Metadata (comments only)
+# class: training
+# id: hrm-v2-seqmaze-vram8gib
+# role: SeqMaze HRM v1 training config (N_max=32, T_max=32 → S=64)
+# =============================================================================
+
+# -- Model architecture -------------------------------------------------------
+    model_config_path = "config/models/hrm-v1-base.toml"
+
+# -- Dataset & training -------------------------------------------------------
+    dataset_path      = "data/processed/seqmaze/default/v1"
+    global_batch_size = 128
+    max_steps         = 50000
+    seed              = 42
+    augment           = false  # no spatial dihedral for seqmaze
+
+# -- DataLoader settings ------------------------------------------------------
+    num_workers        = 4
+    prefetch_factor    = 2
+    pin_memory         = true
+    persistent_workers = true
+
+# -- Trainer control ----------------------------------------------------------
+    init_weights_groups = ["all"]
+    log_every_n_steps    = 10
+    enable_progress_bar  = true
+    trainer_accelerator  = "gpu"
+    trainer_strategy     = "ddp"
+    trainer_devices      = 1
+    trainer_num_nodes    = 1
+    trainer_precision    = "16-mixed"
+    limit_val_batches    = 1.0
+    val_check_interval   = 1000
+    diagnostic_level     = "standard"
+    non_finite_policy    = "raise"
+
+# -- Stabilization ------------------------------------------------------------
+    supervised_only_warmup_steps = 500
+
+# -- Adapter settings (SeqMazeAdapterSettings) --------------------------------
+[adapter]
+    n_max         = 32
+    t_max         = 32
+    k_max         = 4
+    edge_encoding = "successor_index_embedding"
+    hidden_size   = 128
+
+# -- ACT controller -----------------------------------------------------------
+[controller]
+    max_halt_steps     = 16
+    exploration_prob   = 0.1
+
+# -- Objective, optimizer, scheduler ------------------------------------------
+[objective]
+    token_loss       = "stablemax_cross_entropy"
+    use_token_weights = false
+
+[optimizer]
+    lr           = 1e-4
+    weight_decay = 0.1
+    betas        = [0.9, 0.95]
+
+[scheduler]
+    warmup_steps = 2000
+    min_ratio    = 1.00
+
+[runtime.validation]
+    max_rollout_steps = 16
+
+# -- Checkpointing ------------------------------------------------------------
+[checkpoint]
+    dirpath       = "checkpoints/hrm-v1-seqmaze"
+    monitor       = "val/seqmaze/sequence_exact"
+    mode          = "max"
+    save_last     = true
+    save_top_k    = 3
