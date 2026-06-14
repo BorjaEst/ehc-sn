@@ -162,7 +162,7 @@ class QValueEstimator(nn.Module):
         """
         features = self._pool(z_H, z_L)
         x = self.trunk(features.to(torch.float32))
-        return self.head(x)
+        return self.head(x).to(torch.float32)
 
 
 # =============================================================================
