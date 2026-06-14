@@ -104,6 +104,17 @@ class ACTObjectiveBinding[TargetsT](Protocol):
     ) -> AccuracyStats:
         """Return sequence-level accuracy statistics for one executed step."""
 
+    def extract_loss_labels(  # -----------------------------------------------
+        self,
+        targets: TargetsT,
+    ) -> Tensor:
+        """Return a label tensor suitable for the token-level loss function.
+
+        Non-supervised positions must be replaced with an ignore index
+        (typically ``IGNORE_LABEL_ID = -100``) recognized by the loss function's
+        ``ignore_index`` parameter.
+        """
+
 
 # =============================================================================
 class _TokenWeightBinding(Protocol):
@@ -280,7 +291,7 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
                     "ACTObjective: use_token_weights=True but the task binding "
                     "does not implement build_token_weights."
                 )
-            labels = self._require_labels(targets)
+            labels = self._task_binding.extract_loss_labels(targets)
             token_weight_binding = cast(_TokenWeightBinding, self._task_binding)
             token_weights = token_weight_binding.build_token_weights(labels)
 
@@ -304,7 +315,7 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
         """Score per-example ACT loss terms for one executed step."""
         outputs = context.outputs
         logits_q_done = outputs.q_logits[..., outputs.done_action]
-        labels = self._require_labels(context.targets)
+        labels = self._task_binding.extract_loss_labels(context.targets)
 
         return ACTTerms(
             # Compute the token loss per sequence
@@ -379,22 +390,6 @@ class ACTObjective(BaseObjective[ACTObjectiveConfig]):
             input=scores.continue_logit,
             target=continue_target,
             reduction="none",
-        )
-
-    def _require_labels(self, targets: Any) -> Tensor:
-        """Return raw label tensors from task-owned targets."""
-        if isinstance(targets, Tensor):
-            return targets
-        if isinstance(targets, dict) and "labels" in targets:
-            labels = targets["labels"]
-            if isinstance(labels, Tensor):
-                return labels
-        labels = getattr(targets, "labels", None)
-        if isinstance(labels, Tensor):
-            return labels
-        raise TypeError(
-            "ACTObjective expected token labels as a Tensor or as a 'labels' "
-            "field on the task targets."
         )
 
     def compute_losses(  # ----------------------------------------------------
