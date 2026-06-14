@@ -38,7 +38,7 @@
 # -- Stabilization ------------------------------------------------------------
     supervised_only_warmup_steps = 500
 
-# -- Adapter settings (SeqMazeAdapterSettings) --------------------------------
+# -- Adapter settings ---------------------------------------------------------
 [adapter]
     n_max         = 32
     t_max         = 32
@@ -68,10 +68,38 @@
 [runtime.validation]
     max_rollout_steps = 16
 
-# -- Checkpointing ------------------------------------------------------------
+# -- Logs and checkpoints -----------------------------------------------------
+[logger]
+    save_dir  = "logs"
+    name      = "hrm-v1-seqmaze"
+    log_graph = false
+    prefix    = ""
+
+[lr_monitor]
+    logging_interval = "step"
+    log_weight_decay = false
+    log_momentum = false
+
 [checkpoint]
-    dirpath       = "checkpoints/hrm-v1-seqmaze"
-    monitor       = "val/seqmaze/sequence_exact"
-    mode          = "max"
-    save_last     = true
-    save_top_k    = 3
+    dirpath                 = "checkpoints/hrm-v1"
+    filename                = "seqmaze-{step:08d}"
+    save_top_k              = -1
+    every_n_train_steps     = 1000
+    save_last               = true
+    save_on_exception       = true
+    save_weights_only       = false
+
+# -- Standalone scheduled figure generation -----------------------------------
+[figures]
+    enabled    = false
+    context    = "validation"
+    every_n_steps  = 5000
+    figures    = ["halting_timeline", "q_value_evolution"]
+    max_cases  = 2
+    save_pdf   = true
+    save_png   = false
+    png_dpi    = 160
+    max_items  = 4
+    max_cells  = 16
+    max_retained_files = 200
+    failure_policy = "warn"

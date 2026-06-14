@@ -20,7 +20,6 @@ from torch.optim import Optimizer
 from torchmetrics import MetricCollection
 
 from ehc_sn import utils
-from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.controllers.deliberation.actor_critic import (
     DeliberationACControllerConfig,
 )
@@ -41,8 +40,6 @@ from ehc_sn.metrics.step_metrics import StepMetrics
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig
 from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
 from ehc_sn.rollouts.sources import DemandDrivenReplaySource, _move_batch_to
-from ehc_sn.tasks.mazehard.reward import MazeHardRewardConfig
-from ehc_sn.tasks.mazehard.runtime import MazeHardRuntimeConfig
 from ehc_sn.traces import build_trace_spec
 from ehc_sn.training.distributed import normalize_loss_for_backward
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
@@ -90,18 +87,19 @@ class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
     """Concrete component configs for an actor-critic experiment.
 
     Validated and populated by the experiment builder, consumed by
-    the regime module.  Fields carry concrete Pydantic types.
+    the regime module.  Fields hold opaque validated configs whose
+    concrete Pydantic types are determined by the experiment builder.
     """
 
-    adapter: MazeHardHRMAdapterSettings = Field(
+    adapter: BaseModel = Field(
         ...,
-        description="Adapter settings for the MazeHard ↔ HRM bridge.",
+        description="Adapter settings (task-specific, validated by experiment builder).",
     )
-    runtime: MazeHardRuntimeConfig = Field(
+    runtime: BaseModel = Field(
         ...,
         description="Runtime config for the task environment (action semantics, step budget).",
     )
-    reward: MazeHardRewardConfig = Field(
+    reward: BaseModel = Field(
         ...,
         description="Reward configuration for stop-time projection.",
     )

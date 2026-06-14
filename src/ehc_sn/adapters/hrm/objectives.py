@@ -304,8 +304,77 @@ class SeqMazeHRMV1ACTTaskBinding(ACTObjectiveBinding[SeqMazeTargets]):
 
 
 # =============================================================================
+class _HasSeqMazePathLogits(Protocol):
+    """Capability protocol for task payloads that expose path logits."""
+
+    path_logits: Tensor
+
+
+# =============================================================================
+class SeqMazeHRMV2HybridTaskBinding:
+    """SeqMaze-specific extraction for the hybrid RL value-control batch path.
+
+    Implements :class:`~ehc_sn.objectives.hybrid_rl.HybridValueObjectiveBinding`
+    for the HRM v2 + SeqMaze pairing.  Extracts path logits from the
+    task output on the interaction record and supervision labels from the
+    observation dict used for the decision.
+
+    Injected into :class:`~ehc_sn.training.actor_critic.TD0ActorCriticBatchBuilder`
+    and :class:`~ehc_sn.training.actor_critic.ZeroBootstrapActorCriticValidationScorer`
+    at wiring time in the Lightning module.
+    """
+
+    def __init__(self, n_max: int = 32) -> None:
+        self._n_max = n_max
+        self._pad_id = n_max + 1
+
+    def extract_task_logits(
+        self,
+        record: ValueControlInteractionRecord,
+    ) -> Tensor:
+        """Return path-prediction logits from ``record.task_output.path_logits``."""
+        task_output = record.task_output
+        if task_output is None:
+            raise RuntimeError(
+                "SeqMazeHRMV2HybridTaskBinding: task_output is None. "
+                "The controller must attach a task payload with path_logits."
+            )
+        if not hasattr(task_output, "path_logits"):
+            raise RuntimeError(
+                f"SeqMazeHRMV2HybridTaskBinding: task_output has no path_logits. "
+                f"Got {type(task_output).__name__}."
+            )
+        return cast(_HasSeqMazePathLogits, task_output).path_logits
+
+    def extract_labels(
+        self,
+        record: ValueControlInteractionRecord,
+    ) -> Tensor:
+        """Return supervision labels from ``record.observation_used_for_decision``.
+
+        Converts PAD positions (N_max+1) to ``SEQMAZE_IGNORE_LABEL_ID`` so
+        the cross-entropy loss skips them.
+        """
+        obs = record.observation_used_for_decision
+        if "target_path" not in obs:
+            raise RuntimeError(
+                "SeqMazeHRMV2HybridTaskBinding: 'target_path' missing from "
+                "observation_used_for_decision."
+            )
+        labels = obs["target_path"].to(dtype=torch.int64)
+        # Replace PAD (n_max+1) with ignore label
+        labels = torch.where(
+            labels == self._pad_id,
+            torch.full_like(labels, SEQMAZE_IGNORE_LABEL_ID),
+            labels,
+        )
+        return labels
+
+
+# =============================================================================
 __all__ = [
     "MazeHardHRMV1ACTTaskBinding",
     "MazeHardHRMV2HybridTaskBinding",
     "SeqMazeHRMV1ACTTaskBinding",
+    "SeqMazeHRMV2HybridTaskBinding",
 ]

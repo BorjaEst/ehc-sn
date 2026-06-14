@@ -30,7 +30,7 @@
     trainer_devices      = 1
     trainer_num_nodes    = 1
     trainer_precision    = "16-mixed"
-    limit_val_batches    = 1.0  # float: fraction of validation set (1.0 = 100%)
+    limit_val_batches    = 1.0
     val_check_interval   = 1000
     supervised_only_warmup_steps = 5000
     diagnostic_level     = "standard"
@@ -54,16 +54,16 @@
 
 # -- Reward config ------------------------------------------------------------
 [reward]
-    success_reward = 1.0
-    continue_cost = -0.01
+    success_reward         = 1.0
+    continue_cost          = -0.01
     incorrect_halt_penalty = -1.0
-    truncation_penalty = -1.0
+    truncation_penalty     = -1.0
 
 # -- Objective, optimizer, scheduler ------------------------------------------
 [objective]
-    token_loss  = "stablemax_cross_entropy"
+    token_loss    = "stablemax_cross_entropy"
     c_state_value = 0.5
-    c_q_value = 0.5
+    c_q_value     = 0.5
 
 [optimizer_supervised]
     lr           = 1e-4
@@ -87,7 +87,7 @@
 # -- Logs and checkpoints -----------------------------------------------------
 [logger]
     save_dir  = "logs"
-    name      = "hrm-v2"
+    name      = "hrm-v2-mazehard"
     log_graph = false
     prefix    = ""
 
@@ -98,7 +98,7 @@
 
 [checkpoint]
     dirpath                 = "checkpoints/hrm-v2"
-    filename                = "hrm-v2-{step:08d}"
+    filename                = "mazehard-{step:08d}"
     save_top_k              = -1
     every_n_train_steps     = 1000
     save_last               = true
@@ -110,7 +110,7 @@
     enabled    = false
     context    = "validation"
     every_n_steps  = 5000
-    figures    = ["halting_timeline", "q_value_evolution", "halt_logit_evolution"]
+    figures    = ["halting_timeline", "q_value_evolution"]
     max_cases  = 2
     save_pdf   = true
     save_png   = false

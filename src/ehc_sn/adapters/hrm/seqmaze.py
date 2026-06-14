@@ -285,19 +285,48 @@ class SeqMazeProbeHRMV2BridgeAdapter(nn.Module):
 # =============================================================================
 @dataclass(frozen=True)
 class SeqMazeBridgeOutput:
-    """V1 path-prediction bridge output bundle."""
+    """V1 path-prediction bridge output bundle (no policy/critic)."""
 
     task: SeqMazeTaskOutput
 
 
 # =============================================================================
+@dataclass(frozen=True)
+class SeqMazeHRMV2PolicyOutput:
+    """Value-control readouts for the halt/continue policy."""
+
+    q_values: Tensor  # (B, A) Q-values over halt/continue actions
+    valid_action_mask: Tensor | None = None
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class SeqMazeHRMV2CriticOutput:
+    """Critic readouts for the state-value estimate."""
+
+    state_value: Tensor  # (B, 1) STR state-value
+
+
+# =============================================================================
+@dataclass(frozen=True)
+class SeqMazeHRMV2BridgeOutput:
+    """Controller-consumable SeqMaze HRM v2 bridge output bundle."""
+
+    task: SeqMazeTaskOutput
+    policy: SeqMazeHRMV2PolicyOutput
+    critic: SeqMazeHRMV2CriticOutput
+
+
+# =============================================================================
 class SeqMazeHRMV2BridgeAdapter(nn.Module):
-    """SeqMaze v1 path-prediction bridge over HRM v2.
+    """SeqMaze v2 path-prediction bridge over HRM v2 (actor-critic).
 
     Wraps HRModelV2, encodes graph nodes + path queries into schema tokens,
-    runs HRM deliberation, and decodes path-region slots into path logits.
+    runs HRM deliberation, decodes path-region slots into path logits, and
+    exposes policy/critic readouts for RL halt/continue control.
 
     Validates at construction that:
+
         n_max + t_max == model.config.num_schema_slots
     """
 
@@ -316,7 +345,7 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
             raise ValueError(
                 f"Model seq_length ({model.config.num_schema_slots}) must equal "
                 f"n_max + t_max ({self._config.n_max} + {self._config.t_max}"
-                f" = {expected_slots}) for v1 path-prediction mode."
+                f" = {expected_slots}) for v2 path-prediction mode."
             )
 
         self._encoder = SeqMazeEncoder(self._config)
@@ -338,6 +367,13 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
     def init_state(self, batch_size: int) -> HRMStateV2:
         return self.model.init_state(batch_size)
 
+    def reset_state(
+        self,
+        reset_flag: Tensor,
+        state: HRMStateV2,
+    ) -> HRMStateV2:
+        return self.model.reset_state(reset_flag, state)
+
     def prepare_inputs(self, batch: Batch) -> HRMInputV2:
         """Extract task input from batch and encode into schema tokens."""
         task_input = extract_seqmaze_task_input(batch)
@@ -352,23 +388,25 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
         )
         return HRMInputV2(schema_tokens=schema_tokens)
 
-    def postprocess(self, outputs: HRMOutputV2) -> SeqMazeBridgeOutput:
-        """Decode path-region schema slots into path logits."""
+    def postprocess(self, outputs: HRMOutputV2) -> SeqMazeHRMV2BridgeOutput:
+        """Decode path-region slots into path logits and expose policy/critic."""
         path_logits = self._decoder(
             outputs.schema_slots,
             n_max=self._config.n_max,
             t_max=self._config.t_max,
         )
-        return SeqMazeBridgeOutput(
+        return SeqMazeHRMV2BridgeOutput(
             task=SeqMazeTaskOutput(path_logits=path_logits),
+            policy=SeqMazeHRMV2PolicyOutput(q_values=outputs.q_values),
+            critic=SeqMazeHRMV2CriticOutput(state_value=outputs.state_value),
         )
 
     def forward(
         self,
         batch: Batch,
         state: HRMStateV2 | None = None,
-    ) -> tuple[SeqMazeBridgeOutput, HRMStateV2]:
-        """Run a forward pass on one batch of v1 path-prediction samples."""
+    ) -> tuple[SeqMazeHRMV2BridgeOutput, HRMStateV2]:
+        """Run a forward pass on one batch of v2 path-prediction samples."""
         inputs = self.prepare_inputs(batch)
         outputs, next_state = self.model(inputs, state=state)
         bridge_out = self.postprocess(outputs)
@@ -384,4 +422,7 @@ __all__ = [
     "SeqMazeHRMV1BridgeAdapter",
     "SeqMazeProbeHRMV2BridgeAdapter",
     "SeqMazeHRMV2BridgeAdapter",
+    "SeqMazeHRMV2PolicyOutput",
+    "SeqMazeHRMV2CriticOutput",
+    "SeqMazeHRMV2BridgeOutput",
 ]

@@ -104,7 +104,7 @@
 # -- Figures & diagnostics ----------------------------------------------------
 [logger]
     save_dir  = "logs"
-    name      = "tem-v2"
+    name      = "tem-v2-arena"
     log_graph = false
     prefix    = ""
 
@@ -115,7 +115,7 @@
 
 [checkpoint]
     dirpath                 = "checkpoints/tem-v2"
-    filename                = "tem-v2-{step:08d}"
+    filename                = "arena-{step:08d}"
     save_top_k              = -1
     every_n_train_steps     = 1000
     save_last               = true

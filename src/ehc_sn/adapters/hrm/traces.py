@@ -152,11 +152,41 @@ def build_seqmaze_hrm_trace_meta(batch: Batch) -> dict[str, object]:
 
 
 # =============================================================================
+# SeqMaze HRM v2 actor-critic trace fields
+# =============================================================================
+
+SEQMAZE_HRM_ACTOR_CRITIC_TRACE_FIELDS: tuple[str, ...] = (
+    "reward",
+    "state_value",
+    "q_values",
+    "sampled_action",
+    "terminated",
+    "truncated",
+)
+
+
+def build_seqmaze_hrm_actor_critic_trace_meta(
+    batch: Batch,
+) -> dict[str, object]:
+    """Return out-of-band trace metadata for SeqMaze HRM v2 actor-critic figures."""
+    return {
+        "n_nodes": int(batch["node_mask"].sum()),
+        "target_path_len": (
+            int(batch["path_length"].max().item())
+            if "path_length" in batch
+            else 0
+        ),
+    }
+
+
+# =============================================================================
 __all__ = [
     "build_mazehard_hrm_trace_meta",
     "build_seqmaze_hrm_trace_meta",
+    "build_seqmaze_hrm_actor_critic_trace_meta",
     "MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS",
     "MAZE_HARD_HRM_ACT_TRACE_FIELDS",
     "MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY",
+    "SEQMAZE_HRM_ACTOR_CRITIC_TRACE_FIELDS",
     "TARGET_SOLUTION_OVERLAY_META_KEY",
 ]

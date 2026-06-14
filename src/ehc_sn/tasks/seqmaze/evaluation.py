@@ -362,6 +362,123 @@ class SeqMazeScoreReport:
 
 
 # =============================================================================
+@dataclass(frozen=True)
+class SeqMazeStepScore:
+    """Per-step answer quality for one deliberation step.
+
+    At every control step the model exposes a complete parallel path
+    prediction.  This score captures the quality of that prediction so
+    the reward projector can translate it into a scalar RL signal.
+
+    All fields are per-sample tensors of shape ``(B,)``.
+
+    Attributes:
+        path_exact: (B,) bool — canonicalized prediction matches target exactly.
+        goal_reached: (B,) bool — goal token appears before first EOS.
+        all_transitions_valid: (B,) bool — every adjacent candidate-token pair
+            before first EOS is a valid graph edge.
+        eos_present: (B,) bool — at least one EOS token appears.
+        correct_tokens: (B,) int64 — number of correctly predicted supervised
+            positions (including EOS).
+        total_tokens: (B,) int64 — number of supervised positions in the target.
+    """
+
+    path_exact: Tensor
+    goal_reached: Tensor
+    all_transitions_valid: Tensor
+    eos_present: Tensor
+    correct_tokens: Tensor
+    total_tokens: Tensor
+
+
+# =============================================================================
+def build_seqmaze_step_score(
+    task_output: SeqMazeTaskOutput,
+    targets: SeqMazeTargets,
+    successor_indices: Tensor,  # (B, N, K)
+    successor_mask: Tensor,  # (B, N, K)
+    goal_candidate_index: Tensor,  # (B, N)
+    *,
+    eos_id: int,
+    pad_id: int,
+    n_max: int,
+) -> SeqMazeStepScore:
+    """Compute per-step answer quality from the current path prediction.
+
+    Uses the same canonical decoding and graph-validation primitives as
+    offline evaluation.  No second interpretation of correctness.
+
+    Args:
+        task_output: Current path-prediction output from the adapter.
+        targets: Path supervision targets for the batch.
+        successor_indices: (B, N, K) successor candidate indices.
+        successor_mask: (B, N, K) valid successor slots.
+        goal_candidate_index: (B, N) one-hot or index of the goal token.
+        eos_id: EOS token id (= N_max).
+        pad_id: PAD token id (= N_max + 1).
+        n_max: Maximum candidate nodes.
+
+    Returns:
+        SeqMazeStepScore with per-sample fields of shape (B,).
+    """
+    logits = task_output.path_logits  # (B, T, V)
+    pred = logits.argmax(dim=-1)  # (B, T)
+    canonical_pred = _canonicalize(pred, eos_id, pad_id)
+    canonical_target = _canonicalize(targets.path_index, eos_id, pad_id)
+    B, T = canonical_pred.shape
+    device = canonical_pred.device
+
+    # path_exact
+    path_exact = (canonical_pred == canonical_target).all(dim=-1)  # (B,)
+
+    # correct_tokens and total_tokens
+    correct = (canonical_pred == canonical_target) & targets.path_mask
+    correct_tokens = correct.sum(dim=-1)  # (B,)
+    total_tokens = targets.path_mask.sum(dim=-1)  # (B,)
+
+    # eos_present
+    pred_eos_pos = _extract_eos_position(canonical_pred, eos_id)
+    eos_present = pred_eos_pos < T  # (B,)
+
+    # goal_reached
+    goal_idx = (
+        goal_candidate_index.argmax(dim=-1)
+        if goal_candidate_index.ndim == 2
+        else goal_candidate_index
+    )
+    goal_reached = torch.zeros(B, dtype=torch.bool, device=device)
+    for b in range(B):
+        t_len = int(pred_eos_pos[b].item())
+        prefix = canonical_pred[b, :t_len]
+        goal_reached[b] = (prefix == goal_idx[b]).any()
+
+    # all_transitions_valid
+    adj = _build_adjacency(successor_indices, successor_mask, n_max)
+    all_transitions_valid = torch.ones(B, dtype=torch.bool, device=device)
+    for b in range(B):
+        t_len = int(pred_eos_pos[b].item())
+        prefix = canonical_pred[b, :t_len]
+        is_candidate = prefix < n_max
+        cand_tokens = prefix[is_candidate]
+        if cand_tokens.shape[0] >= 2:
+            for t_idx in range(cand_tokens.shape[0] - 1):
+                src = int(cand_tokens[t_idx].item())
+                dst = int(cand_tokens[t_idx + 1].item())
+                if not (src < n_max and dst < n_max and adj[b, src, dst]):
+                    all_transitions_valid[b] = False
+                    break
+
+    return SeqMazeStepScore(
+        path_exact=path_exact,
+        goal_reached=goal_reached,
+        all_transitions_valid=all_transitions_valid,
+        eos_present=eos_present,
+        correct_tokens=correct_tokens,
+        total_tokens=total_tokens,
+    )
+
+
+# =============================================================================
 def _canonicalize(
     pred: Tensor,  # (B, T) int64 — argmax path token indices
     eos_id: int,
@@ -582,4 +699,6 @@ __all__ = [
     "compute_seqmaze_score_report",
     "SEQMAZE_V1_METRIC_SPECS",
     "SEQMAZE_V1_SCORING_SPEC",
+    "SeqMazeStepScore",
+    "build_seqmaze_step_score",
 ]

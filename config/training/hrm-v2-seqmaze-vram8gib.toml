@@ -1,19 +1,19 @@
 # =============================================================================
 # Metadata (comments only)
 # class: training
-# id: hrm-v1-mazehard-vram8gib
-# role: entrypoint default training config for HRM v1
+# id: hrm-v2-seqmaze-vram8gib
+# role: entrypoint default training config for HRM v2 deliberation
 # =============================================================================
 
 # -- Model architecture -------------------------------------------------------
-    model_config_path = "config/models/hrm-v1-base.toml"
+    model_config_path = "config/models/hrm-v2-base.toml"
 
 # -- Dataset & training -------------------------------------------------------
-    dataset_path      = "data/processed/mazehard/default/v1"
-    global_batch_size = 100
+    dataset_path      = "data/processed/seqmaze/default/v1"
+    global_batch_size = 25
     max_steps         = 50000
     seed              = 42
-    augment           = true
+    augment           = false  # no spatial augmentation for seqmaze
 
 # -- DataLoader settings ------------------------------------------------------
     num_workers        = 4
@@ -30,39 +30,60 @@
     trainer_devices      = 1
     trainer_num_nodes    = 1
     trainer_precision    = "16-mixed"
-    limit_val_batches    = 1.0  # float: fraction of validation set (1.0 = 100%)
+    limit_val_batches    = 1.0
     val_check_interval   = 1000
+    supervised_only_warmup_steps = 5000
     diagnostic_level     = "standard"
     non_finite_policy    = "raise"
 
 # Optional model-only init hydration (mutually exclusive with full resume)
-    # init_weights_from = "checkpoints/hrm-v1/last.ckpt"
-
-# -- Stabilization ------------------------------------------------------------
-    supervised_only_warmup_steps = 500
+    # init_weights_from = "checkpoints/hrm-v2/last.ckpt"
 
 # -- Adapter settings ---------------------------------------------------------
 [adapter]
-    encoder_kind = "rope"  # "learned" or "rope"
-    vocab_size = 6  # 5 canonical SEM IDs + O_ID (solution-path token)
+    n_max         = 32
+    t_max         = 32
+    k_max         = 4
+    edge_encoding = "successor_index_embedding"
+    hidden_size   = 128
 
-# -- ACT controller -----------------------------------------------------------
+# -- Deliberation AC controller -----------------------------------------------
 [controller]
-    max_halt_steps = 16
-    exploration_prob = 0.1
 
-# -- Objective, optimizer, scheduler (defaults are fine; override here if needed) ---
+# -- Deliberation capability config -------------------------------------------
+[deliberation]
+    halt_action      = 0
+    episode_horizon  = 16
+
+# -- Reward config ------------------------------------------------------------
+[reward]
+    success_reward         = 1.0
+    continue_cost          = -0.01
+    incorrect_halt_penalty = -1.0
+    truncation_penalty     = -1.0
+
+# -- Objective, optimizer, scheduler ------------------------------------------
 [objective]
-    token_loss = "stablemax_cross_entropy"
+    token_loss      = "stablemax_cross_entropy"
+    gamma           = 0.99
+    c_state_value   = 0.5
+    c_q_value       = 0.5
 
-[optimizer]
+[optimizer_supervised]
     lr           = 1e-4
-    weight_decay = 0.1
-    betas        = [0.9, 0.95]
+    weight_decay = 1e-2
+
+[optimizer_rl]
+    lr           = 1e-4
+    weight_decay = 0.0
+
+[optimizer_qv]
+    lr           = 1e-4
+    weight_decay = 0.0
 
 [scheduler]
-    warmup_steps = 2000
-    min_ratio    = 1.00
+    warmup_steps = 1000
+    min_ratio    = 0.01
 
 [runtime.validation]
     max_rollout_steps = 16
@@ -70,18 +91,18 @@
 # -- Logs and checkpoints -----------------------------------------------------
 [logger]
     save_dir  = "logs"
-    name      = "hrm-v1-mazehard"
+    name      = "hrm-v2-seqmaze"
     log_graph = false
     prefix    = ""
 
 [lr_monitor]
     logging_interval = "step"
     log_weight_decay = false
-    log_momentum = false
+    log_momentum     = false
 
 [checkpoint]
-    dirpath                 = "checkpoints/hrm-v1"
-    filename                = "mazehard-{step:08d}"
+    dirpath                 = "checkpoints/hrm-v2"
+    filename                = "seqmaze-{step:08d}"
     save_top_k              = -1
     every_n_train_steps     = 1000
     save_last               = true

@@ -10,6 +10,7 @@ from .objectives import (
     MazeHardHRMV1ACTTaskBinding,
     MazeHardHRMV2HybridTaskBinding,
     SeqMazeHRMV1ACTTaskBinding,
+    SeqMazeHRMV2HybridTaskBinding,
 )
 from .seqmaze import (
     SeqMazeBridgeOutput,
@@ -17,6 +18,9 @@ from .seqmaze import (
     SeqMazeHRMV1BridgeOutput,
     SeqMazeHRMV1ControlOutput,
     SeqMazeHRMV2BridgeAdapter,
+    SeqMazeHRMV2BridgeOutput,
+    SeqMazeHRMV2CriticOutput,
+    SeqMazeHRMV2PolicyOutput,
     SeqMazeProbeHRMV2BridgeAdapter,
     SeqMazeProbeOutput,
 )
@@ -24,7 +28,9 @@ from .traces import (
     MAZE_HARD_HRM_ACT_TRACE_FIELDS,
     MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
     MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY,
+    SEQMAZE_HRM_ACTOR_CRITIC_TRACE_FIELDS,
     build_mazehard_hrm_trace_meta,
+    build_seqmaze_hrm_actor_critic_trace_meta,
     build_seqmaze_hrm_trace_meta,
 )
 
@@ -37,7 +43,9 @@ __all__ = [
     "MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS",
     "MAZE_HARD_HRM_ACT_TRACE_FIELDS",
     "MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY",
+    "SEQMAZE_HRM_ACTOR_CRITIC_TRACE_FIELDS",
     "build_mazehard_hrm_trace_meta",
+    "build_seqmaze_hrm_actor_critic_trace_meta",
     "build_seqmaze_hrm_trace_meta",
     "SeqMazeAdapterSettings",
     "SeqMazeBridgeOutput",
@@ -46,6 +54,10 @@ __all__ = [
     "SeqMazeHRMV1BridgeOutput",
     "SeqMazeHRMV1ControlOutput",
     "SeqMazeHRMV2BridgeAdapter",
+    "SeqMazeHRMV2BridgeOutput",
+    "SeqMazeHRMV2CriticOutput",
+    "SeqMazeHRMV2HybridTaskBinding",
+    "SeqMazeHRMV2PolicyOutput",
     "SeqMazeProbeAdapterSettings",
     "SeqMazeProbeHRMV2BridgeAdapter",
     "SeqMazeProbeOutput",
