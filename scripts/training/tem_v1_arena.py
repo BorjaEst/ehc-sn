@@ -47,11 +47,6 @@ from ehc_sn.training.tem import (
 )
 
 # Suppress Lightning's manual-optimization checkpoint warning.
-# This architecture deliberately uses post-optimization checkpoints:
-#   model, optimizer, scheduler, episode_source cursor → all at completed step N.
-#   Resume continues from step N+1 without duplicated updates.
-#   Pre-step weight cloning would create model/optimizer inconsistency
-#   and double per-step memory.  See design doc: checkpoint-contract.md.
 warnings.filterwarnings(
     "ignore",
     message=".*ModelCheckpoint with manual optimization.*pre-optimization.*",
@@ -93,62 +88,67 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     # Names and tracking
     project_name: Optional[str] = Field(
         default=None,
-        description=(
-            "Project name. If not set, it defaults to the capitalized name of the dataset "
-            "(e.g. `MATH` -> `Math ACT-torch`)."
-        ),
+        description="Project name. If not set, it defaults to the capitalized "
+        "name of the dataset (e.g. `MATH` -> `Math ACT-torch`).",
     )
     run_name: Optional[str] = Field(
         default=None,
-        description=(
-            "Run name. If not set, it defaults to `<arch_name> <random_slug>` "
-            "(e.g. `TemV1 2x128 4L 16H 0.1D ACT-torch cool-slug`)."
-        ),
+        description="Run name. If not set, it defaults to `<arch_name> <random_slug>` "
+        "(e.g. `TemV1 2x128 4L 16H 0.1D ACT-torch cool-slug`).",
     )
 
     # -------------------------------------------------------------------------
     # Model architecture and data
     model_config_path: Path = Field(
         ...,
-        description="Path to the model configuration TOML file that specifies the TEM v1 architecture.",
+        description="Path to the model configuration TOML file that specifies "
+        "the TEM v1 architecture.",
     )
     adapter: ArenaTEMAdapterSettings = Field(
         ...,
-        description="Settings for the arena bridge adapter that binds TEM v1 to task inputs/outputs.",
+        description="Settings for the arena bridge adapter that binds TEM v1 "
+        "to task inputs/outputs.",
     )
     controller: ReplayTrajectoryControllerConfig = Field(
         ...,
-        description="Replay trajectory controller configuration (window_size for fixed-window TBPTT).",
+        description="Replay trajectory controller configuration (window_size "
+        "for fixed-window TBPTT).",
     )
     objective: TEMObjectiveConfig = Field(
         ...,
-        description="TEM objective configuration (observation, latent, regularization).",
+        description="TEM objective configuration (observation, latent, "
+        "regularization).",
     )
 
     # -------------------------------------------------------------------------
     # Optimizers & scheduling
     optimizer: AdamConfig = Field(
         default_factory=AdamConfig,
-        description="Adam optimizer settings (learning_rate, betas, eps, weight_decay).",
+        description="Adam optimizer settings (learning_rate, betas, eps, "
+        "weight_decay).",
     )
     scheduler: SchedulerConfig = Field(
         default_factory=SchedulerConfig,
-        description="Learning rate scheduler settings (scheduler_type, warmup_steps, total_steps).",
+        description="Learning rate scheduler settings (scheduler_type, "
+        "warmup_steps, total_steps).",
     )
     runtime: RuntimeConfig = Field(
         default_factory=RuntimeConfig,
-        description="TEM runtime dynamics schedule settings applied inside the training loop.",
+        description="TEM runtime dynamics schedule settings applied inside "
+        "the training loop.",
     )
 
     # -------------------------------------------------------------------------
     # Data settings (flat fields composed into DatamoduleConfig)
     dataset_path: Path = Field(
         ...,
-        description="Path to the processed dataset directory (contains index.jsonl + NPZ files).",
+        description="Path to the processed dataset directory (contains "
+        "index.jsonl + NPZ files).",
     )
     seed: int = Field(
         42,
-        description="RNG seed for training-split dihedral augmentation and reproducibility.",
+        description="RNG seed for training-split dihedral augmentation and "
+        "reproducibility.",
     )
     augment: bool = Field(
         True,
@@ -156,10 +156,8 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     global_batch_size: int = Field(
         ...,
-        description=(
-            "Global batch size across all devices. "
-            "The per-device batch size is computed as `global_batch_size // world_size`."
-        ),
+        description="Global batch size across all devices. The per-device "
+        "batch size is computed as `global_batch_size // world_size`.",
     )
     num_workers: int = Field(
         4,
@@ -202,18 +200,14 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(
         default="standard",
-        description=(
-            "Instrumentation tier. 'minimal': only training metrics. "
-            "'standard': training metrics + model health diagnostics. "
-            "'research': all available diagnostic signals."
-        ),
+        description="Instrumentation tier. 'minimal': only training metrics. "
+        "'standard': training metrics + model health diagnostics. "
+        "'research': all available diagnostic signals.",
     )
     non_finite_policy: Literal["drop", "raise"] = Field(
         default="drop",
-        description=(
-            "Policy for NaN/Inf scalar diagnostic values. Set to 'raise' "
-            "to fail fast instead of silently dropping NaN values."
-        ),
+        description="Policy for NaN/Inf scalar diagnostic values. Set to "
+        "'raise' to fail fast instead of silently dropping NaN values.",
     )
 
     # -------------------------------------------------------------------------
@@ -240,15 +234,18 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     # Distributed training settings (explicitly passed to Lightning Trainer)
     trainer_accelerator: Literal["auto", "gpu", "cpu"] = Field(
         default="gpu",
-        description="Trainer accelerator setting. Use 'gpu' for HAICORE multi-GPU runs.",
+        description="Trainer accelerator setting. Use 'gpu' for HAICORE "
+        "multi-GPU runs.",
     )
     trainer_strategy: Literal["auto", "ddp"] = Field(
         default="ddp",
-        description="Trainer strategy setting. Use 'ddp' for SLURM multi-GPU runs.",
+        description="Trainer strategy setting. Use 'ddp' for SLURM "
+        "multi-GPU runs.",
     )
     trainer_devices: int = Field(
         default=1,
-        description="Number of devices per node for the Trainer (per process when using SLURM tasks).",
+        description="Number of devices per node for the Trainer (per process "
+        "when using SLURM tasks).",
     )
     trainer_num_nodes: int = Field(
         default=1,
@@ -256,25 +253,27 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     trainer_precision: str = Field(
         default="16-mixed",
-        description=(
-            "Lightning Trainer precision. '32-true' = full fp32 (paper-parity default). "
-            "Use 'bf16-mixed' for throughput on Ampere+."
-        ),
+        description="Lightning Trainer precision. '32-true' = full fp32 "
+        "(paper-parity default). Use 'bf16-mixed' for throughput on Ampere+.",
     )
 
     # -------------------------------------------------------------------------
     # Checkpointing and evaluation settings (passed as kwargs to Trainer and Checkpoint callback)
     resume_from_checkpoint: Optional[str] = Field(
         default=None,
-        description="Optional checkpoint path to resume full trainer state via Trainer.fit(ckpt_path=...).",
+        description="Optional checkpoint path to resume full trainer state via "
+        "Trainer.fit(ckpt_path=...).",
     )
     init_weights_from: Optional[str] = Field(
         default=None,
-        description="Optional checkpoint path for model-weight initialization only. Distinct from resume_from_checkpoint.",
+        description="Optional checkpoint path for model-weight initialization "
+        "only. Distinct from resume_from_checkpoint.",
     )
     init_weights_groups: list[str] = Field(
         default_factory=lambda: ["all"],
-        description="Named TEM semantic groups to hydrate from init_weights_from. Valid groups: spatial_memory, path_integration, sensory_binding, all.",
+        description="Named TEM semantic groups to hydrate from "
+        "init_weights_from. Valid groups: spatial_memory, path_integration, "
+        "sensory_binding, all.",
     )
     checkpoint_every_eval: bool = Field(
         default=False,
@@ -282,12 +281,13 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     limit_val_batches: int | float = Field(
         default=10,
-        description="Validation batches to run. ``int`` = N batches; ``float`` = "
-        "fraction of validation set (1.0 = 100%).",
+        description="Validation batches to run. ``int`` = N batches; "
+        "``float`` = fraction of validation set (1.0 = 100%).",
     )
     eval_save_outputs: list[str] = Field(
         default_factory=list,
-        description="Evaluation output keys saved as tensors in the checkpoint directory.",
+        description="Evaluation output keys saved as tensors in the checkpoint "
+        "directory.",
     )
 
     @model_validator(mode="after")
@@ -297,7 +297,8 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
             and self.init_weights_from is not None
         ):
             raise ValueError(
-                "resume_from_checkpoint and init_weights_from are mutually exclusive."
+                "resume_from_checkpoint and init_weights_from are mutually "
+                "exclusive."
             )
         if self.init_weights_from is not None:
             if not self.init_weights_groups:

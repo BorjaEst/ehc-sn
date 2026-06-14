@@ -48,11 +48,6 @@ from ehc_sn.training.runner import TrainingEntrypointSpec, run_training
 from ehc_sn.training.schedules import SchedulerConfig
 
 # Suppress Lightning's manual-optimization checkpoint warning.
-# This architecture deliberately uses post-optimization checkpoints:
-#   model, optimizer, scheduler, episode_source cursor → all at completed step N.
-#   Resume continues from step N+1 without duplicated updates.
-#   Pre-step weight cloning would create model/optimizer inconsistency
-#   and double per-step memory.  See design doc: checkpoint-contract.md.
 warnings.filterwarnings(
     "ignore",
     message=".*ModelCheckpoint with manual optimization.*pre-optimization.*",
@@ -99,32 +94,31 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     # Names and tracking
     project_name: Optional[str] = Field(
         default=None,
-        description=(
-            "Project name. If not set, it defaults to the capitalized name of "
-            "the dataset (e.g. `MATH` -> `Math ACT-torch`)."
-        ),
+        description="Project name. If not set, it defaults to the capitalized "
+        "name of the dataset (e.g. `MATH` -> `Math ACT-torch`).",
     )
     run_name: Optional[str] = Field(
         default=None,
-        description=(
-            "Run name. If not set, it defaults to `<arch_name> <random_slug>` "
-            "(e.g. `HrmV2 2x128 4L 16H 0.1D ACT-torch cool-slug`)."
-        ),
+        description="Run name. If not set, it defaults to `<arch_name> <random_slug>` "
+        "(e.g. `HrmV2 2x128 4L 16H 0.1D ACT-torch cool-slug`).",
     )
 
     # --------------------------------------------------------------------------
     # Model architecture and data
     model_config_path: Path = Field(
         ...,
-        description="Path to the model configuration TOML file that specifies the HRM v2 architecture.",
+        description="Path to the model configuration TOML file that specifies "
+        "the HRM v2 architecture.",
     )
     adapter: MazeHardHRMAdapterSettings = Field(
         default_factory=MazeHardHRMAdapterSettings,
-        description="Adapter settings for the MazeHard environment and HRM v2 model.",
+        description="Adapter settings for the MazeHard environment and HRM v2 "
+        "model.",
     )
     deliberation: MazeHardStepEvaluatorConfig = Field(
         ...,
-        description="Step evaluator config (halt_action, episode_horizon) for the MazeHard deliberation path.",
+        description="Step evaluator config (halt_action, episode_horizon) for "
+        "the MazeHard deliberation path.",
     )
     reward: MazeHardRewardConfig = Field(
         default_factory=MazeHardRewardConfig,
@@ -132,17 +126,19 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     controller: DeliberationACControllerConfig = Field(
         default_factory=DeliberationACControllerConfig,
-        description="Deliberation actor-critic controller configuration (policy settings).",
+        description="Deliberation actor-critic controller configuration "
+        "(policy settings).",
     )
     objective: HybridRLLossConfig = Field(
         ...,
-        description="Hybrid RL objective configuration (loss function, discount factor, loss coefficients).",
+        description="Hybrid RL objective configuration "
+        "(loss function, discount factor, loss coefficients).",
     )
 
-    # ~~ Optimizers & scheduling ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     optimizer_supervised: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
-        description="Optimizer for supervised parameters (PFC + embeddings + Token head).",
+        description="Optimizer for supervised parameters "
+        "(PFC + embeddings + Token head).",
     )
     optimizer_rl: AdamATan2Config = Field(
         default_factory=AdamATan2Config,
@@ -159,11 +155,10 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     supervised_only_warmup_steps: int = Field(
         default=5000,
         ge=0,
-        description=(
-            "Number of optimizer steps during which only the supervised optimizer trains. "
-            "STR and vmPFC are frozen; allow_halt=False forces full deliberation. "
-            "Prevents 'halt immediately' collapse before PFC representations are informative."
-        ),
+        description="Number of optimizer steps during which only the "
+        "supervised optimizer trains. STR and vmPFC are frozen; "
+        "allow_halt=False forces full deliberation. Prevents 'halt "
+        "immediately' collapse before PFC representations are informative.",
     )
     runtime: RuntimeConfig = Field(
         default_factory=RuntimeConfig,
@@ -174,11 +169,13 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     # Data settings (flat fields composed into DatamoduleConfig)
     dataset_path: Path = Field(
         ...,
-        description="Path to the processed dataset directory (contains index.jsonl + NPZ files).",
+        description="Path to the processed dataset directory "
+        "(contains index.jsonl + NPZ files).",
     )
     seed: int = Field(
         42,
-        description="RNG seed for training-split dihedral augmentation and reproducibility.",
+        description="RNG seed for training-split dihedral augmentation and "
+        "reproducibility.",
     )
     augment: bool = Field(
         True,
@@ -187,8 +184,8 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     global_batch_size: int = Field(
         ...,
         description=(
-            "Global batch size across all devices. "
-            "The per-device batch size is computed as `global_batch_size // world_size`."
+            "Global batch size across all devices. The per-device batch size "
+            "is computed as `global_batch_size // world_size`."
         ),
     )
     num_workers: int = Field(
@@ -209,7 +206,7 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
 
     # -------------------------------------------------------------------------
-    # Core settings for model, data, and training configuration (passed as configs to modules)
+    # Core settings for model, data, and training configuration
     logger: Optional[LoggerSettings] = Field(
         default_factory=LoggerSettings,
         description="TensorBoard logger settings.",
@@ -270,15 +267,18 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     # Distributed training settings (explicitly passed to Lightning Trainer)
     trainer_accelerator: Literal["auto", "gpu", "cpu"] = Field(
         default="gpu",
-        description="Trainer accelerator setting. Use 'gpu' for HAICORE multi-GPU runs.",
+        description="Trainer accelerator setting. Use 'gpu' for HAICORE "
+        "multi-GPU runs.",
     )
     trainer_strategy: Literal["auto", "ddp"] = Field(
         default="ddp",
-        description="Trainer strategy setting. Use 'ddp' for SLURM multi-GPU runs.",
+        description="Trainer strategy setting. Use 'ddp' for SLURM multi-GPU "
+        "runs.",
     )
     trainer_devices: int = Field(
         default=1,
-        description="Number of devices per node for the Trainer (per process when using SLURM tasks).",
+        description="Number of devices per node for the Trainer (per process "
+        "when using SLURM tasks).",
     )
     trainer_num_nodes: int = Field(
         default=1,
@@ -286,25 +286,26 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     trainer_precision: str = Field(
         default="16-mixed",
-        description=(
-            "Lightning Trainer precision. '32-true' = full fp32 (paper-parity default). "
-            "Use 'bf16-mixed' for throughput on Ampere+."
-        ),
+        description="Lightning Trainer precision. '32-true' = full fp32 "
+        "(paper-parity default). Use 'bf16-mixed' for throughput on Ampere+.",
     )
 
     # -------------------------------------------------------------------------
-    # Checkpointing and evaluation settings (passed as kwargs to Trainer and Checkpoint callback)
+    # Checkpointing and evaluation settings
     resume_from_checkpoint: Optional[str] = Field(
         default=None,
-        description="Optional checkpoint path to resume full trainer state via Trainer.fit(ckpt_path=...).",
+        description="Optional checkpoint path to resume full trainer state via "
+        "Trainer.fit(ckpt_path=...).",
     )
     init_weights_from: Optional[str] = Field(
         default=None,
-        description="Optional checkpoint path for model-weight initialization only. Distinct from resume_from_checkpoint.",
+        description="Optional checkpoint path for model-weight initialization "
+        "only. Distinct from resume_from_checkpoint.",
     )
     init_weights_groups: list[str] = Field(
         default_factory=lambda: ["all"],
-        description="Named HRM semantic groups to hydrate from init_weights_from. Valid groups: pfc_core, striatum, all.",
+        description="Named HRM semantic groups to hydrate from "
+        "init_weights_from. Valid groups: pfc_core, striatum, all.",
     )
     checkpoint_every_eval: bool = Field(
         default=False,
@@ -312,14 +313,13 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     limit_val_batches: int | float = Field(
         default=1.0,
-        description=(
-            "Validation batches to run. ``int`` = N batches; "
-            "``float`` = fraction of validation set (1.0 = 100%)."
-        ),
+        description="Validation batches to run. ``int`` = N batches; "
+        "``float`` = fraction of validation set (1.0 = 100%).",
     )
     eval_save_outputs: list[str] = Field(
         default_factory=list,
-        description="Evaluation output keys saved as tensors in the checkpoint directory.",
+        description="Evaluation output keys saved as tensors in the checkpoint "
+        "directory.",
     )
 
     @model_validator(mode="after")
@@ -329,7 +329,8 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
             and self.init_weights_from is not None
         ):
             raise ValueError(
-                "resume_from_checkpoint and init_weights_from are mutually exclusive."
+                "resume_from_checkpoint and init_weights_from are mutually "
+                "exclusive."
             )
         if self.init_weights_from is not None:
             if not self.init_weights_groups:

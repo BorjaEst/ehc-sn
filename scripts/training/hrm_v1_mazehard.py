@@ -43,11 +43,6 @@ from ehc_sn.training.schedules import SchedulerConfig
 from ehc_sn.training.stabilization import TargetNetworkConfig
 
 # Suppress Lightning's manual-optimization checkpoint warning.
-# This architecture deliberately uses post-optimization checkpoints:
-#   model, optimizer, scheduler, episode_source cursor → all at completed step N.
-#   Resume continues from step N+1 without duplicated updates.
-#   Pre-step weight cloning would create model/optimizer inconsistency
-#   and double per-step memory.  See design doc: checkpoint-contract.md.
 warnings.filterwarnings(
     "ignore",
     message=".*ModelCheckpoint with manual optimization.*pre-optimization.*",
@@ -69,7 +64,7 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     model_config = SettingsConfigDict(extra="forbid")
 
     @classmethod
-    def settings_customise_sources(  # ---------------------------------------
+    def settings_customise_sources(  # ----------------------------------------
         cls,
         settings_cls,
         init_settings,
@@ -89,18 +84,13 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     # Names and tracking
     project_name: Optional[str] = Field(
         default=None,
-        description=(
-            "Project name. If not set, it defaults to the capitalized name of "
-            "the dataset "
-            "(e.g. `MATH` -> `Math ACT-torch`)."
-        ),
+        description="Project name. If not set, it defaults to the capitalized "
+        "name of the dataset (e.g. `MATH` -> `Math ACT-torch`).",
     )
     run_name: Optional[str] = Field(
         default=None,
-        description=(
-            "Run name. If not set, it defaults to `<arch_name> <random_slug>` "
-            "(e.g. `HrmV1 2x128 4L 16H 0.1D ACT-torch cool-slug`)."
-        ),
+        description="Run name. If not set, it defaults to `<arch_name> <random_slug>` "
+        "(e.g. `HrmV1 2x128 4L 16H 0.1D ACT-torch cool-slug`).",
     )
 
     # -------------------------------------------------------------------------
@@ -202,7 +192,7 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
 
     # -------------------------------------------------------------------------
-    # Core settings for model, data, and training configuration (passed as configs to modules)
+    # Core settings for model, data, and training configuration
     logger: Optional[LoggerSettings] = Field(
         default_factory=LoggerSettings,
         description="TensorBoard logger settings.",
@@ -225,18 +215,14 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(
         default="standard",
-        description=(
-            "Instrumentation tier. 'minimal': only training metrics. "
-            "'standard': training metrics + model health diagnostics. "
-            "'research': all available diagnostic signals."
-        ),
+        description="Instrumentation tier. 'minimal': only training metrics. "
+        "'standard': training metrics + model health diagnostics. "
+        "'research': all available diagnostic signals.",
     )
     non_finite_policy: Literal["drop", "raise"] = Field(
         default="drop",
-        description=(
-            "Policy for NaN/Inf scalar diagnostic values. Set to 'raise' "
-            "to fail fast instead of silently dropping NaN values."
-        ),
+        description="Policy for NaN/Inf scalar diagnostic values. Set to "
+        "'raise' to fail fast instead of silently dropping NaN values.",
     )
 
     # -------------------------------------------------------------------------
@@ -282,25 +268,26 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     trainer_precision: str = Field(
         default="16-mixed",
-        description=(
-            "Lightning Trainer precision. '32-true' = full fp32 (paper-parity "
-            "default). Use 'bf16-mixed' for throughput on Ampere+."
-        ),
+        description="Lightning Trainer precision. '32-true' = full fp32 "
+        "(paper-parity default). Use 'bf16-mixed' for throughput on Ampere+.",
     )
 
     # -------------------------------------------------------------------------
     # Checkpointing and evaluation settings
     resume_from_checkpoint: Optional[str] = Field(
         default=None,
-        description="Optional checkpoint path to resume full trainer state via Trainer.fit(ckpt_path=...).",
+        description="Optional checkpoint path to resume full trainer state via "
+        "Trainer.fit(ckpt_path=...).",
     )
     init_weights_from: Optional[str] = Field(
         default=None,
-        description="Optional checkpoint path for model-weight initialization only. Distinct from resume_from_checkpoint.",
+        description="Optional checkpoint path for model-weight initialization "
+        "only. Distinct from resume_from_checkpoint.",
     )
     init_weights_groups: list[str] = Field(
         default_factory=lambda: ["all"],
-        description="Named HRM semantic groups to hydrate from init_weights_from. Valid groups: pfc_core, striatum, all.",
+        description="Named HRM semantic groups to hydrate from "
+        "init_weights_from. Valid groups: pfc_core, striatum, all.",
     )
     checkpoint_every_eval: bool = Field(
         default=False,
@@ -308,8 +295,8 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
     )
     limit_val_batches: int | float = Field(
         default=1.0,
-        description="Validation batches to run. ``int`` = N batches; ``float`` = "
-        "fraction of validation set (1.0 = 100%).",
+        description="Validation batches to run. ``int`` = N batches; "
+        "``float`` = fraction of validation set (1.0 = 100%).",
     )
     eval_save_outputs: list[str] = Field(
         default_factory=list,
@@ -324,7 +311,8 @@ class RunArguments(BaseSettings, cli_parse_args=True, cli_kebab_case=True):
             and self.init_weights_from is not None
         ):
             raise ValueError(
-                "resume_from_checkpoint and init_weights_from are mutually exclusive."
+                "resume_from_checkpoint and init_weights_from are mutually "
+                "exclusive."
             )
         if self.init_weights_from is not None:
             if not self.init_weights_groups:
