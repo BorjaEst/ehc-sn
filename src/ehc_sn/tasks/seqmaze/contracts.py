@@ -10,8 +10,12 @@ probe), path supervision targets, and path-logit output.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Final
 
 from torch import Tensor
+
+# Canonical ignore label for supervised positions not contributing to loss.
+SEQMAZE_IGNORE_LABEL_ID: Final[int] = -100
 
 
 # =============================================================================

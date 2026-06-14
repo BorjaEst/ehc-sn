@@ -204,6 +204,109 @@ SEQMAZE_V1_SCORING_SPEC: TaskScoringSpec = TaskScoringSpec(
 
 
 # =============================================================================
+class SeqMazeValidationScorer:
+    """Stateful online validation scorer for SeqMaze path-prediction metrics.
+
+    Accumulates counts across validation batches and computes epoch-level
+    rates.  Reuses the canonical evaluation primitives for decoding but
+    uses count accumulation rather than ratio averaging.
+
+    Computed metrics::
+
+        seqmaze/eos_present_rate
+        seqmaze/goal_reached_rate
+        seqmaze/valid_transition_rate
+    """
+
+    def __init__(self, eos_id: int, pad_id: int, n_max: int) -> None:
+        self._eos_id = eos_id
+        self._pad_id = pad_id
+        self._n_max = n_max
+        self.reset()
+
+    def update_from_evaluation(self, result: EvaluationCaseResult) -> None:
+        """Update accumulated counters from one evaluation batch.
+
+        Uses the last step's task output (constrained path logits) and
+        the batch metadata.
+        """
+        from ehc_sn.tasks.seqmaze.runtime import extract_seqmaze_targets
+
+        batch = result.case.batch
+        last_step = result.evaluated.last_step
+        logits = last_step.outputs.task.path_logits  # (B, T, V)
+
+        targets = extract_seqmaze_targets(batch)
+        adj = _build_adjacency(
+            batch["successor_indices"],
+            batch["successor_mask"],
+            self._n_max,
+        )
+        goal_idx = batch["node_goal_flag"].to(torch.int64).argmax(dim=-1)
+        pred = logits.argmax(dim=-1)
+        canonical_pred = _canonicalize(pred, self._eos_id, self._pad_id)
+
+        B = int(canonical_pred.shape[0])
+        for b in range(B):
+            self._sequence_count += 1
+
+            pred_eos_pos = int(
+                _extract_eos_position(canonical_pred[b : b + 1], self._eos_id)[
+                    0
+                ]
+            )
+            # EOS presence
+            if pred_eos_pos < canonical_pred.shape[1]:
+                self._eos_present_count += 1
+
+            # Goal reached
+            prefix = canonical_pred[b, :pred_eos_pos]
+            if (prefix == goal_idx[b]).any():
+                self._goal_reached_count += 1
+
+            # Valid transitions
+            cand_tokens = prefix[prefix < self._n_max]
+            if cand_tokens.shape[0] >= 2:
+                total = cand_tokens.shape[0] - 1
+                valid = 0
+                for t in range(total):
+                    src = int(cand_tokens[t].item())
+                    dst = int(cand_tokens[t + 1].item())
+                    if (
+                        src < self._n_max
+                        and dst < self._n_max
+                        and adj[b, src, dst]
+                    ):
+                        valid += 1
+                self._valid_transition_count += valid
+                self._total_transition_count += total
+
+    def compute(self) -> dict[str, Tensor]:
+        """Compute epoch-level rates from accumulated counters."""
+        metrics: dict[str, Tensor] = {}
+        if self._sequence_count > 0:
+            metrics["seqmaze/eos_present_rate"] = torch.tensor(
+                self._eos_present_count / self._sequence_count
+            )
+            metrics["seqmaze/goal_reached_rate"] = torch.tensor(
+                self._goal_reached_count / self._sequence_count
+            )
+        if self._total_transition_count > 0:
+            metrics["seqmaze/valid_transition_rate"] = torch.tensor(
+                self._valid_transition_count / self._total_transition_count
+            )
+        return metrics
+
+    def reset(self) -> None:
+        """Reset all accumulated counters."""
+        self._sequence_count = 0
+        self._eos_present_count = 0
+        self._goal_reached_count = 0
+        self._valid_transition_count = 0
+        self._total_transition_count = 0
+
+
+# =============================================================================
 @dataclass(frozen=True)
 class SeqMazeScoreReport:
     """Aggregate path-prediction scores for one seqmaze v1 evaluation pass.

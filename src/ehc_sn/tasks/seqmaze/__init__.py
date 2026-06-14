@@ -15,6 +15,7 @@ Phase 0 surface:
 """
 
 from .contracts import (
+    SEQMAZE_IGNORE_LABEL_ID,
     SeqMazeProbeInput,
     SeqMazeProbeOutput,
     SeqMazeProbeTargets,
@@ -27,6 +28,7 @@ from .evaluation import (
     SEQMAZE_V1_SCORING_SPEC,
     SeqMazeProbeScoreReport,
     SeqMazeScoreReport,
+    SeqMazeValidationScorer,
 )
 from .runtime import (
     SEQUENCE_BATCH_KEYS,
@@ -38,10 +40,12 @@ from .runtime import (
 )
 
 __all__ = [
+    "SEQMAZE_IGNORE_LABEL_ID",
     "SeqMazeProbeInput",
     "SeqMazeProbeTargets",
     "SeqMazeProbeOutput",
     "SeqMazeProbeScoreReport",
+    "SeqMazeValidationScorer",
     "SEQUENCE_BATCH_KEYS",
     "extract_seqmaze_probe_input",
     "extract_seqmaze_probe_targets",
