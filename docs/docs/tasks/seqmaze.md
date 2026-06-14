@@ -200,7 +200,7 @@ graph capacity and path capacity changes the semantics of the schema slots.
 
 ### Schema-token layout
 
-```
+```text
 schema_tokens: (B, S, D)
 
 positions [0 : N_max):
@@ -229,7 +229,7 @@ HRM-compatible schema tokens.
 
 **Adapter-packed model input**:
 
-```
+```text
 SeqMazeHRMInput:
   schema_tokens:       FloatTensor[B, S, D]
   schema_mask:         BoolTensor[B, S]
@@ -245,7 +245,7 @@ by the adapter (see [Adapter specification](#adapter-specification)).
 
 For each candidate node $i$:
 
-```
+```text
 h_i^0 = E_obs(obs_id_i)               content: what observation
       + E_candidate(candidate_index_i)  identity: which slot
       + E_start(start_flag_i)           flag: is this the start?
@@ -257,7 +257,7 @@ node_embedding_i = h_i^0 + E_region("graph")
 
 The edge encoding (v1 default: `successor_index_embedding`):
 
-```
+```text
 edge_embedding_i =
     Pool_k [ E_successor_slot(k) + E_candidate_index(successor_indices[i, k]) ]
     masked by successor_mask[i, k]
@@ -274,7 +274,7 @@ Padded nodes ($i \ge N$) receive zero embedding and are excluded via
 
 For each output position $t$:
 
-```
+```text
 path_query_t = E_path_query
              + E_path_position(t)
              + E_region("path")
@@ -288,7 +288,7 @@ target sequence.
 
 **Model output**:
 
-```
+```text
 SeqMazeTaskOutput:
   path_logits:  FloatTensor[B, T_max, N_max + 2]
   halt_probs:   FloatTensor[B, steps] (optional; present when ACT controller is used)
@@ -296,7 +296,7 @@ SeqMazeTaskOutput:
 
 The decoder reads:
 
-```
+```text
 path_states = hrm_output[:, N_max : N_max + T_max, :]
 decoder_input_t = path_states[:, t, :] + E_decode_position(t)
 path_logits = Linear(D, N_max + 2)(decoder_input)
@@ -308,7 +308,7 @@ failures where the model cannot distinguish which output slot should emit EOS.
 
 **Local vocabulary**:
 
-```
+```text
 0 .. N_max-1    candidate node indices
 N_max           EOS
 N_max + 1       PAD
@@ -316,7 +316,7 @@ N_max + 1       PAD
 
 **Target path**:
 
-```
+```text
 SeqMazeTargets:
   path_index:   LongTensor[B, T_max]
   path_mask:    BoolTensor[B, T_max]
@@ -438,7 +438,7 @@ permute_candidates(node_fields, seed) → permuted_fields
 These are task-internal utilities, not a shared substrate. `seqmaze` has no
 `data/interim/` layer. The versioned immutable data root is:
 
-```
+```text
 data/processed/seqmaze/<corpus>/v<version>/
   train.npz
   val.npz
@@ -520,7 +520,7 @@ appears anywhere in the canonicalized prefix (before first EOS).
 
 Cross-entropy over path positions, masked by `path_mask`:
 
-```
+```text
 loss = CE(path_logits, target_path)
 masked where path_mask == True
 ```
@@ -591,13 +591,13 @@ If `successor_index_embedding` fails (model cannot learn index-to-slot mapping),
 
 Content and structure embeddings are combined additively with a region tag:
 
-```
+```text
 node_embedding_i = content_embedding_i + edge_embedding_i + E_region("graph")
 ```
 
 where:
 
-```
+```text
 content_embedding_i =
     E_obs(obs_id_i)
   + E_candidate(candidate_index_i)
@@ -615,7 +615,7 @@ mechanisms relevant to broader EHP architecture questions.
 The decoder applies an explicit output-position embedding before the
 linear head:
 
-```
+```text
 decoder_input_t = path_states[:, t, :] + E_decode_position(t)
 path_logits = Linear(D, N_max + 2)(decoder_input)
 ```
