@@ -24,7 +24,6 @@ from torch import Tensor, nn
 from torch.optim import Optimizer
 from torchmetrics import MetricCollection
 
-from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.episode_sources import ShuffledEpisodeSource
 from ehc_sn.eval.contracts import (
@@ -84,6 +83,7 @@ class ACTSupervisedBindings:
     step_routes: tuple
     episode_routes: tuple
     hidden_state_fields: tuple
+    task_scorer_factory: Callable[[], Any] | None = None
 
 
 class ACTSupervisedComponentConfigs(BaseModel, extra="forbid"):
@@ -93,9 +93,9 @@ class ACTSupervisedComponentConfigs(BaseModel, extra="forbid"):
     the regime module.  Fields carry concrete Pydantic types.
     """
 
-    adapter: MazeHardHRMAdapterSettings = Field(
+    adapter: BaseModel = Field(
         ...,
-        description="Adapter settings for the MazeHard ↔ HRM bridge.",
+        description="Task-specific adapter settings. Validated by the experiment builder.",
     )
     controller: ACTControllerConfig = Field(
         ...,
@@ -185,6 +185,13 @@ class ACTSupervisedModule(L.LightningModule):
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()
+
+        # Optional task-specific validation scorer.
+        self._task_scorer = (
+            bindings.task_scorer_factory()
+            if bindings.task_scorer_factory is not None
+            else None
+        )
 
         # Manual optimization: one backward, explicit opt/scheduler steps.
         self.automatic_optimization = False
@@ -440,6 +447,9 @@ class ACTSupervisedModule(L.LightningModule):
         ):
             self._diagnostic_traces.append(result.trace)
 
+        if self._task_scorer is not None:
+            self._task_scorer.update_from_evaluation(result)
+
         return {"trace": result.trace}
 
     def on_validation_epoch_end(  # -------------------------------------------
@@ -447,6 +457,13 @@ class ACTSupervisedModule(L.LightningModule):
     ) -> None:
         compute_nonempty(self._val_reducer_collection)
         self._val_reducer_collection.reset()
+
+        if self._task_scorer is not None:
+            task_metrics = self._task_scorer.compute()
+            self.log_dict(
+                task_metrics, on_step=False, on_epoch=True, logger=True
+            )
+            self._task_scorer.reset()
 
     def execute_evaluation_batch(  # ------------------------------------------
         self,
