@@ -52,7 +52,7 @@ warnings.filterwarnings(
 
 
 CONFIGURATION_PATH = os.environ.get(
-    "HRM_V1_CONFIGURATION_PATH", "config/training/hrm-v2-seqmaze-vram8gib.toml"
+    "HRM_V1_CONFIGURATION_PATH", "config/training/hrm-v1-seqmaze-vram8gib.toml"
 )
 
 
