@@ -17,7 +17,6 @@ from ehc_sn.adapters.ehp._base import (
     ArenaEHCBridgeOutput,
     ArenaEHCDiagnostics,
     ArenaEncoderConfig,
-    ArenaTwoHotEncoder,
 )
 from ehc_sn.models.ehp.ehp_v1 import (
     EHCInputV1,
@@ -31,17 +30,20 @@ from ehc_sn.types import Batch
 
 # =============================================================================
 class ArenaInputsEncoderV1(nn.Module):
-    """Encodes arena step data into a :class:`EHCInputV1` payload."""
+    """Encodes arena step data into a :class:`EHCInputV1` payload.
+
+    The core encoder (``ArenaTwoHotEncoder`` or ``ArenaLearnedEncoder``) is
+    injected by the builder, keeping this wrapper version-specific while the
+    encoding strategy is configurable.
+    """
 
     def __init__(  # ----------------------------------------------------------
         self,
-        observation_dim: int,
-        feature_dim: int,
-        n_freq: int,
+        core_encoder: nn.Module,
     ) -> None:
-        """Initializes the encoder with the given dimensions and frequency count."""
+        """Initializes the encoder with an injected core observation encoder."""
         super().__init__()
-        self._core = ArenaTwoHotEncoder(observation_dim, feature_dim, n_freq)
+        self._core = core_encoder
 
     def forward(  # -----------------------------------------------------------
         self,
@@ -173,12 +175,14 @@ def _build_encoder_v1(  # -----------------------------------------------------
     model: EHCModelV1,
     config: ArenaEHCAdapterSettings,
 ) -> ArenaInputsEncoderV1:
-    """Builds the arena inputs encoder for EHP v1."""
-    return ArenaInputsEncoderV1(
+    """Builds the arena inputs encoder for EHP v1 from model and config."""
+    core = _core.build_arena_observation_encoder(
+        config.encoder,
         observation_dim=config.observation_dim,
         feature_dim=model.config.lec.feature_dim,
         n_freq=model.lec.n_freq,
     )
+    return ArenaInputsEncoderV1(core)
 
 
 # =============================================================================

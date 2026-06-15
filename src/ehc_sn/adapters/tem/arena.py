@@ -40,19 +40,19 @@ from ehc_sn.types import Batch
 
 # =============================================================================
 class ArenaInputsEncoderV1(nn.Module):
-    """Encodes arena step data into a :class:`TEMInputV1` payload."""
+    """Encodes arena step data into a :class:`TEMInputV1` payload.
+
+    The core encoder is injected by the builder, keeping this wrapper
+    version-specific while the encoding strategy is configurable.
+    """
 
     def __init__(  # ----------------------------------------------------------
         self,
-        observation_dim: int,
-        feature_dim: int,
-        n_freq: int,
+        core_encoder: nn.Module,
     ) -> None:
-        """Initializes the encoder with the given dimensions and frequency count."""
+        """Initialize the encoder with an injected core observation encoder."""
         super().__init__()
-        self.encoder = _base.ArenaTwoHotEncoder(
-            observation_dim, feature_dim, n_freq
-        )
+        self.encoder = core_encoder
 
     def forward(  # -----------------------------------------------------------
         self,
@@ -199,11 +199,13 @@ def _build_encoder_v1(  # -----------------------------------------------------
     config: ArenaTEMAdapterSettings,
 ) -> ArenaInputsEncoderV1:
     """Build the TEM-to-arena inputs encoder according to the requested config."""
-    return ArenaInputsEncoderV1(
+    core = _base.build_arena_observation_encoder(
+        config.encoder,
         observation_dim=config.observation_dim,
         feature_dim=model.config.lec.feature_dim,
         n_freq=model.lec.n_freq,
     )
+    return ArenaInputsEncoderV1(core)
 
 
 # =============================================================================
@@ -237,18 +239,18 @@ def _build_decoder_v1(  # -----------------------------------------------------
 
 # =============================================================================
 class ArenaInputsEncoderV2(nn.Module):
-    """Encodes arena step data into a :class:`TEMInputV2` payload."""
+    """Encodes arena step data into a :class:`TEMInputV2` payload.
+
+    The core encoder is injected by the builder.
+    """
 
     def __init__(  # ----------------------------------------------------------
         self,
-        observation_dim: int,
-        feature_dim: int,
-        n_freq: int,
+        core_encoder: nn.Module,
     ) -> None:
+        """Initialize the encoder with an injected core observation encoder."""
         super().__init__()
-        self.encoder = _base.ArenaTwoHotEncoder(
-            observation_dim, feature_dim, n_freq
-        )
+        self.encoder = core_encoder
 
     def forward(  # -----------------------------------------------------------
         self,
@@ -364,11 +366,13 @@ def _build_encoder_v2(  # -----------------------------------------------------
     model: TEMModelV2,
     config: ArenaTEMAdapterSettings,
 ) -> ArenaInputsEncoderV2:
-    return ArenaInputsEncoderV2(
+    core = _base.build_arena_observation_encoder(
+        config.encoder,
         observation_dim=config.observation_dim,
         feature_dim=model.config.lec.feature_dim,
         n_freq=model.lec.n_freq,
     )
+    return ArenaInputsEncoderV2(core)
 
 
 # =============================================================================
@@ -402,10 +406,6 @@ __all__ = [
     "ArenaTEMV1BridgeAdapter",
     "ArenaInputsEncoderV1",
     "ArenaOutputsDecoderV1",
-    "ArenaTEMAdapterSettings",
-    "ArenaTEMBridgeOutput",
-    "ArenaDecoderConfig",
-    "ArenaEncoderConfig",
     "ArenaTEMV2BridgeAdapter",
     "ArenaInputsEncoderV2",
     "ArenaOutputsDecoderV2",

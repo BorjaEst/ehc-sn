@@ -25,16 +25,19 @@ from ehc_sn.utils.detach import DetachMixin
 class ArenaEncoderConfig(BaseModel, extra="forbid"):
     """Encoder strategy config for the arena-to-EHP sensory pathway.
 
-    Only ``kind='two_hot'`` with ``layout='replicated'`` is implemented.
+    Supported encoder families:
+
+    - ``'two_hot'`` — fixed combinatorial two-hot codebook (canonical TEM baseline).
+    - ``'learned'`` — dense ``nn.Embedding`` lookup, replicated across frequency bands.
     """
 
-    kind: Literal["two_hot"] = Field(
+    kind: Literal["two_hot", "learned"] = Field(
         default="two_hot",
-        description="Observation encoder family. Only 'two_hot' is supported.",
+        description="Observation encoder family.",
     )
     layout: Literal["replicated"] = Field(
         default="replicated",
-        description="Band-packing strategy. Only 'replicated' is supported with 'two_hot'.",
+        description="Band-packing strategy. Only 'replicated' is supported.",
     )
 
 
@@ -234,6 +237,87 @@ class ArenaTwoHotEncoder(nn.Module):
             batch.get("episode_start"),
             batch.get("landmark_id"),
         )
+
+
+# =============================================================================
+class ArenaLearnedEncoder(nn.Module):
+    """Learned dense embedding encoder for arena observation IDs.
+
+    Maps each ``observation_id`` integer to a dense learned vector via
+    ``nn.Embedding`` and replicates the vector across all LEC frequency bands
+    (identical copy per band, preserving the TEM assumption that bands differ
+    only in temporal dynamics, not sensory content).
+
+    This is an adapter-owned alternative to :class:`ArenaTwoHotEncoder` with
+    the same output contract: ``encode(batch) -> (MultiScaleCode, action, …)``.
+    """
+
+    def __init__(  # ----------------------------------------------------------
+        self,
+        observation_dim: int,
+        feature_dim: int,
+        n_freq: int,
+        *,
+        device=None,
+        dtype=None,
+    ) -> None:
+        """Initialize the learned embedding encoder."""
+        super().__init__()
+        if observation_dim < 1:
+            raise ValueError(
+                f"observation_dim must be positive, got {observation_dim}."
+            )
+        if feature_dim < 1:
+            raise ValueError(
+                f"feature_dim must be positive, got {feature_dim}."
+            )
+        if n_freq < 1:
+            raise ValueError(f"n_freq must be positive, got {n_freq}.")
+        self.embed = nn.Embedding(
+            observation_dim, feature_dim, device=device, dtype=dtype
+        )
+        self._obs_dim = observation_dim
+        self._n_freq = n_freq
+
+    def encode(  # ------------------------------------------------------------
+        self,
+        batch: Batch,
+    ) -> tuple[MultiScaleCode, Tensor, object, object]:
+        """Return ``(observation_embedding, previous_action, episode_start, landmark_id)``."""
+        obs_id = batch["observation_id"].view(-1).long()  # (B,)
+        code = self.embed(obs_id)  # (B, feature_dim)
+        observation_embedding: MultiScaleCode = [
+            code.clone() for _ in range(self._n_freq)
+        ]
+        return (
+            observation_embedding,
+            batch["previous_action"],
+            batch.get("episode_start"),
+            batch.get("landmark_id"),
+        )
+
+
+# =============================================================================
+def build_arena_observation_encoder(  # ---------------------------------------
+    config: ArenaEncoderConfig,
+    observation_dim: int,
+    feature_dim: int,
+    n_freq: int,
+    *,
+    device=None,
+    dtype=None,
+) -> ArenaTwoHotEncoder | ArenaLearnedEncoder:
+    """Construct the concrete arena observation encoder from config."""
+    match config.kind:
+        case "two_hot":
+            return ArenaTwoHotEncoder(observation_dim, feature_dim, n_freq)
+        case "learned":
+            return ArenaLearnedEncoder(
+                observation_dim, feature_dim, n_freq,
+                device=device, dtype=dtype,
+            )
+        case _:
+            raise ValueError(f"Unsupported arena encoder kind: {config.kind!r}.")
 
 
 # =============================================================================
