@@ -58,7 +58,11 @@ def build_mazehard_hrm_v1_training_experiment(
         transform=coerce_maze_hard_batch,
     )
 
-    return TrainingExperiment(module=module, datamodule=datamodule)
+    return TrainingExperiment(
+        module=module,
+        datamodule=datamodule,
+        trainer=config.trainer,
+    )
 
 
 __all__ = ["TrainingExperiment", "build_mazehard_hrm_v1_training_experiment"]

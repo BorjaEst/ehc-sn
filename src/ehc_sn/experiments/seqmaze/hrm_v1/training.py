@@ -34,7 +34,11 @@ def build_seqmaze_hrm_v1_training_experiment(
         ),
         transform=None,
     )
-    return TrainingExperiment(module=module, datamodule=datamodule)
+    return TrainingExperiment(
+        module=module,
+        datamodule=datamodule,
+        trainer=config.trainer,
+    )
 
 
 __all__ = ["build_seqmaze_hrm_v1_training_experiment"]

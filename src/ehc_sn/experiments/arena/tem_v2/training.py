@@ -26,7 +26,11 @@ def build_arena_tem_v2_training_experiment(
         ),
         transform=None,
     )
-    return TrainingExperiment(module=module, datamodule=datamodule)
+    return TrainingExperiment(
+        module=module,
+        datamodule=datamodule,
+        trainer=config.trainer,
+    )
 
 
 __all__ = ["build_arena_tem_v2_training_experiment"]

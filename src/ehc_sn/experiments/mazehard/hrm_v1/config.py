@@ -151,7 +151,7 @@ class TrainerConfig(BaseModel, extra="forbid"):
         description="Maximum training steps.",
     )
     val_check_interval: int = Field(
-        default=0,
+        default=500,
         description="Validation check interval in steps.",
     )
     log_every_n_steps: int = Field(

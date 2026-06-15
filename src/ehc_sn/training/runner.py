@@ -175,7 +175,7 @@ def _build_trainer(  # --------------------------------------------------------
         precision=getattr(settings, "trainer_precision", "16-mixed"),
         max_epochs=-1,
         max_steps=getattr(settings, "max_steps", 200000),
-        val_check_interval=getattr(settings, "val_check_interval", 0),
+        val_check_interval=getattr(settings, "val_check_interval", 500),
         check_val_every_n_epoch=None,
         limit_val_batches=getattr(settings, "limit_val_batches", 1.0),
         log_every_n_steps=getattr(settings, "log_every_n_steps", 10),
@@ -198,6 +198,7 @@ class TrainingExperiment:
 
     module: Any  # LightningModule
     datamodule: Any  # LightningDataModule
+    trainer: Any | None = None  # TrainerConfig (optional, backfilled by runner)
 
 
 # =============================================================================
@@ -298,26 +299,23 @@ def run_training(  # ----------------------------------------------------------
 def _run_training_experiment(  # ---------------------------------------------
     experiment: TrainingExperiment,
 ) -> None:
-    """Execute training from a pre-assembled ``TrainingExperiment``.
-
-    The experiment already contains a constructed model and datamodule.
-    Trainer settings, callbacks, and checkpoint paths are read from
-    experiment attributes (currently the bare minimum — will expand as
-    more experiment configs are migrated).
-    """
+    """Execute training from a pre-assembled ``TrainingExperiment``."""
     _configure_torch()
     seed_everything(42)
 
     trainer = Trainer(
-        accelerator="gpu",
-        strategy="auto",
-        devices=1,
+        accelerator=experiment.trainer.accelerator,
+        strategy=experiment.trainer.strategy,
+        devices=experiment.trainer.devices,
+        num_nodes=experiment.trainer.num_nodes,
+        precision=experiment.trainer.precision,
         max_epochs=-1,
-        max_steps=200000,
-        val_check_interval=0,
+        max_steps=experiment.trainer.max_steps,
+        val_check_interval=experiment.trainer.val_check_interval,
         check_val_every_n_epoch=None,
-        log_every_n_steps=10,
-        enable_progress_bar=True,
+        limit_val_batches=experiment.trainer.limit_val_batches,
+        log_every_n_steps=experiment.trainer.log_every_n_steps,
+        enable_progress_bar=experiment.trainer.enable_progress_bar,
     )
     trainer.fit(
         model=experiment.module,

@@ -102,9 +102,9 @@ class ActorCriticTrainingConfig(BaseModel, extra="forbid"):
         ...,
         description="Optimizer config for vmPFC parameters.",
     )
-    reward: dict = Field(
+    reward: dict | BaseModel = Field(
         ...,
-        description="Training-only reward configuration dict.  Concrete "
+        description="Training-only reward configuration.  Concrete "
         "validation (MazeHardRewardConfig, SeqMazeRewardConfig) is "
         "performed by the training experiment builder.",
     )
@@ -252,14 +252,14 @@ class ActorCriticModule(L.LightningModule):
             else None
         )
         if self._deliberation is None:
-            raise RuntimeError(
-                "deliberation config must be set before setup()"
-            )
+            raise RuntimeError("deliberation config must be set before setup()")
         runtime = self._bindings.runtime_cls(
             self._deliberation,
-            self._bindings.reward_projector_cls(reward_config)
-            if reward_config is not None
-            else None,
+            (
+                self._bindings.reward_projector_cls(reward_config)
+                if reward_config is not None
+                else None
+            ),
         )
         self.controller = self._bindings.controller_cls(
             self.adapter,
@@ -306,9 +306,7 @@ class ActorCriticModule(L.LightningModule):
             p for p in self.adapter.parameters() if id(p) not in excluded_ids
         ]
 
-        opt_sup = c.optimizer_cls(
-            sup_params, tc.optimizer_supervised
-        )
+        opt_sup = c.optimizer_cls(sup_params, tc.optimizer_supervised)
         opt_rl = c.optimizer_cls(
             list(self.model.str.parameters()),
             tc.optimizer_rl,

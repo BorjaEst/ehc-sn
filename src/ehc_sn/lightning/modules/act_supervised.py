@@ -332,7 +332,7 @@ class ACTSupervisedModule(L.LightningModule):
         world_size = max(getattr(self.trainer, "world_size", 1), 1)
         rank = getattr(self.trainer, "global_rank", 0)
         seed = (
-            self._training_config.runtime.validation.seed
+            self._training_config.runtime.validation.seed or 42
             if self._training_config is not None
             else 42
         )
