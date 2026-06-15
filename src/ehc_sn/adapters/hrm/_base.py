@@ -549,6 +549,18 @@ class SeqMazeEncoder(nn.Module):
             successor_indices, successor_mask, node_candidate_index, node_obs_id
         )  # (B, N, D)
 
+        if self.training and self.config.n_max <= 8:
+            n_actual = node_mask.sum(dim=-1).float().mean().item()
+            succ_min = successor_indices.min().item()
+            succ_max = successor_indices.max().item()
+            mask_ratio = successor_mask.float().mean().item()
+            print(
+                f"[seqmaze-encoder] n_actual={n_actual:.1f} "
+                f"succ_range=[{succ_min},{succ_max}] "
+                f"mask_ratio={mask_ratio:.3f} "
+                f"edge_emb_norm={edge_emb.norm(dim=-1).mean().item():.4f}"
+            )
+
         # Region tag
         region_graph = self.E_region_graph.weight.unsqueeze(0)  # (1, 1, D)
 

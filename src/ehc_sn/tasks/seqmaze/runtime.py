@@ -196,6 +196,8 @@ class SeqMazeRuntime(TaskRuntime["_SeqMazeRuntimeState"]):
         config: SeqMazeRuntimeConfig,
         reward_projector: SeqMazeRewardProjector,
     ) -> None:
+        if reward_projector is None:
+            raise ValueError("SeqMazeRuntime requires a reward_projector")
         self._halt_action = config.halt_action
         self._episode_horizon = config.episode_horizon
         self._reward_projector = reward_projector

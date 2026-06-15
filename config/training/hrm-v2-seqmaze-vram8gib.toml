@@ -19,6 +19,10 @@
     c_state_value   = 0.5
     c_q_value       = 0.5
 
+[deliberation]
+    halt_action     = 0
+    episode_horizon = 16
+
 [training.optimizer_supervised]
     lr           = 1e-4
     weight_decay = 1e-2

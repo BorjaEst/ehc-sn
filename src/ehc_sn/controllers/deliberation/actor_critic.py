@@ -27,7 +27,7 @@ import torch
 from pydantic import BaseModel, Field
 from torch import Tensor
 
-from ehc_sn.contracts.task_runtime import RuntimeReset, StepFeedback, TaskRuntime
+from ehc_sn.contracts.task_runtime import TaskRuntime
 from ehc_sn.controllers._base import BaseController, RolloutState
 from ehc_sn.controllers.contracts.value_control import (
     ValueControlInteractionRecord,
@@ -43,7 +43,6 @@ from ehc_sn.policies.categorical import (
     PolicyInput,
 )
 from ehc_sn.types import Batch
-
 
 # =============================================================================
 _RuntimeStateT = TypeVar("_RuntimeStateT")

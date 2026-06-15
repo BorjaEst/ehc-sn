@@ -8,7 +8,7 @@
     n_max         = 32
     t_max         = 32
     k_max         = 4
-    edge_encoding = "successor_index_embedding"
+    edge_encoding = "successor_node_pool"
     hidden_size   = 128
 
 [model.components.controller]

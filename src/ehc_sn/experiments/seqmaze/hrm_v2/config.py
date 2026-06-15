@@ -38,6 +38,7 @@ from ehc_sn.lightning.modules.actor_critic import (
 )
 from ehc_sn.logging.tensorboard import LoggerSettings
 from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig
+from ehc_sn.tasks.seqmaze.runtime import SeqMazeRuntimeConfig
 from ehc_sn.training.schedules import SchedulerConfig
 
 # =============================================================================
@@ -78,6 +79,38 @@ class SeqMazeHRMV2ModelConfig(BaseModel, extra="forbid"):
         ...,
         description="Task-family component binding (adapter, controller, objective).",
     )
+
+
+# =============================================================================
+# Deliberation configuration (task-owned execution limits)
+# =============================================================================
+
+
+class SeqMazeDeliberationConfig(BaseModel, extra="forbid"):
+    """SeqMaze deliberation / execution policy settings.
+
+    Controls how the AC controller runs during inference and evaluation.
+    Not part of model structure -- does not affect parameter shapes or
+    checkpoint compatibility.
+    """
+
+    halt_action: int = Field(
+        default=0,
+        ge=0,
+        description="Action index that signals episode termination.",
+    )
+    episode_horizon: int = Field(
+        default=16,
+        ge=1,
+        description="Maximum number of deliberation steps per episode.",
+    )
+
+    def to_runtime_config(self) -> SeqMazeRuntimeConfig:
+        """Convert to the runtime config consumed by SeqMazeRuntime."""
+        return SeqMazeRuntimeConfig(
+            halt_action=self.halt_action,
+            episode_horizon=self.episode_horizon,
+        )
 
 
 # =============================================================================
@@ -194,6 +227,10 @@ class SeqMazeHRMV2TrainingExperimentConfig(BaseModel, extra="forbid"):
         ...,
         description="Model structure (components + architecture path).",
     )
+    deliberation: SeqMazeDeliberationConfig = Field(
+        default_factory=SeqMazeDeliberationConfig,
+        description="Deliberation execution policy (halt_action, episode_horizon).",
+    )
     training: ActorCriticTrainingConfig = Field(
         ...,
         description="Actor-critic training configuration.",
@@ -223,10 +260,15 @@ class SeqMazeHRMV2EvaluationExperimentConfig(BaseModel, extra="forbid"):
         ...,
         description="Model structure (components only).",
     )
+    deliberation: SeqMazeDeliberationConfig = Field(
+        default_factory=SeqMazeDeliberationConfig,
+        description="Deliberation execution policy (halt_action, episode_horizon).",
+    )
 
 
 # =============================================================================
 __all__ = [
+    "SeqMazeDeliberationConfig",
     "SeqMazeHRMV2ComponentConfigs",
     "SeqMazeHRMV2ModelConfig",
     "SeqMazeHRMV2TrainingExperimentConfig",

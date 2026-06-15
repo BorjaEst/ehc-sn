@@ -155,41 +155,18 @@ class SeqMazeHRMV1BridgeAdapter(nn.Module):
     def _apply_output_mask(self, logits: Tensor) -> Tensor:
         """Apply sample-specific output vocabulary masking.
 
-        Invalid node indices (those not present in the sample) and PAD
-        are masked to -inf.  EOS and valid node indices pass unmasked.
-
-        Args:
-            logits: (B, T, V) global path logits, V = n_max + 2.
-
-        Returns:
-            (B, T, V) constrained path logits.
+        Delegates to the module-level :func:`_apply_seqmaze_output_mask`
+        using the cached ``node_valid_mask``.
         """
-        node_valid = self._node_valid_mask  # (B, N)
+        node_valid = self._node_valid_mask
         if node_valid is None:
             raise RuntimeError(
                 "SeqMazeHRMV1BridgeAdapter: node_valid_mask not cached. "
                 "prepare_inputs must be called before postprocess."
             )
-        B, T, V = logits.shape
-        N = self._config.n_max
-        device = logits.device
-
-        # Build per-sample mask over vocabulary: (B, V)
-        # Valid: node_valid_mask entries + EOS at index N
-        vocab_mask = torch.zeros(B, V, dtype=torch.bool, device=device)
-        # Valid node indices
-        vocab_mask[:, :N] = node_valid  # (B, N)
-        # EOS is always valid
-        vocab_mask[:, N] = True
-
-        # Broadcast over T dimension
-        vocab_mask = vocab_mask.unsqueeze(1)  # (B, 1, V)
-
-        # Apply -inf to invalid positions
-        constrained = torch.where(
-            vocab_mask, logits, torch.tensor(float("-inf"), device=device)
+        return _apply_seqmaze_output_mask(
+            logits, node_valid, n_max=self._config.n_max
         )
-        return constrained
 
     def postprocess(self, outputs: HRMOutputV1) -> SeqMazeHRMV1BridgeOutput:
         """Decode path-region schema slots into constrained path logits."""
@@ -319,12 +296,51 @@ class SeqMazeHRMV2BridgeOutput:
 
 
 # =============================================================================
+# Module-level vocabulary masking helper (shared by v1 and v2 bridges)
+# =============================================================================
+
+
+def _apply_seqmaze_output_mask(
+    logits: Tensor,
+    node_valid_mask: Tensor,
+    *,
+    n_max: int,
+) -> Tensor:
+    """Apply sample-specific output vocabulary masking.
+
+    Invalid node indices (those not present in the sample) and PAD
+    are masked to -inf.  EOS and valid node indices pass unmasked.
+
+    Args:
+        logits: (B, T, V) global path logits, V = n_max + 2.
+        node_valid_mask: (B, N) bool mask of valid node indices in each sample.
+        n_max: Maximum candidate nodes.
+
+    Returns:
+        (B, T, V) constrained path logits.
+    """
+    B, T, V = logits.shape
+    N = n_max
+    device = logits.device
+
+    vocab_mask = torch.zeros(B, V, dtype=torch.bool, device=device)
+    vocab_mask[:, :N] = node_valid_mask  # (B, N)
+    vocab_mask[:, N] = True  # EOS is always valid
+    vocab_mask = vocab_mask.unsqueeze(1)  # (B, 1, V)
+
+    return torch.where(
+        vocab_mask, logits, torch.tensor(float("-inf"), device=device)
+    )
+
+
+# =============================================================================
 class SeqMazeHRMV2BridgeAdapter(nn.Module):
     """SeqMaze v2 path-prediction bridge over HRM v2 (actor-critic).
 
     Wraps HRModelV2, encodes graph nodes + path queries into schema tokens,
-    runs HRM deliberation, decodes path-region slots into path logits, and
-    exposes policy/critic readouts for RL halt/continue control.
+    runs HRM deliberation, decodes path-region slots into path logits, applies
+    sample-specific output vocabulary masking, and exposes policy/critic
+    readouts for RL halt/continue control.
 
     Validates at construction that:
 
@@ -339,6 +355,7 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
         super().__init__()
         self._config = config or SeqMazeAdapterSettings()
         self.model = model
+        self._node_valid_mask: Tensor | None = None
 
         # Validate profile coupling: N + T <= S
         expected_slots = self._config.n_max + self._config.t_max
@@ -376,7 +393,11 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
         return self.model.reset_state(reset_flag, state)
 
     def prepare_inputs(self, batch: Batch) -> HRMInputV2:
-        """Extract task input from batch and encode into schema tokens."""
+        """Extract task input from batch and encode into schema tokens.
+
+        Caches ``node_mask`` for output vocabulary masking in
+        :meth:`postprocess`.
+        """
         task_input = extract_seqmaze_task_input(batch)
         schema_tokens, schema_mask = self._encoder.forward_padded(
             node_obs_id=task_input.node_obs_id,
@@ -388,15 +409,23 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
             node_mask=task_input.node_mask,
             model_seq_length=self.model.config.num_schema_slots,
         )
+        self._node_valid_mask = task_input.node_mask
         return HRMInputV2(schema_tokens=schema_tokens)
 
     def postprocess(self, outputs: HRMOutputV2) -> SeqMazeHRMV2BridgeOutput:
-        """Decode path-region slots into path logits and expose policy/critic."""
+        """Decode path-region slots into path logits, apply output vocabulary
+        masking, and expose policy/critic readouts."""
         path_logits = self._decoder(
             outputs.schema_slots,
             n_max=self._config.n_max,
             t_max=self._config.t_max,
         )
+        if self._node_valid_mask is not None:
+            path_logits = _apply_seqmaze_output_mask(
+                path_logits,
+                self._node_valid_mask,
+                n_max=self._config.n_max,
+            )
         return SeqMazeHRMV2BridgeOutput(
             task=SeqMazeTaskOutput(path_logits=path_logits),
             policy=SeqMazeHRMV2PolicyOutput(q_values=outputs.q_values),
@@ -427,4 +456,5 @@ __all__ = [
     "SeqMazeHRMV2PolicyOutput",
     "SeqMazeHRMV2CriticOutput",
     "SeqMazeHRMV2BridgeOutput",
+    "_apply_seqmaze_output_mask",
 ]

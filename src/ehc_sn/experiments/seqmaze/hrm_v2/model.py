@@ -77,10 +77,7 @@ def build_seqmaze_hrm_v2_model(
         hidden_state_fields=HRM_HIDDEN_STATE_FIELDS,
     )
     return ActorCriticModule(
-        config=ActorCriticConfig(
-            model_config_path=config.model_config_path,
-            global_batch_size=1,
-        ),
+        config=ActorCriticConfig(model_config_path=config.model_config_path),
         component_configs=components,
         bindings=bindings,
     )

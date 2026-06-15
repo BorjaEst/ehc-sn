@@ -264,6 +264,8 @@ class MazeHardRuntime(TaskRuntime["_MazeHardRuntimeState"]):
                 time.  Lives in :mod:`ehc_sn.tasks.mazehard.reward`; the runtime
                 does not construct it internally.
         """
+        if reward_projector is None:
+            raise ValueError("MazeHardRuntime requires a reward_projector")
         self._halt_action = config.halt_action
         self._episode_horizon = config.episode_horizon
         self._reward_projector = reward_projector

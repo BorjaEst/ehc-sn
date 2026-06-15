@@ -25,7 +25,6 @@ from torch import Tensor
 
 from ehc_sn.types import Batch
 
-
 # =============================================================================
 RuntimeState = TypeVar("RuntimeState")
 

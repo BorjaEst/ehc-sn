@@ -5,7 +5,6 @@ from __future__ import annotations
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
 from ehc_sn.lightning.modules.actor_critic import ActorCriticTrainingConfig
 from ehc_sn.tasks.seqmaze.reward import SeqMazeRewardConfig
-from ehc_sn.tasks.seqmaze.runtime import SeqMazeRuntimeConfig
 from ehc_sn.training.runner import TrainingExperiment
 
 from .config import SeqMazeHRMV2TrainingExperimentConfig
@@ -17,8 +16,7 @@ def build_seqmaze_hrm_v2_training_experiment(
 ) -> TrainingExperiment:
     """Build a complete training experiment for SeqMaze × HRM-v2."""
     module = build_seqmaze_hrm_v2_model(config.model)
-    deliberation = SeqMazeRuntimeConfig()
-    module._deliberation = deliberation
+    module._deliberation = config.deliberation.to_runtime_config()
     module._training_config = ActorCriticTrainingConfig(
         optimizer_supervised=config.training.optimizer_supervised,
         optimizer_rl=config.training.optimizer_rl,

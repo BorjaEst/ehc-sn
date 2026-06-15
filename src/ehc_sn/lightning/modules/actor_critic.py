@@ -162,10 +162,6 @@ class ActorCriticConfig(BaseModel, extra="forbid"):
         description="Number of optimizer steps during which only the "
         "supervised optimizer trains.",
     )
-    global_batch_size: int = Field(
-        ...,
-        description="Global batch size across all devices.",
-    )
 
 
 class ActorCriticModule(L.LightningModule):
@@ -242,24 +238,19 @@ class ActorCriticModule(L.LightningModule):
     def setup(self, stage: Optional[str] = None) -> None:
         """Initialize controller, objective, learner, and val scorer.
 
-        During evaluation (training_config is None), reward config is
-        not available — the runtime is constructed without a reward
-        projector.  The learner is also not needed during eval.
+        During evaluation (training_config is None), reward config defaults
+        to a vanilla instance — the runtime always receives a real projector.
         """
         reward_config = (
             self._training_config.reward
             if self._training_config is not None
-            else None
+            else self._bindings.reward_config_cls()
         )
         if self._deliberation is None:
             raise RuntimeError("deliberation config must be set before setup()")
         runtime = self._bindings.runtime_cls(
             self._deliberation,
-            (
-                self._bindings.reward_projector_cls(reward_config)
-                if reward_config is not None
-                else None
-            ),
+            self._bindings.reward_projector_cls(reward_config),
         )
         self.controller = self._bindings.controller_cls(
             self.adapter,
@@ -400,8 +391,10 @@ class ActorCriticModule(L.LightningModule):
         self._assert_setup()
 
         if self._train_carry is None:
+            local_bs = next(iter(batch.values())).shape[0]
+            world_size_ = max(getattr(self.trainer, "world_size", 1), 1)
             init_batch = self._ensure_episode_source().take(
-                self.config.global_batch_size
+                local_bs * world_size_
             )
             init_batch = _move_batch_to(init_batch, self.device)
             self._train_carry = self.controller.initial_state(init_batch)
@@ -449,8 +442,7 @@ class ActorCriticModule(L.LightningModule):
         step_output = self.objective.compute_step(ac_batch, is_warmup=is_warmup)
 
         local_bs = max(
-            self.config.global_batch_size
-            // max(getattr(self.trainer, "world_size", 1), 1),
+            next(iter(batch.values())).shape[0],
             1,
         )
         loss = normalize_loss_for_backward(step_output.loss, local_bs=local_bs)
