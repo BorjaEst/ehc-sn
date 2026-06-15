@@ -46,7 +46,6 @@ from ehc_sn.lightning.modules.act_supervised import (
 )
 from ehc_sn.logging.tensorboard import LoggerSettings
 from ehc_sn.objectives.act import ACTObjectiveConfig
-from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.schedules import SchedulerConfig
 from ehc_sn.training.stabilization import TargetNetworkConfig
 
@@ -169,6 +168,10 @@ class TrainerConfig(BaseModel, extra="forbid"):
     seed: int = Field(
         default=42,
         description="RNG seed for reproducibility.",
+    )
+    find_unused_parameters: bool = Field(
+        default=False,
+        description="Enable DDP unused-parameter detection for conditional forward graphs.",
     )
 
 

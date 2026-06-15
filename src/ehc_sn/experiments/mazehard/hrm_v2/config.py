@@ -1,4 +1,30 @@
-"""Configuration schemas for the MazeHard × HRM-v2 experiment pairing."""
+"""Configuration schemas for the MazeHard × HRM-v2 experiment pairing.
+
+Hierarchy (training):
+
+    MazeHardHRMV2TrainingExperimentConfig
+    ├── model: MazeHardHRMV2ModelConfig
+    │   └── components: MazeHardHRMV2ComponentConfigs
+    │       ├── adapter: MazeHardHRMAdapterSettings
+    │       ├── controller: DeliberationACControllerConfig | None
+    │       └── objective: HybridRLLossConfig
+    ├── deliberation: MazeHardDeliberationConfig
+    │   ├── halt_action
+    │   └── episode_horizon
+    ├── training: ActorCriticTrainingConfig
+    │   ├── optimizer
+    │   └── runtime
+    ├── data: DatamoduleConfig
+    ├── trainer: TrainerConfig
+    ├── checkpointing: CheckpointingConfig
+    └── logging: LoggerSettings
+
+Hierarchy (evaluation):
+
+    MazeHardHRMV2EvaluationExperimentConfig
+    ├── model: MazeHardHRMV2ModelConfig (same as above)
+    └── deliberation: MazeHardDeliberationConfig (same as above)
+"""
 
 from __future__ import annotations
 
@@ -27,61 +53,170 @@ from ehc_sn.training.stabilization import TargetNetworkConfig
 
 
 class MazeHardDeliberationConfig(BaseModel, extra="forbid"):
-    """MazeHard deliberation / execution policy settings."""
+    """MazeHard deliberation / execution policy settings.
 
-    halt_action: int = Field(default=0, ge=0)
-    episode_horizon: int = Field(default=16, ge=1)
+    Controls how the AC controller runs during inference and evaluation.
+    Not part of model structure -- does not affect parameter shapes or
+    checkpoint compatibility.
+    """
+
+    halt_action: int = Field(
+        default=0,
+        ge=0,
+        description="Action index that signals episode termination.",
+    )
+    episode_horizon: int = Field(
+        default=16,
+        ge=1,
+        description="Maximum number of deliberation steps per episode.",
+    )
 
 
 # =============================================================================
-# Model configuration
+# Model configuration (computational structure only)
 # =============================================================================
 
 
 class MazeHardHRMV2ComponentConfigs(BaseModel, extra="forbid"):
     """Component-level config for MazeHard × HRM-v2."""
 
-    adapter: MazeHardHRMAdapterSettings
-    controller: DeliberationACControllerConfig | None = None
-    objective: HybridRLLossConfig
+    adapter: MazeHardHRMAdapterSettings = Field(
+        ...,
+        description="MazeHard adapter settings for HRM v2.",
+    )
+    controller: DeliberationACControllerConfig | None = Field(
+        default=None,
+        description="Deliberation actor-critic controller configuration. "
+        "None disables the controller during evaluation.",
+    )
+    objective: HybridRLLossConfig = Field(
+        ...,
+        description="Hybrid RL loss configuration.",
+    )
 
 
 class MazeHardHRMV2ModelConfig(BaseModel, extra="forbid"):
-    """Model-level config — computational structure only."""
+    """Model-level config for MazeHard × HRM-v2.
 
-    model_config_path: Path
-    components: MazeHardHRMV2ComponentConfigs
+    Contains computational structure and the model architecture TOML
+    path. Deliberation and training configs are peers at the experiment
+    level.
+    """
+
+    model_config_path: Path = Field(
+        ...,
+        description="Path to the HRM v2 model architecture TOML file.",
+    )
+    components: MazeHardHRMV2ComponentConfigs = Field(
+        ...,
+        description="Task-family component binding (adapter, controller, objective).",
+    )
 
 
 # =============================================================================
-# Infra stubs
+# Trainer / infra config
 # =============================================================================
 
 
 class TrainerConfig(BaseModel, extra="forbid"):
-    accelerator: Literal["auto", "gpu", "cpu"] = "gpu"
-    strategy: Literal["auto", "ddp"] = "ddp"
-    devices: int = 1
-    num_nodes: int = 1
-    precision: str = "16-mixed"
-    max_steps: int = 200000
-    val_check_interval: int = 500
-    log_every_n_steps: int = 10
-    enable_progress_bar: bool = True
-    limit_val_batches: int | float = 1.0
-    seed: int = 42
+    """Lightning Trainer configuration fields."""
+
+    accelerator: Literal["auto", "gpu", "cpu"] = Field(
+        default="gpu",
+        description="Trainer accelerator setting.",
+    )
+    strategy: Literal["auto", "ddp"] = Field(
+        default="ddp",
+        description="Trainer DDP strategy.",
+    )
+    devices: int = Field(
+        default=1,
+        ge=1,
+        description="Number of devices per node.",
+    )
+    num_nodes: int = Field(
+        default=1,
+        ge=1,
+        description="Number of nodes.",
+    )
+    precision: str = Field(
+        default="16-mixed",
+        description="Training precision.",
+    )
+    max_steps: int = Field(
+        default=200000,
+        ge=1,
+        description="Maximum training steps.",
+    )
+    val_check_interval: int = Field(
+        default=500,
+        ge=1,
+        description="Validation check interval in steps.",
+    )
+    log_every_n_steps: int = Field(
+        default=10,
+        ge=1,
+        description="Log metrics every N steps.",
+    )
+    enable_progress_bar: bool = Field(
+        default=True,
+        description="Show progress bar.",
+    )
+    limit_val_batches: int | float = Field(
+        default=1.0,
+        description="Validation batches (int=N, float=fraction).",
+    )
+    seed: int = Field(
+        default=42,
+        ge=0,
+        description="RNG seed for reproducibility.",
+    )
+    find_unused_parameters: bool = Field(
+        default=False,
+        description="Enable DDP find_unused_parameters.",
+    )
 
 
 class CheckpointingConfig(BaseModel, extra="forbid"):
-    checkpoint: Optional[CheckpointSettings] = None
-    resume_from: Optional[str] = None
-    init_weights_from: Optional[str] = None
-    init_weights_groups: list[str] = ["all"]
-    supervised_only_warmup_steps: int = 5000
-    diagnostic_level: Literal["minimal", "standard", "research"] = "standard"
-    non_finite_policy: Literal["drop", "raise"] = "raise"
-    scheduler: SchedulerConfig = SchedulerConfig()
-    checkpoint_every_eval: bool = False
+    """Checkpoint and weight-init settings."""
+
+    checkpoint: Optional[CheckpointSettings] = Field(
+        default=None,
+        description="Model checkpoint settings.",
+    )
+    resume_from: Optional[str] = Field(
+        default=None,
+        description="Checkpoint path to resume full trainer state.",
+    )
+    init_weights_from: Optional[str] = Field(
+        default=None,
+        description="Checkpoint path for model-weight initialization only.",
+    )
+    init_weights_groups: list[str] = Field(
+        default_factory=lambda: ["all"],
+        description="Named weight groups to hydrate from init_weights_from.",
+    )
+    supervised_only_warmup_steps: int = Field(
+        default=5000,
+        ge=0,
+        description="Steps with learned halting disabled.",
+    )
+    diagnostic_level: Literal["minimal", "standard", "research"] = Field(
+        default="standard",
+        description="Instrumentation tier for diagnostic logging.",
+    )
+    non_finite_policy: Literal["drop", "raise"] = Field(
+        default="raise",
+        description="Policy for NaN/Inf diagnostics.",
+    )
+    scheduler: SchedulerConfig = Field(
+        default_factory=SchedulerConfig,
+        description="LR scheduler config.",
+    )
+    checkpoint_every_eval: bool = Field(
+        default=False,
+        description="Checkpoint after every evaluation.",
+    )
 
 
 # =============================================================================
@@ -90,15 +225,58 @@ class CheckpointingConfig(BaseModel, extra="forbid"):
 
 
 class MazeHardHRMV2TrainingExperimentConfig(BaseModel, extra="forbid"):
-    model: MazeHardHRMV2ModelConfig
-    deliberation: MazeHardDeliberationConfig
-    training: ActorCriticTrainingConfig
-    data: DatamoduleConfig
-    trainer: TrainerConfig = TrainerConfig()
-    checkpointing: CheckpointingConfig = CheckpointingConfig()
-    logging: Optional[LoggerSettings] = None
+    """Full training application configuration for MazeHard × HRM-v2."""
+
+    model: MazeHardHRMV2ModelConfig = Field(
+        ...,
+        description="Model structure (components + architecture path).",
+    )
+    deliberation: MazeHardDeliberationConfig = Field(
+        default_factory=MazeHardDeliberationConfig,
+        description="Execution / deliberation policy. Defaults are safe for training.",
+    )
+    training: ActorCriticTrainingConfig = Field(
+        ...,
+        description="Actor-critic training configuration.",
+    )
+    data: DatamoduleConfig = Field(
+        ...,
+        description="Dataset and DataLoader settings.",
+    )
+    trainer: TrainerConfig = Field(
+        default_factory=TrainerConfig,
+        description="Lightning Trainer settings.",
+    )
+    checkpointing: CheckpointingConfig = Field(
+        default_factory=CheckpointingConfig,
+        description="Checkpoint, weight-init, and diagnostic settings.",
+    )
+    logging: Optional[LoggerSettings] = Field(
+        default=None,
+        description="TensorBoard logger settings.",
+    )
 
 
 class MazeHardHRMV2EvaluationExperimentConfig(BaseModel, extra="forbid"):
-    model: MazeHardHRMV2ModelConfig
-    deliberation: MazeHardDeliberationConfig
+    """Full evaluation application configuration for MazeHard × HRM-v2."""
+
+    model: MazeHardHRMV2ModelConfig = Field(
+        ...,
+        description="Model structure (components only).",
+    )
+    deliberation: MazeHardDeliberationConfig = Field(
+        default_factory=MazeHardDeliberationConfig,
+        description="Execution / deliberation policy. Defaults are safe for evaluation.",
+    )
+
+
+# =============================================================================
+__all__ = [
+    "MazeHardDeliberationConfig",
+    "MazeHardHRMV2ComponentConfigs",
+    "MazeHardHRMV2ModelConfig",
+    "MazeHardHRMV2TrainingExperimentConfig",
+    "MazeHardHRMV2EvaluationExperimentConfig",
+    "TrainerConfig",
+    "CheckpointingConfig",
+]

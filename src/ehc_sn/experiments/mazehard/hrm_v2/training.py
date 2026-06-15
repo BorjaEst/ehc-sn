@@ -48,6 +48,8 @@ def build_mazehard_hrm_v2_training_experiment(
         module=module,
         datamodule=datamodule,
         trainer=config.trainer,
+        checkpointing=config.checkpointing,
+        logging=config.logging,
     )
 
 

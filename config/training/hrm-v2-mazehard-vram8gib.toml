@@ -1,7 +1,5 @@
 # Training config — MazeHard × HRM-v2 (nested experiment schema)
 # =============================================================================
-# Based on: config/training/hrm-v2-mazehard-vram8gib.toml
-# =============================================================================
 
 [model]
     model_config_path = "config/models/hrm-v2-base.toml"
@@ -44,7 +42,7 @@
 
 [data]
     dataset_path         = "data/processed/mazehard/default/v1"
-    global_batch_size    = 25
+    global_batch_size    = 100
     num_workers          = 4
     prefetch_factor      = 2
     pin_memory           = true

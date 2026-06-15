@@ -101,43 +101,49 @@ def _configure_torch() -> None:
 
 
 def _build_callbacks(  # ------------------------------------------------------
-    settings: BaseModel,
+    checkpointing_config: Any | None = None,
+    *,
+    eval_regimes: EvaluationRegimesCallbackSettings | None = None,
+    diagnostics: DiagnosticsSettings | None = None,
+    lr_monitor: LearningRateMonitorSettings | None = None,
+    figures: FigureGenerationSettings | None = None,
 ) -> list[object]:
-    """Construct callback list from readable settings fields.
+    """Construct callback list from structured config.
 
-    Each callback is optional; the method checks the appropriate settings
-    field and creates the callback only when configured.
+    Parameters
+    ----------
+    checkpointing_config:
+        Object with ``checkpoint``, ``diagnostic_level``, and ``diagnostics``
+        attributes.  Supplied by the migrated path (``experiment.checkpointing``).
+    eval_regimes, diagnostics, lr_monitor, figures:
+        Keyword-only overrides used by the legacy path only.
     """
     callbacks: list[object] = [MetricsCallback(), StepProgressBar()]
 
-    eval_regimes: EvaluationRegimesCallbackSettings | None = getattr(
-        settings, "eval_regimes", None
-    )
     if eval_regimes is not None:
         callbacks.append(EvaluationRegimesCallback(eval_regimes))
 
-    checkpoint: CheckpointSettings | None = getattr(
-        settings, "checkpoint", None
-    )
-    if checkpoint is not None:
-        callbacks.append(CheckpointCallback(checkpoint))
+    if checkpointing_config is not None:
+        ckpt: CheckpointSettings | None = getattr(
+            checkpointing_config, "checkpoint", None
+        )
+        if ckpt is not None:
+            callbacks.append(CheckpointCallback(ckpt))
 
-    diag_level = getattr(settings, "diagnostic_level", "minimal")
-    diagnostics: DiagnosticsSettings | None = getattr(
-        settings, "diagnostics", None
-    )
-    if diag_level != "minimal" and diagnostics is not None:
-        callbacks.append(DiagnosticsCallback(diagnostics))
+        diag_level: str = getattr(
+            checkpointing_config, "diagnostic_level", "minimal"
+        )
+        diag: DiagnosticsSettings | None = (
+            diagnostics
+            if diagnostics is not None
+            else getattr(checkpointing_config, "diagnostics", None)
+        )
+        if diag_level != "minimal" and diag is not None:
+            callbacks.append(DiagnosticsCallback(diag))
 
-    lr_monitor: LearningRateMonitorSettings | None = getattr(
-        settings, "lr_monitor", None
-    )
     if lr_monitor is not None:
         callbacks.append(LearningRateMonitor(lr_monitor))
 
-    figures: FigureGenerationSettings | None = getattr(
-        settings, "figures", None
-    )
     if figures is not None:
         callbacks.append(FigureGenerationCallback(figures))
 
@@ -145,41 +151,44 @@ def _build_callbacks(  # ------------------------------------------------------
 
 
 def _build_logger(  # ---------------------------------------------------------
-    settings: BaseModel,
+    logger_settings: LoggerSettings | None = None,
 ) -> object | None:
     """Construct TensorBoard logger if configured."""
-    logger_settings: LoggerSettings | None = getattr(settings, "logger", None)
     if logger_settings is not None:
         return Logger(logger_settings)
     return None
 
 
-def _build_trainer(  # --------------------------------------------------------
-    settings: BaseModel,
-    callbacks: list[object],
-    world_size: int,
-    find_unused_parameters: bool,
+def _build_trainer_from_config(  # --------------------------------------------
+    trainer_config: Any,
+    *,
+    logger: object | None = None,
+    callbacks: list[object] | None = None,
+    world_size: int = 1,
+    find_unused_parameters: bool = False,
 ) -> Trainer:
-    """Construct the PyTorch Lightning ``Trainer`` from flat settings fields."""
+    """Construct the PyTorch Lightning ``Trainer`` from a typed config object."""
     return Trainer(
-        logger=_build_logger(settings),
+        logger=logger,
         callbacks=callbacks if callbacks else None,
-        accelerator=getattr(settings, "trainer_accelerator", "gpu"),
+        accelerator=getattr(trainer_config, "accelerator", "gpu"),
         strategy=resolve_trainer_strategy(
-            getattr(settings, "trainer_strategy", "ddp"),
+            getattr(trainer_config, "strategy", "ddp"),
             world_size,
             find_unused_parameters=find_unused_parameters,
         ),
-        devices=getattr(settings, "trainer_devices", 1),
-        num_nodes=getattr(settings, "trainer_num_nodes", 1),
-        precision=getattr(settings, "trainer_precision", "16-mixed"),
+        devices=getattr(trainer_config, "devices", 1),
+        num_nodes=getattr(trainer_config, "num_nodes", 1),
+        precision=getattr(trainer_config, "precision", "16-mixed"),
         max_epochs=-1,
-        max_steps=getattr(settings, "max_steps", 200000),
-        val_check_interval=getattr(settings, "val_check_interval", 500),
+        max_steps=getattr(trainer_config, "max_steps", 200000),
+        val_check_interval=getattr(trainer_config, "val_check_interval", 500),
         check_val_every_n_epoch=None,
-        limit_val_batches=getattr(settings, "limit_val_batches", 1.0),
-        log_every_n_steps=getattr(settings, "log_every_n_steps", 10),
-        enable_progress_bar=getattr(settings, "enable_progress_bar", True),
+        limit_val_batches=getattr(trainer_config, "limit_val_batches", 1.0),
+        log_every_n_steps=getattr(trainer_config, "log_every_n_steps", 10),
+        enable_progress_bar=getattr(
+            trainer_config, "enable_progress_bar", True
+        ),
     )
 
 
@@ -193,12 +202,15 @@ class TrainingExperiment:
     """Fully assembled training experiment.
 
     Produced by a task-family ``build_training_experiment`` function and
-    consumed by ``run_training``.
+    consumed by ``run_training``.  Trainer, checkpointing, and logging
+    configs are passed through to shared orchestration helpers.
     """
 
     module: Any  # LightningModule
     datamodule: Any  # LightningDataModule
-    trainer: Any | None = None  # TrainerConfig (optional, backfilled by runner)
+    trainer: Any | None = None  # TrainerConfig
+    checkpointing: Any | None = None  # CheckpointingConfig
+    logging: Any | None = None  # LoggerSettings
 
 
 # =============================================================================
@@ -257,9 +269,22 @@ def run_training(  # ----------------------------------------------------------
     )
     seed_everything(getattr(settings, "seed", 42))
 
-    callbacks = _build_callbacks(settings)
-    trainer = _build_trainer(
-        settings, callbacks, world_size, spec.find_unused_parameters
+    logger = _build_logger(
+        logger_settings=getattr(settings, "logger", None),
+    )
+    callbacks = _build_callbacks(
+        checkpointing_config=settings,
+        eval_regimes=getattr(settings, "eval_regimes", None),
+        diagnostics=getattr(settings, "diagnostics", None),
+        lr_monitor=getattr(settings, "lr_monitor", None),
+        figures=getattr(settings, "figures", None),
+    )
+    trainer = _build_trainer_from_config(
+        settings,
+        logger=logger,
+        callbacks=callbacks,
+        world_size=world_size,
+        find_unused_parameters=spec.find_unused_parameters,
     )
 
     # Build the experiment (LightningModule)
@@ -301,25 +326,38 @@ def _run_training_experiment(  # ---------------------------------------------
 ) -> None:
     """Execute training from a pre-assembled ``TrainingExperiment``."""
     _configure_torch()
-    seed_everything(42)
+    seed_everything(getattr(experiment.trainer, "seed", 42))
 
-    trainer = Trainer(
-        accelerator=experiment.trainer.accelerator,
-        strategy=experiment.trainer.strategy,
-        devices=experiment.trainer.devices,
-        num_nodes=experiment.trainer.num_nodes,
-        precision=experiment.trainer.precision,
-        max_epochs=-1,
-        max_steps=experiment.trainer.max_steps,
-        val_check_interval=experiment.trainer.val_check_interval,
-        check_val_every_n_epoch=None,
-        limit_val_batches=experiment.trainer.limit_val_batches,
-        log_every_n_steps=experiment.trainer.log_every_n_steps,
-        enable_progress_bar=experiment.trainer.enable_progress_bar,
+    world_size = resolve_effective_world_size(
+        getattr(experiment.trainer, "strategy", "ddp"),
+        getattr(experiment.trainer, "devices", 1),
+        getattr(experiment.trainer, "num_nodes", 1),
     )
+
+    logger = _build_logger(
+        logger_settings=experiment.logging,
+    )
+    callbacks = _build_callbacks(
+        checkpointing_config=experiment.checkpointing,
+    )
+    trainer = _build_trainer_from_config(
+        experiment.trainer,
+        logger=logger,
+        callbacks=callbacks,
+        world_size=world_size,
+        find_unused_parameters=getattr(
+            experiment.trainer, "find_unused_parameters", False
+        ),
+    )
+
+    ckpt_path: str | None = None
+    if experiment.checkpointing is not None:
+        ckpt_path = getattr(experiment.checkpointing, "resume_from", None)
+
     trainer.fit(
         model=experiment.module,
         datamodule=experiment.datamodule,
+        ckpt_path=ckpt_path,
     )
 
 

@@ -30,6 +30,8 @@ def build_arena_tem_v1_training_experiment(
         module=module,
         datamodule=datamodule,
         trainer=config.trainer,
+        checkpointing=config.checkpointing,
+        logging=config.logging,
     )
 
 
