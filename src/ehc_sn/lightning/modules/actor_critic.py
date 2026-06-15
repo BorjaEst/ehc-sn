@@ -384,7 +384,11 @@ class ActorCriticModule(L.LightningModule):
             train_dataset,
             rank=rank,
             world_size=world_size,
-            seed=self._component_configs.hrm_runtime.validation.seed or 42,
+            seed=(
+                self._training_config.hrm_runtime.validation.seed or 42
+                if self._training_config is not None
+                else 42
+            ),
         )
         return self._episode_source
 
@@ -561,21 +565,13 @@ class ActorCriticModule(L.LightningModule):
             carry=self.controller.initial_state(case.batch),
             objective=self.val_scorer,
             max_rollout_steps=(
-                self._component_configs.hrm_runtime.validation.max_rollout_steps
-                if hasattr(self._component_configs.hrm_runtime, "validation")
-                and hasattr(
-                    self._component_configs.hrm_runtime.validation,
-                    "max_rollout_steps",
-                )
+                self._training_config.hrm_runtime.validation.max_rollout_steps
+                if self._training_config is not None
                 else None
             ),
             hard_max_rollout_steps=(
-                self._component_configs.hrm_runtime.validation.hard_max_rollout_steps
+                self._training_config.hrm_runtime.validation.hard_max_rollout_steps
                 if self._training_config is not None
-                and hasattr(
-                    self._training_config.hrm_runtime.validation,
-                    "hard_max_rollout_steps",
-                )
                 else None
             ),
             runner_options={

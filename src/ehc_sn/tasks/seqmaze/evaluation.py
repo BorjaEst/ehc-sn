@@ -452,7 +452,7 @@ def build_seqmaze_step_score(
 
     # goal_reached
     goal_idx = (
-        goal_candidate_index.argmax(dim=-1)
+        goal_candidate_index.float().argmax(dim=-1)
         if goal_candidate_index.ndim == 2
         else goal_candidate_index
     )
@@ -664,7 +664,7 @@ def compute_seqmaze_score_report(
     # --- reaches_goal ---
     # Goal token is the one with goal_flag. We get the candidate index from goal_candidate_index.
     goal_idx = (
-        goal_candidate_index.argmax(dim=-1)
+        goal_candidate_index.float().argmax(dim=-1)
         if goal_candidate_index.ndim == 2
         else goal_candidate_index
     )  # (B,)
