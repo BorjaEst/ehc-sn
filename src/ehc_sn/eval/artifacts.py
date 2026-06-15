@@ -322,7 +322,12 @@ def _build_executor_from_family_artifact(
     model_family: str,
     config_map: dict[str, Any],
 ) -> Any:
-    """Instantiate one training/evaluation executor for a supported family."""
+    """Instantiate one training/evaluation executor for a supported family.
+
+    Constructs only the typed configs needed for inference (components
+    + runtime/deliberation).  Training-only configs (optimizers, reward
+    shaping) are never constructed.
+    """
     _FAMILY_TO_PARADIGM = {
         "tem-v1": "tem",
         "tem-v2": "tem",
@@ -333,28 +338,153 @@ def _build_executor_from_family_artifact(
     paradigm = _FAMILY_TO_PARADIGM.get(model_family, model_family.split("-")[0])
 
     if model_family == "hrm-v1":
-        from ehc_sn.experiments.mazehard.hrm_v1 import (
-            build_experiment as _build,
+        from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
+        from ehc_sn.controllers.deliberation.act import ACTControllerConfig
+        from ehc_sn.experiments.mazehard.hrm_v1.config import (
+            MazeHardHRMV1ComponentConfigs,
+            MazeHardHRMV1EvaluationExperimentConfig,
+            MazeHardHRMV1ModelConfig,
         )
+        from ehc_sn.experiments.mazehard.hrm_v1.evaluation import (
+            build_mazehard_hrm_v1_evaluation_executor,
+        )
+        from ehc_sn.objectives.act import ACTObjectiveConfig
+        from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
 
-        executor = _build(config_map)
+        model_config = MazeHardHRMV1ModelConfig(
+            model_config_path=config_map.get("model_config_path", ""),
+            components=MazeHardHRMV1ComponentConfigs(
+                adapter=MazeHardHRMAdapterSettings.model_validate(
+                    config_map["adapter"]
+                ),
+                controller=ACTControllerConfig.model_validate(
+                    config_map["controller"]
+                ),
+                objective=ACTObjectiveConfig.model_validate(
+                    config_map["objective"]
+                ),
+            ),
+        )
+        eval_config = MazeHardHRMV1EvaluationExperimentConfig(
+            model=model_config,
+        )
+        runtime = (
+            HRMRuntimeConfig.model_validate(config_map["runtime"])
+            if "runtime" in config_map
+            else None
+        )
+        executor = build_mazehard_hrm_v1_evaluation_executor(
+            eval_config, runtime=runtime
+        )
 
     elif model_family == "hrm-v2":
-        from ehc_sn.experiments.mazehard.hrm_v2 import (
-            build_experiment as _build,
+        from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
+        from ehc_sn.controllers.deliberation.actor_critic import (
+            DeliberationACControllerConfig,
         )
+        from ehc_sn.experiments.mazehard.hrm_v2.config import (
+            MazeHardDeliberationConfig,
+            MazeHardHRMV2ComponentConfigs,
+            MazeHardHRMV2EvaluationExperimentConfig,
+            MazeHardHRMV2ModelConfig,
+        )
+        from ehc_sn.experiments.mazehard.hrm_v2.evaluation import (
+            build_mazehard_hrm_v2_evaluation_executor,
+        )
+        from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig
 
-        executor = _build(config_map)
+        controller_raw = config_map.get("controller")
+        model_config = MazeHardHRMV2ModelConfig(
+            model_config_path=config_map.get("model_config_path", ""),
+            components=MazeHardHRMV2ComponentConfigs(
+                adapter=MazeHardHRMAdapterSettings.model_validate(
+                    config_map["adapter"]
+                ),
+                controller=(
+                    DeliberationACControllerConfig.model_validate(
+                        controller_raw
+                    )
+                    if controller_raw is not None
+                    else None
+                ),
+                objective=HybridRLLossConfig.model_validate(
+                    config_map["objective"]
+                ),
+            ),
+        )
+        deliberation_raw = config_map.get("deliberation", {})
+        eval_config = MazeHardHRMV2EvaluationExperimentConfig(
+            model=model_config,
+            deliberation=MazeHardDeliberationConfig(
+                halt_action=deliberation_raw.get("halt_action", 0),
+                episode_horizon=deliberation_raw.get("episode_horizon", 16),
+            ),
+        )
+        executor = build_mazehard_hrm_v2_evaluation_executor(eval_config)
 
     elif model_family == "tem-v1":
-        from ehc_sn.experiments.arena.tem_v1 import build_experiment as _build
+        from ehc_sn.adapters.tem import ArenaTEMAdapterSettings
+        from ehc_sn.controllers.replay.trajectory import (
+            ReplayTrajectoryControllerConfig,
+        )
+        from ehc_sn.experiments.arena.tem_v1.config import (
+            ArenaTEMV1ComponentConfigs,
+            ArenaTEMV1EvaluationExperimentConfig,
+            ArenaTEMV1ModelConfig,
+        )
+        from ehc_sn.experiments.arena.tem_v1.evaluation import (
+            build_arena_tem_v1_evaluation_executor,
+        )
+        from ehc_sn.objectives.tem import TEMObjectiveConfig
 
-        executor = _build(config_map)
+        model_config = ArenaTEMV1ModelConfig(
+            model_config_path=config_map.get("model_config_path", ""),
+            components=ArenaTEMV1ComponentConfigs(
+                adapter=ArenaTEMAdapterSettings.model_validate(
+                    config_map["adapter"]
+                ),
+                controller=ReplayTrajectoryControllerConfig.model_validate(
+                    config_map["controller"]
+                ),
+                objective=TEMObjectiveConfig.model_validate(
+                    config_map["objective"]
+                ),
+            ),
+        )
+        eval_config = ArenaTEMV1EvaluationExperimentConfig(model=model_config)
+        executor = build_arena_tem_v1_evaluation_executor(eval_config)
 
     elif model_family == "tem-v2":
-        from ehc_sn.experiments.arena.tem_v2 import build_experiment as _build
+        from ehc_sn.adapters.tem import ArenaTEMAdapterSettings
+        from ehc_sn.controllers.replay.trajectory import (
+            ReplayTrajectoryControllerConfig,
+        )
+        from ehc_sn.experiments.arena.tem_v2.config import (
+            ArenaTEMV2ComponentConfigs,
+            ArenaTEMV2EvaluationExperimentConfig,
+            ArenaTEMV2ModelConfig,
+        )
+        from ehc_sn.experiments.arena.tem_v2.evaluation import (
+            build_arena_tem_v2_evaluation_executor,
+        )
+        from ehc_sn.objectives.tem import TEMObjectiveConfig
 
-        executor = _build(config_map)
+        model_config = ArenaTEMV2ModelConfig(
+            model_config_path=config_map.get("model_config_path", ""),
+            components=ArenaTEMV2ComponentConfigs(
+                adapter=ArenaTEMAdapterSettings.model_validate(
+                    config_map["adapter"]
+                ),
+                controller=ReplayTrajectoryControllerConfig.model_validate(
+                    config_map["controller"]
+                ),
+                objective=TEMObjectiveConfig.model_validate(
+                    config_map["objective"]
+                ),
+            ),
+        )
+        eval_config = ArenaTEMV2EvaluationExperimentConfig(model=model_config)
+        executor = build_arena_tem_v2_evaluation_executor(eval_config)
 
     else:
         raise ValueError(

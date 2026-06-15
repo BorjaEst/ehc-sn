@@ -1,12 +1,4 @@
-"""SeqMaze + HRM v2 experiment (hybrid actor-critic).
-
-Composition:
-    model: HRModelV2
-    adapter: SeqMazeHRMV2BridgeAdapter
-    controller: DeliberationACController
-    objective: HybridRLObjective
-    regime module: ActorCriticModule
-"""
+"""Model constructor for SeqMaze × HRM-v2."""
 
 from __future__ import annotations
 
@@ -49,29 +41,14 @@ from ehc_sn.training.actor_critic import (
 )
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 
+from .config import SeqMazeHRMV2ModelConfig
 
-def build_experiment(
-    config: ActorCriticConfig,
-    components: ActorCriticComponentConfigs,
-    deliberation: SeqMazeRuntimeConfig,
-    training: ActorCriticTrainingConfig | None = None,
+
+def build_seqmaze_hrm_v2_model(
+    config: SeqMazeHRMV2ModelConfig,
 ) -> ActorCriticModule:
-    """Build an ActorCriticModule from typed sub-configs.
-
-    ``training`` is ``None`` during evaluation.
-
-    Args:
-        config: Regime-owned settings (model_config_path, scheduler,
-            warmup, batch scale).
-        components: Component configs (adapter, controller, objective).
-        deliberation: Task runtime config (halt_action, episode_horizon).
-        training: Optional training config (optimizers, reward shaping).
-
-    Returns:
-        Instantiated
-        :class:`~ehc_sn.lightning.modules.actor_critic.ActorCriticModule`.
-    """
-    # Derive constants from adapter config for task binding
+    """Construct an ActorCriticModule for SeqMaze × HRM-v2."""
+    components: ActorCriticComponentConfigs = config.components  # type: ignore[assignment]
     adapter_settings: SeqMazeAdapterSettings = components.adapter  # type: ignore[assignment]
     n_max = adapter_settings.n_max
 
@@ -99,14 +76,38 @@ def build_experiment(
         episode_routes=RL_EPISODE_ROUTES,
         hidden_state_fields=HRM_HIDDEN_STATE_FIELDS,
     )
-    module = ActorCriticModule(
-        config=config,
+    return ActorCriticModule(
+        config=ActorCriticConfig(
+            model_config_path=config.model_config_path,
+            global_batch_size=1,
+        ),
         component_configs=components,
         bindings=bindings,
-        training_config=training,
     )
-    module._deliberation = deliberation
+
+
+def build_experiment(
+    config: ActorCriticConfig,
+    components: ActorCriticComponentConfigs,
+    deliberation: SeqMazeRuntimeConfig,
+    training: ActorCriticTrainingConfig | None = None,
+) -> ActorCriticModule:
+    """Backward-compat builder — delegates to ``build_seqmaze_hrm_v2_model``."""
+    from .config import SeqMazeHRMV2ComponentConfigs, SeqMazeHRMV2ModelConfig
+
+    model_config = SeqMazeHRMV2ModelConfig(
+        model_config_path=config.model_config_path,
+        components=SeqMazeHRMV2ComponentConfigs(
+            adapter=components.adapter,
+            controller=components.controller,
+            objective=components.objective,
+        ),
+    )
+    module = build_seqmaze_hrm_v2_model(model_config)
+    if training is not None:
+        module._deliberation = deliberation
+        module._training_config = training
     return module
 
 
-__all__ = ["build_experiment"]
+__all__ = ["build_experiment", "build_seqmaze_hrm_v2_model"]

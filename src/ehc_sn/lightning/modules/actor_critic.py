@@ -83,34 +83,13 @@ class ActorCriticBindings:
     hidden_state_fields: tuple
 
 
-class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
-    """Concrete component configs for an actor-critic experiment.
+class ActorCriticTrainingConfig(BaseModel, extra="forbid"):
+    """Training-only configuration for an actor-critic experiment.
 
-    Validated and populated by the experiment builder, consumed by
-    the regime module.  Fields hold opaque validated configs whose
-    concrete Pydantic types are determined by the experiment builder.
+    Not required for evaluation — only used to construct optimizers
+    and reward projection during training.
     """
 
-    adapter: BaseModel = Field(
-        ...,
-        description="Adapter settings (task-specific, validated by experiment builder).",
-    )
-    runtime: BaseModel = Field(
-        ...,
-        description="Runtime config for the task environment (action semantics, step budget).",
-    )
-    reward: BaseModel = Field(
-        ...,
-        description="Reward configuration for stop-time projection.",
-    )
-    controller: DeliberationACControllerConfig = Field(
-        default_factory=lambda: None,
-        description="Deliberation AC controller configuration.",
-    )
-    objective: HybridRLLossConfig = Field(
-        ...,
-        description="Hybrid RL objective configuration.",
-    )
     optimizer_supervised: AdamATan2Config = Field(
         ...,
         description="Optimizer config for supervised parameters.",
@@ -123,9 +102,40 @@ class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
         ...,
         description="Optimizer config for vmPFC parameters.",
     )
+    reward: dict = Field(
+        ...,
+        description="Training-only reward configuration dict.  Concrete "
+        "validation (MazeHardRewardConfig, SeqMazeRewardConfig) is "
+        "performed by the training experiment builder.",
+    )
     hrm_runtime: HRMRuntimeConfig = Field(
         ...,
         description="HRM runtime configuration (validation safety limits).",
+    )
+
+
+class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
+    """Concrete component configs for an actor-critic experiment.
+
+    Validated and populated by the experiment builder, consumed by
+    the regime module.  Fields hold opaque validated configs whose
+    concrete Pydantic types are determined by the experiment builder.
+    Contains only the configs needed to construct the computational
+    graph — optimizers and training-only settings live in
+    :class:`ActorCriticTrainingConfig`.
+    """
+
+    adapter: BaseModel = Field(
+        ...,
+        description="Adapter settings (task-specific, validated by experiment builder).",
+    )
+    controller: DeliberationACControllerConfig = Field(
+        default_factory=lambda: None,
+        description="Deliberation AC controller configuration.",
+    )
+    objective: HybridRLLossConfig = Field(
+        ...,
+        description="Hybrid RL objective configuration.",
     )
 
 
@@ -172,10 +182,12 @@ class ActorCriticModule(L.LightningModule):
         config: ActorCriticConfig,
         component_configs: ActorCriticComponentConfigs,
         bindings: ActorCriticBindings,
+        training_config: ActorCriticTrainingConfig | None = None,
     ) -> None:
         super().__init__()
         self._bindings = bindings
         self._component_configs = component_configs
+        self._training_config = training_config
 
         model_settings = bindings.model_settings_cls.from_config(
             config.model_config_path
@@ -218,17 +230,36 @@ class ActorCriticModule(L.LightningModule):
             prefix="val_diag/",
         )
 
-        # No batch buffer — demand-driven admission.
+        # Deliberation (task runtime config) is required for both training
+        # and evaluation.  It is set by the experiment builder after init
+        # via setter, since the module is constructed before setup().
+        self._deliberation: Any = None
 
     @property
     def config(self) -> ActorCriticConfig:
         return self._config
 
     def setup(self, stage: Optional[str] = None) -> None:
-        """Initialize controller, objective, learner, and val scorer."""
+        """Initialize controller, objective, learner, and val scorer.
+
+        During evaluation (training_config is None), reward config is
+        not available — the runtime is constructed without a reward
+        projector.  The learner is also not needed during eval.
+        """
+        reward_config = (
+            self._training_config.reward
+            if self._training_config is not None
+            else None
+        )
+        if self._deliberation is None:
+            raise RuntimeError(
+                "deliberation config must be set before setup()"
+            )
         runtime = self._bindings.runtime_cls(
-            self._component_configs.runtime,
-            self._bindings.reward_projector_cls(self._component_configs.reward),
+            self._deliberation,
+            self._bindings.reward_projector_cls(reward_config)
+            if reward_config is not None
+            else None,
         )
         self.controller = self._bindings.controller_cls(
             self.adapter,
@@ -261,9 +292,12 @@ class ActorCriticModule(L.LightningModule):
 
     def configure_optimizers(  # ----------------------------------------------
         self,
-    ) -> tuple[list[Optimizer], list[dict[str, Any]]]:
+    ) -> tuple[list[Optimizer], list[dict[str, Any]]] | list[Optimizer]:
+        if self._training_config is None:
+            return []
         total_steps = int(self.trainer.estimated_stepping_batches)
         c = self._bindings
+        tc = self._training_config
 
         vmPFC_ids = {id(p) for p in self.model.pfc.estimator.parameters()}
         str_ids = {id(p) for p in self.model.str.parameters()}
@@ -273,15 +307,15 @@ class ActorCriticModule(L.LightningModule):
         ]
 
         opt_sup = c.optimizer_cls(
-            sup_params, self._component_configs.optimizer_supervised
+            sup_params, tc.optimizer_supervised
         )
         opt_rl = c.optimizer_cls(
             list(self.model.str.parameters()),
-            self._component_configs.optimizer_rl,
+            tc.optimizer_rl,
         )
         opt_qv = c.optimizer_cls(
             list(self.model.pfc.estimator.parameters()),
-            self._component_configs.optimizer_qv,
+            tc.optimizer_qv,
         )
 
         schedulers: list[dict[str, Any]] = [
@@ -388,8 +422,8 @@ class ActorCriticModule(L.LightningModule):
             runner_options={
                 "allow_halt": not is_warmup,
                 "explore": True,
-                "halt_action": self._component_configs.runtime.halt_action,
-                "max_halt_steps": self._component_configs.runtime.episode_horizon,
+                "halt_action": self._deliberation.halt_action,
+                "max_halt_steps": self._deliberation.episode_horizon,
             },
         )
         self._train_carry = execution.final_carry.detach()
@@ -539,9 +573,9 @@ class ActorCriticModule(L.LightningModule):
             ),
             hard_max_rollout_steps=(
                 self._component_configs.hrm_runtime.validation.hard_max_rollout_steps
-                if hasattr(self._component_configs.hrm_runtime, "validation")
+                if self._training_config is not None
                 and hasattr(
-                    self._component_configs.hrm_runtime.validation,
+                    self._training_config.hrm_runtime.validation,
                     "hard_max_rollout_steps",
                 )
                 else None
@@ -549,8 +583,8 @@ class ActorCriticModule(L.LightningModule):
             runner_options={
                 "explore": False,
                 "allow_halt": False,
-                "halt_action": self._component_configs.runtime.halt_action,
-                "max_halt_steps": self._component_configs.runtime.episode_horizon,
+                "halt_action": self._deliberation.halt_action,
+                "max_halt_steps": self._deliberation.episode_horizon,
             },
             trace_request=trace_request,
         )

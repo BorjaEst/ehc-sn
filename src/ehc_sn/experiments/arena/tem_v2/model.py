@@ -1,12 +1,4 @@
-"""Arena + TEM v2 experiment.
-
-Composition:
-    model: TEMModelV2
-    adapter: ArenaTEMV2BridgeAdapter
-    controller: ReplayTrajectoryController
-    objective: TEMObjective
-    regime module: VariationalReplayModule
-"""
+"""Model constructor for Arena × TEM-v2."""
 
 from __future__ import annotations
 
@@ -30,20 +22,14 @@ from ehc_sn.models.tem.tem_v2 import ModelSettingsV2, TEMModelV2
 from ehc_sn.objectives.tem import TEMObjectiveConfig
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
 
+from .config import ArenaTEMV2ModelConfig
 
-def build_experiment(
-    config: VariationalReplayConfig,
-    components: VariationalReplayComponentConfigs,
+
+def build_arena_tem_v2_model(
+    config: ArenaTEMV2ModelConfig,
 ) -> VariationalReplayModule:
-    """Build a VariationalReplayModule from typed sub-configs.
+    components: VariationalReplayComponentConfigs = config.components  # type: ignore[assignment]
 
-    Args:
-        config: Regime-owned settings (model_config_path).
-        components: Component configs (adapter, controller, objective).
-
-    Returns:
-        Instantiated :class:`~ehc_sn.lightning.modules.variational_replay.VariationalReplayModule`.
-    """
     bindings = VariationalReplayBindings(
         model_cls=TEMModelV2,
         model_settings_cls=ModelSettingsV2,
@@ -55,10 +41,29 @@ def build_experiment(
         task_binding_factory=ArenaTEMTaskBinding,
     )
     return VariationalReplayModule(
-        config=config,
+        config=VariationalReplayConfig(
+            model_config_path=config.model_config_path,
+        ),
         component_configs=components,
         bindings=bindings,
     )
 
 
-__all__ = ["build_experiment"]
+def build_experiment(
+    config: VariationalReplayConfig,
+    components: VariationalReplayComponentConfigs,
+) -> VariationalReplayModule:
+    """Backward-compat builder — delegates to ``build_arena_tem_v2_model``."""
+    return build_arena_tem_v2_model(
+        ArenaTEMV2ModelConfig(
+            model_config_path=config.model_config_path,
+            components=type(ArenaTEMV2ModelConfig.model_fields["components"])(
+                adapter=components.adapter,
+                controller=components.controller,
+                objective=components.objective,
+            ),
+        )
+    )
+
+
+__all__ = ["build_experiment", "build_arena_tem_v2_model"]

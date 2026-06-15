@@ -86,11 +86,31 @@ class ACTSupervisedBindings:
     task_scorer_factory: Callable[[], Any] | None = None
 
 
+class ACTSupervisedTrainingConfig(BaseModel, extra="forbid"):
+    """Training-only configuration for an ACT-supervised experiment.
+
+    Not required for evaluation — only used to construct optimizers
+    and instantiate the training loop.
+    """
+
+    optimizer: AdamATan2Config = Field(
+        ...,
+        description="Family-specific optimizer configuration.",
+    )
+    runtime: HRMRuntimeConfig = Field(
+        ...,
+        description="HRM/ACT runtime configuration (validation safety limits).",
+    )
+
+
 class ACTSupervisedComponentConfigs(BaseModel, extra="forbid"):
     """Concrete component configs for an ACT-supervised experiment.
 
     Validated and populated by the experiment builder, consumed by
     the regime module.  Fields carry concrete Pydantic types.
+    Contains only the configs needed to construct the computational
+    graph — optimizers and training-only settings live in
+    :class:`ACTSupervisedTrainingConfig`.
     """
 
     adapter: BaseModel = Field(
@@ -104,14 +124,6 @@ class ACTSupervisedComponentConfigs(BaseModel, extra="forbid"):
     objective: ACTObjectiveConfig = Field(
         ...,
         description="ACT objective configuration.",
-    )
-    optimizer: AdamATan2Config = Field(
-        ...,
-        description="Family-specific optimizer configuration.",
-    )
-    runtime: HRMRuntimeConfig = Field(
-        ...,
-        description="HRM/ACT runtime configuration (validation safety limits).",
     )
 
 
@@ -153,9 +165,11 @@ class ACTSupervisedModule(L.LightningModule):
     """Generic LightningModule for ACT-supervised (halting-based) training.
 
     Accepts an :class:`ACTSupervisedConfig`, an
-    :class:`ACTSupervisedComponentConfigs`, and an
+    :class:`ACTSupervisedComponentConfigs`, an
     :class:`ACTSupervisedBindings` bundle that specifies concrete
-    model, adapter, controller, objective, and optimizer classes.
+    model, adapter, controller, objective, and optimizer classes,
+    and an optional :class:`ACTSupervisedTrainingConfig` (``None``
+    during evaluation).
     """
 
     def __init__(  # ----------------------------------------------------------
@@ -163,6 +177,9 @@ class ACTSupervisedModule(L.LightningModule):
         config: ACTSupervisedConfig,
         component_configs: ACTSupervisedComponentConfigs,
         bindings: ACTSupervisedBindings,
+        training_config: ACTSupervisedTrainingConfig | None = None,
+        *,
+        runtime: HRMRuntimeConfig | None = None,
     ) -> None:
         super().__init__()
         self._bindings = bindings
@@ -207,6 +224,15 @@ class ACTSupervisedModule(L.LightningModule):
         self.val_metrics = build_val_metrics(bindings.episode_routes).clone(
             prefix="val/"
         )
+        self._training_config = training_config
+        # Runtime config may come from training config (training-time seed)
+        # or be passed as a separate kwarg (eval-time max_rollout_steps).
+        # Training config takes precedence.
+        if training_config is not None:
+            self._runtime: HRMRuntimeConfig | None = training_config.runtime
+        else:
+            self._runtime: HRMRuntimeConfig | None = runtime
+
         self._trace_paradigm: str = "act"
         self._extra_trace_fields: tuple = bindings.trace_fields
         self.diagnostic_trace_spec: DiagnosticTraceSpec = DiagnosticTraceSpec(
@@ -240,16 +266,18 @@ class ACTSupervisedModule(L.LightningModule):
 
     @property
     def component_configs(self) -> ACTSupervisedComponentConfigs:
-        """Experiment-selected component configs (adapter, controller, objective, optimizer, runtime)."""
+        """Experiment-selected component configs (adapter, controller, objective)."""
         return self._component_configs
 
     def configure_optimizers(  # ----------------------------------------------
         self,
-    ) -> tuple[list[Optimizer], list[dict[str, Any]]]:
+    ) -> tuple[list[Optimizer], list[dict[str, Any]]] | list[Optimizer]:
+        if self._training_config is None:
+            return []
         total_steps = int(self.trainer.estimated_stepping_batches)
         sup_params = [p for p in self.adapter.parameters() if p.requires_grad]
         opt_sup = self._bindings.optimizer_cls(
-            sup_params, self._component_configs.optimizer
+            sup_params, self._training_config.optimizer
         )
         schedulers: list[dict[str, Any]] = [
             {
@@ -303,11 +331,16 @@ class ACTSupervisedModule(L.LightningModule):
             )
         world_size = max(getattr(self.trainer, "world_size", 1), 1)
         rank = getattr(self.trainer, "global_rank", 0)
+        seed = (
+            self._training_config.runtime.validation.seed
+            if self._training_config is not None
+            else 42
+        )
         self._episode_source = ShuffledEpisodeSource(
             train_dataset,
             rank=rank,
             world_size=world_size,
-            seed=self._component_configs.runtime.validation.seed or 42,
+            seed=seed,
         )
         return self._episode_source
 
@@ -484,19 +517,19 @@ class ACTSupervisedModule(L.LightningModule):
             carry=self.controller.initial_state(case.batch),
             objective=self.objective,
             max_rollout_steps=(
-                self._component_configs.runtime.validation.max_rollout_steps
-                if hasattr(self._component_configs.runtime, "validation")
+                self._runtime.validation.max_rollout_steps
+                if self._runtime is not None
                 and hasattr(
-                    self._component_configs.runtime.validation,
+                    self._runtime.validation,
                     "max_rollout_steps",
                 )
                 else None
             ),
             hard_max_rollout_steps=(
-                self._component_configs.runtime.validation.hard_max_rollout_steps
-                if hasattr(self._component_configs.runtime, "validation")
+                self._runtime.validation.hard_max_rollout_steps
+                if self._runtime is not None
                 and hasattr(
-                    self._component_configs.runtime.validation,
+                    self._runtime.validation,
                     "hard_max_rollout_steps",
                 )
                 else None

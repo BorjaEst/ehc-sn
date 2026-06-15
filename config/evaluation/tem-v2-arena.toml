@@ -1,5 +1,5 @@
 # Evaluation executor config — TEM v2 on Arena.
-# Derived from config/training/tem-v2-default-vram8gib.toml.
+# Derived from config/training/tem-v2-arena-vram8gib.toml.
 # All training orchestration stripped.  Dynamics schedules preserved.
 
 model_config_path = "config/models/tem-v2-base.toml"

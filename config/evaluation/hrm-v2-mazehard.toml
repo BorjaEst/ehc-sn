@@ -1,5 +1,5 @@
 # Evaluation executor config — HRM v2 on MazeHard.
-# Derived from config/training/hrm-v2-default-vram8gib.toml.
+# Derived from config/training/hrm-v2-mazehard-vram8gib.toml.
 # global_batch_size = 1 (truthful for single-episode eval batches;
 # the field is required by HRMV2ModelConfig).
 
@@ -14,16 +14,7 @@ global_batch_size = 1
     halt_action     = 0
     episode_horizon = 16
 
-[reward]
-    success_reward         = 1.0
-    continue_cost          = -0.01
-    incorrect_halt_penalty = -1.0
-    truncation_penalty     = -1.0
-
 [objective]
     token_loss    = "stablemax_cross_entropy"
     c_state_value = 0.5
     c_q_value     = 0.5
-
-[runtime.validation]
-    max_rollout_steps = 16

@@ -1,12 +1,4 @@
-"""Arena + TEM v1 experiment.
-
-Composition:
-    model: TEMModelV1
-    adapter: ArenaTEMV1BridgeAdapter
-    controller: ReplayTrajectoryController
-    objective: TEMObjective
-    regime module: VariationalReplayModule
-"""
+"""Model constructor for Arena × TEM-v1."""
 
 from __future__ import annotations
 
@@ -30,20 +22,15 @@ from ehc_sn.models.tem.tem_v1 import ModelSettingsV1, TEMModelV1
 from ehc_sn.objectives.tem import TEMObjectiveConfig
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
 
+from .config import ArenaTEMV1ModelConfig
 
-def build_experiment(
-    config: VariationalReplayConfig,
-    components: VariationalReplayComponentConfigs,
+
+def build_arena_tem_v1_model(
+    config: ArenaTEMV1ModelConfig,
 ) -> VariationalReplayModule:
-    """Build a VariationalReplayModule from typed sub-configs.
+    """Construct a VariationalReplayModule for Arena × TEM-v1."""
+    components: VariationalReplayComponentConfigs = config.components  # type: ignore[assignment]
 
-    Args:
-        config: Regime-owned settings (model_config_path).
-        components: Component configs (adapter, controller, objective).
-
-    Returns:
-        Instantiated :class:`~ehc_sn.lightning.modules.variational_replay.VariationalReplayModule`.
-    """
     bindings = VariationalReplayBindings(
         model_cls=TEMModelV1,
         model_settings_cls=ModelSettingsV1,
@@ -55,10 +42,29 @@ def build_experiment(
         task_binding_factory=ArenaTEMTaskBinding,
     )
     return VariationalReplayModule(
-        config=config,
+        config=VariationalReplayConfig(
+            model_config_path=config.model_config_path,
+        ),
         component_configs=components,
         bindings=bindings,
     )
 
 
-__all__ = ["build_experiment"]
+def build_experiment(
+    config: VariationalReplayConfig,
+    components: VariationalReplayComponentConfigs,
+) -> VariationalReplayModule:
+    """Backward-compat builder — delegates to ``build_arena_tem_v1_model``."""
+    return build_arena_tem_v1_model(
+        ArenaTEMV1ModelConfig(
+            model_config_path=config.model_config_path,
+            components=type(ArenaTEMV1ModelConfig.model_fields["components"])(
+                adapter=components.adapter,
+                controller=components.controller,
+                objective=components.objective,
+            ),
+        )
+    )
+
+
+__all__ = ["build_experiment", "build_arena_tem_v1_model"]

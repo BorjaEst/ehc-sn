@@ -1,92 +1,27 @@
+# Training config — Arena × TEM-v2 (nested experiment schema)
 # =============================================================================
-# Metadata (comments only)
-# class: training
-# id: tem-v2-arena-vram8gib
-# role: entrypoint default training config for TEM v2
+# Based on: config/training/tem-v2-default-vram8gib.toml
 # =============================================================================
 
-# -- Model architecture -------------------------------------------------------
+[model]
     model_config_path = "config/models/tem-v2-base.toml"
 
-# -- General settings ---------------------------------------------------------
-    dataset_path         = "data/processed/arena/default/v1"
-    global_batch_size    = 32
-    max_steps            = 50000
-    seed                 = 42
-    augment              = true
-
-# -- DataLoader settings ------------------------------------------------------
-    num_workers          = 4
-    prefetch_factor      = 2
-    pin_memory           = true
-    persistent_workers   = true
-
-# -- Trainer control ----------------------------------------------------------
-    init_weights_groups  = ["all"]
-    log_every_n_steps    = 10
-    val_check_interval   = 1000  # int: training steps between validation runs
-    limit_val_batches    = 10    # int: N validation batches per run
-    enable_progress_bar  = true
-    trainer_accelerator  = "gpu"
-    trainer_strategy     = "ddp"
-    trainer_devices      = 1
-    trainer_num_nodes    = 1
-    trainer_precision    = "bf16-mixed"
-    diagnostic_level     = "standard"
-    non_finite_policy    = "raise"
-
-# Optional model-only init hydration (mutually exclusive with full resume)
-    # init_weights_from = "checkpoints/tem-v2/last.ckpt"
-
-# -- Adapter ------------------------------------------------------------------
-[adapter]
+[model.components.adapter]
     observation_dim = 45
     action_count    = 5
 
-[adapter.encoder]
+[model.components.adapter.encoder]
     kind   = "two_hot"
     layout = "replicated"
 
-[adapter.decoder]
+[model.components.adapter.decoder]
     kind            = "single_scale"
     prediction_freq = 0
 
-# -- Controller ---------------------------------------------------------------
-[controller]
+[model.components.controller]
     window_size = 2000
 
-# -- Optimization -------------------------------------------------------------
-[optimizer]
-    lr           = 9.4e-4
-    weight_decay = 0.00
-    betas        = [0.9, 0.98]
-
-[scheduler]
-    warmup_steps = 1000
-    min_ratio    = 0.01
-
-[runtime.memory]
-    eta           = 0.5
-    eta_it        = 16000
-    hebbian_decay = 0.9999
-    lambda_it     = 200
-
-[runtime.uncertainty]
-    p2g_sig_half_it  = 0
-    p2g_sig_scale_it = 200
-    offset_min       = 0.0
-    offset_max       = 10000.0
-
-[runtime.sequence]
-    tbptt_steps = 25
-
-[runtime.validation]
-    hard_max_rollout_steps = 6000
-    max_rollout_steps = 2000
-    seed = 42
-
-# -- Objective ----------------------------------------------------------------
-[objective]
+[model.components.objective]
     observation_loss = "softmax_cross_entropy"
     c_obs            = 1.0
     c_grid           = 1.0
@@ -101,38 +36,72 @@
     g_reg_it         = 40000000
     p_reg_it         = 4000
 
-# -- Figures & diagnostics ----------------------------------------------------
-[logger]
+[training]
+    model_config_path = "config/models/tem-v2-base.toml"
+
+[training.optimizer]
+    lr           = 9.4e-4
+    weight_decay = 0.00
+    betas        = [0.9, 0.98]
+
+[training.scheduler]
+    warmup_steps = 1000
+    min_ratio    = 0.01
+
+[training.runtime.memory]
+    eta           = 0.5
+    eta_it        = 16000
+    hebbian_decay = 0.9999
+    lambda_it     = 200
+
+[training.runtime.uncertainty]
+    p2g_sig_half_it  = 0
+    p2g_sig_scale_it = 200
+    offset_min       = 0.0
+    offset_max       = 10000.0
+
+[training.runtime.sequence]
+    tbptt_steps = 25
+
+[training.runtime.validation]
+    hard_max_rollout_steps = 6000
+    max_rollout_steps      = 2000
+    seed                   = 42
+
+[data]
+    dataset_path         = "data/processed/arena/default/v1"
+    global_batch_size    = 32
+    num_workers          = 4
+    prefetch_factor      = 2
+    pin_memory           = true
+    persistent_workers   = true
+    augment              = true
+    seed                 = 42
+
+[trainer]
+    accelerator         = "gpu"
+    strategy            = "ddp"
+    devices             = 1
+    num_nodes           = 1
+    precision           = "bf16-mixed"
+    max_steps           = 50000
+    val_check_interval  = 1000
+    log_every_n_steps   = 10
+    enable_progress_bar = true
+    limit_val_batches   = 10
+    seed                = 42
+
+[checkpointing]
+    init_weights_groups = ["all"]
+    diagnostic_level    = "standard"
+    non_finite_policy   = "raise"
+
+[checkpointing.scheduler]
+    warmup_steps = 1000
+    min_ratio    = 0.01
+
+[logging]
     save_dir  = "logs"
     name      = "tem-v2-arena"
     log_graph = false
     prefix    = ""
-
-[lr_monitor]
-    logging_interval = "step"
-    log_weight_decay = false
-    log_momentum = false
-
-[checkpoint]
-    dirpath                 = "checkpoints/tem-v2"
-    filename                = "arena-{step:08d}"
-    save_top_k              = -1
-    every_n_train_steps     = 1000
-    save_last               = true
-    save_on_exception       = true
-    save_weights_only       = false
-
-# -- Standalone scheduled figure generation -----------------------------------
-[figures]
-    enabled    = false
-    context    = "validation"
-    every_n_steps  = 5000
-    figures    = [ ]
-    max_cases  = 2
-    save_pdf   = true
-    save_png   = false
-    png_dpi    = 160
-    max_items  = 4
-    max_cells  = 16
-    max_retained_files = 200
-    failure_policy = "warn"

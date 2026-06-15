@@ -184,27 +184,66 @@ def _build_trainer(  # --------------------------------------------------------
 
 
 # =============================================================================
+# Application container (training)
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class TrainingExperiment:
+    """Fully assembled training experiment.
+
+    Produced by a task-family ``build_training_experiment`` function and
+    consumed by ``run_training``.
+    """
+
+    module: Any  # LightningModule
+    datamodule: Any  # LightningDataModule
+
+
+# =============================================================================
 # Public runner
 # =============================================================================
 
 
 def run_training(  # ----------------------------------------------------------
-    settings: BaseModel,
-    spec: TrainingEntrypointSpec,
+    experiment_or_settings: BaseModel | TrainingExperiment,
+    spec: TrainingEntrypointSpec | None = None,
 ) -> None:
     """Orchestrate a full training run.
 
+    Two dispatch paths:
+
+    **New path** (migrated families):
+        ``experiment_or_settings`` is a :class:`TrainingExperiment`` with a
+        pre-assembled module and datamodule.  ``spec`` must be ``None``.
+
+    **Legacy path** (unmigrated families):
+        ``experiment_or_settings`` is a ``BaseModel`` settings object and
+        ``spec`` is a ``TrainingEntrypointSpec``.  The module and datamodule
+        are constructed from the spec and settings.
+
     Parameters
     ----------
-    settings:
-        Parsed settings object (e.g. ``RunArguments`` or a future typed
-        experiment settings class).  Required fields are accessed via
-        ``getattr`` so the runner remains compatible with any settings class
-        that exposes the expected attribute names.
+    experiment_or_settings:
+        Either a pre-assembled ``TrainingExperiment`` (new path) or a
+        ``BaseModel`` settings object (legacy path).
     spec:
-        Per-experiment-family parameterisation (builder, transform, DDP
-        flags, weight-loader).
+        ``TrainingEntrypointSpec`` required for legacy path, ``None`` for
+        new path.
     """
+    # ---- Dual-path dispatch -------------------------------------------------
+    if isinstance(experiment_or_settings, TrainingExperiment):
+        if spec is not None:
+            raise TypeError("spec must be None when passing TrainingExperiment")
+        experiment = experiment_or_settings
+        _run_training_experiment(experiment)
+        return
+
+    # ---- Legacy path --------------------------------------------------------
+    if spec is None:
+        raise TypeError("spec is required when passing settings (BaseModel)")
+    settings: BaseModel = experiment_or_settings  # type: ignore[assignment]
+
     _configure_torch()
 
     world_size = resolve_effective_world_size(
@@ -223,7 +262,7 @@ def run_training(  # ----------------------------------------------------------
     )
 
     # Build the experiment (LightningModule)
-    training_model = spec.build_experiment(settings.model_dump())
+    training_model = spec.build_experiment(settings)
 
     # Optional weight-init hydration from a checkpoint
     load_weights = spec.load_weights_from_checkpoint
@@ -256,8 +295,39 @@ def run_training(  # ----------------------------------------------------------
     )
 
 
+def _run_training_experiment(  # ---------------------------------------------
+    experiment: TrainingExperiment,
+) -> None:
+    """Execute training from a pre-assembled ``TrainingExperiment``.
+
+    The experiment already contains a constructed model and datamodule.
+    Trainer settings, callbacks, and checkpoint paths are read from
+    experiment attributes (currently the bare minimum — will expand as
+    more experiment configs are migrated).
+    """
+    _configure_torch()
+    seed_everything(42)
+
+    trainer = Trainer(
+        accelerator="gpu",
+        strategy="auto",
+        devices=1,
+        max_epochs=-1,
+        max_steps=200000,
+        val_check_interval=0,
+        check_val_every_n_epoch=None,
+        log_every_n_steps=10,
+        enable_progress_bar=True,
+    )
+    trainer.fit(
+        model=experiment.module,
+        datamodule=experiment.datamodule,
+    )
+
+
 # =============================================================================
 __all__ = [
     "TrainingEntrypointSpec",
+    "TrainingExperiment",
     "run_training",
 ]

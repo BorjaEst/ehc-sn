@@ -1,13 +1,4 @@
-"""SeqMaze + HRM v1 experiment (ACT-supervised).
-
-Composition:
-    model: HRModelV1
-    adapter: SeqMazeHRMV1BridgeAdapter
-    controller: ACTController
-    objective: ACTObjective
-    regime module: ACTSupervisedModule
-    validation scorer: SeqMazeValidationScorer
-"""
+"""Model constructor for SeqMaze × HRM-v1."""
 
 from __future__ import annotations
 
@@ -36,26 +27,17 @@ from ehc_sn.traces.specs import HRM_HIDDEN_STATE_FIELDS
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 
+from .config import SeqMazeHRMV1ModelConfig
 
-def build_experiment(
-    config: ACTSupervisedConfig,
-    components: ACTSupervisedComponentConfigs,
-    training: ACTSupervisedTrainingConfig | None = None,
+
+def build_seqmaze_hrm_v1_model(
+    config: SeqMazeHRMV1ModelConfig,
 ) -> ACTSupervisedModule:
-    """Build an ACTSupervisedModule from typed sub-configs.
+    """Construct an ACTSupervisedModule for SeqMaze × HRM-v1.
 
-    ``training`` is ``None`` during evaluation.
-
-    Args:
-        config: Regime-owned settings (model_config_path, scheduler,
-            batch scale, warmup, target-network).
-        components: Component configs (adapter, controller, objective).
-        training: Optional training config (optimizer, training runtime).
-
-    Returns:
-        Instantiated :class:`~ehc_sn.lightning.modules.act_supervised.ACTSupervisedModule`.
+    No training config — safe for eval.
     """
-    # Derive vocabulary constants from adapter settings
+    components: ACTSupervisedComponentConfigs = config.components  # type: ignore[assignment]
     adapter_settings: SeqMazeAdapterSettings = components.adapter  # type: ignore[assignment]
     n_max = adapter_settings.n_max
     t_max = adapter_settings.t_max
@@ -84,12 +66,36 @@ def build_experiment(
         ),
     )
     return ACTSupervisedModule(
-        config=config,
+        config=ACTSupervisedConfig(
+            model_config_path=config.model_config_path,
+            global_batch_size=1,
+        ),
         component_configs=components,
         bindings=bindings,
-        training_config=training,
-        runtime=training.runtime if training is not None else None,
     )
 
 
-__all__ = ["build_experiment"]
+def build_experiment(
+    config: ACTSupervisedConfig,
+    components: ACTSupervisedComponentConfigs,
+    training: ACTSupervisedTrainingConfig | None = None,
+) -> ACTSupervisedModule:
+    """Backward-compat builder — delegates to ``build_seqmaze_hrm_v1_model``."""
+    from .config import SeqMazeHRMV1ComponentConfigs, SeqMazeHRMV1ModelConfig
+
+    model_config = SeqMazeHRMV1ModelConfig(
+        model_config_path=config.model_config_path,
+        components=SeqMazeHRMV1ComponentConfigs(
+            adapter=components.adapter,
+            controller=components.controller,
+            objective=components.objective,
+        ),
+    )
+    module = build_seqmaze_hrm_v1_model(model_config)
+    if training is not None:
+        # Attach training config to enable optimizers
+        module._training_config = training
+    return module
+
+
+__all__ = ["build_experiment", "build_seqmaze_hrm_v1_model"]

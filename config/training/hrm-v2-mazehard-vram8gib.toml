@@ -1,121 +1,83 @@
+# Training config — MazeHard × HRM-v2 (nested experiment schema)
 # =============================================================================
-# Metadata (comments only)
-# class: training
-# id: hrm-v2-mazehard-vram8gib
-# role: entrypoint default training config for HRM v2 deliberation
+# Based on: config/training/hrm-v2-mazehard-vram8gib.toml
 # =============================================================================
 
-# -- Model architecture -------------------------------------------------------
+[model]
     model_config_path = "config/models/hrm-v2-base.toml"
 
-# -- Dataset & training -------------------------------------------------------
-    dataset_path      = "data/processed/mazehard/default/v1"
-    global_batch_size = 25
-    max_steps         = 50000
-    seed              = 42
-    augment           = true
+[model.components.adapter]
+    encoder_kind = "rope"
+    vocab_size   = 6
 
-# -- DataLoader settings ------------------------------------------------------
-    num_workers        = 4
-    prefetch_factor    = 2
-    pin_memory         = true
-    persistent_workers = true
+[model.components.controller]
 
-# -- Trainer control ----------------------------------------------------------
-    init_weights_groups = ["all"]
-    log_every_n_steps    = 10
-    enable_progress_bar  = true
-    trainer_accelerator  = "gpu"
-    trainer_strategy     = "ddp"
-    trainer_devices      = 1
-    trainer_num_nodes    = 1
-    trainer_precision    = "16-mixed"
-    limit_val_batches    = 1.0
-    val_check_interval   = 1000
-    supervised_only_warmup_steps = 5000
-    diagnostic_level     = "standard"
-    non_finite_policy    = "raise"
+[model.components.objective]
+    token_loss      = "stablemax_cross_entropy"
+    c_state_value   = 0.5
+    c_q_value       = 0.5
 
-# Optional model-only init hydration (mutually exclusive with full resume)
-    # init_weights_from = "checkpoints/hrm-v2/last.ckpt"
-
-# -- Adapter settings ---------------------------------------------------------
-[adapter]
-    encoder_kind = "rope"  # "learned" or "rope"
-    vocab_size = 6  # 5 canonical SEM IDs + O_ID (solution-path token)
-
-# -- Deliberation AC controller -----------------------------------------------
-[controller]
-
-# -- Deliberation capability config ------------------------------------------
 [deliberation]
-    halt_action      = 0
-    episode_horizon  = 16
+    halt_action     = 0
+    episode_horizon = 16
 
-# -- Reward config ------------------------------------------------------------
-[reward]
+[training.optimizer_supervised]
+    lr           = 1e-4
+    weight_decay = 1e-2
+
+[training.optimizer_rl]
+    lr           = 1e-4
+    weight_decay = 0.0
+
+[training.optimizer_qv]
+    lr           = 1e-4
+    weight_decay = 0.0
+
+[training.reward]
     success_reward         = 1.0
     continue_cost          = -0.01
     incorrect_halt_penalty = -1.0
     truncation_penalty     = -1.0
 
-# -- Objective, optimizer, scheduler ------------------------------------------
-[objective]
-    token_loss    = "stablemax_cross_entropy"
-    c_state_value = 0.5
-    c_q_value     = 0.5
+[training.hrm_runtime.validation]
+    max_rollout_steps = 16
 
-[optimizer_supervised]
-    lr           = 1e-4
-    weight_decay = 1e-2
+[data]
+    dataset_path         = "data/processed/mazehard/default/v1"
+    global_batch_size    = 25
+    num_workers          = 4
+    prefetch_factor      = 2
+    pin_memory           = true
+    persistent_workers   = true
+    augment              = true
+    seed                 = 42
 
-[optimizer_rl]
-    lr           = 1e-4
-    weight_decay = 0.0
+[trainer]
+    accelerator         = "gpu"
+    strategy            = "ddp"
+    devices             = 1
+    num_nodes           = 1
+    precision           = "16-mixed"
+    max_steps           = 50000
+    val_check_interval  = 1000
+    log_every_n_steps   = 10
+    enable_progress_bar = true
+    limit_val_batches   = 1.0
+    seed                = 42
 
-[optimizer_qv]
-    lr           = 1e-4
-    weight_decay = 0.0
+[checkpointing]
+    supervised_only_warmup_steps = 5000
+    init_weights_groups          = ["all"]
+    diagnostic_level             = "standard"
+    non_finite_policy            = "raise"
+    checkpoint_every_eval        = false
 
-[scheduler]
+[checkpointing.scheduler]
     warmup_steps = 1000
     min_ratio    = 0.01
 
-[runtime.validation]
-    max_rollout_steps = 16
-
-# -- Logs and checkpoints -----------------------------------------------------
-[logger]
+[logging]
     save_dir  = "logs"
     name      = "hrm-v2-mazehard"
     log_graph = false
     prefix    = ""
-
-[lr_monitor]
-    logging_interval = "step"
-    log_weight_decay = false
-    log_momentum = false
-
-[checkpoint]
-    dirpath                 = "checkpoints/hrm-v2"
-    filename                = "mazehard-{step:08d}"
-    save_top_k              = -1
-    every_n_train_steps     = 1000
-    save_last               = true
-    save_on_exception       = true
-    save_weights_only       = false
-
-# -- Standalone scheduled figure generation -----------------------------------
-[figures]
-    enabled    = false
-    context    = "validation"
-    every_n_steps  = 5000
-    figures    = ["halting_timeline", "q_value_evolution"]
-    max_cases  = 2
-    save_pdf   = true
-    save_png   = false
-    png_dpi    = 160
-    max_items  = 4
-    max_cells  = 16
-    max_retained_files = 200
-    failure_policy = "warn"

@@ -1,5 +1,5 @@
 # Evaluation executor config — TEM v1 on Arena.
-# Derived from config/training/tem-v1-default-vram8gib.toml.
+# Derived from config/training/tem-v1-arena-vram8gib.toml.
 # All training orchestration (optimizer, scheduler, data loading, logging,
 # checkpoints, figures) stripped.  Dynamics schedules preserved verbatim
 # because they affect inference-time behavior.
