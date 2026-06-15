@@ -92,13 +92,13 @@ class SeqMazeHRMV1BridgeAdapter(nn.Module):
         self._config = config or SeqMazeAdapterSettings()
         self.model = model
 
-        # Validate profile coupling: N + T == S
+        # Validate profile coupling: N + T <= S
         expected_slots = self._config.n_max + self._config.t_max
-        if model.config.num_schema_slots != expected_slots:
+        if expected_slots > model.config.num_schema_slots:
             raise ValueError(
-                f"Model seq_length ({model.config.num_schema_slots}) must equal "
-                f"n_max + t_max ({self._config.n_max} + {self._config.t_max}"
-                f" = {expected_slots}) for v1 path-prediction mode."
+                f"Task requires {expected_slots} schema slots "
+                f"(n_max={self._config.n_max} + t_max={self._config.t_max}), "
+                f"but PFC capacity is only {model.config.num_schema_slots}."
             )
         if model.config.pfc.hidden_size != self._config.hidden_size:
             raise ValueError(
@@ -138,7 +138,7 @@ class SeqMazeHRMV1BridgeAdapter(nn.Module):
     def prepare_inputs(self, batch: Batch) -> HRMInputV1:
         """Extract task input from batch and encode into schema tokens."""
         task_input = extract_seqmaze_task_input(batch)
-        schema_tokens, _ = self._encoder(
+        schema_tokens, _ = self._encoder.forward_padded(
             node_obs_id=task_input.node_obs_id,
             node_candidate_index=task_input.node_candidate_index,
             node_start_flag=task_input.node_start_flag,
@@ -146,6 +146,7 @@ class SeqMazeHRMV1BridgeAdapter(nn.Module):
             successor_indices=task_input.successor_indices,
             successor_mask=task_input.successor_mask,
             node_mask=task_input.node_mask,
+            model_seq_length=self.model.config.num_schema_slots,
         )
         # Cache node_valid_mask for output masking in postprocess
         self._node_valid_mask = task_input.node_mask
@@ -339,13 +340,13 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
         self._config = config or SeqMazeAdapterSettings()
         self.model = model
 
-        # Validate profile coupling: N + T == S
+        # Validate profile coupling: N + T <= S
         expected_slots = self._config.n_max + self._config.t_max
-        if model.config.num_schema_slots != expected_slots:
+        if expected_slots > model.config.num_schema_slots:
             raise ValueError(
-                f"Model seq_length ({model.config.num_schema_slots}) must equal "
-                f"n_max + t_max ({self._config.n_max} + {self._config.t_max}"
-                f" = {expected_slots}) for v2 path-prediction mode."
+                f"Task requires {expected_slots} schema slots "
+                f"(n_max={self._config.n_max} + t_max={self._config.t_max}), "
+                f"but PFC capacity is only {model.config.num_schema_slots}."
             )
 
         self._encoder = SeqMazeEncoder(self._config)
@@ -377,7 +378,7 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
     def prepare_inputs(self, batch: Batch) -> HRMInputV2:
         """Extract task input from batch and encode into schema tokens."""
         task_input = extract_seqmaze_task_input(batch)
-        schema_tokens, schema_mask = self._encoder(
+        schema_tokens, schema_mask = self._encoder.forward_padded(
             node_obs_id=task_input.node_obs_id,
             node_candidate_index=task_input.node_candidate_index,
             node_start_flag=task_input.node_start_flag,
@@ -385,6 +386,7 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
             successor_indices=task_input.successor_indices,
             successor_mask=task_input.successor_mask,
             node_mask=task_input.node_mask,
+            model_seq_length=self.model.config.num_schema_slots,
         )
         return HRMInputV2(schema_tokens=schema_tokens)
 

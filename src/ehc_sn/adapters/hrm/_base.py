@@ -588,6 +588,64 @@ class SeqMazeEncoder(nn.Module):
 
         return schema_tokens, schema_mask
 
+    def forward_padded(
+        self,
+        # Graph region inputs
+        node_obs_id: Tensor,  # (B, N)
+        node_candidate_index: Tensor,  # (B, N)
+        node_start_flag: Tensor,  # (B, N)
+        node_goal_flag: Tensor,  # (B, N)
+        successor_indices: Tensor,  # (B, N, K)
+        successor_mask: Tensor,  # (B, N, K)
+        node_mask: Tensor,  # (B, N)
+        model_seq_length: int,  # total PFC slot capacity
+    ) -> tuple[Tensor, Tensor]:
+        """Run ``forward()`` then pad output to *model_seq_length*.
+
+        When the task schema length (N + T) is less than the model's
+        PFC slot capacity, trailing positions are filled with zero
+        vectors and masked as invalid.
+
+        Returns:
+            schema_tokens: ``(B, model_seq_length, D)``.
+            schema_mask: ``(B, model_seq_length)``.
+
+        Raises:
+            ValueError: If ``N + T > model_seq_length``.
+        """
+        schema_tokens, schema_mask = self(
+            node_obs_id=node_obs_id,
+            node_candidate_index=node_candidate_index,
+            node_start_flag=node_start_flag,
+            node_goal_flag=node_goal_flag,
+            successor_indices=successor_indices,
+            successor_mask=successor_mask,
+            node_mask=node_mask,
+        )
+        config = self.config
+        B, N, _ = successor_indices.shape
+        T = config.t_max
+        S_task = N + T
+        D = config.hidden_size
+        device = successor_indices.device
+
+        if S_task > model_seq_length:
+            raise ValueError(
+                f"Task schema length {S_task} (N={N} + T={T}) exceeds "
+                f"PFC capacity {model_seq_length}."
+            )
+
+        if S_task < model_seq_length:
+            pad_len = model_seq_length - S_task
+            pad_tokens = torch.zeros(
+                B, pad_len, D, device=device, dtype=schema_tokens.dtype
+            )
+            pad_mask = torch.zeros(B, pad_len, dtype=torch.bool, device=device)
+            schema_tokens = torch.cat([schema_tokens, pad_tokens], dim=1)
+            schema_mask = torch.cat([schema_mask, pad_mask], dim=1)
+
+        return schema_tokens, schema_mask
+
     def _encode_edges(
         self,
         successor_indices: Tensor,  # (B, N, K)
