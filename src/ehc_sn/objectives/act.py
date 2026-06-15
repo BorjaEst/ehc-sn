@@ -202,6 +202,16 @@ class ACTObjectiveStep:
         """Scalar loss for this step, used for back-propagation."""
         return self.losses.total
 
+    @property
+    def step_output(self) -> Optional[ACTStepOutput]:
+        """Canonical name for the underlying controller/backbone step output.
+
+        Preferred over the bare ``outputs`` field, which collides with
+        :attr:`ObservedStep.outputs` and forces consumers to write
+        ``outputs.outputs`` when traversing from an ``EvaluatedChunk``.
+        """
+        return self.outputs
+
 
 # =============================================================================
 class ACTObjective(BaseObjective[ACTObjectiveConfig]):

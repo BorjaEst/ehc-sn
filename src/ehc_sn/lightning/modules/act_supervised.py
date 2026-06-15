@@ -448,7 +448,7 @@ class ACTSupervisedModule(L.LightningModule):
             self._diagnostic_traces.append(result.trace)
 
         if self._task_scorer is not None:
-            self._task_scorer.update_from_evaluation(result)
+            self._task_scorer.update_from_evaluation(result, batch)
 
         return {"trace": result.trace}
 

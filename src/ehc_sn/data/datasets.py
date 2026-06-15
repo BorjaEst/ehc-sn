@@ -135,10 +135,15 @@ class ProcessedDataset(Dataset):
         idx: int,
     ) -> dict[str, Tensor]:
         """Return a sample by index, applying the optional transform."""
-        sample = {k: v[idx] for k, v in self._arrays.items()}
+        sample = {
+            k: np.array(v[idx], copy=True) for k, v in self._arrays.items()
+        }
         if self._transform:
             sample = self._transform(sample)
-        result = {k: torch.from_numpy(np.array(v)) for k, v in sample.items()}
+        result = {
+            k: v if isinstance(v, torch.Tensor) else torch.from_numpy(v)
+            for k, v in sample.items()
+        }
         # Stable fit-path identity derived from dataset index position.
         # Non-model-visible: consumed only by the replay controller at admission
         # to populate carry.trajectory_id; never passed to the model or objectives.

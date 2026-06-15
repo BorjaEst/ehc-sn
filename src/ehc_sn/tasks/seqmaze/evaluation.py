@@ -12,7 +12,9 @@ from dataclasses import dataclass, field
 import torch
 from torch import Tensor
 
+from ehc_sn.eval.contracts import EvaluationCaseResult
 from ehc_sn.metrics.spec import MetricSpec, TaskScoringSpec
+from ehc_sn.types import Batch
 
 from .contracts import SeqMazeTargets
 
@@ -224,7 +226,9 @@ class SeqMazeValidationScorer:
         self._n_max = n_max
         self.reset()
 
-    def update_from_evaluation(self, result: EvaluationCaseResult) -> None:
+    def update_from_evaluation(
+        self, result: EvaluationCaseResult, batch: Batch
+    ) -> None:
         """Update accumulated counters from one evaluation batch.
 
         Uses the last step's task output (constrained path logits) and
@@ -232,9 +236,15 @@ class SeqMazeValidationScorer:
         """
         from ehc_sn.tasks.seqmaze.runtime import extract_seqmaze_targets
 
-        batch = result.case.batch
         last_step = result.evaluated.last_step
-        logits = last_step.outputs.task.path_logits  # (B, T, V)
+        objective_step = last_step.outputs  # ACTObjectiveStep
+        step_output = objective_step.outputs  # ACTStepOutput | None
+        if step_output is None:
+            raise RuntimeError(
+                "SeqMaze validation requires the retained ACT step output, "
+                "but this evaluation result contains metrics-only objective data."
+            )
+        logits = step_output.task.path_logits  # (B, T, V)
 
         targets = extract_seqmaze_targets(batch)
         adj = _build_adjacency(
