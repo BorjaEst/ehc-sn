@@ -244,7 +244,7 @@ def random_walk_straight_bias(
     rng: np.random.Generator,
     action_deltas: tuple[tuple[int, int], ...],
     stay_action: int,
-    direc_bias: float = 0.2,
+    direc_bias: float = 0.25,
     angle_bias_change: float = 0.4,
     diff_angle_min: float | None = None,
     angle_fn: Callable = _cartesian_angle,
@@ -263,8 +263,12 @@ def random_walk_straight_bias(
       random non-stay neighbour.
     - Perturb theta by ``uniform(-angle_bias_change, +angle_bias_change)``
       **every step** (after both biased and random moves).
-    - With probability ``direc_bias``, override the biased neighbour and
-      sample uniformly from the available neighbours instead (no bias).
+    - With probability ``direc_bias``, follow the heading bias (select the
+      neighbour whose allocentric angle is closest to the current heading).
+      Otherwise, sample uniformly from the available neighbours.
+      This matches the legacy TEM ``if np.random.rand() > self.par.env.direc_bias``
+      condition where ``direc_bias`` is the probability of *keeping* the bias.
+      See ``legacy_tem/tem_tf2/environments.py`` (line 189).
 
     Args:
         mask_valid: Boolean ``(H, W)`` passable-cell mask.
@@ -273,8 +277,9 @@ def random_walk_straight_bias(
         rng: NumPy random generator (mutated in-place).
         action_deltas: Row/col deltas indexed by action id.
         stay_action: Action id representing the no-op / stay action.
-        direc_bias: Probability of a random override (default 0.2 means
-            20% of steps are random, 80% follow the heading bias).
+        direc_bias: Probability of following the heading bias (default 0.25
+            means 25% of steps follow the bias, 75% are random), matching
+            legacy TEM ``par.env.direc_bias = 0.25`` for rectangle worlds.
         angle_bias_change: Maximum angular perturbation per step (default
             0.4 radians).
         diff_angle_min: Angular difference threshold for considering the
@@ -311,7 +316,7 @@ def random_walk_straight_bias(
 
         if not valid_moves:
             action, nr, nc = stay_action, r, c
-        elif rng.random() > direc_bias:
+        elif rng.random() < direc_bias:
             # Follow heading bias: pick neighbour closest to current angle.
             angles = [
                 angle_fn(r, c, nr, nc) if (nr, nc) != (r, c) else 10000.0
