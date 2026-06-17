@@ -17,24 +17,41 @@ from torch.utils.data import DataLoader, IterableDataset
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.index import filter_index, read_index
 from ehc_sn.data.transforms import Compose, RandomDihedral
+from ehc_sn.rollouts.sources import DemandDrivenReplaySource
 
 
 # =============================================================================
-class _InfiniteTickIterable(IterableDataset):
-    """Yields empty sentinels indefinitely.
+class DemandDrivenTickIterable(IterableDataset):
+    """Yields real episode batches from a ``DemandDrivenReplaySource``.
 
-    ``num_workers`` MUST be 0 — multi-worker IterableDataset replicates
-    the iterator per worker, which would produce duplicate ticks and
-    break DDP step synchronization.
+    Replaces the empty-sentinel ``_InfiniteTickIterable``.  The source
+    is created by the experiment builder and shared with the module so
+    that both the DataLoader and the module access the same carry state.
+
+    ``num_workers`` MUST be 0 — multi-worker IterableDataset would replicate
+    the source iterator and produce duplicate episodes.
 
     Termination is exclusively via ``Trainer.max_steps``.
     """
 
-    def __iter__(self):
+    def __init__(
+        self, source_provider: Callable[[], DemandDrivenReplaySource]
+    ) -> None:
+        self._source_provider = source_provider
+        self._source: DemandDrivenReplaySource | None = None
+
+    def __iter__(self) -> "DemandDrivenTickIterable":
         return self
 
-    def __next__(self):
-        return {}
+    def __next__(self) -> dict:
+        if self._source is None:
+            self._source = self._source_provider()
+            if self._source is None:
+                raise RuntimeError(
+                    "DemandDrivenTickIterable: source provider returned None. "
+                    "The LightningModule may not have called setup('fit') yet."
+                )
+        return next(self._source)
 
 
 # =============================================================================
@@ -45,9 +62,17 @@ class DatamoduleConfig(BaseModel, extra="forbid"):
         ...,
         description="Path to the processed dataset root (contains index.jsonl and per-split channel arrays).",
     )
-    global_batch_size: int = Field(
+    num_slots: int = Field(
         default=8,
-        description="Global batch size across all devices.",  # TODO: Describe how per-device batch size is computed
+        ge=1,
+        description="Pass-through for TOML parsing. Consumed by the experiment "
+        "builder, not by the Datamodule itself.",
+    )
+    eval_batch_size: int = Field(
+        default=8,
+        ge=1,
+        description="Per-rank batch size for validation and test DataLoaders. "
+        "Does not affect training.",
     )
     num_workers: int = Field(
         default=4,
@@ -100,6 +125,22 @@ class Datamodule(L.LightningDataModule):
         self._train: ProcessedDataset | None = None
         self._val: ProcessedDataset | None = None
         self._test: ProcessedDataset | None = None
+        self._source_provider: Callable[[], DemandDrivenReplaySource] | None = (
+            None
+        )
+
+    def attach_source_provider(  # --------------------------------------------
+        self,
+        provider: Callable[[], DemandDrivenReplaySource],
+    ) -> None:
+        """Register a callable that provides the demand-driven replay source.
+
+        The provider is called lazily when the iterable's first ``__next__``
+        is invoked, guaranteeing the module's ``setup('fit')`` has already run
+        and created the source.  The callable should capture a reference to
+        ``module._train_source``.
+        """
+        self._source_provider = provider
 
     @property
     def config(self) -> DatamoduleConfig:
@@ -161,7 +202,7 @@ class Datamodule(L.LightningDataModule):
         world_size = max(
             self.trainer.world_size if self.trainer is not None else 1, 1
         )
-        return max(self.config.global_batch_size // world_size, 1)
+        return max(self.config.eval_batch_size // world_size, 1)
 
     def _make_loader(  # ------------------------------------------------------
         self,
@@ -190,16 +231,22 @@ class Datamodule(L.LightningDataModule):
     def train_dataloader(  # --------------------------------------------------
         self,
     ) -> DataLoader:
-        """Return a tick DataLoader for demand-driven training.
+        """Return a DataLoader wrapping the demand-driven replay source.
 
-        Yields empty sentinels — the trainer invokes ``training_step``
-        without moving real episode data.  Admission is handled entirely
-        by the episode source inside the module.
+        Yields real episode batches from ``DemandDrivenReplaySource``.
+        The source provider (a callable returning the module's
+        ``_train_source``) must be registered via
+        :meth:`attach_source_provider` before this method is called.
         """
         if self._train is None:
             raise RuntimeError("Call setup('fit') before train_dataloader()")
+        if self._source_provider is None:
+            raise RuntimeError(
+                "train_dataloader() requires a source provider. "
+                "Call datamodule.attach_source_provider(...) before training."
+            )
         return DataLoader(
-            _InfiniteTickIterable(),
+            DemandDrivenTickIterable(self._source_provider),
             batch_size=None,
             num_workers=0,
         )

@@ -8,7 +8,6 @@ from __future__ import annotations
 from ehc_sn.lightning.modules.act_supervised import (
     ACTSupervisedModule,
 )
-from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
 
 from .config import MazeHardHRMV1EvaluationExperimentConfig
 from .model import build_mazehard_hrm_v1_model
@@ -16,15 +15,12 @@ from .model import build_mazehard_hrm_v1_model
 
 def build_mazehard_hrm_v1_evaluation_executor(
     config: MazeHardHRMV1EvaluationExperimentConfig,
-    *,
-    runtime: HRMRuntimeConfig | None = None,
 ) -> ACTSupervisedModule:
-    """Build an evaluation executor for MazeHard × HRM-v1.
-
-    The returned module has ``_training_config is None`` — it is safe
-    to use for inference without constructing optimizers.
-    """
-    return build_mazehard_hrm_v1_model(config.model, runtime=runtime)
+    """Build an evaluation executor for MazeHard \u00d7 HRM-v1."""
+    return build_mazehard_hrm_v1_model(
+        config.model,
+        execution=config.execution,
+    )
 
 
 __all__ = ["build_mazehard_hrm_v1_evaluation_executor"]

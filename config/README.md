@@ -1,6 +1,6 @@
 # Configurations
 
-Canonical TOML configuration files for the EHC-SN project. Each subdirectory
+Canonical TOML configuration files for the EHP-SN project. Each subdirectory
 covers one config category; configs are composed at runtime by training
 entrypoints, evaluation scripts, and benchmark runners.
 
@@ -31,7 +31,7 @@ Internal TOML schema details are owned by `spec/spec-benchmark-configuration-con
 
 Training-time debug configurations for short low-resource runs. These are
 full training configs (same schema as `config/training/`) with reduced
-`max_steps`, `global_batch_size`, and `num_workers`, and include
+`max_steps`, `num_slots`, and `num_workers`, and include
 `[[eval_regimes.regimes]]` blocks that schedule in-training evaluation
 via the `EvaluationRegimesCallback` during Lightning `Trainer.fit()`.
 
@@ -69,12 +69,12 @@ scheduler, runtime, logger, and checkpoint settings. Evaluation configs
 under `config/evaluation/` are derived from these by stripping
 training-orchestration fields.
 
-| File                           | Model  | Task     |
-| ------------------------------ | ------ | -------- |
-| `tem-v1-default-vram8gib.toml` | TEM v1 | Arena    |
-| `tem-v2-default-vram8gib.toml` | TEM v2 | Arena    |
-| `hrm-v1-default-vram8gib.toml` | HRM v1 | MazeHard |
-| `hrm-v2-default-vram8gib.toml` | HRM v2 | MazeHard |
+| File                            | Model  | Task     |
+| ------------------------------- | ------ | -------- |
+| `tem-v1-arena-vram8gib.toml`    | TEM v1 | Arena    |
+| `tem-v2-arena-vram8gib.toml`    | TEM v2 | Arena    |
+| `hrm-v1-mazehard-vram8gib.toml` | HRM v1 | MazeHard |
+| `hrm-v2-mazehard-vram8gib.toml` | HRM v2 | MazeHard |
 
 ---
 
@@ -90,14 +90,14 @@ figure generation).
 
 Files are named `{family}-{task}.toml`.
 
-| File                   | Model  | Task     | Source training config                         |
-| ---------------------- | ------ | -------- | ---------------------------------------------- |
-| `tem-v1-arena.toml`    | TEM v1 | Arena    | `config/training/tem-v1-default-vram8gib.toml` |
-| `tem-v2-arena.toml`    | TEM v2 | Arena    | `config/training/tem-v2-default-vram8gib.toml` |
-| `hrm-v1-mazehard.toml` | HRM v1 | MazeHard | `config/training/hrm-v1-default-vram8gib.toml` |
-| `hrm-v2-mazehard.toml` | HRM v2 | MazeHard | `config/training/hrm-v2-default-vram8gib.toml` |
-| `ehc-v1-arena.toml`    | EHC v1 | Arena    | `config/training/ehc-v1-spatial-vram8gib.toml` |
-| `ehc-v1-mazehard.toml` | EHC v1 | MazeHard | `config/training/ehc-v1-reason-vram8gib.toml`  |
+| File                   | Model  | Task     | Source training config                          |
+| ---------------------- | ------ | -------- | ----------------------------------------------- |
+| `tem-v1-arena.toml`    | TEM v1 | Arena    | `config/training/tem-v1-arena-vram8gib.toml`    |
+| `tem-v2-arena.toml`    | TEM v2 | Arena    | `config/training/tem-v2-arena-vram8gib.toml`    |
+| `hrm-v1-mazehard.toml` | HRM v1 | MazeHard | `config/training/hrm-v1-mazehard-vram8gib.toml` |
+| `hrm-v2-mazehard.toml` | HRM v2 | MazeHard | `config/training/hrm-v2-mazehard-vram8gib.toml` |
+| `ehp-v1-arena.toml`    | EHP v1 | Arena    | `config/training/ehp-v1-spatial-vram8gib.toml`  |
+| `ehp-v1-mazehard.toml` | EHP v1 | MazeHard | `config/training/ehp-v1-reason-vram8gib.toml`   |
 
 ---
 

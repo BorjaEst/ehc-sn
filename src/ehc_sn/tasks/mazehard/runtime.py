@@ -28,6 +28,7 @@ from ehc_sn.tasks.mazehard.contracts import (
 )
 from ehc_sn.tasks.mazehard.evaluation import build_maze_hard_step_score
 from ehc_sn.tasks.mazehard.reward import MazeHardRewardProjector
+from ehc_sn.training.hrm import ValidationRuntimeConfig
 from ehc_sn.types import Batch
 
 MAZE_HARD_BATCH_KEYS: Final[tuple[str, ...]] = ("input_ids", "labels")
@@ -211,6 +212,10 @@ class MazeHardRuntimeConfig(BaseModel, extra="forbid"):
         default=16,
         ge=1,
         description="Task-owned semantic step budget per slot; runtime emits truncated when steps reach this value.",
+    )
+    validation: ValidationRuntimeConfig = Field(
+        default_factory=ValidationRuntimeConfig,
+        description="Runner-owned safety limits (max steps, seed).",
     )
 
 

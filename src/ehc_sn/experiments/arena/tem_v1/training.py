@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
+from ehc_sn.lightning.modules.variational_replay import TEMTrainingConfig
 from ehc_sn.training.runner import TrainingExperiment
 
 from .config import ArenaTEMV1TrainingExperimentConfig
@@ -12,11 +13,20 @@ from .model import build_arena_tem_v1_model
 def build_arena_tem_v1_training_experiment(
     config: ArenaTEMV1TrainingExperimentConfig,
 ) -> TrainingExperiment:
-    module = build_arena_tem_v1_model(config.model)
+    transfer_training = TEMTrainingConfig(
+        optimizer=config.training.optimizer,
+    )
+    module = build_arena_tem_v1_model(
+        config.model,
+        training_config=transfer_training,
+        execution=config.execution,
+        scheduler=config.scheduler,
+    )
     datamodule = Datamodule(
         DatamoduleConfig(
             dataset_path=config.data.dataset_path,
-            global_batch_size=config.data.global_batch_size,
+            num_slots=config.data.num_slots,
+            eval_batch_size=config.data.eval_batch_size,
             num_workers=config.data.num_workers,
             prefetch_factor=config.data.prefetch_factor,
             pin_memory=config.data.pin_memory,
@@ -26,6 +36,7 @@ def build_arena_tem_v1_training_experiment(
         ),
         transform=None,
     )
+    datamodule.attach_source_provider(lambda: module._train_source)
     return TrainingExperiment(
         module=module,
         datamodule=datamodule,

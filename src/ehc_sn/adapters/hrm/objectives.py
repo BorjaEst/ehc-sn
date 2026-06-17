@@ -370,6 +370,23 @@ class SeqMazeHRMV2HybridTaskBinding:
         )
         return labels
 
+    def extract_token_weights(  # ------------------------------------------
+        self,
+        record: ValueControlInteractionRecord,
+    ) -> Tensor:
+        """Return per-token loss weights for SeqMaze hybrid RL.
+
+        Uniform-1.0 weights for all non-ignore positions, zero for
+        ``SEQMAZE_IGNORE_LABEL_ID`` positions.  Unlike MazeHard, SeqMaze
+        does not upweight any token class.
+        """
+        labels = self.extract_labels(record)
+        return torch.where(
+            labels == SEQMAZE_IGNORE_LABEL_ID,
+            torch.zeros_like(labels, dtype=torch.float32),
+            torch.ones_like(labels, dtype=torch.float32),
+        )
+
 
 # =============================================================================
 __all__ = [

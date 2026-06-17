@@ -35,19 +35,27 @@ def build_mazehard_hrm_v1_training_experiment(
     Returns:
         A ``TrainingExperiment`` ready for the generic runner.
     """
-    # Construct the model (no training config — we add it separately).
+    # Construct training config (optimizer only — runtime/execution policy
+    # is passed separately) and pass both through the model builder.
     transfer_training = ACTSupervisedTrainingConfig(
         optimizer=config.training.optimizer,
-        runtime=config.training.runtime,
+        num_slots=config.data.num_slots,
     )
-    module = build_mazehard_hrm_v1_model(config.model)
-    module._training_config = transfer_training
+    module = build_mazehard_hrm_v1_model(
+        config.model,
+        training_config=transfer_training,
+        execution=config.execution,
+        scheduler=config.scheduler,
+        supervised_only_warmup_steps=config.supervised_only_warmup_steps,
+        target_network=config.target_network,
+    )
 
     # Construct the datamodule.
     datamodule = Datamodule(
         DatamoduleConfig(
             dataset_path=config.data.dataset_path,
-            global_batch_size=config.data.global_batch_size,
+            num_slots=config.data.num_slots,
+            eval_batch_size=config.data.eval_batch_size,
             num_workers=config.data.num_workers,
             prefetch_factor=config.data.prefetch_factor,
             pin_memory=config.data.pin_memory,
@@ -57,6 +65,7 @@ def build_mazehard_hrm_v1_training_experiment(
         ),
         transform=coerce_maze_hard_batch,
     )
+    datamodule.attach_source_provider(lambda: module._train_source)
 
     return TrainingExperiment(
         module=module,

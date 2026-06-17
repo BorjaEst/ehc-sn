@@ -338,8 +338,8 @@ class SeqMazeProbeEncoder(nn.Module):
         )  # (1, 1, K, D)
         slot_emb = slot_emb.expand(B, N, -1, -1)  # (B, N, K, D)
 
-        # E_candidate_index(succ[i,k])
-        index_emb = self.E_candidate_index(succ_idx_clamped)  # (B, N, K, D)
+        # E_candidate(succ[i,k]) — shared identity table with node slots
+        index_emb = self.E_candidate(succ_idx_clamped)  # (B, N, K, D)
 
         # Sum slot + index, then mean-pool over K
         edge_per_slot = slot_emb + index_emb  # (B, N, K, D)
@@ -428,6 +428,9 @@ class SeqMazeAdapterSettings(BaseModel, extra="forbid"):
         hidden_size: Embedding dimension (must match PFC hidden size).
         share_path_position_embeddings: Whether E_decode_position shares
             weights with E_path_position.
+        oracle_decoder_enabled: When True, also decode from graph-region
+            slots as a diagnostic.  The oracle decoder is an ablation-only
+            shortcut — it must never be active during production training.
     """
 
     n_max: int = Field(default=32, ge=1)
@@ -442,6 +445,12 @@ class SeqMazeAdapterSettings(BaseModel, extra="forbid"):
     ] = Field(default="successor_index_embedding")
     hidden_size: int = Field(default=128, ge=1)
     share_path_position_embeddings: bool = Field(default=True)
+    oracle_decoder_enabled: bool = Field(
+        default=False,
+        description="Diagnostic ablation: decode path logits from graph-region "
+        "slots directly.  Disabled by default — must not be enabled in "
+        "production training.",
+    )
 
 
 # =============================================================================
@@ -491,13 +500,8 @@ class SeqMazeEncoder(nn.Module):
         self.E_successor_slot = nn.Embedding(
             config.k_max, D, device=device, dtype=dtype
         )
-        self.E_candidate_index = nn.Embedding(
-            config.n_max + 1, D, device=device, dtype=dtype
-        )
-
-        # --- Graph region: successor_node_pool encoding ---
-        # Shared with candidate-index embedding above (same index space)
-        # Pooled by mean over valid successors
+        # Edge-to-node identity grounding: successor references use the same
+        # E_candidate table as node slots (shared identity code space).
 
         # --- Path region: learned query embeddings ---
         self.E_path_query = nn.Embedding(1, D, device=device, dtype=dtype)
@@ -509,7 +513,8 @@ class SeqMazeEncoder(nn.Module):
         self.E_region_graph = nn.Embedding(1, D, device=device, dtype=dtype)
         self.E_region_path = nn.Embedding(1, D, device=device, dtype=dtype)
 
-        # Scaling
+        # Scaling: D**0.5 matches transformer input convention used by PFC
+        # and MazeHard encoder.  The PFC was designed for this scale.
         self.embedding_scale = D**0.5
 
     def forward(
@@ -548,18 +553,6 @@ class SeqMazeEncoder(nn.Module):
         edge_emb = self._encode_edges(
             successor_indices, successor_mask, node_candidate_index, node_obs_id
         )  # (B, N, D)
-
-        if self.training and self.config.n_max <= 8:
-            n_actual = node_mask.sum(dim=-1).float().mean().item()
-            succ_min = successor_indices.min().item()
-            succ_max = successor_indices.max().item()
-            mask_ratio = successor_mask.float().mean().item()
-            print(
-                f"[seqmaze-encoder] n_actual={n_actual:.1f} "
-                f"succ_range=[{succ_min},{succ_max}] "
-                f"mask_ratio={mask_ratio:.3f} "
-                f"edge_emb_norm={edge_emb.norm(dim=-1).mean().item():.4f}"
-            )
 
         # Region tag
         region_graph = self.E_region_graph.weight.unsqueeze(0)  # (1, 1, D)
@@ -684,7 +677,7 @@ class SeqMazeEncoder(nn.Module):
 
         if config.edge_encoding == "successor_node_pool":
             return self._encode_successor_node_pool(
-                successor_indices, successor_mask, node_obs_id
+                successor_indices, successor_mask, node_obs_id, node_candidate_index
             )
 
         raise ValueError(f"Unknown edge_encoding: {config.edge_encoding!r}")
@@ -697,7 +690,7 @@ class SeqMazeEncoder(nn.Module):
         """Encode edges as pooled slot+index embeddings.
 
         edge_embedding_i =
-            Pool_k [ E_successor_slot(k) + E_candidate_index(succ[i,k]) ]
+            Pool_k [ E_successor_slot(k) + E_candidate(succ[i,k]) ]
             masked by successor_mask[i, k]
         """
         config = self.config
@@ -711,8 +704,8 @@ class SeqMazeEncoder(nn.Module):
         slot_emb = self.E_successor_slot.weight.unsqueeze(0).unsqueeze(0)
         slot_emb = slot_emb.expand(B, N, -1, -1)  # (B, N, K, D)
 
-        # E_candidate_index(succ[i,k])
-        index_emb = self.E_candidate_index(succ_idx_clamped)  # (B, N, K, D)
+        # E_candidate(succ[i,k]) — shared identity table with node slots
+        index_emb = self.E_candidate(succ_idx_clamped)  # (B, N, K, D)
 
         # Sum slot + index, then mean-pool over K
         edge_per_slot = slot_emb + index_emb  # (B, N, K, D)
@@ -727,12 +720,17 @@ class SeqMazeEncoder(nn.Module):
         successor_indices: Tensor,  # (B, N, K)
         successor_mask: Tensor,  # (B, N, K)
         node_obs_id: Tensor,  # (B, N)
+        node_candidate_index: Tensor,  # (B, N)
     ) -> Tensor:
-        """Encode edges by pooling successor node base embeddings.
+        """Encode edges by pooling successor full node content embeddings.
 
         edge_embedding_i =
-            Pool_k [ E_obs(obs_id[succ[i,k]]) ]
+            Pool_k [ E_obs(obs_id[succ]) + E_candidate(candidate_index[succ]) ]
             masked by successor_mask[i, k]
+
+        Pools both E_obs and E_candidate of each successor so the edge
+        representation shares the same identity code space as graph-region
+        node slots.
         """
         config = self.config
         B, N, K = successor_indices.shape
@@ -742,8 +740,7 @@ class SeqMazeEncoder(nn.Module):
         succ_idx_clamped = successor_indices.clamp(min=0, max=N - 1)
         succ_idx_mask = successor_mask  # (B, N, K)
 
-        # Gather obs_id of successors: node_obs_id[b, succ[i,k]]
-        # Expand node_obs_id to (B, N, 1) -> gather along dim=1 with succ indices
+        # Gather inputs of successors via advanced indexing.
         batch_idx = (
             torch.arange(B, device=node_obs_id.device)
             .unsqueeze(1)
@@ -751,13 +748,20 @@ class SeqMazeEncoder(nn.Module):
             .expand(-1, N, K)
         )
         node_idx = succ_idx_clamped  # (B, N, K)
-        succ_obs_id = node_obs_id[batch_idx, node_idx]  # (B, N, K)
 
-        # Embed and mean-pool
+        # E_obs of each successor
+        succ_obs_id = node_obs_id[batch_idx, node_idx]  # (B, N, K)
         obs_emb = self.E_obs(succ_obs_id)  # (B, N, K, D)
-        obs_emb = obs_emb * succ_idx_mask.unsqueeze(-1)
+
+        # E_candidate of each successor (shared identity code)
+        succ_cand_idx = node_candidate_index[batch_idx, node_idx]  # (B, N, K)
+        cand_emb = self.E_candidate(succ_cand_idx)  # (B, N, K, D)
+
+        # Mean-pool over successors
+        content_emb = obs_emb + cand_emb  # (B, N, K, D)
+        content_emb = content_emb * succ_idx_mask.unsqueeze(-1)
         denom = succ_idx_mask.sum(dim=-1, keepdim=True).clamp(min=1)
-        edge_emb = obs_emb.sum(dim=-2) / denom  # (B, N, D)
+        edge_emb = content_emb.sum(dim=-2) / denom  # (B, N, D)
 
         return edge_emb
 
@@ -831,6 +835,79 @@ class SeqMazeDecoder(nn.Module):
 
 
 # =============================================================================
+class SeqMazeOracleDecoder(nn.Module):
+    """Diagnostic decoder that reads graph-region slots to produce path logits.
+
+    This is an ablation-only shortcut decoder.  It proves whether the full
+    data pipeline (encoder, targets, loss, output vocabulary) is correct when
+    graph information is explicitly exposed to the decoder.
+
+    It is NOT the production architecture — the production :class:`SeqMazeDecoder`
+    reads only path-region slots.
+    """
+
+    def __init__(
+        self,
+        config: SeqMazeAdapterSettings,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self.config = config
+        D = config.hidden_size
+        V = config.n_max + 2  # path vocabulary size
+
+        # Position embedding for the T output positions
+        self.E_decode_position = nn.Embedding(
+            config.t_max, D, device=device, dtype=dtype
+        )
+        self.ln = nn.LayerNorm(D, device=device, dtype=dtype)
+        self.lm_head = nn.Linear(D, V, bias=False, device=device, dtype=dtype)
+
+    def forward(
+        self,
+        schema_slots: Tensor,  # (B, S, D) — full schema output from HRM
+        n_max: int,
+        t_max: int,
+    ) -> Tensor:
+        """Decode graph-region schema slots into path logits.
+
+        Each graph node state is decoded independently into one path position,
+        so position ``t`` reads from graph slot ``t`` (clamped to N-1 when
+        ``t >= N``).  This exposes graph information to the decoder while
+        keeping the output shape identical to :class:`SeqMazeDecoder`.
+
+        Args:
+            schema_slots: (B, S, D) — all schema slots from HRM output.
+            n_max: Number of graph region slots (N).
+            t_max: Number of path region slots (T).
+
+        Returns:
+            path_logits: (B, T, N+2) float32.
+        """
+        # Extract graph region
+        graph_states = schema_slots[:, :n_max, :]  # (B, N, D)
+        B, N, D = graph_states.shape
+        device = schema_slots.device
+
+        # For each output position t, read from graph slot min(t, N-1).
+        # This keeps all logits inside the graph region, avoiding path-region
+        # slot access.
+        src_idx = torch.arange(t_max, device=device).clamp(max=N - 1)  # (T,)
+        decoder_input = graph_states[:, src_idx, :]  # (B, T, D)
+
+        # Add position embedding
+        pos_ids = torch.arange(t_max, device=device).unsqueeze(0).expand(B, -1)
+        pos_emb = self.E_decode_position(pos_ids)  # (B, T, D)
+        decoder_input = decoder_input + pos_emb
+        decoder_input = self.ln(decoder_input)
+
+        path_logits = self.lm_head(decoder_input)  # (B, T, N+2)
+        return path_logits
+
+
+# =============================================================================
 __all__ = [
     "O_ID",
     "DEFAULT_MAZE_HARD_HRM_VOCAB_SIZE",
@@ -847,4 +924,5 @@ __all__ = [
     "SeqMazeAdapterSettings",
     "SeqMazeEncoder",
     "SeqMazeDecoder",
+    "SeqMazeOracleDecoder",
 ]

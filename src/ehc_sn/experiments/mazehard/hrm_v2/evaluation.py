@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ehc_sn.lightning.modules.actor_critic import ActorCriticModule
+from ehc_sn.tasks.mazehard.runtime import MazeHardRuntimeConfig
 
 from .config import MazeHardHRMV2EvaluationExperimentConfig
 from .model import build_mazehard_hrm_v2_model
@@ -15,7 +16,10 @@ def build_mazehard_hrm_v2_evaluation_executor(
 
     The returned module has ``_training_config is None``.
     """
-    return build_mazehard_hrm_v2_model(config.model)
+    return build_mazehard_hrm_v2_model(
+        config.model,
+        execution=config.execution.to_runtime_config(),
+    )
 
 
 __all__ = ["build_mazehard_hrm_v2_evaluation_executor"]

@@ -146,16 +146,26 @@ class BaseController[ModelState, ConfigT: BaseModel]:
             model_state=self.backbone.init_state(batch_size),
             steps=torch.zeros((batch_size,), dtype=torch.int32, device=device),
             halted=torch.ones((batch_size,), dtype=torch.bool, device=device),
-            data=self.make_empty_slot_data(batch_sample),
+            data=self.make_empty_slot_data(batch_sample, device=device),
         )
 
     @staticmethod
     def make_empty_slot_data(  # ----------------------------------------------
         batch_sample: Batch,
+        *,
+        device: torch.device | None = None,
     ) -> dict[str, Tensor]:
-        """Allocate per-slot buffers matching an example batch."""
+        """Allocate per-slot buffers matching an example batch.
+
+        Args:
+            batch_sample: Example batch used to infer keys, shapes, and dtypes.
+            device: Target device for the allocated buffers.  When ``None``,
+                each buffer inherits the device of the corresponding input
+                value (``torch.empty_like`` default).
+        """
         return {
-            key: torch.empty_like(value) for key, value in batch_sample.items()
+            key: torch.empty_like(value, device=device)
+            for key, value in batch_sample.items()
         }
 
     def refresh_slot_data(  # -------------------------------------------------
@@ -163,7 +173,25 @@ class BaseController[ModelState, ConfigT: BaseModel]:
         batch: Batch,
         state: RolloutState[ModelState],
     ) -> dict[str, Tensor]:
-        """Refresh slot buffers for halted rows."""
+        """Refresh slot buffers for halted rows.
+
+        Raises:
+            RuntimeError: If any tensor in *batch* or *state.data* resides on
+                a different device than ``state.halted``.
+        """
+        target_device = state.halted.device
+        for key, value in batch.items():
+            if value.device != target_device:
+                raise RuntimeError(
+                    f"Device mismatch in batch key {key!r}: "
+                    f"expected {target_device}, got {value.device}."
+                )
+            if state.data[key].device != target_device:
+                raise RuntimeError(
+                    f"Device mismatch in state.data key {key!r}: "
+                    f"expected {target_device}, got {state.data[key].device}."
+                )
+
         batch, halted, data = batch, state.halted, state.data
         return {
             key: torch.where(

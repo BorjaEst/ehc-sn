@@ -16,15 +16,26 @@ def build_seqmaze_hrm_v1_training_experiment(
     config: SeqMazeHRMV1TrainingExperimentConfig,
 ) -> TrainingExperiment:
     """Build a complete training experiment for SeqMaze × HRM-v1."""
-    module = build_seqmaze_hrm_v1_model(config.model)
-    module._training_config = ACTSupervisedTrainingConfig(
+    # Construct training config (optimizer only — runtime/execution policy
+    # is passed separately) and pass both through the model builder.
+    training_config = ACTSupervisedTrainingConfig(
         optimizer=config.training.optimizer,
-        runtime=config.training.runtime,
+        num_slots=config.data.num_slots,
+        gradient_clip_val=getattr(config.trainer, "gradient_clip_val", None),
+    )
+    module = build_seqmaze_hrm_v1_model(
+        config.model,
+        training_config=training_config,
+        execution=config.execution,
+        scheduler=config.scheduler,
+        supervised_only_warmup_steps=config.supervised_only_warmup_steps,
+        target_network=config.target_network,
     )
     datamodule = Datamodule(
         DatamoduleConfig(
             dataset_path=config.data.dataset_path,
-            global_batch_size=config.data.global_batch_size,
+            num_slots=config.data.num_slots,
+            eval_batch_size=config.data.eval_batch_size,
             num_workers=config.data.num_workers,
             prefetch_factor=config.data.prefetch_factor,
             pin_memory=config.data.pin_memory,
@@ -34,6 +45,7 @@ def build_seqmaze_hrm_v1_training_experiment(
         ),
         transform=None,
     )
+    datamodule.attach_source_provider(lambda: module._train_source)
     return TrainingExperiment(
         module=module,
         datamodule=datamodule,

@@ -1,11 +1,11 @@
 # Evaluation executor config — HRM v1 on MazeHard.
 # Derived from config/training/hrm-v1-mazehard-vram8gib.toml.
 # Key eval override: exploration_prob = 0.0 (deterministic).
-# global_batch_size = 1 (truthful for single-episode eval batches;
-# the field is required by HRMV1ModelConfig).
+# num_slots = 1 (single-episode eval batches; model builder
+# expects this field for carry-width allocation).
 
 model_config_path = "config/models/hrm-v1-base.toml"
-global_batch_size = 1
+num_slots = 1
 
 [adapter]
     encoder_kind = "rope"

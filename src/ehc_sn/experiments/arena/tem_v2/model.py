@@ -9,24 +9,27 @@ from ehc_sn.adapters.tem import (
     ArenaTEMV2BridgeAdapter,
     build_arena_tem_trace_meta,
 )
-from ehc_sn.controllers.replay.trajectory import (
-    ReplayTrajectoryControllerConfig,
-)
 from ehc_sn.lightning.modules.variational_replay import (
+    TEMTrainingConfig,
     VariationalReplayBindings,
     VariationalReplayComponentConfigs,
     VariationalReplayConfig,
     VariationalReplayModule,
 )
 from ehc_sn.models.tem.tem_v2 import ModelSettingsV2, TEMModelV2
-from ehc_sn.objectives.tem import TEMObjectiveConfig
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
+from ehc_sn.training.schedules import SchedulerConfig
+from ehc_sn.training.tem import RuntimeConfig as TEMRuntimeConfig
 
 from .config import ArenaTEMV2ModelConfig
 
 
 def build_arena_tem_v2_model(
     config: ArenaTEMV2ModelConfig,
+    *,
+    training_config: TEMTrainingConfig | None = None,
+    execution: TEMRuntimeConfig | None = None,
+    scheduler: SchedulerConfig | None = None,
 ) -> VariationalReplayModule:
     components: VariationalReplayComponentConfigs = config.components  # type: ignore[assignment]
 
@@ -43,27 +46,13 @@ def build_arena_tem_v2_model(
     return VariationalReplayModule(
         config=VariationalReplayConfig(
             model_config_path=config.model_config_path,
+            scheduler=scheduler or SchedulerConfig(),
         ),
         component_configs=components,
         bindings=bindings,
+        training_config=training_config,
+        execution=execution,
     )
 
 
-def build_experiment(
-    config: VariationalReplayConfig,
-    components: VariationalReplayComponentConfigs,
-) -> VariationalReplayModule:
-    """Backward-compat builder — delegates to ``build_arena_tem_v2_model``."""
-    return build_arena_tem_v2_model(
-        ArenaTEMV2ModelConfig(
-            model_config_path=config.model_config_path,
-            components=type(ArenaTEMV2ModelConfig.model_fields["components"])(
-                adapter=components.adapter,
-                controller=components.controller,
-                objective=components.objective,
-            ),
-        )
-    )
-
-
-__all__ = ["build_experiment", "build_arena_tem_v2_model"]
+__all__ = ["build_arena_tem_v2_model"]

@@ -19,22 +19,24 @@ def build_mazehard_hrm_v2_training_experiment(
     config: MazeHardHRMV2TrainingExperimentConfig,
 ) -> TrainingExperiment:
     """Build a complete training experiment for MazeHard × HRM-v2."""
-    module = build_mazehard_hrm_v2_model(config.model)
-    module._deliberation = MazeHardRuntimeConfig(
-        halt_action=config.deliberation.halt_action,
-        episode_horizon=config.deliberation.episode_horizon,
-    )
-    module._training_config = ActorCriticTrainingConfig(
-        optimizer_supervised=config.training.optimizer_supervised,
-        optimizer_rl=config.training.optimizer_rl,
-        optimizer_qv=config.training.optimizer_qv,
-        reward=MazeHardRewardConfig.model_validate(config.training.reward),
-        hrm_runtime=config.training.hrm_runtime,
+    module = build_mazehard_hrm_v2_model(
+        config.model,
+        execution=config.execution.to_runtime_config(),
+        training_config=ActorCriticTrainingConfig(
+            optimizer_supervised=config.training.optimizer_supervised,
+            optimizer_rl=config.training.optimizer_rl,
+            optimizer_qv=config.training.optimizer_qv,
+            reward=MazeHardRewardConfig.model_validate(config.training.reward),
+            num_slots=config.data.num_slots,
+        ),
+        scheduler=config.scheduler,
+        supervised_only_warmup_steps=config.supervised_only_warmup_steps,
     )
     datamodule = Datamodule(
         DatamoduleConfig(
             dataset_path=config.data.dataset_path,
-            global_batch_size=config.data.global_batch_size,
+            num_slots=config.data.num_slots,
+            eval_batch_size=config.data.eval_batch_size,
             num_workers=config.data.num_workers,
             prefetch_factor=config.data.prefetch_factor,
             pin_memory=config.data.pin_memory,
@@ -44,6 +46,7 @@ def build_mazehard_hrm_v2_training_experiment(
         ),
         transform=coerce_maze_hard_batch,
     )
+    datamodule.attach_source_provider(lambda: module._train_source)
     return TrainingExperiment(
         module=module,
         datamodule=datamodule,

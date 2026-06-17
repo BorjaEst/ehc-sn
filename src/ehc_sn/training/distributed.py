@@ -7,32 +7,51 @@ cluster behavior for true multi-rank runs.
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 
 from lightning.pytorch.strategies import DDPStrategy
 from torch import Tensor
 
 
 # =============================================================================
+@dataclass(frozen=True)
+class SumOverBatch:
+    """Loss reduced by sum over the local batch.
+
+    ``normalize_loss_for_backward`` accepts only this type, enforcing
+    the sum-reduction contract at the call site. A mean-reduced loss
+    passed here produces incorrectly scaled gradients under DDP.
+
+    The caller (training_step) is responsible for wrapping the objective's
+    summed loss in this type before passing to ``normalize_loss_for_backward``.
+    """
+
+    value: Tensor
+
+
+# =============================================================================
 def normalize_loss_for_backward(  # -------------------------------------------
-    total_loss: Tensor,
+    loss: SumOverBatch,
     local_bs: int,
 ) -> Tensor:
-    """Normalize the total loss by the local batch size for distributed training.
+    """Normalize a sum-reduced loss by the local batch size for DDP.
 
-    In distributed training (for example DDP), each rank computes gradients on its
-    local mini-batch. Dividing by the local batch size keeps gradient magnitudes
-    consistent before DDP averages gradients across ranks.
+    In distributed training, each rank computes gradients on its local
+    mini-batch. Dividing the summed loss by the local batch size converts
+    it to a per-example mean before ``manual_backward()``. DDP then
+    averages gradients across ranks, yielding the correct effective batch
+    size of ``local_bs * world_size``.
 
     Args:
-        total_loss: Unnormalized scalar loss for the current local mini-batch.
+        loss: Sum-reduced loss over the local batch.
         local_bs: Effective local batch size on the current rank.
 
     Returns:
-        Loss scaled for backward().
+        Mean loss per example, ready for ``backward()``.
     """
     if local_bs <= 0:
         raise ValueError(f"local_bs must be positive, got {local_bs}.")
-    return total_loss / float(local_bs)
+    return loss.value / float(local_bs)
 
 
 # =============================================================================
@@ -65,19 +84,19 @@ def resolve_effective_world_size(  # ------------------------------------------
 
 
 # =============================================================================
-def validate_batch_size_divisibility(  # --------------------------------------
-    global_batch_size: int,
+def validate_num_slots_divisibility(  # ---------------------------------------
+    num_slots: int,
     world_size: int,
 ) -> None:
-    """Validate that the global batch size is divisible by the effective world size."""
+    """Validate that num_slots is divisible by the effective world size."""
     if world_size <= 0:
         raise ValueError(
             "World size must be a positive integer.",
         )
-    if global_batch_size % world_size != 0:
+    if num_slots % world_size != 0:
         raise ValueError(
-            "global_batch_size must be divisible by world_size. "
-            f"Got global_batch_size={global_batch_size}, "
+            "num_slots must be divisible by world_size. "
+            f"Got num_slots={num_slots}, "
             f"world_size={world_size}.",
         )
 
@@ -103,8 +122,9 @@ def resolve_trainer_strategy(  # ----------------------------------------------
 
 # =============================================================================
 __all__ = [
+    "SumOverBatch",
     "normalize_loss_for_backward",
     "resolve_effective_world_size",
     "resolve_trainer_strategy",
-    "validate_batch_size_divisibility",
+    "validate_num_slots_divisibility",
 ]

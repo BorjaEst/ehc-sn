@@ -26,16 +26,35 @@ from ehc_sn.tasks.seqmaze.evaluation import SeqMazeValidationScorer
 from ehc_sn.traces.specs import HRM_HIDDEN_STATE_FIELDS
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
+from ehc_sn.training.schedules import SchedulerConfig
+from ehc_sn.training.stabilization import TargetNetworkConfig
 
 from .config import SeqMazeHRMV1ModelConfig
 
 
 def build_seqmaze_hrm_v1_model(
     config: SeqMazeHRMV1ModelConfig,
+    *,
+    training_config: ACTSupervisedTrainingConfig | None = None,
+    execution: HRMRuntimeConfig | None = None,
+    scheduler: SchedulerConfig | None = None,
+    supervised_only_warmup_steps: int | None = None,
+    target_network: TargetNetworkConfig | None = None,
 ) -> ACTSupervisedModule:
     """Construct an ACTSupervisedModule for SeqMaze × HRM-v1.
 
-    No training config — safe for eval.
+    Training config and execution are both constructor parameters —
+    no post-construction mutation needed.
+
+    Args:
+        config: Model-level configuration (components + architecture path).
+        training_config: Training-only settings (optimizer, runtime).
+            ``None`` during evaluation-only construction.
+        execution: Execution policy for eval-time rollout bounds.
+            Used only when ``training_config`` is ``None``.
+
+    Returns:
+        Instantiated ACTSupervisedModule.
     """
     components: ACTSupervisedComponentConfigs = config.components  # type: ignore[assignment]
     adapter_settings: SeqMazeAdapterSettings = components.adapter  # type: ignore[assignment]
@@ -68,34 +87,15 @@ def build_seqmaze_hrm_v1_model(
     return ACTSupervisedModule(
         config=ACTSupervisedConfig(
             model_config_path=config.model_config_path,
-            global_batch_size=1,
+            scheduler=scheduler or SchedulerConfig(),
+            supervised_only_warmup_steps=supervised_only_warmup_steps or 0,
+            target_network=target_network or TargetNetworkConfig(),
         ),
         component_configs=components,
         bindings=bindings,
+        training_config=training_config,
+        execution=execution,
     )
 
 
-def build_experiment(
-    config: ACTSupervisedConfig,
-    components: ACTSupervisedComponentConfigs,
-    training: ACTSupervisedTrainingConfig | None = None,
-) -> ACTSupervisedModule:
-    """Backward-compat builder — delegates to ``build_seqmaze_hrm_v1_model``."""
-    from .config import SeqMazeHRMV1ComponentConfigs, SeqMazeHRMV1ModelConfig
-
-    model_config = SeqMazeHRMV1ModelConfig(
-        model_config_path=config.model_config_path,
-        components=SeqMazeHRMV1ComponentConfigs(
-            adapter=components.adapter,
-            controller=components.controller,
-            objective=components.objective,
-        ),
-    )
-    module = build_seqmaze_hrm_v1_model(model_config)
-    if training is not None:
-        # Attach training config to enable optimizers
-        module._training_config = training
-    return module
-
-
-__all__ = ["build_experiment", "build_seqmaze_hrm_v1_model"]
+__all__ = ["build_seqmaze_hrm_v1_model"]

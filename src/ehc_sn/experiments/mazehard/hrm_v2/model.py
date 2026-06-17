@@ -43,17 +43,32 @@ from ehc_sn.training.actor_critic import (
     ZeroBootstrapActorCriticValidationScorer,
 )
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
+from ehc_sn.training.schedules import SchedulerConfig
 
 from .config import MazeHardHRMV2ModelConfig
 
 
 def build_mazehard_hrm_v2_model(
     config: MazeHardHRMV2ModelConfig,
+    *,
+    training_config: ActorCriticTrainingConfig | None = None,
+    execution: MazeHardRuntimeConfig | None = None,
+    scheduler: SchedulerConfig | None = None,
+    supervised_only_warmup_steps: int | None = None,
 ) -> ActorCriticModule:
     """Construct an ActorCriticModule for MazeHard × HRM-v2.
 
-    No training config — the returned module is safe for eval.
-    Training config is attached by the training experiment builder.
+    Parameters
+    ----------
+    config:
+        Model configuration (components + architecture path).
+    execution:
+        Execution policy (runtime config). Required for both training and
+        evaluation when the module is used with a Trainer.
+    training_config:
+        Training-only optimiser and reward config.  ``None`` during
+        evaluation-only construction.  When provided, ``num_slots`` is
+        read from ``training_config.num_slots`` in ``setup()``.
     """
     components: ActorCriticComponentConfigs = config.components  # type: ignore[assignment]
 
@@ -82,36 +97,16 @@ def build_mazehard_hrm_v2_model(
         hidden_state_fields=HRM_HIDDEN_STATE_FIELDS,
     )
     return ActorCriticModule(
-        config=ActorCriticConfig(model_config_path=config.model_config_path),
+        config=ActorCriticConfig(
+            model_config_path=config.model_config_path,
+            scheduler=scheduler or SchedulerConfig(),
+            supervised_only_warmup_steps=supervised_only_warmup_steps or 0,
+        ),
         component_configs=components,
         bindings=bindings,
+        execution=execution,
+        training_config=training_config,
     )
 
 
-def build_experiment(
-    config: ActorCriticConfig,
-    components: ActorCriticComponentConfigs,
-    deliberation: MazeHardRuntimeConfig,
-    training: ActorCriticTrainingConfig | None = None,
-) -> ActorCriticModule:
-    """Backward-compat builder — delegates to ``build_mazehard_hrm_v2_model``.
-
-    Matches the legacy typed signature used by ``artifacts.py``.
-    """
-    from .config import MazeHardHRMV2ComponentConfigs, MazeHardHRMV2ModelConfig
-
-    model_config = MazeHardHRMV2ModelConfig(
-        model_config_path=config.model_config_path,
-        components=MazeHardHRMV2ComponentConfigs(
-            adapter=components.adapter,
-            controller=components.controller,
-            objective=components.objective,
-        ),
-    )
-    module = build_mazehard_hrm_v2_model(model_config)
-    if training is not None:
-        module._deliberation = deliberation
-    return module
-
-
-__all__ = ["build_experiment", "build_mazehard_hrm_v2_model"]
+__all__ = ["build_mazehard_hrm_v2_model"]

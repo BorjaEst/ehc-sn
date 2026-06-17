@@ -46,7 +46,7 @@ class ACTObjectiveConfig(BaseModel, extra="forbid"):
     """Configuration for :class:`ACTObjective`."""
 
     token_loss: LossType = Field(
-        default="stablemax_cross_entropy",
+        default="softmax_cross_entropy",
         description="The loss function to use for the modeling loss.",
     )
     use_token_weights: bool = Field(

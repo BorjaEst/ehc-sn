@@ -1,7 +1,6 @@
 """MazeHard × HRM-v1 experiment package."""
 
 from .config import (
-    MazeHardDeliberationConfig,
     MazeHardHRMV1ComponentConfigs,
     MazeHardHRMV1EvaluationExperimentConfig,
     MazeHardHRMV1ModelConfig,
@@ -12,7 +11,6 @@ from .model import build_mazehard_hrm_v1_model
 from .training import build_mazehard_hrm_v1_training_experiment
 
 __all__ = [
-    "MazeHardDeliberationConfig",
     "MazeHardHRMV1ComponentConfigs",
     "MazeHardHRMV1ModelConfig",
     "MazeHardHRMV1TrainingExperimentConfig",

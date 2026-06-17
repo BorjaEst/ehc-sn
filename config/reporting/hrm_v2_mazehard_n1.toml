@@ -4,7 +4,7 @@ eval_artifacts_root = "artifacts/evaluation/hrm_v2"
 output_dir = "artifacts/reports/hrm_v2/mazehard_n1"
 
 [checkpoint]
-path = "checkpoints/hrm-v2/eval-weights-only.pt"
+path = "models/hrm-v2/best.pt"
 
 [[regimes]]
 task = "mazehard"

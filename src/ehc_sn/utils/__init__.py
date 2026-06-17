@@ -2,10 +2,11 @@ import datetime
 import logging
 import math
 import os
+import warnings
 from dataclasses import fields, is_dataclass, replace
 from itertools import combinations
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, Optional, Sequence
 
 import numpy as np
 import torch
@@ -14,7 +15,6 @@ from scipy.special import comb
 from torch import Tensor
 from torch import device as Device
 from torch import dtype as Dtype
-from torch import nn
 
 from ehc_sn.types import LocationBelief, Matrix, Reduction, Vector
 
@@ -31,7 +31,7 @@ def inv_var_weight(
     sigmas,
     *,
     eps: float = 1e-4,
-) -> Tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor]:
     """
     Accepts lists batches of row vectors of means and standard deviations, with batches along dim 0.
     Returns inverse-variance weighted averages and standard deviations.
@@ -55,6 +55,14 @@ def inv_var_weight(
 def has_any_grad(
     opt: Any,
 ) -> bool:
+    warnings.warn(
+        "has_any_grad is deprecated for training control-plane logic; "
+        "use only for diagnostics and assertions. "
+        "Remove the guard: stepping an active optimizer with zero gradients "
+        "is harmless and avoids scheduler drift.",
+        FutureWarning,
+        stacklevel=2,
+    )
     raw_opt = getattr(opt, "optimizer", opt)
     return any(
         param.grad is not None

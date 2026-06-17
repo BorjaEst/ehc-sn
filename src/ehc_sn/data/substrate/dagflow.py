@@ -67,6 +67,8 @@ def _generate_graph_sample(
     n_max: int,
     k_max: int,
     rng: np.random.Generator,
+    min_path_length: int = 1,
+    require_unique_shortest_path: bool = True,
 ) -> dict[str, np.ndarray]:
     """Generate one random DAG sample with structural channels only.
 
@@ -74,14 +76,22 @@ def _generate_graph_sample(
         n_max: Maximum candidate nodes (N). Actual nodes < n_max are padded.
         k_max: Maximum out-degree per node (K).
         rng: Seeded random generator.
+        min_path_length: Minimum acceptable shortest-path length in nodes
+            (default 1, meaning any path is acceptable).
 
     Returns:
         Sample dict with layout channels (no path or edge labels).
     """
-    n_actual = int(rng.integers(min(4, n_max), n_max + 1))
+    n_actual_low = max(min(4, n_max), min_path_length + 1)
+    n_actual_low = min(n_actual_low, n_max)
+    n_actual = int(rng.integers(n_actual_low, n_max + 1))
 
     base_seed = int(rng.integers(0, 2**31))
-    adjacency = generate_transition_dag(n_actual, k_max, base_seed)
+    adjacency = generate_transition_dag(
+        n_actual, k_max, base_seed,
+        min_path_length=min_path_length,
+        require_unique_shortest_path=require_unique_shortest_path,
+    )
 
     remap_seed = int(rng.integers(0, 2**31))
     obs_ids = remap_obs_ids(n_actual, remap_seed)
@@ -199,6 +209,8 @@ def build_dagflow_layouts(
     n_val: int = 500,
     n_test: int = 500,
     seed: int = 42,
+    min_path_length: int = 1,
+    require_unique_shortest_path: bool = True,
 ) -> None:
     """Build the dagflow layout dataset at *version_root*.
 
@@ -220,6 +232,13 @@ def build_dagflow_layouts(
         n_val: Number of validation samples.
         n_test: Number of test samples.
         seed: Deterministic base seed for reproducibility.
+        min_path_length: Minimum acceptable shortest-path length in nodes
+            (default 1, meaning any path is acceptable).
+        require_unique_shortest_path: When True, generated graphs are
+            rejected if the start-to-goal shortest path is not unique.
+            Default True.
+        n_test: Number of test samples.
+        seed: Deterministic base seed for reproducibility.
 
     Raises:
         FileExistsError: When *version_root* already exists (immutable root).
@@ -228,19 +247,12 @@ def build_dagflow_layouts(
     version = extract_version(version_root)
 
     stage_params = {
-        "n_max": n_max,
-        "t_max": t_max,
-        "max_out_degree": max_out_degree,
-        "n_train": n_train,
-        "n_val": n_val,
-        "n_test": n_test,
-        "seed": seed,
-    }
-    stage_params = {
         "preset": preset,
         "n_max": n_max,
         "t_max": t_max,
         "max_out_degree": max_out_degree,
+        "min_path_length": min_path_length,
+        "require_unique_shortest_path": require_unique_shortest_path,
         "n_train": n_train,
         "n_val": n_val,
         "n_test": n_test,
@@ -271,6 +283,8 @@ def build_dagflow_layouts(
                         n_max=n_max,
                         k_max=max_out_degree,
                         rng=sample_rng,
+                        min_path_length=min_path_length,
+                        require_unique_shortest_path=require_unique_shortest_path,
                     )
                 )
 
@@ -308,6 +322,7 @@ def build_dagflow_layouts(
             n_max=n_max,
             t_max=t_max,
             max_out_degree=max_out_degree,
+            min_path_length=min_path_length,
         )
 
     n_total = n_train + n_val + n_test

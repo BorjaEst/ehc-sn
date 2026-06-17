@@ -4,7 +4,7 @@ eval_artifacts_root = "artifacts/evaluation/tem_v2"
 output_dir = "artifacts/reports/tem_v2/arena_n1"
 
 [checkpoint]
-path = "checkpoints/tem-v2/eval-weights-only.pt"
+path = "models/tem-v2/best.pt"
 
 [[regimes]]
 task = "arena"

@@ -80,6 +80,9 @@ from ehc_sn.training.schedules import (
 from ehc_sn.training.tem import RuntimeConfig as TEMRuntimeConfig
 from ehc_sn.training.tem import (
     TEMRuntimeState,
+)
+from ehc_sn.training.tem import load_weights_from_checkpoint as _loader
+from ehc_sn.training.tem import (
     resolve_tem_runtime,
 )
 from ehc_sn.types import Batch
@@ -143,6 +146,18 @@ class VariationalReplayComponentConfigs(BaseModel, extra="forbid"):
     )
 
 
+class TEMTrainingConfig(BaseModel, extra="forbid"):
+    """Training-only configuration for a variational/replay experiment.
+
+    Not required for evaluation — only used to construct optimizers.
+    """
+
+    optimizer: AdamConfig = Field(
+        default_factory=AdamConfig,
+        description="Adam optimizer hyperparameters.",
+    )
+
+
 class VariationalReplayConfig(BaseModel, extra="forbid"):
     """Regime-owned settings for a variational replay Lightning experiment.
 
@@ -151,23 +166,18 @@ class VariationalReplayConfig(BaseModel, extra="forbid"):
     (adapter, controller, objective) live in
     :class:`VariationalReplayComponentConfigs`, validated by the
     experiment builder.
+
+    Training-only concerns (optimizer) and execution policy (runtime)
+    are separate parameters passed to ``VariationalReplayModule``.
     """
 
     model_config_path: Path = Field(
         ...,
         description="Path to the model configuration TOML file.",
     )
-    optimizer: AdamConfig = Field(
-        default_factory=AdamConfig,
-        description="Adam optimizer hyperparameters.",
-    )
     scheduler: SchedulerConfig = Field(
         default_factory=SchedulerConfig,
         description="Learning-rate scheduler configuration.",
-    )
-    runtime: TEMRuntimeConfig = Field(
-        default_factory=TEMRuntimeConfig,
-        description="TEM runtime configuration (dynamics schedules, etc.).",
     )
 
 
@@ -193,11 +203,21 @@ class VariationalReplayModule(L.LightningModule):
         component_configs: VariationalReplayComponentConfigs,
         bindings: VariationalReplayBindings,
         *,
+        training_config: TEMTrainingConfig | None = None,
+        execution: TEMRuntimeConfig | None = None,
         debug_env_var: str | None = None,
+        num_slots: int | None = None,
     ) -> None:
         super().__init__()
         self._bindings = bindings
         self._component_configs = component_configs
+        self._training_config = training_config
+        self._execution = execution
+        if num_slots is not None and num_slots <= 0:
+            raise ValueError(
+                f"num_slots must be positive, " f"got {num_slots}."
+            )
+        self._num_slots = num_slots
         self._debug_env_var = debug_env_var
 
         model_settings = bindings.model_settings_cls.from_config(
@@ -276,6 +296,9 @@ class VariationalReplayModule(L.LightningModule):
 
         # No batch buffer or assembler — demand-driven admission is used.
 
+    def load_weights_from_checkpoint(self, path, groups):
+        return _loader(self.model, path, groups)
+
     @property
     def config(self) -> VariationalReplayConfig:
         """Return the parsed configuration."""
@@ -299,7 +322,10 @@ class VariationalReplayModule(L.LightningModule):
         total_steps = int(self.trainer.estimated_stepping_batches)
 
         sup_params = [p for p in self.adapter.parameters() if p.requires_grad]
-        opt_sup = Adam(sup_params, self.config.optimizer)
+        if self._training_config is None:
+            return []
+        sup_params = [p for p in self.adapter.parameters() if p.requires_grad]
+        opt_sup = Adam(sup_params, self._training_config.optimizer)
         schedulers: list[dict[str, Any]] = [
             {
                 "scheduler": CosineAnnealingLRWithWarmup(
@@ -339,29 +365,43 @@ class VariationalReplayModule(L.LightningModule):
         self._diagnostic_traces.clear()
 
     def _get_batch_size(self) -> int:
-        """Return the per-device batch size from the datamodule config."""
-        if self.trainer is None or self.trainer.datamodule is None:
+        """Return the per-device carry width from the constructor-stored value."""
+        if self._num_slots is None:
             return 1
-        dm = self.trainer.datamodule
         world_size = max(getattr(self.trainer, "world_size", 1), 1)
-        return max(dm.config.global_batch_size // world_size, 1)
+        return max(self._num_slots // world_size, 1)
 
     def _validation_seed(self, batch_idx: int) -> int:
         """Return the explicit evaluation seed for one validation batch."""
-        seed = self.config.runtime.validation.seed
+        if self._execution is None:
+            raise RuntimeError(
+                "execution config is required for TEM validation. "
+                "Pass execution= to VariationalReplayModule constructor."
+            )
+        seed = self._execution.validation.seed
         if seed is None:
             raise ValueError(
-                "TEM evaluation requires runtime.validation.seed to be set."
+                "TEM evaluation requires execution.validation.seed to be set."
             )
         return int(seed) + int(batch_idx)
 
     def _train_chunk_steps(self) -> int:
         """Return the number of training chunk steps from config."""
-        return self.config.runtime.sequence.tbptt_steps
+        if self._execution is None:
+            raise RuntimeError(
+                "execution config is required for TEM training. "
+                "Pass execution= to VariationalReplayModule constructor."
+            )
+        return self._execution.sequence.tbptt_steps
 
     def _apply_runtime(self, step: int) -> TEMRuntimeState:
         """Resolve runtime state for the given optimizer step."""
-        return resolve_tem_runtime(step, self.config.runtime)
+        if self._execution is None:
+            raise RuntimeError(
+                "execution config is required for TEM training. "
+                "Pass execution= to VariationalReplayModule constructor."
+            )
+        return resolve_tem_runtime(step, self._execution)
 
     def _require_train_controller(self) -> ReplayTrajectoryController:
         if self.train_controller is None:
@@ -455,7 +495,11 @@ class VariationalReplayModule(L.LightningModule):
             train_dataset,
             rank=rank,
             world_size=world_size,
-            seed=self._config.runtime.validation.seed or 42,
+            seed=(
+                self._execution.validation.seed or 42
+                if self._execution is not None
+                else 42
+            ),
         )
 
         # Deferred checkpoint restore: attempt exact cursor restore;
@@ -768,8 +812,16 @@ class VariationalReplayModule(L.LightningModule):
             controller=eval_controller,
             carry=carry0,
             objective=eval_objective,
-            max_rollout_steps=self.config.runtime.validation.max_rollout_steps,
-            hard_max_rollout_steps=self.config.runtime.validation.hard_max_rollout_steps,
+            max_rollout_steps=(
+                self._execution.validation.max_rollout_steps
+                if self._execution is not None
+                else None
+            ),
+            hard_max_rollout_steps=(
+                self._execution.validation.hard_max_rollout_steps
+                if self._execution is not None
+                else None
+            ),
             runner_options={"allow_halt": True, "explore": False},
             objective_options=objective_options,
             trace_request=trace_request,

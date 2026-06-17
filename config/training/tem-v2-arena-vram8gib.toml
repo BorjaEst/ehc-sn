@@ -34,41 +34,35 @@
     g_reg_it         = 40000000
     p_reg_it         = 4000
 
-[training]
-    model_config_path = "config/models/tem-v2-base.toml"
-
 [training.optimizer]
     lr           = 9.4e-4
     weight_decay = 0.00
     betas        = [0.9, 0.98]
 
-[training.scheduler]
-    warmup_steps = 1000
-    min_ratio    = 0.01
-
-[training.runtime.memory]
+[execution.memory]
     eta           = 0.5
     eta_it        = 16000
     hebbian_decay = 0.9999
     lambda_it     = 200
 
-[training.runtime.uncertainty]
+[execution.uncertainty]
     p2g_sig_half_it  = 0
     p2g_sig_scale_it = 200
     offset_min       = 0.0
     offset_max       = 10000.0
 
-[training.runtime.sequence]
+[execution.sequence]
     tbptt_steps = 25
 
-[training.runtime.validation]
+[execution.validation]
     hard_max_rollout_steps = 6000
     max_rollout_steps      = 2000
     seed                   = 42
 
 [data]
     dataset_path         = "data/processed/arena/default/v1"
-    global_batch_size    = 32
+    num_slots            = 32
+    eval_batch_size      = 32
     num_workers          = 4
     prefetch_factor      = 2
     pin_memory           = true
@@ -95,7 +89,7 @@
     diagnostic_level    = "standard"
     non_finite_policy   = "raise"
 
-[checkpointing.scheduler]
+[scheduler]
     warmup_steps = 1000
     min_ratio    = 0.01
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import fields, is_dataclass, replace
+
 import torch
 from torch import Tensor
 
@@ -166,8 +168,11 @@ class DemandDrivenReplaySource:
             }
 
         # Scatter replacement rows into halted positions.
+        # Ensure halted index is on the same device as the template.
         B = self._batch_size
         result = dict(self._template)
+        if halted.device != self._device:
+            halted = halted.to(self._device)
         halted_idx = halted.nonzero(as_tuple=False).flatten()
 
         for k, replacement_tensor in replacements.items():
@@ -206,10 +211,17 @@ def _move_batch_to(  # --------------------------------------------------------
 
     Non-tensor values (metadata, strings, scalars) pass through unchanged.
     ``Tensor`` values are moved via ``.to(device, non_blocking=True)``.
-    Nested ``dict``, ``list``, and ``tuple`` containers are recursed into.
+    Nested ``dict``, ``list``, ``tuple``, and dataclass containers are
+    recursed into.
     """
     if isinstance(batch, Tensor):
         return batch.to(device, non_blocking=True)
+    if is_dataclass(batch):
+        updates = {
+            f.name: _move_batch_to(getattr(batch, f.name), device)
+            for f in fields(batch)
+        }
+        return replace(batch, **updates)
     if isinstance(batch, dict):
         return {k: _move_batch_to(v, device) for k, v in batch.items()}
     if isinstance(batch, (list, tuple)):

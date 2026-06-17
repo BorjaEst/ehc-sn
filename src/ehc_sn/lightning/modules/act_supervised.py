@@ -19,6 +19,7 @@ from typing import Any, Callable, Optional
 
 import lightning as L
 import torch
+import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 from torch.optim import Optimizer
@@ -40,9 +41,14 @@ from ehc_sn.metrics.step_metrics import StepMetrics
 from ehc_sn.objectives.act import ACTObjectiveConfig
 from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
 from ehc_sn.rollouts.sources import DemandDrivenReplaySource, _move_batch_to
+from ehc_sn.tasks.seqmaze.contracts import SEQMAZE_IGNORE_LABEL_ID
 from ehc_sn.traces import build_trace_spec
-from ehc_sn.training.distributed import normalize_loss_for_backward
+from ehc_sn.training.distributed import (
+    SumOverBatch,
+    normalize_loss_for_backward,
+)
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
+from ehc_sn.training.hrm import load_weights_from_checkpoint as _loader
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.rollout import score_captured_rollout
 from ehc_sn.training.schedules import (
@@ -56,6 +62,19 @@ from ehc_sn.training.stabilization import (
 from ehc_sn.types import Batch
 
 
+# =============================================================================
+def _payload_width(batch: Batch) -> int:
+    """Return the leading (batch) dimension from an honest payload batch."""
+    for v in batch.values():
+        if isinstance(v, Tensor):
+            return int(v.shape[0])
+    raise ValueError(
+        "Honest payload batch is empty or contains no tensors. "
+        "Cannot determine batch width."
+    )
+
+
+# =============================================================================
 @dataclass(frozen=True, slots=True, eq=False)
 class ACTSupervisedBindings:
     """Immutable experiment-to-module bindings for ACT-supervised regimes.
@@ -84,6 +103,14 @@ class ACTSupervisedBindings:
     episode_routes: tuple
     hidden_state_fields: tuple
     task_scorer_factory: Callable[[], Any] | None = None
+    param_group_fn: Callable[[nn.Module, nn.Module], list[dict]] | None = None
+    """Optional callable ``(model, adapter) -> list[dict]``.
+
+    Returns parameter groups for the optimizer.  Each dict must have
+    ``"params"`` (list of ``nn.Parameter``) and may have optional overrides
+    such as ``"lr"`` or ``"weight_decay"``.  When ``None``, all adapter
+    parameters are placed in a single group.
+    """
 
 
 class ACTSupervisedTrainingConfig(BaseModel, extra="forbid"):
@@ -95,11 +122,22 @@ class ACTSupervisedTrainingConfig(BaseModel, extra="forbid"):
 
     optimizer: AdamATan2Config = Field(
         ...,
-        description="Family-specific optimizer configuration.",
+        description="Base optimizer configuration.  Per-group overrides "
+        "(e.g. lr, weight_decay) can be supplied by the experiment "
+        "builder via ``ACTSupervisedBindings.param_group_fn``.",
     )
-    runtime: HRMRuntimeConfig = Field(
-        ...,
-        description="HRM/ACT runtime configuration (validation safety limits).",
+    num_slots: int | None = Field(
+        default=None,
+        ge=1,
+        description="Per-rank carry buffer width (concurrent trajectory slots). "
+        "``None`` during evaluation — carry is allocated per batch from the "
+        "DataLoader batch dimension.",
+    )
+    gradient_clip_val: float | None = Field(
+        default=None,
+        ge=0,
+        description="Maximum global gradient norm for clipping.  ``None`` means "
+        "no gradient clipping.",
     )
 
 
@@ -145,10 +183,6 @@ class ACTSupervisedConfig(BaseModel, extra="forbid"):
         default_factory=SchedulerConfig,
         description="Learning-rate scheduler configuration.",
     )
-    global_batch_size: int = Field(
-        ...,
-        description="Global batch size across all devices.",
-    )
     target_network: TargetNetworkConfig = Field(
         default_factory=TargetNetworkConfig,
         description="Optional EMA-lagged target network config.",
@@ -158,6 +192,13 @@ class ACTSupervisedConfig(BaseModel, extra="forbid"):
         ge=0,
         description="Number of optimizer steps during which learned halting "
         "is disabled.",
+    )
+    simple_supervised: bool = Field(
+        default=False,
+        description="Bypass the ACT rollout and use a single forward pass with "
+        "pure cross-entropy loss.  Diagnostic flag to isolate whether the "
+        "rollout mechanics (multi-step, Q-losses, state management) prevent "
+        "convergence.",
     )
 
 
@@ -179,11 +220,13 @@ class ACTSupervisedModule(L.LightningModule):
         bindings: ACTSupervisedBindings,
         training_config: ACTSupervisedTrainingConfig | None = None,
         *,
-        runtime: HRMRuntimeConfig | None = None,
+        execution: HRMRuntimeConfig | None = None,
     ) -> None:
         super().__init__()
         self._bindings = bindings
         self._component_configs = component_configs
+        self._num_slots: int | None = None
+        self._gradient_clip_val: float | None = None
 
         model_settings = bindings.model_settings_cls.from_config(
             config.model_config_path
@@ -215,6 +258,7 @@ class ACTSupervisedModule(L.LightningModule):
         self._train_carry = None
         self._train_source: DemandDrivenReplaySource | None = None
         self._episode_source: ShuffledEpisodeSource | None = None
+        self._pending_source_state: dict[str, Any] | None = None
 
         # Metrics are cloned for train/val to allow separate logging and state
         # management.
@@ -224,14 +268,10 @@ class ACTSupervisedModule(L.LightningModule):
         self.val_metrics = build_val_metrics(bindings.episode_routes).clone(
             prefix="val/"
         )
+        # Training config is set once at construction time — never mutated
+        # post-construction.
         self._training_config = training_config
-        # Runtime config may come from training config (training-time seed)
-        # or be passed as a separate kwarg (eval-time max_rollout_steps).
-        # Training config takes precedence.
-        if training_config is not None:
-            self._runtime: HRMRuntimeConfig | None = training_config.runtime
-        else:
-            self._runtime: HRMRuntimeConfig | None = runtime
+        self._runtime: HRMRuntimeConfig | None = execution
 
         self._trace_paradigm: str = "act"
         self._extra_trace_fields: tuple = bindings.trace_fields
@@ -254,6 +294,9 @@ class ACTSupervisedModule(L.LightningModule):
         if config.target_network.enabled:
             self._target_adapter = TargetAdapterModule(self.adapter)
 
+    def load_weights_from_checkpoint(self, path, groups):
+        return _loader(self.model, path, groups)
+
     @property
     def regime_config(self) -> ACTSupervisedConfig:
         """Regime-owned settings (scheduler, batch scale, warmup, target-network policy)."""
@@ -275,21 +318,69 @@ class ACTSupervisedModule(L.LightningModule):
         if self._training_config is None:
             return []
         total_steps = int(self.trainer.estimated_stepping_batches)
-        sup_params = [p for p in self.adapter.parameters() if p.requires_grad]
-        opt_sup = self._bindings.optimizer_cls(
-            sup_params, self._training_config.optimizer
-        )
+        tc = self._training_config
+
+        # Build parameter groups from experiment-provided callable,
+        # falling back to a single group over all adapter parameters.
+        param_group_fn = self._bindings.param_group_fn
+        if param_group_fn is not None:
+            raw_groups = param_group_fn(self.model, self.adapter)
+        else:
+            raw_groups = [{"params": list(self.adapter.parameters())}]
+
+        # Merge base config with per-group overrides.
+        base_cfg = tc.optimizer
+        param_groups: list[dict[str, Any]] = []
+        for g in raw_groups:
+            merged: dict[str, Any] = {"params": g["params"]}
+            for key in ("lr", "weight_decay", "betas"):
+                merged[key] = g.get(key, getattr(base_cfg, key))
+            param_groups.append(merged)
+
+        opt = self._bindings.optimizer_cls(param_groups, base_cfg)
         schedulers: list[dict[str, Any]] = [
             {
                 "scheduler": CosineAnnealingLRWithWarmup(
-                    opt_sup, total_steps, self.regime_config.scheduler
+                    opt, total_steps, self.regime_config.scheduler
                 ),
                 "interval": "step",
                 "frequency": 1,
                 "name": "optim/main",
             }
         ]
-        return [opt_sup], schedulers
+        return [opt], schedulers
+
+    def setup(self, stage: Optional[str] = None) -> None:
+        """Initialize the training source and carry for source-driven training.
+
+        Called by Lightning after the datamodule's ``setup()``. Creates the
+        episode source, initial carry, and demand-driven replay source so
+        ``training_step`` receives real episode batches from the DataLoader.
+        """
+        if stage == "fit" and self._training_config is not None:
+            tc = self._training_config
+            if tc.num_slots is None:
+                raise RuntimeError(
+                    "num_slots is required for training. "
+                    "Set it via ACTSupervisedTrainingConfig.num_slots."
+                )
+            self._num_slots = tc.num_slots
+            self._gradient_clip_val = tc.gradient_clip_val
+            local_bs = tc.num_slots // max(
+                getattr(self.trainer, "world_size", 1), 1
+            )
+            init_batch = self._ensure_episode_source().take(local_bs)
+            init_batch = _move_batch_to(init_batch, self.device)
+            self._train_carry = self.controller.initial_state(init_batch)
+            # Move carry to target device so the replay source's template,
+            # carry, and index tensors are all on the same device.
+            self._train_carry = _move_batch_to(self._train_carry, self.device)
+
+            self._train_source = DemandDrivenReplaySource(
+                episode_source=self._ensure_episode_source(),
+                carry0=self._train_carry,
+                device=self.device,
+            )
 
     def on_train_epoch_start(  # ----------------------------------------------
         self,
@@ -332,8 +423,8 @@ class ACTSupervisedModule(L.LightningModule):
         world_size = max(getattr(self.trainer, "world_size", 1), 1)
         rank = getattr(self.trainer, "global_rank", 0)
         seed = (
-            self._training_config.runtime.validation.seed or 42
-            if self._training_config is not None
+            self._runtime.validation.seed or 42
+            if self._runtime is not None
             else 42
         )
         self._episode_source = ShuffledEpisodeSource(
@@ -342,28 +433,159 @@ class ACTSupervisedModule(L.LightningModule):
             world_size=world_size,
             seed=seed,
         )
+
+        if self._pending_source_state is not None:
+            try:
+                self._episode_source.load_state_dict(self._pending_source_state)
+            except ValueError:
+                import warnings
+
+                saved_cycle = self._pending_source_state.get("cycle", 0)
+                warnings.warn(
+                    "Episode source fingerprint mismatch. Restarting "
+                    f"coverage cycle {saved_cycle} from cursor 0.",
+                    RuntimeWarning,
+                )
+                self._episode_source.restart_cycle(saved_cycle)
+            self._pending_source_state = None
+
         return self._episode_source
+
+    # ── Checkpoint hooks ────────────────────────────────────────────────────
+
+    def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        """Persist episode source state into the Lightning checkpoint."""
+        if self._episode_source is not None:
+            checkpoint["episode_source"] = self._episode_source.state_dict()
+
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        """Restore episode source state from checkpoint (deferred)."""
+        source_state = checkpoint.get("episode_source")
+        if source_state is not None:
+            self._pending_source_state = source_state
+
+    def _training_step_simple(  # ------------------------------------------------
+        self,
+        batch: Batch,
+    ) -> dict[str, object]:
+        """Single forward pass with pure cross-entropy, no rollout.
+
+        Bypasses the ACT controller's multi-step mechanics and Q-losses.
+        Trains only the encoder and decoder (backbone receives no gradient
+        from this path).
+        """
+        B = _payload_width(batch)
+        state = self.adapter.init_state(B)
+        out, _ = self.adapter(batch, state)
+        logits = out.task.path_logits  # (B, T, V)
+
+        # Infer vocabulary size from logits
+        V = logits.shape[-1]
+
+        # Extract labels and mask non-supervised positions
+        labels = batch["target_path"].to(dtype=torch.long)
+        mask = batch["path_mask"].to(dtype=torch.bool)
+        labels = torch.where(
+            mask,
+            labels,
+            torch.full_like(labels, SEQMAZE_IGNORE_LABEL_ID),
+        )
+
+        loss = F.cross_entropy(
+            logits.reshape(-1, V),
+            labels.reshape(-1),
+        )
+
+        # --- Auxiliary edge-prediction loss (multi-task training) ------------
+        # Provides the dense (N² pairs per sample) signal the HRM needs to
+        # learn disentanglement from composited slot representations.
+        edge_logits = getattr(out.task, "edge_logits", None)
+        if edge_logits is not None:
+            B, N, _, _ = edge_logits.shape
+            edge_labels = batch["edge_label"].to(
+                dtype=torch.long, device=edge_logits.device
+            )
+            edge_mask = batch["edge_mask"].to(
+                dtype=torch.bool, device=edge_logits.device
+            )
+            edge_loss = F.cross_entropy(
+                edge_logits[edge_mask],
+                edge_labels[edge_mask],
+            )
+            # Scale so edge loss (N² pairs) doesn't dominate path loss (T tokens).
+            # Both at random: path ≈ T * log(V), edge ≈ N² * log(2).
+            loss = loss + (1.0 / N) * edge_loss
+
+        optimizers = self.optimizers()
+        for opt in (
+            optimizers if isinstance(optimizers, list) else [optimizers]
+        ):
+            opt.zero_grad(set_to_none=True)
+
+        self.manual_backward(loss)
+
+        if self._gradient_clip_val is not None:
+            torch.nn.utils.clip_grad_norm_(
+                self.parameters(), max_norm=self._gradient_clip_val
+            )
+
+        for opt in (
+            optimizers if isinstance(optimizers, list) else [optimizers]
+        ):
+            opt.step()
+
+        self.log("train/loss", loss, on_step=True, on_epoch=False, logger=True)
+        self.log(
+            "train/loss/token", loss, on_step=True, on_epoch=False, logger=True
+        )
+
+        # Compute token accuracy for logging
+        with torch.no_grad():
+            pred = logits.argmax(dim=-1)
+            correct = (pred == batch["target_path"]) & mask
+            acc = correct.sum().float() / mask.sum().float()
+            self.log(
+                "train/acc", acc, on_step=True, on_epoch=False, logger=True
+            )
+
+        if self.global_step % 10 == 0:
+            pre_clip_norm = 0.0
+            for p in self.adapter.parameters():
+                if p.grad is not None:
+                    pre_clip_norm += p.grad.norm().item() ** 2
+            pre_clip_norm = pre_clip_norm**0.5
+            self.log(
+                "train/grad_norm",
+                pre_clip_norm,
+                on_step=True,
+                on_epoch=False,
+                logger=True,
+            )
+
+        return {"loss": loss}
 
     def training_step(  # -----------------------------------------------------
         self,
         batch: Batch,
         batch_idx: int,
     ) -> dict[str, object]:
-        if self._train_carry is None:
-            init_batch = self._ensure_episode_source().take(
-                self.regime_config.global_batch_size
-            )
-            init_batch = _move_batch_to(init_batch, self.device)
-            self._train_carry = self.controller.initial_state(init_batch)
+        # --- Simple supervised bypass: single forward pass, pure CE ---------
+        if self.regime_config.simple_supervised:
+            return self._training_step_simple(batch)
 
-            # Create the persistent rollout source, lifetime = training run.
-            self._train_source = DemandDrivenReplaySource(
-                episode_source=self._ensure_episode_source(),
-                carry0=self._train_carry,
-                device=self.device,
-            )
-
-        source = self._train_source
+        # --- Normal ACT rollout training ------------------------------------
+        # Validate payload width matches requested geometry on first step.
+        if not getattr(self, "_payload_validated", False):
+            world_size = max(getattr(self.trainer, "world_size", 1), 1)
+            observed = _payload_width(batch)
+            requested = (self._num_slots or 0) // world_size
+            if observed != requested:
+                raise ValueError(
+                    f"Honest payload width ({observed}) does not match "
+                    f"requested num_slots // world_size "
+                    f"({requested}). Check your data config."
+                )
+            self._payload_validated = True
 
         is_warmup = (
             self.global_step < self.regime_config.supervised_only_warmup_steps
@@ -375,7 +597,7 @@ class ACTSupervisedModule(L.LightningModule):
 
         evaluation = score_captured_rollout(
             runner=self._train_runner,
-            source=source,
+            source=self._train_source,
             controller=self.controller,
             carry=self._train_carry,
             objective=self.objective,
@@ -398,13 +620,13 @@ class ACTSupervisedModule(L.LightningModule):
         self._train_carry = evaluation.chunk.final_carry.detach()
         self._train_source.update(carry=self._train_carry)
 
-        local_bs = max(
-            self.regime_config.global_batch_size
+        carry_width = max(
+            (self._num_slots or 0)
             // max(getattr(self.trainer, "world_size", 1), 1),
             1,
         )
         loss = normalize_loss_for_backward(
-            evaluation.evaluated.loss, local_bs=local_bs
+            SumOverBatch(evaluation.evaluated.loss), local_bs=carry_width
         )
 
         optimizers = self.optimizers()
@@ -414,6 +636,99 @@ class ACTSupervisedModule(L.LightningModule):
             opt.zero_grad(set_to_none=True)
 
         self.manual_backward(loss)
+
+        # Gradient clipping: prevents PFC backbone updates from destroying
+        # encoder representations (ratio ~3600 vs ~1500 update-to-param).
+        # Log the pre-clip norm for diagnostic, then clamp.
+        if self._gradient_clip_val is not None:
+            pre_clip_norm = torch.nn.utils.clip_grad_norm_(
+                self.parameters(), max_norm=self._gradient_clip_val
+            )
+            if self.global_step % 10 == 0:
+                self.log(
+                    "train/grad_norm_clipped",
+                    pre_clip_norm,
+                    on_step=True,
+                    on_epoch=False,
+                    logger=True,
+                )
+        elif self.global_step % 10 == 0:
+            # Pre-clip total norm for diagnostic when clipping is off
+            pre_clip_norm = 0.0
+            for p in self.adapter.parameters():
+                if p.grad is not None:
+                    pre_clip_norm += p.grad.norm().item() ** 2
+            pre_clip_norm = pre_clip_norm**0.5
+            self.log(
+                "train/grad_norm_clipped",
+                pre_clip_norm,
+                on_step=True,
+                on_epoch=False,
+                logger=True,
+            )
+
+        # Log per-component gradient norms for diagnostic
+        if self.global_step % 10 == 0:
+            # Total gradient norm (backward-compat)
+            total_norm = 0.0
+            for p in self.adapter.parameters():
+                if p.grad is not None:
+                    total_norm += p.grad.norm().item() ** 2
+            total_norm = total_norm**0.5
+            self.log(
+                "train/grad_norm",
+                total_norm,
+                on_step=True,
+                on_epoch=False,
+                logger=True,
+            )
+
+            # Per-component: model backbone (PFC) vs adapter (encoder+decoder)
+            model_param_ids = {id(p) for p in self.model.parameters()}
+            for group_name, group_params in [
+                ("pfc", self.model.parameters()),
+                (
+                    "adapter",
+                    [
+                        p
+                        for p in self.adapter.parameters()
+                        if id(p) not in model_param_ids
+                    ],
+                ),
+            ]:
+                grad_norm_sq = 0.0
+                param_norm_sq = 0.0
+                has_grad = False
+                for p in group_params:
+                    param_norm_sq += p.norm().item() ** 2
+                    if p.grad is not None:
+                        grad_norm_sq += p.grad.norm().item() ** 2
+                        has_grad = True
+                grad_norm = grad_norm_sq**0.5
+                param_norm = param_norm_sq**0.5
+                if has_grad:
+                    self.log(
+                        f"train/grad/{group_name}_norm",
+                        grad_norm,
+                        on_step=True,
+                        on_epoch=False,
+                        logger=True,
+                    )
+                self.log(
+                    f"train/param/{group_name}_norm",
+                    param_norm,
+                    on_step=True,
+                    on_epoch=False,
+                    logger=True,
+                )
+                if has_grad and param_norm > 0:
+                    self.log(
+                        f"train/ratio/{group_name}_update_to_param",
+                        grad_norm / (param_norm + 1e-8),
+                        on_step=True,
+                        on_epoch=False,
+                        logger=True,
+                    )
 
         for opt in (
             optimizers if isinstance(optimizers, list) else [optimizers]

@@ -15,6 +15,7 @@ from ehc_sn.adapters.hrm._base import (
     SeqMazeAdapterSettings,
     SeqMazeDecoder,
     SeqMazeEncoder,
+    SeqMazeOracleDecoder,
     SeqMazeProbeAdapterSettings,
     SeqMazeProbeDecoder,
     SeqMazeProbeEncoder,
@@ -118,6 +119,20 @@ class SeqMazeHRMV1BridgeAdapter(nn.Module):
             path_position_emb=path_position_emb,
         )
 
+        # Diagnostic oracle decoder (ablation-only shortcut).
+        # Reads graph-region slots directly; never enabled in production.
+        # Auxiliary edge-prediction head for multi-task training.
+        # Reads graph-region PFC output slots and predicts N×N adjacency.
+        # Provides the dense signal the HRM needs to learn disentanglement
+        # without a separate probe-pretraining phase.
+        D = self._config.hidden_size
+        self._edge_head = nn.Linear(2 * D, 2)
+
+        if self._config.oracle_decoder_enabled:
+            self._oracle_decoder = SeqMazeOracleDecoder(self._config)
+        else:
+            self._oracle_decoder = None
+
         # Cached per-forward node_valid_mask for output masking
         self._node_valid_mask: Tensor | None = None
 
@@ -150,6 +165,8 @@ class SeqMazeHRMV1BridgeAdapter(nn.Module):
         )
         # Cache node_valid_mask for output masking in postprocess
         self._node_valid_mask = task_input.node_mask
+        # Cache raw encoder output for PFC-bypass oracle decoder
+        self._cached_encoder_output = schema_tokens
         return HRMInputV1(schema_tokens=schema_tokens, prefix_bias=None)
 
     def _apply_output_mask(self, logits: Tensor) -> Tensor:
@@ -169,15 +186,57 @@ class SeqMazeHRMV1BridgeAdapter(nn.Module):
         )
 
     def postprocess(self, outputs: HRMOutputV1) -> SeqMazeHRMV1BridgeOutput:
-        """Decode path-region schema slots into constrained path logits."""
+        """Decode path-region schema slots into constrained path logits.
+
+        When ``oracle_decoder_enabled`` is True (diagnostic/ablation only),
+        the oracle decoder reads from the **raw encoder output** (pre-PFC),
+        completely bypassing the PFC.  This isolates whether the encoder
+        produces useful graph representations that any decoder can use.
+        """
+        schema_slots = outputs.schema_slots
+
+        # Oracle bypass: read pre-PFC encoder output instead of PFC output
+        if self._oracle_decoder is not None:
+            oracle_source = self._cached_encoder_output
+        else:
+            oracle_source = None
+
         path_logits = self._decoder(
-            outputs.schema_slots,
+            schema_slots,
             n_max=self._config.n_max,
             t_max=self._config.t_max,
         )
         constrained_logits = self._apply_output_mask(path_logits)
+
+        oracle_logits: Tensor | None = None
+        if self._oracle_decoder is not None:
+            raw_oracle = self._oracle_decoder(
+                oracle_source,
+                n_max=self._config.n_max,
+                t_max=self._config.t_max,
+            )
+            oracle_logits = self._apply_output_mask(raw_oracle)
+
+        # When oracle is active, the oracle logits replace path_logits
+        # so all downstream consumers (loss, evaluation) use the shortcut.
+        effective_path = (
+            oracle_logits if oracle_logits is not None else constrained_logits
+        )
+
+        # --- Auxiliary edge prediction from graph-region slots ---
+        N = self._config.n_max
+        graph_slots = schema_slots[:, :N, :]  # (B, N, D)
+        slot_i = graph_slots.unsqueeze(2).expand(-1, -1, N, -1)  # (B, N, N, D)
+        slot_j = graph_slots.unsqueeze(1).expand(-1, N, -1, -1)  # (B, N, N, D)
+        pair_emb = torch.cat([slot_i, slot_j], dim=-1)  # (B, N, N, 2*D)
+        edge_logits = self._edge_head(pair_emb)  # (B, N, N, 2)
+
         return SeqMazeHRMV1BridgeOutput(
-            task=SeqMazeTaskOutput(path_logits=constrained_logits),
+            task=SeqMazeTaskOutput(
+                path_logits=effective_path,
+                oracle_path_logits=oracle_logits,
+                edge_logits=edge_logits,
+            ),
             control=SeqMazeHRMV1ControlOutput(q_logits=outputs.q_logits),
         )
 
@@ -378,6 +437,17 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
             path_position_emb=path_position_emb,
         )
 
+        # Auxiliary edge-prediction head for multi-task training.
+        # Reads graph-region PFC output slots and predicts N×N adjacency.
+        # Provides the dense signal the HRM needs to learn disentanglement.
+        D = self._config.hidden_size
+        self._edge_head = nn.Linear(2 * D, 2)
+
+        if self._config.oracle_decoder_enabled:
+            self._oracle_decoder = SeqMazeOracleDecoder(self._config)
+        else:
+            self._oracle_decoder = None
+
     @property
     def config(self) -> SeqMazeAdapterSettings:
         return self._config
@@ -410,13 +480,26 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
             model_seq_length=self.model.config.num_schema_slots,
         )
         self._node_valid_mask = task_input.node_mask
+        self._cached_encoder_output = schema_tokens
         return HRMInputV2(schema_tokens=schema_tokens)
 
     def postprocess(self, outputs: HRMOutputV2) -> SeqMazeHRMV2BridgeOutput:
         """Decode path-region slots into path logits, apply output vocabulary
-        masking, and expose policy/critic readouts."""
+        masking, and expose policy/critic readouts.
+
+        When ``oracle_decoder_enabled`` is True (diagnostic/ablation only),
+        the oracle decoder reads from the **raw encoder output** (pre-PFC),
+        completely bypassing the PFC.
+        """
+        schema_slots = outputs.schema_slots
+
+        if self._oracle_decoder is not None:
+            oracle_source = self._cached_encoder_output
+        else:
+            oracle_source = None
+
         path_logits = self._decoder(
-            outputs.schema_slots,
+            schema_slots,
             n_max=self._config.n_max,
             t_max=self._config.t_max,
         )
@@ -426,11 +509,45 @@ class SeqMazeHRMV2BridgeAdapter(nn.Module):
                 self._node_valid_mask,
                 n_max=self._config.n_max,
             )
-        return SeqMazeHRMV2BridgeOutput(
-            task=SeqMazeTaskOutput(path_logits=path_logits),
+
+        oracle_logits: Tensor | None = None
+        if self._oracle_decoder is not None:
+            raw_oracle = self._oracle_decoder(
+                oracle_source,
+                n_max=self._config.n_max,
+                t_max=self._config.t_max,
+            )
+            oracle_logits = _apply_seqmaze_output_mask(
+                raw_oracle,
+                self._node_valid_mask,
+                n_max=self._config.n_max,
+            )
+
+        effective_path = (
+            oracle_logits if oracle_logits is not None else path_logits
+        )
+
+        # --- Auxiliary edge prediction from graph-region slots ---
+        # Detach from PFC to prevent dense edge gradients from destabilizing
+        # the value-control path through the shared backbone.
+        N = self._config.n_max
+        graph_slots = schema_slots[:, :N, :].detach()  # (B, N, D)
+        slot_i = graph_slots.unsqueeze(2).expand(-1, -1, N, -1)  # (B, N, N, D)
+        slot_j = graph_slots.unsqueeze(1).expand(-1, N, -1, -1)  # (B, N, N, D)
+        pair_emb = torch.cat([slot_i, slot_j], dim=-1)  # (B, N, N, 2*D)
+        edge_logits = self._edge_head(pair_emb)  # (B, N, N, 2)
+
+        # Cache bridge output for auxiliary loss computation in training_step
+        self._last_bridge_output = SeqMazeHRMV2BridgeOutput(
+            task=SeqMazeTaskOutput(
+                path_logits=effective_path,
+                oracle_path_logits=oracle_logits,
+                edge_logits=edge_logits,
+            ),
             policy=SeqMazeHRMV2PolicyOutput(q_values=outputs.q_values),
             critic=SeqMazeHRMV2CriticOutput(state_value=outputs.state_value),
         )
+        return self._last_bridge_output
 
     def forward(
         self,

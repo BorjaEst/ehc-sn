@@ -11,7 +11,10 @@ from .model import build_seqmaze_hrm_v1_model
 def build_seqmaze_hrm_v1_evaluation_executor(
     config: SeqMazeHRMV1EvaluationExperimentConfig,
 ) -> ACTSupervisedModule:
-    return build_seqmaze_hrm_v1_model(config.model)
+    return build_seqmaze_hrm_v1_model(
+        config.model,
+        execution=config.execution,
+    )
 
 
 __all__ = ["build_seqmaze_hrm_v1_evaluation_executor"]

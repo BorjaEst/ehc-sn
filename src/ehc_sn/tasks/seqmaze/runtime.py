@@ -30,6 +30,7 @@ from ehc_sn.tasks.seqmaze.contracts import (
 )
 from ehc_sn.tasks.seqmaze.evaluation import build_seqmaze_step_score
 from ehc_sn.tasks.seqmaze.reward import SeqMazeRewardProjector
+from ehc_sn.training.hrm import ValidationRuntimeConfig
 from ehc_sn.types import Batch
 
 # Canonical batch keys for the seqmaze probe.
@@ -155,6 +156,10 @@ class SeqMazeRuntimeConfig(BaseModel, extra="forbid"):
         ge=1,
         description="Task-owned step budget; runtime emits truncated "
         "when steps reach this value.",
+    )
+    validation: ValidationRuntimeConfig = Field(
+        default_factory=ValidationRuntimeConfig,
+        description="Runner-owned safety limits (max steps, seed).",
     )
 
 

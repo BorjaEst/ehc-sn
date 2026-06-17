@@ -10,10 +10,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Protocol
 
 import lightning as L
 import torch
+import torch.nn.functional as F
 from pydantic import BaseModel, Field
 from torch import Tensor, nn
 from torch.optim import Optimizer
@@ -41,8 +42,12 @@ from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig
 from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
 from ehc_sn.rollouts.sources import DemandDrivenReplaySource, _move_batch_to
 from ehc_sn.traces import build_trace_spec
-from ehc_sn.training.distributed import normalize_loss_for_backward
-from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
+from ehc_sn.training.distributed import (
+    SumOverBatch,
+    normalize_loss_for_backward,
+)
+from ehc_sn.training.hrm import ValidationRuntimeConfig
+from ehc_sn.training.hrm import load_weights_from_checkpoint as _loader
 from ehc_sn.training.optim import AdamATan2Config
 from ehc_sn.training.rollout import run_captured_rollout
 from ehc_sn.training.schedules import (
@@ -52,6 +57,39 @@ from ehc_sn.training.schedules import (
 from ehc_sn.types import Batch
 
 
+# =============================================================================
+class RuntimeConfigLike(Protocol):
+    """Protocol for deliberation/execution policy configs consumed by
+    :class:`ActorCriticModule`.
+
+    Both :class:`~ehc_sn.tasks.mazehard.runtime.MazeHardRuntimeConfig` and
+    :class:`~ehc_sn.tasks.seqmaze.runtime.SeqMazeRuntimeConfig` satisfy this
+    protocol.  The module does not import task-specific types.
+    """
+
+    halt_action: int
+    episode_horizon: int
+    validation: ValidationRuntimeConfig
+
+
+# =============================================================================
+def _payload_width(batch: Batch) -> int:
+    """Return the leading (batch) dimension from an honest payload batch.
+
+    The honest iterator yields a dict whose tensors share a leading dimension
+    equal to the per-rank replay slot count.  Returns that dimension, or
+    raises ``ValueError`` if the batch is empty.
+    """
+    for v in batch.values():
+        if isinstance(v, Tensor):
+            return int(v.shape[0])
+    raise ValueError(
+        "Honest payload batch is empty or contains no tensors. "
+        "Cannot determine batch width."
+    )
+
+
+# =============================================================================
 @dataclass(frozen=True, slots=True, eq=False)
 class ActorCriticBindings:
     """Immutable experiment-to-module bindings for actor-critic regimes."""
@@ -108,9 +146,12 @@ class ActorCriticTrainingConfig(BaseModel, extra="forbid"):
         "validation (MazeHardRewardConfig, SeqMazeRewardConfig) is "
         "performed by the training experiment builder.",
     )
-    hrm_runtime: HRMRuntimeConfig = Field(
-        ...,
-        description="HRM runtime configuration (validation safety limits).",
+    num_slots: int | None = Field(
+        default=None,
+        ge=1,
+        description="Per-rank carry buffer width (concurrent trajectory slots). "
+        "``None`` during evaluation — carry is allocated per batch from the "
+        "DataLoader batch dimension.",
     )
 
 
@@ -146,6 +187,9 @@ class ActorCriticConfig(BaseModel, extra="forbid"):
     the concrete experiment.  Component-specific configs live in
     :class:`ActorCriticComponentConfigs`, validated by the
     experiment builder.
+
+    ``num_slots`` is passed as a separate constructor argument,
+    not a config field — the honest payload carries observed width.
     """
 
     model_config_path: Path = Field(
@@ -179,11 +223,15 @@ class ActorCriticModule(L.LightningModule):
         component_configs: ActorCriticComponentConfigs,
         bindings: ActorCriticBindings,
         training_config: ActorCriticTrainingConfig | None = None,
+        *,
+        execution: RuntimeConfigLike | None = None,
     ) -> None:
         super().__init__()
         self._bindings = bindings
         self._component_configs = component_configs
         self._training_config = training_config
+        self._deliberation = execution
+        self._num_slots: int | None = None
 
         model_settings = bindings.model_settings_cls.from_config(
             config.model_config_path
@@ -204,6 +252,8 @@ class ActorCriticModule(L.LightningModule):
         self._train_carry = None
         self._train_source: DemandDrivenReplaySource | None = None
         self._episode_source: ShuffledEpisodeSource | None = None
+        self._episode_source_for_lazy: ShuffledEpisodeSource | None = None
+        self._pending_source_state: dict[str, Any] | None = None
 
         self.train_metrics = build_train_metrics(bindings.step_routes).clone(
             prefix="train/"
@@ -226,20 +276,91 @@ class ActorCriticModule(L.LightningModule):
             prefix="val_diag/",
         )
 
-        # Deliberation (task runtime config) is required for both training
-        # and evaluation.  It is set by the experiment builder after init
-        # via setter, since the module is constructed before setup().
-        self._deliberation: Any = None
+    def load_weights_from_checkpoint(self, path, groups):
+        return _loader(self.model, path, groups)
 
     @property
     def config(self) -> ActorCriticConfig:
         return self._config
 
+    def validate_run_plan(  # -------------------------------------------------
+        self,
+    ) -> None:
+        """Assert that all preconditions are satisfied before the first optimizer step.
+
+        Runs once at the start of ``training_step``.  Catches misconfiguration
+        that would otherwise produce silent incorrect behaviour or delayed crashes.
+        """
+        if self._deliberation is None:
+            raise RuntimeError(
+                "validate_run_plan: deliberation config is None. "
+                "It must be set before training begins."
+            )
+        if self._training_config is None:
+            raise RuntimeError(
+                "validate_run_plan: training_config is None. "
+                "Training requires a full ActorCriticTrainingConfig."
+            )
+        rp = self._num_slots
+        if rp is not None and rp <= 0:
+            raise ValueError(
+                f"validate_run_plan: num_slots must be > 0, " f"got {rp}."
+            )
+        world_size = max(getattr(self.trainer, "world_size", 1), 1)
+        if rp is not None and rp % world_size != 0:
+            raise ValueError(
+                f"validate_run_plan: num_slots ({rp}) "
+                f"not divisible by world_size ({world_size})."
+            )
+        if self._train_source is None:
+            raise RuntimeError(
+                "validate_run_plan: training source is None. "
+                "Call setup('fit') before training."
+            )
+        if self._train_carry is None:
+            raise RuntimeError(
+                "validate_run_plan: training carry is None. "
+                "Call setup('fit') before training."
+            )
+        if self.controller is None:
+            raise RuntimeError(
+                "validate_run_plan: controller is None. "
+                "Call setup('fit') before training."
+            )
+        if self.objective is None:
+            raise RuntimeError(
+                "validate_run_plan: objective is None. "
+                "Call setup('fit') before training."
+            )
+        if self.learner is None:
+            raise RuntimeError(
+                "validate_run_plan: learner is None. "
+                "Call setup('fit') before training."
+            )
+        if self.trainer is None:
+            raise RuntimeError(
+                "validate_run_plan: trainer is None. "
+                "Module must be attached to a Trainer before training."
+            )
+        for i, opt in enumerate(self.optimizers() or []):
+            if not any(
+                p.requires_grad
+                for group in opt.param_groups
+                for p in group["params"]
+            ):
+                raise RuntimeError(
+                    f"validate_run_plan: optimizer {i} has no parameters "
+                    "with requires_grad=True."
+                )
+
     def setup(self, stage: Optional[str] = None) -> None:
-        """Initialize controller, objective, learner, and val scorer.
+        """Initialize controller, objective, learner, val scorer, and training source.
 
         During evaluation (training_config is None), reward config defaults
         to a vanilla instance — the runtime always receives a real projector.
+
+        In the ``fit`` stage, also creates the episode source, initial carry,
+        and demand-driven replay source for honest-iterator training.
         """
         reward_config = (
             self._training_config.reward
@@ -270,6 +391,48 @@ class ActorCriticModule(L.LightningModule):
         self.val_scorer = self._bindings.val_scorer_cls(
             self.objective, task_binding
         )
+
+        # Initialize the training source and carry for source-driven training.
+        # During setup() the module is on CPU, but self.device reports the
+        # target accelerator device.  The carry's halted tensor (created by
+        # initial_slots from the backbone's CPU device) must be moved to the
+        # target device so DemandDrivenReplaySource has consistent device
+        # placement for its template and index operations.
+        if stage == "fit" and self._training_config is not None:
+            tc = self._training_config
+            if tc.num_slots is None:
+                raise RuntimeError(
+                    "num_slots is required for training. "
+                    "Set it via ActorCriticTrainingConfig.num_slots."
+                )
+            self._num_slots = tc.num_slots
+            carry_width = tc.num_slots // max(
+                getattr(self.trainer, "world_size", 1), 1
+            )
+            init_batch = self._ensure_episode_source().take(carry_width)
+            init_batch = _move_batch_to(init_batch, self.device)
+            self._train_carry = self.controller.initial_state(init_batch)
+
+            # Move carry to target device so the replay source's template,
+            # carry, and index tensors are all on the same device.
+            target_device = self.device
+            self._train_carry = _move_batch_to(self._train_carry, target_device)
+
+            self._train_source = DemandDrivenReplaySource(
+                episode_source=self._ensure_episode_source(),
+                carry0=self._train_carry,
+                device=target_device,
+            )
+
+    def _assert_setup(self) -> None:
+        if self.controller is None:
+            raise RuntimeError("setup() not called.")
+        if self.objective is None:
+            raise RuntimeError("setup() not called.")
+        if self.learner is None:
+            raise RuntimeError("setup() not called.")
+        if self.val_scorer is None:
+            raise RuntimeError("setup() not called.")
 
     def _assert_setup(self) -> None:
         if self.controller is None:
@@ -376,11 +539,27 @@ class ActorCriticModule(L.LightningModule):
             rank=rank,
             world_size=world_size,
             seed=(
-                self._training_config.hrm_runtime.validation.seed or 42
-                if self._training_config is not None
+                self._deliberation.validation.seed or 42
+                if self._deliberation is not None
                 else 42
             ),
         )
+
+        if self._pending_source_state is not None:
+            try:
+                self._episode_source.load_state_dict(self._pending_source_state)
+            except ValueError:
+                import warnings
+
+                saved_cycle = self._pending_source_state.get("cycle", 0)
+                warnings.warn(
+                    "Episode source fingerprint mismatch. Restarting "
+                    f"coverage cycle {saved_cycle} from cursor 0.",
+                    RuntimeWarning,
+                )
+                self._episode_source.restart_cycle(saved_cycle)
+            self._pending_source_state = None
+
         return self._episode_source
 
     def training_step(  # -----------------------------------------------------
@@ -389,29 +568,27 @@ class ActorCriticModule(L.LightningModule):
         batch_idx: int,
     ) -> dict[str, Any]:
         self._assert_setup()
+        if not getattr(self, "_run_plan_validated", False):
+            self.validate_run_plan()
+            self._run_plan_validated = True
 
-        if self._train_carry is None:
-            local_bs = next(iter(batch.values())).shape[0]
-            world_size_ = max(getattr(self.trainer, "world_size", 1), 1)
-            init_batch = self._ensure_episode_source().take(
-                local_bs * world_size_
-            )
-            init_batch = _move_batch_to(init_batch, self.device)
-            self._train_carry = self.controller.initial_state(init_batch)
-
-            # Create the persistent rollout source, lifetime = training run.
-            self._train_source = DemandDrivenReplaySource(
-                episode_source=self._ensure_episode_source(),
-                carry0=self._train_carry,
-                device=self.device,
-            )
-
-        source = self._train_source
+        # Validate payload width matches requested geometry on first step.
+        if not getattr(self, "_payload_validated", False):
+            world_size = max(getattr(self.trainer, "world_size", 1), 1)
+            observed = _payload_width(batch)
+            requested = (self._num_slots or 0) // world_size
+            if observed != requested:
+                raise ValueError(
+                    f"Honest payload width ({observed}) does not match "
+                    f"requested num_slots // world_size "
+                    f"({requested}). Check your data config."
+                )
+            self._payload_validated = True
 
         is_warmup = self.global_step < self.config.supervised_only_warmup_steps
         execution = run_captured_rollout(
             runner=self._train_runner,
-            source=source,
+            source=self._train_source,
             controller=self.controller,
             carry=self._train_carry,
             runner_options={
@@ -432,20 +609,58 @@ class ActorCriticModule(L.LightningModule):
         if self._train_carry is None:
             raise RuntimeError("Training carry missing after rollout.")
         next_obs = self._train_carry.data
+        use_token_weights = hasattr(
+            self.learner._task_binding, "extract_token_weights"
+        )
         ac_batch = self.learner.build_deliberation_ac_batch(
             record.outputs,
             record.snapshot,
             next_obs=next_obs,
             carry=self._train_carry,
-            use_token_weights=True,
+            use_token_weights=use_token_weights,
         )
         step_output = self.objective.compute_step(ac_batch, is_warmup=is_warmup)
 
-        local_bs = max(
-            next(iter(batch.values())).shape[0],
-            1,
+        world_size_ = max(getattr(self.trainer, "world_size", 1), 1)
+        rp = self._num_slots
+        if rp is not None and rp % world_size_ != 0:
+            raise ValueError(
+                f"num_slots ({rp}) "
+                f"not divisible by world_size ({world_size_})"
+            )
+        carry_width = (rp or 0) // world_size_
+        loss = normalize_loss_for_backward(
+            SumOverBatch(step_output.loss), local_bs=carry_width
         )
-        loss = normalize_loss_for_backward(step_output.loss, local_bs=local_bs)
+
+        # --- Auxiliary edge-prediction loss (multi-task training) ------------
+        # Provides the dense (N² pairs per sample) signal the HRM needs to
+        # learn disentanglement from composited slot representations.
+        edge_logits = None
+        try:
+            edge_logits = record.outputs.task.edge_logits
+        except (AttributeError, KeyError):
+            pass
+        if edge_logits is not None:
+            # edge_logits: (B, N, N, 2), labels: (B, N, N)
+            B, N, _, _ = edge_logits.shape
+            # Get edge labels and mask from the step's batch data.
+            step_batch = record.batch
+            edge_labels = step_batch["edge_label"].to(
+                dtype=torch.long, device=edge_logits.device
+            )
+            edge_mask = step_batch["edge_mask"].to(
+                dtype=torch.bool, device=edge_logits.device
+            )
+            edge_loss = F.cross_entropy(
+                edge_logits[edge_mask],
+                edge_labels[edge_mask],
+            )
+            # Scale edge loss so it doesn't dominate the total or destabilize
+            # the shared PFC backbone.  N² terms per sample vs ~N path tokens.
+            loss = loss + (1.0 / (N * N)) * edge_loss
+            edge_loss_weight = 1.0 / N  # normalize by graph size
+            loss = loss + edge_loss_weight * edge_loss
 
         optimizer_list = self.optimizers()
         optimizer_list = (
@@ -468,9 +683,8 @@ class ActorCriticModule(L.LightningModule):
         active_indices = [0] if is_warmup else list(range(len(optimizer_list)))
         for idx in active_indices:
             opt = optimizer_list[idx]
-            if utils.has_any_grad(opt):
-                opt.step()
-                scheduler_list[idx].step()
+            opt.step()
+            scheduler_list[idx].step()
 
         update_metrics_from_step(
             self.train_metrics,
@@ -532,6 +746,22 @@ class ActorCriticModule(L.LightningModule):
 
         return {"trace": evaluation.trace}
 
+    # ── Checkpoint hooks ────────────────────────────────────────────────────
+
+    def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        """Persist episode source state into the Lightning checkpoint."""
+        if self._episode_source is not None:
+            checkpoint["episode_source"] = self._episode_source.state_dict()
+
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        """Restore episode source state from checkpoint (deferred).
+
+        Stashes full state for deferred restore in ``_ensure_episode_source``.
+        """
+        source_state = checkpoint.get("episode_source")
+        if source_state is not None:
+            self._pending_source_state = source_state
+
     def on_validation_epoch_end(self) -> None:
         compute_nonempty(self._val_reducer_collection)
         self._val_reducer_collection.reset()
@@ -557,13 +787,13 @@ class ActorCriticModule(L.LightningModule):
             carry=self.controller.initial_state(case.batch),
             objective=self.val_scorer,
             max_rollout_steps=(
-                self._training_config.hrm_runtime.validation.max_rollout_steps
-                if self._training_config is not None
+                self._deliberation.validation.max_rollout_steps
+                if self._deliberation is not None
                 else None
             ),
             hard_max_rollout_steps=(
-                self._training_config.hrm_runtime.validation.hard_max_rollout_steps
-                if self._training_config is not None
+                self._deliberation.validation.hard_max_rollout_steps
+                if self._deliberation is not None
                 else None
             ),
             runner_options={

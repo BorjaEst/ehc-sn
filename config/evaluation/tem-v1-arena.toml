@@ -7,7 +7,7 @@
 # Usage:
 #   python scripts/evaluation/run_eval.py \
 #       --model-family tem-v1 \
-#       --checkpoint checkpoints/tem-v1/eval-weights-only.pt \
+#       --checkpoint models/tem-v1/eval-weights-only.pt \
 #       --config config/evaluation/tem-v1-arena.toml \
 #       --task arena \
 #       --provider-ref ehc_sn.tasks.arena.providers.ArenaReplayProvider \

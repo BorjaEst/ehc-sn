@@ -1,12 +1,13 @@
 # Training config — SeqMaze × HRM-v1 (nested experiment schema)
 # =============================================================================
+    supervised_only_warmup_steps = 500
 
 [model]
     model_config_path = "config/models/hrm-v1-base.toml"
 
 [model.components.adapter]
-    n_max         = 32
-    t_max         = 32
+    n_max         = 16
+    t_max         = 16
     k_max         = 4
     edge_encoding = "successor_node_pool"
     hidden_size   = 128
@@ -16,7 +17,7 @@
     exploration_prob   = 0.1
 
 [model.components.objective]
-    token_loss        = "stablemax_cross_entropy"
+    token_loss        = "softmax_cross_entropy"
     use_token_weights = false
 
 [training.optimizer]
@@ -24,12 +25,13 @@
     weight_decay = 0.1
     betas        = [0.9, 0.95]
 
-[training.runtime.validation]
+[execution.validation]
     max_rollout_steps = 16
 
 [data]
     dataset_path         = "data/processed/seqmaze/default/v1"
-    global_batch_size    = 128
+    num_slots            = 128
+    eval_batch_size      = 128
     num_workers          = 4
     prefetch_factor      = 2
     pin_memory           = true
@@ -51,16 +53,15 @@
     seed                = 42
 
 [checkpointing]
-    supervised_only_warmup_steps = 500
     init_weights_groups          = ["all"]
     diagnostic_level             = "standard"
     non_finite_policy            = "raise"
 
-[checkpointing.scheduler]
+[scheduler]
     warmup_steps = 2000
     min_ratio    = 1.00
 
-[checkpointing.target_network]
+[target_network]
     enabled = false
 
 [logging]

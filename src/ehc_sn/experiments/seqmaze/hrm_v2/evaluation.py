@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ehc_sn.lightning.modules.actor_critic import ActorCriticModule
+from ehc_sn.tasks.seqmaze.runtime import SeqMazeRuntimeConfig
 
 from .config import SeqMazeHRMV2EvaluationExperimentConfig
 from .model import build_seqmaze_hrm_v2_model
@@ -11,7 +12,10 @@ from .model import build_seqmaze_hrm_v2_model
 def build_seqmaze_hrm_v2_evaluation_executor(
     config: SeqMazeHRMV2EvaluationExperimentConfig,
 ) -> ActorCriticModule:
-    return build_seqmaze_hrm_v2_model(config.model)
+    return build_seqmaze_hrm_v2_model(
+        config.model,
+        execution=config.execution.to_runtime_config(),
+    )
 
 
 __all__ = ["build_seqmaze_hrm_v2_evaluation_executor"]

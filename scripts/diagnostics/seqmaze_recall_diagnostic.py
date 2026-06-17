@@ -75,7 +75,7 @@ def train_diagnostic_model(
     k_max = cfg.get("k_max", 3)
     vocab_size_obs = cfg.get("vocab_size_obs", 64)
     vocab_size_candidate = cfg.get("vocab_size_candidate", 16)
-    replay_slots = cfg.get("replay_slots", 32)
+    num_slots = cfg.get("num_slots", 32)
     max_epochs = cfg.get("max_epochs", 50)
     num_workers = cfg.get("num_workers", 2)
 
@@ -104,7 +104,7 @@ def train_diagnostic_model(
     )
     train_loader = DataLoader(
         train_dataset,
-        batch_size=replay_slots,
+        batch_size=num_slots,
         num_workers=num_workers,
         shuffle=False,
         drop_last=True,

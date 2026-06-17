@@ -367,15 +367,13 @@ def _build_executor_from_family_artifact(
         )
         eval_config = MazeHardHRMV1EvaluationExperimentConfig(
             model=model_config,
+            execution=(
+                HRMRuntimeConfig.model_validate(config_map["execution"])
+                if "runtime" in config_map
+                else None
+            ),
         )
-        runtime = (
-            HRMRuntimeConfig.model_validate(config_map["runtime"])
-            if "runtime" in config_map
-            else None
-        )
-        executor = build_mazehard_hrm_v1_evaluation_executor(
-            eval_config, runtime=runtime
-        )
+        executor = build_mazehard_hrm_v1_evaluation_executor(eval_config)
 
     elif model_family == "hrm-v2":
         from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
@@ -412,7 +410,7 @@ def _build_executor_from_family_artifact(
                 ),
             ),
         )
-        deliberation_raw = config_map.get("deliberation", {})
+        deliberation_raw = config_map.get("execution", {})
         eval_config = MazeHardHRMV2EvaluationExperimentConfig(
             model=model_config,
             deliberation=MazeHardDeliberationConfig(

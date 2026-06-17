@@ -123,9 +123,16 @@ class SeqMazeTaskOutput:
     Attributes:
         path_logits: (B, T, N_max+2) float32 -- logits over the path vocabulary
             for each output position.
+        oracle_path_logits: (B, T, N_max+2) float32, optional -- logits decoded
+            from graph-region slots via the oracle decoder (diagnostic ablation
+            only, None when disabled).
+        edge_logits: (B, N, N, 2) float32, optional -- auxiliary edge-prediction
+            logits from graph-region PFC output slots (multi-task training).
     """
 
     path_logits: Tensor
+    oracle_path_logits: Tensor | None = None
+    edge_logits: Tensor | None = None
 
 
 # =============================================================================

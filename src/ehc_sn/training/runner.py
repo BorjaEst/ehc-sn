@@ -42,7 +42,7 @@ from ehc_sn.logging.tensorboard import Logger, LoggerSettings
 from ehc_sn.training.distributed import (
     resolve_effective_world_size,
     resolve_trainer_strategy,
-    validate_batch_size_divisibility,
+    validate_num_slots_divisibility,
 )
 
 # =============================================================================
@@ -189,6 +189,7 @@ def _build_trainer_from_config(  # --------------------------------------------
         enable_progress_bar=getattr(
             trainer_config, "enable_progress_bar", True
         ),
+        gradient_clip_val=getattr(trainer_config, "gradient_clip_val", None),
     )
 
 
@@ -264,8 +265,8 @@ def run_training(  # ----------------------------------------------------------
         getattr(settings, "trainer_devices", 1),
         getattr(settings, "trainer_num_nodes", 1),
     )
-    validate_batch_size_divisibility(
-        getattr(settings, "global_batch_size", 1), world_size
+    validate_num_slots_divisibility(
+        getattr(settings, "num_slots", 1), world_size
     )
     seed_everything(getattr(settings, "seed", 42))
 
@@ -349,6 +350,24 @@ def _run_training_experiment(  # ---------------------------------------------
             experiment.trainer, "find_unused_parameters", False
         ),
     )
+
+    # Optional weight-init hydration from a checkpoint
+    if experiment.checkpointing is not None:
+        init_from: str | None = getattr(
+            experiment.checkpointing, "init_weights_from", None
+        )
+        if init_from is not None:
+            init_groups: list[str] = getattr(
+                experiment.checkpointing, "init_weights_groups", ["all"]
+            )
+            loaded_keys = experiment.module.load_weights_from_checkpoint(
+                init_from,
+                init_groups,
+            )
+            print(
+                f"[init_weights_from] Loaded {len(loaded_keys)} parameter keys "
+                f"(groups={init_groups}) from {init_from!r}."
+            )
 
     ckpt_path: str | None = None
     if experiment.checkpointing is not None:
