@@ -26,14 +26,14 @@ Openfield square (TEM reproduction)::
     python build-arena.py materialize-task \\
         --layout-root data/interim/openfield/square/v1 \\
         --corpus openfield-square \\
-        --walk-policy legacy_angle_bias
+        --walk-policy angle_bias
 
 Standard dungeongen recipe::
 
     python build-arena.py materialize-task \\
         --layout-root data/interim/dungeongen/default/v1 \\
         --corpus dungeons \\
-        --walk-policy no_immediate_backtrack
+        --walk-policy no_backtrack
 
 Examples
 --------
@@ -66,7 +66,7 @@ from ehc_sn.tasks.arena import (
 # ---------------------------------------------------------------------------
 _DEFAULT_TASK_VERSION = 1
 _DEFAULT_CORPUS = "default"
-_DEFAULT_WALK_POLICY = "legacy_angle_bias"
+_DEFAULT_WALK_POLICY = "angle_bias"
 _DEFAULT_MAX_STEPS = 2000
 _DEFAULT_N_EPISODES = 4
 _DEFAULT_WALK_SEED = 45
@@ -96,7 +96,7 @@ def materialize_task(  # ------------------------------------------------------
         str,
         typer.Option(
             "--walk-policy",
-            help="Walk policy for trajectory generation (default: legacy_angle_bias).",
+            help="Walk policy for trajectory generation (default: angle_bias).",
         ),
     ] = _DEFAULT_WALK_POLICY,
     n_episodes: Annotated[
