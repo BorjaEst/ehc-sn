@@ -353,7 +353,10 @@ class ActorCriticModule(L.LightningModule):
                     "with requires_grad=True."
                 )
 
-    def setup(self, stage: Optional[str] = None) -> None:
+    def setup(  # -------------------------------------------------------------
+        self,
+        stage: Optional[str] = None,
+    ) -> None:
         """Initialize controller, objective, learner, val scorer, and training source.
 
         During evaluation (training_config is None), reward config defaults
@@ -392,12 +395,7 @@ class ActorCriticModule(L.LightningModule):
             self.objective, task_binding
         )
 
-        # Initialize the training source and carry for source-driven training.
-        # During setup() the module is on CPU, but self.device reports the
-        # target accelerator device.  The carry's halted tensor (created by
-        # initial_slots from the backbone's CPU device) must be moved to the
-        # target device so DemandDrivenReplaySource has consistent device
-        # placement for its template and index operations.
+        # Training source creation moved to on_fit_start() — device-dependent.
         if stage == "fit" and self._training_config is not None:
             tc = self._training_config
             if tc.num_slots is None:
@@ -406,22 +404,23 @@ class ActorCriticModule(L.LightningModule):
                     "Set it via ActorCriticTrainingConfig.num_slots."
                 )
             self._num_slots = tc.num_slots
-            carry_width = tc.num_slots // max(
+
+    def on_fit_start(  # ------------------------------------------------------
+        self,
+    ) -> None:
+        """Create training source and carry on the correct accelerator device."""
+        if self._training_config is not None and self._num_slots is not None:
+            carry_width = self._num_slots // max(
                 getattr(self.trainer, "world_size", 1), 1
             )
             init_batch = self._ensure_episode_source().take(carry_width)
             init_batch = _move_batch_to(init_batch, self.device)
             self._train_carry = self.controller.initial_state(init_batch)
-
-            # Move carry to target device so the replay source's template,
-            # carry, and index tensors are all on the same device.
-            target_device = self.device
-            self._train_carry = _move_batch_to(self._train_carry, target_device)
-
+            self._train_carry = _move_batch_to(self._train_carry, self.device)
             self._train_source = DemandDrivenReplaySource(
                 episode_source=self._ensure_episode_source(),
                 carry0=self._train_carry,
-                device=target_device,
+                device=self.device,
             )
 
     def _assert_setup(self) -> None:

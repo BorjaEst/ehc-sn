@@ -350,12 +350,14 @@ class ACTSupervisedModule(L.LightningModule):
         ]
         return [opt], schedulers
 
-    def setup(self, stage: Optional[str] = None) -> None:
-        """Initialize the training source and carry for source-driven training.
+    def setup(  # -------------------------------------------------------------
+        self,
+        stage: Optional[str] = None,
+    ) -> None:
+        """Initialize stage-local controller/objective/runtime (not device-dependent).
 
-        Called by Lightning after the datamodule's ``setup()``. Creates the
-        episode source, initial carry, and demand-driven replay source so
-        ``training_step`` receives real episode batches from the DataLoader.
+        Device-dependent training source and carry are created in
+        ``on_fit_start()``, after Lightning has moved the model to GPU.
         """
         if stage == "fit" and self._training_config is not None:
             tc = self._training_config
@@ -366,16 +368,23 @@ class ACTSupervisedModule(L.LightningModule):
                 )
             self._num_slots = tc.num_slots
             self._gradient_clip_val = tc.gradient_clip_val
-            local_bs = tc.num_slots // max(
+
+    def on_fit_start(  # ------------------------------------------------------
+        self,
+    ) -> None:
+        """Create training source and carry on the correct accelerator device.
+
+        Called by Lightning after ``setup()`` and after the model has been
+        moved to GPU — ``self.device`` is the target accelerator device.
+        """
+        if self._training_config is not None:
+            local_bs = self._num_slots // max(
                 getattr(self.trainer, "world_size", 1), 1
             )
             init_batch = self._ensure_episode_source().take(local_bs)
             init_batch = _move_batch_to(init_batch, self.device)
             self._train_carry = self.controller.initial_state(init_batch)
-            # Move carry to target device so the replay source's template,
-            # carry, and index tensors are all on the same device.
             self._train_carry = _move_batch_to(self._train_carry, self.device)
-
             self._train_source = DemandDrivenReplaySource(
                 episode_source=self._ensure_episode_source(),
                 carry0=self._train_carry,

@@ -308,25 +308,27 @@ class VariationalReplayModule(L.LightningModule):
         self,
         stage: Optional[str] = None,
     ) -> None:
-        """Initialize phase-local train/eval runtimes and training source."""
+        """Initialize phase-local train/eval runtimes."""
         if stage in (None, "fit"):
             self._ensure_train_runtime()
             self._ensure_eval_runtime()
-            # Training source must be created here — before the DataLoader
-            # iterator starts — so DemandDrivenTickIterable finds a valid
-            # _train_source on first __next__.
-            B = self._get_batch_size()
-            synthetic = {"_anchor": torch.zeros(B, device=self.device)}
-            self._train_carry = self._require_train_controller().initial_state(
-                synthetic
-            )
-            self._train_source = DemandDrivenReplaySource(
-                episode_source=self._ensure_episode_source(),
-                carry0=self._train_carry,
-                device=self.device,
-            )
         elif stage in ("validate", "test"):
             self._ensure_eval_runtime()
+
+    def on_fit_start(  # ------------------------------------------------------
+        self,
+    ) -> None:
+        """Create training source and carry on the correct accelerator device."""
+        B = self._get_batch_size()
+        synthetic = {"_anchor": torch.zeros(B, device=self.device)}
+        self._train_carry = self._require_train_controller().initial_state(
+            synthetic
+        )
+        self._train_source = DemandDrivenReplaySource(
+            episode_source=self._ensure_episode_source(),
+            carry0=self._train_carry,
+            device=self.device,
+        )
 
     def configure_optimizers(  # ----------------------------------------------
         self,
