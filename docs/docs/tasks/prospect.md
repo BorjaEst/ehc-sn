@@ -1,19 +1,19 @@
-# `goalfield` Benchmark Task
+# `prospect` Benchmark Task
 
 ## Task identity and overview
 
-Task name: `goalfield`
+Task name: `prospect`
 
 Benchmark family: memory-derived goal-conditioned prospective field prediction
 
 | Symbol            | Surface | Description                                                             |
 | ----------------- | ------- | ----------------------------------------------------------------------- |
 | $o_{\text{goal}}$ | yes     | goal observation as sensory cue (task boundary input)                   |
-| $\mathbf{f}_t$    | yes     | goal-conditioned prospective firing field over $N$ nodes (model output) |
 | $x_{\text{goal}}$ | —       | LEC-encoded goal sensory state (model-internal)                         |
 | $g_t$             | —       | MEC current location state (model-internal, derived from experience)    |
 | $p_t$             | —       | HPC conjunctive state (model-internal)                                  |
 | $\mathbf{r}_t$    | —       | relational evidence retrieved from HPC memory (model-internal)          |
+| $\mathbf{f}_t$    | yes     | goal-conditioned prospective firing field over $N$ nodes (model output) |
 | $z_H$             | —       | HRM/PFC recurrent state (model-internal)                                |
 | $M$               | —       | episodic memory store (TEM-derived, model-internal)                     |
 
@@ -24,10 +24,10 @@ but are not part of the task-level data contract.
 Canonical package path:
 
 ```text
-src/ehc_sn/tasks/goalfield/
+src/ehc_sn/tasks/prospect/
 ```
 
-`goalfield` is the **integrated EHP training task**. It tests whether the
+`prospect` is the **integrated EHP training task**. It tests whether the
 combined TEM (EC/HPC memory) and HRM (PFC deliberation) system can produce
 a goal-conditioned prospective firing field when the task provides only a
 sensory goal cue and ongoing environmental experience — not oracle positions
@@ -58,7 +58,7 @@ position and weight signals?
 
 ## Scientific purpose
 
-`goalfield` tests whether EHP can:
+`prospect` tests whether EHP can:
 
 1. encode a sensory goal cue via LEC into $x_{\text{goal}}$;
 2. maintain a current location state $g_t$ via MEC from ongoing experience;
@@ -80,7 +80,7 @@ sensory goal + environmental experience
 
 Interpretation:
 
-| Component | Role in `goalfield`                                                               |
+| Component | Role in `prospect`                                                                |
 | --------- | --------------------------------------------------------------------------------- |
 | LEC       | encodes sensory goal observation into $x_{\text{goal}}$                           |
 | MEC       | tracks current structural location $g_t$ from movement history                    |
@@ -101,7 +101,7 @@ that a feed-forward network can compute distances on a memorized graph.
 
 ### Execution mode
 
-`goalfield` uses **single-step field prediction after memory retrieval and
+`prospect` uses **single-step field prediction after memory retrieval and
 recurrent deliberation**. The model does not navigate or select actions.
 
 1. The task provides $o_{\text{goal}}$ (sensory goal observation) and the
@@ -162,7 +162,7 @@ GoalFieldTargets:
 
 The target is the discounted prospective relevance from the current location
 toward the goal, restricted to nodes on viable goal-reaching continuations
-(see `obsnav.md` for the full target formula).
+(see `goaltrace.md` for the full target formula).
 
 ---
 
@@ -170,9 +170,9 @@ toward the goal, restricted to nodes on viable goal-reaching continuations
 
 ### Pretraining requirements
 
-`goalfield` requires pretrained components:
+`prospect` requires pretrained components:
 
-| Component                | Pretrained on                      | Frozen during `goalfield`?     |
+| Component                | Pretrained on                      | Frozen during `prospect`?      |
 | ------------------------ | ---------------------------------- | ------------------------------ |
 | TEM (LEC, MEC, HPC, $M$) | structural exposure (replay)       | Frozen (v1) or fine-tuned (v2) |
 | HRM                      | oracle field prediction (optional) | Trainable                      |
@@ -181,7 +181,7 @@ The recommended v1 strategy is **frozen TEM + trainable HRM**:
 
 1. Pretrain TEM on structural exposure.
 2. Optionally pretrain HRM on oracle-quality field prediction.
-3. Train on `goalfield` with TEM frozen, HRM trainable.
+3. Train on `prospect` with TEM frozen, HRM trainable.
 
 This tests whether HRM can adapt from oracle-quality relational evidence to
 memory-derived relational evidence without retraining TEM.
@@ -206,7 +206,7 @@ To verify that $\mathbf{r}_t$ causally shapes $\mathbf{f}_t$:
 
 ## Corpus and data generation
 
-`goalfield` corpora require a pretrained TEM checkpoint from structural
+`prospect` corpora require a pretrained TEM checkpoint from structural
 exposure training. The data generation pipeline runs TEM over layouts to
 produce the memory state $M$ and latent representations.
 
@@ -229,7 +229,7 @@ cross-task parity.
 ### Data generation
 
 ```bash
-python scripts/data-gen/build-goalfield.py build-all \
+python scripts/data-gen/build-prospect.py build-all \
     --corpus default --version 1 \
     --arena-checkpoint checkpoints/arena/tem-v1-weights-only.pt \
     --n-observations 32 --max-out-degree 4 \
@@ -238,17 +238,17 @@ python scripts/data-gen/build-goalfield.py build-all \
     --seed 42
 ```
 
-Output path: `data/processed/goalfield/<corpus>/v<version>/`
+Output path: `data/processed/prospect/<corpus>/v<version>/`
 
 ---
 
 ## Benchmark and evaluation
 
-### GoalField-Mem track
+### Prospect-Mem track
 
 | Aspect            | Value                                                                          |
 | ----------------- | ------------------------------------------------------------------------------ |
-| Benchmark track   | GoalField-Mem                                                                  |
+| Benchmark track   | Prospect-Mem                                                                   |
 | Claim family      | `memory_derived_prospective_field`                                             |
 | Execution mode    | single-step field prediction after memory retrieval + deliberation             |
 | Primary metric    | `field_mse`                                                                    |

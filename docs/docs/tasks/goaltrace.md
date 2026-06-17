@@ -1,8 +1,8 @@
-# `obsnav` Benchmark Task
+# `goaltrace` Benchmark Task
 
 ## Task identity and overview
 
-Task name: `obsnav`
+Task name: `goaltrace`
 
 Benchmark family: goal-conditioned prospective field prediction
 
@@ -21,10 +21,10 @@ but are not part of the task-level data contract.
 Canonical package path:
 
 ```text
-src/ehc_sn/tasks/obsnav/
+src/ehc_sn/tasks/goaltrace/
 ```
 
-`obsnav` is the **isolated HRM/PFC training task**. It trains HRM to transform
+`goaltrace` is the **isolated HRM/PFC training task**. It trains HRM to transform
 a current-location representation, a goal observation, and state-dependent
 relational weights into a goal-conditioned prospective firing field over the
 nodes of a fixed learned DAG.
@@ -72,7 +72,7 @@ prediction loss.
 
 ## Scientific purpose
 
-`obsnav` tests whether HRM can:
+`goaltrace` tests whether HRM can:
 
 1. learn a fixed directed topology parametrically from field supervision;
 2. anchor computation on a current location $g_t$;
@@ -92,7 +92,7 @@ current anchor + goal cue + relational evidence
 
 Interpretation:
 
-| Component       | Role in `obsnav`                                                        |
+| Component       | Role in `goaltrace`                                                     |
 | --------------- | ----------------------------------------------------------------------- |
 | HRM / PFC       | constructs queries, integrates evidence, refines prospective field      |
 | Token structure | encodes observation identity, current/goal flags, and relational weight |
@@ -105,7 +105,7 @@ The central question is:
 > weights to produce a goal-conditioned prospective field that correctly
 > identifies which observations lie on viable paths to the goal?
 
-`obsnav` does **not** test:
+`goaltrace` does **not** test:
 
 - hippocampal episodic retrieval;
 - MEC-based self-localization;
@@ -121,7 +121,7 @@ prospective field.
 
 ### Execution mode
 
-`obsnav` uses **single-step field prediction with optional recurrent
+`goaltrace` uses **single-step field prediction with optional recurrent
 deliberation**. The model does not navigate, select actions, or interact with
 a runtime loop. There is no physical movement, no episode horizon, and no
 state transition.
@@ -350,7 +350,7 @@ are stable and assigned independently of topological order.
 
 ```json
 {
-  "task": "obsnav",
+  "task": "goaltrace",
   "corpus": "default",
   "version": 1,
   "n_observations": 32,
@@ -374,7 +374,7 @@ are stable and assigned independently of topological order.
 ### Data generation
 
 ```bash
-python scripts/data-gen/build-obsnav.py build-all \
+python scripts/data-gen/build-goaltrace.py build-all \
     --corpus default --version 1 \
     --n-observations 32 --max-out-degree 4 \
     --oracle-semantics reliability --field-decay 0.8 \
@@ -382,7 +382,7 @@ python scripts/data-gen/build-obsnav.py build-all \
     --seed 42
 ```
 
-Output path: `data/processed/obsnav/<corpus>/v<version>/`
+Output path: `data/processed/goaltrace/<corpus>/v<version>/`
 
 ### Train/test split
 
@@ -394,11 +394,11 @@ split holds out specific (current, goal) pairs entirely.
 
 ## Benchmark and evaluation
 
-### ObsNav-Field track
+### Goaltrace-Field track
 
 | Aspect            | Value                                                        |
 | ----------------- | ------------------------------------------------------------ |
-| Benchmark track   | ObsNav-Field                                                 |
+| Benchmark track   | Goaltrace-Field                                              |
 | Claim family      | `goal_conditioned_prospective_field`                         |
 | Execution mode    | single-step field prediction after recurrent deliberation    |
 | Primary metric    | `field_mse`                                                  |

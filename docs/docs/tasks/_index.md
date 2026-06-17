@@ -9,8 +9,8 @@ demand.
 | ----------- | ---------------------------- | ----------------------- | ------------------------------------------------------------------ |
 | `arena`     | [arena.md](arena.md)         | structural learning     | acquires spatial representations from sequential experience        |
 | `mazehard`  | (external)                   | spatial navigation      | navigates a fixed grid with blocked cells                          |
-| `obsnav`    | [obsnav.md](obsnav.md)       | prospective field (HRM) | produces a goal-conditioned prospective field from oracle inputs   |
-| `goalfield` | [goalfield.md](goalfield.md) | prospective field (EHP) | produces a goal-conditioned prospective field from episodic memory |
+| `goaltrace` | [goaltrace.md](goaltrace.md) | prospective field (HRM) | produces a goal-conditioned prospective field from oracle inputs   |
+| `prospect`  | [prospect.md](prospect.md)   | prospective field (EHP) | produces a goal-conditioned prospective field from episodic memory |
 
 ## Task relationships
 
@@ -19,40 +19,40 @@ demand.
 | Task        | Model         | Task supplies                                               | Model must produce or retrieve                            |
 | ----------- | ------------- | ----------------------------------------------------------- | --------------------------------------------------------- |
 | `arena`     | TEM           | sensory observations and transitions through an environment | EC/HPC representations and episodic memory                |
-| `obsnav`    | HRM           | $g_t$, $x_{\text{goal}}$, $\mathbf{w}_t$                    | goal-conditioned prospective field $\mathbf{f}_t$         |
-| `goalfield` | EHP (TEM+HRM) | $o_{\text{goal}}$ + environmental experience                | memory-derived $g_t$, $\mathbf{r}_t$, then $\mathbf{f}_t$ |
+| `goaltrace` | HRM           | $g_t$, $x_{\text{goal}}$, $\mathbf{w}_t$                    | goal-conditioned prospective field $\mathbf{f}_t$         |
+| `prospect`  | EHP (TEM+HRM) | $o_{\text{goal}}$ + environmental experience                | memory-derived $g_t$, $\mathbf{r}_t$, then $\mathbf{f}_t$ |
 
 ```text
 arena:     world → memory
-obsnav:    memory-like evidence → prospective field
-goalfield: world memory + goal → prospective field
+goaltrace:    memory-like evidence → prospective field
+prospect: world memory + goal → prospective field
 ```
 
-### `arena` ↔ `obsnav`
+### `arena` ↔ `goaltrace`
 
 `arena` trains TEM to learn structural representations ($g_t$, $p_t$) and
-eventual relational retrieval. `obsnav` receives approximations of those
+eventual relational retrieval. `goaltrace` receives approximations of those
 signals as oracle inputs, so HRM can be trained in isolation. The two tasks
-train complementary systems that `goalfield` later integrates.
+train complementary systems that `prospect` later integrates.
 
-### `arena` ↔ `goalfield`
+### `arena` ↔ `prospect`
 
-`goalfield` depends on `arena` for TEM pretraining. The TEM modules (LEC,
+`prospect` depends on `arena` for TEM pretraining. The TEM modules (LEC,
 MEC, HPC, and memory store $M$) must be pretrained on structural exposure
-before `goalfield` training begins. During `goalfield` training, TEM weights
+before `prospect` training begins. During `prospect` training, TEM weights
 may be frozen or fine-tuned depending on the training strategy.
 
-During `goalfield` data generation, a pretrained arena TEM model is run over
+During `prospect` data generation, a pretrained arena TEM model is run over
 a layout to produce the episodic memory state ($M$) and latent representations
-($g_t$, $p_t$). `goalfield` then tests whether the model can use that memory
+($g_t$, $p_t$). `prospect` then tests whether the model can use that memory
 to solve goal-conditioned prospective-field problems.
 
-### `obsnav` ↔ `goalfield`
+### `goaltrace` ↔ `prospect`
 
-`obsnav` and `goalfield` share the same output semantics (a goal-conditioned
+`goaltrace` and `prospect` share the same output semantics (a goal-conditioned
 prospective field) but differ in input provenance:
 
-|                    | `obsnav`                        | `goalfield`                           |
+|                    | `goaltrace`                     | `prospect`                            |
 | ------------------ | ------------------------------- | ------------------------------------- |
 | Current location   | task-supplied $g_t$             | MEC-derived from experience           |
 | Goal cue           | task-supplied $x_{\text{goal}}$ | LEC-encoded from $o_{\text{goal}}$    |
@@ -60,19 +60,19 @@ prospective field) but differ in input provenance:
 | Model              | HRM only                        | EHP (TEM + HRM)                       |
 | Claim              | PFC computation                 | memory-guided PFC computation         |
 
-An HRM pretrained on `obsnav` (oracle weights) may transfer to `goalfield`
+An HRM pretrained on `goaltrace` (oracle weights) may transfer to `prospect`
 (memory-derived evidence). This transfer is itself a scientific test of
 whether the PFC computation generalizes across input quality.
 
-`obsnav` cannot support claims about memory retrieval, localization, or
-episodic binding. Those claims belong to `goalfield`.
+`goaltrace` cannot support claims about memory retrieval, localization, or
+episodic binding. Those claims belong to `prospect`.
 
-### `obsnav` ↔ `seqmaze`
+### `goaltrace` ↔ `seqmaze`
 
 `seqmaze` provides a novel graph per sample and requires full-path output.
-`obsnav` uses one fixed DAG learned parametrically and requires a distributed
+`goaltrace` uses one fixed DAG learned parametrically and requires a distributed
 field, not a discrete path. `seqmaze` tests novel-graph interpretation;
-`obsnav` tests parametric topology knowledge applied under changing local
+`goaltrace` tests parametric topology knowledge applied under changing local
 conditions.
 
 ### `arena` ↔ `seqmaze`
@@ -81,10 +81,10 @@ conditions.
 Arena provides the spatial grounding that `seqmaze` deliberately removes.
 The two tasks bookend the structural-learning-to-reasoning spectrum.
 
-### Why `goalfield` replaces `goalchain`
+### Why `prospect` replaces `goalchain`
 
 `goalchain` required an explicit ordered chain output
-($v_0 \rightarrow v_1 \rightarrow \cdots \rightarrow v_g$). `goalfield`
+($v_0 \rightarrow v_1 \rightarrow \cdots \rightarrow v_g$). `prospect`
 requires a distributed prospective field that:
 
 - is anchored at the current location;
@@ -98,7 +98,7 @@ required to output the entire chain at once.
 
 ### Fixed topology contract
 
-`obsnav` and `goalfield` v1 share a common fixed-topology contract:
+`goaltrace` and `prospect` v1 share a common fixed-topology contract:
 
 ```text
 G = (V, E)
