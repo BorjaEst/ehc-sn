@@ -191,10 +191,19 @@ class SeqMazeRoutingDataset(IterableDataset):
             eos_pos = min(len(sp), t - 1)
             path[eos_pos] = VOCAB_PATH - 2  # EOS
             path_mask = path != (VOCAB_PATH - 1)
-            result["path_target"] = path.unsqueeze(0)
+            result["target_path"] = path.unsqueeze(0)
             result["path_mask"] = path_mask.unsqueeze(0)
+            result["path_length"] = torch.tensor([len(sp)], dtype=torch.long)
+        else:
+            # Emit dummy path keys for the shared batch validation.
+            result["target_path"] = torch.zeros(1, 4, dtype=torch.long)
+            result["path_mask"] = torch.zeros(1, 4, dtype=torch.bool)
+            result["path_length"] = torch.zeros(1, dtype=torch.long)
 
         return result
+
+
+# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +490,7 @@ def run_routing_probe(
         n_batches = 0
         for batch in loader:
             batch = {k: v.to(DEVICE) for k, v in batch.items()}
-            targets = batch["path_target"]  # (B, T)
+            targets = batch["target_path"]  # (B, T)
             target_mask = batch["path_mask"]  # (B, T)
 
             # Encode 4 graph nodes using the probe-trained encoder
@@ -542,7 +551,7 @@ def run_routing_probe(
     with torch.no_grad():
         for batch in loader:
             batch = {k: v.to(DEVICE) for k, v in batch.items()}
-            targets = batch["path_target"]
+            targets = batch["target_path"]
             target_mask = batch["path_mask"]
 
             graph_tokens, graph_mask = graph_encoder(
@@ -651,6 +660,12 @@ def print_table(
 
 # =============================================================================
 def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--save-probe", type=str, default=None,
+                       help="Save probe-trained model checkpoint to this path")
+    args = parser.parse_args()
+
     print("=" * 64)
     print("SEQMAZE ROUTING PROBE")
     print("=" * 64)
@@ -662,6 +677,14 @@ def main() -> None:
 
     # Step 1: Train probe model
     adapter = train_probe_model()
+
+    # Save probe checkpoint if requested
+    if args.save_probe is not None:
+        import os
+        os.makedirs(os.path.dirname(args.save_probe) or ".", exist_ok=True)
+        sd = adapter.model.state_dict()
+        torch.save({"state_dict": sd}, args.save_probe)
+        print(f"\nSaved probe checkpoint to {args.save_probe!r}")
 
     # Step 2: Evaluate experimental condition (graph info present)
     print("\n--- Routing probe: experimental condition ---")

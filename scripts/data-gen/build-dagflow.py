@@ -61,9 +61,10 @@ _DEFAULT_PRESET = "default"
 _DEFAULT_RAW_ROOT = Path("data/raw/dagflow")
 _DEFAULT_INTERIM_ROOT = Path("data/interim/dagflow")
 _DEFAULT_VERSION = 1
-_DEFAULT_N_MAX = 32
-_DEFAULT_T_MAX = 32
+_DEFAULT_N_MAX = 16
+_DEFAULT_T_MAX = 16
 _DEFAULT_MAX_OUT_DEGREE = 4
+_DEFAULT_MIN_PATH_LENGTH = 4
 _DEFAULT_N_TRAIN = 4000
 _DEFAULT_N_VAL = 500
 _DEFAULT_N_TEST = 500
@@ -223,6 +224,13 @@ def materialize_layouts(
             help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
         ),
     ] = _DEFAULT_N_TEST,
+    min_path_length: Annotated[
+        int,
+        typer.Option(
+            "--min-path-length",
+            help=f"Minimum shortest-path length in nodes (default: {_DEFAULT_MIN_PATH_LENGTH}).",
+        ),
+    ] = _DEFAULT_MIN_PATH_LENGTH,
     topology_seed: Annotated[
         int,
         typer.Option(
@@ -276,6 +284,7 @@ def materialize_layouts(
         n_val=n_val,
         n_test=n_test,
         seed=topology_seed,
+        min_path_length=min_path_length,
     )
 
 
@@ -364,6 +373,13 @@ def build_all(
             help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
         ),
     ] = _DEFAULT_N_TEST,
+    min_path_length: Annotated[
+        int,
+        typer.Option(
+            "--min-path-length",
+            help=f"Minimum shortest-path length in nodes (default: {_DEFAULT_MIN_PATH_LENGTH}).",
+        ),
+    ] = _DEFAULT_MIN_PATH_LENGTH,
     topology_seed: Annotated[
         int,
         typer.Option(
@@ -408,6 +424,7 @@ def build_all(
         n_max=n_max,
         t_max=t_max,
         max_out_degree=max_out_degree,
+        min_path_length=min_path_length,
         n_train=n_train,
         n_val=n_val,
         n_test=n_test,

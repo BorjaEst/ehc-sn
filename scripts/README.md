@@ -19,7 +19,7 @@ Uses `ehc_sn.eval.offline.run_offline_eval`.
 # TEM v1 Arena diagnostic (1 case, with traces for overlays)
 python scripts/evaluation/run_eval.py \
     --model-family tem-v1 \
-    --checkpoint checkpoints/tem-v1/eval-weights-only.pt \
+    --checkpoint models/tem-v1/best.pt \
     --config config/evaluation/tem-v1-arena.toml \
     --task arena \
     --provider-ref ehc_sn.tasks.arena.providers.ArenaReplayProvider \
@@ -31,7 +31,7 @@ python scripts/evaluation/run_eval.py \
 # TEM v2 Arena diagnostic (1 case, with traces for overlays)
 python scripts/evaluation/run_eval.py \
     --model-family tem-v2 \
-    --checkpoint checkpoints/tem-v2/eval-weights-only.pt \
+    --checkpoint best/tem-v2/best.pt \
     --config config/evaluation/tem-v2-arena.toml \
     --task arena \
     --provider-ref ehc_sn.tasks.arena.providers.ArenaReplayProvider \
@@ -43,7 +43,7 @@ python scripts/evaluation/run_eval.py \
 # HRM v1 MazeHard full diagnostic (1 case, with traces)
 python scripts/evaluation/run_eval.py \
     --model-family hrm-v1 \
-    --checkpoint checkpoints/hrm-v1/eval-weights-only.pt \
+    --checkpoint best/hrm-v1/best.pt \
     --config config/evaluation/hrm-v1-mazehard.toml \
     --task mazehard \
     --provider-ref ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider \
@@ -57,7 +57,7 @@ python scripts/evaluation/run_eval.py \
 # HRM v2 MazeHard diagnostic (1 cases, with traces)
 python scripts/evaluation/run_eval.py \
     --model-family hrm-v2 \
-    --checkpoint checkpoints/hrm-v2/eval-weights-only.pt \
+    --checkpoint best/hrm-v2/best.pt \
     --config config/evaluation/hrm-v2-mazehard.toml \
     --task mazehard \
     --provider-ref ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider \
