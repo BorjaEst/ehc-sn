@@ -67,43 +67,37 @@ TASK_SCHEMA_VERSION: Final[int] = 1
 TASK_PROTOCOL_VERSION: Final[int] = 1
 
 ArenaStartPolicy: TypeAlias = Literal["random_valid", "canonical_entrance"]
-ArenaWalkPolicy: TypeAlias = Literal[
-    "no_immediate_backtrack", "uniform", "legacy_angle_bias"
-]
+ArenaWalkPolicy: TypeAlias = Literal["no_backtrack", "uniform", "angle_bias"]
 ArenaWalkFn: TypeAlias = Callable[
     ..., tuple[np.ndarray, np.ndarray, np.ndarray]
 ]
 
 DEFAULT_START_POLICY: Final[ArenaStartPolicy] = "random_valid"
-DEFAULT_WALK_POLICY: Final[ArenaWalkPolicy] = "no_immediate_backtrack"
+DEFAULT_WALK_POLICY: Final[ArenaWalkPolicy] = "no_backtrack"
 DEFAULT_MAX_STEPS: Final[int] = 250
 
 START_POLICY_RANDOM_VALID_ID: Final[str] = "random_valid_cell_v1"
 START_POLICY_CANONICAL_ENTRANCE_ID: Final[str] = (
     "dungeongen_canonical_entrance_v1"
 )
-WALK_POLICY_NO_IMMEDIATE_BACKTRACK_ID: Final[str] = (
-    "random_walk_no_immediate_backtrack_v1"
-)
+WALK_POLICY_NO_BACKTRACK_ID: Final[str] = "random_walk_no_backtrack_v1"
 WALK_POLICY_UNIFORM_ID: Final[str] = "random_walk_uniform_v1"
 
 _START_POLICY_ID_BY_NAME: Final[dict[str, str]] = {
     "random_valid": START_POLICY_RANDOM_VALID_ID,
     "canonical_entrance": START_POLICY_CANONICAL_ENTRANCE_ID,
 }
-WALK_POLICY_LEGACY_ANGLE_BIAS_ID: Final[str] = (
-    "random_walk_legacy_angle_bias_v1"
-)
+WALK_POLICY_ANGLE_BIAS_ID: Final[str] = "random_walk_angle_bias_v1"
 
 _WALK_POLICY_ID_BY_NAME: Final[dict[str, str]] = {
-    "no_immediate_backtrack": WALK_POLICY_NO_IMMEDIATE_BACKTRACK_ID,
+    "no_backtrack": WALK_POLICY_NO_BACKTRACK_ID,
     "uniform": WALK_POLICY_UNIFORM_ID,
-    "legacy_angle_bias": WALK_POLICY_LEGACY_ANGLE_BIAS_ID,
+    "angle_bias": WALK_POLICY_ANGLE_BIAS_ID,
 }
 _WALK_FUNCTION_BY_NAME: Final[dict[str, ArenaWalkFn]] = {
-    "no_immediate_backtrack": random_walk_no_backtrack,
+    "no_backtrack": random_walk_no_backtrack,
     "uniform": random_walk,
-    "legacy_angle_bias": random_walk_straight_bias,
+    "angle_bias": random_walk_straight_bias,
 }
 _ALLOWED_START_POLICY_IDS: Final[frozenset[str]] = frozenset(
     _START_POLICY_ID_BY_NAME.values()
@@ -667,7 +661,7 @@ def build_arena_task_corpus(
     *,
     layouts: list[SpatialLayout],
     corpus: str = "default",
-    walk_policy: ArenaWalkPolicy = "legacy_angle_bias",
+    walk_policy: ArenaWalkPolicy = "angle_bias",
     n_episodes_per_layout: int = 10,
     max_steps: int = 250,
     seed: int = 42,
@@ -685,7 +679,7 @@ def build_arena_task_corpus(
         version_root: Destination versioned root.
         layouts: Validated spatial layout records.
         corpus: Corpus label (e.g. ``"dungeons"``, ``"openfield-square"``).
-        walk_policy: Walk policy name (default ``\"legacy_angle_bias\"``).
+        walk_policy: Walk policy name (default ``\"angle_bias\"``).
         n_episodes_per_layout: Walk episodes per layout instance.
         max_steps: Trajectory length.
         seed: Base RNG seed for walk-seed derivation.

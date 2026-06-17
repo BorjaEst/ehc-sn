@@ -164,7 +164,7 @@ def random_walk_no_backtrack(
 ) -> tuple[ndarray, ndarray, ndarray]:
     """Random walk with no-immediate-backtrack suppression.
 
-    Implements ``random_walk_no_immediate_backtrack_v1``:
+    Implements ``random_walk_no_backtrack_v1``:
 
     - Enumerate legal movement actions from the current cell.
     - If the inverse of the previous non-STAY action is legal **and** at least
