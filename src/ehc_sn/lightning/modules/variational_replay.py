@@ -308,10 +308,23 @@ class VariationalReplayModule(L.LightningModule):
         self,
         stage: Optional[str] = None,
     ) -> None:
-        """Initialize phase-local train and evaluation runtimes."""
+        """Initialize phase-local train/eval runtimes and training source."""
         if stage in (None, "fit"):
             self._ensure_train_runtime()
             self._ensure_eval_runtime()
+            # Training source must be created here — before the DataLoader
+            # iterator starts — so DemandDrivenTickIterable finds a valid
+            # _train_source on first __next__.
+            B = self._get_batch_size()
+            synthetic = {"_anchor": torch.zeros(B, device=self.device)}
+            self._train_carry = self._require_train_controller().initial_state(
+                synthetic
+            )
+            self._train_source = DemandDrivenReplaySource(
+                episode_source=self._ensure_episode_source(),
+                carry0=self._train_carry,
+                device=self.device,
+            )
         elif stage in ("validate", "test"):
             self._ensure_eval_runtime()
 
@@ -577,20 +590,6 @@ class VariationalReplayModule(L.LightningModule):
             admitted_before = self._episode_source.total_admitted
         else:
             admitted_before = 0
-
-        if self._train_carry is None:
-            # With the tick DataLoader there is no real episode batch.
-            # initial_state() only needs B and device from a tensor.
-            B = self._get_batch_size()
-            synthetic = {"_anchor": torch.zeros(B, device=self.device)}
-            self._train_carry = train_controller.initial_state(synthetic)
-
-            # Create the persistent rollout source, lifetime = training run.
-            self._train_source = DemandDrivenReplaySource(
-                episode_source=self._ensure_episode_source(),
-                carry0=self._train_carry,
-                device=self.device,
-            )
 
         source = self._train_source
         objective_options = train_objective.runtime_loss_options(
