@@ -17,6 +17,7 @@ def build_arena_tem_v2_training_experiment(
         config.model,
         training_config=TEMTrainingConfig(
             optimizer=config.training.optimizer,
+            num_slots=config.data.num_slots,
         ),
         execution=config.execution,
         scheduler=config.scheduler,

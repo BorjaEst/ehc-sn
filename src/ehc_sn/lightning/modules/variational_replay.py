@@ -156,6 +156,12 @@ class TEMTrainingConfig(BaseModel, extra="forbid"):
         default_factory=AdamConfig,
         description="Adam optimizer hyperparameters.",
     )
+    num_slots: int | None = Field(
+        default=None,
+        ge=1,
+        description="Per-rank carry buffer width (concurrent trajectory slots). "
+        "``None`` during evaluation — carry is allocated from batch dimension.",
+    )
 
 
 class VariationalReplayConfig(BaseModel, extra="forbid"):
@@ -206,18 +212,12 @@ class VariationalReplayModule(L.LightningModule):
         training_config: TEMTrainingConfig | None = None,
         execution: TEMRuntimeConfig | None = None,
         debug_env_var: str | None = None,
-        num_slots: int | None = None,
     ) -> None:
         super().__init__()
         self._bindings = bindings
         self._component_configs = component_configs
         self._training_config = training_config
         self._execution = execution
-        if num_slots is not None and num_slots <= 0:
-            raise ValueError(
-                f"num_slots must be positive, " f"got {num_slots}."
-            )
-        self._num_slots = num_slots
         self._debug_env_var = debug_env_var
 
         model_settings = bindings.model_settings_cls.from_config(
@@ -319,6 +319,8 @@ class VariationalReplayModule(L.LightningModule):
         self,
     ) -> None:
         """Create training source and carry on the correct accelerator device."""
+        if self._training_config is not None:
+            self._num_slots = self._training_config.num_slots
         B = self._get_batch_size()
         synthetic = {"_anchor": torch.zeros(B, device=self.device)}
         self._train_carry = self._require_train_controller().initial_state(

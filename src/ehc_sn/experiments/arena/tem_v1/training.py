@@ -15,6 +15,7 @@ def build_arena_tem_v1_training_experiment(
 ) -> TrainingExperiment:
     transfer_training = TEMTrainingConfig(
         optimizer=config.training.optimizer,
+        num_slots=config.data.num_slots,
     )
     module = build_arena_tem_v1_model(
         config.model,
