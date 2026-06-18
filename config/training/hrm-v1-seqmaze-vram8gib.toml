@@ -6,7 +6,7 @@
     model_config_path = "config/models/hrm-v1-base.toml"
 
 [model.components.adapter]
-    n_max         = 16
+    n_max         = 45
     t_max         = 16
     k_max         = 4
     edge_encoding = "successor_node_pool"

@@ -58,7 +58,7 @@ from ehc_sn.tasks.seqmaze.builder import (
 # ---------------------------------------------------------------------------
 _DEFAULT_VERSION = 1
 _DEFAULT_CORPUS = "default"
-_DEFAULT_N_MAX = 16
+_DEFAULT_N_MAX = 45
 _DEFAULT_T_MAX = 16
 _DEFAULT_MAX_OUT_DEGREE = 4
 _DEFAULT_N_TRAIN = 4000
