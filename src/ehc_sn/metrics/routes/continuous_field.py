@@ -3,6 +3,17 @@
 These routes map metric keys to dotted attribute paths on
 :class:`~ehc_sn.metrics.step_metrics.StepMetrics`, which is the step-metrics
 object produced by :class:`~ehc_sn.objectives.continuous_field.ContinuousFieldObjective`.
+
+Route categories
+----------------
+[deliberation]
+    Populated from StepMetrics aggregate fields (step.accuracy_sum,
+    episode.completed_count, etc.).  Zero in ``simple_supervised`` mode;
+    filled from ACT carry data when deliberation is enabled.
+
+[extras]
+    Populated from StepMetrics.extras dict, which the objective fills
+    from its loss computation.  Active in all training modes.
 """
 
 from ehc_sn.metrics.adapter import Route
@@ -10,12 +21,13 @@ from ehc_sn.metrics.keys import extra_ratio_paths
 from ehc_sn.metrics.routes.act import _with_namespace
 
 # =============================================================================
+# [deliberation] Fraction of eligible slots that completed the episode.
+# Zero in simple_supervised mode.
+# [deliberation] Mean deliberation steps per slot.  Zero in simple_supervised.
+# [extras] MSE between predicted and target firing field.  Active always.
+# [extras] Q(done) classifier accuracy.  Active always.
+# =============================================================================
 CONTINUOUS_FIELD_STEP_ROUTES: tuple[Route, ...] = (
-    Route(
-        key="all/accuracy",
-        num_path="step.accuracy_sum",
-        den_path="step.evaluated_count",
-    ),
     Route(
         key="rollout/completed_rate",
         num_path="episode.completed_count",
@@ -41,11 +53,6 @@ CONTINUOUS_FIELD_STEP_ROUTES: tuple[Route, ...] = (
 CONTINUOUS_FIELD_EPISODE_ROUTES: tuple[Route, ...] = _with_namespace(
     "episode",
     (
-        Route(
-            key="all/accuracy",
-            num_path="episode.accuracy_sum",
-            den_path="episode.completed_count",
-        ),
         Route(
             key="rollout/completed_rate",
             num_path="episode.completed_count",

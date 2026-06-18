@@ -357,7 +357,12 @@ class ContinuousFieldObjective(BaseObjective[ContinuousFieldObjectiveConfig]):
         self,
         context: ContinuousFieldContext,
     ) -> StepMetrics:
-        """Build step metrics from precomputed losses and context."""
+        """Build step metrics from precomputed losses and context.
+
+        Populates placeholder aggregates with deliberation data from the
+        carry snapshot when available (ACT mode).  Falls back to zeros when
+        ``snapshot.steps`` is ``None`` (simple_supervised mode).
+        """
         losses = context.losses
         terms = context.terms
 
@@ -388,24 +393,47 @@ class ContinuousFieldObjective(BaseObjective[ContinuousFieldObjectiveConfig]):
                 ),
             }
 
+        # --- Read deliberation data from carry snapshot ---
+        snapshot = context.snapshot
+        dtype = torch.float64
+        device = torch.device("cpu")
+
+        if losses is not None:
+            dtype = losses.loss_field_sum.dtype
+            device = losses.loss_field_sum.device
+
+        if snapshot.steps is not None:
+            steps = snapshot.steps.to(dtype=dtype, device=device)
+        else:
+            steps = torch.zeros(B, dtype=dtype, device=device)
+
+        if snapshot.halted is not None:
+            halted = snapshot.halted.to(dtype=dtype, device=device)
+        else:
+            halted = torch.zeros(B, dtype=dtype, device=device)
+
+        # All slots are eligible (all contribute field predictions).
+        eligible = torch.ones(B, dtype=dtype, device=device)
+        completed = halted
+
         return StepMetrics(
             episode=RolloutAgg(
-                completed_count=torch.tensor(0.0),
-                eligible_count=torch.tensor(0.0),
+                completed_count=completed.sum(),
+                eligible_count=eligible.sum(),
                 accuracy_sum=torch.tensor(0.0),
                 exact_sum=torch.tensor(0.0),
-                steps_sum=torch.tensor(0.0),
+                steps_sum=(steps * completed).sum(),
             ),
             episode_tokens=TokenAgg(
                 token_correct_sum=torch.tensor(0.0),
                 token_count_sum=torch.tensor(0.0),
             ),
             step=TransitionAgg(
-                evaluated_count=torch.tensor(float(B)),
-                eligible_count=torch.tensor(float(B)),
+                evaluated_count=eligible.sum(),
+                eligible_count=eligible.sum(),
                 accuracy_sum=torch.tensor(0.0),
                 exact_sum=torch.tensor(0.0),
-                steps_sum=torch.tensor(0.0),
+                steps_sum=steps.sum(),
             ),
             step_tokens=TokenAgg(
                 token_correct_sum=torch.tensor(0.0),
