@@ -1,6 +1,7 @@
 # Training config — SeqMaze × HRM-v1 (nested experiment schema)
 # =============================================================================
     supervised_only_warmup_steps = 500
+    use_token_weights = false
 
 [model]
     model_config_path = "config/models/hrm-v1-base.toml"
@@ -18,7 +19,6 @@
 
 [model.components.objective]
     token_loss        = "softmax_cross_entropy"
-    use_token_weights = false
 
 [training.optimizer]
     lr           = 1e-4

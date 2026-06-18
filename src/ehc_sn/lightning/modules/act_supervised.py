@@ -38,7 +38,6 @@ from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.reducers import HiddenNormHistogram, compute_nonempty
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.step_metrics import StepMetrics
-from ehc_sn.objectives.act import ACTObjectiveConfig
 from ehc_sn.rollouts.runtime import (
     CarrySnapshot,
     RecurrentRunner,
@@ -143,6 +142,12 @@ class ACTSupervisedTrainingConfig(BaseModel, extra="forbid"):
         description="Maximum global gradient norm for clipping.  ``None`` means "
         "no gradient clipping.",
     )
+    use_token_weights: bool = Field(
+        default=False,
+        description="Whether to apply task-provided per-token weights when "
+        "computing token supervision loss.  Moved here from "
+        "ACTObjectiveConfig — training policy, not loss math.",
+    )
 
 
 class ACTSupervisedComponentConfigs(BaseModel, extra="forbid"):
@@ -163,9 +168,11 @@ class ACTSupervisedComponentConfigs(BaseModel, extra="forbid"):
         ...,
         description="ACT deliberation controller configuration.",
     )
-    objective: ACTObjectiveConfig = Field(
+    objective: BaseModel = Field(
         ...,
-        description="ACT objective configuration.",
+        description="Task-specific objective configuration.  Validated by the"
+        "experiment builder.  Generic BaseModel so the module stays"
+        "agnostic to objective type.",
     )
 
 
@@ -603,7 +610,7 @@ class ACTSupervisedModule(L.LightningModule):
             objective_options={
                 "controller": self.controller,
                 "td_target": True,
-                "use_token_weights": self.component_configs.objective.use_token_weights,
+                "use_token_weights": self._training_config.use_token_weights,
                 "target_backbone": target_backbone,
             },
         )

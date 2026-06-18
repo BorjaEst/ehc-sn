@@ -114,6 +114,12 @@ class SeqMazeHRMV1TrainingExperimentConfig(BaseModel, extra="forbid"):
         ...,
         description="Dataset and DataLoader settings.",
     )
+    use_token_weights: bool = Field(
+        default=False,
+        description="Whether to apply task-provided per-token weights when "
+        "computing token supervision loss.  Passed through to "
+        "ACTSupervisedTrainingConfig for the ACT rollout path.",
+    )
     trainer: TrainerConfig = Field(
         default_factory=TrainerConfig,
         description="Lightning Trainer settings.",

@@ -22,6 +22,7 @@ def build_seqmaze_hrm_v1_training_experiment(
         optimizer=config.training.optimizer,
         num_slots=config.data.num_slots,
         gradient_clip_val=getattr(config.trainer, "gradient_clip_val", None),
+        use_token_weights=config.use_token_weights,
     )
     module = build_seqmaze_hrm_v1_model(
         config.model,

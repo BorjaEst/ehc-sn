@@ -127,9 +127,7 @@ class VariationalReplayComponentConfigs(BaseModel, extra="forbid"):
     """Concrete component configs for a variational/replay experiment.
 
     Validated and populated by the experiment builder, consumed by
-    the regime module.  Fields carry concrete Pydantic types — never
-    bare ``BaseModel`` — so the config class does not need to know
-    which experiment family produced them.
+    the regime module.
     """
 
     adapter: ArenaTEMAdapterSettings = Field(
@@ -140,7 +138,7 @@ class VariationalReplayComponentConfigs(BaseModel, extra="forbid"):
         ...,
         description="Replay trajectory controller configuration.",
     )
-    objective: TEMObjectiveConfig = Field(
+    objective: BaseModel = Field(
         ...,
         description="Objective configuration (loss weights, etc.).",
     )

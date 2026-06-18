@@ -22,7 +22,10 @@ from ehc_sn.lightning.modules.act_supervised import (
     ACTSupervisedModule,
     ACTSupervisedTrainingConfig,
 )
-from ehc_sn.metrics.routes.act import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
+from ehc_sn.metrics.routes.continuous_field import (
+    CONTINUOUS_FIELD_EPISODE_ROUTES,
+    CONTINUOUS_FIELD_STEP_ROUTES,
+)
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
 from ehc_sn.objectives.continuous_field import (
     ContinuousFieldObjective,
@@ -62,7 +65,7 @@ def build_goaltrace_hrm_v1_model(
         simple_supervised: When True (default), bypasses ACT rollout
             and uses single-pass training with objective-delegated loss.
     """
-    components: ACTSupervisedComponentConfigs = config.components  # type: ignore[assignment]
+    components: ACTSupervisedComponentConfigs = config.components
 
     bindings = ACTSupervisedBindings(
         model_cls=HRModelV1,
@@ -78,8 +81,8 @@ def build_goaltrace_hrm_v1_model(
         optimizer_config_cls=AdamATan2Config,
         trace_fields=(),
         build_trace_meta_fn=build_goaltrace_hrm_trace_meta,
-        step_routes=ACT_STEP_ROUTES,
-        episode_routes=ACT_EPISODE_ROUTES,
+        step_routes=CONTINUOUS_FIELD_STEP_ROUTES,
+        episode_routes=CONTINUOUS_FIELD_EPISODE_ROUTES,
         hidden_state_fields=HRM_HIDDEN_STATE_FIELDS,
     )
     return ACTSupervisedModule(

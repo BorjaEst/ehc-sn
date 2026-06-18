@@ -174,9 +174,10 @@ class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
         default_factory=lambda: None,
         description="Deliberation AC controller configuration.",
     )
-    objective: HybridRLLossConfig = Field(
+    objective: BaseModel = Field(
         ...,
-        description="Hybrid RL objective configuration.",
+        description="Objective configuration (task-specific, validated by "
+        "experiment builder).",
     )
 
 
