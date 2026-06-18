@@ -132,6 +132,11 @@ class ArenaTEMV1EvaluationExperimentConfig(BaseModel, extra="forbid"):
         ...,
         description="Model structure (components only).",
     )
+    execution: Optional[TEMRuntimeConfig] = Field(
+        default=None,
+        description="Execution policy for eval-time runtime dynamics. "
+        "None skips runtime configuration (not valid for actual eval).",
+    )
 
 
 # =============================================================================

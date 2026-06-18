@@ -1,20 +1,22 @@
 # Evaluation executor config — HRM v2 on MazeHard.
 # Derived from config/training/hrm-v2-mazehard-vram8gib.toml.
-# num_slots = 1 (single-episode eval batches; model builder
-# expects this field for carry-width allocation).
+# Nested structure matches Pydantic field names in
+# MazeHardHRMV2EvaluationExperimentConfig.
 
-model_config_path = "config/models/hrm-v2-base.toml"
-num_slots = 1
+[model]
+    model_config_path = "config/models/hrm-v2-base.toml"
 
-[adapter]
+[model.components.adapter]
     encoder_kind = "rope"
     vocab_size   = 6
 
-[deliberation]
+[model.components.controller]
+
+[model.components.objective]
+    token_loss      = "stablemax_cross_entropy"
+    c_state_value   = 0.5
+    c_q_value       = 0.5
+
+[execution]
     halt_action     = 0
     episode_horizon = 16
-
-[objective]
-    token_loss    = "stablemax_cross_entropy"
-    c_state_value = 0.5
-    c_q_value     = 0.5

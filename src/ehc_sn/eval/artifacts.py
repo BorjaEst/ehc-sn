@@ -317,6 +317,76 @@ def load_executor_from_artifact(artifact: EvalArtifactExecutorRef) -> Any:
 
 
 # =============================================================================
+# =============================================================================
+# Family registry — single source of truth for eval config → executor dispatch
+# =============================================================================
+
+_EVAL_FAMILY_REGISTRY: dict[str, tuple[type[BaseModel], Any]] = {}
+
+
+def _build_registry() -> None:
+    """Lazy-populate the eval family registry.
+
+    Imports are deferred to this point to avoid circular imports at module
+    load time.  This function is idempotent and called once on first use.
+    """
+    if _EVAL_FAMILY_REGISTRY:
+        return
+
+    # -- hrm-v1 -----------------------------------------------------------------
+    from ehc_sn.experiments.mazehard.hrm_v1.config import (
+        MazeHardHRMV1EvaluationExperimentConfig,
+    )
+    from ehc_sn.experiments.mazehard.hrm_v1.evaluation import (
+        build_mazehard_hrm_v1_evaluation_executor,
+    )
+
+    _EVAL_FAMILY_REGISTRY["hrm-v1"] = (
+        MazeHardHRMV1EvaluationExperimentConfig,
+        build_mazehard_hrm_v1_evaluation_executor,
+    )
+
+    # -- hrm-v2 -----------------------------------------------------------------
+    from ehc_sn.experiments.mazehard.hrm_v2.config import (
+        MazeHardHRMV2EvaluationExperimentConfig,
+    )
+    from ehc_sn.experiments.mazehard.hrm_v2.evaluation import (
+        build_mazehard_hrm_v2_evaluation_executor,
+    )
+
+    _EVAL_FAMILY_REGISTRY["hrm-v2"] = (
+        MazeHardHRMV2EvaluationExperimentConfig,
+        build_mazehard_hrm_v2_evaluation_executor,
+    )
+
+    # -- tem-v1 -----------------------------------------------------------------
+    from ehc_sn.experiments.arena.tem_v1.config import (
+        ArenaTEMV1EvaluationExperimentConfig,
+    )
+    from ehc_sn.experiments.arena.tem_v1.evaluation import (
+        build_arena_tem_v1_evaluation_executor,
+    )
+
+    _EVAL_FAMILY_REGISTRY["tem-v1"] = (
+        ArenaTEMV1EvaluationExperimentConfig,
+        build_arena_tem_v1_evaluation_executor,
+    )
+
+    # -- tem-v2 -----------------------------------------------------------------
+    from ehc_sn.experiments.arena.tem_v2.config import (
+        ArenaTEMV2EvaluationExperimentConfig,
+    )
+    from ehc_sn.experiments.arena.tem_v2.evaluation import (
+        build_arena_tem_v2_evaluation_executor,
+    )
+
+    _EVAL_FAMILY_REGISTRY["tem-v2"] = (
+        ArenaTEMV2EvaluationExperimentConfig,
+        build_arena_tem_v2_evaluation_executor,
+    )
+
+
+# =============================================================================
 def _build_executor_from_family_artifact(
     *,
     model_family: str,
@@ -324,187 +394,35 @@ def _build_executor_from_family_artifact(
 ) -> Any:
     """Instantiate one training/evaluation executor for a supported family.
 
-    Constructs only the typed configs needed for inference (components
-    + runtime/deliberation).  Training-only configs (optimizers, reward
-    shaping) are never constructed.
+    Dispatches to a registry mapping family name → (config class, build fn).
+    The config class validates the full TOML dict with ``model_validate``,
+    eliminating manual key-by-key extraction.  Training-only configs
+    (optimizers, reward shaping) are absent from the eval config classes.
+
+    The executor's ``_trace_paradigm`` is read from the module itself,
+    which every ``LightningModule`` subclass sets in ``__init__``.
     """
-    _FAMILY_TO_PARADIGM = {
-        "tem-v1": "tem",
-        "tem-v2": "tem",
-        "hrm-v1": "act",
-        "hrm-v2": "rl",
-        "ehp-v1": "ehp",
-    }
-    paradigm = _FAMILY_TO_PARADIGM.get(model_family, model_family.split("-")[0])
-
-    if model_family == "hrm-v1":
-        from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
-        from ehc_sn.controllers.deliberation.act import ACTControllerConfig
-        from ehc_sn.experiments.mazehard.hrm_v1.config import (
-            MazeHardHRMV1ComponentConfigs,
-            MazeHardHRMV1EvaluationExperimentConfig,
-            MazeHardHRMV1ModelConfig,
-        )
-        from ehc_sn.experiments.mazehard.hrm_v1.evaluation import (
-            build_mazehard_hrm_v1_evaluation_executor,
-        )
-        from ehc_sn.objectives.act import ACTObjectiveConfig
-        from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
-
-        model_config = MazeHardHRMV1ModelConfig(
-            model_config_path=config_map.get("model_config_path", ""),
-            components=MazeHardHRMV1ComponentConfigs(
-                adapter=MazeHardHRMAdapterSettings.model_validate(
-                    config_map["adapter"]
-                ),
-                controller=ACTControllerConfig.model_validate(
-                    config_map["controller"]
-                ),
-                objective=ACTObjectiveConfig.model_validate(
-                    config_map["objective"]
-                ),
-            ),
-        )
-        eval_config = MazeHardHRMV1EvaluationExperimentConfig(
-            model=model_config,
-            execution=(
-                HRMRuntimeConfig.model_validate(config_map["execution"])
-                if "runtime" in config_map
-                else None
-            ),
-        )
-        executor = build_mazehard_hrm_v1_evaluation_executor(eval_config)
-
-    elif model_family == "hrm-v2":
-        from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
-        from ehc_sn.controllers.deliberation.actor_critic import (
-            DeliberationACControllerConfig,
-        )
-        from ehc_sn.experiments.mazehard.hrm_v2.config import (
-            MazeHardDeliberationConfig,
-            MazeHardHRMV2ComponentConfigs,
-            MazeHardHRMV2EvaluationExperimentConfig,
-            MazeHardHRMV2ModelConfig,
-        )
-        from ehc_sn.experiments.mazehard.hrm_v2.evaluation import (
-            build_mazehard_hrm_v2_evaluation_executor,
-        )
-        from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig
-
-        controller_raw = config_map.get("controller")
-        model_config = MazeHardHRMV2ModelConfig(
-            model_config_path=config_map.get("model_config_path", ""),
-            components=MazeHardHRMV2ComponentConfigs(
-                adapter=MazeHardHRMAdapterSettings.model_validate(
-                    config_map["adapter"]
-                ),
-                controller=(
-                    DeliberationACControllerConfig.model_validate(
-                        controller_raw
-                    )
-                    if controller_raw is not None
-                    else None
-                ),
-                objective=HybridRLLossConfig.model_validate(
-                    config_map["objective"]
-                ),
-            ),
-        )
-        deliberation_raw = config_map.get("execution", {})
-        eval_config = MazeHardHRMV2EvaluationExperimentConfig(
-            model=model_config,
-            deliberation=MazeHardDeliberationConfig(
-                halt_action=deliberation_raw.get("halt_action", 0),
-                episode_horizon=deliberation_raw.get("episode_horizon", 16),
-            ),
-        )
-        executor = build_mazehard_hrm_v2_evaluation_executor(eval_config)
-
-    elif model_family == "tem-v1":
-        from ehc_sn.adapters.tem import ArenaTEMAdapterSettings
-        from ehc_sn.controllers.replay.trajectory import (
-            ReplayTrajectoryControllerConfig,
-        )
-        from ehc_sn.experiments.arena.tem_v1.config import (
-            ArenaTEMV1ComponentConfigs,
-            ArenaTEMV1EvaluationExperimentConfig,
-            ArenaTEMV1ModelConfig,
-        )
-        from ehc_sn.experiments.arena.tem_v1.evaluation import (
-            build_arena_tem_v1_evaluation_executor,
-        )
-        from ehc_sn.objectives.tem import TEMObjectiveConfig
-
-        model_config = ArenaTEMV1ModelConfig(
-            model_config_path=config_map.get("model_config_path", ""),
-            components=ArenaTEMV1ComponentConfigs(
-                adapter=ArenaTEMAdapterSettings.model_validate(
-                    config_map["adapter"]
-                ),
-                controller=ReplayTrajectoryControllerConfig.model_validate(
-                    config_map["controller"]
-                ),
-                objective=TEMObjectiveConfig.model_validate(
-                    config_map["objective"]
-                ),
-            ),
-        )
-        eval_config = ArenaTEMV1EvaluationExperimentConfig(model=model_config)
-        executor = build_arena_tem_v1_evaluation_executor(eval_config)
-
-    elif model_family == "tem-v2":
-        from ehc_sn.adapters.tem import ArenaTEMAdapterSettings
-        from ehc_sn.controllers.replay.trajectory import (
-            ReplayTrajectoryControllerConfig,
-        )
-        from ehc_sn.experiments.arena.tem_v2.config import (
-            ArenaTEMV2ComponentConfigs,
-            ArenaTEMV2EvaluationExperimentConfig,
-            ArenaTEMV2ModelConfig,
-        )
-        from ehc_sn.experiments.arena.tem_v2.evaluation import (
-            build_arena_tem_v2_evaluation_executor,
-        )
-        from ehc_sn.objectives.tem import TEMObjectiveConfig
-
-        model_config = ArenaTEMV2ModelConfig(
-            model_config_path=config_map.get("model_config_path", ""),
-            components=ArenaTEMV2ComponentConfigs(
-                adapter=ArenaTEMAdapterSettings.model_validate(
-                    config_map["adapter"]
-                ),
-                controller=ReplayTrajectoryControllerConfig.model_validate(
-                    config_map["controller"]
-                ),
-                objective=TEMObjectiveConfig.model_validate(
-                    config_map["objective"]
-                ),
-            ),
-        )
-        eval_config = ArenaTEMV2EvaluationExperimentConfig(model=model_config)
-        executor = build_arena_tem_v2_evaluation_executor(eval_config)
-
-    else:
+    _build_registry()
+    try:
+        config_cls, build_fn = _EVAL_FAMILY_REGISTRY[model_family]
+    except KeyError:
         raise ValueError(
             "Unsupported executor artifact model_family "
             f"{model_family!r}. Supported families: "
-            f"{sorted(_SUPPORTED_EXECUTOR_FAMILIES)!r}."
-        )
+            f"{sorted(_EVAL_FAMILY_REGISTRY)!r}."
+        ) from None
+
+    eval_config = config_cls.model_validate(config_map)
+    executor = build_fn(eval_config)
 
     # Tag the executor so _build_trace_request can construct a trace spec
-    # without calling set_eval_trace_keys.
-    executor._trace_paradigm = paradigm  # type: ignore[attr-defined]
+    # without calling set_eval_trace_keys.  Every LightningModule subclass
+    # already sets _trace_paradigm in __init__.
+    executor._trace_paradigm = getattr(executor, "_trace_paradigm", model_family.split("-")[0])  # type: ignore[attr-defined]
     return executor
 
 
 # =============================================================================
-def _build_model_config(config_map: dict[str, Any], config_cls: Any) -> Any:
-    """Validate one training-model config from a larger TOML mapping."""
-    field_names = set(config_cls.model_fields)
-    filtered = {k: v for k, v in config_map.items() if k in field_names}
-    return config_cls.model_validate(filtered)
-
-
 # =============================================================================
 # Generic case task-evidence helpers (task-agnostic duck-typed hook)
 # =============================================================================

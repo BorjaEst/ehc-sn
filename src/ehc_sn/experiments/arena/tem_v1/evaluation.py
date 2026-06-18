@@ -13,7 +13,10 @@ from .model import build_arena_tem_v1_model
 def build_arena_tem_v1_evaluation_executor(
     config: ArenaTEMV1EvaluationExperimentConfig,
 ) -> VariationalReplayModule:
-    return build_arena_tem_v1_model(config.model)
+    return build_arena_tem_v1_model(
+        config.model,
+        execution=config.execution,
+    )
 
 
 __all__ = ["build_arena_tem_v1_evaluation_executor"]
