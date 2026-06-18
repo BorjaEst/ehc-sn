@@ -61,7 +61,7 @@
 
 [data]
     dataset_path         = "data/processed/arena/default/v1"
-    num_slots            = 32
+    num_slots            = 40
     eval_batch_size      = 32
     num_workers          = 4
     prefetch_factor      = 2
