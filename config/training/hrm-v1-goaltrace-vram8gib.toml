@@ -1,0 +1,73 @@
+# Training config — Goaltrace × HRM-v1 (nested experiment schema)
+# =============================================================================
+    supervised_only_warmup_steps = 0
+    simple_supervised = false
+    # Set to true after implementing ACT deliberation for goaltrace.
+    # simple_supervised=false enables recurrent deliberation via ACT rollout.
+
+[model]
+    model_config_path = "config/models/hrm-v1-base.toml"
+
+[model.components.adapter]
+    num_observations = 45
+    hidden_size      = 128
+    vocab_size_obs   = 64
+
+[model.components.controller]
+    # ACT controller drives recurrent deliberation for field refinement.
+    max_halt_steps     = 8
+    exploration_prob   = 0.1
+
+[model.components.objective]
+    field_loss           = "mse"
+    field_done_threshold = 0.01
+
+[training.optimizer]
+    lr           = 1e-4
+    weight_decay = 0.1
+    betas        = [0.9, 0.95]
+
+[execution.validation]
+    max_rollout_steps = 8
+
+[data]
+    dataset_path         = "data/processed/goaltrace/default/v1"
+    num_slots            = 128
+    eval_batch_size      = 128
+    num_workers          = 4
+    prefetch_factor      = 2
+    pin_memory           = true
+    persistent_workers   = true
+    augment              = false
+    seed                 = 42
+
+[trainer]
+    accelerator          = "gpu"
+    strategy             = "ddp"
+    devices              = 1
+    num_nodes            = 1
+    precision            = "16-mixed"
+    max_steps            = 50000
+    val_check_interval   = 1000
+    log_every_n_steps    = 10
+    enable_progress_bar  = true
+    limit_val_batches    = 1.0
+    seed                 = 42
+
+[checkpointing]
+    init_weights_groups          = []
+    diagnostic_level             = "standard"
+    non_finite_policy            = "raise"
+
+[scheduler]
+    warmup_steps = 2000
+    min_ratio    = 1.00
+
+[target_network]
+    enabled = false
+
+[logging]
+    save_dir  = "logs"
+    name      = "hrm-v1-goaltrace"
+    log_graph = false
+    prefix    = ""
