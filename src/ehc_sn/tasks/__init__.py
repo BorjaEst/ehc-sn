@@ -12,16 +12,20 @@ Canonical task families defined by their semantic domain:
   sequences; task owns sequence evaluation and aggregate benchmark score.
 - :mod:`ehc_sn.tasks.countwalk` — replay over a bounded integer number line;
   task owns digit-prediction evaluation and replay capability.
+- :mod:`ehc_sn.tasks.goaltrace` — goal-conditioned prospective field prediction;
+  task owns field contracts, evaluation, and oracle-based corpus builder.
 
 Execution-binding capabilities (replay, online control, deliberation) live in
 ``<task>.capabilities.*`` sub-packages when implemented for that task family.
 """
 
-from ehc_sn.tasks import arena, countwalk, dungeon, mazehard
+from ehc_sn.tasks import arena, countwalk, dungeon, goaltrace, mazehard, seqmaze
 
 __all__ = [
     "arena",
-    "dungeon",
-    "mazehard",
     "countwalk",
+    "dungeon",
+    "goaltrace",
+    "mazehard",
+    "seqmaze",
 ]

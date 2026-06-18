@@ -33,6 +33,14 @@ from ehc_sn.objectives.act import (
     ACTObjectiveStep,
     ACTStepOutput,
 )
+from ehc_sn.objectives.continuous_field import (
+    ContinuousFieldLosses,
+    ContinuousFieldObjective,
+    ContinuousFieldObjectiveBinding,
+    ContinuousFieldObjectiveConfig,
+    ContinuousFieldObjectiveStep,
+    ContinuousFieldTerms,
+)
 from ehc_sn.objectives.hybrid_rl import (
     HybridRLLossConfig,
     HybridRLLosses,
@@ -94,6 +102,13 @@ __all__ = [
     "HybridRLObjective",
     "HybridRLLosses",
     "HybridRLObjectiveStep",
+    # continuous field — canonical
+    "ContinuousFieldObjectiveConfig",
+    "ContinuousFieldObjective",
+    "ContinuousFieldObjectiveBinding",
+    "ContinuousFieldObjectiveStep",
+    "ContinuousFieldLosses",
+    "ContinuousFieldTerms",
     # tem — canonical
     "TEMObjectiveConfig",
     "TEMObjective",

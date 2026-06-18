@@ -433,7 +433,7 @@ class SeqMazeAdapterSettings(BaseModel, extra="forbid"):
             shortcut — it must never be active during production training.
     """
 
-    n_max: int = Field(default=32, ge=1)
+    n_max: int = Field(default=45, ge=1)
     t_max: int = Field(default=32, ge=1)
     k_max: int = Field(default=4, ge=1)
     vocab_size_obs: int = Field(default=64, ge=1)

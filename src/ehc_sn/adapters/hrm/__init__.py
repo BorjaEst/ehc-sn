@@ -1,12 +1,20 @@
-"""HRM bridge adapters for MazeHard and SeqMaze task families."""
+"""HRM bridge adapters for MazeHard, SeqMaze, and Goaltrace task families."""
 
 from ._base import (
     MazeHardHRMAdapterSettings,
     SeqMazeAdapterSettings,
     SeqMazeProbeAdapterSettings,
 )
+from .goaltrace import (
+    GoaltraceAdapterSettings,
+    GoaltraceHRMV1BridgeAdapter,
+    GoaltraceHRMV1BridgeOutput,
+    GoaltraceHRMV1ControlOutput,
+    build_goaltrace_hrm_trace_meta,
+)
 from .mazehard import MazeHardHRMV1BridgeAdapter, MazeHardHRMV2BridgeAdapter
 from .objectives import (
+    GoaltraceHRMV1ACTTaskBinding,
     MazeHardHRMV1ACTTaskBinding,
     MazeHardHRMV2HybridTaskBinding,
     SeqMazeHRMV1ACTTaskBinding,
@@ -35,6 +43,12 @@ from .traces import (
 )
 
 __all__ = [
+    "GoaltraceAdapterSettings",
+    "GoaltraceHRMV1ACTTaskBinding",
+    "GoaltraceHRMV1BridgeAdapter",
+    "GoaltraceHRMV1BridgeOutput",
+    "GoaltraceHRMV1ControlOutput",
+    "build_goaltrace_hrm_trace_meta",
     "MazeHardHRMAdapterSettings",
     "MazeHardHRMV1BridgeAdapter",
     "MazeHardHRMV1ACTTaskBinding",

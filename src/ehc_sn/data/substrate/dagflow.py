@@ -202,7 +202,7 @@ def build_dagflow_layouts(
     version_root: Path,
     *,
     preset: str = "default",
-    n_max: int = 32,
+    n_max: int = 45,
     t_max: int = 32,
     max_out_degree: int = 4,
     n_train: int = 4000,

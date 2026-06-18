@@ -39,9 +39,13 @@ from ehc_sn.metrics.reducers import HiddenNormHistogram, compute_nonempty
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.step_metrics import StepMetrics
 from ehc_sn.objectives.act import ACTObjectiveConfig
-from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
+from ehc_sn.rollouts.runtime import (
+    CarrySnapshot,
+    RecurrentRunner,
+    SingleStepRunner,
+    StepRecord,
+)
 from ehc_sn.rollouts.sources import DemandDrivenReplaySource, _move_batch_to
-from ehc_sn.tasks.seqmaze.contracts import SEQMAZE_IGNORE_LABEL_ID
 from ehc_sn.traces import build_trace_spec
 from ehc_sn.training.distributed import (
     SumOverBatch,
@@ -477,53 +481,39 @@ class ACTSupervisedModule(L.LightningModule):
         self,
         batch: Batch,
     ) -> dict[str, object]:
-        """Single forward pass with pure cross-entropy, no rollout.
+        """Single forward pass, no rollout.  Loss delegated to the objective.
 
         Bypasses the ACT controller's multi-step mechanics and Q-losses.
-        Trains only the encoder and decoder (backbone receives no gradient
-        from this path).
+        Constructs a minimal ``StepRecord`` from the adapter output and
+        delegates scoring to ``self.objective.evaluate_step(record)``.
+
+        The objective (and its task binding) own loss extraction — this
+        method remains task-agnostic.
         """
         B = _payload_width(batch)
         state = self.adapter.init_state(B)
         out, _ = self.adapter(batch, state)
-        logits = out.task.path_logits  # (B, T, V)
 
-        # Infer vocabulary size from logits
-        V = logits.shape[-1]
-
-        # Extract labels and mask non-supervised positions
-        labels = batch["target_path"].to(dtype=torch.long)
-        mask = batch["path_mask"].to(dtype=torch.bool)
-        labels = torch.where(
-            mask,
-            labels,
-            torch.full_like(labels, SEQMAZE_IGNORE_LABEL_ID),
+        # Build a minimal record for the objective to score.
+        # The objective's binding owns field extraction from `batch` and `out`.
+        try:
+            device = next(self.adapter.parameters()).device
+        except StopIteration:
+            device = torch.device("cpu")
+        halted = torch.zeros(B, dtype=torch.bool, device=device)
+        record = StepRecord(
+            index=0,
+            batch=batch,
+            snapshot=CarrySnapshot(halted=halted, data={}),
+            outputs=out,
+            all_halted=False,
         )
 
-        loss = F.cross_entropy(
-            logits.reshape(-1, V),
-            labels.reshape(-1),
+        # Delegate loss computation to the objective.
+        step_result = self.objective.evaluate_step(
+            record, controller=None, td_target=False
         )
-
-        # --- Auxiliary edge-prediction loss (multi-task training) ------------
-        # Provides the dense (N² pairs per sample) signal the HRM needs to
-        # learn disentanglement from composited slot representations.
-        edge_logits = getattr(out.task, "edge_logits", None)
-        if edge_logits is not None:
-            B, N, _, _ = edge_logits.shape
-            edge_labels = batch["edge_label"].to(
-                dtype=torch.long, device=edge_logits.device
-            )
-            edge_mask = batch["edge_mask"].to(
-                dtype=torch.bool, device=edge_logits.device
-            )
-            edge_loss = F.cross_entropy(
-                edge_logits[edge_mask],
-                edge_labels[edge_mask],
-            )
-            # Scale so edge loss (N² pairs) doesn't dominate path loss (T tokens).
-            # Both at random: path ≈ T * log(V), edge ≈ N² * log(2).
-            loss = loss + (1.0 / N) * edge_loss
+        loss = step_result.loss
 
         optimizers = self.optimizers()
         for opt in (
@@ -544,18 +534,14 @@ class ACTSupervisedModule(L.LightningModule):
             opt.step()
 
         self.log("train/loss", loss, on_step=True, on_epoch=False, logger=True)
-        self.log(
-            "train/loss/token", loss, on_step=True, on_epoch=False, logger=True
-        )
 
-        # Compute token accuracy for logging
-        with torch.no_grad():
-            pred = logits.argmax(dim=-1)
-            correct = (pred == batch["target_path"]) & mask
-            acc = correct.sum().float() / mask.sum().float()
+        # Log per-model-name metrics from the objective step.
+        for key, stat in (step_result.metrics.extras or {}).items():
+            ratio = stat.numerator_sum / stat.denominator_sum.clamp(min=1)
             self.log(
-                "train/acc", acc, on_step=True, on_epoch=False, logger=True
-            )
+                f"train/{key}", ratio,
+                on_step=True, on_epoch=False, logger=True,
+            )  # fmt: skip
 
         if self.global_step % 10 == 0:
             pre_clip_norm = 0.0

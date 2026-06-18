@@ -23,6 +23,7 @@ from ehc_sn.controllers.contracts.value_control import (
 )
 from ehc_sn.objectives._token import AccuracyStats, compute_accuracy_stats
 from ehc_sn.objectives.act import ACTObjectiveBinding
+from ehc_sn.objectives.continuous_field import ContinuousFieldObjectiveBinding
 from ehc_sn.objectives.hybrid_rl import HybridValueObjectiveBinding
 from ehc_sn.rollouts.runtime import CarrySnapshot
 from ehc_sn.tasks.mazehard.contracts import (
@@ -389,7 +390,149 @@ class SeqMazeHRMV2HybridTaskBinding:
 
 
 # =============================================================================
+class GoaltraceHRMV1ACTTaskBinding(ContinuousFieldObjectiveBinding):
+    """ACT task binding for Goaltrace field prediction via HRM v1.
+
+    Implements :class:`~ehc_sn.objectives.continuous_field.ContinuousFieldObjectiveBinding`
+    by reading ``step_output.task.firing_field`` and target data from the
+    executed batch.
+
+    The ACT ``extract_logits`` / ``extract_targets`` / ``evaluate_sequences`` /
+    ``extract_loss_labels`` surface is not used by the goaltrace field
+    objective and is not implemented here.
+    """
+
+    def __init__(self) -> None:
+        pass
+
+    # ------------------------------------------------------------------
+    # ContinuousFieldObjectiveBinding implementation
+    # ------------------------------------------------------------------
+
+    def extract_field(
+        self,
+        executed_batch: Batch,
+        snapshot: CarrySnapshot,
+        step_output: Any,
+    ) -> Tensor:
+        """Return the predicted firing field from the step output."""
+        _ = executed_batch, snapshot
+        task = getattr(step_output, "task", None)
+        if task is None:
+            raise RuntimeError(
+                "GoaltraceHRMV1ACTTaskBinding: step_output has no .task "
+                "attribute."
+            )
+        field = getattr(task, "firing_field", None)
+        if field is None:
+            raise RuntimeError(
+                "GoaltraceHRMV1ACTTaskBinding: step_output.task has no "
+                ".firing_field attribute."
+            )
+        return field
+
+    def extract_target_field(
+        self,
+        executed_batch: Batch,
+        snapshot: CarrySnapshot,
+        step_output: Any,
+    ) -> Tensor:
+        """Return the target firing field from the executed batch."""
+        _ = snapshot, step_output
+        if "target_field" not in executed_batch:
+            raise RuntimeError(
+                "GoaltraceHRMV1ACTTaskBinding: 'target_field' missing from "
+                "executed_batch."
+            )
+        return executed_batch["target_field"].to(dtype=torch.float32)
+
+    def extract_node_mask(
+        self,
+        executed_batch: Batch,
+    ) -> Tensor:
+        """Return the valid-node mask from the executed batch."""
+        if "node_mask" not in executed_batch:
+            raise RuntimeError(
+                "GoaltraceHRMV1ACTTaskBinding: 'node_mask' missing from "
+                "executed_batch."
+            )
+        return executed_batch["node_mask"].to(dtype=torch.bool)
+
+    def compute_field_quality(
+        self,
+        pred_field: Tensor,
+        target_field: Tensor,
+        node_mask: Tensor,
+        threshold: float,
+    ) -> Tensor:
+        """Return per-sample field quality flag for Q(done) supervision.
+
+        A sample is considered 'done-well' if its masked field MSE is
+        below *threshold*.
+        """
+        diff = pred_field - target_field
+        squared = diff**2
+        valid_count = node_mask.sum(dim=1).clamp(min=1)
+        per_sample_mse = (squared * node_mask).sum(dim=1) / valid_count
+        return per_sample_mse < threshold
+
+    # ------------------------------------------------------------------
+    # ACTObjectiveBinding legacy surface (unused by goaltrace objective)
+    # ------------------------------------------------------------------
+
+    def extract_logits(
+        self,
+        executed_batch: Batch,
+        snapshot: CarrySnapshot,
+        step_output: Any,
+    ) -> Tensor:
+        """Not used by GoaltraceFieldObjective.  Raises NotImplementedError."""
+        _ = executed_batch, snapshot, step_output
+        raise NotImplementedError(
+            "GoaltraceHRMV1ACTTaskBinding.extract_logits is unused by "
+            "GoaltraceFieldObjective.  Use extract_field instead."
+        )
+
+    def extract_targets(
+        self,
+        executed_batch: Batch,
+        snapshot: CarrySnapshot,
+        step_output: Any,
+    ) -> Tensor:
+        """Not used by GoaltraceFieldObjective.  Raises NotImplementedError."""
+        _ = executed_batch, snapshot, step_output
+        raise NotImplementedError(
+            "GoaltraceHRMV1ACTTaskBinding.extract_targets is unused by "
+            "GoaltraceFieldObjective.  Use extract_target_field instead."
+        )
+
+    def evaluate_sequences(
+        self,
+        logits: Tensor,
+        targets: Any,
+    ) -> AccuracyStats:
+        """Not used by GoaltraceFieldObjective.  Raises NotImplementedError."""
+        _ = logits, targets
+        raise NotImplementedError(
+            "GoaltraceHRMV1ACTTaskBinding.evaluate_sequences is unused by "
+            "GoaltraceFieldObjective."
+        )
+
+    def extract_loss_labels(
+        self,
+        targets: Any,
+    ) -> Tensor:
+        """Not used by GoaltraceFieldObjective.  Raises NotImplementedError."""
+        _ = targets
+        raise NotImplementedError(
+            "GoaltraceHRMV1ACTTaskBinding.extract_loss_labels is unused by "
+            "GoaltraceFieldObjective."
+        )
+
+
+# =============================================================================
 __all__ = [
+    "GoaltraceHRMV1ACTTaskBinding",
     "MazeHardHRMV1ACTTaskBinding",
     "MazeHardHRMV2HybridTaskBinding",
     "SeqMazeHRMV1ACTTaskBinding",
