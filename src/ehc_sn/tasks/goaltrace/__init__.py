@@ -28,6 +28,10 @@ training regime.
 """
 
 from .builder import (
+    GOALTRACE_CORPUS_CHANNELS,
+    GOALTRACE_EVALUATION_META_CHANNELS,
+    GOALTRACE_MODEL_INPUT_CHANNELS,
+    GOALTRACE_TARGET_CHANNELS,
     GOALTRACE_TASK_CHANNELS,
     TASK_FAMILY,
     build_goaltrace_task_corpus,
@@ -60,8 +64,12 @@ from .traces import (
 
 __all__ = [
     "GOALTRACE_BATCH_KEYS",
+    "GOALTRACE_CORPUS_CHANNELS",
+    "GOALTRACE_EVALUATION_META_CHANNELS",
     "GOALTRACE_METRIC_SPECS",
+    "GOALTRACE_MODEL_INPUT_CHANNELS",
     "GOALTRACE_SCORING_SPEC",
+    "GOALTRACE_TARGET_CHANNELS",
     "GOALTRACE_TASK_CHANNELS",
     "GoaltraceEvaluationSourceContext",
     "GoaltraceStepScore",

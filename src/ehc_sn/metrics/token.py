@@ -1,13 +1,14 @@
-"""Shared token-supervision helpers.
+"""Token-supervision metrics — correctness statistics and metric builders.
 
-This module defines the :class:`TokenSupervisionBinding` protocol and reusable
-token-level loss/metric utilities for objective implementations.
+This module owns the token-level accuracy computation and
+:class:`StepMetrics` construction used by supervised objectives
+(ACT, hybrid RL).  Loss primitives live in
+:mod:`ehc_sn.objectives.supervised.token`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
 
 import torch
 from torch import Tensor
@@ -19,44 +20,6 @@ from ehc_sn.metrics.step_metrics import (
     TokenAgg,
     TransitionAgg,
 )
-from ehc_sn.rollouts.runtime import CarrySnapshot
-from ehc_sn.types import Batch
-
-IGNORE_LABEL_ID: int = -100
-
-
-# =============================================================================
-class TokenSupervisionBinding[TargetsT](Protocol):
-    """Extraction seam for token-supervised rollout objectives.
-
-    The ``executed_batch`` input is the executed-step payload (``record.batch``),
-    which is authoritative for current-step supervision. The ``snapshot`` input
-    is a frozen post-step snapshot intended only for continuity facts or
-    lightweight projections, not step-truth tensors.
-    """
-
-    def extract_logits(  # ----------------------------------------------------
-        self,
-        executed_batch: Batch,
-        snapshot: CarrySnapshot,
-        step_output: Any,
-    ) -> Tensor:
-        """Return supervised logits for one executed step."""
-
-    def extract_targets(  # ---------------------------------------------------
-        self,
-        executed_batch: Batch,
-        snapshot: CarrySnapshot,
-        step_output: Any,
-    ) -> TargetsT:
-        """Return task-owned supervision targets for one executed step."""
-
-    def evaluate_sequences(  # ------------------------------------------------
-        self,
-        logits: Tensor,
-        targets: TargetsT,
-    ) -> "AccuracyStats":
-        """Return sequence-level accuracy statistics for one executed step."""
 
 
 # =============================================================================
@@ -88,54 +51,12 @@ def compute_accuracy_stats(  # ------------------------------------------------
     logits_token: Tensor,
     labels: Tensor,
     *,
-    ignore_label_id: int = IGNORE_LABEL_ID,
+    ignore_label_id: int = -100,
 ) -> AccuracyStats:
     """Compute masked token correctness statistics out of graph."""
     mask = labels != ignore_label_id
     is_correct = mask & (torch.argmax(logits_token, dim=-1) == labels)
     return AccuracyStats(mask=mask, is_correct=is_correct)
-
-
-# =============================================================================
-def compute_token_loss_sum(  # ---------------------------------------------------
-    loss_fn: Any,
-    logits_token: Tensor,
-    labels: Tensor,
-    stats: AccuracyStats,
-    *,
-    ignore_label_id: int = IGNORE_LABEL_ID,
-    token_weights: Tensor | None = None,
-) -> Tensor:
-    """Compute the summed supervised Token loss over the batch."""
-    loss_per_token = compute_token_loss_unreduced(
-        loss_fn,
-        logits_token,
-        labels,
-        ignore_label_id=ignore_label_id,
-        token_weights=token_weights,
-    )
-    loss_per_seq = loss_per_token.sum(-1) / stats.loss_counts.clamp_min(1)
-    return loss_per_seq.sum()
-
-
-# =============================================================================
-def compute_token_loss_unreduced(  # ------------------------------------------
-    loss_fn: Any,
-    logits_token: Tensor,
-    labels: Tensor,
-    *,
-    ignore_label_id: int = IGNORE_LABEL_ID,
-    token_weights: Tensor | None = None,
-) -> Tensor:
-    """Return the per-token loss tensor before sequence reduction."""
-    loss_per_token = loss_fn(logits_token, labels, ignore_index=ignore_label_id)
-    if token_weights is not None:
-        if token_weights.shape != labels.shape:
-            raise ValueError(
-                "token_weights must match labels shape for Token loss weighting.",
-            )
-        loss_per_token = loss_per_token * token_weights.to(loss_per_token.dtype)
-    return loss_per_token
 
 
 # =============================================================================
@@ -186,11 +107,7 @@ def build_token_step_metrics(  # ----------------------------------------------
 
 # =============================================================================
 __all__ = [
-    "IGNORE_LABEL_ID",
     "AccuracyStats",
-    "TokenSupervisionBinding",
     "build_token_step_metrics",
     "compute_accuracy_stats",
-    "compute_token_loss_unreduced",
-    "compute_token_loss_sum",
 ]

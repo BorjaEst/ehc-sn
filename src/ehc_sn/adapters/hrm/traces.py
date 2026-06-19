@@ -26,13 +26,28 @@ from torch import Tensor
 
 from ehc_sn.adapters.hrm._base import O_ID
 from ehc_sn.traces import TraceField, TraceValue
+from ehc_sn.traces.keys import (  # fmt: skip
+    GOALTRACE_META_KEY_CURRENT_FLAG,
+    GOALTRACE_META_KEY_GOAL_FLAG,
+    GOALTRACE_META_KEY_NODE_MASK,
+    GOALTRACE_META_KEY_OBSERVATION_ID,
+    GOALTRACE_META_KEY_SUCCESSOR_INDICES,
+    GOALTRACE_META_KEY_SUCCESSOR_MASK,
+    GOALTRACE_META_KEY_TARGET_FIELD,
+    GOALTRACE_META_KEY_WEIGHT,
+    GOALTRACE_TRACE_KEY_FIRING_FIELD,
+    MAZEHARD_META_KEY_GT_OVERLAY,
+    MAZEHARD_META_KEY_INPUT_IDS,
+    SEQMAZE_META_KEY_N_NODES,
+    SEQMAZE_META_KEY_NODE_GOAL_FLAG,
+    SEQMAZE_META_KEY_NODE_START_FLAG,
+    SEQMAZE_META_KEY_NODE_VALID_MASK,
+    SEQMAZE_META_KEY_PATH_LENGTH,
+    SEQMAZE_META_KEY_PATH_MASK,
+    SEQMAZE_META_KEY_TARGET_PATH,
+    SEQMAZE_META_KEY_TARGET_PATH_LEN,
+)
 from ehc_sn.types import Batch
-
-# Metadata key that lightning modules must populate in trace_meta with the
-# ground-truth overlay mask: ``(batch["labels"] == O_ID).to(torch.uint8)``.
-# Read by figure selectors via ``trace.get_meta_path("target/solution_overlay")``.
-TARGET_SOLUTION_OVERLAY_META_KEY = "target/solution_overlay"
-
 
 # =============================================================================
 # Minimal typed context for MazeHard+HRM ACT trace getters
@@ -98,12 +113,12 @@ def _get_maze_hard_solution_overlay_actor_critic(
 
 def build_mazehard_hrm_trace_meta(batch: Batch) -> dict[str, object]:
     """Return out-of-band trace metadata required by MazeHard HRM figures."""
-    root_key, leaf_key = TARGET_SOLUTION_OVERLAY_META_KEY.split("/", maxsplit=1)
+    root_key, leaf_key = MAZEHARD_META_KEY_GT_OVERLAY.split("/", maxsplit=1)
     return {
         root_key: {
             leaf_key: (batch["labels"] == O_ID).to(torch.uint8),
         },
-        "input_ids": batch["input_ids"],
+        MAZEHARD_META_KEY_INPUT_IDS: batch["input_ids"],
     }
 
 
@@ -131,6 +146,46 @@ MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS: tuple[TraceField, ...] = (
 
 
 # =============================================================================
+# Goaltrace HRM ACT trace fields
+# =============================================================================
+
+
+class _GoaltraceACTTraceTaskOutput(Protocol):
+    """Minimal task payload exposing goaltrace firing field."""
+
+    firing_field: Tensor
+
+
+class _GoaltraceACTTraceOutputs(Protocol):
+    """Minimal raw ACT controller-step output consumed by goaltrace trace getters."""
+
+    task: _GoaltraceACTTraceTaskOutput
+
+
+class _GoaltraceACTTraceContext(Protocol):
+    """Trace context expected by goaltrace ACT trace fields."""
+
+    outputs: _GoaltraceACTTraceOutputs
+
+
+def _get_goaltrace_firing_field_act(
+    ctx: _GoaltraceACTTraceContext,
+) -> TraceValue:
+    """Read goaltrace firing field from ACT backbone bridge output."""
+    return ctx.outputs.task.firing_field.detach().cpu()
+
+
+GOALTRACE_HRM_ACT_FIRING_FIELD: TraceField = TraceField(
+    name=GOALTRACE_TRACE_KEY_FIRING_FIELD,
+    get=_get_goaltrace_firing_field_act,
+)
+
+GOALTRACE_HRM_ACT_TRACE_FIELDS: tuple[TraceField, ...] = (
+    GOALTRACE_HRM_ACT_FIRING_FIELD,
+)
+
+
+# =============================================================================
 # SeqMaze trace metadata builder
 # =============================================================================
 
@@ -140,14 +195,18 @@ def build_seqmaze_hrm_trace_meta(batch: Batch) -> dict[str, object]:
 
     Includes minimal task context needed to interpret predictions without
     duplicating large model activations.
+
+    Note: batch channel names (e.g. "node_mask") may differ from the trace
+    meta key ("node_valid_mask").  The batch name is used for extraction;
+    the constant provides the trace meta key name.
     """
     return {
-        "target_path": batch["target_path"],
-        "path_mask": batch["path_mask"],
-        "path_length": batch["path_length"],
-        "node_valid_mask": batch["node_mask"],
-        "node_start_flag": batch["node_start_flag"],
-        "node_goal_flag": batch["node_goal_flag"],
+        SEQMAZE_META_KEY_TARGET_PATH: batch[SEQMAZE_META_KEY_TARGET_PATH],
+        SEQMAZE_META_KEY_PATH_MASK: batch[SEQMAZE_META_KEY_PATH_MASK],
+        SEQMAZE_META_KEY_PATH_LENGTH: batch[SEQMAZE_META_KEY_PATH_LENGTH],
+        SEQMAZE_META_KEY_NODE_VALID_MASK: batch["node_mask"],
+        SEQMAZE_META_KEY_NODE_START_FLAG: batch[SEQMAZE_META_KEY_NODE_START_FLAG],
+        SEQMAZE_META_KEY_NODE_GOAL_FLAG: batch[SEQMAZE_META_KEY_NODE_GOAL_FLAG],
     }
 
 
@@ -170,13 +229,58 @@ def build_seqmaze_hrm_actor_critic_trace_meta(
 ) -> dict[str, object]:
     """Return out-of-band trace metadata for SeqMaze HRM v2 actor-critic figures."""
     return {
-        "n_nodes": int(batch["node_mask"].sum()),
-        "target_path_len": (
-            int(batch["path_length"].max().item())
-            if "path_length" in batch
+        SEQMAZE_META_KEY_N_NODES: int(batch["node_mask"].sum()),
+        SEQMAZE_META_KEY_TARGET_PATH_LEN: (
+            int(batch[SEQMAZE_META_KEY_PATH_LENGTH].max().item())
+            if SEQMAZE_META_KEY_PATH_LENGTH in batch
             else 0
         ),
     }
+
+
+# =============================================================================
+# Goaltrace trace metadata builder
+# =============================================================================
+
+def build_goaltrace_hrm_trace_meta(
+    batch: dict,
+) -> dict:
+    """Build trace metadata for goaltrace evaluation traces from a batch dict.
+
+    Extracts all sample-constant metadata fields (input channels, targets,
+    topology) from the collated batch and returns them as a flat dict of
+    numpy arrays ready for insertion into ``TraceTree.attached_meta``.
+
+    The model-input keys (observation_id, weight, current_flag, goal_flag,
+    node_mask) are projected explicitly.  Extra batch keys are ignored
+    unless they are recognised target or topology keys.
+    """
+    import numpy as np
+
+    def _to_np(key: str) -> np.ndarray:
+        val = batch[key]
+        return val.cpu().numpy() if hasattr(val, "cpu") else np.asarray(val)
+
+    # Model input channels
+    meta: dict[str, np.ndarray] = {
+        GOALTRACE_META_KEY_OBSERVATION_ID: _to_np("observation_id"),
+        GOALTRACE_META_KEY_WEIGHT: _to_np("weight"),
+        GOALTRACE_META_KEY_CURRENT_FLAG: _to_np("current_flag"),
+        GOALTRACE_META_KEY_GOAL_FLAG: _to_np("goal_flag"),
+        GOALTRACE_META_KEY_NODE_MASK: _to_np("node_mask"),
+    }
+
+    # Target channel
+    if "target_field" in batch:
+        meta[GOALTRACE_META_KEY_TARGET_FIELD] = _to_np("target_field")
+
+    # Topology channels (evaluation metadata, not model input)
+    if "successor_indices" in batch:
+        meta[GOALTRACE_META_KEY_SUCCESSOR_INDICES] = _to_np("successor_indices")
+    if "successor_mask" in batch:
+        meta[GOALTRACE_META_KEY_SUCCESSOR_MASK] = _to_np("successor_mask")
+
+    return meta
 
 
 # =============================================================================
@@ -184,9 +288,11 @@ __all__ = [
     "build_mazehard_hrm_trace_meta",
     "build_seqmaze_hrm_trace_meta",
     "build_seqmaze_hrm_actor_critic_trace_meta",
+    "build_goaltrace_hrm_trace_meta",
     "MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS",
     "MAZE_HARD_HRM_ACT_TRACE_FIELDS",
     "MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY",
     "SEQMAZE_HRM_ACTOR_CRITIC_TRACE_FIELDS",
-    "TARGET_SOLUTION_OVERLAY_META_KEY",
+    "MAZEHARD_META_KEY_GT_OVERLAY",
+    "MAZEHARD_META_KEY_INPUT_IDS",
 ]

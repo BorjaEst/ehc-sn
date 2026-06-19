@@ -28,7 +28,7 @@ def build_goaltrace_hrm_v1_training_experiment(
         scheduler=config.scheduler,
         supervised_only_warmup_steps=config.supervised_only_warmup_steps,
         target_network=config.target_network,
-        simple_supervised=config.simple_supervised,
+        single_step=config.single_step,
     )
     datamodule = Datamodule(
         DatamoduleConfig(

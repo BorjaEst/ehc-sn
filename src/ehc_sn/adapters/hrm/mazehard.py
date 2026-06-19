@@ -38,7 +38,7 @@ from ehc_sn.types import Batch
 class MazeHardHRMV1ControlOutput:
     """ACT-compatible control readouts emitted by the MazeHard HRM v1 bridge."""
 
-    q_logits: Tensor
+    action_logits: Tensor
 
 
 # =============================================================================
@@ -91,6 +91,7 @@ def _build_decoder(  # --------------------------------------------------------
     return build_token_decoder(
         hidden_size=model.config.pfc.hidden_size,
         vocab_size=config.vocab_size,
+        task_family="mazehard",
         device=params.device,
         dtype=params.dtype,
     )
@@ -147,7 +148,9 @@ class MazeHardHRMV1BridgeAdapter(nn.Module):
         """Split one HRM step output into controller-consumable task and control heads."""
         return MazeHardHRMV1BridgeOutput(
             task=self._decoder(outputs),
-            control=MazeHardHRMV1ControlOutput(q_logits=outputs.q_logits),
+            control=MazeHardHRMV1ControlOutput(
+                action_logits=outputs.action_logits
+            ),
         )
 
     def forward(  # -----------------------------------------------------------

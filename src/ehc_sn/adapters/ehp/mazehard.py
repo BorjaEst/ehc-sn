@@ -23,9 +23,6 @@ import torch
 from torch import Tensor, nn
 
 from ehc_sn.adapters.ehp._base import MazeHardEHCAdapterSettings
-from ehc_sn.adapters.ehp.objectives import (
-    MazeHardEHCV1HybridTaskBinding,
-)
 from ehc_sn.models.ehp.ehp_v1 import (
     EHCInputV1,
     EHCModelV1,
@@ -272,7 +269,6 @@ __all__ = [
     "MazeHardEHCV1BridgeOutput",
     "MazeHardEHCV1CriticOutput",
     "MazeHardEHCV1Encoder",
-    "MazeHardEHCV1HybridTaskBinding",
     "MazeHardEHCV1PolicyOutput",
     "MazeHardEHCV1TaskDecoder",
 ]

@@ -27,6 +27,7 @@ from torch import Tensor
 
 from ehc_sn.tasks.arena.evaluation import coerce_observation_ids
 from ehc_sn.traces import TraceField, TraceValue
+from ehc_sn.traces.keys import TEM_META_KEY_TARGET_OBS_ID
 from ehc_sn.traces.specs import (
     TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM,
     TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
@@ -156,12 +157,6 @@ def select_arena_tem_trace_fields(  # -----------------------------------------
 
 
 # =============================================================================
-TARGET_OBSERVATION_ID_META_KEY: str = "target/observation_id"
-"""Trace metadata key for the ground-truth observation-id trajectory.
-
-Populated by :func:`build_arena_tem_trace_meta` and read by TEM figure
-selectors via ``trace.get_meta_path(TARGET_OBSERVATION_ID_META_KEY)``.
-"""
 
 
 # =============================================================================
@@ -178,7 +173,7 @@ def build_arena_tem_trace_meta(  # --------------------------------------------
         Nested dict keyed by ``"target/observation_id"`` with the full
         trajectory moved to CPU.
     """
-    root_key, leaf_key = TARGET_OBSERVATION_ID_META_KEY.split("/", maxsplit=1)
+    root_key, leaf_key = TEM_META_KEY_TARGET_OBS_ID.split("/", maxsplit=1)
     return {
         root_key: {
             leaf_key: batch["trajectory_observation_id"].detach().cpu(),
@@ -195,6 +190,5 @@ __all__ = [
     "ARENA_TEM_TRACE_PRED_RECALL",
     "ARENA_TEM_TRACE_PRED_PATH",
     "select_arena_tem_trace_fields",
-    "TARGET_OBSERVATION_ID_META_KEY",
     "build_arena_tem_trace_meta",
 ]

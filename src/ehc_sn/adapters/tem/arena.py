@@ -22,6 +22,7 @@ from ehc_sn.adapters.tem._base import (
     ArenaTEMAdapterSettings,
     ArenaTEMBridgeOutput,
 )
+from ehc_sn.loss.consistency import LatentRelation
 from ehc_sn.models.tem.tem_v1 import (
     TEMInputV1,
     TEMModelV1,
@@ -121,11 +122,29 @@ class ArenaOutputsDecoderV1(nn.Module):
         obs_path = self.decode(model_output.pred_codes.path)
 
         task = _base.ArenaTaskOutput(obs_logits=obs_post)
-        tem = _base.ArenaTEMDiagnostics(
+        tem = _base.TEMLearningState(
             obs_logits=(obs_post, obs_recall, obs_path),
             grid_codes=model_output.grid_codes,
             place_codes=model_output.place_codes,
             pred_codes=model_output.pred_codes,
+            grid_transition=LatentRelation(
+                lhs=model_output.grid_codes.post,
+                rhs=model_output.grid_codes.prior,
+            ),
+            place_transition=LatentRelation(
+                lhs=model_output.place_codes.post,
+                rhs=model_output.place_codes.recall,
+            ),
+            place_sensory=(
+                LatentRelation(
+                    lhs=model_output.place_codes.post,
+                    rhs=model_output.place_codes.sensory,
+                )
+                if model_output.place_codes.sensory is not None
+                else None
+            ),
+            grid_reg_code=model_output.grid_codes.post,
+            place_reg_code=model_output.place_codes.post,
         )
         return _base.ArenaTEMBridgeOutput(task=task, tem=tem)
 
@@ -308,11 +327,29 @@ class ArenaOutputsDecoderV2(nn.Module):
         obs_path = self._decode(model_output.pred_codes.path)
 
         task = _base.ArenaTaskOutput(obs_logits=obs_post)
-        tem = _base.ArenaTEMDiagnostics(
+        tem = _base.TEMLearningState(
             obs_logits=(obs_post, obs_recall, obs_path),
             grid_codes=model_output.grid_codes,
             place_codes=model_output.place_codes,
             pred_codes=model_output.pred_codes,
+            grid_transition=LatentRelation(
+                lhs=model_output.grid_codes.post,
+                rhs=model_output.grid_codes.prior,
+            ),
+            place_transition=LatentRelation(
+                lhs=model_output.place_codes.post,
+                rhs=model_output.place_codes.recall,
+            ),
+            place_sensory=(
+                LatentRelation(
+                    lhs=model_output.place_codes.post,
+                    rhs=model_output.place_codes.sensory,
+                )
+                if model_output.place_codes.sensory is not None
+                else None
+            ),
+            grid_reg_code=model_output.grid_codes.post,
+            place_reg_code=model_output.place_codes.post,
         )
         return _base.ArenaTEMBridgeOutput(task=task, tem=tem)
 

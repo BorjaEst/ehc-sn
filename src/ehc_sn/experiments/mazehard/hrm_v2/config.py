@@ -43,7 +43,7 @@ from ehc_sn.lightning.modules.actor_critic import (
     ActorCriticTrainingConfig,
 )
 from ehc_sn.logging.tensorboard import LoggerSettings
-from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig
+from ehc_sn.objectives.composites.hybrid_rl import HybridRLLossConfig
 from ehc_sn.tasks.mazehard.runtime import MazeHardRuntimeConfig
 from ehc_sn.training.hrm import ValidationRuntimeConfig
 from ehc_sn.training.schedules import SchedulerConfig

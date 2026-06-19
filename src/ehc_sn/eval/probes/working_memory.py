@@ -29,6 +29,12 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedKFold
 
+from ehc_sn.traces.keys import (
+    MAZEHARD_META_KEY_GT_OVERLAY,
+    PFC_TRACE_KEY_Z_H,
+    PFC_TRACE_KEY_Z_L,
+)
+
 
 # =============================================================================
 @dataclass(frozen=True)
@@ -196,8 +202,8 @@ def compute_pfc_path_memory_probe(
         "probe_id": "pfc_path_memory_probe",
         "probe_version": 1,
         "method": "logistic_regression_balanced",
-        "target": "target/solution_overlay",
-        "states": ["pfc/z_H", "pfc/z_L"],
+        "target": MAZEHARD_META_KEY_GT_OVERLAY,
+        "states": [PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L],
         "slot_alignment": slot_alignment,
         "split": split,
         "n_splits": n_splits,
@@ -232,10 +238,10 @@ def compute_pfc_path_memory_probe_from_artifact(
     cases = load_artifact_run_cases(artifact_path)
     t = cases[0].trace
 
-    z_h: NDArray = t.get("pfc/z_H")
-    z_l: NDArray = t.get("pfc/z_L")
+    z_h: NDArray = t.get(PFC_TRACE_KEY_Z_H)
+    z_l: NDArray = t.get(PFC_TRACE_KEY_Z_L)
     target_raw: NDArray = np.asarray(
-        t.get_meta_path("target/solution_overlay")
+        t.get_meta_path(MAZEHARD_META_KEY_GT_OVERLAY)
     )
 
     return compute_pfc_path_memory_probe(
@@ -365,10 +371,10 @@ def compute_and_persist_probes_for_artifact(
         )
 
     t = cases[0].trace
-    z_h: NDArray = t.get("pfc/z_H")
-    z_l: NDArray = t.get("pfc/z_L")
+    z_h: NDArray = t.get(PFC_TRACE_KEY_Z_H)
+    z_l: NDArray = t.get(PFC_TRACE_KEY_Z_L)
     target_raw: NDArray = np.asarray(
-        t.get_meta_path("target/solution_overlay")
+        t.get_meta_path(MAZEHARD_META_KEY_GT_OVERLAY)
     )
 
     probe = compute_pfc_path_memory_probe(

@@ -8,6 +8,81 @@ from __future__ import annotations
 import random
 from typing import Sequence
 
+import numpy as np
+from numpy.typing import NDArray
+
+
+# =============================================================================
+def compute_layered_dag_positions(
+    *,
+    num_nodes: int,
+    edges: Sequence[tuple[int, int]],
+) -> NDArray:
+    """Compute deterministic layered DAG positions using longest predecessor depth.
+
+    Assigns each node an x-coordinate equal to its layer (longest path from
+    any source node), guaranteeing that every directed edge moves strictly
+    left-to-right.  Within each layer, nodes are sorted by their canonical
+    index (deterministic y-spacing).
+
+    Args:
+        num_nodes: Number of valid (non-padded) nodes.
+        edges: Directed edges as ``(source, target)`` pairs in compact
+            (non-padded) index space.
+
+    Returns:
+        Float array of shape ``(num_nodes, 2)`` with columns ``(x, y)``.
+        ``x`` is the layer index; ``y`` is the within-layer rank.
+
+    Raises:
+        ValueError: If *edges* contains a cycle (detected when layer
+            computation fails to converge after ``num_nodes`` iterations).
+    """
+    # Build adjacency
+    successors: list[list[int]] = [[] for _ in range(num_nodes)]
+    predecessors: list[list[int]] = [[] for _ in range(num_nodes)]
+    for u, v in edges:
+        if u < 0 or u >= num_nodes or v < 0 or v >= num_nodes:
+            raise ValueError(
+                f"Edge ({u}, {v}) has out-of-range node index "
+                f"(num_nodes={num_nodes})."
+            )
+        successors[u].append(v)
+        predecessors[v].append(u)
+
+    # Longest predecessor depth (DP over DAG topological order)
+    layer = [0] * num_nodes
+    for iteration in range(num_nodes + 1):
+        changed = False
+        for v in range(num_nodes):
+            if predecessors[v]:
+                new_layer = 1 + max(layer[u] for u in predecessors[v])
+                if new_layer != layer[v]:
+                    layer[v] = new_layer
+                    changed = True
+        if not changed:
+            break
+    else:
+        raise ValueError(
+            "Cycle detected: longest-predecessor-depth iteration did not "
+            f"converge after {num_nodes + 1} passes over {num_nodes} nodes."
+        )
+
+    # Group nodes by layer, sort within each layer by node index
+    n_layers = max(layer) + 1
+    nodes_by_layer: list[list[int]] = [[] for _ in range(n_layers)]
+    for v in range(num_nodes):
+        nodes_by_layer[layer[v]].append(v)
+
+    positions = np.zeros((num_nodes, 2), dtype=np.float64)
+    for x, group in enumerate(nodes_by_layer):
+        for y_offset, v in enumerate(sorted(group)):
+            positions[v, 0] = float(x)
+            # Center within layer
+            positions[v, 1] = float(y_offset - (len(group) - 1) / 2.0)
+
+    return positions
+
 
 # =============================================================================
 def count_shortest_paths(

@@ -15,6 +15,7 @@ from __future__ import annotations
 import numpy as np
 
 from ehc_sn.traces import TraceTree
+from ehc_sn.traces.keys import PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -140,7 +141,7 @@ def compute_hrm_dynamics_metrics_from_trace(
 ) -> dict[str, float]:
     """Extract z_H/z_L from a trace tree and compute dynamics metrics.
 
-    Uses ``trace.get("pfc/z_H")`` and ``trace.get("pfc/z_L")`` to
+    Uses ``trace.get(PFC_TRACE_KEY_Z_H)`` and ``trace.get(PFC_TRACE_KEY_Z_L)`` to
     retrieve the dense arrays, validates their rank, then delegates to
     :func:`compute_hrm_dynamics_metrics`.
 
@@ -167,7 +168,7 @@ def compute_hrm_dynamics_metrics_from_trace(
             )
         return arr
 
-    z_H = _extract("pfc/z_H")
-    z_L = _extract("pfc/z_L")
+    z_H = _extract(PFC_TRACE_KEY_Z_H)
+    z_L = _extract(PFC_TRACE_KEY_Z_L)
 
     return compute_hrm_dynamics_metrics(z_H, z_L)

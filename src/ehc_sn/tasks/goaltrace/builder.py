@@ -35,22 +35,46 @@ from ehc_sn.utils.graph import shortest_path as bfs_shortest_path
 TASK_FAMILY: Final[str] = "goaltrace"
 """Task namespace for the goaltrace task corpus."""
 
-GOALTRACE_TASK_CHANNELS: Final[list[str]] = [
+# =============================================================================
+# Channel group constants — explicit information-boundary declarations
+# =============================================================================
+
+GOALTRACE_MODEL_INPUT_CHANNELS: Final[tuple[str, ...]] = (
     "observation_id",
     "weight",
     "current_flag",
     "goal_flag",
     "node_mask",
-    "target_field",
-]
-"""All channels in the goaltrace task corpus.
+)
+"""Channels passed to the HRM model adapter (model input only).
 
-All channels are computed at build time.  No parent substrate channels are
-copied verbatim — structural layout channels (node_obs_id, successor_indices,
-etc.) are consumed but not forwarded.
-
-Oracle-derived channels (weight, target_field) are unique to goaltrace.
+Topology and supervision targets are intentionally excluded — they live
+in other channel groups so the adapter never receives them.
 """
+
+GOALTRACE_TARGET_CHANNELS: Final[tuple[str, ...]] = ("target_field",)
+"""Channels used as supervision targets (objective / binding contract)."""
+
+GOALTRACE_EVALUATION_META_CHANNELS: Final[tuple[str, ...]] = (
+    "successor_indices",
+    "successor_mask",
+)
+"""Channels captured as evaluation metadata for figures and diagnostics.
+
+These are persisted in the processed corpus and travel with the sample
+through collation, but are projected out of the model input surface by
+the adapter.  Intentionally omitted from ``GOALTRACE_MODEL_INPUT_CHANNELS``.
+"""
+
+GOALTRACE_CORPUS_CHANNELS: Final[tuple[str, ...]] = (
+    *GOALTRACE_MODEL_INPUT_CHANNELS,
+    *GOALTRACE_TARGET_CHANNELS,
+    *GOALTRACE_EVALUATION_META_CHANNELS,
+)
+"""All channels persisted in the goaltrace task corpus (union of all groups)."""
+
+# Legacy alias — do not use in new code.
+GOALTRACE_TASK_CHANNELS: Final[list[str]] = list(GOALTRACE_CORPUS_CHANNELS)
 
 _REQUIRED_PARENT_CHANNELS: tuple[str, ...] = (
     "node_obs_id",
@@ -69,6 +93,8 @@ GOALTRACE_TASK_CHANNEL_DTYPES: dict[str, np.dtype] = {
     "goal_flag": np.dtype(bool),
     "node_mask": np.dtype(bool),
     "target_field": np.dtype(np.float32),
+    "successor_indices": np.dtype(np.int32),
+    "successor_mask": np.dtype(bool),
 }
 """Expected numpy dtypes for goaltrace task corpus channels."""
 
@@ -378,6 +404,22 @@ def _assign_goaltrace_sample(
     else:
         padded_obs_ids = obs_ids[:num_observations].astype(np.int32)
 
+    # Forward topology from parent substrate, padded to num_observations
+    K = substrate_sample["successor_indices"].shape[-1]
+    raw_succ_idx = substrate_sample["successor_indices"]  # (n_actual, K)
+    raw_succ_mask = substrate_sample["successor_mask"]  # (n_actual, K)
+    if raw_succ_idx.ndim == 2:
+        # Single-graph substrate: shape (n_actual, K), pad rows to N
+        padded_succ_idx = np.zeros((num_observations, K), dtype=np.int32)
+        padded_succ_mask = np.zeros((num_observations, K), dtype=bool)
+        n_actual = raw_succ_idx.shape[0]
+        padded_succ_idx[:n_actual, :] = raw_succ_idx
+        padded_succ_mask[:n_actual, :] = raw_succ_mask
+    else:
+        # Multi-sample: keep as-is (already batched)
+        padded_succ_idx = raw_succ_idx
+        padded_succ_mask = raw_succ_mask
+
     return {
         "observation_id": padded_obs_ids,
         "weight": weight,
@@ -385,6 +427,8 @@ def _assign_goaltrace_sample(
         "goal_flag": goal_flag,
         "node_mask": node_mask_out,
         "target_field": padded_target,
+        "successor_indices": padded_succ_idx,
+        "successor_mask": padded_succ_mask,
     }
 
 
@@ -396,17 +440,19 @@ def _assign_goaltrace_sample(
 def validate_goaltrace_sample(data: dict[str, np.ndarray]) -> None:
     """Validate one goaltrace task corpus sample against the task channel schema.
 
+    Validates all channels present in *data* against known dtypes and shape
+    constraints.  Extra channels (not in ``GOALTRACE_TASK_CHANNEL_DTYPES``)
+    that are present in *data* are validated for shape only.
+
+    Channels absent from *data* are not required — this allows the validator
+    to accept both v1 (legacy) and v2 (with topology) samples.
+
     Args:
         data: Dict of channel arrays for one sample.
 
     Raises:
         ValueError: On any contract violation.
     """
-    missing = set(GOALTRACE_TASK_CHANNELS) - data.keys()
-    if missing:
-        raise ValueError(
-            f"Goaltrace sample missing channels: {sorted(missing)}"
-        )
 
     for name, arr in data.items():
         if (
@@ -428,8 +474,30 @@ def validate_goaltrace_sample(data: dict[str, np.ndarray]) -> None:
         raise ValueError(f"goal_flag does not match N ({n_nodes}).")
     if data["node_mask"].shape[0] != n_nodes:
         raise ValueError(f"node_mask does not match N ({n_nodes}).")
-    if data["target_field"].shape[0] != n_nodes:
-        raise ValueError(f"target_field does not match N ({n_nodes}).")
+    if "target_field" in data:
+        if data["target_field"].shape[0] != n_nodes:
+            raise ValueError(f"target_field does not match N ({n_nodes}).")
+    if "successor_indices" in data:
+        succ = data["successor_indices"]
+        if succ.ndim != 2 or succ.shape[0] != n_nodes:
+            raise ValueError(
+                f"successor_indices must be (N, K) with N={n_nodes}, "
+                f"got shape {succ.shape}."
+            )
+    if "successor_mask" in data:
+        _succ_shape = (
+            data["successor_indices"].shape
+            if "successor_indices" in data
+            else None
+        )
+        if (
+            _succ_shape is not None
+            and data["successor_mask"].shape != _succ_shape
+        ):
+            raise ValueError(
+                f"successor_mask shape {data['successor_mask'].shape} must match "
+                f"successor_indices shape {_succ_shape}."
+            )
 
     # Validate field values in [0, 1]
     field = data["target_field"]
@@ -473,6 +541,10 @@ def validate_goaltrace_sample(data: dict[str, np.ndarray]) -> None:
 def validate_goaltrace_root(root: Path) -> dict:
     """Validate a goaltrace task corpus root against task-owned semantics.
 
+    Validates against the channels declared in the manifest (backward
+    compatible with corpora that predate ``successor_indices`` /
+    ``successor_mask``).
+
     Args:
         root: Resolved versioned goaltrace task corpus root.
 
@@ -495,10 +567,16 @@ def validate_goaltrace_root(root: Path) -> dict:
     if n_nodes is None:
         raise ValueError("Manifest missing n_observations.")
 
+    # Use the manifest's channel list so old corpora (v1 without topology)
+    # still validate correctly.  New corpora include all corpus channels.
+    declared_channels: list[str] = manifest.get(
+        "channels", list(GOALTRACE_CORPUS_CHANNELS)
+    )
+
     for split, n in manifest["n_samples"].items():
         split_dir = root / split
         arrays: dict[str, np.ndarray] = {}
-        for ch in GOALTRACE_TASK_CHANNELS:
+        for ch in declared_channels:
             ch_file = split_dir / f"{ch}.npy"
             if not ch_file.exists():
                 raise FileNotFoundError(
@@ -511,14 +589,20 @@ def validate_goaltrace_root(root: Path) -> dict:
                     f"has {arrays[ch].shape[0]} samples, "
                     f"manifest declares {n}."
                 )
+            # The first per-sample dimension must be n_nodes, regardless
+            # of whether the channel is 1D (N,) or 2D (N, K).
             if arrays[ch].shape[1] != n_nodes:
+                raise ValueError(
+                    f"Channel '{ch}' first sample dim is "
+                    f"{arrays[ch].shape[1]}, expected {n_nodes}."
+                )
                 raise ValueError(
                     f"Channel '{ch}' has N={arrays[ch].shape[1]}, "
                     f"expected {n_nodes}."
                 )
 
         for i in range(n):
-            sample = {ch: arrays[ch][i] for ch in GOALTRACE_TASK_CHANNELS}
+            sample = {ch: arrays[ch][i] for ch in declared_channels}
             validate_goaltrace_sample(sample)
 
     return manifest

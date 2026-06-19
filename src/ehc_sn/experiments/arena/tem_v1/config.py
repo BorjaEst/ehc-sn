@@ -39,7 +39,7 @@ from ehc_sn.lightning.modules.variational_replay import (
     VariationalReplayConfig,
 )
 from ehc_sn.logging.tensorboard import LoggerSettings
-from ehc_sn.objectives.tem import TEMObjectiveConfig
+from ehc_sn.objectives.composites.tem import TEMObjectiveConfig
 from ehc_sn.training.schedules import SchedulerConfig
 from ehc_sn.training.tem import RuntimeConfig as TEMRuntimeConfig
 

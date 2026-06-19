@@ -2,13 +2,13 @@
 
 These routes map metric keys to dotted attribute paths on
 :class:`~ehc_sn.metrics.step_metrics.StepMetrics`, which is the step-metrics
-object produced by :class:`~ehc_sn.objectives.continuous_field.ContinuousFieldObjective`.
+object produced by :class:`~ehc_sn.objectives.combine.ACTSupervisedScorer` (field modality).
 
 Route categories
 ----------------
 [deliberation]
     Populated from StepMetrics aggregate fields (step.accuracy_sum,
-    episode.completed_count, etc.).  Zero in ``simple_supervised`` mode;
+    episode.completed_count, etc.).  Zero in ``single_step`` mode;
     filled from ACT carry data when deliberation is enabled.
 
 [extras]
@@ -22,8 +22,8 @@ from ehc_sn.metrics.routes.act import _with_namespace
 
 # =============================================================================
 # [deliberation] Fraction of eligible slots that completed the episode.
-# Zero in simple_supervised mode.
-# [deliberation] Mean deliberation steps per slot.  Zero in simple_supervised.
+# Zero in single_step mode.
+# [deliberation] Mean deliberation steps per slot.  Zero in single_step.
 # [extras] MSE between predicted and target firing field.  Active always.
 # [extras] Q(done) classifier accuracy.  Active always.
 # =============================================================================

@@ -5,7 +5,6 @@ from __future__ import annotations
 from ehc_sn.adapters.tem import (
     ARENA_TEM_TRACE_FIELDS,
     ArenaTEMAdapterSettings,
-    ArenaTEMTaskBinding,
     ArenaTEMV2BridgeAdapter,
     build_arena_tem_trace_meta,
 )
@@ -18,6 +17,10 @@ from ehc_sn.lightning.modules.variational_replay import (
 )
 from ehc_sn.models.tem.tem_v2 import ModelSettingsV2, TEMModelV2
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
+from ehc_sn.tasks.arena.supervision import (
+    build_arena_supervision,
+    build_arena_tem_objective_supervision,
+)
 from ehc_sn.training.schedules import SchedulerConfig
 from ehc_sn.training.tem import RuntimeConfig as TEMRuntimeConfig
 
@@ -41,7 +44,8 @@ def build_arena_tem_v2_model(
         trace_fields=ARENA_TEM_TRACE_FIELDS,
         build_trace_meta_fn=build_arena_tem_trace_meta,
         replay_runtime_factory=ArenaReplayCapability,
-        task_binding_factory=ArenaTEMTaskBinding,
+        supervision_builder=build_arena_supervision,
+        scoring_supervision_builder=build_arena_tem_objective_supervision,
     )
     return VariationalReplayModule(
         config=VariationalReplayConfig(

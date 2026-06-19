@@ -45,6 +45,7 @@ from ehc_sn.eval.artifacts import persist_regime_artifact_bundle
 from ehc_sn.eval.contracts import EvaluationCaseResult, EvaluationRegimeResult
 from ehc_sn.models.hrm.hrm_v1 import HRMInputV1, HRModelV1
 from ehc_sn.traces import TraceTree
+from ehc_sn.traces.keys import PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L
 from ehc_sn.traces.wm_contract import (
     WM_PHASE_CUE,
     WM_PHASE_DELAY,
@@ -184,8 +185,8 @@ def produce_cue_recall_block_artifact(
 
         trace.append(
             {
-                "pfc/z_H": z_H,
-                "pfc/z_L": z_L,
+                PFC_TRACE_KEY_Z_H: z_H,
+                PFC_TRACE_KEY_Z_L: z_L,
                 "task/phase": torch.tensor([PHASE_SEQUENCE[step_idx]]),
                 "task/item": torch.tensor([EXPECTED_ITEMS[step_idx]]),
                 "task/position": torch.tensor([EXPECTED_POSITIONS[step_idx]]),

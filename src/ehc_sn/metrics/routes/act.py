@@ -2,7 +2,7 @@
 
 These routes map metric keys to dotted attribute paths on
 :class:`~ehc_sn.metrics.step_metrics.StepMetrics`, which is the step-metrics
-object produced by :class:`~ehc_sn.objectives.act.ACTObjective`.
+object produced by :class:`~ehc_sn.objectives.composites.act.ACTSupervisedScorer`.
 """
 
 from ehc_sn.metrics.adapter import Route

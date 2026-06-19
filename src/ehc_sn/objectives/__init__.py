@@ -1,119 +1,102 @@
-"""Canonical public surface for rollout-scoring objective modules.
+"""Canonical public surface for objective modules.
 
-For the ACT and TEM families the canonical names follow the ``*Objective*``
-vocabulary; the legacy ``*Objective*`` names are preserved as backward-compatible
-aliases. The hybrid RL family uses ``*Objective*`` names directly — it is a
-learner-owned batch-loss path, not a rollout-scoring objective.
+Three contract levels are defined by this package:
+
+1. **Atomic objectives** (``supervised/``, ``control/``): stateless
+   ``nn.Module`` components that compute one differentiable loss from
+   typed tensors and return an ``ObjectiveResult``.  Batch-oriented; do
+   not consume ``StepRecord`` or rollout chunks.
+
+2. **Composite regime step scorers** (``composites/``): learning-regime
+   step scorers that compose atomic objectives into family-specific
+   losses (ACT, TEM, hybrid RL).  A composite may consume one
+   ``StepRecord`` with typed supervision, but it must not initiate
+   rollout traversal or import task semantics.
+
+3. **Rollout traversal** is owned by ``rollouts/scoring.py`` and
+   ``training/rollout.py``, not by any module under ``objectives/``.
 
 Prefer ``from ehc_sn.objectives import ...`` over any sub-module import.
 """
 
-from ehc_sn.objectives._base import BaseObjective
-from ehc_sn.objectives._token import (
-    IGNORE_LABEL_ID,
+from ehc_sn.metrics.token import (
     AccuracyStats,
-    TokenSupervisionBinding,
     build_token_step_metrics,
     compute_accuracy_stats,
-    compute_token_loss_sum,
 )
-from ehc_sn.objectives._variational import (
-    VariationalLosses,
-    VariationalObjectiveBase,
-    VariationalObjectiveStep,
-    build_variational_step_metrics,
-    get_reg_term,
-    require_latent_relation,
-)
-from ehc_sn.objectives.act import (
-    ACTLosses,
-    ACTObjective,
-    ACTObjectiveBinding,
-    ACTObjectiveConfig,
-    ACTObjectiveStep,
+from ehc_sn.objectives.composites.act import (
+    ACTContinuationInput,
+    ACTHaltInput,
+    ACTScoringInput,
+    ACTStepLosses,
     ACTStepOutput,
+    ACTSupervisedScorer,
+    ACTSupervisedScorerConfig,
+    ACTSupervisedStep,
+    FieldACTInput,
+    FieldACTScoringInput,
+    TokenACTInput,
+    TokenACTScoringInput,
 )
-from ehc_sn.objectives.continuous_field import (
-    ContinuousFieldLosses,
-    ContinuousFieldObjective,
-    ContinuousFieldObjectiveBinding,
-    ContinuousFieldObjectiveConfig,
-    ContinuousFieldObjectiveStep,
-    ContinuousFieldTerms,
-)
-from ehc_sn.objectives.hybrid_rl import (
+from ehc_sn.objectives.composites.hybrid_rl import (
     HybridRLLossConfig,
     HybridRLLosses,
     HybridRLObjective,
     HybridRLObjectiveStep,
 )
-from ehc_sn.objectives.rollout import (
-    EvaluatedChunk,
-    ObjectiveStepOutput,
-    ObservedStep,
-    RolloutScorer,
-    materialize_observed_step,
-    score_rollout_chunk,
-)
-from ehc_sn.objectives.tem import (
+from ehc_sn.objectives.composites.tem import (
     TEMLosses,
     TEMObjective,
-    TEMObjectiveBinding,
     TEMObjectiveConfig,
     TEMObjectiveStep,
     TEMStepOutput,
+    VariationalLosses,
+    build_variational_step_metrics,
 )
+from ehc_sn.objectives.supervised.token import (
+    IGNORE_LABEL_ID,
+)
+from ehc_sn.objectives.types import ObjectiveResult
 
 # =============================================================================
 __all__ = [
-    # base
-    "BaseObjective",
-    # rollout scoring
-    "EvaluatedChunk",
-    "ObjectiveStepOutput",
-    "ObservedStep",
-    "RolloutScorer",
-    "materialize_observed_step",
-    "score_rollout_chunk",
+    # types
+    "ObjectiveResult",
     # token family — implementation / compat
     "IGNORE_LABEL_ID",
     "AccuracyStats",
-    "TokenSupervisionBinding",
     "build_token_step_metrics",
     "compute_accuracy_stats",
-    "compute_token_loss_sum",
     # variational family — canonical
-    "VariationalObjectiveBase",
-    # variational family — implementation / compat
     "VariationalLosses",
-    "VariationalObjectiveStep",
+    # variational family — implementation / compat
     "build_variational_step_metrics",
-    "get_reg_term",
-    "require_latent_relation",
     # act — canonical
-    "ACTObjectiveConfig",
-    "ACTObjective",
-    "ACTObjectiveStep",
-    "ACTLosses",
-    "ACTObjectiveBinding",
+    "ACTContinuationInput",
+    "ACTHaltInput",
+    "ACTScoringInput",
+    "ACTStepLosses",
     "ACTStepOutput",
+    "ACTSupervisedScorer",
+    "ACTSupervisedScorerConfig",
+    "ACTSupervisedStep",
+    "FieldACTInput",
+    "FieldACTScoringInput",
+    "TokenACTInput",
+    "TokenACTScoringInput",
     # hybrid rl — batch-loss path (no *Objective* aliases; not a rollout scorer)
     "HybridRLLossConfig",
     "HybridRLObjective",
     "HybridRLLosses",
     "HybridRLObjectiveStep",
     # continuous field — canonical
-    "ContinuousFieldObjectiveConfig",
-    "ContinuousFieldObjective",
-    "ContinuousFieldObjectiveBinding",
-    "ContinuousFieldObjectiveStep",
-    "ContinuousFieldLosses",
-    "ContinuousFieldTerms",
+    "ACTSupervisedScorerConfig",
+    "ACTSupervisedScorer",
+    "ACTSupervisedStep",
     # tem — canonical
     "TEMObjectiveConfig",
     "TEMObjective",
     "TEMObjectiveStep",
     "TEMLosses",
-    "TEMObjectiveBinding",
     "TEMStepOutput",
 ]

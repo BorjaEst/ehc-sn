@@ -18,6 +18,7 @@
     exploration_prob   = 0.1
 
 [model.components.objective]
+    task_modality     = "token"
     token_loss        = "softmax_cross_entropy"
 
 [training.optimizer]
@@ -56,6 +57,13 @@
     init_weights_groups          = ["all"]
     diagnostic_level             = "standard"
     non_finite_policy            = "raise"
+
+[checkpointing.checkpoint]
+    dirpath             = "checkpoints/hrm-v1-seqmaze"
+    filename            = "step={step:06d}.ckpt"
+    every_n_train_steps = 1000
+    save_last           = true
+    save_on_exception   = true
 
 [scheduler]
     warmup_steps = 2000

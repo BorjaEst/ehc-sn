@@ -6,12 +6,10 @@ from typing import Any
 
 from ehc_sn.adapters.ehp import (
     ArenaEHCAdapterSettings,
-    ArenaEHCTaskBinding,
     ArenaEHCV1BridgeAdapter,
 )
 from ehc_sn.adapters.tem import (
     ArenaTEMAdapterSettings,
-    ArenaTEMTaskBinding,
     ArenaTEMV1BridgeAdapter,
     ArenaTEMV2BridgeAdapter,
 )
@@ -30,8 +28,7 @@ from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryController,
     ReplayTrajectoryControllerConfig,
 )
-from ehc_sn.objectives.ehp import EHCObjective, EHCObjectiveConfig
-from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
+from ehc_sn.objectives.composites.tem import TEMObjective, TEMObjectiveConfig
 from ehc_sn.rollouts.runtime import RecurrentRunner
 from ehc_sn.tasks.arena.capabilities.replay import ArenaReplayCapability
 from ehc_sn.tasks.arena.providers import ArenaReplayProvider
@@ -176,17 +173,13 @@ def _resolve_arena_adapter_config(
 
 
 # =============================================================================
-def _build_arena_objective(model_family: str) -> object:
-    if model_family in {"tem-v1", "tem-v2"}:
-        return TEMObjective(
-            TEMObjectiveConfig(),
-            task_binding=ArenaTEMTaskBinding(),
-        )
-    if model_family == "ehp-v1":
-        return EHCObjective(
-            EHCObjectiveConfig(),
-            task_binding=ArenaEHCTaskBinding(),
-        )
+def _build_arena_objective(model_family: str) -> TEMObjective:
+    if model_family in {"tem-v1", "tem-v2", "ehp-v1"}:
+        # EHC pretraining currently reuses the TEM variational objective.
+        # A distinct EHC composite will be introduced only when
+        # EHC-specific loss terms (PFC retrieval, query-key alignment,
+        # coupling) exist.
+        return TEMObjective(TEMObjectiveConfig())
     raise ValueError(f"Unsupported Arena model family: {model_family!r}.")
 
 

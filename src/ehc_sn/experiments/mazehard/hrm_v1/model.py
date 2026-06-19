@@ -8,7 +8,6 @@ from __future__ import annotations
 from ehc_sn.adapters.hrm import (
     MAZE_HARD_HRM_ACT_TRACE_FIELDS,
     MazeHardHRMAdapterSettings,
-    MazeHardHRMV1ACTTaskBinding,
     MazeHardHRMV1BridgeAdapter,
     build_mazehard_hrm_trace_meta,
 )
@@ -25,7 +24,11 @@ from ehc_sn.lightning.modules.act_supervised import (
 )
 from ehc_sn.metrics.routes.act import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
-from ehc_sn.objectives.act import ACTObjective, ACTObjectiveConfig
+from ehc_sn.objectives.composites.act import (
+    ACTSupervisedScorer,
+    ACTSupervisedScorerConfig,
+)
+from ehc_sn.tasks.mazehard.supervision import build_mazehard_supervision
 from ehc_sn.traces.specs import HRM_HIDDEN_STATE_FIELDS
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
@@ -67,9 +70,8 @@ def build_mazehard_hrm_v1_model(
         adapter_settings_cls=MazeHardHRMAdapterSettings,
         controller_cls=ACTController,
         controller_config_cls=ACTControllerConfig,
-        objective_cls=ACTObjective,
-        objective_config_cls=ACTObjectiveConfig,
-        task_binding_cls=MazeHardHRMV1ACTTaskBinding,
+        objective_cls=ACTSupervisedScorer,
+        objective_config_cls=ACTSupervisedScorerConfig,
         optimizer_cls=AdamATan2,
         optimizer_config_cls=AdamATan2Config,
         trace_fields=MAZE_HARD_HRM_ACT_TRACE_FIELDS,
@@ -77,6 +79,7 @@ def build_mazehard_hrm_v1_model(
         step_routes=ACT_STEP_ROUTES,
         episode_routes=ACT_EPISODE_ROUTES,
         hidden_state_fields=HRM_HIDDEN_STATE_FIELDS,
+        supervision_builder=build_mazehard_supervision,
     )
     return ACTSupervisedModule(
         config=ACTSupervisedConfig(

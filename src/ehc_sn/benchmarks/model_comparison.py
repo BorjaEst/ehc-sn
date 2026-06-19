@@ -112,10 +112,6 @@ def run_ready_track_model_comparison(
                 max_rollout_steps=recipe.execution.fixed_budget_steps,
                 hard_max_rollout_steps=None,
                 runner_options=step_options,
-                objective_options={
-                    "controller": execution.controller,
-                    "td_target": False,
-                },
             )
             score_reports.append(
                 _score_evaluated_case(
@@ -236,10 +232,6 @@ def _adapt_bridge_only(
             max_rollout_steps=recipe.execution.fixed_budget_steps,
             hard_max_rollout_steps=None,
             runner_options=step_options,
-            objective_options={
-                "controller": execution.controller,
-                "td_target": False,
-            },
         )
         loss = result.evaluated.loss
         loss.backward()

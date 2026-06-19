@@ -93,8 +93,10 @@ class CheckpointingConfig(BaseModel, extra="forbid"):
     """
 
     checkpoint: Optional[CheckpointSettings] = Field(
-        default=None,
-        description="Model checkpoint settings.",
+        default_factory=CheckpointSettings,
+        description="Model checkpoint settings. Defaults to a CheckpointSettings() "
+        "instance so that a CheckpointCallback is always constructed. "
+        "Set to None to disable checkpointing.",
     )
     resume_from: Optional[str] = Field(
         default=None,
@@ -107,10 +109,6 @@ class CheckpointingConfig(BaseModel, extra="forbid"):
     init_weights_groups: list[str] = Field(
         default_factory=lambda: ["all"],
         description="Named weight groups to hydrate from init_weights_from.",
-    )
-    diagnostic_level: Literal["minimal", "standard", "research"] = Field(
-        default="standard",
-        description="Instrumentation tier for diagnostic logging.",
     )
     diagnostic_level: Literal["minimal", "standard", "research"] = Field(
         default="standard",

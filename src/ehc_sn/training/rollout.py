@@ -8,12 +8,9 @@ from typing import Any, Mapping
 
 from torch import Tensor
 
-from ehc_sn.objectives.rollout import (
+from ehc_sn.rollouts.materialization import (
     EvaluatedChunk,
     ObservedStep,
-    RolloutScorer,
-    materialize_observed_step,
-    score_rollout_chunk,
 )
 from ehc_sn.rollouts.runtime import (
     RolloutChunk,
@@ -22,6 +19,11 @@ from ehc_sn.rollouts.runtime import (
     Source,
     StepController,
     StepRecord,
+)
+from ehc_sn.rollouts.scoring import (
+    RolloutScorer,
+    score_rollout_chunk,
+    score_rollout_record,
 )
 
 
@@ -85,7 +87,7 @@ def score_captured_rollout(  # -----------------------------------------------
     max_rollout_steps: int | None = None,
     hard_max_rollout_steps: int | None = None,
     runner_options: Mapping[str, object] | None = None,
-    objective_options: Mapping[str, object] | None = None,
+    scoring_input_builder: Callable[[StepRecord], object] | None = None,
     snapshot_model_state: bool = True,
 ) -> CapturedRolloutResult:
     """Execute a rollout chunk and score it with a pure objective."""
@@ -100,7 +102,7 @@ def score_captured_rollout(  # -----------------------------------------------
         snapshot_model_state=snapshot_model_state,
     )
     evaluated = score_rollout_chunk(
-        executed, objective, **dict(objective_options or {})
+        executed, objective, scoring_input_builder=scoring_input_builder
     )
     return CapturedRolloutResult(chunk=executed, evaluated=evaluated)
 
@@ -116,26 +118,24 @@ def score_rollout_streaming(  # ----------------------------------------------
     max_rollout_steps: int | None = None,
     hard_max_rollout_steps: int | None = None,
     runner_options: Mapping[str, object] | None = None,
-    objective_options: Mapping[str, object] | None = None,
+    scoring_input_builder: Callable[[StepRecord], object],
     observed_step_observer: Callable[[ObservedStep], None] | None = None,
     snapshot_model_state: bool = True,
 ) -> StreamingRolloutResult:
     """Execute a rollout and score records on the fly without storing the full chunk."""
-    objective_options_dict = dict(objective_options or {})
     total_loss: Tensor | None = None
     last_step: ObservedStep | None = None
 
     def observe_record(record: StepRecord) -> None:
         nonlocal total_loss, last_step
-        step_output = objective.evaluate_step(record, **objective_options_dict)
-        observed = materialize_observed_step(record, step_output)
+        scored = score_rollout_record(
+            record, objective, input_builder=scoring_input_builder
+        )
         if observed_step_observer is not None:
-            observed_step_observer(observed)
-        last_step = observed
+            observed_step_observer(scored.observed_step)
+        last_step = scored.observed_step
         total_loss = (
-            step_output.loss
-            if total_loss is None
-            else total_loss + step_output.loss
+            scored.loss if total_loss is None else total_loss + scored.loss
         )
 
     executed = runner.run(

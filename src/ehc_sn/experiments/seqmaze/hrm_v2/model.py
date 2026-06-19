@@ -6,7 +6,6 @@ from ehc_sn.adapters.hrm import (
     SEQMAZE_HRM_ACTOR_CRITIC_TRACE_FIELDS,
     SeqMazeAdapterSettings,
     SeqMazeHRMV2BridgeAdapter,
-    SeqMazeHRMV2HybridTaskBinding,
     build_seqmaze_hrm_actor_critic_trace_meta,
 )
 from ehc_sn.controllers.deliberation.actor_critic import (
@@ -22,7 +21,7 @@ from ehc_sn.lightning.modules.actor_critic import (
 )
 from ehc_sn.metrics.routes.rl import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
-from ehc_sn.objectives.hybrid_rl import (
+from ehc_sn.objectives.composites.hybrid_rl import (
     HybridRLLossConfig,
     HybridRLObjective,
 )
@@ -34,6 +33,7 @@ from ehc_sn.tasks.seqmaze.runtime import (
     SeqMazeRuntime,
     SeqMazeRuntimeConfig,
 )
+from ehc_sn.tasks.seqmaze.supervision import build_seqmaze_supervision
 from ehc_sn.traces.specs import HRM_HIDDEN_STATE_FIELDS
 from ehc_sn.training.actor_critic import (
     TD0ActorCriticBatchBuilder,
@@ -81,7 +81,6 @@ def build_seqmaze_hrm_v2_model(
         controller_config_cls=DeliberationACControllerConfig,
         objective_cls=HybridRLObjective,
         objective_config_cls=HybridRLLossConfig,
-        task_binding_cls=lambda: SeqMazeHRMV2HybridTaskBinding(n_max=n_max),
         learner_cls=TD0ActorCriticBatchBuilder,
         val_scorer_cls=ZeroBootstrapActorCriticValidationScorer,
         optimizer_cls=AdamATan2,
@@ -95,6 +94,8 @@ def build_seqmaze_hrm_v2_model(
         step_routes=RL_STEP_ROUTES,
         episode_routes=RL_EPISODE_ROUTES,
         hidden_state_fields=HRM_HIDDEN_STATE_FIELDS,
+        supervision_builder=build_seqmaze_supervision,
+        token_weight_builder=None,
     )
     return ActorCriticModule(
         config=ActorCriticConfig(

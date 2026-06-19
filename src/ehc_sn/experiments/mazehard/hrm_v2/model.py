@@ -9,7 +9,6 @@ from ehc_sn.adapters.hrm import (
     MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
     MazeHardHRMAdapterSettings,
     MazeHardHRMV2BridgeAdapter,
-    MazeHardHRMV2HybridTaskBinding,
     build_mazehard_hrm_trace_meta,
 )
 from ehc_sn.controllers.deliberation.actor_critic import (
@@ -25,7 +24,7 @@ from ehc_sn.lightning.modules.actor_critic import (
 )
 from ehc_sn.metrics.routes.rl import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
-from ehc_sn.objectives.hybrid_rl import (
+from ehc_sn.objectives.composites.hybrid_rl import (
     HybridRLLossConfig,
     HybridRLObjective,
 )
@@ -36,6 +35,10 @@ from ehc_sn.tasks.mazehard.reward import (
 from ehc_sn.tasks.mazehard.runtime import (
     MazeHardRuntime,
     MazeHardRuntimeConfig,
+)
+from ehc_sn.tasks.mazehard.supervision import (
+    build_mazehard_supervision,
+    build_mazehard_weights,
 )
 from ehc_sn.traces.specs import HRM_HIDDEN_STATE_FIELDS
 from ehc_sn.training.actor_critic import (
@@ -81,7 +84,6 @@ def build_mazehard_hrm_v2_model(
         controller_config_cls=DeliberationACControllerConfig,
         objective_cls=HybridRLObjective,
         objective_config_cls=HybridRLLossConfig,
-        task_binding_cls=MazeHardHRMV2HybridTaskBinding,
         learner_cls=TD0ActorCriticBatchBuilder,
         val_scorer_cls=ZeroBootstrapActorCriticValidationScorer,
         optimizer_cls=AdamATan2,
@@ -95,6 +97,8 @@ def build_mazehard_hrm_v2_model(
         step_routes=RL_STEP_ROUTES,
         episode_routes=RL_EPISODE_ROUTES,
         hidden_state_fields=HRM_HIDDEN_STATE_FIELDS,
+        supervision_builder=build_mazehard_supervision,
+        token_weight_builder=build_mazehard_weights,
     )
     return ActorCriticModule(
         config=ActorCriticConfig(

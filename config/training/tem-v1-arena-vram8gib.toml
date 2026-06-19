@@ -29,7 +29,7 @@
     grid_reg_norm    = "l2"
     place_reg_norm   = "l1"
     temp_it          = 2000
-    p2g_use_it       = 0.0
+    p2g_use_it       = 0
     p2g_scale        = 200.0
     g_reg_it         = 40000000
     p_reg_it         = 4000
@@ -88,6 +88,13 @@
     init_weights_groups = ["all"]
     diagnostic_level    = "standard"
     non_finite_policy   = "raise"
+
+[checkpointing.checkpoint]
+    dirpath             = "checkpoints/tem-v1-arena"
+    filename            = "step={step:06d}.ckpt"
+    every_n_train_steps = 1000
+    save_last           = true
+    save_on_exception   = true
 
 [scheduler]
     warmup_steps = 1000

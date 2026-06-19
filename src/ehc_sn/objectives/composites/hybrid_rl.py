@@ -11,7 +11,7 @@ learner-owned TD(0) batch path — it is not a rollout-scoring objective.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -20,17 +20,25 @@ from torch import Tensor, nn
 
 import ehc_sn.loss.cross_entropy as cross_entropy_module
 import ehc_sn.metrics.signals as S
-from ehc_sn.controllers.contracts.value_control import (
-    ValueControlInteractionRecord,
-)
 from ehc_sn.loss.cross_entropy import LossType
 from ehc_sn.metrics.keys import LOSS_TOKEN, RL_LOSS_Q_VALUE, RL_LOSS_STATE_VALUE
 from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
-from ehc_sn.objectives._token import (
+from ehc_sn.metrics.token import (
     AccuracyStats,
     build_token_step_metrics,
     compute_accuracy_stats,
-    compute_token_loss_unreduced,
+)
+from ehc_sn.objectives.control.q_value import (
+    QValueObjective,
+    SelectedQInput,
+)
+from ehc_sn.objectives.control.state_value import (
+    StateValueObjective,
+    ValueRegressionInput,
+)
+from ehc_sn.objectives.supervised.token import (
+    TokenObjectiveInput,
+    TokenPredictionObjective,
 )
 from ehc_sn.utils.detach import DetachMixin
 
@@ -66,27 +74,6 @@ class HybridRLLossConfig(BaseModel, extra="forbid"):
         ge=0.0,
         description="vmPFC auxiliary Q-predictor loss coefficient.",
     )
-
-
-# =============================================================================
-class HybridValueObjectiveBinding(Protocol):
-    """Adapter-owned extraction of task-specific fields for hybrid RL batches.
-
-    Implement this protocol in the adapter layer so that training helpers stay
-    task-agnostic while using the value-control interaction record.
-    """
-
-    def extract_task_logits(  # -----------------------------------------------
-        self,
-        record: ValueControlInteractionRecord,
-    ) -> Tensor:
-        """Return token-prediction logits from the task output on ``record``."""
-
-    def extract_labels(  # ----------------------------------------------------
-        self,
-        record: ValueControlInteractionRecord,
-    ) -> Tensor:
-        """Return supervision labels from the interaction record."""
 
 
 # =============================================================================
@@ -204,6 +191,11 @@ class HybridRLObjective(nn.Module):
         """Create the batch-loss module from its configuration."""
         super().__init__()
         self._config = config
+        self._token_component = TokenPredictionObjective(
+            loss_fn=self._config.token_loss,
+        )
+        self._q_component = QValueObjective()
+        self._v_component = StateValueObjective()
 
     @property
     def config(self) -> HybridRLLossConfig:
@@ -252,26 +244,34 @@ class HybridRLObjective(nn.Module):
     ) -> HybridValueTerms:
         """Compute unreduced loss terms for a pre-materialized batch."""
         batch = context.batch
-        loss_token = compute_token_loss_unreduced(
-            self.token_loss_fn,
-            batch.task_logits,
-            batch.labels,
-            token_weights=batch.token_weights,
+        token_input = TokenObjectiveInput(
+            logits=batch.task_logits,
+            labels=batch.labels,
+            weights=batch.token_weights,
         )
+        token_result = self._token_component(token_input)
+        loss_token = token_result.terms["token_per_element"]
         if context.is_warmup:
             zero = batch.task_logits.new_zeros(batch.rewards.shape[0])
             loss_state_value = zero
             loss_q_value = zero
         else:
-            loss_state_value = F.mse_loss(
-                batch.state_values, batch.returns, reduction="none"
+            v_input = ValueRegressionInput(
+                predictions=batch.state_values,
+                targets=batch.returns,
             )
-            q_a = batch.q_values.gather(1, batch.actions.unsqueeze(-1)).squeeze(
-                -1
+            loss_state_value = self._v_component(v_input).terms[
+                "state_value_per_sample"
+            ]
+
+            q_input = SelectedQInput(
+                q_values=batch.q_values,
+                actions=batch.actions,
+                targets=batch.returns.detach(),
             )
-            loss_q_value = F.mse_loss(
-                q_a, batch.returns.detach(), reduction="none"
-            )
+            loss_q_value = self._q_component(q_input).terms[
+                "q_value_per_sample"
+            ]
         return HybridValueTerms(
             loss_token=loss_token,
             loss_state_value=loss_state_value,
@@ -394,7 +394,6 @@ class HybridRLObjective(nn.Module):
 
 # =============================================================================
 __all__ = [
-    "HybridValueObjectiveBinding",
     "HybridValueBatch",
     "HybridValueContext",
     "HybridValueTerms",

@@ -74,6 +74,13 @@
     diagnostic_level             = "standard"
     non_finite_policy            = "raise"
 
+[checkpointing.checkpoint]
+    dirpath             = "checkpoints/hrm-v2-seqmaze"
+    filename            = "step={step:06d}.ckpt"
+    every_n_train_steps = 1000
+    save_last           = true
+    save_on_exception   = true
+
 [scheduler]
     warmup_steps = 1000
     min_ratio    = 0.01

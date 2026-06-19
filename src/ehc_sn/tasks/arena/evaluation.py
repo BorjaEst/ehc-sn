@@ -16,7 +16,7 @@ from torch import Tensor
 
 from ehc_sn.metrics.spec import MetricSpec
 from ehc_sn.metrics.step_metrics import RatioStat, StepMetrics
-from ehc_sn.objectives.rollout import EvaluatedChunk
+from ehc_sn.rollouts.materialization import EvaluatedChunk
 
 from .contracts import ArenaTargets, ArenaTaskInput
 

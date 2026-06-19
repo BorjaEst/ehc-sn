@@ -12,8 +12,8 @@ from ehc_sn.eval.contracts import (
     EvaluationSourceProvider,
     EvaluationTraceRequest,
 )
-from ehc_sn.objectives.rollout import RolloutScorer
-from ehc_sn.rollouts.runtime import Runner, StepController
+from ehc_sn.rollouts.runtime import Runner, StepController, StepRecord
+from ehc_sn.rollouts.scoring import RolloutScorer
 from ehc_sn.rollouts.sources import RepeatSource
 from ehc_sn.traces.rollout import observe_rollout_chunk
 from ehc_sn.training.rollout import score_captured_rollout
@@ -30,7 +30,7 @@ def execute_replay_evaluation_batch(
     max_rollout_steps: int | None = None,
     hard_max_rollout_steps: int | None = None,
     runner_options: Mapping[str, object] | None = None,
-    objective_options: Mapping[str, object] | None = None,
+    scoring_input_builder: Callable[[StepRecord], object] | None = None,
     trace_request: EvaluationTraceRequest | None = None,
 ) -> EvaluationCaseResult:
     """Execute and score one replay case with optional trace materialization."""
@@ -44,7 +44,7 @@ def execute_replay_evaluation_batch(
         max_rollout_steps=max_rollout_steps,
         hard_max_rollout_steps=hard_max_rollout_steps,
         runner_options=runner_options,
-        objective_options=objective_options,
+        scoring_input_builder=scoring_input_builder,
         snapshot_model_state=snapshot_model_state,
     )
 

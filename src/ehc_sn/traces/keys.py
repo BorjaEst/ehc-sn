@@ -37,6 +37,10 @@ MAZEHARD_TRACE_KEY_PRED_OVERLAY = "pred/solution_overlay"
 MAZEHARD_META_KEY_INPUT_IDS = "input_ids"
 MAZEHARD_META_KEY_GT_OVERLAY = "target/solution_overlay"
 
+# ── PFC / HRM hidden-state diagnostics ───────────────────────────────────────
+PFC_TRACE_KEY_Z_H = "pfc/z_H"
+PFC_TRACE_KEY_Z_L = "pfc/z_L"
+
 # ── Shared spatial (world_step/*) ────────────────────────────────────────────
 WORLD_TRACE_KEY_LOCATION_IDS = "world_step/location_ids"
 WORLD_TRACE_KEY_OBSERVATION = "world_step/observation"
@@ -55,3 +59,26 @@ MEC_TRACE_KEY_CELLS = "diagnostic/mec/location_mean"
 # ── HPC ──────────────────────────────────────────────────────────────────────
 HPC_TRACE_KEY_CELLS = "diagnostic/hpc/location_mean"
 HPC_TRACE_KEY_MEMORY = "diagnostic/hpc/memory"
+
+
+# ── SeqMaze ────────────────────────────────────────────────────────────────
+SEQMAZE_META_KEY_TARGET_PATH = "target_path"
+SEQMAZE_META_KEY_PATH_MASK = "path_mask"
+SEQMAZE_META_KEY_PATH_LENGTH = "path_length"
+SEQMAZE_META_KEY_NODE_VALID_MASK = "node_valid_mask"
+SEQMAZE_META_KEY_NODE_START_FLAG = "node_start_flag"
+SEQMAZE_META_KEY_NODE_GOAL_FLAG = "node_goal_flag"
+SEQMAZE_META_KEY_N_NODES = "n_nodes"
+SEQMAZE_META_KEY_TARGET_PATH_LEN = "target_path_len"
+
+
+# ── Goaltrace ────────────────────────────────────────────────────────────────
+GOALTRACE_TRACE_KEY_FIRING_FIELD = "goaltrace/firing_field"
+GOALTRACE_META_KEY_TARGET_FIELD = "goaltrace/target_field"
+GOALTRACE_META_KEY_WEIGHT = "goaltrace/weight"
+GOALTRACE_META_KEY_NODE_MASK = "goaltrace/node_mask"
+GOALTRACE_META_KEY_OBSERVATION_ID = "goaltrace/observation_id"
+GOALTRACE_META_KEY_CURRENT_FLAG = "goaltrace/current_flag"
+GOALTRACE_META_KEY_GOAL_FLAG = "goaltrace/goal_flag"
+GOALTRACE_META_KEY_SUCCESSOR_INDICES = "goaltrace/successor_indices"
+GOALTRACE_META_KEY_SUCCESSOR_MASK = "goaltrace/successor_mask"

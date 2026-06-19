@@ -17,6 +17,10 @@ from torch import device as Device
 from torch import dtype as Dtype
 from torch import nn
 
+from ehc_sn.tasks.goaltrace.contracts import (
+    GoaltraceTaskInput,
+    GoaltraceTaskOutput,
+)
 from ehc_sn.tasks.mazehard.contracts import (
     MazeHardTaskInput,
     MazeHardTaskOutput,
@@ -47,6 +51,179 @@ class MazeHardHRMAdapterSettings(BaseModel, extra="forbid"):
             "Defaults to the canonical SEM vocabulary plus the solution-overlay token."
         ),
     )
+
+
+# =============================================================================
+class GoaltraceHRMAdapterSettings(BaseModel, extra="forbid"):
+    """Task-side Goaltrace settings shared by the HRM bridge family.
+
+    Attributes:
+        encoder_kind: Positional front-end (``"learned"`` or ``"rope"``).
+        num_observations: Padded node count N_max.  How many node slots
+            are encoded in one task instance.  The observation-ID
+            embedding ``E_obs`` is sized to ``num_observations`` — under
+            the current corpus contract observation IDs are dense
+            permutations of ``[0, N_max)``, so V = N_max.
+    """
+
+    encoder_kind: Literal["learned", "rope"] = Field(
+        default="rope",
+        description="Positional front-end used by the Goaltrace token encoder.",
+    )
+    num_observations: int = Field(
+        default=45,
+        ge=1,
+        description="Padded node count N_max.  Determines the number of "
+        "schema slots reserved for goaltrace nodes and the observation-ID "
+        "embedding table size.  Must match the goaltrace corpus "
+        "``n_observations``.",
+    )
+
+
+# =============================================================================
+class GoaltraceRoPEEncoder(nn.Module, Generic[TInput]):
+    """Encoder for Goaltrace task inputs using a RoPE-compatible front-end.
+
+    Encodes observation IDs, relational weights, current/goal flags into
+    schema tokens without adapter-level positional embeddings.  Sequence
+    position is left to the HRM's internal RoPE mechanism.
+    """
+
+    def __init__(  # ----------------------------------------------------------
+        self,
+        seq_length: int,
+        vocab_size: int,
+        hidden_size: int,
+        *,
+        input_factory: Callable[[Tensor, Tensor | None], TInput],
+        device: Device | None = None,
+        dtype: Dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self._seq_length = seq_length
+        self._hidden_size = hidden_size
+        self.E_obs = nn.Embedding(
+            vocab_size, hidden_size, device=device, dtype=dtype
+        )
+        self.f_weight = nn.Linear(
+            1, hidden_size, device=device, dtype=dtype
+        )
+        self.E_current = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        self.E_goal = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        self.embedding_scale = hidden_size**0.5
+        self._input_factory = input_factory
+        self.reset_parameters()
+
+    def reset_parameters(  # ------------------------------------------------------
+        self,
+    ) -> None:
+        """Initialize weights with small normal to avoid HRM input overdrive."""
+        nn.init.normal_(self.E_obs.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.f_weight.weight, mean=0.0, std=0.02)
+        nn.init.zeros_(self.f_weight.bias)
+        nn.init.normal_(self.E_current, mean=0.0, std=0.02)
+        nn.init.normal_(self.E_goal, mean=0.0, std=0.02)
+
+    def forward(  # -----------------------------------------------------------
+        self,
+        batch: GoaltraceTaskInput,
+    ) -> TInput:
+        """Encode Goaltrace task inputs without learned positional embeddings."""
+        obs_id = batch.observation_id.to(dtype=torch.int32)
+        B, N = obs_id.shape
+        D = self._hidden_size
+        S = self._seq_length
+
+        obs_emb = self.E_obs(obs_id)  # (B, N, D)
+        w_emb = self.f_weight(batch.weight.unsqueeze(-1))  # (B, N, D)
+        current_emb = self.E_current * batch.current_flag.unsqueeze(-1).float()
+        goal_emb = self.E_goal * batch.goal_flag.unsqueeze(-1).float()
+
+        content = obs_emb + w_emb + current_emb + goal_emb
+        encoded = self.embedding_scale * content  # (B, N, D)
+
+        # Pad to model slot capacity
+        if N < S:
+            pad = torch.zeros(
+                B, S - N, D, device=encoded.device, dtype=encoded.dtype
+            )
+            encoded = torch.cat([encoded, pad], dim=1)
+
+        return self._input_factory(encoded, None)
+
+
+# =============================================================================
+class GoaltraceLearnedEncoder(nn.Module, Generic[TInput]):
+    """Encoder for Goaltrace task inputs using learned positional embeddings."""
+
+    def __init__(  # ----------------------------------------------------------
+        self,
+        seq_length: int,
+        vocab_size: int,
+        hidden_size: int,
+        *,
+        input_factory: Callable[[Tensor, Tensor | None], TInput],
+        device: Device | None = None,
+        dtype: Dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self._seq_length = seq_length
+        self._hidden_size = hidden_size
+        self.E_obs = nn.Embedding(
+            vocab_size, hidden_size, device=device, dtype=dtype
+        )
+        self.f_weight = nn.Linear(
+            1, hidden_size, device=device, dtype=dtype
+        )
+        self.E_current = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        self.E_goal = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        self.E_pos = nn.Embedding(
+            seq_length, hidden_size, device=device, dtype=dtype
+        )
+        self.embedding_scale = 0.707106781 * (hidden_size**0.5)
+        self._input_factory = input_factory
+        self.reset_parameters()
+
+    def reset_parameters(  # ------------------------------------------------------
+        self,
+    ) -> None:
+        """Initialize weights with small normal to avoid HRM input overdrive."""
+        nn.init.normal_(self.E_obs.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.f_weight.weight, mean=0.0, std=0.02)
+        nn.init.zeros_(self.f_weight.bias)
+        nn.init.normal_(self.E_current, mean=0.0, std=0.02)
+        nn.init.normal_(self.E_goal, mean=0.0, std=0.02)
+        nn.init.normal_(self.E_pos.weight, mean=0.0, std=0.02)
+
+    def forward(  # -----------------------------------------------------------
+        self,
+        batch: GoaltraceTaskInput,
+    ) -> TInput:
+        """Encode Goaltrace task inputs with learned positional embeddings."""
+        obs_id = batch.observation_id.to(dtype=torch.int32)
+        B, N = obs_id.shape
+        D = self._hidden_size
+        S = self._seq_length
+
+        obs_emb = self.E_obs(obs_id)  # (B, N, D)
+        w_emb = self.f_weight(batch.weight.unsqueeze(-1))  # (B, N, D)
+        current_emb = self.E_current * batch.current_flag.unsqueeze(-1).float()
+        goal_emb = self.E_goal * batch.goal_flag.unsqueeze(-1).float()
+        content = obs_emb + w_emb + current_emb + goal_emb
+
+        positions = torch.arange(N, device=obs_id.device)
+        pos_emb = self.E_pos(positions).unsqueeze(0)  # (1, N, D)
+
+        encoded = self.embedding_scale * (content + pos_emb)  # (B, N, D)
+
+        # Pad to model slot capacity
+        if N < S:
+            pad = torch.zeros(
+                B, S - N, D, device=encoded.device, dtype=encoded.dtype
+            )
+            encoded = torch.cat([encoded, pad], dim=1)
+
+        return self._input_factory(encoded, None)
 
 
 # =============================================================================
@@ -135,17 +312,48 @@ def build_token_encoder(
     hidden_size: int,
     encoder_kind: Literal["learned", "rope"],
     input_factory: Callable[[Tensor, Tensor | None], TInput],
+    task_family: Literal["mazehard", "goaltrace"] = "mazehard",
     device: Device | None = None,
     dtype: Dtype | None = None,
-) -> MazeHardLearnedEncoder[TInput] | MazeHardRoPEEncoder[TInput]:
-    """Construct the MazeHard token encoder front-end for one HRM bridge."""
-    match encoder_kind:
-        case "learned":
-            encoder_cls = MazeHardLearnedEncoder[TInput]
-        case "rope":
-            encoder_cls = MazeHardRoPEEncoder[TInput]
-        case _:
-            raise ValueError(f"Unsupported encoder kind: {encoder_kind}")
+) -> (
+    MazeHardLearnedEncoder[TInput]
+    | MazeHardRoPEEncoder[TInput]
+    | GoaltraceLearnedEncoder[TInput]
+    | GoaltraceRoPEEncoder[TInput]
+):
+    """Construct a token encoder front-end for one HRM bridge.
+
+    Args:
+        seq_length: Model PFC slot capacity (S).
+        vocab_size: Token or observation vocabulary size.
+        hidden_size: Embedding dimension (must match PFC hidden size).
+        encoder_kind: ``"learned"`` adds adapter-level learned positional
+            embeddings; ``"rope"`` leaves position handling to the HRM's
+            internal RoPE mechanism.
+        input_factory: Callable that wraps encoded tensors into the
+            model-native input type (e.g. ``HRMInputV1``).
+        task_family: Which task family the encoder belongs to.
+    """
+    if task_family == "mazehard":
+        match encoder_kind:
+            case "learned":
+                encoder_cls = MazeHardLearnedEncoder[TInput]
+            case "rope":
+                encoder_cls = MazeHardRoPEEncoder[TInput]
+            case _:
+                raise ValueError(
+                    f"Unsupported encoder kind: {encoder_kind}"
+                )
+    else:
+        match encoder_kind:
+            case "learned":
+                encoder_cls = GoaltraceLearnedEncoder[TInput]
+            case "rope":
+                encoder_cls = GoaltraceRoPEEncoder[TInput]
+            case _:
+                raise ValueError(
+                    f"Unsupported encoder kind: {encoder_kind}"
+                )
 
     return encoder_cls(
         seq_length=seq_length,
@@ -192,17 +400,77 @@ class MazeHardMLPDecoder(nn.Module):
 
 
 # =============================================================================
+class GoaltraceMLPDecoder(nn.Module):
+    """Decoder mapping HRM schema-slot features to Goaltrace firing field."""
+
+    def __init__(  # ----------------------------------------------------------
+        self,
+        hidden_size: int,
+        num_observations: int,
+        *,
+        device: Device | None = None,
+        dtype: Dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self._num_observations = num_observations
+        self.field_head = nn.Linear(
+            hidden_size, 1, device=device, dtype=dtype
+        )
+        self.reset_parameters()
+
+    def reset_parameters(  # ------------------------------------------------------
+        self,
+    ) -> None:
+        """Initialize decoder head with small normal."""
+        nn.init.normal_(self.field_head.weight, mean=0.0, std=0.02)
+        nn.init.zeros_(self.field_head.bias)
+
+    def forward(  # -----------------------------------------------------------
+        self,
+        outputs: HasSchemaSlots,
+    ) -> GoaltraceTaskOutput:
+        """Decode the first ``num_observations`` schema slots into a
+        scalar firing field via linear head + sigmoid."""
+        N = self._num_observations
+        slots = outputs.schema_slots[:, :N, :]  # (B, N, D)
+        field_logits = self.field_head(slots).squeeze(-1)  # (B, N)
+        return GoaltraceTaskOutput(firing_field=torch.sigmoid(field_logits))
+
+
+# =============================================================================
 def build_token_decoder(
     *,
     hidden_size: int,
     vocab_size: int,
+    task_family: Literal["mazehard", "goaltrace"] = "mazehard",
+    num_observations: int | None = None,
     device: Device | None = None,
     dtype: Dtype | None = None,
-) -> MazeHardMLPDecoder:
-    """Construct the MazeHard token decoder head for one HRM bridge."""
-    return MazeHardMLPDecoder(
+) -> MazeHardMLPDecoder | GoaltraceMLPDecoder:
+    """Construct a token decoder head for one HRM bridge.
+
+    Args:
+        hidden_size: Embedding dimension (must match PFC hidden size).
+        vocab_size: Token vocabulary size (mazehard) or observation
+            vocabulary size (goaltrace).  Only used by mazehard.
+        task_family: Which task family the decoder belongs to.
+        num_observations: Required for ``task_family="goaltrace"``.
+            Number of observation nodes (N) to decode into field values.
+    """
+    if task_family == "mazehard":
+        return MazeHardMLPDecoder(
+            hidden_size=hidden_size,
+            vocab_size=vocab_size,
+            device=device,
+            dtype=dtype,
+        )
+    if num_observations is None:
+        raise ValueError(
+            "num_observations is required for goaltrace token decoder"
+        )
+    return GoaltraceMLPDecoder(
         hidden_size=hidden_size,
-        vocab_size=vocab_size,
+        num_observations=num_observations,
         device=device,
         dtype=dtype,
     )
@@ -911,10 +1179,14 @@ class SeqMazeOracleDecoder(nn.Module):
 __all__ = [
     "O_ID",
     "DEFAULT_MAZE_HARD_HRM_VOCAB_SIZE",
+    "GoaltraceHRMAdapterSettings",
+    "GoaltraceLearnedEncoder",
+    "GoaltraceMLPDecoder",
+    "GoaltraceRoPEEncoder",
     "MazeHardHRMAdapterSettings",
     "MazeHardLearnedEncoder",
-    "MazeHardRoPEEncoder",
     "MazeHardMLPDecoder",
+    "MazeHardRoPEEncoder",
     "HasSchemaSlots",
     "build_token_encoder",
     "build_token_decoder",

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from ehc_sn.adapters.hrm import (
     SeqMazeAdapterSettings,
-    SeqMazeHRMV1ACTTaskBinding,
     SeqMazeHRMV1BridgeAdapter,
     build_seqmaze_hrm_trace_meta,
 )
@@ -21,8 +20,12 @@ from ehc_sn.lightning.modules.act_supervised import (
 )
 from ehc_sn.metrics.routes.act import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
-from ehc_sn.objectives.act import ACTObjective, ACTObjectiveConfig
+from ehc_sn.objectives.composites.act import (
+    ACTSupervisedScorer,
+    ACTSupervisedScorerConfig,
+)
 from ehc_sn.tasks.seqmaze.evaluation import SeqMazeValidationScorer
+from ehc_sn.tasks.seqmaze.supervision import build_seqmaze_supervision
 from ehc_sn.traces.specs import HRM_HIDDEN_STATE_FIELDS
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
@@ -70,9 +73,8 @@ def build_seqmaze_hrm_v1_model(
         adapter_settings_cls=SeqMazeAdapterSettings,
         controller_cls=ACTController,
         controller_config_cls=ACTControllerConfig,
-        objective_cls=ACTObjective,
-        objective_config_cls=ACTObjectiveConfig,
-        task_binding_cls=lambda: SeqMazeHRMV1ACTTaskBinding(n_max=n_max),
+        objective_cls=ACTSupervisedScorer,
+        objective_config_cls=ACTSupervisedScorerConfig,
         optimizer_cls=AdamATan2,
         optimizer_config_cls=AdamATan2Config,
         trace_fields=(),
@@ -83,6 +85,7 @@ def build_seqmaze_hrm_v1_model(
         task_scorer_factory=lambda: SeqMazeValidationScorer(
             eos_id=eos_id, pad_id=pad_id, n_max=n_max
         ),
+        supervision_builder=build_seqmaze_supervision,
     )
     return ACTSupervisedModule(
         config=ACTSupervisedConfig(

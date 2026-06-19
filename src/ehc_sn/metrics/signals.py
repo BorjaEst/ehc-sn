@@ -1,6 +1,6 @@
 """Canonical scalar telemetry vocabulary for diagnostic and research logging.
 
-All telemetry producers (:meth:`~ehc_sn.objectives.act.ACTObjective.compute_signals`,
+All telemetry producers (:meth:`~ehc_sn.objectives.composites.act.ACTSupervisedScorer.compute_signals`,
 :meth:`~ehc_sn.objectives.hybrid_rl.HybridRLObjective.compute_step`,
 :meth:`~ehc_sn.objectives.tem.TEMObjective.compute_signals`) and consumers
 import from this module rather than using string literals. This ensures that
@@ -48,7 +48,7 @@ CROSS_PARADIGM_SIGNALS: frozenset[str] = frozenset({STEPS_MEAN, THETA_CLS_NORM})
 
 
 # =============================================================================
-# ACT-specific — produced by ACTObjective.compute_signals()
+# ACT-specific — produced by ACTSupervisedScorer
 # =============================================================================
 
 LOSS_Q_DONE: str = "loss_q_done"

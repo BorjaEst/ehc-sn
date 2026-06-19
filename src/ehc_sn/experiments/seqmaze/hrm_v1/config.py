@@ -7,7 +7,7 @@ Hierarchy (training):
     │   └── components: SeqMazeHRMV1ComponentConfigs
     │       ├── adapter: SeqMazeAdapterSettings
     │       ├── controller: ACTControllerConfig
-    │       └── objective: ACTObjectiveConfig
+    │       └── objective: ACTSupervisedScorerConfig
     ├── training: ACTSupervisedTrainingConfig
     ├── data: DatamoduleConfig
     ├── trainer: TrainerConfig
@@ -33,7 +33,7 @@ from ehc_sn.data.datamodules import DatamoduleConfig
 from ehc_sn.experiments._infra import CheckpointingConfig, TrainerConfig
 from ehc_sn.lightning.modules.act_supervised import ACTSupervisedTrainingConfig
 from ehc_sn.logging.tensorboard import LoggerSettings
-from ehc_sn.objectives.act import ACTObjectiveConfig
+from ehc_sn.objectives.composites.act import ACTSupervisedScorerConfig
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
 from ehc_sn.training.schedules import SchedulerConfig
 from ehc_sn.training.stabilization import TargetNetworkConfig
@@ -54,7 +54,7 @@ class SeqMazeHRMV1ComponentConfigs(BaseModel, extra="forbid"):
         ...,
         description="ACT deliberation controller configuration.",
     )
-    objective: ACTObjectiveConfig = Field(
+    objective: ACTSupervisedScorerConfig = Field(
         ...,
         description="ACT supervised objective configuration.",
     )

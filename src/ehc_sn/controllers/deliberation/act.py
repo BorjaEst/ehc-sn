@@ -100,25 +100,25 @@ class ACTHaltContinueScores:
 
 # =============================================================================
 def collapse_act_halt_continue_logits(  # -------------------------------------
-    q_logits: Tensor,
+    action_logits: Tensor,
     *,
     done_action: int,
 ) -> ACTHaltContinueScores:
-    """Collapse q_logits into halt vs continue scores.
+    """Collapse action logits into halt vs continue scores.
 
     Args:
-        q_logits: Shape ``(B, A)`` with ``A >= 2``.
+        action_logits: Shape ``(B, A)`` with ``A >= 2``.
         done_action: Index of the halt action; must be in ``[0, A)``.
 
     Returns:
         :class:`ACTHaltContinueScores` with ``halt_logit`` and ``continue_logit``.
     """
-    if q_logits.ndim != 2:
+    if action_logits.ndim != 2:
         raise ValueError(
             "collapse_act_halt_continue_logits expects shape (B, A), "
-            f"got {tuple(q_logits.shape)}."
+            f"got {tuple(action_logits.shape)}."
         )
-    n_actions = q_logits.shape[-1]
+    n_actions = action_logits.shape[-1]
     if n_actions < 2:
         raise ValueError(
             "collapse_act_halt_continue_logits requires at least 2 actions, "
@@ -130,8 +130,8 @@ def collapse_act_halt_continue_logits(  # -------------------------------------
         )
 
     non_done = [i for i in range(n_actions) if i != done_action]
-    halt_logit = q_logits[..., done_action]
-    continue_logit = q_logits[..., non_done].max(dim=-1).values
+    halt_logit = action_logits[..., done_action]
+    continue_logit = action_logits[..., non_done].max(dim=-1).values
     return ACTHaltContinueScores(
         halt_logit=halt_logit, continue_logit=continue_logit
     )
@@ -192,9 +192,9 @@ class ACTControllerStepOutput(DetachMixin):
         return self.backbone_output.task
 
     @property
-    def q_logits(self) -> Tensor:
-        """Return Q logits for objective-facing ACT contracts."""
-        return self.backbone_output.control.q_logits
+    def action_logits(self) -> Tensor:
+        """Return action logits for objective-facing ACT contracts."""
+        return self.backbone_output.control.action_logits
 
 
 # =============================================================================
@@ -271,9 +271,9 @@ class ACTController[ModelState](
         """Derive the halted mask from q_logits using the shared collapse
         contract.
         """
-        q_logits = backbone_output.control.q_logits.detach()
+        action_logits = backbone_output.control.action_logits.detach()
         scores = collapse_act_halt_continue_logits(
-            q_logits, done_action=self.config.done_action
+            action_logits, done_action=self.config.done_action
         )
 
         max_step_done = steps >= self.config.max_halt_steps

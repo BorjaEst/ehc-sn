@@ -35,7 +35,7 @@ from ehc_sn.data.datamodules import DatamoduleConfig
 from ehc_sn.experiments._infra import CheckpointingConfig, TrainerConfig
 from ehc_sn.lightning.modules.actor_critic import ActorCriticTrainingConfig
 from ehc_sn.logging.tensorboard import LoggerSettings
-from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig
+from ehc_sn.objectives.composites.hybrid_rl import HybridRLLossConfig
 from ehc_sn.tasks.seqmaze.runtime import SeqMazeRuntimeConfig
 from ehc_sn.training.hrm import ValidationRuntimeConfig
 from ehc_sn.training.schedules import SchedulerConfig

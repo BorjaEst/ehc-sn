@@ -20,14 +20,9 @@ import torch.nn.functional as F
 from pydantic import BaseModel, Field, model_validator
 from torch import Tensor, nn
 
-from ehc_sn.loss.consistency import LatentRelation
+from ehc_sn.loss.consistency import LatentCode, LatentRelation
 from ehc_sn.models.tem.core.tem_base import GridCodes, PlaceCodes, PredCodes
 from ehc_sn.modules.autoencoder import TwoHotEncoder
-from ehc_sn.objectives.tem import (
-    GRID_TRANSITION_RELATION,
-    PLACE_SENSORY_RELATION,
-    PLACE_TRANSITION_RELATION,
-)
 from ehc_sn.tasks.arena.contracts import ArenaTaskOutput
 from ehc_sn.types import Batch, MultiScaleCode
 from ehc_sn.utils.detach import DetachMixin
@@ -104,11 +99,12 @@ class ArenaTEMAdapterSettings(BaseModel, extra="forbid"):
 # Shared bridge types — diagnostics and output
 # =============================================================================
 @dataclass(frozen=True)
-class ArenaTEMDiagnostics(DetachMixin):
+class TEMLearningState(DetachMixin):
     """TEM-family diagnostic surface for controller and objective consumption.
 
-    Satisfies :class:`~ehc_sn.objectives.tem.TEMStepOutput` via computed
-    properties that map bridge-native fields to the protocol's attribute names.
+    Carries typed latent-relation fields (grid transition, place transition,
+    place sensory) and regularization-code overrides.  ``TEMObjective`` reads
+    these fields directly instead of looking up string keys in a dictionary.
 
     Used by both TEM v1 and TEM v2 bridge adapters.
     """
@@ -117,6 +113,15 @@ class ArenaTEMDiagnostics(DetachMixin):
     grid_codes: GridCodes  # (prior, post)
     place_codes: PlaceCodes  # (posterior, prior, retrieved, sensory)
     pred_codes: PredCodes  # (inference, retrieved, ancestral)
+
+    # Typed latent relations — consumed directly by TEMObjective.
+    grid_transition: LatentRelation
+    place_transition: LatentRelation
+    place_sensory: LatentRelation | None
+
+    # Typed regularization codes — consumed directly by TEMObjective.
+    grid_reg_code: LatentCode
+    place_reg_code: LatentCode
 
     # -- TEMStepOutput protocol surface -----------------------------------------
 
@@ -135,28 +140,6 @@ class ArenaTEMDiagnostics(DetachMixin):
         """Observation logits from the HPC ancestral (structural prior) pathway."""
         return self.obs_logits[2]
 
-    @property
-    def latent_relations(self) -> dict[str, LatentRelation]:
-        """Named latent consistency relations expected by :class:`~ehc_sn.objectives.tem.TEMObjective`."""
-        relations: dict[str, LatentRelation] = {
-            GRID_TRANSITION_RELATION: LatentRelation(
-                lhs=self.grid_codes.post, rhs=self.grid_codes.prior
-            ),
-            PLACE_TRANSITION_RELATION: LatentRelation(
-                lhs=self.place_codes.post, rhs=self.place_codes.recall
-            ),
-        }
-        if self.place_codes.sensory is not None:
-            relations[PLACE_SENSORY_RELATION] = LatentRelation(
-                lhs=self.place_codes.post, rhs=self.place_codes.sensory
-            )
-        return relations
-
-    @property
-    def reg_terms(self) -> None:
-        """No regularization-code overrides; TEMObjective falls back to relation codes."""
-        return None
-
 
 @dataclass(frozen=True)
 class ArenaTEMBridgeOutput(DetachMixin):
@@ -166,7 +149,7 @@ class ArenaTEMBridgeOutput(DetachMixin):
     """
 
     task: ArenaTaskOutput
-    tem: ArenaTEMDiagnostics
+    tem: TEMLearningState
 
     @property
     def obs_logits(self) -> tuple[Tensor, Tensor, Tensor]:
@@ -189,14 +172,29 @@ class ArenaTEMBridgeOutput(DetachMixin):
         return self.tem.logits_path
 
     @property
-    def latent_relations(self) -> dict[str, LatentRelation]:
-        """Expose TEM latent-consistency relations on the bridge output."""
-        return self.tem.latent_relations
+    def grid_transition(self) -> LatentRelation:
+        """Return grid transition relation."""
+        return self.tem.grid_transition
 
     @property
-    def reg_terms(self) -> None:
-        """Expose optional TEM regularization-code overrides on the bridge output."""
-        return self.tem.reg_terms
+    def place_transition(self) -> LatentRelation:
+        """Return place transition relation."""
+        return self.tem.place_transition
+
+    @property
+    def place_sensory(self) -> LatentRelation | None:
+        """Return place sensory relation."""
+        return self.tem.place_sensory
+
+    @property
+    def grid_reg_code(self) -> LatentCode:
+        """Return grid regularization code."""
+        return self.tem.grid_reg_code
+
+    @property
+    def place_reg_code(self) -> LatentCode:
+        """Return place regularization code."""
+        return self.tem.place_reg_code
 
 
 # =============================================================================
@@ -329,11 +327,16 @@ def build_arena_observation_encoder(  # ---------------------------------------
             return ArenaTwoHotEncoder(observation_dim, feature_dim, n_freq)
         case "learned":
             return ArenaLearnedEncoder(
-                observation_dim, feature_dim, n_freq,
-                device=device, dtype=dtype,
+                observation_dim,
+                feature_dim,
+                n_freq,
+                device=device,
+                dtype=dtype,
             )
         case _:
-            raise ValueError(f"Unsupported arena encoder kind: {config.kind!r}.")
+            raise ValueError(
+                f"Unsupported arena encoder kind: {config.kind!r}."
+            )
 
 
 # =============================================================================

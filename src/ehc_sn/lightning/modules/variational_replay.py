@@ -57,8 +57,13 @@ from ehc_sn.metrics.rollout import (
     update_metric_collection_from_evaluated_chunk,
 )
 from ehc_sn.metrics.step_metrics import StepMetrics
-from ehc_sn.objectives.tem import TEMObjective, TEMObjectiveConfig
-from ehc_sn.rollouts.runtime import RecurrentRunner
+from ehc_sn.objectives.composites.tem import (
+    TEMObjective,
+    TEMObjectiveConfig,
+    TEMScoringContext,
+    TEMScoringInput,
+)
+from ehc_sn.rollouts.runtime import RecurrentRunner, StepRecord
 from ehc_sn.rollouts.sources import DemandDrivenReplaySource
 from ehc_sn.tasks.arena.runtime import (
     ARENA_REPLAY_REQUIRED_KEYS,
@@ -115,7 +120,19 @@ class VariationalReplayBindings:
     trace_fields: tuple
     build_trace_meta_fn: Callable
     replay_runtime_factory: Callable[[], object]
-    task_binding_factory: Callable[[], object]
+    supervision_builder: Callable[[Batch], object]
+    """Task-owned supervision builder.
+
+    Signature: ``(executed_batch) -> supervision``, where supervision is a
+    task-owned dataclass with ``.observation_id`` (``Tensor (B,)`` int64)
+    and ``.protocol_mask`` (``Tensor (B,)`` bool).
+    """
+    scoring_supervision_builder: Callable[[Any], object]
+    """Translates task-owned supervision into objective-facing TEMSupervision.
+
+    Signature: ``(task_supervision) -> TEMSupervision``.  Injected by the
+    experiment binding to keep the regime module task-agnostic.
+    """
 
 
 # =============================================================================
@@ -393,12 +410,46 @@ class VariationalReplayModule(L.LightningModule):
                 "execution config is required for TEM validation. "
                 "Pass execution= to VariationalReplayModule constructor."
             )
-        seed = self._execution.validation.seed
-        if seed is None:
-            raise ValueError(
-                "TEM evaluation requires execution.validation.seed to be set."
-            )
-        return int(seed) + int(batch_idx)
+
+    # ── Scoring input builder ──────────────────────────────────────────────
+
+    def _current_scoring_context(self) -> TEMScoringContext:
+        """Resolve scheduled algorithm parameters for the current step."""
+        runtime = self._apply_runtime(self.global_step)
+        return TEMScoringContext(
+            temperature=min(
+                (self.global_step + 1)
+                / float(self._component_configs.objective.temp_it),
+                1.0,
+            ),
+            p2g_use=runtime.p2g_use,
+            g_cell_reg=1.0
+            - min(
+                (self.global_step + 1)
+                / float(self._component_configs.objective.g_reg_it),
+                1.0,
+            ),
+            p_cell_reg=1.0
+            - min(
+                (self.global_step + 1)
+                / float(self._component_configs.objective.p_reg_it),
+                1.0,
+            ),
+        )
+
+    def _build_scoring_input(self, record: StepRecord) -> TEMScoringInput:
+        """Build per-record scoring input from the executed frame."""
+        frame = record.executed_frame
+        if frame is None:
+            raise ValueError("TEM scoring requires an executed frame.")
+        task_supervision = self._bindings.supervision_builder(frame)
+        objective_supervision = self._bindings.scoring_supervision_builder(
+            task_supervision
+        )
+        return TEMScoringInput(
+            supervision=objective_supervision,
+            context=self._current_scoring_context(),
+        )
 
     def _train_chunk_steps(self) -> int:
         """Return the number of training chunk steps from config."""
@@ -451,10 +502,8 @@ class VariationalReplayModule(L.LightningModule):
         controller = ReplayTrajectoryController(
             self.adapter, self._component_configs.controller, runtime
         )
-        task_binding = self._bindings.task_binding_factory()
         objective = TEMObjective(
             self._component_configs.objective,
-            task_binding=task_binding,
         )
         self.train_controller = controller
         self.train_objective = objective
@@ -469,10 +518,8 @@ class VariationalReplayModule(L.LightningModule):
         self.eval_controller = ReplayTrajectoryController(
             self.adapter, self._component_configs.controller, eval_runtime
         )
-        eval_task_binding = self._bindings.task_binding_factory()
         self.eval_objective = TEMObjective(
             self._component_configs.objective,
-            task_binding=eval_task_binding,
         )
 
     def _ensure_episode_source(  # --------------------------------------------
@@ -594,9 +641,6 @@ class VariationalReplayModule(L.LightningModule):
             admitted_before = 0
 
         source = self._train_source
-        objective_options = train_objective.runtime_loss_options(
-            self.global_step, p2g_use=runtime.p2g_use
-        )
         evaluation = score_rollout_streaming(
             runner=self._train_runner,
             source=source,
@@ -604,7 +648,7 @@ class VariationalReplayModule(L.LightningModule):
             carry=self._train_carry,
             objective=train_objective,
             max_rollout_steps=self._train_chunk_steps(),
-            objective_options=objective_options,
+            scoring_input_builder=self._build_scoring_input,
             observed_step_observer=make_observed_step_metric_observer(
                 self.train_metrics, self._step_routes
             ),
@@ -804,9 +848,6 @@ class VariationalReplayModule(L.LightningModule):
             static_data=self._diagnostic_params(),
         )
 
-        objective_options = eval_objective.runtime_loss_options(
-            self.global_step, p2g_use=runtime.p2g_use
-        )
         result = execute_replay_evaluation_batch(
             case=case,
             runner=self._eval_runner,
@@ -824,7 +865,7 @@ class VariationalReplayModule(L.LightningModule):
                 else None
             ),
             runner_options={"allow_halt": True, "explore": False},
-            objective_options=objective_options,
+            scoring_input_builder=self._build_scoring_input,
             trace_request=trace_request,
         )
 

@@ -3,8 +3,8 @@
 Goaltrace is a single-step field prediction task with no interactive
 environment for online rollouts.  The production training path uses
 supervised single-step forward passes (``ACTSupervisedModule`` with
-``simple_supervised=True``), and the ACT deliberation path uses
-``ACTController`` with ``ContinuousFieldObjective`` — neither path
+``single_step=True``), and the ACT deliberation path uses
+``ACTController`` with ``ACTSupervisedScorer`` (field modality) — neither path
 requires an interactive environment.
 
 This module exists for contract symmetry with other task families that

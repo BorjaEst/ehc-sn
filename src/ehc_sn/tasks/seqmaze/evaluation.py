@@ -237,7 +237,7 @@ class SeqMazeValidationScorer:
         from ehc_sn.tasks.seqmaze.runtime import extract_seqmaze_targets
 
         last_step = result.evaluated.last_step
-        objective_step = last_step.outputs  # ACTObjectiveStep
+        objective_step = last_step.outputs  # ACTSupervisedStep
         step_output = objective_step.outputs  # ACTStepOutput | None
         if step_output is None:
             raise RuntimeError(

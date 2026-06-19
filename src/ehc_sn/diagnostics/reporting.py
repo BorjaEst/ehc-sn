@@ -22,6 +22,7 @@ from ehc_sn.diagnostics.hrm_dynamics import (
     compute_hrm_dynamics_metrics_from_trace,
 )
 from ehc_sn.eval.artifacts import load_artifact_run_cases
+from ehc_sn.traces.keys import PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -74,7 +75,7 @@ def compute_hrm_dynamics_report_rows(
 
     if not per_case:
         raise ValueError(
-            f"No case traces contained pfc/z_H and pfc/z_L "
+            f"No case traces contained {PFC_TRACE_KEY_Z_H} and {PFC_TRACE_KEY_Z_L} "
             f"in artifact: {artifact_dir}"
         )
 

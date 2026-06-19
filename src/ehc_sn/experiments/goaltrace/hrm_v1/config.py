@@ -5,9 +5,9 @@ Hierarchy (training):
     GoaltraceHRMV1TrainingExperimentConfig
     ├── model: GoaltraceHRMV1ModelConfig
     │   └── components: GoaltraceHRMV1ComponentConfigs
-    │       ├── adapter: GoaltraceAdapterSettings
+    │       ├── adapter: GoaltraceHRMAdapterSettings
     │       ├── controller: ACTControllerConfig
-    │       └── objective: ContinuousFieldObjectiveConfig
+    │       └── objective: ACTSupervisedScorerConfig
     ├── training: ACTSupervisedTrainingConfig
     ├── data: DatamoduleConfig
     ├── trainer: TrainerConfig
@@ -22,7 +22,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from ehc_sn.adapters.hrm import GoaltraceAdapterSettings
+from ehc_sn.adapters.hrm import GoaltraceHRMAdapterSettings
 from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.datamodules import DatamoduleConfig
 from ehc_sn.experiments._infra import CheckpointingConfig, TrainerConfig
@@ -30,7 +30,7 @@ from ehc_sn.lightning.modules.act_supervised import (
     ACTSupervisedTrainingConfig,
 )
 from ehc_sn.logging.tensorboard import LoggerSettings
-from ehc_sn.objectives.continuous_field import ContinuousFieldObjectiveConfig
+from ehc_sn.objectives.composites.act import ACTSupervisedScorerConfig
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
 from ehc_sn.training.schedules import SchedulerConfig
 from ehc_sn.training.stabilization import TargetNetworkConfig
@@ -43,19 +43,19 @@ from ehc_sn.training.stabilization import TargetNetworkConfig
 class GoaltraceHRMV1ComponentConfigs(BaseModel, extra="forbid"):
     """Component-level config for Goaltrace × HRM-v1."""
 
-    adapter: GoaltraceAdapterSettings = Field(
+    adapter: GoaltraceHRMAdapterSettings = Field(
         ...,
         description="Goaltrace adapter settings for HRM v1.",
     )
     controller: ACTControllerConfig = Field(
         ...,
         description="ACT deliberation controller configuration "
-        "(bypassed when simple_supervised=true).",
+        "(bypassed when single_step=true).",
     )
-    objective: ContinuousFieldObjectiveConfig = Field(
+    objective: ACTSupervisedScorerConfig = Field(
         ...,
-        description="Continuous field objective configuration "
-        "(bypassed when simple_supervised=true).",
+        description="ACTSupervisedScorer configuration "
+        "(bypassed when single_step=true).",
     )
 
 
@@ -105,9 +105,9 @@ class GoaltraceHRMV1TrainingExperimentConfig(BaseModel, extra="forbid"):
     supervised_only_warmup_steps: int = Field(
         default=0,
         description="Optimizer steps with learned halting disabled. "
-        "Ignored when simple_supervised=true.",
+        "Ignored when single_step=true.",
     )
-    simple_supervised: bool = Field(
+    single_step: bool = Field(
         default=True,
         description="Bypass ACT rollout and use a single forward pass with "
         "MSE field loss.  Set to false after implementing ACT deliberation "

@@ -10,10 +10,8 @@ from torch import Tensor
 from ehc_sn.tasks.arena.evaluation import coerce_observation_ids
 from ehc_sn.tasks.mazehard.runtime import PATH_ID as _O_ID
 from ehc_sn.traces import TraceField, TraceValue
+from ehc_sn.traces.keys import MAZEHARD_META_KEY_GT_OVERLAY
 from ehc_sn.types import Batch
-
-TARGET_SOLUTION_OVERLAY_META_KEY = "target/solution_overlay"
-
 
 # =============================================================================
 # Minimal typed context for MazeHard+EHP actor-critic trace getters
@@ -52,7 +50,7 @@ def _get_maze_hard_solution_overlay_actor_critic(
 
 def build_mazehard_ehc_trace_meta(batch: Batch) -> dict[str, object]:
     """Return out-of-band trace metadata required by MazeHard+EHP figures."""
-    root_key, leaf_key = TARGET_SOLUTION_OVERLAY_META_KEY.split("/", maxsplit=1)
+    root_key, leaf_key = MAZEHARD_META_KEY_GT_OVERLAY.split("/", maxsplit=1)
     return {
         root_key: {
             leaf_key: (batch["labels"] == _O_ID).to(torch.uint8),
@@ -174,7 +172,6 @@ def select_arena_ehc_trace_fields(
 __all__ = [
     "build_mazehard_ehc_trace_meta",
     "MAZE_HARD_EHP_ACTOR_CRITIC_TRACE_FIELDS",
-    "TARGET_SOLUTION_OVERLAY_META_KEY",
     "ARENA_EHP_TRACE_FIELDS",
     "ARENA_EHP_TRACE_WORLD_OBS_ID",
     "ARENA_EHP_TRACE_IS_REVISIT",

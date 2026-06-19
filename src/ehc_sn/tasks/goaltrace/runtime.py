@@ -25,36 +25,48 @@ GOALTRACE_BATCH_KEYS: Final[tuple[str, ...]] = (
     "goal_flag",
     "node_mask",
     "target_field",
+    "successor_indices",
+    "successor_mask",
 )
+"""All keys present in a collated goaltrace batch.
+
+Distinct from :data:`GOALTRACE_MODEL_INPUT_CHANNELS` which is the
+adapter-facing subset.  Keys here also include supervision targets
+and evaluation metadata.
+"""
 
 
 # =============================================================================
-def _validate_goaltrace_batch(batch: Batch) -> None:
-    """Ensure all required keys are present."""
-    missing = [key for key in GOALTRACE_BATCH_KEYS if key not in batch]
-    if missing:
-        raise KeyError(
-            "Goaltrace batch is missing required keys: "
-            + ", ".join(missing)
-            + "."
-        )
+def _require_key(batch: Batch, key: str) -> None:
+    """Raise ``KeyError`` if *key* is absent from *batch*."""
+    if key not in batch:
+        raise KeyError(f"Goaltrace batch is missing required key: {key!r}.")
 
 
 # =============================================================================
 def extract_goaltrace_task_input(batch: Batch) -> GoaltraceTaskInput:
     """Extract goaltrace task input fields from one generic batch mapping.
 
+    Explicitly projects only the five model-input keys.  Extra batch keys
+    (targets, evaluation metadata) are silently ignored.
+
     Args:
-        batch: Dict mapping channel names to tensors.  Must contain all
-            keys in :data:`GOALTRACE_BATCH_KEYS`.
+        batch: Dict mapping channel names to tensors.
 
     Returns:
         Typed :class:`GoaltraceTaskInput` with dtype coercion applied.
 
     Raises:
-        KeyError: When any required key is absent from *batch*.
+        KeyError: When any model-input key is absent from *batch*.
     """
-    _validate_goaltrace_batch(batch)
+    for k in (
+        "observation_id",
+        "weight",
+        "current_flag",
+        "goal_flag",
+        "node_mask",
+    ):
+        _require_key(batch, k)
     return GoaltraceTaskInput(
         observation_id=batch["observation_id"].to(dtype=torch.int64),
         weight=batch["weight"].to(dtype=torch.float32),

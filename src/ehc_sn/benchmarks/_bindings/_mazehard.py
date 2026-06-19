@@ -9,7 +9,6 @@ import torch
 
 from ehc_sn.adapters.hrm import (
     MazeHardHRMAdapterSettings,
-    MazeHardHRMV1ACTTaskBinding,
     MazeHardHRMV1BridgeAdapter,
     MazeHardHRMV2BridgeAdapter,
 )
@@ -28,7 +27,10 @@ from ehc_sn.controllers.deliberation.act import (
     ACTController,
     ACTControllerConfig,
 )
-from ehc_sn.objectives.act import ACTObjective, ACTObjectiveConfig
+from ehc_sn.objectives.composites.act import (
+    ACTSupervisedScorer,
+    ACTSupervisedScorerConfig,
+)
 from ehc_sn.rollouts.runtime import RecurrentRunner
 from ehc_sn.tasks.mazehard.providers import MazeHardReplayProvider
 
@@ -59,7 +61,7 @@ class MazeHardCaseAggregate:
 class _MazeHardACTControlOutput:
     """ACT control payload translated from HRM v2 policy outputs."""
 
-    q_logits: torch.Tensor
+    action_logits: torch.Tensor
 
 
 # =============================================================================
@@ -89,7 +91,9 @@ class _MazeHardHRMV2ACTBridgeAdapter:
         output, next_state = self._bridge(batch, state)
         translated = _MazeHardACTBackboneOutput(
             task=output.task,
-            control=_MazeHardACTControlOutput(q_logits=output.policy.q_values),
+            control=_MazeHardACTControlOutput(
+                action_logits=output.policy.q_values
+            ),
         )
         return translated, next_state
 
@@ -169,11 +173,11 @@ class MazeHardDelibHRMV1ModelComparisonBinding(ModelComparisonBinding):
             return ModelComparisonExecution(
                 bridge=bridge,
                 controller=controller,
-                objective=ACTObjective(
-                    ACTObjectiveConfig(
-                        token_loss=recipe.adaptation.objective_token_loss
+                objective=ACTSupervisedScorer(
+                    ACTSupervisedScorerConfig(
+                        task_modality="token",
+                        token_loss=recipe.adaptation.objective_token_loss,
                     ),
-                    task_binding=MazeHardHRMV1ACTTaskBinding(),
                 ),
                 runner=RecurrentRunner(),
                 bridge_parameter_groups=parameter_groups,

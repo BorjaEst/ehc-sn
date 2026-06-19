@@ -106,12 +106,12 @@ class HRMOutputV1:
     Attributes:
         theta_summary: Controller summary vector with shape ``(B, D)``.
         schema_slots: Schema-slot bank with shape ``(B, N, D)``.
-        q_logits: Control logits consumed by ACT-style controllers.
+        action_logits: Policy logits for ACT action selection (halt/continue).
     """
 
     theta_summary: Tensor
     schema_slots: Tensor
-    q_logits: Tensor
+    action_logits: Tensor
 
 
 # =============================================================================
@@ -195,7 +195,7 @@ class HRModelV1(nn.Module):
         output = HRMOutputV1(
             theta_summary=pfc_out.summary,
             schema_slots=pfc_out.workspace.family("schema"),
-            q_logits=pfc_out.q_values,
+            action_logits=pfc_out.q_values,
         )
 
         return output, state

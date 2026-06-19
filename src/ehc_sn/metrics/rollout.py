@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 from torchmetrics import MetricCollection
 
 from ehc_sn.metrics.adapter import Route, update_metrics_from_step
-from ehc_sn.objectives.rollout import EvaluatedChunk, ObservedStep
+from ehc_sn.rollouts.materialization import EvaluatedChunk, ObservedStep
 
 
 # =============================================================================

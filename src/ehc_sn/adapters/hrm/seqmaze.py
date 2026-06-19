@@ -61,7 +61,7 @@ class SeqMazeProbeBridgeOutput:
 class SeqMazeHRMV1ControlOutput:
     """ACT control readouts emitted by the SeqMaze HRM v1 bridge."""
 
-    q_logits: Tensor
+    action_logits: Tensor
 
 
 @dataclass(frozen=True)
@@ -237,7 +237,9 @@ class SeqMazeHRMV1BridgeAdapter(nn.Module):
                 oracle_path_logits=oracle_logits,
                 edge_logits=edge_logits,
             ),
-            control=SeqMazeHRMV1ControlOutput(q_logits=outputs.q_logits),
+            control=SeqMazeHRMV1ControlOutput(
+                action_logits=outputs.action_logits
+            ),
         )
 
     def forward(

@@ -15,7 +15,6 @@ from .mazehard import (
     MazeHardEHCV1PolicyOutput,
     MazeHardEHCV1TaskDecoder,
 )
-from .objectives import ArenaEHCTaskBinding, MazeHardEHCV1HybridTaskBinding
 from .traces import (
     ARENA_EHP_TRACE_FIELDS,
     ARENA_EHP_TRACE_IS_REVISIT,
@@ -35,7 +34,6 @@ __all__ = [
     "MazeHardEHCV1BridgeOutput",
     "MazeHardEHCV1CriticOutput",
     "MazeHardEHCV1Encoder",
-    "MazeHardEHCV1HybridTaskBinding",
     "MazeHardEHCV1PolicyOutput",
     "MazeHardEHCV1TaskDecoder",
     "MAZE_HARD_EHP_ACTOR_CRITIC_TRACE_FIELDS",
@@ -43,7 +41,6 @@ __all__ = [
     "ArenaEHCAdapterSettings",
     "ArenaEHCBridgeOutput",
     "ArenaEHCDiagnostics",
-    "ArenaEHCTaskBinding",
     "ArenaEHCV1BridgeAdapter",
     "ARENA_EHP_TRACE_FIELDS",
     "ARENA_EHP_TRACE_IS_REVISIT",

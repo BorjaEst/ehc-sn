@@ -20,8 +20,8 @@ from typing import Any, Literal, Protocol, TypeAlias
 from pydantic import BaseModel, Field, model_validator
 
 from ehc_sn.loss.cross_entropy import LossType
-from ehc_sn.objectives.rollout import RolloutScorer
 from ehc_sn.rollouts.runtime import Runner
+from ehc_sn.rollouts.scoring import RolloutScorer
 from ehc_sn.tasks.arena.evaluation import ArenaScoreReport
 from ehc_sn.tasks.arena.runtime import (
     ARENA_REPLAY_OPTIONAL_KEYS,

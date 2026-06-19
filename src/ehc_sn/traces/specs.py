@@ -171,22 +171,22 @@ COMMON_TRACE_FIELDS: tuple[TraceField, ...] = (
 
 
 # =============================================================================
-# ACT-specific — produced by ACTObjective / ACTController
+# ACT-specific — produced by ACTSupervisedScorer / ACTController
 # =============================================================================
 
 
-def _get_q_logits_act(ctx: _ACTTraceContext) -> TraceValue:
-    """Q-logits over halt/continue actions from the raw ACT controller step."""
-    logits_q: Tensor = ctx.outputs.q_logits  # (B, n_actions)
+def _get_action_logits_act(ctx: _ACTTraceContext) -> TraceValue:
+    """Action logits over halt/continue from the raw ACT controller step."""
+    logits_q: Tensor = ctx.outputs.action_logits  # (B, n_actions)
     return logits_q.detach()
 
 
-TRACE_Q_LOGITS_ACT = TraceField(
-    name="value/q_logits",
-    get=_get_q_logits_act,
+TRACE_ACTION_LOGITS_ACT = TraceField(
+    name="value/action_logits",
+    get=_get_action_logits_act,
 )
 
-ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_Q_LOGITS_ACT,)
+ACT_TRACE_FIELDS: tuple[TraceField, ...] = (TRACE_ACTION_LOGITS_ACT,)
 
 
 # =============================================================================

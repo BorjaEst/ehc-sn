@@ -33,7 +33,7 @@ Both zero-bootstrap paths share :func:`_zero_bootstrap_batch`.
 
 from __future__ import annotations
 
-from typing import Any, Protocol, cast
+from typing import Any, Callable
 
 import torch
 from torch import Tensor
@@ -47,14 +47,14 @@ from ehc_sn.controllers.contracts.value_control import (
     ValueControlInteractionRecord,
     ValueControlRolloutBackbone,
 )
-from ehc_sn.objectives.hybrid_rl import (
+from ehc_sn.objectives.composites.hybrid_rl import (
     HybridRLObjective,
     HybridRLObjectiveStep,
     HybridValueBatch,
-    HybridValueObjectiveBinding,
 )
-from ehc_sn.objectives.rollout import EvaluatedChunk, score_rollout_chunk
+from ehc_sn.rollouts.materialization import EvaluatedChunk
 from ehc_sn.rollouts.runtime import RolloutChunk, StepRecord
+from ehc_sn.rollouts.scoring import score_rollout_chunk
 from ehc_sn.types import Batch
 
 
@@ -77,16 +77,19 @@ class TD0ActorCriticBatchBuilder:
         backbone: ValueControlRolloutBackbone,
         runtime: OnlineBootstrapRuntime | None,
         gamma: float,
-        task_binding: HybridValueObjectiveBinding,
+        supervision_builder: Callable[[Any], object],
+        token_weight_builder: Callable[[Any], Tensor] | None = None,
     ) -> None:
         """Initialize the batch builder with a backbone for bootstrap value
         computation, a runtime for bootstrap value extraction, a discount
-        factor gamma, and a task binding for task-specific field extraction.
+        factor gamma, a supervision builder for task-specific field extraction,
+        and an optional token weight builder.
         """
         self._backbone = backbone
         self._runtime = runtime
         self._gamma = gamma
-        self._task_binding = task_binding
+        self._supervision_builder = supervision_builder
+        self._token_weight_builder = token_weight_builder
 
     @torch.no_grad()
     def compute_bootstrap_value(  # -------------------------------------------
@@ -162,14 +165,16 @@ class TD0ActorCriticBatchBuilder:
         returns = reward + self._gamma * bootstrap_value * (1.0 - done)
 
         token_weights = None
-        if use_token_weights:
-            if not hasattr(self._task_binding, "extract_token_weights"):
-                raise RuntimeError(
-                    "TD0ActorCriticBatchBuilder: use_token_weights=True but the "
-                    "task binding does not implement extract_token_weights."
-                )
-            token_weight_binding = cast(_TokenWeightBinding, self._task_binding)
-            token_weights = token_weight_binding.extract_token_weights(record)
+        if use_token_weights and self._token_weight_builder is not None:
+            token_weights = self._token_weight_builder(record)
+
+        supervision = self._supervision_builder(record)
+        task_logits = getattr(supervision, "task_logits", None)
+        if task_logits is None:
+            raise RuntimeError(
+                "TD0ActorCriticBatchBuilder.assemble_batch: supervision "
+                "object has no 'task_logits' attribute."
+            )
 
         return HybridValueBatch(
             actions=record.sampled_action,
@@ -179,8 +184,8 @@ class TD0ActorCriticBatchBuilder:
             terminated=record.terminated,
             truncated=record.truncated,
             state_values=state_values,
-            task_logits=self._task_binding.extract_task_logits(record),
-            labels=self._task_binding.extract_labels(record),
+            task_logits=task_logits,
+            labels=supervision.labels,
             token_weights=token_weights,
             bootstrap_value=bootstrap_value,
             returns=returns,
@@ -261,7 +266,8 @@ class TD0ActorCriticBatchBuilder:
             record,
             snapshot.steps,
             snapshot.halted,
-            self._task_binding,
+            self._supervision_builder,
+            token_weight_builder=self._token_weight_builder,
             use_token_weights=use_token_weights,
         )
 
@@ -271,7 +277,8 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
     ir: ValueControlInteractionRecord,
     steps: Tensor,
     halted: Tensor,
-    task_binding: HybridValueObjectiveBinding,
+    supervision_builder: Callable[[Any], object],
+    token_weight_builder: Callable[[Any], Tensor] | None = None,
     *,
     use_token_weights: bool = False,
 ) -> HybridValueBatch:
@@ -287,14 +294,15 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
     state_values = ir.state_value.squeeze(-1)
     returns = reward  # zero bootstrap collapses the discount term
     token_weights = None
-    if use_token_weights:
-        if not hasattr(task_binding, "extract_token_weights"):
-            raise RuntimeError(
-                "Zero-bootstrap batch: use_token_weights=True but the task "
-                "binding does not implement extract_token_weights."
-            )
-        token_weight_binding = cast(_TokenWeightBinding, task_binding)
-        token_weights = token_weight_binding.extract_token_weights(ir)
+    if use_token_weights and token_weight_builder is not None:
+        token_weights = token_weight_builder(ir)
+
+    supervision = supervision_builder(ir)
+    task_logits = getattr(supervision, "task_logits", None)
+    if task_logits is None:
+        raise RuntimeError(
+            "_zero_bootstrap_batch: supervision object has no 'task_logits' attribute."
+        )
 
     return HybridValueBatch(
         actions=ir.sampled_action,
@@ -304,8 +312,8 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
         terminated=ir.terminated,
         truncated=ir.truncated,
         state_values=state_values,
-        task_logits=task_binding.extract_task_logits(ir),
-        labels=task_binding.extract_labels(ir),
+        task_logits=task_logits,
+        labels=supervision.labels,
         token_weights=token_weights,
         bootstrap_value=torch.zeros_like(reward),
         returns=returns,
@@ -334,13 +342,16 @@ class ZeroBootstrapActorCriticValidationScorer:
     def __init__(  # ----------------------------------------------------------
         self,
         objective: HybridRLObjective,
-        task_binding: HybridValueObjectiveBinding,
+        supervision_builder: Callable[[Any], object],
+        token_weight_builder: Callable[[Any], Tensor] | None = None,
     ) -> None:
         """Initialize the scorer with a loss head for step-wise loss
-        computation and a task binding for task-specific field extraction.
+        computation, a supervision builder for task-specific field extraction,
+        and an optional token weight builder.
         """
         self._objective = objective
-        self._task_binding = task_binding
+        self._supervision_builder = supervision_builder
+        self._token_weight_builder = token_weight_builder
 
     def __call__(self, chunk: RolloutChunk, **options: Any) -> EvaluatedChunk:
         """Score all records in a rollout chunk and return an evaluated chunk."""
@@ -388,7 +399,8 @@ class ZeroBootstrapActorCriticValidationScorer:
             ir,
             steps,
             record.snapshot.halted,
-            self._task_binding,
+            self._supervision_builder,
+            token_weight_builder=self._token_weight_builder,
             use_token_weights=bool(options.get("use_token_weights", False)),
         )
         is_warmup = bool(options.get("is_warmup", False))
@@ -396,18 +408,7 @@ class ZeroBootstrapActorCriticValidationScorer:
 
 
 # =============================================================================
-class _TokenWeightBinding(Protocol):
-    """Optional task binding surface for per-token Token weights."""
-
-    def extract_token_weights(
-        self, record: ValueControlInteractionRecord
-    ) -> Tensor:
-        """Return per-token loss weights aligned with Token labels."""
-
-
-# =============================================================================
 __all__ = [
-    "HybridValueObjectiveBinding",
     "OnlineBootstrapCarry",
     "OnlineBootstrapRuntime",
     "TD0ActorCriticBatchBuilder",

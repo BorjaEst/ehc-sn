@@ -38,7 +38,7 @@ from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.reducers import HiddenNormHistogram, compute_nonempty
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.step_metrics import StepMetrics
-from ehc_sn.objectives.hybrid_rl import HybridRLLossConfig
+from ehc_sn.objectives.composites.hybrid_rl import HybridRLLossConfig
 from ehc_sn.rollouts.runtime import RecurrentRunner, SingleStepRunner
 from ehc_sn.rollouts.sources import DemandDrivenReplaySource, _move_batch_to
 from ehc_sn.traces import build_trace_spec
@@ -105,7 +105,12 @@ class ActorCriticBindings:
     controller_config_cls: type[BaseModel]
     objective_cls: type[nn.Module]
     objective_config_cls: type[BaseModel]
-    task_binding_cls: type
+    supervision_builder: Callable[[Any], object]
+    """Task-owned supervision builder.
+
+    Signature: ``(executed_batch) -> supervision``, where supervision is a
+    task-owned dataclass with ``.labels`` and optionally ``.task_logits``.
+    """
     learner_cls: type
     val_scorer_cls: type
     optimizer_cls: type[Optimizer]
@@ -119,6 +124,12 @@ class ActorCriticBindings:
     step_routes: tuple
     episode_routes: tuple
     hidden_state_fields: tuple
+    token_weight_builder: Callable[[Any], Tensor] | None = None
+    """Optional task-owned token weight builder.
+
+    Signature: ``(record) -> tensor`` returning per-token weights.
+    When ``None``, uniform weights are used.
+    """
 
 
 class ActorCriticTrainingConfig(BaseModel, extra="forbid"):
@@ -385,15 +396,17 @@ class ActorCriticModule(L.LightningModule):
         self.objective = self._bindings.objective_cls(
             self._component_configs.objective
         )
-        task_binding = self._bindings.task_binding_cls()
         self.learner = self._bindings.learner_cls(
             self.adapter,
             None,
             gamma=self._component_configs.objective.gamma,
-            task_binding=task_binding,
+            supervision_builder=self._bindings.supervision_builder,
+            token_weight_builder=self._bindings.token_weight_builder,
         )
         self.val_scorer = self._bindings.val_scorer_cls(
-            self.objective, task_binding
+            self.objective,
+            supervision_builder=self._bindings.supervision_builder,
+            token_weight_builder=self._bindings.token_weight_builder,
         )
 
         # Training source creation moved to on_fit_start() — device-dependent.

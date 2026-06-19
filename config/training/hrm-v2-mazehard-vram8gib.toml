@@ -9,8 +9,6 @@
     encoder_kind = "rope"
     vocab_size   = 6
 
-[model.components.controller]
-
 [model.components.objective]
     token_loss      = "stablemax_cross_entropy"
     c_state_value   = 0.5
@@ -69,6 +67,13 @@
     init_weights_groups          = ["all"]
     diagnostic_level             = "standard"
     non_finite_policy            = "raise"
+
+[checkpointing.checkpoint]
+    dirpath             = "checkpoints/hrm-v2-mazehard"
+    filename            = "step={step:06d}.ckpt"
+    every_n_train_steps = 1000
+    save_last           = true
+    save_on_exception   = true
 
 [scheduler]
     warmup_steps = 1000

@@ -10,7 +10,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
-from ehc_sn.objectives.rollout import EvaluatedChunk
+from ehc_sn.rollouts.materialization import EvaluatedChunk
 from ehc_sn.traces.observer import TraceSpec
 from ehc_sn.traces.trace_tree import TraceTree
 from ehc_sn.types import Batch

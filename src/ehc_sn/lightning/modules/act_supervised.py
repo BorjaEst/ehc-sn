@@ -12,8 +12,9 @@ Access pattern for config attributes:
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -25,7 +26,10 @@ from torch import Tensor, nn
 from torch.optim import Optimizer
 from torchmetrics import MetricCollection
 
-from ehc_sn.controllers.deliberation.act import ACTControllerConfig
+from ehc_sn.controllers.deliberation.act import (
+    ACTControllerConfig,
+    ACTControllerStepOutput,
+)
 from ehc_sn.data.episode_sources import ShuffledEpisodeSource
 from ehc_sn.eval.contracts import (
     EvaluationCaseBatch,
@@ -38,6 +42,19 @@ from ehc_sn.metrics.builders import build_train_metrics, build_val_metrics
 from ehc_sn.metrics.reducers import HiddenNormHistogram, compute_nonempty
 from ehc_sn.metrics.rollout import update_metric_collection_from_evaluated_chunk
 from ehc_sn.metrics.step_metrics import StepMetrics
+from ehc_sn.metrics.token import compute_accuracy_stats
+from ehc_sn.objectives.composites.act import (
+    ACTContinuationInput,
+    ACTHaltInput,
+    ACTScoringInput,
+    FieldACTInput,
+    FieldACTScoringInput,
+    TokenACTInput,
+    TokenACTScoringInput,
+)
+from ehc_sn.objectives.control.halt import HaltObjectiveInput
+from ehc_sn.objectives.supervised.field import FieldObjectiveInput
+from ehc_sn.objectives.supervised.token import TokenObjectiveInput
 from ehc_sn.rollouts.runtime import (
     CarrySnapshot,
     RecurrentRunner,
@@ -45,6 +62,11 @@ from ehc_sn.rollouts.runtime import (
     StepRecord,
 )
 from ehc_sn.rollouts.sources import DemandDrivenReplaySource, _move_batch_to
+from ehc_sn.targets.halt import (
+    FieldQualityHaltTarget,
+    FieldQualityHaltTargetConfig,
+    HaltTargetBuilder,
+)
 from ehc_sn.traces import build_trace_spec
 from ehc_sn.training.distributed import (
     SumOverBatch,
@@ -97,7 +119,6 @@ class ACTSupervisedBindings:
     controller_config_cls: type[BaseModel]
     objective_cls: type[nn.Module]
     objective_config_cls: type[BaseModel]
-    task_binding_cls: type
     optimizer_cls: type[Optimizer]
     optimizer_config_cls: type[BaseModel]
     trace_fields: tuple
@@ -105,6 +126,23 @@ class ACTSupervisedBindings:
     step_routes: tuple
     episode_routes: tuple
     hidden_state_fields: tuple
+    supervision_builder: Callable[[Batch], Any]
+    """Task-owned supervision builder.
+
+    Signature: ``(executed_batch) -> supervision``, where supervision is a
+    task-owned dataclass with ``.labels`` (``Tensor (B, S)``) and ``.weights``
+    (``Tensor (B, S) | None``).
+    """
+    halt_target_builder: HaltTargetBuilder = field(
+        default_factory=lambda: FieldQualityHaltTarget(
+            FieldQualityHaltTargetConfig()
+        )
+    )
+    """Learning-algorithm halt-target policy.
+
+    Computes halt targets from field predictions and targets.
+    Defaults to field-quality-based halting.
+    """
     task_scorer_factory: Callable[[], Any] | None = None
     param_group_fn: Callable[[nn.Module, nn.Module], list[dict]] | None = None
     """Optional callable ``(model, adapter) -> list[dict]``.
@@ -146,7 +184,25 @@ class ACTSupervisedTrainingConfig(BaseModel, extra="forbid"):
         default=False,
         description="Whether to apply task-provided per-token weights when "
         "computing token supervision loss.  Moved here from "
-        "ACTObjectiveConfig — training policy, not loss math.",
+        "ACTSupervisedScorerConfig — training policy, not loss math.",
+    )
+    c_task: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Placeholder for future regime-level task-loss coefficient. "
+        "Not wired in this phase.",
+    )
+    c_halt: float = Field(
+        default=0.5,
+        ge=0.0,
+        description="Placeholder for future regime-level halt-loss coefficient. "
+        "Not wired in this phase.",
+    )
+    c_continue: float = Field(
+        default=0.5,
+        ge=0.0,
+        description="Placeholder for future regime-level continue-loss coefficient. "
+        "Not wired in this phase.",
     )
 
 
@@ -204,12 +260,9 @@ class ACTSupervisedConfig(BaseModel, extra="forbid"):
         description="Number of optimizer steps during which learned halting "
         "is disabled.",
     )
-    simple_supervised: bool = Field(
+    single_step: bool = Field(
         default=False,
-        description="Bypass the ACT rollout and use a single forward pass with "
-        "pure cross-entropy loss.  Diagnostic flag to isolate whether the "
-        "rollout mechanics (multi-step, Q-losses, state management) prevent "
-        "convergence.",
+        description="Bypass the ACT rollout and use a single forward pass.",
     )
 
 
@@ -251,11 +304,15 @@ class ACTSupervisedModule(L.LightningModule):
         )
         self.objective = bindings.objective_cls(
             component_configs.objective,
-            task_binding=bindings.task_binding_cls(),
         )
         self._config = config
         self._train_runner = SingleStepRunner()
         self._eval_runner = RecurrentRunner()
+
+        # Halt-target builder for field tasks (goaltrace).
+        self._halt_target_builder: HaltTargetBuilder = (
+            bindings.halt_target_builder
+        )
 
         # Optional task-specific validation scorer.
         self._task_scorer = (
@@ -458,8 +515,6 @@ class ACTSupervisedModule(L.LightningModule):
             try:
                 self._episode_source.load_state_dict(self._pending_source_state)
             except ValueError:
-                import warnings
-
                 saved_cycle = self._pending_source_state.get("cycle", 0)
                 warnings.warn(
                     "Episode source fingerprint mismatch. Restarting "
@@ -478,31 +533,147 @@ class ACTSupervisedModule(L.LightningModule):
         if self._episode_source is not None:
             checkpoint["episode_source"] = self._episode_source.state_dict()
 
+    def _build_scoring_input(self, record: StepRecord) -> ACTScoringInput:
+        """Build a complete typed scoring input for one ACT step.
+
+        Constructs prediction supervision, halt supervision, and optional
+        continuation targets from the executed record.
+        """
+        frame = record.executed_frame
+        if frame is None:
+            frame = record.batch
+            if frame is None:
+                raise ValueError("ACT scoring requires an executed frame.")
+
+        supervision = self._bindings.supervision_builder(frame)
+
+        if hasattr(supervision, "target_field") and hasattr(
+            supervision, "node_mask"
+        ):
+            # Field task (e.g. goaltrace).
+            pred_field = getattr(
+                record.outputs.backbone_output, "firing_field", None
+            )
+            if pred_field is None:
+                task = getattr(record.outputs.backbone_output, "task", None)
+                if task is not None:
+                    pred_field = getattr(
+                        task,
+                        "firing_field",
+                        (
+                            task.get("firing_field")
+                            if isinstance(task, dict)
+                            else None
+                        ),
+                    )
+            if pred_field is None:
+                raise RuntimeError(
+                    "bridge output has no 'firing_field' for field task."
+                )
+            field_quality = self._halt_target_builder.build(
+                pred_field=pred_field,
+                target_field=supervision.target_field,
+                node_mask=supervision.node_mask,
+            )
+            halt_logits = record.outputs.action_logits[
+                ..., record.outputs.done_action
+            ]
+            return FieldACTScoringInput(
+                prediction=FieldACTInput(
+                    prediction=pred_field,
+                    target=supervision.target_field,
+                    mask=supervision.node_mask,
+                ),
+                halt=ACTHaltInput(
+                    logits=halt_logits,
+                    targets=field_quality.to(halt_logits.dtype),
+                ),
+            )
+        else:
+            # Token task (e.g. mazehard).
+            backbone = record.outputs.backbone_output
+            # Bridge output nests logits under .task.task_logits;
+            # fall back to .path_logits for compat (HRM v2 seqmaze).
+            task_attrs = getattr(backbone, "task", None)
+            logits = (
+                task_attrs.task_logits
+                if task_attrs is not None and hasattr(task_attrs, "task_logits")
+                else getattr(
+                    backbone,
+                    "task_logits",
+                    getattr(backbone, "path_logits", None),
+                )
+            )
+            if logits is None:
+                raise RuntimeError(
+                    "bridge output has neither 'task_logits' nor "
+                    "'path_logits'."
+                )
+            halt_logits = record.outputs.action_logits[
+                ..., record.outputs.done_action
+            ]
+            B = halt_logits.shape[0]
+            stats = compute_accuracy_stats(
+                logits_token=logits, labels=supervision.labels
+            )
+            return TokenACTScoringInput(
+                prediction=TokenACTInput(
+                    logits=logits,
+                    labels=supervision.labels,
+                    weights=getattr(supervision, "weights", None),
+                ),
+                halt=ACTHaltInput(
+                    logits=halt_logits,
+                    targets=torch.zeros(
+                        B,
+                        dtype=halt_logits.dtype,
+                        device=halt_logits.device,
+                    ),
+                ),
+                accuracy=stats,
+            )
+
+    def _score_one_record(  # ----------------------------------------------------
+        self,
+        record: StepRecord,
+        batch: Batch,
+    ) -> Any:
+        """Build supervision and scoring inputs, then evaluate one step.
+
+        Shared by ``_training_step_simple`` and the full ACT rollout path.
+        Constructs ``ACTScoringInput`` from the task binding and passes
+        them to ``self.objective.evaluate_step``.
+        """
+        return self.objective.evaluate_step(
+            record, inputs=self._build_scoring_input(record)
+        )
+
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
         """Restore episode source state from checkpoint (deferred)."""
         source_state = checkpoint.get("episode_source")
         if source_state is not None:
             self._pending_source_state = source_state
 
-    def _training_step_simple(  # ------------------------------------------------
+    def _single_step(  # ----------------------------------------------------------
         self,
         batch: Batch,
     ) -> dict[str, object]:
-        """Single forward pass, no rollout.  Loss delegated to the objective.
+        """Single forward pass, no rollout.  Delegates scoring to
+        :meth:`_score_one_record`.
 
-        Bypasses the ACT controller's multi-step mechanics and Q-losses.
-        Constructs a minimal ``StepRecord`` from the adapter output and
-        delegates scoring to ``self.objective.evaluate_step(record)``.
-
-        The objective (and its task binding) own loss extraction — this
-        method remains task-agnostic.
+        Bypasses the ACT controller's multi-step mechanics.  Constructs a
+        minimal ``StepRecord`` from the adapter output, then calls
+        ``_score_one_record``.
         """
         B = _payload_width(batch)
         state = self.adapter.init_state(B)
         out, _ = self.adapter(batch, state)
 
-        # Build a minimal record for the objective to score.
-        # The objective's binding owns field extraction from `batch` and `out`.
+        out = ACTControllerStepOutput(
+            backbone_output=out,
+            done_action=self._component_configs.controller.done_action,
+        )
+
         try:
             device = next(self.adapter.parameters()).device
         except StopIteration:
@@ -516,10 +687,7 @@ class ACTSupervisedModule(L.LightningModule):
             all_halted=False,
         )
 
-        # Delegate loss computation to the objective.
-        step_result = self.objective.evaluate_step(
-            record, controller=None, td_target=False
-        )
+        step_result = self._score_one_record(record, batch)
         loss = step_result.loss
 
         optimizers = self.optimizers()
@@ -542,7 +710,6 @@ class ACTSupervisedModule(L.LightningModule):
 
         self.log("train/loss", loss, on_step=True, on_epoch=False, logger=True)
 
-        # Log per-model-name metrics from the objective step.
         for key, stat in (step_result.metrics.extras or {}).items():
             ratio = stat.numerator_sum / stat.denominator_sum.clamp(min=1)
             self.log(
@@ -571,9 +738,9 @@ class ACTSupervisedModule(L.LightningModule):
         batch: Batch,
         batch_idx: int,
     ) -> dict[str, object]:
-        # --- Simple supervised bypass: single forward pass, pure CE ---------
-        if self.regime_config.simple_supervised:
-            return self._training_step_simple(batch)
+        # --- Single-step bypass: single forward pass, pure CE ---------
+        if self.regime_config.single_step:
+            return self._single_step(batch)
 
         # --- Normal ACT rollout training ------------------------------------
         # Validate payload width matches requested geometry on first step.
@@ -593,10 +760,6 @@ class ACTSupervisedModule(L.LightningModule):
             self.global_step < self.regime_config.supervised_only_warmup_steps
         )
 
-        target_backbone: TargetAdapterModule | None = (
-            self._target_adapter if self._target_adapter is not None else None
-        )
-
         evaluation = score_captured_rollout(
             runner=self._train_runner,
             source=self._train_source,
@@ -607,12 +770,7 @@ class ACTSupervisedModule(L.LightningModule):
                 "allow_halt": not is_warmup,
                 "explore": True,
             },
-            objective_options={
-                "controller": self.controller,
-                "td_target": True,
-                "use_token_weights": self._training_config.use_token_weights,
-                "target_backbone": target_backbone,
-            },
+            scoring_input_builder=self._build_scoring_input,
         )
         update_metric_collection_from_evaluated_chunk(
             self.train_metrics,
@@ -852,10 +1010,7 @@ class ACTSupervisedModule(L.LightningModule):
                 else None
             ),
             runner_options={"allow_halt": False, "explore": False},
-            objective_options={
-                "controller": self.controller,
-                "td_target": False,
-            },
+            scoring_input_builder=self._build_scoring_input,
             trace_request=trace_request,
         )
 
