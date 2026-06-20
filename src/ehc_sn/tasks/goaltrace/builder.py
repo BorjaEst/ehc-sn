@@ -393,16 +393,18 @@ def _assign_goaltrace_sample(
         current_flag[pi] = orig_i == current_orig
         goal_flag[pi] = orig_i == goal_orig
         node_mask_out[pi] = True
-        weight[pi] = full_weights[current_orig, orig_i]
+        # Only expose edge weights to the model; non-edges → 0.0 (unavailable).
+        if orig_i in adjacency[current_orig]:
+            weight[pi] = full_weights[current_orig, orig_i]
+        else:
+            weight[pi] = 0.0
         padded_target[pi] = float(target_field_orig[orig_i])
 
-    # Pad observation_id to num_observations (matching other channels)
-    obs_ids_len = len(obs_ids)
-    if obs_ids_len < num_observations:
-        padded_obs_ids = np.zeros(num_observations, dtype=np.int32)
-        padded_obs_ids[:obs_ids_len] = obs_ids.astype(np.int32)
-    else:
-        padded_obs_ids = obs_ids[:num_observations].astype(np.int32)
+    # Pad observation_id: real nodes get ids 0..n_nodes-1, padding gets n_nodes.
+    PAD_OBS_ID = n_nodes  # sentinel outside valid observation ID range
+    padded_obs_ids = np.full(num_observations, PAD_OBS_ID, dtype=np.int32)
+    actual_obs = np.array(obs_ids[:n_nodes], dtype=np.int32)
+    padded_obs_ids[: len(actual_obs)] = actual_obs
 
     # Forward topology from parent substrate, padded to num_observations
     K = substrate_sample["successor_indices"].shape[-1]
@@ -536,6 +538,23 @@ def validate_goaltrace_sample(data: dict[str, np.ndarray]) -> None:
             f"min={masked_weights.min()}, max={masked_weights.max()}."
         )
 
+    # Validate observation_id: sentinel for padding, valid for real nodes
+    obs = data["observation_id"]
+    n_actual = int(data["node_mask"].sum())
+    PAD_OBS_ID = n_actual
+    real_obs = obs[data["node_mask"]]
+    pad_obs = obs[~data["node_mask"]]
+    if np.any(real_obs < 0) or np.any(real_obs >= n_actual):
+        raise ValueError(
+            f"Real-node observation IDs must be in [0, {n_actual}). "
+            f"Got min={real_obs.min()}, max={real_obs.max()}."
+        )
+    if len(pad_obs) > 0 and np.any(pad_obs != PAD_OBS_ID):
+        raise ValueError(
+            f"Padding observation IDs must be {PAD_OBS_ID} (n_actual). "
+            f"Got values: {np.unique(pad_obs).tolist()}."
+        )
+
 
 # =============================================================================
 def validate_goaltrace_root(root: Path) -> dict:
@@ -609,6 +628,205 @@ def validate_goaltrace_root(root: Path) -> dict:
 
 
 # =============================================================================
+# Static-weight helpers
+# =============================================================================
+
+
+def _build_static_corpus_samples(
+    adjacency: list[list[int]],
+    base_weights: np.ndarray,
+    n_nodes: int,
+    n_observations: int,
+    semantics: str,
+    field_decay: float,
+    step_penalty: float,
+    min_margin: float,
+    pad_obs_id: int,
+    obs_ids: np.ndarray,
+    rng: np.random.Generator,
+) -> list[dict[str, np.ndarray]]:
+    """Enumerate all valid (current, goal) pairs, run the oracle, enforce
+    uniqueness margin, and return a list of sample dicts.
+
+    Args:
+        adjacency: DAG adjacency in original (hidden) index space.
+        base_weights: ``(N, N)`` float64 relational topology matrix.
+        n_nodes: Number of actual nodes.
+        n_observations: Padded slot count.
+        semantics: Oracle semantics string.
+        field_decay: Decay factor gamma.
+        step_penalty: Penalty lambda for ``"preference"`` semantics.
+        min_margin: Minimum optimality margin (second-best minus best cost).
+            0 means no filtering.
+        pad_obs_id: Observation ID sentinel for padding slots.
+        obs_ids: (N,) int32 observation IDs in original (hidden) index order.
+        rng: Seeded RNG for sample ordering and split shuffling.
+
+    Returns:
+        List of sample dicts, one per valid (current, goal) pair that passes
+        the margin check.  Each dict has the 8 standard goaltrace channels.
+    """
+    samples: list[dict[str, np.ndarray]] = []
+
+    # Precompute successor mask for padding
+    K = max(len(a) for a in adjacency) if adjacency else 0
+
+    rejected_margin = 0
+
+    for current in range(n_nodes):
+        for goal in range(current + 1, n_nodes):
+            if not bfs_shortest_path(adjacency, current, goal):
+                continue  # safety — should not happen with Hamiltonian backbone
+
+            # Run oracle
+            cost_matrix = _apply_adjacency_mask(base_weights, adjacency)
+            path = _select_optimal_path(
+                adjacency, cost_matrix, current, goal, semantics, step_penalty
+            )
+            target = _encode_target_field(path, n_nodes, field_decay, current)
+
+            # Optionally check optimality margin
+            if min_margin > 0:
+                # Approximate second-best path cost by finding the second-best
+                # distinct route.  We compute the cost of the optimal path,
+                # then find the next path that differs by at least one edge.
+                opt_cost = sum(
+                    _edge_cost(
+                        float(base_weights[path[i], path[i + 1]]),
+                        semantics,
+                        step_penalty,
+                    )
+                    for i in range(len(path) - 1)
+                )
+                # Simple heuristic: find the cost of the best alternative first
+                # step.  This is approximate but catches obvious ties.
+                alt_costs: list[float] = []
+                for first_succ in adjacency[current]:
+                    if first_succ == path[1]:
+                        continue
+                    if not bfs_shortest_path(adjacency, first_succ, goal):
+                        continue
+                    alt_cost = _edge_cost(
+                        float(base_weights[current, first_succ]),
+                        semantics,
+                        step_penalty,
+                    )
+                    alt_path = _select_optimal_path(
+                        adjacency,
+                        cost_matrix,
+                        first_succ,
+                        goal,
+                        semantics,
+                        step_penalty,
+                    )
+                    alt_cost += sum(
+                        _edge_cost(
+                            float(base_weights[alt_path[i], alt_path[i + 1]]),
+                            semantics,
+                            step_penalty,
+                        )
+                        for i in range(len(alt_path) - 1)
+                    )
+                    alt_costs.append(alt_cost)
+                if alt_costs:
+                    best_alt = min(alt_costs)
+                    if opt_cost + min_margin > best_alt:
+                        rejected_margin += 1
+                        continue
+
+            # Convert from original to padded public space
+            weight_row = np.zeros(n_observations, dtype=np.float32)
+            public_target = np.zeros(n_observations, dtype=np.float32)
+            cur_flag = np.zeros(n_observations, dtype=bool)
+            goal_flag = np.zeros(n_observations, dtype=bool)
+            node_mask_out = np.zeros(n_observations, dtype=bool)
+
+            # Original-index space: we store observation IDs in their
+            # original (hidden rank) order, since the dagflow substrate
+            # provides the permutation.  We use original indices directly.
+            for j in range(n_nodes):
+                node_mask_out[j] = True
+                if base_weights[current, j] > 0:
+                    weight_row[j] = float(base_weights[current, j])
+                cur_flag[j] = j == current
+                goal_flag[j] = j == goal
+                public_target[j] = float(target[j])
+            # Self-identity signal: model should know current position has
+            # full support, matching the target field's f[current]=1.0.
+            weight_row[current] = 1.0
+
+            # Pad observation IDs
+            padded_obs = np.full(n_observations, pad_obs_id, dtype=np.int32)
+            padded_obs[:n_nodes] = obs_ids[:n_nodes]
+
+            # Successor padding (K from adjacency)
+            succ_idx_pad = np.zeros((n_observations, K), dtype=np.int32)
+            succ_mask_pad = np.zeros((n_observations, K), dtype=bool)
+            for j in range(n_nodes):
+                for k_idx, s in enumerate(adjacency[j]):
+                    if k_idx < K:
+                        succ_idx_pad[j, k_idx] = s
+                        succ_mask_pad[j, k_idx] = True
+
+            samples.append(
+                {
+                    "observation_id": padded_obs,
+                    "weight": weight_row,
+                    "current_flag": cur_flag,
+                    "goal_flag": goal_flag,
+                    "node_mask": node_mask_out,
+                    "target_field": public_target,
+                    "successor_indices": succ_idx_pad,
+                    "successor_mask": succ_mask_pad,
+                }
+            )
+
+    if rejected_margin > 0:
+        print(
+            f"  Builder: rejected {rejected_margin} pairs below "
+            f"optimality margin ({min_margin})."
+        )
+
+    return samples
+
+
+def _split_pairs_by_identity(
+    samples: list[dict[str, np.ndarray]],
+    n_train: int,
+    n_val: int,
+    n_test: int,
+    rng: np.random.Generator,
+) -> dict[str, list[dict[str, np.ndarray]]]:
+    """Assign samples to splits by (current, goal) identity.
+
+    Shuffles the sample list, then assigns the first *n_train* to training,
+    next *n_val* to validation, remaining to test (capped at *n_test*).
+    Raises if not enough samples to satisfy the requested split sizes.
+
+    Returns dict mapping split name to list of sample dicts.
+    """
+    total = n_train + n_val + n_test
+    if len(samples) < total:
+        raise ValueError(
+            f"Not enough samples ({len(samples)}) for requested split "
+            f"({total}).  Increase the margin or reduce the split sizes."
+        )
+
+    indices = list(range(len(samples)))
+    rng.shuffle(indices)
+
+    train_idx = indices[:n_train]
+    val_idx = indices[n_train : n_train + n_val]
+    test_idx = indices[n_train + n_val : n_train + n_val + n_test]
+
+    return {
+        "train": [samples[i] for i in train_idx],
+        "val": [samples[i] for i in val_idx],
+        "test": [samples[i] for i in test_idx],
+    }
+
+
+# =============================================================================
 # Builder
 # =============================================================================
 
@@ -627,6 +845,13 @@ def build_goaltrace_task_corpus(
     n_val: int = 500,
     n_test: int = 500,
     seed: int = 42,
+    static_weights: bool = False,
+    min_optimality_margin: float = 0.0,
+    distance_tau: float = 8.0,
+    distance_max: float | None = None,
+    grid_width: int = 20,
+    grid_height: int = 30,
+    geometry_seed: int = 42,
 ) -> None:
     """Build the goaltrace task corpus at *version_root* over a dagflow layout.
 
@@ -634,7 +859,14 @@ def build_goaltrace_task_corpus(
     weight-per-edge, oracle path selection, and target field encoding.
     When ``num_graphs == 1`` (default), all samples share a single DAG.
 
-    The version integer is derived from the ``v<N>`` leaf of *version_root*.
+    Two modes:
+
+    - **Random-weight mode** (``static_weights=False``, default): each sample
+      gets an independent random weight matrix.  This is the v2-compatible path.
+    - **Static-weight mode** (``static_weights=True``): a single base relational
+      topology matrix $W$ is derived from the DAG geometry and a hidden spatial
+      substrate.  All valid (current, goal) pairs are enumerated exactly once,
+      producing at most 990 deterministic samples with no contradictions.
 
     Args:
         version_root: Destination versioned root
@@ -650,10 +882,29 @@ def build_goaltrace_task_corpus(
         field_decay: Decay factor gamma in ``(0, 1)``.
         preference_step_penalty: Per-step penalty lambda for ``"preference"``
             semantics.
-        n_train: Number of training samples.
-        n_val: Number of validation samples.
-        n_test: Number of test samples.
+        n_train: Number of training samples (for random-weight mode) or
+            number of (current, goal) pairs assigned to training (for static mode).
+        n_val: Number of validation samples/pairs.
+        n_test: Number of test samples/pairs.
         seed: Deterministic base seed for reproducibility.
+        static_weights: When True, use a single static relational weight matrix
+            derived from geometry plus DAG adjacency.  When False (default),
+            use per-sample random weights (v2-compatible).
+        min_optimality_margin: Minimum required cost difference between the
+            optimal path and the second-best path.  Pairs below this margin
+            are rejected.  Only used when ``static_weights=True``.
+        distance_tau: Temperature / distance scale for the spatial kernel.
+            Only used when ``static_weights=True``.
+        distance_max: Maximum effective distance for the kernel truncation.
+            When ``None`` (default), computed as ``grid_width + grid_height``
+            to avoid truncation of any DAG edge.
+            Only used when ``static_weights=True``.
+        grid_width: Width of the hidden spatial grid in cells.
+            Only used when ``static_weights=True``.
+        grid_height: Height of the hidden spatial grid in cells.
+            Only used when ``static_weights=True``.
+        geometry_seed: Seed for anchor placement on the grid.
+            Only used when ``static_weights=True``.
 
     Raises:
         FileExistsError: When *version_root* already exists (immutable root).
@@ -661,6 +912,8 @@ def build_goaltrace_task_corpus(
         ValueError: When the layout is not a dagflow layout_dataset,
             the layout lacks required structural channels, or
             *oracle_semantics* is invalid.
+        RuntimeError: When ``static_weights=True`` and no valid pairs survive
+            the optimality margin check.
     """
     version = extract_version(version_root)
     layout_manifest = read_manifest(layout_root)
@@ -722,6 +975,10 @@ def build_goaltrace_task_corpus(
         f"v{layout_manifest['version']}"
     )
 
+    # Default D_max to grid diameter if not specified
+    if distance_max is None:
+        distance_max = float(grid_width + grid_height)
+
     stage_params = {
         "corpus": corpus,
         "n_observations": n_observations,
@@ -734,7 +991,15 @@ def build_goaltrace_task_corpus(
         "n_test": n_test,
         "seed": seed,
         "layout_version": layout_manifest["version"],
+        "static_weights": static_weights,
+        "min_optimality_margin": min_optimality_margin,
     }
+    if static_weights:
+        stage_params["distance_tau"] = distance_tau
+        stage_params["distance_max"] = distance_max
+        stage_params["grid_width"] = grid_width
+        stage_params["grid_height"] = grid_height
+        stage_params["geometry_seed"] = geometry_seed
 
     with staging_root(version_root) as tmp:
         all_entries: list = []
@@ -789,6 +1054,9 @@ def build_goaltrace_task_corpus(
                 _entry, substrate_sample = entry_sample_pairs[entry_idx]
                 n_actual = int(substrate_sample["node_mask"].sum())
                 adjacency = [[] for _ in range(n_actual)]
+                obs_ids = substrate_sample["node_obs_id"][:n_actual].astype(
+                    np.int32
+                )
                 for i in range(n_actual):
                     for k in range(k_max):
                         if substrate_sample["successor_mask"][i, k]:
@@ -802,33 +1070,116 @@ def build_goaltrace_task_corpus(
                         "sample": substrate_sample,
                         "n_actual": n_actual,
                         "adjacency": adjacency,
+                        "obs_ids": obs_ids,
                     }
                 )
 
-            # Distribute samples across graphs (round-robin or even split)
-            samples_per_graph = [
-                n_samples // effective_k
-                + (1 if i < n_samples % effective_k else 0)
-                for i in range(effective_k)
-            ]
+            # --- Static-weight branch ---
+            if static_weights:
+                # Build all samples once, then split by identity.
+                if split == _SPLITS[0]:  # first split
+                    from ehc_sn.data.relational import (
+                        combine_relational_topology,
+                        compute_all_pairs_grid_distances,
+                        distance_kernel,
+                        generate_anchor_grid,
+                    )
 
-            samples: list[dict[str, np.ndarray]] = []
-            for graph_idx, graph in enumerate(layout_graphs):
-                graph_rng = np.random.default_rng(
-                    split_rng.integers(0, 2**31) + graph_idx
-                )
-                for _ in range(samples_per_graph[graph_idx]):
-                    sample = _assign_goaltrace_sample(
-                        substrate_sample=graph["sample"],
-                        n_nodes=graph["n_actual"],
-                        adjacency=graph["adjacency"],
-                        rng=graph_rng,
+                    self_rng = np.random.default_rng(seed)
+
+                    # Use the first graph's topology
+                    graph = layout_graphs[0]
+                    n_actual = graph["n_actual"]
+                    adj = graph["adjacency"]  # permuted-space adjacency
+                    obs_ids_g = graph["obs_ids"]
+
+                    # Rebuild a rank-space adjacency with Hamiltonian backbone
+                    # so that graph searches work in unpermuted index space.
+                    rank_adj: list[list[int]] = [
+                        list(range(i + 1, n_actual)) for i in range(n_actual)
+                    ]
+                    rank_adj[n_actual - 1] = []
+
+                    # Build geometric substrate
+                    anchors, grid_adj = generate_anchor_grid(
+                        n_actual,
+                        grid_width,
+                        grid_height,
+                        geometry_seed,
+                    )
+                    D = compute_all_pairs_grid_distances(
+                        anchors,
+                        grid_adj,
+                        grid_width,
+                    )
+                    G = distance_kernel(D, distance_tau, distance_max)
+                    # Combine geometry with the permuted-space adjacency
+                    W = combine_relational_topology(G, adj)
+
+                    pad_id = n_actual  # sentinel for padding
+                    all_samples = _build_static_corpus_samples(
+                        adjacency=rank_adj,
+                        base_weights=W,
+                        n_nodes=n_actual,
+                        n_observations=n_observations,
                         semantics=oracle_semantics,
                         field_decay=field_decay,
                         step_penalty=preference_step_penalty,
-                        num_observations=n_observations,
+                        min_margin=min_optimality_margin,
+                        pad_obs_id=pad_id,
+                        obs_ids=obs_ids_g,
+                        rng=self_rng,
                     )
-                    samples.append(sample)
+
+                    if not all_samples:
+                        raise RuntimeError(
+                            "No valid (current, goal) pairs survived the "
+                            "optimality margin check.  Try lowering "
+                            "min_optimality_margin."
+                        )
+
+                    # Split by identity
+                    split_samples = _split_pairs_by_identity(
+                        all_samples,
+                        n_train,
+                        n_val,
+                        n_test,
+                        rng=np.random.default_rng(seed + 1),
+                    )
+
+                # Use the pre-computed split for this split
+                samples = split_samples[split]
+                print(
+                    f"  {split}: {len(samples)} samples "
+                    f"(static weights, {len(adj)} nodes)"
+                )
+
+            else:
+                # --- Legacy random-weight branch ---
+                # Distribute samples across graphs
+                samples_per_graph = [
+                    n_samples // effective_k
+                    + (1 if i < n_samples % effective_k else 0)
+                    for i in range(effective_k)
+                ]
+
+                samples: list[dict[str, np.ndarray]] = []
+                for graph_idx, graph in enumerate(layout_graphs):
+                    graph_rng = np.random.default_rng(
+                        split_rng.integers(0, 2**31) + graph_idx
+                    )
+                    for _ in range(samples_per_graph[graph_idx]):
+                        sample = _assign_goaltrace_sample(
+                            substrate_sample=graph["sample"],
+                            n_nodes=graph["n_actual"],
+                            adjacency=graph["adjacency"],
+                            rng=graph_rng,
+                            semantics=oracle_semantics,
+                            field_decay=field_decay,
+                            step_penalty=preference_step_penalty,
+                            num_observations=n_observations,
+                        )
+                        samples.append(sample)
 
             entries = write_split(
                 output_root=tmp,

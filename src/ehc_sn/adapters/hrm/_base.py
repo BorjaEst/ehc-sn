@@ -78,6 +78,14 @@ class GoaltraceHRMAdapterSettings(BaseModel, extra="forbid"):
         "embedding table size.  Must match the goaltrace corpus "
         "``n_observations``.",
     )
+    padding_obs_id: int | None = Field(
+        default=None,
+        description="Observation ID sentinel for padding slots.  When set, "
+        "the encoder uses ``vocab_size = padding_obs_id + 1`` and applies "
+        "``padding_idx = padding_obs_id`` so padding slots embed to zero. "
+        "When ``None`` (default), the encoder uses ``vocab_size = num_observations`` "
+        "with no padding_idx (backward compatible with v1 corpora).",
+    )
 
 
 # =============================================================================
@@ -103,11 +111,13 @@ class GoaltraceRoPEEncoder(nn.Module, Generic[TInput]):
         self._seq_length = seq_length
         self._hidden_size = hidden_size
         self.E_obs = nn.Embedding(
-            vocab_size, hidden_size, device=device, dtype=dtype
+            vocab_size,
+            hidden_size,
+            padding_idx=vocab_size - 1 if vocab_size > 1 else None,
+            device=device,
+            dtype=dtype,
         )
-        self.f_weight = nn.Linear(
-            1, hidden_size, device=device, dtype=dtype
-        )
+        self.f_weight = nn.Linear(1, hidden_size, device=device, dtype=dtype)
         self.E_current = nn.Parameter(torch.zeros(1, 1, hidden_size))
         self.E_goal = nn.Parameter(torch.zeros(1, 1, hidden_size))
         self.embedding_scale = hidden_size**0.5
@@ -170,11 +180,13 @@ class GoaltraceLearnedEncoder(nn.Module, Generic[TInput]):
         self._seq_length = seq_length
         self._hidden_size = hidden_size
         self.E_obs = nn.Embedding(
-            vocab_size, hidden_size, device=device, dtype=dtype
+            vocab_size,
+            hidden_size,
+            padding_idx=vocab_size - 1 if vocab_size > 1 else None,
+            device=device,
+            dtype=dtype,
         )
-        self.f_weight = nn.Linear(
-            1, hidden_size, device=device, dtype=dtype
-        )
+        self.f_weight = nn.Linear(1, hidden_size, device=device, dtype=dtype)
         self.E_current = nn.Parameter(torch.zeros(1, 1, hidden_size))
         self.E_goal = nn.Parameter(torch.zeros(1, 1, hidden_size))
         self.E_pos = nn.Embedding(
@@ -341,9 +353,7 @@ def build_token_encoder(
             case "rope":
                 encoder_cls = MazeHardRoPEEncoder[TInput]
             case _:
-                raise ValueError(
-                    f"Unsupported encoder kind: {encoder_kind}"
-                )
+                raise ValueError(f"Unsupported encoder kind: {encoder_kind}")
     else:
         match encoder_kind:
             case "learned":
@@ -351,9 +361,7 @@ def build_token_encoder(
             case "rope":
                 encoder_cls = GoaltraceRoPEEncoder[TInput]
             case _:
-                raise ValueError(
-                    f"Unsupported encoder kind: {encoder_kind}"
-                )
+                raise ValueError(f"Unsupported encoder kind: {encoder_kind}")
 
     return encoder_cls(
         seq_length=seq_length,
@@ -413,9 +421,7 @@ class GoaltraceMLPDecoder(nn.Module):
     ) -> None:
         super().__init__()
         self._num_observations = num_observations
-        self.field_head = nn.Linear(
-            hidden_size, 1, device=device, dtype=dtype
-        )
+        self.field_head = nn.Linear(hidden_size, 1, device=device, dtype=dtype)
         self.reset_parameters()
 
     def reset_parameters(  # ------------------------------------------------------
@@ -945,7 +951,10 @@ class SeqMazeEncoder(nn.Module):
 
         if config.edge_encoding == "successor_node_pool":
             return self._encode_successor_node_pool(
-                successor_indices, successor_mask, node_obs_id, node_candidate_index
+                successor_indices,
+                successor_mask,
+                node_obs_id,
+                node_candidate_index,
             )
 
         raise ValueError(f"Unknown edge_encoding: {config.edge_encoding!r}")

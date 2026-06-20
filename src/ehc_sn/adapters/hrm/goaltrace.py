@@ -79,11 +79,16 @@ def _build_encoder(  # ----------------------------------------------------
 ) -> GoaltraceTokenEncoder:
     """Construct the token encoder front-end for the bridge adapter based on config."""
     params = next(model.parameters())
+    # vocab_size: when a padding sentinel is configured use that + 1,
+    # otherwise fall back to num_observations (backward compat).
+    vocab_size = (
+        config.padding_obs_id + 1
+        if config.padding_obs_id is not None
+        else config.num_observations
+    )
     return build_token_encoder(
         seq_length=model.config.num_schema_slots,
-        # V = N_max per corpus contract: remap_obs_ids generates dense
-        # permutations of [0, N_max), so E_obs is sized to num_observations.
-        vocab_size=config.num_observations,
+        vocab_size=vocab_size,
         hidden_size=model.config.pfc.hidden_size,
         encoder_kind=config.encoder_kind,
         task_family="goaltrace",

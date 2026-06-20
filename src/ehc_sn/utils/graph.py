@@ -138,6 +138,136 @@ def count_shortest_paths(
 
 
 # =============================================================================
+def generate_hamiltonian_dag(
+    n_nodes: int,
+    max_out_degree: int,
+    seed: int,
+    *,
+    target_edges: int | None = None,
+    min_extra_edges_per_node: int = 0,
+    short_edge_prob: float = 0.6,
+    medium_edge_prob: float = 0.30,
+    long_edge_prob: float = 0.10,
+    short_span: tuple[int, int] = (2, 5),
+    medium_span: tuple[int, int] = (6, 15),
+    long_span: tuple[int, int] = (16, 44),
+) -> list[list[int]]:
+    """Generate a DAG with mandatory Hamiltonian backbone and controlled
+    shortcut edges in three rank-separation bands.
+
+    Every node ``i`` has the mandatory forward edge ``i → i+1``, guaranteeing
+    that all non-terminal nodes have out-degree ≥ 1 and that every lower-rank
+    node can reach every higher-rank node.  Additional forward edges are
+    sampled probabilistically in three span bands (short, medium, long) to
+    create forks, merges, bypasses, and hierarchy while preserving the
+    backbone connectivity guarantee.
+
+    Args:
+        n_nodes: Number of nodes (topological ranks 0..n_nodes-1).
+        max_out_degree: Maximum out-degree per node (must be ≥ 2).
+        seed: Deterministic seed.
+        target_edges: Desired total edge count.  When set, edges are sampled
+            until the target is reached or each node's out-degree budget is
+            exhausted (soft target; no error if unreachable).
+        min_extra_edges_per_node: Minimum extra edges beyond the mandatory
+            backbone edge for each non-terminal node.  Nodes near the end of
+            the chain with few forward candidates may receive fewer.
+        short_edge_prob: Per-candidate probability for short-span edges.
+        medium_edge_prob: Per-candidate probability for medium-span edges.
+        long_edge_prob: Per-candidate probability for long-span edges.
+        short_span: (min, max) inclusive separation for short edges.
+        medium_span: (min, max) inclusive separation for medium edges.
+        long_span: (min, max) inclusive separation for long edges.
+
+    Returns:
+        Adjacency list where ``adj[i]`` is a sorted list of successor
+        indices.  Length equals ``n_nodes``.
+    """
+    if n_nodes < 2:
+        raise ValueError(f"n_nodes must be ≥ 2, got {n_nodes}")
+    if max_out_degree < 2:
+        raise ValueError(f"max_out_degree must be ≥ 2, got {max_out_degree}")
+
+    rng = random.Random(seed)
+    adj: list[list[int]] = [[] for _ in range(n_nodes)]
+
+    # 1. Mandatory backbone: i → i+1
+    for i in range(n_nodes - 1):
+        adj[i].append(i + 1)
+
+    backbone_edges = n_nodes - 1
+
+    # If min_extra_edges_per_node > 0, ensure each non-terminal node
+    # gets at least that many extra edges (may be impossible near end).
+    if min_extra_edges_per_node > 0:
+        for i in range(n_nodes - 1):
+            needed = min_extra_edges_per_node
+            candidates = [j for j in range(i + 2, n_nodes) if j not in adj[i]]
+            while needed > 0 and candidates:
+                j = rng.choice(candidates)
+                if len(adj[i]) < max_out_degree:
+                    adj[i].append(j)
+                    candidates.remove(j)
+                    needed -= 1
+                else:
+                    break
+
+    extras_needed = (
+        None
+        if target_edges is None
+        else max(0, target_edges - sum(len(a) for a in adj))
+    )
+    extras_added = 0
+
+    # 2. Define span bands with eligibility: (lo, hi, prob)
+    bands = [
+        ("short", short_span[0], short_span[1], short_edge_prob),
+        ("medium", medium_span[0], medium_span[1], medium_edge_prob),
+        ("long", long_span[0], long_span[1], long_edge_prob),
+    ]
+
+    # 3. Process bands in priority order, shuffling candidates within each band
+    for band_name, lo, hi, prob in bands:
+        # Build candidate list for this band
+        candidates: list[tuple[int, int]] = []
+        for i in range(n_nodes - 1):
+            lo_j = max(i + 1, i + lo)
+            hi_j = min(n_nodes - 1, i + hi)
+            for j in range(lo_j, hi_j + 1):
+                if j not in adj[i]:
+                    candidates.append((i, j))
+        rng.shuffle(candidates)
+        for i, j in candidates:
+            if extras_needed is not None and extras_added >= extras_needed:
+                break
+            if len(adj[i]) >= max_out_degree:
+                continue
+            if j in adj[i]:
+                continue
+            if rng.random() < prob:
+                adj[i].append(j)
+                extras_added += 1
+        if extras_needed is not None and extras_added >= extras_needed:
+            break
+
+    # 4. Sort for determinism
+    for i in range(n_nodes):
+        adj[i].sort()
+
+    total = backbone_edges + extras_added
+    if extras_needed is not None and extras_added < extras_needed:
+        import warnings
+
+        warnings.warn(
+            f"generate_hamiltonian_dag: target_edges={target_edges} but only "
+            f"added {extras_added} extra edges (budget exhausted). "
+            f"Total edges: {total}."
+        )
+
+    return adj
+
+
+# =============================================================================
 def generate_transition_dag(
     n_nodes: int,
     max_out_degree: int,

@@ -36,7 +36,7 @@ from ehc_sn.data.lifecycle import (
 )
 from ehc_sn.data.manifest import write_manifest
 from ehc_sn.utils.graph import (
-    generate_transition_dag,
+    generate_hamiltonian_dag,
     remap_obs_ids,
 )
 from ehc_sn.utils.graph import shortest_path as bfs_shortest_path
@@ -67,41 +67,50 @@ def _generate_graph_sample(
     n_max: int,
     k_max: int,
     rng: np.random.Generator,
-    min_path_length: int = 1,
-    require_unique_shortest_path: bool = True,
+    *,
+    target_edges: int | None = None,
+    fixed_n_actual: bool = False,
+    min_extra_edges_per_node: int = 0,
 ) -> dict[str, np.ndarray]:
     """Generate one random DAG sample with structural channels only.
+
+    Uses :func:`generate_hamiltonian_dag` which guarantees a mandatory
+    backbone ``0→1→…→n_actual-1``, full reachability, and no stranded
+    nodes (except the terminal).
 
     Args:
         n_max: Maximum candidate nodes (N). Actual nodes < n_max are padded.
         k_max: Maximum out-degree per node (K).
         rng: Seeded random generator.
-        min_path_length: Minimum acceptable shortest-path length in nodes
-            (default 1, meaning any path is acceptable).
+        target_edges: Desired total edge count.  ``None`` for probabilistic
+            sampling without a fixed target.
+        fixed_n_actual: When True, use all ``n_max`` nodes (no randomization).
+        min_extra_edges_per_node: Minimum extra edges beyond the mandatory
+            backbone edge.  Passed through to :func:`generate_hamiltonian_dag`.
 
     Returns:
         Sample dict with layout channels (no path or edge labels).
     """
-    n_actual_low = max(min(4, n_max), min_path_length + 1)
-    n_actual_low = min(n_actual_low, n_max)
-    n_actual = int(rng.integers(n_actual_low, n_max + 1))
+    if fixed_n_actual:
+        n_actual = n_max
+    else:
+        n_actual_low = max(4, min(n_max - 1, 10))
+        n_actual = int(rng.integers(n_actual_low, n_max + 1))
 
     base_seed = int(rng.integers(0, 2**31))
-    adjacency = generate_transition_dag(
-        n_actual, k_max, base_seed,
-        min_path_length=min_path_length,
-        require_unique_shortest_path=require_unique_shortest_path,
+    adjacency = generate_hamiltonian_dag(
+        n_actual,
+        k_max,
+        base_seed,
+        target_edges=target_edges,
+        min_extra_edges_per_node=min_extra_edges_per_node,
     )
-
-    remap_seed = int(rng.integers(0, 2**31))
-    obs_ids = remap_obs_ids(n_actual, remap_seed)
 
     start_idx = 0
     goal_idx = n_actual - 1
 
-    sp = bfs_shortest_path(adjacency, start_idx, goal_idx)
-    if not sp:
-        raise RuntimeError("No path from start to goal after graph generation.")
+    remap_seed = int(rng.integers(0, 2**31))
+    obs_ids = remap_obs_ids(n_actual, remap_seed)
 
     perm_seed = int(rng.integers(0, 2**31))
     from ehc_sn.utils.graph import permute_candidate_order
@@ -205,18 +214,21 @@ def build_dagflow_layouts(
     n_max: int = 45,
     t_max: int = 32,
     max_out_degree: int = 4,
+    target_edges: int | None = None,
     n_train: int = 4000,
     n_val: int = 500,
     n_test: int = 500,
     seed: int = 42,
-    min_path_length: int = 1,
-    require_unique_shortest_path: bool = True,
+    fixed_n_actual: bool = False,
+    min_extra_edges_per_node: int = 0,
 ) -> None:
     """Build the dagflow layout dataset at *version_root*.
 
-    Generates random DAG samples, each with a unique shortest path from the
-    first to the last node.  Only structural channels are written — task
-    protocol labels (paths, edges) belong in the task corpus builder.
+    Generates random DAG samples with a mandatory Hamiltonian backbone
+    and controlled shortcut edges.  Every non-terminal node has out-degree
+    ≥ 1, so there are no stranded nodes.  Only structural channels are
+    written — task protocol labels (paths, edges) belong in the task
+    corpus builder.
 
     The version integer is derived from the ``v<N>`` leaf of *version_root*.
 
@@ -228,15 +240,11 @@ def build_dagflow_layouts(
         t_max: Maximum generated path length (T) — stored in manifest for task
             builders but not a channel of the substrate.
         max_out_degree: Maximum out-degree per node (K).
+        target_edges: Desired total edge count per graph.  When set, adds
+            approximately this many edges (soft target, capped by out-degree
+            limits).  When ``None``, edges are added probabilistically.
         n_train: Number of training samples.
         n_val: Number of validation samples.
-        n_test: Number of test samples.
-        seed: Deterministic base seed for reproducibility.
-        min_path_length: Minimum acceptable shortest-path length in nodes
-            (default 1, meaning any path is acceptable).
-        require_unique_shortest_path: When True, generated graphs are
-            rejected if the start-to-goal shortest path is not unique.
-            Default True.
         n_test: Number of test samples.
         seed: Deterministic base seed for reproducibility.
 
@@ -251,8 +259,9 @@ def build_dagflow_layouts(
         "n_max": n_max,
         "t_max": t_max,
         "max_out_degree": max_out_degree,
-        "min_path_length": min_path_length,
-        "require_unique_shortest_path": require_unique_shortest_path,
+        "target_edges": target_edges,
+        "fixed_n_actual": fixed_n_actual,
+        "min_extra_edges_per_node": min_extra_edges_per_node,
         "n_train": n_train,
         "n_val": n_val,
         "n_test": n_test,
@@ -283,8 +292,9 @@ def build_dagflow_layouts(
                         n_max=n_max,
                         k_max=max_out_degree,
                         rng=sample_rng,
-                        min_path_length=min_path_length,
-                        require_unique_shortest_path=require_unique_shortest_path,
+                        target_edges=target_edges,
+                        fixed_n_actual=fixed_n_actual,
+                        min_extra_edges_per_node=min_extra_edges_per_node,
                     )
                 )
 
@@ -322,7 +332,9 @@ def build_dagflow_layouts(
             n_max=n_max,
             t_max=t_max,
             max_out_degree=max_out_degree,
-            min_path_length=min_path_length,
+            target_edges=target_edges,
+            fixed_n_actual=fixed_n_actual,
+            min_extra_edges_per_node=min_extra_edges_per_node,
         )
 
     n_total = n_train + n_val + n_test

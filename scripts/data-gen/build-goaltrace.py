@@ -41,12 +41,28 @@ Validate an existing task corpus::
 
     python build-goaltrace.py validate data/processed/goaltrace/default/v1
 
+Build a static-weight corpus (deterministic, contradiction-free)::
+
+    python build-goaltrace.py materialize-task \\
+        --layout-root data/interim/dagflow/default/v1 \\
+        --static-weights \\
+        --n-train 500 --n-val 250 --n-test 240 \\
+        --distance-tau 8.0 \\
+        --grid-width 20 --grid-height 30 \\
+        --version 3
+
 Prerequisites
 -------------
 A dagflow shared substrate must exist before running.
 Build it first::
 
     python scripts/data-gen/build-dagflow.py build-all
+
+For static-weight corpora, the dagflow substrate should be built with
+``generate_hamiltonian_dag`` (the default after 2026-06-20).  Run::
+
+    python scripts/data-gen/build-dagflow.py build-all \\
+        --n-max 45 --max-out-degree 4 --version 2
 """
 
 from __future__ import annotations
@@ -74,6 +90,13 @@ _DEFAULT_N_TRAIN = 4000
 _DEFAULT_N_VAL = 500
 _DEFAULT_N_TEST = 500
 _DEFAULT_SEED = 42
+_DEFAULT_STATIC = False
+_DEFAULT_MARGIN = 0.0
+_DEFAULT_TAU = 8.0
+_DEFAULT_DMAX = 0.0  # 0 means auto-compute from grid dimensions
+_DEFAULT_GW = 20
+_DEFAULT_GH = 30
+_DEFAULT_GEOM_SEED = 42
 
 app = typer.Typer(help="Goaltrace task corpus builder.")
 
@@ -166,8 +189,71 @@ def materialize_task(
             help="Deterministic base seed (default: 42).",
         ),
     ] = _DEFAULT_SEED,
+    # --- Static-weight pipeline flags ---
+    static_weights: Annotated[
+        bool,
+        typer.Option(
+            "--static-weights",
+            help="Use static geometry-derived relational weights instead of "
+            "per-sample random weights.  Requires a dagflow substrate built "
+            "with the Hamiltonian backbone generator (default: false).",
+        ),
+    ] = _DEFAULT_STATIC,
+    min_optimality_margin: Annotated[
+        float,
+        typer.Option(
+            "--min-optimality-margin",
+            help="Minimum cost margin between optimal and second-best path. "
+            "Pairs below this threshold are rejected.  Only used with "
+            "--static-weights (default: 0.0).",
+        ),
+    ] = _DEFAULT_MARGIN,
+    distance_tau: Annotated[
+        float,
+        typer.Option(
+            "--distance-tau",
+            help="Temperature / distance scale for the spatial kernel. "
+            "Only used with --static-weights (default: 8.0).",
+        ),
+    ] = _DEFAULT_TAU,
+    distance_max: Annotated[
+        float,
+        typer.Option(
+            "--distance-max",
+            help="Maximum effective distance for the kernel.  Set to 0 to "
+            "auto-compute from grid width+height.  Only used with "
+            "--static-weights (default: 0 = auto).",
+        ),
+    ] = _DEFAULT_DMAX,
+    grid_width: Annotated[
+        int,
+        typer.Option(
+            "--grid-width",
+            help="Hidden spatial grid width in cells.  Only used with "
+            "--static-weights (default: 20).",
+        ),
+    ] = _DEFAULT_GW,
+    grid_height: Annotated[
+        int,
+        typer.Option(
+            "--grid-height",
+            help="Hidden spatial grid height in cells.  Only used with "
+            "--static-weights (default: 30).",
+        ),
+    ] = _DEFAULT_GH,
+    geometry_seed: Annotated[
+        int,
+        typer.Option(
+            "--geometry-seed",
+            help="Seed for anchor placement on the spatial grid.  Only used "
+            "with --static-weights (default: 42).",
+        ),
+    ] = _DEFAULT_GEOM_SEED,
 ) -> None:
     """Build the Goaltrace task corpus over a dagflow layout dataset."""
+    # Translate distance_max=0 to None for the builder (auto-compute)
+    parsed_distance_max = None if distance_max == 0.0 else distance_max
+
     root = Path(f"data/processed/{TASK_FAMILY}/{corpus}/v{version}")
     build_goaltrace_task_corpus(
         version_root=root.resolve(),
@@ -182,10 +268,22 @@ def materialize_task(
         n_val=n_val,
         n_test=n_test,
         seed=seed,
+        static_weights=static_weights,
+        min_optimality_margin=min_optimality_margin,
+        distance_tau=distance_tau,
+        distance_max=parsed_distance_max,
+        grid_width=grid_width,
+        grid_height=grid_height,
+        geometry_seed=geometry_seed,
     )
     print(f"Goaltrace corpus built at {root.resolve()}")
     print(f"  Profile: N={n_observations}, num_graphs={num_graphs}")
     print(f"  Oracle: {oracle_semantics}, field_decay={field_decay}")
+    if static_weights:
+        print(
+            f"  Mode: static weights  tau={distance_tau}  "
+            f"grid={grid_width}x{grid_height}  margin={min_optimality_margin}"
+        )
 
 
 # =============================================================================
