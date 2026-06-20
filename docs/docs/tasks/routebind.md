@@ -571,49 +571,53 @@ corpus constants (see [Corpus manifest](#corpus-manifest)).
 
 ### Data pipeline
 
-`routebind` follows the repository's declared data pipeline:
+`routebind` follows the repository's declared data pipeline. It consumes two
+interim substrates — one for the hidden semantic DAG and one for the spatial
+layout — and produces a single task corpus:
 
 ```text
-data/interim/gridworld/<preset>/v<N>/
+data/interim/dagflow/<preset>/v<N>/        (hidden DAG topology)
+data/interim/openfield/<preset>/v<N>/      (spatial grid layouts)
     → data/processed/routebind/<corpus>/v<N>/
 ```
 
-A new `gridworld` interim substrate family is introduced in v1. It stores
-reusable task-neutral physical layouts. The routebind task builder adds
-observation placement, the hidden DAG, start/goal queries, and the
-product-state oracle on top.
+The default spatial layout source is `openfield` with square 30×30 grids
+(matching MazeHard's shape). `dungeongen` is also supported as an
+alternative spatial source. The routebind task builder adds observation
+placement, start/goal queries, and the product-state oracle on top.
 
-This is the same separation as `dagflow → goaltrace`. The spatial layout
-family has independent value for future tasks.
+This is the same separation as `dagflow → goaltrace` (semantic) composed
+with `openfield → arena` (spatial). Both parent families have independent
+value for other tasks.
 
-### GridworldLayout substrate
+### Spatial layout substrate
 
-```text
-GridworldLayout:
-    layout_id
-    grid_height:        int          (30)
-    grid_width:         int          (30)
-    wall_mask:          bool[900]
-    traversable_mask:   bool[900]
-    state_to_row_col:   int32[900, 2]
-    row_col_to_state:   int32[30, 30]
-    spatial_adjacency:  int32[900, 4]  or successor table
-    generator_metadata: dict
-```
+Routebind consumes existing spatial layout datasets (`openfield` or
+`dungeongen`) that provide the `SpatialLayout` protocol
+(see `spec/spec-openfield-layout.md`). The substrate supplies:
 
-The substrate must not contain task semantics: observation identities,
-the hidden DAG, start/goal selection, waypoints, or routebind targets.
+- `topology`: wall mask (`False` = wall, `True` = traversable).
+- `valid_state_mask`: largest traversable component.
+- `state_to_row_col`: row-major positional mapping.
+- `adjacency`: four-neighbor connectivity.
+
+For v1 the recommended profile is 30×30 square grids (900 positions,
+row-major ordering). The spatial substrate must not contain task
+semantics: observation identities, the hidden DAG, start/goal selection,
+waypoints, or routebind targets.
 
 ### Generation phases
 
-**Phase A — Build the hidden semantic DAG.** Generate one DAG per corpus.
-Measure and store in-degree/out-degree distributions, reachable-pair count,
-semantic shortest-path distribution, branch count, transitive shortcuts,
-sink and source counts. Reject graphs with insufficient route diversity.
+**Phase A — Build the hidden semantic DAG.** Generate one DAG per corpus
+(or consume it from a dagflow substrate). Measure and store in-degree/
+out-degree distributions, reachable-pair count, semantic shortest-path
+distribution, branch count, transitive shortcuts, sink and source counts.
+Reject graphs with insufficient route diversity.
 
-**Phase B — Generate spatial layouts.** Produce connected traversable grids
-with walls. Use a curriculum over wall density, corridor width, bottlenecks,
-and physical route-length distribution.
+**Phase B — Consume spatial layouts.** Read spatial layouts from the
+openfield (or dungeongen) interim substrate. Each layout supplies a
+30×30 traversable grid with walls. Validate grid dimensions and
+connectivity.
 
 **Phase C — Place observations.** Place observation identities onto
 traversable cells. Place distractor observations. Optionally duplicate
@@ -659,7 +663,7 @@ spatial and semantic decay factors.
 - The trajectory and waypoint fields follow their respective decay rules.
 - The next-direction target matches the first physical step.
 - The next-observation target matches the first post-start acceptance.
-- Regeneration with the same substrate, task seed, and query produces
+- Regeneration with the same substrates, task seed, and query produces
   identical tensors.
 
 ### Field decay
@@ -692,7 +696,9 @@ Goaltrace) because semantic sequences are short (2–6 steps).
   "field_decay_spatial": 0.9848,
   "field_decay_semantic": 0.8,
   "max_supported_route_length": 150,
-  "minimum_terminal_activation": 0.1
+  "minimum_terminal_activation": 0.1,
+  "parent_dag_family": "dagflow",
+  "parent_grid_family": "openfield"
 }
 ```
 
@@ -714,6 +720,8 @@ is independent; the manifest records all three for readability.
 
 ```bash
 python scripts/data-gen/build-routebind.py build-all \
+    --dag-layout-root data/interim/dagflow/default/v1 \
+    --grid-layout-root data/interim/openfield/big-square/v1 \
     --corpus default --version 1 \
     --n-observations 16 --max-out-degree 4 \
     --grid-height 30 --grid-width 30 \
