@@ -214,13 +214,13 @@ def build_dagflow_layouts(
     n_max: int = 45,
     t_max: int = 32,
     max_out_degree: int = 4,
-    target_edges: int | None = None,
+    target_edges: int | None = 105,
     n_train: int = 4000,
     n_val: int = 500,
     n_test: int = 500,
     seed: int = 42,
-    fixed_n_actual: bool = False,
-    min_extra_edges_per_node: int = 0,
+    fixed_n_actual: bool = True,
+    min_extra_edges_per_node: int = 1,
 ) -> None:
     """Build the dagflow layout dataset at *version_root*.
 

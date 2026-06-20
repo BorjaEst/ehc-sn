@@ -64,7 +64,9 @@ _DEFAULT_VERSION = 1
 _DEFAULT_N_MAX = 45
 _DEFAULT_T_MAX = 16
 _DEFAULT_MAX_OUT_DEGREE = 4
-_DEFAULT_MIN_PATH_LENGTH = 4
+_DEFAULT_TARGET_EDGES = 105
+_DEFAULT_FIXED_N_ACTUAL = True
+_DEFAULT_MIN_EXTRA_EDGES = 1
 _DEFAULT_N_TRAIN = 4000
 _DEFAULT_N_VAL = 500
 _DEFAULT_N_TEST = 500
@@ -224,13 +226,31 @@ def materialize_layouts(
             help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
         ),
     ] = _DEFAULT_N_TEST,
-    min_path_length: Annotated[
+    target_edges: Annotated[
         int,
         typer.Option(
-            "--min-path-length",
-            help=f"Minimum shortest-path length in nodes (default: {_DEFAULT_MIN_PATH_LENGTH}).",
+            "--target-edges",
+            help=f"Desired total edge count per graph "
+            f"(default: {_DEFAULT_TARGET_EDGES}).",
         ),
-    ] = _DEFAULT_MIN_PATH_LENGTH,
+    ] = _DEFAULT_TARGET_EDGES,
+    fixed_n_actual: Annotated[
+        bool,
+        typer.Option(
+            "--fixed-n-actual/--no-fixed-n-actual",
+            help="When True, always use exactly n_max nodes "
+            f"(default: {_DEFAULT_FIXED_N_ACTUAL}).",
+        ),
+    ] = _DEFAULT_FIXED_N_ACTUAL,
+    min_extra_edges: Annotated[
+        int,
+        typer.Option(
+            "--min-extra-edges",
+            help="Minimum extra edges per non-terminal node beyond the "
+            "Hamiltonian backbone "
+            f"(default: {_DEFAULT_MIN_EXTRA_EDGES}).",
+        ),
+    ] = _DEFAULT_MIN_EXTRA_EDGES,
     topology_seed: Annotated[
         int,
         typer.Option(
@@ -280,11 +300,13 @@ def materialize_layouts(
         n_max=n_max,
         t_max=t_max,
         max_out_degree=max_out_degree,
+        target_edges=target_edges,
         n_train=n_train,
         n_val=n_val,
         n_test=n_test,
         seed=topology_seed,
-        min_path_length=min_path_length,
+        fixed_n_actual=fixed_n_actual,
+        min_extra_edges_per_node=min_extra_edges,
     )
 
 
@@ -373,13 +395,31 @@ def build_all(
             help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
         ),
     ] = _DEFAULT_N_TEST,
-    min_path_length: Annotated[
+    target_edges: Annotated[
         int,
         typer.Option(
-            "--min-path-length",
-            help=f"Minimum shortest-path length in nodes (default: {_DEFAULT_MIN_PATH_LENGTH}).",
+            "--target-edges",
+            help=f"Desired total edge count per graph "
+            f"(default: {_DEFAULT_TARGET_EDGES}).",
         ),
-    ] = _DEFAULT_MIN_PATH_LENGTH,
+    ] = _DEFAULT_TARGET_EDGES,
+    fixed_n_actual: Annotated[
+        bool,
+        typer.Option(
+            "--fixed-n-actual/--no-fixed-n-actual",
+            help="When True, always use exactly n_max nodes "
+            f"(default: {_DEFAULT_FIXED_N_ACTUAL}).",
+        ),
+    ] = _DEFAULT_FIXED_N_ACTUAL,
+    min_extra_edges: Annotated[
+        int,
+        typer.Option(
+            "--min-extra-edges",
+            help="Minimum extra edges per non-terminal node beyond the "
+            "Hamiltonian backbone "
+            f"(default: {_DEFAULT_MIN_EXTRA_EDGES}).",
+        ),
+    ] = _DEFAULT_MIN_EXTRA_EDGES,
     topology_seed: Annotated[
         int,
         typer.Option(
@@ -424,11 +464,13 @@ def build_all(
         n_max=n_max,
         t_max=t_max,
         max_out_degree=max_out_degree,
-        min_path_length=min_path_length,
+        target_edges=target_edges,
         n_train=n_train,
         n_val=n_val,
         n_test=n_test,
         topology_seed=topology_seed,
+        fixed_n_actual=fixed_n_actual,
+        min_extra_edges=min_extra_edges,
         version=version,
         raw_root=raw_root,
         interim_root=interim_root,
