@@ -63,10 +63,15 @@ G = (V, E)
 V = {obs_0, obs_1, ..., obs_{N-1}}
 ```
 
-Observation IDs have stable identities. Numerical order does not imply graph
-order. Edges are directed and constant across all samples. The topology is
-not supplied in the input; the model learns it parametrically from the field
-prediction loss.
+Observation IDs have stable identities. **v1 uses a dense DAG** in which
+every forward pair $(i, j)$ with $i < j$ is a directed edge (990 total edges
+for $N = 45$). This is guaranteed by a Hamiltonian backbone chain
+$0 \to 1 \to 2 \to \dots \to N-1$ plus the rank-space adjacency where
+$\operatorname{adj}[i] = \{i+1, \dots, N-1\}$. Every node can reach every
+later node; there are no stranded nodes.
+
+The topology is not supplied in the input; the model learns it parametrically
+from the field prediction loss.
 
 ---
 
@@ -161,7 +166,21 @@ it is learned parametrically from the field prediction loss.
 | `weight`         | `(B, N)` | relational weight from $g_t$ to candidate $j$     |
 | `current_flag`   | `(B, N)` | `True` for the current location $g_t$             |
 | `goal_flag`      | `(B, N)` | `True` for the goal observation $x_{\text{goal}}$ |
-| `node_mask`      | `(B, N)` | `True` for valid nodes (masks padding)            |
+| `node_mask`      | `(B, N)` | `True` for valid observation slots                |
+
+v1 has **no padding slots** ($N_{\text{pad}} = N_{\text{actual}} = 45$).
+The `padding_obs_id` adapter setting is not needed.
+
+Two additional channels are stored in the corpus for evaluation diagnostics
+but are **excluded from the model input surface**:
+
+| Field               | Shape       | Description                            |
+| ------------------- | ----------- | -------------------------------------- |
+| `successor_indices` | `(B, N, K)` | successor node indices per observation |
+| `successor_mask`    | `(B, N, K)` | validity mask for successor slots      |
+
+where $K = N-1$ (full forward cone; every later node is a successor in the
+dense DAG).
 
 For observation $j$, the adapter constructs:
 
@@ -285,110 +304,103 @@ with high direct weight.
 ### Example
 
 ```text
-Fixed DAG:
-  obs_7  → obs_2
-  obs_7  → obs_11
-  obs_2  → obs_5
-  obs_11 → obs_5
-  obs_5  → obs_3
+Dense DAG (all forward pairs are edges, N=5 for illustration):
+  obs_0 → obs_1, obs_2, obs_3, obs_4
+  obs_1 → obs_2, obs_3, obs_4
+  obs_2 → obs_3, obs_4
+  obs_3 → obs_4
+  obs_4  (terminal)
 
 Sample:
-  current: obs_7  (i_t = 7)
-  goal:    obs_3
+  current: obs_0
+  goal:    obs_4
   oracle semantics: reliability
   decay: γ = 0.8
 
-Oracle: reliability uses c_e = −log(w_e).
-  obs_7 → obs_2:  w=0.3  →  c=1.20
-  obs_7 → obs_11: w=0.8  →  c=0.22
-  obs_2 → obs_5:  w=0.4  →  c=0.92
-  obs_11 → obs_5: w=0.9  →  c=0.11
-  obs_5 → obs_3:  w=0.2  →  c=1.61
+Weights are derived from a hidden spatial substrate (see Generation pipeline).
+For this example, suppose the geometric kernel assigns these edge costs:
+  obs_0 → obs_1:  w=0.90  →  c = -log(0.90) = 0.105
+  obs_0 → obs_2:  w=0.10  →  c = 2.303
+  obs_0 → obs_3:  w=0.70  →  c = 0.357
+  obs_0 → obs_4:  w=0.05  →  c = 2.996
+  obs_1 → obs_2:  w=0.85  →  c = 0.163
+  obs_1 → obs_3:  w=0.60  →  c = 0.511
+  obs_1 → obs_4:  w=0.30  →  c = 1.204
+  obs_2 → obs_3:  w=0.95  →  c = 0.051
+  obs_2 → obs_4:  w=0.80  →  c = 0.223
+  obs_3 → obs_4:  w=0.40  →  c = 0.916
 
-Optimal route (min Σ c): obs_7 → obs_2 → obs_5 → obs_3  (Σc = 3.73)
-  (obs_7 → obs_11 → obs_5 → obs_3 would be cheaper at Σc = 1.94,
-   but obs_11 cannot reach the goal in this DAG)
+Oracle: Dijkstra on the dense graph finds the minimum-cost path.
+  Optimal route: obs_0 → obs_1 → obs_2 → obs_3 → obs_4  (Σc = 1.235)
+  (The direct hop obs_0→obs_3→obs_4 would cost 1.273 — slightly worse.)
 
 Target field:
-  obs_7  = 1.000   (γ^0, current location)
-  obs_2  = 0.800   (γ^1)
-  obs_5  = 0.640   (γ^2)
+  obs_0  = 1.000   (γ^0, current location)
+  obs_1  = 0.800   (γ^1)
+  obs_2  = 0.640   (γ^2)
   obs_3  = 0.512   (γ^3)
-  obs_11 = 0.000   (off optimal path, despite high direct weight)
+  obs_4  = 0.410   (γ^4)
 ```
 
-Note: `obs_11` receives zero target activation because it does not lie on a
-viable path to the goal, even though it is directly reachable with high weight.
-The field is goal-conditioned, not merely proximity-based.
+Note: in the dense DAG every forward pair is reachable, so path selection is
+purely determined by the geometric weight costs. Nodes with high direct weight
+may be skipped if a multi-hop route has lower total cost.
 
 ---
 
 ## Corpus and data generation
 
-Each corpus is built around one fixed DAG shared across all samples.
+Each corpus is built around one fixed dense DAG shared across all samples.
 Samples vary the current observation, goal observation, and weight vector.
+The weight vector is a row of a static relational weight matrix $W$ derived
+from a hidden geometric substrate (anchors on a $20 \times 30$ grid, BFS
+distances, truncated exponential kernel with $\tau = 8.0$, masked by the DAG
+adjacency). v1 has no padding slots ($N_{\text{pad}} = N_{\text{actual}} = 45$).
 
-### Graph topology
+### Frozen v1 channels
 
-v1 uses **DAGs** exclusively. The DAG is fixed per corpus. Observation IDs
-are stable and assigned independently of topological order.
-
-### Key invariants
-
-- One fixed DAG per corpus; all samples share the same $(V, E)$.
-- Observation IDs are stable and do not encode graph order.
-- Only the current-state weight vector is exposed (not the full $N \times N$
-  weight matrix).
-- Weight values are in $[0, 1]$ with the orientation $0$ = blocked,
-  $1$ = maximally supported, and sampled continuously to prevent
-  categorical-threshold memorization.
-- The optimal path is unique under the declared oracle semantics.
-- The target field encodes only the selected path via pure decay; weights
-  do not multiply field values.
-
-### Corpus manifest
-
-```json
-{
-  "task": "goaltrace",
-  "corpus": "default",
-  "version": 1,
-  "n_observations": 32,
-  "max_out_degree": 4,
-  "weight_range": [0.0, 1.0],
-  "oracle_semantics": "reliability",
-  "field_decay": 0.8
-}
+```text
+observation_id              — (B, N) int32, stable observation identity
+weight                      — (B, N) float32, relational weight from current
+                              to candidate j, ∈ [0, 1]
+current_flag                — (B, N) bool,  True at current location g_t
+goal_flag                   — (B, N) bool,  True at goal observation
+node_mask                   — (B, N) bool,  True for valid observation slots
+target_field                — (B, N) float32, target prospective field ∈ [0, 1]
+successor_indices           — (B, N, K) int32, successor node indices
+successor_mask              — (B, N, K) bool,  validity mask for successor slots
 ```
 
-`preference_step_penalty` (default `0.0`) is required when
-`oracle_semantics` is `"preference"`.
-
-### Profile coupling
-
-| Checkpoint         | Validation                                                |
-| ------------------ | --------------------------------------------------------- |
-| Training startup   | `model.n_observations == manifest.n_observations`         |
-| Evaluation startup | `checkpoint.n_observations == eval_corpus.n_observations` |
+$K = N - 1$ (full forward cone; every later node is a successor in the dense
+DAG). `successor_indices` / `successor_mask` are persisted for evaluation
+diagnostics but excluded from the model input surface.
 
 ### Data generation
 
 ```bash
-python scripts/data-gen/build-goaltrace.py build-all \
-    --corpus default --version 1 \
-    --n-observations 32 --max-out-degree 4 \
-    --oracle-semantics reliability --field-decay 0.8 \
-    --n-train 4000 --n-val 500 --n-test 500 \
-    --seed 42
+# Requires dagflow substrate first:
+python scripts/data-gen/build-dagflow.py materialize-layouts --version 1
+python scripts/data-gen/build-goaltrace.py materialize-task \
+    --layout-root data/interim/dagflow/default/v1
+
+# All flags have sensible defaults.  Explicit:
+python scripts/data-gen/build-goaltrace.py materialize-task \
+    --layout-root data/interim/dagflow/default/v1 \
+    --static-weights --min-optimality-margin 0.0 \
+    --distance-tau 8.0 --distance-max 0 \
+    --grid-width 20 --grid-height 30 \
+    --n-train 500 --n-val 250 --n-test 240 \
+    --version 1
 ```
 
 Output path: `data/processed/goaltrace/<corpus>/v<version>/`
 
 ### Train/test split
 
-The split is over **(current, goal, weight) configurations**, not over graph
-structures. All splits share the same fixed DAG. The strongest generalization
-split holds out specific (current, goal) pairs entirely.
+The split is over **(current, goal) pairs** (500 / 250 / 240), not over graph
+structures. All splits share the same fixed DAG and static weight matrix $W$.
+Pairs are assigned by identity so a specific (current, goal) pair never appears
+in more than one split.
 
 ---
 

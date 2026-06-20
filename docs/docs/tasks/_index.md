@@ -10,22 +10,27 @@ demand.
 | `arena`     | [arena.md](arena.md)         | structural learning     | acquires spatial representations from sequential experience        |
 | `mazehard`  | (external)                   | spatial navigation      | navigates a fixed grid with blocked cells                          |
 | `goaltrace` | [goaltrace.md](goaltrace.md) | prospective field (HRM) | produces a goal-conditioned prospective field from oracle inputs   |
+| `routebind` | [routebind.md](routebind.md) | spatial route binding   | binds hidden obs-transition graph to new spatial layouts           |
 | `prospect`  | [prospect.md](prospect.md)   | prospective field (EHP) | produces a goal-conditioned prospective field from episodic memory |
 
 ## Task relationships
 
-### Three-task decomposition
+### Task decomposition
 
 | Task        | Model         | Task supplies                                               | Model must produce or retrieve                            |
 | ----------- | ------------- | ----------------------------------------------------------- | --------------------------------------------------------- |
 | `arena`     | TEM           | sensory observations and transitions through an environment | EC/HPC representations and episodic memory                |
+| `mazehard`  | HRM           | grid layout, start, goal, walls                             | spatial route (token sequence)                            |
 | `goaltrace` | HRM           | $g_t$, $x_{\text{goal}}$, $\mathbf{w}_t$                    | goal-conditioned prospective field $\mathbf{f}_t$         |
+| `routebind` | HRM           | spatial layout, start, goal obs, hidden obs-transition DAG  | spatial trajectory + waypoint fields over 900 positions   |
 | `prospect`  | EHP (TEM+HRM) | $o_{\text{goal}}$ + environmental experience                | memory-derived $g_t$, $\mathbf{r}_t$, then $\mathbf{f}_t$ |
 
 ```text
 arena:     world → memory
-goaltrace:    memory-like evidence → prospective field
-prospect: world memory + goal → prospective field
+mazehard:  grid → spatial route
+goaltrace: memory-like evidence → prospective field
+routebind: grid + hidden DAG → spatial route with semantic binding
+prospect:  world memory + goal → prospective field
 ```
 
 ### `arena` ↔ `goaltrace`
