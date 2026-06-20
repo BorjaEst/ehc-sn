@@ -89,6 +89,49 @@ class GoaltraceHRMAdapterSettings(BaseModel, extra="forbid"):
 
 
 # =============================================================================
+# =============================================================================
+class RoutebindHRMAdapterSettings(BaseModel, extra="forbid"):
+    """Task-side Routebind settings shared by the HRM bridge family.
+
+    Attributes:
+        encoder_kind: Positional front-end (``"learned"`` or ``"rope"``).
+        num_cell_types: Number of cell type categories (WALL=0, FREE=1,
+            OBSERVATION=2).  Default 3.
+        num_observations: Number of observation identities in the hidden
+            DAG.  Determines the observation-ID embedding table size.
+        grid_height: Grid height in cells (default 30 for v1).
+        grid_width: Grid width in cells (default 30 for v1).
+        padding_obs_id: Observation ID sentinel for non-observation cells.
+            Defaults to ``num_observations`` (the sentinel value used during
+            data generation; the embedding at this index is frozen to zero).
+    """
+
+    encoder_kind: Literal["learned", "rope"] = Field(
+        default="rope",
+        description="Positional front-end used by the Routebind token encoder.",
+    )
+    num_cell_types: int = Field(
+        default=3,
+        ge=1,
+        description="Number of cell type categories (WALL, FREE, OBSERVATION).",
+    )
+    num_observations: int = Field(
+        default=16,
+        ge=1,
+        description="Number of observation identities in the hidden DAG.",
+    )
+    grid_height: int = Field(
+        default=30,
+        ge=1,
+        description="Grid height in cells.",
+    )
+    grid_width: int = Field(
+        default=30,
+        ge=1,
+        description="Grid width in cells.",
+    )
+
+
 class GoaltraceRoPEEncoder(nn.Module, Generic[TInput]):
     """Encoder for Goaltrace task inputs using a RoPE-compatible front-end.
 
@@ -104,6 +147,7 @@ class GoaltraceRoPEEncoder(nn.Module, Generic[TInput]):
         hidden_size: int,
         *,
         input_factory: Callable[[Tensor, Tensor | None], TInput],
+        padding_idx: int | None = None,
         device: Device | None = None,
         dtype: Dtype | None = None,
     ) -> None:
@@ -113,7 +157,7 @@ class GoaltraceRoPEEncoder(nn.Module, Generic[TInput]):
         self.E_obs = nn.Embedding(
             vocab_size,
             hidden_size,
-            padding_idx=vocab_size - 1 if vocab_size > 1 else None,
+            padding_idx=padding_idx,
             device=device,
             dtype=dtype,
         )
@@ -173,6 +217,7 @@ class GoaltraceLearnedEncoder(nn.Module, Generic[TInput]):
         hidden_size: int,
         *,
         input_factory: Callable[[Tensor, Tensor | None], TInput],
+        padding_idx: int | None = None,
         device: Device | None = None,
         dtype: Dtype | None = None,
     ) -> None:
@@ -182,7 +227,7 @@ class GoaltraceLearnedEncoder(nn.Module, Generic[TInput]):
         self.E_obs = nn.Embedding(
             vocab_size,
             hidden_size,
-            padding_idx=vocab_size - 1 if vocab_size > 1 else None,
+            padding_idx=padding_idx,
             device=device,
             dtype=dtype,
         )
@@ -325,6 +370,7 @@ def build_token_encoder(
     encoder_kind: Literal["learned", "rope"],
     input_factory: Callable[[Tensor, Tensor | None], TInput],
     task_family: Literal["mazehard", "goaltrace"] = "mazehard",
+    padding_idx: int | None = None,
     device: Device | None = None,
     dtype: Dtype | None = None,
 ) -> (
@@ -345,6 +391,9 @@ def build_token_encoder(
         input_factory: Callable that wraps encoded tensors into the
             model-native input type (e.g. ``HRMInputV1``).
         task_family: Which task family the encoder belongs to.
+        padding_idx: Optional padding index for the observation-ID embedding.
+            ``None`` (default) means no padding index (v1 backward compat).
+            When set, the embedding at that index is frozen to zero.
     """
     if task_family == "mazehard":
         match encoder_kind:
@@ -354,6 +403,14 @@ def build_token_encoder(
                 encoder_cls = MazeHardRoPEEncoder[TInput]
             case _:
                 raise ValueError(f"Unsupported encoder kind: {encoder_kind}")
+        return encoder_cls(
+            seq_length=seq_length,
+            vocab_size=vocab_size,
+            hidden_size=hidden_size,
+            input_factory=input_factory,
+            device=device,
+            dtype=dtype,
+        )
     else:
         match encoder_kind:
             case "learned":
@@ -362,15 +419,15 @@ def build_token_encoder(
                 encoder_cls = GoaltraceRoPEEncoder[TInput]
             case _:
                 raise ValueError(f"Unsupported encoder kind: {encoder_kind}")
-
-    return encoder_cls(
-        seq_length=seq_length,
-        vocab_size=vocab_size,
-        hidden_size=hidden_size,
-        input_factory=input_factory,
-        device=device,
-        dtype=dtype,
-    )
+        return encoder_cls(
+            seq_length=seq_length,
+            vocab_size=vocab_size,
+            hidden_size=hidden_size,
+            input_factory=input_factory,
+            padding_idx=padding_idx,
+            device=device,
+            dtype=dtype,
+        )
 
 
 # =============================================================================
@@ -441,6 +498,229 @@ class GoaltraceMLPDecoder(nn.Module):
         slots = outputs.schema_slots[:, :N, :]  # (B, N, D)
         field_logits = self.field_head(slots).squeeze(-1)  # (B, N)
         return GoaltraceTaskOutput(firing_field=torch.sigmoid(field_logits))
+
+
+# =============================================================================
+class RoutebindRoPEEncoder(nn.Module, Generic[TInput]):
+    """Encoder for Routebind spatial-grid task inputs using a RoPE-compatible
+    front-end.
+
+    For each spatial position slot ``p = (r, c)``, constructs:
+
+        e_p = E_cell(t_p) + E_obs(o_p) + s_p * E_start + g_p * E_goal
+              + E_row(r) + E_col(c)
+
+    Sequence position is left to the HRM's internal RoPE mechanism.
+    """
+
+    def __init__(
+        self,
+        seq_length: int,
+        num_cell_types: int,
+        num_observations: int,
+        hidden_size: int,
+        grid_height: int,
+        grid_width: int,
+        *,
+        input_factory: Callable[[Tensor, Tensor | None], TInput],
+        padding_idx: int | None = None,
+        device: Device | None = None,
+        dtype: Dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self._seq_length = seq_length
+        self._hidden_size = hidden_size
+        self._grid_height = grid_height
+        self._grid_width = grid_width
+        self.E_cell = nn.Embedding(
+            num_cell_types, hidden_size, device=device, dtype=dtype
+        )
+        self.E_obs = nn.Embedding(
+            num_observations + 1,
+            hidden_size,
+            padding_idx=padding_idx,
+            device=device,
+            dtype=dtype,
+        )
+        self.E_start = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        self.E_goal = nn.Parameter(torch.zeros(1, 1, hidden_size))
+        self.E_row = nn.Embedding(
+            grid_height, hidden_size, device=device, dtype=dtype
+        )
+        self.E_col = nn.Embedding(
+            grid_width, hidden_size, device=device, dtype=dtype
+        )
+        self.embedding_scale = hidden_size**0.5
+        self._input_factory = input_factory
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        nn.init.normal_(self.E_cell.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.E_obs.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.E_start, mean=0.0, std=0.02)
+        nn.init.normal_(self.E_goal, mean=0.0, std=0.02)
+        nn.init.normal_(self.E_row.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.E_col.weight, mean=0.0, std=0.02)
+        # Explicitly zero the padding index so sentinel cells embed to zero
+        if self.E_obs.padding_idx is not None:
+            with torch.no_grad():
+                self.E_obs.weight[self.E_obs.padding_idx] = 0.0
+
+    def forward(
+        self,
+        cell_type: Tensor,
+        observation_id: Tensor,
+        start_flag: Tensor,
+        goal_flag: Tensor,
+    ) -> TInput:
+        """Encode routebind grid inputs into schema tokens.
+
+        Args:
+            cell_type: ``(B, S)`` int32 — cell type per position.
+            observation_id: ``(B, S)`` int32 — observation IDs, with
+                sentinel = ``num_observations`` for non-observation cells.
+            start_flag: ``(B, S)`` bool.
+            goal_flag: ``(B, S)`` bool.
+
+        Returns:
+            Model-native input with schema tokens ``(B, S, D)``.
+        """
+        B, S = cell_type.shape
+        D = self._hidden_size
+        device = cell_type.device
+
+        # Compute row/col per slot
+        rows = (
+            torch.arange(self._grid_height, device=device)
+            .view(-1, 1)
+            .expand(self._grid_height, self._grid_width)
+            .reshape(-1)[:S]
+            .unsqueeze(0)
+            .expand(B, -1)
+        )  # (B, S)
+        cols = (
+            torch.arange(self._grid_width, device=device)
+            .view(1, -1)
+            .expand(self._grid_height, self._grid_width)
+            .reshape(-1)[:S]
+            .unsqueeze(0)
+            .expand(B, -1)
+        )  # (B, S)
+
+        cell_emb = self.E_cell(cell_type.to(dtype=torch.int32))  # (B, S, D)
+        obs_emb = self.E_obs(observation_id.to(dtype=torch.int32))  # (B, S, D)
+        start_emb = self.E_start * start_flag.unsqueeze(-1).float()  # (B, S, D)
+        goal_emb = self.E_goal * goal_flag.unsqueeze(-1).float()  # (B, S, D)
+        row_emb = self.E_row(rows.to(dtype=torch.int32))  # (B, S, D)
+        col_emb = self.E_col(cols.to(dtype=torch.int32))  # (B, S, D)
+
+        content = cell_emb + obs_emb + start_emb + goal_emb + row_emb + col_emb
+        encoded = self.embedding_scale * content  # (B, S, D)
+
+        # Pad to model slot capacity
+        S_model = self._seq_length
+        if S < S_model:
+            pad = torch.zeros(
+                B, S_model - S, D, device=device, dtype=encoded.dtype
+            )
+            encoded = torch.cat([encoded, pad], dim=1)
+        elif S > S_model:
+            raise ValueError(
+                f"Routebind grid ({S} slots) exceeds model capacity "
+                f"({S_model} slots)."
+            )
+
+        return self._input_factory(encoded, None)
+
+
+# =============================================================================
+class RoutebindDecoder(nn.Module):
+    """Multi-head decoder for Routebind field prediction.
+
+    Decodes schema-slot features into trajectory field, waypoint field,
+    next-direction logits (from the start slot), and next-observation
+    logits (from the start slot).
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        num_slots: int,
+        num_observations: int,
+        *,
+        device: Device | None = None,
+        dtype: Dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self._num_slots = num_slots
+        self._num_observations = num_observations
+        self.trajectory_head = nn.Linear(
+            hidden_size, 1, device=device, dtype=dtype
+        )
+        self.waypoint_head = nn.Linear(
+            hidden_size, 1, device=device, dtype=dtype
+        )
+        self.direction_head = nn.Linear(
+            hidden_size, 4, device=device, dtype=dtype
+        )
+        self.observation_head = nn.Linear(
+            hidden_size, num_observations, device=device, dtype=dtype
+        )
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        for head in (
+            self.trajectory_head,
+            self.waypoint_head,
+            self.direction_head,
+            self.observation_head,
+        ):
+            nn.init.normal_(head.weight, mean=0.0, std=0.02)
+            nn.init.zeros_(head.bias)
+
+    def forward(
+        self,
+        outputs: HasSchemaSlots,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Decode schema-slot features into routebind outputs.
+
+        Args:
+            outputs: Model output carrying ``schema_slots`` shaped
+                ``(B, S, D)``.
+
+        Returns:
+            Tuple of (trajectory_field, waypoint_field,
+            next_direction_logits, next_observation_logits) where:
+            - trajectory_field: ``(B, S)`` float32 via sigmoid
+            - waypoint_field: ``(B, S)`` float32 via sigmoid
+            - next_direction_logits: ``(B, 4)`` float32
+            - next_observation_logits: ``(B, N_obs)`` float32
+        """
+        slots = outputs.schema_slots
+        S = self._num_slots
+        B = slots.shape[0]
+
+        # Per-slot field heads (operate on all S slots)
+        traj_logits = self.trajectory_head(slots[:, :S, :]).squeeze(-1)
+        wp_logits = self.waypoint_head(slots[:, :S, :]).squeeze(-1)
+        trajectory_field = torch.sigmoid(traj_logits)
+        waypoint_field = torch.sigmoid(wp_logits)
+
+        # Start-slot heads use the full pooled representation across all slots.
+        # H_start = slots[:, 0, :] is a heuristic; the actual start position
+        # must be located by the caller.  Here we use the *pooled* representation
+        # from the full schema-slot bank so that HRM self-attention can integrate
+        # the start position information into any slot.
+        pooled = slots.mean(dim=1)  # (B, D)
+        next_direction_logits = self.direction_head(pooled)
+        next_observation_logits = self.observation_head(pooled)
+
+        return (
+            trajectory_field,
+            waypoint_field,
+            next_direction_logits,
+            next_observation_logits,
+        )
 
 
 # =============================================================================
@@ -1197,6 +1477,9 @@ __all__ = [
     "MazeHardMLPDecoder",
     "MazeHardRoPEEncoder",
     "HasSchemaSlots",
+    "RoutebindHRMAdapterSettings",
+    "RoutebindRoPEEncoder",
+    "RoutebindDecoder",
     "build_token_encoder",
     "build_token_decoder",
     "SeqMazeProbeAdapterSettings",

@@ -21,13 +21,13 @@ class GoaltraceFieldSupervision:
     """Typed supervision struct for Goaltrace field prediction.
 
     Attributes:
-        target_field: Oracle goal-conditioned prospective firing field,
+        target: Oracle goal-conditioned prospective firing field,
             shape ``(B, N)`` float32, values in ``[0, 1]``.
-        node_mask: Valid-node mask, shape ``(B, N)`` bool.
+        mask: Valid-node mask, shape ``(B, N)`` bool.
     """
 
-    target_field: Tensor
-    node_mask: Tensor
+    target: Tensor
+    mask: Tensor
 
 
 # =============================================================================
@@ -56,8 +56,8 @@ def build_goaltrace_supervision(
             "from executed_batch."
         )
     return GoaltraceFieldSupervision(
-        target_field=executed_batch["target_field"].to(dtype=torch.float32),
-        node_mask=executed_batch["node_mask"].to(dtype=torch.bool),
+        target=executed_batch["target_field"].to(dtype=torch.float32),
+        mask=executed_batch["node_mask"].to(dtype=torch.bool),
     )
 
 

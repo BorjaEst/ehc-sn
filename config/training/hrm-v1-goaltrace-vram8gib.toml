@@ -16,6 +16,8 @@
 [model.components.objective]
     task_modality        = "field"
     field_loss           = "mse"
+    c_halt               = 0.05
+    c_continue           = 0.05
 
 [training.optimizer]
     lr           = 1e-4

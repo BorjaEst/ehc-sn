@@ -86,6 +86,9 @@ def _build_encoder(  # ----------------------------------------------------
         if config.padding_obs_id is not None
         else config.num_observations
     )
+    # padding_idx: only set when padding_obs_id is explicitly configured.
+    # When None (v1 backward compat), no observation embedding is frozen.
+    padding_idx = config.padding_obs_id
     return build_token_encoder(
         seq_length=model.config.num_schema_slots,
         vocab_size=vocab_size,
@@ -93,6 +96,7 @@ def _build_encoder(  # ----------------------------------------------------
         encoder_kind=config.encoder_kind,
         task_family="goaltrace",
         input_factory=_make_input_v1,
+        padding_idx=padding_idx,
         device=params.device,
         dtype=params.dtype,
     )
@@ -218,9 +222,25 @@ class GoaltraceHRMV1BridgeAdapter(nn.Module):
         batch: Batch,
         state: HRMStateV1 | None = None,
     ) -> tuple[GoaltraceHRMV1BridgeOutput, HRMStateV1]:
-        """Run a forward pass on one batch of goaltrace samples."""
+        """Run a forward pass on one batch of goaltrace samples.
+
+        HRM v1 uses post-norm transformer blocks which collapse all token
+        representations to near-identical vectors (cosine similarity > 0.999
+        after 4 layers).  The decoder therefore reads the *pre-HRM* input
+        embeddings (``inputs.schema_tokens``) which preserve per-node identity,
+        while the HRM still produces ``action_logits`` and ``theta_summary``
+        for ACT deliberation.
+        """
         inputs = self.prepare_inputs(batch)
         outputs, next_state = self.model.step(inputs, state=state)
+        # Use pre-HRM input embeddings for the decoder so node identity
+        # survives — the HRM's post-norm transformer collapses schema_slots
+        # to indistinguishable vectors.
+        outputs = HRMOutputV1(
+            theta_summary=outputs.theta_summary,
+            schema_slots=inputs.schema_tokens,
+            action_logits=outputs.action_logits,
+        )
         bridge_out = self.postprocess(outputs)
         return bridge_out, next_state
 

@@ -547,33 +547,34 @@ class ACTSupervisedModule(L.LightningModule):
 
         supervision = self._bindings.supervision_builder(frame)
 
-        if hasattr(supervision, "target_field") and hasattr(
-            supervision, "node_mask"
-        ):
-            # Field task (e.g. goaltrace).
+        if hasattr(supervision, "target") and hasattr(supervision, "mask"):
+            # Continuous-field task (goaltrace, routebind, etc.).
             pred_field = getattr(
                 record.outputs.backbone_output, "firing_field", None
             )
             if pred_field is None:
+                pred_field = getattr(
+                    record.outputs.backbone_output, "trajectory_field", None
+                )
+            if pred_field is None:
                 task = getattr(record.outputs.backbone_output, "task", None)
                 if task is not None:
-                    pred_field = getattr(
-                        task,
-                        "firing_field",
-                        (
-                            task.get("firing_field")
-                            if isinstance(task, dict)
-                            else None
-                        ),
-                    )
+                    pred_field = getattr(task, "firing_field", None)
+                    if pred_field is None:
+                        pred_field = getattr(task, "trajectory_field", None)
+                        if pred_field is None and isinstance(task, dict):
+                            pred_field = task.get("firing_field") or task.get(
+                                "trajectory_field"
+                            )
             if pred_field is None:
                 raise RuntimeError(
-                    "bridge output has no 'firing_field' for field task."
+                    "bridge output has no 'firing_field' or "
+                    "'trajectory_field' for field task."
                 )
             field_quality = self._halt_target_builder.build(
                 pred_field=pred_field,
-                target_field=supervision.target_field,
-                node_mask=supervision.node_mask,
+                target_field=supervision.target,
+                node_mask=supervision.mask,
             )
             halt_logits = record.outputs.action_logits[
                 ..., record.outputs.done_action
@@ -581,8 +582,8 @@ class ACTSupervisedModule(L.LightningModule):
             return FieldACTScoringInput(
                 prediction=FieldACTInput(
                     prediction=pred_field,
-                    target=supervision.target_field,
-                    mask=supervision.node_mask,
+                    target=supervision.target,
+                    mask=supervision.mask,
                 ),
                 halt=ACTHaltInput(
                     logits=halt_logits,
@@ -707,6 +708,16 @@ class ACTSupervisedModule(L.LightningModule):
             optimizers if isinstance(optimizers, list) else [optimizers]
         ):
             opt.step()
+
+        # Step schedulers — required in manual-optimization mode even for
+        # single-step training, otherwise the LR stays at its initial value
+        # (e.g. 1e-10 from warmup start_factor=1e-6) and params never move.
+        schedulers = self.lr_schedulers()
+        if schedulers is not None:
+            for sched in (
+                schedulers if isinstance(schedulers, list) else [schedulers]
+            ):
+                sched.step()
 
         self.log("train/loss", loss, on_step=True, on_epoch=False, logger=True)
 
