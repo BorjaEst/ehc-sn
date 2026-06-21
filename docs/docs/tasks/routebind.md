@@ -218,14 +218,19 @@ observation may occur at multiple positions.
 identity. Observation-bearing cells are traversable unless independently
 marked as walls; in v1, wall and observation cell types are mutually
 exclusive. Non-observation cells use a dedicated sentinel observation ID.
+The presence of FREE cells depends on the topology source: `openfield`
+assigns observations to every traversable cell (no FREE cells), while
+`dungeongen` may include traversable cells without observations.
 
-**Observation presence per layout**: Not every DAG observation identity
-must appear in every layout. The start observation appears at the start
-cell; the goal observation appears at least once; all observations needed
-by the selected oracle solution appear; other DAG observations may be
-absent; distractor observations may appear zero, one, or several times.
-The hidden DAG is corpus-wide; each sample supplies a partial spatial
-instantiation of it.
+**Observation presence per layout**: Observation identities are assigned
+by the topology interim and consumed as-is by routebind. Not every DAG
+observation identity must appear in every layout. The start observation
+appears at the start cell; the goal observation appears at least once;
+all observations needed by the selected oracle solution appear; other
+DAG observations may be absent; distractor observations may appear zero,
+one, or several times. The hidden DAG is corpus-wide; each sample supplies
+a partial spatial instantiation of it. Routebind selects a query from the
+supplied layout; it does not modify the layout to make a query valid.
 
 The task input does **not** contain:
 
@@ -571,72 +576,107 @@ corpus constants (see [Corpus manifest](#corpus-manifest)).
 
 ### Data pipeline
 
-`routebind` follows the repository's declared data pipeline. It consumes two
-interim substrates — one for the hidden semantic DAG and one for the spatial
-layout — and produces a single task corpus:
+`routebind` follows the repository's declared data pipeline. It consumes a
+topology interim (spatial layout with observation assignments) and produces
+a single task corpus:
 
 ```text
-data/interim/dagflow/<preset>/v<N>/        (hidden DAG topology)
-data/interim/openfield/<preset>/v<N>/      (spatial grid layouts)
+data/interim/<topology_family>/<preset>/v<N>/    (spatial topology + observation IDs)
     → data/processed/routebind/<corpus>/v<N>/
 ```
 
-The default spatial layout source is `openfield` with square 30×30 grids
+The default spatial topology source is `openfield` with square 30×30 grids
 (matching MazeHard's shape). `dungeongen` is also supported as an
-alternative spatial source. The routebind task builder adds observation
-placement, start/goal queries, and the product-state oracle on top.
+alternative source. The routebind task builder adds start/goal query
+selection and the product-state oracle on top of the topology-supplied
+layout; it does not place observations or invent cell types.
 
-This is the same separation as `dagflow → goaltrace` (semantic) composed
-with `openfield → arena` (spatial). Both parent families have independent
-value for other tasks.
+The hidden DAG may be generated directly over the topology's observation
+vocabulary (v1 recommendation) or consumed from a dagflow substrate whose
+vocabulary matches the topology. The dagflow-composition analogy
+(`dagflow → goaltrace`) holds for the semantic supervision structure.
 
 ### Spatial layout substrate
 
-Routebind consumes existing spatial layout datasets (`openfield` or
+Routebind consumes existing spatial topology datasets (`openfield` or
 `dungeongen`) that provide the `SpatialLayout` protocol
-(see `spec/spec-openfield-layout.md`). The substrate supplies:
+(see `spec/spec-openfield-layout.md`). The topology supplies the complete
+visible world:
 
-- `topology`: wall mask (`False` = wall, `True` = traversable).
-- `valid_state_mask`: largest traversable component.
+- `valid_state_mask`: traversable positions (`True` = traversable).
+- `observation_id`: observation identity per traversable position,
+  or a sentinel for positions without observations.
 - `state_to_row_col`: row-major positional mapping.
 - `adjacency`: four-neighbor connectivity.
 
+Routebind derives `cell_type` from these fields — it does not place
+observations, assign cell types, or invent cell semantics. For every
+spatial slot $p$:
+
+$$
+\operatorname{cell_type}(p) =
+\begin{cases}
+\text{WALL}, & \text{inaccessible}\\
+\text{OBSERVATION}, & \text{traversable and has an observation ID}\\
+\text{FREE}, & \text{traversable and no observation ID}
+\end{cases}
+$$
+
+The distribution of cell types is determined by the chosen topology source.
+`openfield` assigns an observation to every traversable cell, producing
+~0\% FREE cells. `dungeongen` may produce walls, FREE cells, and
+observation-bearing cells.
+
 For v1 the recommended profile is 30×30 square grids (900 positions,
-row-major ordering). The spatial substrate must not contain task
-semantics: observation identities, the hidden DAG, start/goal selection,
-waypoints, or routebind targets.
+row-major ordering). The topology source owns observation identities;
+routebind must not replace them. The topology must not contain routebind
+query semantics: the hidden DAG, start/goal selection, waypoints, or
+routebind targets.
 
 ### Generation phases
 
-**Phase A — Build the hidden semantic DAG.** Generate one DAG per corpus
-(or consume it from a dagflow substrate). Measure and store in-degree/
-out-degree distributions, reachable-pair count, semantic shortest-path
-distribution, branch count, transitive shortcuts, sink and source counts.
-Reject graphs with insufficient route diversity.
+**Phase A — Load or generate the hidden semantic DAG.** Use one fixed DAG
+per corpus. Generate the DAG over the topology's observation vocabulary
+(recommended for v1) or consume a dagflow substrate whose vocabulary
+matches the topology. Measure in-degree/out-degree distributions,
+reachable-pair count, semantic shortest-path distribution, branch count,
+transitive shortcuts, sink and source counts. Reject graphs with
+insufficient route diversity. Coupling invariant:
+$O_{\text{DAG}} \subseteq O_{\text{topology}}$ (full equality recommended
+for v1).
 
-**Phase B — Consume spatial layouts.** Read spatial layouts from the
-openfield (or dungeongen) interim substrate. Each layout supplies a
-30×30 traversable grid with walls. Validate grid dimensions and
-connectivity.
+**Phase B — Load the topology interim.** Read one versioned spatial
+layout from the selected topology family (e.g. `openfield` or
+`dungeongen`). Each layout supplies traversability, per-position
+observation identities, and spatial adjacency. Validate grid dimensions
+and connectivity.
 
-**Phase C — Place observations.** Place observation identities onto
-traversable cells. Place distractor observations. Optionally duplicate
-selected identities. Observation placement must not correlate with
-numerical ID.
+**Phase C — Derive routebind spatial channels.** From the topology record,
+derive `cell_type`, `observation_id`, and `cell_mask`:
+
+- inaccessible $\rightarrow$ `WALL`;
+- traversable with observation $\rightarrow$ `OBSERVATION`, passthrough
+  the topology's observation ID;
+- traversable without observation $\rightarrow$ `FREE`, sentinel
+  observation ID.
+
+Build occurrence lists for every observation identity. Reject a layout
+that lacks observations required by the DAG. No observations are placed,
+moved, or invented here.
 
 **Phase D — Select start and goal.** Choose a reachable semantic
 start–goal pair from the precomputed reachable-pair relation of the hidden
 DAG. The start cell must contain the start observation. The goal must
 differ from the start observation. Mark all physical occurrences of the
-goal. Reject the sample if no valid semantic query can be formed on this
-layout.
+goal via `goal_flag`. Reject the sample if no valid semantic query can be
+formed on this layout.
 
 **Phase E — Run the joint oracle.** Execute product-state shortest-path
-search over the placed layout and selected query. Recover: the full
-product-state path, projected spatial route, accepted semantic observation
-sequence, selected occurrence of each waypoint, selected goal occurrence,
-first physical direction, and next observation. Reject the sample if no
-suitable route exists.
+search over the topology-supplied layout and selected query. Recover: the
+full product-state path, projected spatial route, accepted semantic
+observation sequence, selected occurrence of each waypoint, selected goal
+occurrence, first physical direction, and next observation. Reject the
+sample if no suitable route exists.
 
 **Phase F — Enforce uniqueness.** Verify exactly one optimal
 task-equivalence class exists and the projected physical route is simple. Reject samples that
@@ -649,7 +689,11 @@ spatial and semantic decay factors.
 ### Key invariants
 
 - One fixed DAG per corpus; all samples share the same $(O, E_{\text{obs}})$.
+- The DAG vocabulary is a subset of the topology observation vocabulary
+  ($O_{\text{DAG}} \subseteq O_{\text{topology}}$).
 - Observation IDs are stable and do not encode graph order.
+- Cell types and observation IDs are derived from the topology interim;
+  routebind does not generate or replace them.
 - The hidden graph is never exposed in model inputs.
 - The start cell is traversable and contains a real observation.
 - The goal differs from the start observation and is semantically reachable.
@@ -690,45 +734,53 @@ Goaltrace) because semantic sequences are short (2–6 steps).
   "task": "routebind",
   "corpus": "default",
   "version": 1,
-  "n_observations": 16,
+  "topology_family": "openfield",
+  "topology_version": 1,
+  "topology_observation_vocabulary_size": 45,
+  "n_observations": 45,
   "max_out_degree": 4,
   "grid_shape": [30, 30],
   "field_decay_spatial": 0.9848,
   "field_decay_semantic": 0.8,
   "max_supported_route_length": 150,
-  "minimum_terminal_activation": 0.1,
-  "parent_dag_family": "dagflow",
-  "parent_grid_family": "openfield"
+  "minimum_terminal_activation": 0.1
 }
 ```
 
-`field_decay_spatial` is the authoritative decay parameter.
-`minimum_terminal_activation` and `max_supported_route_length` are
-derived consistency checks: the builder validates that
+`topology_observation_vocabulary_size` is the observation-ID range used by
+the topology source. `n_observations` is the DAG observation count and must
+satisfy `n_observations <= topology_observation_vocabulary_size` (equality
+recommended for v1). `field_decay_spatial` is the authoritative decay
+parameter. `minimum_terminal_activation` and `max_supported_route_length`
+are derived consistency checks: the builder validates that
 $\gamma_{\text{space}}^{L_{\max}} \ge f_{\min}$. Only one of the three
 is independent; the manifest records all three for readability.
 
 ### Profile coupling
 
-| Checkpoint         | Validation                                                       |
-| ------------------ | ---------------------------------------------------------------- |
-| Training startup   | `model.num_schema_slots == 900`                                  |
-| Training startup   | `adapter.num_observation_embeddings == n_observations + 1`       |
-| Evaluation startup | checkpoint profile agrees with eval corpus on all coupled fields |
+| Checkpoint         | Validation                                                          |
+| ------------------ | ------------------------------------------------------------------- |
+| Training startup   | `model.num_schema_slots == 900`                                     |
+| Training startup   | `adapter.num_observation_embeddings == n_observations + 1`          |
+| Training startup   | `n_observations <= topology_observation_vocabulary_size`            |
+| Evaluation startup | checkpoint profile agrees with eval corpus on all coupled fields    |
+| Evaluation startup | topology family and version match between training and eval corpora |
 
 ### Data generation
 
 ```bash
 python scripts/data-gen/build-routebind.py build-all \
-    --dag-layout-root data/interim/dagflow/default/v1 \
-    --grid-layout-root data/interim/openfield/big-square/v1 \
+    --topology-root data/interim/openfield/big-square/v1 \
     --corpus default --version 1 \
-    --n-observations 16 --max-out-degree 4 \
-    --grid-height 30 --grid-width 30 \
+    --n-observations 45 --max-out-degree 4 \
     --field-decay-spatial 0.9848 --field-decay-semantic 0.8 \
     --n-layouts-train 4000 --n-layouts-val 200 --n-layouts-test 200 \
     --seed 42
 ```
+
+`--n-observations` must not exceed the topology source's observation
+vocabulary size (45 for `openfield` with `s_size=45`). Grid shape is
+read from the topology source and is not a builder argument.
 
 Output path: `data/processed/routebind/<corpus>/v<version>/`
 
@@ -749,11 +801,13 @@ only test.
 
 ### Curriculum profiles
 
-The task should be introduced progressively:
+The task should be introduced progressively. Profiles are expressed as
+topology-source presets or sample-selection constraints — routebind does
+not control observation occurrence patterns:
 
-| Profile | Name                              | Properties                                                                              |
+| Profile | Name                              | Topology properties                                                                     |
 | ------- | --------------------------------- | --------------------------------------------------------------------------------------- |
-| 1       | Unique observations, open layouts | each observation appears once; low wall density; short semantic sequences               |
+| 1       | Sparse observations, open layouts | each DAG observation appears few times; low wall density; short semantic sequences      |
 | 2       | Semantic branching                | branching DAG; one valid route; moderate route lengths                                  |
 | 3       | Repeated observations             | selected observations appear at multiple positions; binding choices                     |
 | 4       | Obstacles and bottlenecks         | higher wall density; longer paths; spatially close but semantically invalid distractors |
