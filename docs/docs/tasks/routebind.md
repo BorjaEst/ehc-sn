@@ -576,25 +576,42 @@ corpus constants (see [Corpus manifest](#corpus-manifest)).
 
 ### Data pipeline
 
-`routebind` follows the repository's declared data pipeline. It consumes a
-topology interim (spatial layout with observation assignments) and produces
-a single task corpus:
+`routebind` is a **dual-substrate derived task**. It consumes two
+versioned, read-only parent artifacts:
 
 ```text
-data/interim/<topology_family>/<preset>/v<N>/    (spatial topology + observation IDs)
-    → data/processed/routebind/<corpus>/v<N>/
+data/interim/<topology_family>/<preset>/v<N>/        (spatial topology + observation IDs)
+                                                         │
+                                                         ├── data/processed/routebind/<corpus>/v<N>/
+                                                         │
+data/interim/dagflow/<preset>/v<N>/                   (hidden semantic DAG)
 ```
 
-The default spatial topology source is `openfield` with square 30×30 grids
-(matching MazeHard's shape). `dungeongen` is also supported as an
-alternative source. The routebind task builder adds start/goal query
-selection and the product-state oracle on top of the topology-supplied
-layout; it does not place observations or invent cell types.
+The topology parent supplies the complete visible spatial world,
+including traversability, spatial adjacency, coordinates, and the
+observation identity assigned to each position. Routebind preserves
+these channels exactly — it does not place, remove, duplicate, replace,
+or remap observations.
 
-The hidden DAG may be generated directly over the topology's observation
-vocabulary (v1 recommendation) or consumed from a dagflow substrate whose
-vocabulary matches the topology. The dagflow-composition analogy
-(`dagflow → goaltrace`) holds for the semantic supervision structure.
+The dagflow parent supplies one fixed directed graph over exactly the
+same public observation vocabulary used by the topology substrate.
+Routebind consumes this graph as hidden oracle structure; the adjacency
+is never exposed in model inputs.
+
+Routebind always consumes one versioned dagflow graph artifact. It does
+not generate a DAG. The selected dagflow graph and the topology substrate
+must use exactly the same declared public observation vocabulary:
+
+$$
+O_{\mathrm{DAG}} = O_{\mathrm{topology}}
+= \{0, \ldots, N_{\mathrm{obs}}-1\}
+$$
+
+The topology substrate provides the observation-to-position mapping
+$\phi: P \rightarrow O \cup \{\varnothing\}$. The dagflow substrate
+provides the hidden transition relation $E_{\mathrm{obs}} \subseteq O \times O$.
+Routebind computes over $(P, \phi, E_{\mathrm{obs}})$ without modifying
+either $\phi$ or $E_{\mathrm{obs}}$.
 
 ### Spatial layout substrate
 
@@ -635,15 +652,13 @@ routebind targets.
 
 ### Generation phases
 
-**Phase A — Load or generate the hidden semantic DAG.** Use one fixed DAG
-per corpus. Generate the DAG over the topology's observation vocabulary
-(recommended for v1) or consume a dagflow substrate whose vocabulary
-matches the topology. Measure in-degree/out-degree distributions,
-reachable-pair count, semantic shortest-path distribution, branch count,
-transitive shortcuts, sink and source counts. Reject graphs with
-insufficient route diversity. Coupling invariant:
-$O_{\text{DAG}} \subseteq O_{\text{topology}}$ (full equality recommended
-for v1).
+**Phase A — Load the hidden semantic DAG.** One fixed DAG per corpus,
+consumed from a versioned dagflow substrate. The dagflow artifact
+expresses edges in the same public observation IDs used by the topology.
+Validate vocabulary identity ($O_{\text{DAG}} = O_{\text{topology}}$),
+in-degree/out-degree distributions, reachable-pair count, semantic
+shortest-path distribution, and graph connectivity. Reject graphs with
+insufficient route diversity. Routebind does not generate the DAG.
 
 **Phase B — Load the topology interim.** Read one versioned spatial
 layout from the selected topology family (e.g. `openfield` or
@@ -689,8 +704,10 @@ spatial and semantic decay factors.
 ### Key invariants
 
 - One fixed DAG per corpus; all samples share the same $(O, E_{\text{obs}})$.
-- The DAG vocabulary is a subset of the topology observation vocabulary
-  ($O_{\text{DAG}} \subseteq O_{\text{topology}}$).
+- The DAG vocabulary equals the topology observation vocabulary
+  ($O_{\text{DAG}} = O_{\text{topology}}$). Both use the same declared
+  public observation IDs; a layout may contain a subset of those IDs,
+  but the declared vocabularies must match exactly.
 - Observation IDs are stable and do not encode graph order.
 - Cell types and observation IDs are derived from the topology interim;
   routebind does not generate or replace them.
@@ -734,11 +751,23 @@ Goaltrace) because semantic sequences are short (2–6 steps).
   "task": "routebind",
   "corpus": "default",
   "version": 1,
-  "topology_family": "openfield",
-  "topology_version": 1,
-  "topology_observation_vocabulary_size": 45,
+  "manifest_schema_version": 2,
+  "parents": {
+    "spatial_topology": {
+      "family": "openfield",
+      "root": "data/interim/openfield/big-square/v1",
+      "version": 1
+    },
+    "semantic_graph": {
+      "family": "dagflow",
+      "root": "data/interim/dagflow/default/v1",
+      "version": 1,
+      "artifact_id": "dagflow-train-000001",
+      "content_digest": "sha256:..."
+    }
+  },
   "n_observations": 45,
-  "max_out_degree": 4,
+  "topology_observation_vocabulary_size": 45,
   "grid_shape": [30, 30],
   "field_decay_spatial": 0.9848,
   "field_decay_semantic": 0.8,
@@ -747,40 +776,57 @@ Goaltrace) because semantic sequences are short (2–6 steps).
 }
 ```
 
-`topology_observation_vocabulary_size` is the observation-ID range used by
-the topology source. `n_observations` is the DAG observation count and must
-satisfy `n_observations <= topology_observation_vocabulary_size` (equality
-recommended for v1). `field_decay_spatial` is the authoritative decay
-parameter. `minimum_terminal_activation` and `max_supported_route_length`
-are derived consistency checks: the builder validates that
-$\gamma_{\text{space}}^{L_{\max}} \ge f_{\min}$. Only one of the three
-is independent; the manifest records all three for readability.
+`parents.spatial_topology` records the topology substrate that supplies
+the complete visible spatial world, including per-position observation
+identities. `parents.semantic_graph` records the dagflow graph artifact
+that supplies the hidden semantic DAG. Both parents are immutable,
+versioned artifacts; the routebind corpus is derived from their exact
+content, not merely their generation parameters.
+
+The dagflow parent includes an `artifact_id` identifying the specific
+graph instance and a `content_digest` verifying its exact content. The
+same graph may be shared by a Goaltrace corpus for cross-task transfer
+experiments.
+
+`n_observations` and `topology_observation_vocabulary_size` must be
+equal ($O_{\text{DAG}} = O_{\text{topology}}$). `field_decay_spatial` is
+the authoritative decay parameter. `minimum_terminal_activation` and
+`max_supported_route_length` are derived consistency checks.
 
 ### Profile coupling
 
-| Checkpoint         | Validation                                                          |
-| ------------------ | ------------------------------------------------------------------- |
-| Training startup   | `model.num_schema_slots == 900`                                     |
-| Training startup   | `adapter.num_observation_embeddings == n_observations + 1`          |
-| Training startup   | `n_observations <= topology_observation_vocabulary_size`            |
-| Evaluation startup | checkpoint profile agrees with eval corpus on all coupled fields    |
-| Evaluation startup | topology family and version match between training and eval corpora |
+| Checkpoint         | Validation                                                              |
+| ------------------ | ----------------------------------------------------------------------- |
+| Training startup   | `model.num_schema_slots == 900`                                         |
+| Training startup   | `adapter.num_observation_embeddings == n_observations + 1`              |
+| Training startup   | `n_observations == topology_observation_vocabulary_size`                |
+| Training startup   | dagflow parent `artifact_id` and `content_digest` match training corpus |
+| Evaluation startup | checkpoint profile agrees with eval corpus on all coupled fields        |
+| Evaluation startup | topology family and version match between training and eval corpora     |
+| Evaluation startup | dagflow graph identity matches between training and eval corpora        |
 
 ### Data generation
 
 ```bash
-python scripts/data-gen/build-routebind.py build-all \
+# Build the dagflow graph first:
+python scripts/data-gen/build-dagflow.py build-all
+
+# Build the routebind corpus consuming both parents:
+python scripts/data-gen/build-routebind.py materialize-task \
     --topology-root data/interim/openfield/big-square/v1 \
+    --dagflow-root data/interim/dagflow/default/v1 \
+    --dagflow-graph-id dagflow-default-v1-train-000000 \
     --corpus default --version 1 \
-    --n-observations 45 --max-out-degree 4 \
     --field-decay-spatial 0.9848 --field-decay-semantic 0.8 \
-    --n-layouts-train 4000 --n-layouts-val 200 --n-layouts-test 200 \
+    --n-queries-per-layout 10 \
     --seed 42
 ```
 
-`--n-observations` must not exceed the topology source's observation
-vocabulary size (45 for `openfield` with `s_size=45`). Grid shape is
-read from the topology source and is not a builder argument.
+The dagflow graph artifact is built separately by `build-dagflow.py`.
+Routebind reads the selected graph by stable artifact ID. Parameters
+such as `--n-observations` and `--max-out-degree` are owned by dagflow;
+routebind reads them from the dagflow manifest and validates
+compatibility.
 
 Output path: `data/processed/routebind/<corpus>/v<version>/`
 
