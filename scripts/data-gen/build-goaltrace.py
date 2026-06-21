@@ -123,12 +123,22 @@ def materialize_task(
             help="Maximum padded observation count N (default: 32).",
         ),
     ] = _DEFAULT_N_OBSERVATIONS,
+    dagflow_graph_id: Annotated[
+        str | None,
+        typer.Option(
+            "--dagflow-graph-id",
+            help="Stable artifact ID of a single DAG within layout-root. "
+            "When set, overrides --num-graphs and uses exactly this graph. "
+            "(default: None, uses --num-graphs).",
+        ),
+    ] = None,
     num_graphs: Annotated[
         int,
         typer.Option(
             "--num-graphs",
             help="Number of DAGs to sample from the layout pool "
-            "(default: 1, all samples share one DAG).",
+            "(default: 1, all samples share one DAG).  Deprecated when "
+            "--dagflow-graph-id is provided.",
         ),
     ] = _DEFAULT_NUM_GRAPHS,
     oracle_semantics: Annotated[
@@ -261,6 +271,7 @@ def materialize_task(
         corpus=corpus,
         n_observations=n_observations,
         num_graphs=num_graphs,
+        dagflow_graph_id=dagflow_graph_id,
         oracle_semantics=oracle_semantics,
         field_decay=field_decay,
         preference_step_penalty=preference_step_penalty,
