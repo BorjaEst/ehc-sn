@@ -65,14 +65,83 @@ def iter_substrate_entries_and_samples(
         FileNotFoundError: When the index or a channel file is missing.
         ValueError: When the index entry count does not match array length.
     """
-    entries = [e for e in read_index(substrate_root / "index.jsonl") if e.split == split]
+    entries = [
+        e
+        for e in read_index(substrate_root / "index.jsonl")
+        if e.split == split
+    ]
     split_dir = substrate_root / split
     arrays = {ch: np.load(split_dir / f"{ch}.npy") for ch in channels}
     n_arrays = next(iter(arrays.values())).shape[0]
     if len(entries) != n_arrays:
-        raise ValueError(f"Index has {len(entries)} {split!r} entries but arrays have {n_arrays} samples " f"in {substrate_root}.")
+        raise ValueError(
+            f"Index has {len(entries)} {split!r} entries but arrays have {n_arrays} samples "
+            f"in {substrate_root}."
+        )
     for i, entry in enumerate(entries):
         yield entry, {ch: arrays[ch][i] for ch in channels}
+
+
+def find_artifact_by_id(
+    substrate_root: Path,
+    artifact_id: str,
+) -> tuple[DatasetIndexEntry, dict[str, np.ndarray]]:
+    """Find a single substrate sample by its stable artifact ID.
+
+    Scans the root-level ``index.jsonl`` for the matching entry, then loads
+    the sample arrays from the appropriate split directory.
+
+    Args:
+        substrate_root: Versioned root of the shared substrate
+            (e.g. ``data/interim/dagflow/default/v1``).
+        artifact_id: Stable artifact ID (e.g. ``"dagflow-default-v1-train-000042"``).
+
+    Returns:
+        ``(DatasetIndexEntry, dict[str, ndarray])`` for the matching sample.
+
+    Raises:
+        FileNotFoundError: When *substrate_root* or its index is missing.
+        ValueError: When *artifact_id* is not found, or when the entry's split
+            directory is missing the required channels.
+    """
+    index_path = substrate_root / "index.jsonl"
+    if not index_path.exists():
+        raise FileNotFoundError(f"No index at {index_path}.")
+
+    match_entry: DatasetIndexEntry | None = None
+    for entry in read_index(index_path):
+        if entry.id == artifact_id:
+            match_entry = entry
+            break
+
+    if match_entry is None:
+        raise ValueError(f"Artifact {artifact_id!r} not found in {index_path}.")
+
+    split = match_entry.split
+    channels = match_entry.channels
+    split_dir = substrate_root / split
+
+    arrays: dict[str, np.ndarray] = {}
+    for ch in channels:
+        ch_file = split_dir / f"{ch}.npy"
+        if not ch_file.exists():
+            raise FileNotFoundError(
+                f"Channel file not found: {ch_file} "
+                f"(for artifact {artifact_id!r})."
+            )
+        all_arr = np.load(ch_file, mmap_mode="r")
+        # Find the index of this artifact within the split
+        all_entries = [e for e in read_index(index_path) if e.split == split]
+        for idx, e in enumerate(all_entries):
+            if e.id == artifact_id:
+                arrays[ch] = all_arr[idx]
+                break
+        else:
+            raise ValueError(
+                f"Could not locate {artifact_id!r} in split {split!r} arrays."
+            )
+
+    return match_entry, arrays
 
 
 def load_substrate_manifest(substrate_root: Path) -> dict:
@@ -90,12 +159,16 @@ def load_substrate_manifest(substrate_root: Path) -> dict:
     """
     manifest = read_manifest(substrate_root)
     if manifest.get("dataset_class") != "shared_substrate":
-        raise ValueError(f"Expected a shared_substrate root, got dataset_class=" f"{manifest.get('dataset_class')!r} at {substrate_root}.")
+        raise ValueError(
+            f"Expected a shared_substrate root, got dataset_class="
+            f"{manifest.get('dataset_class')!r} at {substrate_root}."
+        )
     return manifest
 
 
 __all__ = [
     "iter_substrate_samples",
     "iter_substrate_entries_and_samples",
+    "find_artifact_by_id",
     "load_substrate_manifest",
 ]
