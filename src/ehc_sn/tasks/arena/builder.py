@@ -251,20 +251,19 @@ def _build_episode_from_layout(
     rng = np.random.default_rng(np.uint64(walk_seed))
     N = layout["graph_state_count"]
     row_col = layout["state_to_row_col"]
-    valid_mask = layout["valid_state_mask"]
     obs_ids_src = layout["observation_id"]
     as_ = layout["action_space"]
     deltas = as_["action_deltas"]
     stay_a = as_["stay_action"] if as_["stay_action"] is not None else -1
 
-    # Build a 2-D mask_valid for the walk function.
+    # Build a 2-D mask_valid from the layout's state_to_row_col.
+    # In the compact representation, every graph state is a valid cell.
     max_row = int(row_col[:, 0].max()) + 1
     max_col = int(row_col[:, 1].max()) + 1
     mask_valid_2d = np.zeros((max_row, max_col), dtype=bool)
     for s in range(N):
-        if valid_mask[s]:
-            r, c = int(row_col[s, 0]), int(row_col[s, 1])
-            mask_valid_2d[r, c] = True
+        r, c = int(row_col[s, 0]), int(row_col[s, 1])
+        mask_valid_2d[r, c] = True
 
     if start_cell is None:
         start_r, start_c = random_valid_cell(mask_valid_2d, rng)
@@ -325,7 +324,7 @@ def _build_episode_from_layout(
         m_valid_pad = mask_valid_2d
     for s in range(N):
         r, c = int(row_col[s, 0]), int(row_col[s, 1])
-        topology[r, c] = valid_mask[s]
+        topology[r, c] = True
         observations[r, c] = obs_ids_src[s]
 
     return {
@@ -699,7 +698,7 @@ def build_arena_task_corpus(
         f"{n}={i}"
         for i, n in enumerate(layouts[0]["action_space"]["action_names"])
     )
-    sensory_vocab_size = layouts[0]["sensory_vocab_size"]
+    sensory_vocab_size = layouts[0]["observation_vocabulary_size"]
     topology_type = layouts[0]["topology_type"]
     layout_family = layouts[0]["layout_family"]
 
@@ -773,10 +772,10 @@ def build_arena_task_corpus(
                     per_sample_extra.append(
                         {
                             "task_metadata": {
-                                "layout_instance_id": layout["layout_id"],
+                                "parent_sample_id": layout["layout_id"],
                                 "topology_type": topology_type,
                                 "topology_seed": layout["topology_seed"],
-                                "sensory_seed": layout["sensory_seed"],
+                                "observation_seed": layout["observation_seed"],
                                 "episode_index": ep_idx,
                                 "walk_seed": walk_seed,
                             }
@@ -791,7 +790,7 @@ def build_arena_task_corpus(
                 channels=ARENA_TASK_CHANNELS,
                 topology_kind=topology_type,
                 n_states=layouts[0]["graph_state_count"],
-                extent=[max_grid_h],
+                extent=[max_grid_h, max_grid_w],
                 index_kwargs={},
                 per_sample_ids=per_sample_ids,
                 per_sample_extra=per_sample_extra,
@@ -806,10 +805,11 @@ def build_arena_task_corpus(
             dataset_class="task_corpus",
             family=TASK_FAMILY,
             version=version,
+            manifest_schema_version=1,
             channels=ARENA_TASK_CHANNELS,
             topology_kind=topology_type,
             n_states=layouts[0]["graph_state_count"],
-            extent=[int(layouts[0]["state_to_row_col"][:, 0].max()) + 1],
+            extent=[max_grid_h, max_grid_w],
             n_samples=split_counts,
             source_id=layout_family,
             builder="ehc_sn.tasks.arena.build_arena_task_corpus",
@@ -821,7 +821,7 @@ def build_arena_task_corpus(
             task_protocol_version=TASK_PROTOCOL_VERSION,
             task=TASK_FAMILY,
             corpus=corpus,
-            parent_substrate=f"data/processed/{layout_family}/v1",
+            parent_substrate=f"data/interim/{layout_family}/v1",
             start_policy_id=START_POLICY_RANDOM_VALID_ID,
             walk_policy_id=walk_policy_id,
             action_count=action_count,

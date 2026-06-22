@@ -58,6 +58,17 @@ _TASK_REQUIRED: frozenset[str] = _SHARED_REQUIRED | frozenset(
     }
 )
 
+# v2 task corpora use role-addressed parents dict instead of flat parent fields.
+_TASK_REQUIRED_V2: frozenset[str] = _SHARED_REQUIRED | frozenset(
+    {
+        "task",
+        "corpus",
+        "parents",
+        "task_schema_version",
+        "task_protocol_version",
+    }
+)
+
 _SOURCE_SPEC_REQUIRED: frozenset[str] = frozenset(
     {
         "schema_version",
@@ -121,7 +132,12 @@ def _validate_structure(root: Path) -> dict[str, Any]:
     if dataset_class == "source_spec":
         required = _SOURCE_SPEC_REQUIRED
     elif dataset_class == "task_corpus":
-        required = _TASK_REQUIRED
+        # Select required fields based on manifest_schema_version
+        ms_version = manifest.get("manifest_schema_version", 1)
+        if ms_version >= 2:
+            required = _TASK_REQUIRED_V2
+        else:
+            required = _TASK_REQUIRED
     else:
         required = _SHARED_REQUIRED
     missing = required - manifest.keys()
@@ -134,11 +150,27 @@ def _validate_structure(root: Path) -> dict[str, Any]:
         channels: list[str] = manifest["channels"]
 
     if dataset_class == "task_corpus":
-        ps: str = manifest["parent_substrate"]
-        if ps.startswith("/"):
-            raise ValueError(
-                f"parent_substrate must be a repo-relative path, got absolute: {ps!r}"
-            )
+        # v1: flat parent fields; v2: parents dict
+        ms_version = manifest.get("manifest_schema_version", 1)
+        if ms_version < 2:
+            ps: str = manifest["parent_substrate"]
+            if ps.startswith("/"):
+                raise ValueError(
+                    f"parent_substrate must be a repo-relative path, got absolute: {ps!r}"
+                )
+        else:
+            # v2: parents must be a dict with at least one role
+            parents: dict = manifest["parents"]
+            if not isinstance(parents, dict) or not parents:
+                raise ValueError(
+                    f"parents must be a non-empty dict, got {type(parents).__name__}: {parents!r}"
+                )
+            for role, ref in parents.items():
+                for key in ("family", "root", "version"):
+                    if key not in ref:
+                        raise ValueError(
+                            f"parents.{role} missing required key {key!r}: {ref!r}"
+                        )
 
     # source_spec roots use per-split specs.jsonl, not a root index.jsonl.
     if dataset_class != "source_spec":
@@ -266,21 +298,63 @@ def _validate_path_grammar(root: Path, manifest: dict[str, Any]) -> None:
                 f"Task corpus root must reside under data/processed/, "
                 f"got path {root}."
             )
-        ps: str = manifest["parent_substrate"]
-        parent_family = manifest["parent_family"]
-        parent_version = manifest["parent_version"]
-        if parent_family in {"dagflow", "openfield", "dungeongen"}:
-            expected_ps = (
-                f"data/interim/{parent_family}/default/v{parent_version}"
-            )
-        elif parent_family in {"maze-nd", "numberline"}:
+        ms_version = manifest.get("manifest_schema_version", 1)
+        if ms_version < 2:
+            # v1: flat parent_substrate / parent_family / parent_version fields.
+            ps: str = manifest["parent_substrate"]
+            parent_family = manifest["parent_family"]
+            parent_version = manifest["parent_version"]
+            # Use the actual parent_substrate as the canonical expectation;
+            # the builder owns its value and may use non-default presets.
             expected_ps = f"data/interim/{parent_family}/v{parent_version}"
+            # Pre-computed parent_substrate is also acceptable (it is the builder's
+            # own source-of-truth), so only reject if it deviates from the standard
+            # pattern by more than the preset segment.
+            if not ps.startswith(f"data/interim/{parent_family}/"):
+                raise ValueError(
+                    f"parent_substrate {ps!r} does not start with "
+                    f"'data/interim/{parent_family}/'."
+                )
+            # Verify version matches
+            if not ps.endswith(f"/v{parent_version}"):
+                raise ValueError(
+                    f"parent_substrate {ps!r} version does not match "
+                    f"parent_version=v{parent_version}."
+                )
         else:
-            expected_ps = f"data/processed/{parent_family}/v{parent_version}"
-        if ps != expected_ps:
-            raise ValueError(
-                f"parent_substrate {ps!r} does not match expected {expected_ps!r}."
-            )
+            # v2+: parents dict with role-addressed refs.
+            parents: dict = manifest.get("parents", {})
+            if not parents:
+                raise ValueError(
+                    f"Task corpus manifest_schema_version={ms_version} "
+                    f"must have a non-empty 'parents' dict."
+                )
+            for role, ref in parents.items():
+                pfam = ref.get("family")
+                proot = ref.get("root", "")
+                pver = ref.get("version")
+                if not pfam or not proot or pver is None:
+                    raise ValueError(
+                        f"parents.{role} must have 'family', 'root', "
+                        f"and 'version' keys."
+                    )
+                # Every parent root under data/interim/ must start with
+                # the expected family prefix and end with the expected version leaf.
+                if proot.startswith("data/interim/"):
+                    expected_prefix = f"data/interim/{pfam}/"
+                    if not proot.startswith(expected_prefix):
+                        raise ValueError(
+                            f"parents.{role} root {proot!r} does not start "
+                            f"with expected prefix {expected_prefix!r} "
+                            f"(family={pfam!r})."
+                        )
+                    expected_suffix = f"/v{pver}"
+                    if not proot.endswith(expected_suffix):
+                        raise ValueError(
+                            f"parents.{role} root {proot!r} version does not "
+                            f"match version={pver} (expected suffix "
+                            f"{expected_suffix!r})."
+                        )
     elif dataset_class == "source_spec":
         preset = manifest.get("preset", "")
         family = manifest["family"]

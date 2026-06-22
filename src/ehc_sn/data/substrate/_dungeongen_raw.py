@@ -64,6 +64,9 @@ _SPLIT_SEED_OFFSET: Final[dict[str, int]] = {
 }
 """Per-split seed offsets: sample i in split uses base_seed + offset[split] + i."""
 
+_DEFAULT_ATTEMPT_BUDGET: Final[int] = 100
+"""Default attempt budget for ``generate_bounded_topology``."""
+
 _MANIFEST_FILENAME: Final[str] = "manifest.json"
 _SOURCE_ID: Final[str] = "dungeongen"
 _SNAPSHOT_KIND: Final[str] = "materialized_snapshot"
@@ -79,24 +82,41 @@ def default_raw_root() -> Path:
 
 
 # =============================================================================
-def generate_topology_and_regions(seed: int) -> tuple[np.ndarray, np.ndarray]:
+def generate_topology_and_regions(
+    seed: int,
+    *,
+    generator_config: dict[str, Any] | None = None,
+) -> tuple[np.ndarray, np.ndarray, int, int]:
     """Generate one dungeon topology and room-region map using ``dungeongen``.
 
     Requires ``dungeongen`` at call time (writer-only dependency).
 
     Args:
         seed: Integer seed forwarded to ``DungeonGenerator.generate()``.
+        generator_config: Optional dict of keyword arguments forwarded to
+            ``GenerationParams(**generator_config)``.  When ``None``, the
+            generator uses default ``DungeonGenerator()`` (no explicit params).
+            Typical keys: ``size`` (DungeonSize), ``room_size_bias`` (float),
+            ``density`` (float), ``symmetry`` (SymmetryType), etc.
 
     Returns:
-        ``(topology, regions)`` where:
+        ``(topology, regions, natural_h, natural_w)`` where:
 
         - ``topology`` is a bool ``(H, W)`` array (``True`` = passable).
         - ``regions`` is an int32 ``(H, W)`` array with the room number at each
           passable room cell (``-1`` for corridor/passage cells and walls).
+        - ``natural_h``, ``natural_w`` are the raster dimensions derived from
+          the generated dungeon's geometric bounds.
     """
     from dungeongen.layout import DungeonGenerator
+    from dungeongen.layout.params import GenerationParams
 
-    gen = DungeonGenerator()
+    if generator_config is not None:
+        params = GenerationParams(**generator_config)
+        gen = DungeonGenerator(params=params)
+    else:
+        gen = DungeonGenerator()
+
     dungeon = gen.generate(seed=seed)
     grid = gen.occupancy
 
@@ -131,7 +151,48 @@ def generate_topology_and_regions(seed: int) -> tuple[np.ndarray, np.ndarray]:
                     if 0 <= row < grid_h and 0 <= col < grid_w:
                         regions[row, col] = room_num
 
-    return topology, regions
+    return topology, regions, grid_h, grid_w
+
+
+def generate_bounded_topology(
+    seed: int,
+    max_height: int,
+    max_width: int,
+    *,
+    generator_config: dict[str, Any] | None = None,
+    attempt_budget: int = _DEFAULT_ATTEMPT_BUDGET,
+) -> tuple[np.ndarray, np.ndarray, int, int, int]:
+    """Call ``generate_topology_and_regions`` with retry until extent fits.
+
+    Each failed attempt increments the attempt seed by 1 while keeping the
+    base seed unchanged, producing a deterministic retry sequence.
+
+    Args:
+        seed: Base seed for the first attempt.
+        max_height: Maximum allowed natural height (exclusive upper bound).
+        max_width: Maximum allowed natural width (exclusive upper bound).
+        generator_config: Forwarded to ``generate_topology_and_regions``.
+        attempt_budget: Maximum number of generation attempts.
+
+    Returns:
+        ``(topology, regions, natural_h, natural_w, attempt)`` — the same
+        as ``generate_topology_and_regions`` with an extra ``attempt`` int
+        indicating which attempt succeeded (0-based).
+
+    Raises:
+        RuntimeError: When the budget is exhausted without a fitting layout.
+    """
+    for attempt in range(attempt_budget):
+        topology, regions, h, w = generate_topology_and_regions(
+            seed + attempt,
+            generator_config=generator_config,
+        )
+        if h <= max_height and w <= max_width:
+            return topology, regions, h, w, attempt
+    raise RuntimeError(
+        f"generate_bounded_topology: exhausted {attempt_budget} attempts "
+        f"for seed {seed}.  Last extent: [{h}, {w}]."
+    )
 
 
 # =============================================================================
@@ -236,19 +297,24 @@ def _check_legacy_layout(raw_root: Path) -> None:
 
 def _write_shard(
     shard_path: Path,
-    samples: list[tuple[int, int, np.ndarray, np.ndarray]],
+    samples: list[tuple[int, int, np.ndarray, np.ndarray, int]],
 ) -> None:
     """Write a tar shard containing one NPZ record per sample.
 
     Args:
         shard_path: Destination ``.tar`` file path.
-        samples: List of ``(sample_id, seed, topology, regions)`` tuples,
-            where ``sample_id`` determines the member name within the shard.
+        samples: List of ``(sample_id, seed, topology, regions, attempt)``
+            tuples, where ``sample_id`` determines the member name within
+            the shard and ``attempt`` is the generation attempt index.
     """
     with tarfile.open(shard_path, "w") as tf:
-        for member_idx, (sample_id, seed, topology, regions) in enumerate(
-            samples
-        ):
+        for member_idx, (
+            sample_id,
+            seed,
+            topology,
+            regions,
+            attempt,
+        ) in enumerate(samples):
             buf = io.BytesIO()
             np.savez_compressed(
                 buf,
@@ -256,6 +322,7 @@ def _write_shard(
                 seed=np.int64(seed),
                 topology=topology,
                 regions=regions,
+                generation_attempt=np.int32(attempt),
             )
             buf.seek(0)
             raw = buf.read()
@@ -269,8 +336,16 @@ def _write_snapshot_split(
     split: str,
     n: int,
     base_seed: int,
+    *,
+    generator_config: dict[str, Any] | None = None,
+    max_extent: tuple[int, int] | None = None,
+    attempt_budget: int = _DEFAULT_ATTEMPT_BUDGET,
 ) -> None:
-    """Generate and write all shards for one split."""
+    """Generate and write all shards for one split.
+
+    When ``max_extent`` is provided, uses ``generate_bounded_topology``
+    with retry; otherwise uses the default ``generate_topology_and_regions``.
+    """
     split_dir = raw_root / split
     split_dir.mkdir(parents=True, exist_ok=True)
 
@@ -278,11 +353,24 @@ def _write_snapshot_split(
     for shard_idx, shard_filename in enumerate(shards):
         start = shard_idx * _SHARD_SIZE
         end = min(start + _SHARD_SIZE, n)
-        samples: list[tuple[int, int, np.ndarray, np.ndarray]] = []
+        samples: list[tuple[int, int, np.ndarray, np.ndarray, int]] = []
         for sample_idx in range(start, end):
             seed = base_seed + sample_idx
-            topology, regions = generate_topology_and_regions(seed)
-            samples.append((sample_idx, seed, topology, regions))
+            if max_extent is not None:
+                max_h, max_w = max_extent
+                topology, regions, _, _, attempt = generate_bounded_topology(
+                    seed,
+                    max_h,
+                    max_w,
+                    generator_config=generator_config,
+                    attempt_budget=attempt_budget,
+                )
+            else:
+                topology, regions, _, _ = generate_topology_and_regions(
+                    seed, generator_config=generator_config
+                )
+                attempt = 0
+            samples.append((sample_idx, seed, topology, regions, attempt))
         _write_shard(split_dir / shard_filename, samples)
 
 
@@ -304,6 +392,10 @@ def ensure_raw_snapshot(
     raw_root: Path,
     base_seed: int,
     split_counts: dict[str, int],
+    *,
+    generator_config: dict[str, Any] | None = None,
+    max_extent: tuple[int, int] | None = None,
+    attempt_budget: int = _DEFAULT_ATTEMPT_BUDGET,
 ) -> None:
     """Create or validate the canonical tar-sharded raw snapshot for all splits.
 
@@ -322,15 +414,25 @@ def ensure_raw_snapshot(
     The root ``base_seed`` is stored in ``manifest.json`` under
     ``generator_params`` and is the same for all splits.
 
+    When ``max_extent`` is provided (e.g. ``(30, 30)``), the generator uses
+    ``generate_bounded_topology`` with deterministic retry up to
+    ``attempt_budget`` per layout.
+
     Args:
         raw_root: Canonical raw root (e.g. ``data/raw/dungeongen``).
         base_seed: Root base seed (train base seed). Per-split seeds use
             ``_SPLIT_SEED_OFFSET`` internally.
         split_counts: Mapping of split name to number of samples, e.g.
             ``{"train": 200, "val": 40, "test": 40}``.
+        generator_config: Optional ``GenerationParams`` kwargs forwarded to
+            the dungeon generator.
+        max_extent: Optional ``(max_height, max_width)`` bound.  When set,
+            every exported layout fits within this extent via retry.
+        attempt_budget: Max attempts per layout (default 100).
 
     Raises:
-        RuntimeError: On manifest identity mismatch or legacy layout.
+        RuntimeError: On manifest identity mismatch or legacy layout, or
+            when any bounded generation exhausts its attempt budget.
     """
     manifest_path = _manifest_path(raw_root)
 
@@ -344,6 +446,15 @@ def ensure_raw_snapshot(
     source_revision = _dungeongen_version()
     producer_revision = _ehc_sn_version()
 
+    generator_params: dict[str, Any] = {
+        "base_seed": base_seed,
+    }
+    if generator_config is not None:
+        generator_params["generator_config"] = generator_config
+    if max_extent is not None:
+        generator_params["max_extent"] = list(max_extent)
+        generator_params["attempt_budget"] = attempt_budget
+
     if manifest_path.exists():
         existing = _read_raw_manifest(raw_root)
         existing_identity = _manifest_identity(existing)
@@ -351,7 +462,7 @@ def ensure_raw_snapshot(
             "source_revision": source_revision,
             "record_format": _RECORD_FORMAT,
             "record_schema_version": _RECORD_SCHEMA_VERSION,
-            "generator_params": {"base_seed": base_seed},
+            "generator_params": generator_params,
             "split_counts": split_counts,
         }
         if existing_identity != requested_identity:
@@ -368,7 +479,15 @@ def ensure_raw_snapshot(
     raw_root.mkdir(parents=True, exist_ok=True)
     for split, n in split_counts.items():
         split_base_seed = base_seed + _SPLIT_SEED_OFFSET.get(split, 0)
-        _write_snapshot_split(raw_root, split, n, split_base_seed)
+        _write_snapshot_split(
+            raw_root,
+            split,
+            n,
+            split_base_seed,
+            generator_config=generator_config,
+            max_extent=max_extent,
+            attempt_budget=attempt_budget,
+        )
 
     manifest = _build_raw_manifest(
         source_revision=source_revision,
@@ -384,8 +503,8 @@ def ensure_raw_snapshot(
 def iter_raw_topologies(
     raw_root: Path,
     split: str,
-) -> Iterator[tuple[np.ndarray, np.ndarray, int]]:
-    """Yield ``(topology, regions, seed)`` for each sample in *split*.
+) -> Iterator[tuple[np.ndarray, np.ndarray, int, int]]:
+    """Yield ``(topology, regions, seed, generation_attempt)`` for each sample.
 
     Reads from the canonical tar-sharded snapshot in deterministic shard/member
     order.  Does **not** import ``dungeongen`` — safe to call in environments
@@ -396,7 +515,10 @@ def iter_raw_topologies(
         split: Split name.
 
     Yields:
-        ``(topology, regions, seed)`` tuples in deterministic sample order.
+        ``(topology, regions, seed, generation_attempt)`` tuples in
+        deterministic sample order.  ``generation_attempt`` is the 0-based
+        attempt index that produced the accepted layout; 0 for legacy
+        snapshots that lack the field.
 
     Raises:
         FileNotFoundError: When the manifest or raw root does not exist.
@@ -431,7 +553,13 @@ def iter_raw_topologies(
                 if fobj is None:
                     continue
                 data = np.load(io.BytesIO(fobj.read()))
-                yield data["topology"], data["regions"], int(data["seed"])
+                attempt = int(data.get("generation_attempt", np.int32(0)))
+                yield (
+                    data["topology"],
+                    data["regions"],
+                    int(data["seed"]),
+                    attempt,
+                )
 
 
 # =============================================================================
@@ -458,6 +586,7 @@ def count_raw_topologies(raw_root: Path, split: str) -> int:
 __all__ = [
     "default_raw_root",
     "generate_topology_and_regions",
+    "generate_bounded_topology",
     "ensure_raw_snapshot",
     "iter_raw_topologies",
     "count_raw_topologies",

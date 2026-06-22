@@ -83,13 +83,18 @@ competes with the profile's per-band probability.
 """
 
 DAGFLOW_PRESETS: dict[str, dict] = {
-    "sparse": {
+    "branching": {
         "span_profile": "local",
         "target_edges": 139,
         "n_max": 45,
         "max_out_degree": 4,
         "public_id_policy": "permuted",
-        "description": "Sparse DAG profile, mostly backbone with few shortcuts.",
+        "description": (
+            "Branching DAG profile: 45 nodes, 139 edges, high shortcut "
+            "density.  Produces graphs with many alternative paths and "
+            "high merge/branch counts.  Suitable for multi-path reasoning "
+            "stress tests."
+        ),
     },
     "small": {
         "span_profile": "balanced",
@@ -108,7 +113,9 @@ DAGFLOW_PRESETS: dict[str, dict] = {
         "description": (
             "Canonical routing graph profile.  45 observations, "
             "low extra-edge count with local shortcuts; "
-            "promotes semantic paths of 5-10 accepted waypoints.  "
+            "supports waypoint_count 5-10 in typical Routebind queries;  "
+            "this is a structural graph property, not a routebind preset  "
+            "guarantee.  "
             "Suitable for the documented Routebind mixed-difficulty regime."
         ),
     },
@@ -173,11 +180,25 @@ def _resolve_preset(
     specification and ``extra_edge_density`` is a fallback for CLI
     compatibility.
     """
-    if preset not in DAGFLOW_PRESETS:
+    # Backward-compatible alias: "sparse" → "branching"
+    _PRESET_ALIASES: dict[str, str] = {"sparse": "branching"}
+    resolved_preset = _PRESET_ALIASES.get(preset, preset)
+    if resolved_preset != preset:
+        import warnings
+
+        warnings.warn(
+            f"dagflow preset {preset!r} is deprecated; use "
+            f"{resolved_preset!r} instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    if resolved_preset not in DAGFLOW_PRESETS:
         raise ValueError(
-            f"Unknown dagflow preset {preset!r}. "
+            f"Unknown dagflow preset {resolved_preset!r}. "
             f"Valid: {sorted(DAGFLOW_PRESETS)}."
         )
+    preset = resolved_preset
 
     p = DAGFLOW_PRESETS[preset]
 

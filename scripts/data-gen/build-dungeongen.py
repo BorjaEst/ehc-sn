@@ -60,6 +60,31 @@ _DEFAULT_TOPOLOGY_SEED = 42
 _DEFAULT_N_TRAIN = 250
 _DEFAULT_N_VAL = 10
 _DEFAULT_N_TEST = 10
+_DEFAULT_ATTEMPT_BUDGET = 100
+
+# Named preset configurations for the dungeon generator.
+# Each value is (generator_config_dict_or_None, max_extent_or_None).
+# Enum-type values are stored as importable attribute strings and resolved
+# at call time to avoid import-time coupling.
+_PRESET_GENERATOR: dict[str, tuple[dict | None, tuple[int, int] | None]] = {
+    "default": (None, None),
+    "routebind-30": (
+        {
+            "size": "DungeonSize.SMALL",
+            "room_count": (6, 10),
+            "room_size_bias": -1.0,
+            "density": 0.6,
+            "symmetry": "SymmetryType.NONE",
+            "passage_width": 1,
+            "linearity": 0.1,
+            "loop_factor": 0.0,
+            "extra_room_connections": 0.0,
+            "extra_passage_junctions": 0.0,
+            "winding": 0.0,
+        },
+        (30, 30),
+    ),
+}
 
 
 app = typer.Typer(add_completion=False, help=__doc__)
@@ -307,10 +332,15 @@ def _generate_topology(  # ----------------------------------------------------
 ) -> None:
     """Internal stage: generate raw dungeongen corpus and prepare interim files."""
     raw_leaf = raw_root / preset / f"v{version}"
+    generator_config = _resolve_generator_config(preset)
+    max_extent = _resolve_max_extent(preset)
     _ensure_raw(
         raw_leaf,
         topology_seed,
         {"train": n_train, "val": n_val, "test": n_test},
+        generator_config=generator_config,
+        max_extent=max_extent,
+        attempt_budget=_DEFAULT_ATTEMPT_BUDGET,
     )
     print(f"Raw corpus at {raw_leaf}")
     interim_path = interim_root / preset / "interim" / f"v{version}"
@@ -359,6 +389,41 @@ def _materialize_layouts(  # ---------------------------------------------------
         preset=preset,
         n_sensory_instances=n_sensory_instances,
     )
+
+
+def _resolve_generator_config(preset: str) -> dict | None:
+    """Return the ``generator_config`` dict for *preset*, or ``None``."""
+    entry = _PRESET_GENERATOR.get(preset)
+    if entry is None:
+        raise ValueError(
+            f"Unknown preset {preset!r}. " f"Valid: {sorted(_PRESET_GENERATOR)}"
+        )
+    cfg, _ = entry
+    if cfg is None:
+        return None
+    # Late-import dungeongen enums to avoid import-time coupling.
+    from dungeongen.layout.params import DungeonSize, SymmetryType
+
+    enum_map = {
+        "DungeonSize.SMALL": DungeonSize.SMALL,
+        "SymmetryType.NONE": SymmetryType.NONE,
+    }
+    resolved: dict = {}
+    for k, v in cfg.items():
+        if isinstance(v, str) and v in enum_map:
+            resolved[k] = enum_map[v]
+        else:
+            resolved[k] = v
+    return resolved
+
+
+def _resolve_max_extent(preset: str) -> tuple[int, int] | None:
+    """Return the ``max_extent`` for *preset*, or ``None``."""
+    entry = _PRESET_GENERATOR.get(preset)
+    if entry is None:
+        raise ValueError(f"Unknown preset {preset!r}.")
+    _, extent = entry
+    return extent
 
 
 # =============================================================================

@@ -5,6 +5,8 @@ All algorithms are pure-Python with no external graph library dependency.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
 from typing import Sequence
 
@@ -463,3 +465,116 @@ def permute_candidate_order(
     for orig, permuted in enumerate(perm):
         inv[permuted] = orig
     return perm, inv
+
+
+# =============================================================================
+def canonical_dag_digest(
+    adjacency: list[list[int]],
+    obs_ids: np.ndarray,
+    *,
+    schema_version: int = 1,
+) -> str:
+    """Return ``"sha256:..."`` for a canonical DAG serialization.
+
+    The canonical representation hashes only the **public-graph content**:
+    the sorted set of public observation IDs and the sorted set of directed
+    ``(source_obs_id, dest_obs_id)`` edges.  Storage order, Python object
+    order, and task-specific metadata are excluded.
+
+    The digest identifies the labeled public observation graph.  It changes
+    when the public-ID assignment changes the public edge relation.  Two DAGs
+    produce the same digest **iff** they have the same set of public
+    observation IDs and the same set of public directed edges.  Because the
+    rank-to-public-ID permutation determines the mapping from internal
+    adjacency to public edges, changing the permutation (on any non-trivial
+    graph) changes the digest.
+
+    Args:
+        adjacency: Adjacency list in **rank-index space**.
+            ``adj[i]`` is a sorted list of successor **rank** indices for
+            rank ``i``.  This is the canonical index space — all producers
+            and consumers that compute the digest MUST use this convention.
+        obs_ids: ``(n_nodes,)`` int32 array of public observation IDs in
+            **rank-index order** (``obs_ids[i]`` = public ID of rank ``i``).
+        schema_version: Canonical serialization schema version (default ``1``).
+
+    Returns:
+        String ``"sha256:<64-hex-char>"``.
+
+    Raises:
+        ValueError: When ``len(adjacency) != len(obs_ids)``.
+    """
+    n = len(adjacency)
+    if n != len(obs_ids):
+        raise ValueError(
+            f"adjacency length ({n}) does not match obs_ids length ({len(obs_ids)})."
+        )
+
+    # Build edge list and sort by (source_obs_id, dest_obs_id) — iterating
+    # rank order does NOT guarantee public-ID order because obs_ids is a
+    # random permutation.
+    edges_set: set[tuple[int, int]] = set()
+    for u in range(n):
+        u_obs = int(obs_ids[u])
+        for v in adjacency[u]:
+            v_obs = int(obs_ids[v])
+            edges_set.add((u_obs, v_obs))
+    edges_sorted = sorted(edges_set)
+
+    # Sorted set of public node IDs (not rank-index ordered).
+    node_ids_sorted = sorted(int(obs_ids[i]) for i in range(n))
+
+    canonical = {
+        "schema": f"ehc-sn.dag.v{schema_version}",
+        "n_nodes": n,
+        "nodes": node_ids_sorted,
+        "edges": edges_sorted,
+    }
+    payload = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    return f"sha256:{hashlib.sha256(payload.encode()).hexdigest()}"
+
+
+def construction_dag_digest(
+    adjacency: list[list[int]],
+    obs_ids: np.ndarray,
+    seed: int,
+    params: dict | None = None,
+    *,
+    schema_version: int = 1,
+) -> str:
+    """Return ``"sha256:..."`` for DAG construction provenance.
+
+    Unlike :func:`canonical_dag_digest`, this digest includes the
+    explicit ``rank_to_obs_id`` mapping, the generation seed, and optional
+    generation parameters.  Both digests change when the permutation
+    changes — this digest records the provenance directly, while
+    :func:`canonical_dag_digest` changes because the public edge set
+    changes.
+
+    Args:
+        adjacency: Adjacency list in rank-index space.
+        obs_ids: Public observation IDs in rank-index order.
+        seed: Generation seed.
+        params: Optional dict of resolved generation parameters.
+        schema_version: Canonical serialization schema version (default ``1``).
+
+    Returns:
+        String ``"sha256:<64-hex-char>"``.
+    """
+    n = len(adjacency)
+    edges_as_seen: list[list[int]] = []
+    for u in range(n):
+        for v in sorted(adjacency[u]):
+            edges_as_seen.append([int(obs_ids[u]), int(obs_ids[v])])
+
+    record: dict = {
+        "schema": f"ehc-sn.dag.provenance.v{schema_version}",
+        "n_nodes": n,
+        "rank_to_obs_id": [int(obs_ids[i]) for i in range(n)],
+        "edges": edges_as_seen,
+        "seed": seed,
+    }
+    if params is not None:
+        record["params"] = dict(params)
+    payload = json.dumps(record, sort_keys=True, separators=(",", ":"))
+    return f"sha256:{hashlib.sha256(payload.encode()).hexdigest()}"

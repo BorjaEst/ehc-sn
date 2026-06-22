@@ -22,9 +22,11 @@ import numpy as np
 class ActionSpace(TypedDict):
     """Action-space descriptor for a spatial layout.
 
-    Declares the number of actions, their names, and the row/col deltas
-    that implement them.  The ``stay_action`` field is the action id of
-    the no-op action, or ``None`` if the layout has no stay action.
+    Declares the number of actions, their names, the row/col deltas that
+    implement them, and the movement kind.  The ``stay_action`` field is
+    the action id of the no-op action, or ``None`` if the layout has no
+    stay action.  ``movement_kind`` distinguishes orthogonal grid
+    movement from hexagonal or future movement types.
     """
 
     name: str
@@ -37,6 +39,10 @@ class ActionSpace(TypedDict):
     """Human-readable names for each action (length ``action_count``)."""
     action_deltas: list[tuple[int, int]]
     """(row, col) deltas for each action (length ``action_count``)."""
+    movement_kind: str
+    """Movement topology kind (``"grid4"``, ``"hex6"``).  Independent of
+    the raster type (square vs rectangle vs hex), which is declared by
+    ``topology_type``."""
 
 
 # =============================================================================
@@ -45,10 +51,11 @@ class ActionSpace(TypedDict):
 
 
 class SpatialLayout(TypedDict):
-    """Graph-indexed spatial world record.
+    """Graph-indexed spatial world record — compact representation.
 
-    All arrays use the graph state index as their first axis.  Valid walkable
-    states are those where ``valid_state_mask`` is True.
+    Every stored row represents exactly one traversable state.  Walls,
+    padding, and pruned backing cells are excluded from the exported
+    artifact.  There are no invalid rows.
 
     Fields (in declaration order):
     """
@@ -58,34 +65,51 @@ class SpatialLayout(TypedDict):
     layout_family: str
     """Layout source family (e.g. ``"openfield"``, ``"dungeongen"``)."""
     topology_type: str
-    """Topology kind (e.g. ``"square"``, ``"hex"``, ``"grid2d"``)."""
+    """Geometric refinement of the topology (e.g. ``"square"``, ``"rectangle"``, ``"hex"``).
+    Independent of mathematical topology class (``topology_kind``)."""
+
+    topology_kind: NotRequired[str]
+    """Mathematical topology class: ``"grid2d"``, ``"dag"``, ``"line1d"``.
+    Describes the abstract structure independent of geometric refinement."""
 
     graph_state_count: int
-    """Number of nodes in the graph index space (may include pruned states)."""
-    valid_state_mask: np.ndarray
-    """Boolean ``(graph_state_count,)`` — True for walkable states."""
+    """Number of nodes in the compact graph index space (only traversable states)."""
 
     state_to_row_col: np.ndarray
     """``(graph_state_count, 2)`` int32 — row, col for each graph state."""
     observation_id: np.ndarray
-    """``(graph_state_count,)`` int32 — sensory observation id per graph state."""
+    """``(graph_state_count,)`` int32 — observation id per graph state.
+    IDs are drawn from ``{0, ..., observation_vocabulary_size-1}`` and may
+    repeat.  Sentinel ``-1`` indicates no observation (topology-only stage)."""
 
-    adjacency: np.ndarray
-    """``(graph_state_count, graph_state_count)`` bool — undirected connectivity."""
+    extent: NotRequired[tuple[int, int]]
+    """Declared canvas dimensions ``(height, width)`` in cells.  When present,
+    every coordinate in ``state_to_row_col`` satisfies ``0 ≤ row < height``
+    and ``0 ≤ col < width``.  Per-layout extent is authoritative; the
+    manifest-level copy is a convenience field."""
+
+    next_state: np.ndarray
+    """``(graph_state_count, action_count)`` int32 — destination compact
+    state index for each action from each state.  For the STAY action
+    ``next_state[s, STAY] == s``.  For an invalid action
+    ``next_state[s, a] == s`` (self-loop sentinel)."""
+
+    action_valid: np.ndarray
+    """``(graph_state_count, action_count)`` bool — whether action ``a``
+    is a valid state-changing movement from state ``s``.  STAY is always
+    ``True``.  An action that would cross a wall or boundary with no
+    traversable neighbor is ``False``."""
 
     action_space: ActionSpace
     """Action-space descriptor for this layout."""
 
-    transition_matrix: np.ndarray
-    """``(graph_state_count, graph_state_count)`` float64 — row-stochastic transition probs."""
-
     # Provenance
     topology_seed: int
     """Seed used to generate the topology (width, shape)."""
-    sensory_seed: int
+    observation_seed: int
     """Seed used for the observation_id random assignment."""
-    sensory_vocab_size: int
-    """Number of distinct observation ids (equivalent to legacy TEM ``s_size``)."""
+    observation_vocabulary_size: int
+    """Number of distinct observation ids (size of the observation vocabulary)."""
     split: NotRequired[str]
     """Split assignment (e.g. ``"train"``, ``"val"``, ``"test"``)."""
 
@@ -100,8 +124,11 @@ DEFAULT_GRID_ACTION_SPACE: Final[ActionSpace] = {
     "stay_action": 0,
     "action_names": ["STAY", "UP", "RIGHT", "DOWN", "LEFT"],
     "action_deltas": [(0, 0), (-1, 0), (0, 1), (1, 0), (0, -1)],
+    "movement_kind": "grid4",
 }
-"""Default 4-direction + stay action space for square/dungeon grids."""
+"""Default 4-direction + stay action space for square/dungeon grids.
+
+``movement_kind = "grid4"`` indicates orthogonal grid-neighbor movement."""
 
 HEX_ACTION_SPACE: Final[ActionSpace] = {
     "name": "hex6_dir",
@@ -125,6 +152,7 @@ HEX_ACTION_SPACE: Final[ActionSpace] = {
         (0, -1),
         (0, 1),
     ],
+    "movement_kind": "hex6",
 }
 """Hex 6-direction + stay action space.
 
@@ -151,62 +179,73 @@ def validate_spatial_layout(layout: SpatialLayout) -> None:
         ValueError: On any contract violation.
     """
     N = layout["graph_state_count"]
+    A = layout["action_space"]["action_count"]
 
     # — Shape contracts —
-    _check_array("valid_state_mask", layout["valid_state_mask"], (N,), bool)
     _check_array(
         "state_to_row_col", layout["state_to_row_col"], (N, 2), np.int32
     )
     _check_array("observation_id", layout["observation_id"], (N,), np.int32)
-    _check_array("adjacency", layout["adjacency"], (N, N), bool)
-    _check_array(
-        "transition_matrix", layout["transition_matrix"], (N, N), np.floating
-    )
+    _check_array("next_state", layout["next_state"], (N, A), np.int32)
+    _check_array("action_valid", layout["action_valid"], (N, A), bool)
 
     # — Action space —
     as_ = layout["action_space"]
-    if as_["action_count"] < 1:
-        raise ValueError(
-            f"action_space.action_count must be >= 1, got {as_['action_count']}."
-        )
-    if len(as_["action_names"]) != as_["action_count"]:
+    if A < 1:
+        raise ValueError(f"action_space.action_count must be >= 1, got {A}.")
+    if len(as_["action_names"]) != A:
         raise ValueError(
             f"action_names length {len(as_['action_names'])} != "
-            f"action_count {as_['action_count']}."
+            f"action_count {A}."
         )
-    if len(as_["action_deltas"]) != as_["action_count"]:
+    if len(as_["action_deltas"]) != A:
         raise ValueError(
             f"action_deltas length {len(as_['action_deltas'])} != "
-            f"action_count {as_['action_count']}."
+            f"action_count {A}."
+        )
+    if not as_.get("name"):
+        raise ValueError(
+            "action_space.name is required but was empty or missing."
+        )
+    if not as_.get("movement_kind"):
+        raise ValueError(
+            "action_space.movement_kind is required but was empty or missing."
         )
 
-    # — Valid mask —
-    n_valid = int(layout["valid_state_mask"].sum())
-    if n_valid == 0:
-        raise ValueError("valid_state_mask has no True entries.")
-
-    # — Adjacency symmetry —
-    adj = layout["adjacency"]
-    if not (adj == adj.T).all():
-        raise ValueError("adjacency must be symmetric (undirected graph).")
-
-    # — Self-loops — stay-still is expected, not enforced, but check diagonal
-    #   entries exist for stay-state compatibility.
-    for i in range(N):
-        if layout["valid_state_mask"][i] and not adj[i, i]:
-            raise ValueError(
-                f"Valid state {i} has no self-loop (required for stay action)."
-            )
-
-    # — Transition matrix row-normalized —
-    tm = layout["transition_matrix"]
-    row_sums = tm.sum(axis=1)
-    for i in range(N):
-        if layout["valid_state_mask"][i]:
-            if not np.isclose(row_sums[i], 1.0):
+    # — Next state invariants —
+    next_s = layout["next_state"]
+    act_val = layout["action_valid"]
+    stay_idx = as_.get("stay_action")
+    if stay_idx is not None:
+        # STAY must self-map and be valid.
+        for s in range(N):
+            if next_s[s, stay_idx] != s:
                 raise ValueError(
-                    f"transition_matrix row {i} (valid) sums to {row_sums[i]}, "
-                    f"expected 1.0."
+                    f"next_state[s={s}, stay_action={stay_idx}] = "
+                    f"{next_s[s, stay_idx]}, expected {s} (self-loop)."
+                )
+            if not act_val[s, stay_idx]:
+                raise ValueError(
+                    f"action_valid[s={s}, stay_action={stay_idx}] is False, "
+                    f"expected True."
+                )
+
+    # Every next_state value must be in [0, N).
+    if np.any(next_s < 0) or np.any(next_s >= N):
+        raise ValueError(
+            "next_state contains values outside [0, graph_state_count)."
+        )
+
+    # action_valid must be False when next_state == s for non-STAY actions.
+    for a in range(A):
+        if stay_idx is not None and a == stay_idx:
+            continue
+        for s in range(N):
+            if not act_val[s, a] and next_s[s, a] != s:
+                raise ValueError(
+                    f"action_valid[s={s}, a={a}] is False but "
+                    f"next_state[s, a] = {next_s[s, a]} != s. "
+                    "Invalid actions must self-loop."
                 )
 
     # — Invertible state_to_row_col mapping —
@@ -223,9 +262,10 @@ def validate_spatial_layout(layout: SpatialLayout) -> None:
         unique_pairs.add(pair)
 
     # — Provenance —
-    if layout["sensory_vocab_size"] < 0:
+    if layout["observation_vocabulary_size"] < 0:
         raise ValueError(
-            "sensory_vocab_size must be >= 0 (0 = topology-only record)."
+            "observation_vocabulary_size must be >= 0 "
+            "(0 = topology-only record)."
         )
 
 

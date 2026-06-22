@@ -23,9 +23,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ehc_sn.traces.keys import (
+    ROUTEBIND_META_KEY_CANVAS_HEIGHT,
+    ROUTEBIND_META_KEY_CANVAS_WIDTH,
     ROUTEBIND_META_KEY_CELL_MASK,
     ROUTEBIND_META_KEY_CELL_TYPE,
     ROUTEBIND_META_KEY_GOAL_FLAG,
+    ROUTEBIND_META_KEY_N_OBSERVATIONS,
     ROUTEBIND_META_KEY_OBSERVATION_ID,
     ROUTEBIND_META_KEY_START_FLAG,
     ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
@@ -69,7 +72,6 @@ class RoutebindTraceSupplements:
     observation_id: NDArray
     start_flag: NDArray
     goal_flag: NDArray
-    cell_mask: NDArray
     target_trajectory: NDArray
     target_waypoint: NDArray
 
@@ -97,7 +99,6 @@ def build_routebind_trace_supplements(
         "observation_id",
         "start_flag",
         "goal_flag",
-        "cell_mask",
         "target_trajectory",
         "target_waypoint",
     )
@@ -111,7 +112,6 @@ def build_routebind_trace_supplements(
         observation_id=np.asarray(batch["observation_id"]),
         start_flag=np.asarray(batch["start_flag"]),
         goal_flag=np.asarray(batch["goal_flag"]),
-        cell_mask=np.asarray(batch["cell_mask"]),
         target_trajectory=np.asarray(batch["target_trajectory"]),
         target_waypoint=np.asarray(batch["target_waypoint"]),
     )
@@ -121,12 +121,22 @@ def build_routebind_trace_supplements(
 def apply_routebind_trace_supplements(
     trace: TraceTree,
     supplements: RoutebindTraceSupplements,
+    *,
+    n_observations: int | None = None,
+    canvas_width: int | None = None,
+    canvas_height: int | None = None,
 ) -> None:
     """Attach routebind supplement data to a trace tree.
 
     Args:
         trace: Mutable trace tree to attach data to.
         supplements: Pre-built supplement content.
+        n_observations: Corpus-wide observation vocabulary size.
+            When provided, attached as ``routebind/n_observations``
+            so figure selectors can use the authoritative count instead
+            of inferring from array data.
+        canvas_width: Grid width in cells.
+        canvas_height: Grid height in cells.
     """
     trace.attached_meta[ROUTEBIND_META_KEY_CELL_TYPE] = supplements.cell_type
     trace.attached_meta[ROUTEBIND_META_KEY_OBSERVATION_ID] = (
@@ -134,13 +144,18 @@ def apply_routebind_trace_supplements(
     )
     trace.attached_meta[ROUTEBIND_META_KEY_START_FLAG] = supplements.start_flag
     trace.attached_meta[ROUTEBIND_META_KEY_GOAL_FLAG] = supplements.goal_flag
-    trace.attached_meta[ROUTEBIND_META_KEY_CELL_MASK] = supplements.cell_mask
     trace.attached_meta[ROUTEBIND_META_KEY_TARGET_TRAJECTORY] = (
         supplements.target_trajectory
     )
     trace.attached_meta[ROUTEBIND_META_KEY_TARGET_WAYPOINT] = (
         supplements.target_waypoint
     )
+    if n_observations is not None:
+        trace.attached_meta[ROUTEBIND_META_KEY_N_OBSERVATIONS] = n_observations
+    if canvas_width is not None:
+        trace.attached_meta[ROUTEBIND_META_KEY_CANVAS_WIDTH] = canvas_width
+    if canvas_height is not None:
+        trace.attached_meta[ROUTEBIND_META_KEY_CANVAS_HEIGHT] = canvas_height
 
 
 # =============================================================================

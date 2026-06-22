@@ -59,16 +59,29 @@ from .contracts import (
     RoutebindTaskInput,
     RoutebindTaskOutput,
 )
+from .corpus import (
+    load_sample,
+    load_split_arrays,
+    load_split_manifest,
+)
 from .decoding import (
     decode_next_direction,
     extract_route_from_trajectory_field,
     extract_waypoint_sequence,
     extract_waypoints_from_field,
 )
+from .diagnostics import (
+    compute_corpus_statistics,
+    select_samples,
+)
 from .evaluation import (
     ROUTEBIND_METRIC_SPECS,
     ROUTEBIND_SCORING_SPEC,
     RoutebindStepScore,
+)
+from .inspection import (
+    RoutebindSampleInspection,
+    prepare_sample_inspection,
 )
 from .oracle import (
     OracleResult,
@@ -98,6 +111,10 @@ from .traces import (
 )
 from .validation import (
     ValidationIssue,
+    check_auxiliary_targets,
+    check_dag_transitions,
+    check_route_field,
+    check_waypoint_field,
     validate_corpus_root,
     validate_generated_sample,
     validate_stored_sample,
@@ -125,6 +142,7 @@ __all__ = [
     "RoutebindCorpusSchema",
     "RoutebindEvaluationSourceContext",
     "RoutebindFieldSupervision",
+    "RoutebindSampleInspection",
     "RoutebindSamplingProfile",
     "RoutebindStepScore",
     "RoutebindTargets",
@@ -137,9 +155,13 @@ __all__ = [
     "build_routebind_supervision",
     "build_routebind_task_corpus",
     "build_routebind_trace_supplements",
+    "check_auxiliary_targets",
+    "check_dag_transitions",
+    "check_route_field",
+    "check_waypoint_field",
+    "compute_corpus_statistics",
     "compute_goal_distance_table",
     "decode_next_direction",
-    "reconstruct_from_policy",
     "encode_trajectory_field",
     "encode_waypoint_field",
     "extract_route_from_trajectory_field",
@@ -147,12 +169,17 @@ __all__ = [
     "extract_routebind_task_input",
     "extract_waypoint_sequence",
     "extract_waypoints_from_field",
+    "load_sample",
+    "load_split_arrays",
+    "load_split_manifest",
+    "prepare_sample_inspection",
+    "reconstruct_from_policy",
     "resolve_preset",
+    "select_samples",
     "solve_product_state_route",
     "validate_corpus_root",
     "validate_decay_consistency",
     "validate_generated_sample",
     "validate_routebind_root",
-    "validate_routebind_sample",
     "validate_stored_sample",
 ]

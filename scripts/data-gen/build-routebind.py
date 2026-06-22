@@ -692,12 +692,14 @@ def inspect(
 
     # ── Sample gallery ────────────────────────────────────────────────────
     if gallery > 0:
+        cw = manifest.get("canvas_width", None)
         selected = select_samples(
             root,
             all_splits,
             policy=selection,
             n=gallery,
             seed=figure_seed,
+            grid_width=cw,
         )
         for s, idx in selected:
             sample = load_sample(root, s, idx)

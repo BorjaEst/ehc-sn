@@ -25,6 +25,7 @@ def extract_route_from_trajectory_field(
     start_idx: int,
     cell_type: np.ndarray | None = None,
     max_length: int = 150,
+    grid_width: int | None = None,
 ) -> list[int]:
     """Extract a discrete route by greedy max-activation walk.
 
@@ -33,12 +34,18 @@ def extract_route_from_trajectory_field(
     traversable, unvisited neighbor with the highest predicted activation.
     Ties are broken by the fixed direction order (UP > RIGHT > DOWN > LEFT).
 
+    When *grid_width* is ``None``, the function assumes a square grid and
+    infers width from ``sqrt(n_slots)``.  This is the legacy behaviour;
+    explicit *grid_width* is preferred for non-square canvases.
+
     Args:
         trajectory_field: ``(S,)`` float32 predicted activations.
         start_idx: Index of the start position.
         cell_type: Optional ``(S,)`` int32 cell types.  When provided,
             ``CELL_WALL`` (0) positions are rejected.
         max_length: Maximum extracted route length.
+        grid_width: Width of the grid (number of columns).  When ``None``,
+            inferred from assuming a square grid.
 
     Returns:
         Ordered list of position indices, or empty list if activation at
@@ -47,12 +54,21 @@ def extract_route_from_trajectory_field(
     n_slots = len(trajectory_field)
     if trajectory_field[start_idx] <= 0:
         return []
-    width = int(math.sqrt(n_slots))
-    if width * width != n_slots:
-        raise ValueError(
-            f"n_slots={n_slots} is not a perfect square; "
-            f"grid dimensions cannot be inferred."
-        )
+    if grid_width is not None:
+        width = grid_width
+        height = n_slots // width
+        if height * width != n_slots:
+            raise ValueError(
+                f"n_slots={n_slots} is not divisible by grid_width={width}."
+            )
+    else:
+        width = int(math.sqrt(n_slots))
+        if width * width != n_slots:
+            raise ValueError(
+                f"n_slots={n_slots} is not a perfect square and "
+                f"grid_width was not provided."
+            )
+        height = width
 
     route: list[int] = [start_idx]
     visited: set[int] = {start_idx}
@@ -67,7 +83,7 @@ def extract_route_from_trajectory_field(
         best_val = -1.0
         for dr, dc in dirs:
             nr, nc = r + dr, c + dc
-            if 0 <= nr < width and 0 <= nc < width:
+            if 0 <= nr < height and 0 <= nc < width:
                 npos = nr * width + nc
                 if npos in visited:
                     continue
@@ -164,5 +180,6 @@ def decode_next_direction(
 __all__ = [
     "decode_next_direction",
     "extract_route_from_trajectory_field",
+    "extract_waypoint_sequence",
     "extract_waypoints_from_field",
 ]

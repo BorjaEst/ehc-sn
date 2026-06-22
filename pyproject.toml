@@ -36,6 +36,7 @@
         "pydantic_settings",
         "rich",
         "scipy",
+        "numba",
         "matplotlib",
         "tensorboard",
         "networkx",

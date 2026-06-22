@@ -31,6 +31,9 @@ CELL_FREE: Final[int] = 1
 """Cell is traversable but contains no observation."""
 CELL_OBSERVATION: Final[int] = 2
 """Cell is traversable and contains an observation identity."""
+CELL_PAD: Final[int] = 3
+"""Cell is outside the natural spatial domain of this sample (storage padding).
+Not traversable, not a real wall, not part of the topology."""
 
 
 # =============================================================================
@@ -86,7 +89,13 @@ class RoutebindCorpusSchema:
     observation_id: str = "observation_id"
     start_flag: str = "start_flag"
     goal_flag: str = "goal_flag"
-    cell_mask: str = "cell_mask"
+    spatial_mask: str = "spatial_mask"
+
+    # Metadata channels (per-sample scalar, not model input)
+    natural_height: str = "natural_height"
+    natural_width: str = "natural_width"
+    row_offset: str = "row_offset"
+    col_offset: str = "col_offset"
 
     # Target channels
     target_trajectory: str = "target_trajectory"
@@ -101,7 +110,16 @@ class RoutebindCorpusSchema:
             self.observation_id,
             self.start_flag,
             self.goal_flag,
-            self.cell_mask,
+            self.spatial_mask,
+        )
+
+    @property
+    def metadata_channels(self) -> tuple[str, ...]:
+        return (
+            self.natural_height,
+            self.natural_width,
+            self.row_offset,
+            self.col_offset,
         )
 
     @property
@@ -115,7 +133,11 @@ class RoutebindCorpusSchema:
 
     @property
     def all_channels(self) -> tuple[str, ...]:
-        return self.model_input_channels + self.target_channels
+        return (
+            self.model_input_channels
+            + self.metadata_channels
+            + self.target_channels
+        )
 
     @property
     def dtypes(self) -> dict[str, np.dtype]:
@@ -124,7 +146,11 @@ class RoutebindCorpusSchema:
             self.observation_id: np.dtype(np.int32),
             self.start_flag: np.dtype(bool),
             self.goal_flag: np.dtype(bool),
-            self.cell_mask: np.dtype(bool),
+            self.spatial_mask: np.dtype(bool),
+            self.natural_height: np.dtype(np.int32),
+            self.natural_width: np.dtype(np.int32),
+            self.row_offset: np.dtype(np.int32),
+            self.col_offset: np.dtype(np.int32),
             self.target_trajectory: np.dtype(np.float32),
             self.target_waypoint: np.dtype(np.float32),
             self.target_next_dir: np.dtype(np.int32),
@@ -147,22 +173,23 @@ class RoutebindTaskInput:
     Attributes:
         cell_type: Per-cell type category, shape ``(B, S)`` int32.
             Values are ``CELL_WALL (0)``, ``CELL_FREE (1)``,
-            ``CELL_OBSERVATION (2)``.
+            ``CELL_OBSERVATION (2)``, ``CELL_PAD (3)``.
         observation_id: Stable observation identity per cell, shape
             ``(B, S)`` int64.  Sentinel for non-observation cells.
         start_flag: ``True`` for exactly one traversable position, shape
             ``(B, S)`` bool.
         goal_flag: ``True`` for all positions containing the goal
             observation, shape ``(B, S)`` bool.
-        cell_mask: ``True`` for all ``S`` positions (fixed-size v1; walls
-            are meaningful cells and remain unmasked), shape ``(B, S)`` bool.
+        spatial_mask: ``True`` where the stored slot corresponds to a real
+            position in the sample's natural spatial domain; ``False`` where
+            the slot is corpus-storage padding, shape ``(B, S)`` bool.
     """
 
     cell_type: Tensor
     observation_id: Tensor
     start_flag: Tensor
     goal_flag: Tensor
-    cell_mask: Tensor
+    spatial_mask: Tensor
 
 
 # =============================================================================
@@ -198,8 +225,8 @@ class RoutebindTargets:
         target_waypoint: Oracle semantic waypoint field, shape ``(B, S)``
             float32, values in ``[0, 1]``.
         target_next_dir: Ground-truth first physical movement direction,
-            shape ``(B,)`` int64, values in ``{0, 1, 2, 3}`` for
-            {UP, DOWN, LEFT, RIGHT}.
+            shape ``(B,)`` int32, values in ``{0, 1, 2, 3}`` for
+            {UP, RIGHT, DOWN, LEFT}.
         target_next_obs: Ground-truth first post-start accepted observation
             identity, shape ``(B,)`` int64.
     """

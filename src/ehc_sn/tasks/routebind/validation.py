@@ -15,13 +15,14 @@ from typing import Any
 import numpy as np
 
 from ehc_sn.data.lifecycle import validate_version_root
-from ehc_sn.data.manifest import read_manifest
 from ehc_sn.tasks.routebind.contracts import (
     CELL_FREE,
     CELL_OBSERVATION,
+    CELL_PAD,
     CELL_WALL,
     ROUTEBIND_SCHEMA,
 )
+from ehc_sn.tasks.routebind.corpus import load_split_arrays
 from ehc_sn.tasks.routebind.oracle import OracleResult
 from ehc_sn.tasks.routebind.targets import validate_decay_consistency
 
@@ -48,28 +49,9 @@ class ValidationIssue:
 # =============================================================================
 
 
-def _load_split_data(root: Path, split: str) -> dict[str, np.ndarray] | None:
-    """Load all channel arrays for one split, mmap'd.
-
-    Args:
-        root: Versioned corpus root.
-        split: Split name (e.g. ``"train"``).
-
-    Returns:
-        Dict mapping channel names to ``(N, ...)`` arrays, or ``None`` if
-        the split directory does not exist.
-    """
-    from ehc_sn.tasks.routebind.contracts import ROUTEBIND_SCHEMA
-
-    split_dir = root / split
-    if not split_dir.is_dir():
-        return None
-    arrays: dict[str, np.ndarray] = {}
-    for ch in ROUTEBIND_SCHEMA.all_channels:
-        fpath = split_dir / f"{ch}.npy"
-        if fpath.exists():
-            arrays[ch] = np.load(fpath, mmap_mode="r")
-    return arrays if arrays else None
+# =============================================================================
+# Public validators
+# =============================================================================
 
 
 def _issue(
@@ -102,7 +84,14 @@ def _check_shape(
 ) -> None:
     """Check that *name* has shape ``(S,)`` (spatial) or scalar (aux)."""
     arr = np.asarray(data[name])
-    scalar_channels = {"target_next_dir", "target_next_obs"}
+    scalar_channels = {
+        "target_next_dir",
+        "target_next_obs",
+        "natural_height",
+        "natural_width",
+        "row_offset",
+        "col_offset",
+    }
     if name in scalar_channels:
         if arr.ndim != 0:
             issues.append(
@@ -206,7 +195,12 @@ def validate_generated_sample(
             )
 
     # Value ranges
-    invalid_ct = set(ct.tolist()) - {CELL_WALL, CELL_FREE, CELL_OBSERVATION}
+    invalid_ct = set(ct.tolist()) - {
+        CELL_WALL,
+        CELL_FREE,
+        CELL_OBSERVATION,
+        CELL_PAD,
+    }
     if invalid_ct:
         issues.append(
             _issue(
@@ -214,9 +208,54 @@ def validate_generated_sample(
                 "invalid_cell_type",
                 msg=f"Invalid cell types: {sorted(invalid_ct)}",
                 obs=sorted(invalid_ct),
-                exp="{0,1,2}",
+                exp="{0,1,2,3}",
             )
         )
+
+    # Spatial mask consistency
+    if "spatial_mask" in data:
+        sm = np.asarray(data["spatial_mask"])
+        for p in range(S):
+            if sm[p] and int(ct[p]) == CELL_PAD:
+                issues.append(
+                    _issue(
+                        "ERROR",
+                        "spatial_mask_inconsistency",
+                        msg=f"Pos {p}: spatial_mask True but cell_type is CELL_PAD",
+                    )
+                )
+            if not sm[p] and int(ct[p]) != CELL_PAD:
+                issues.append(
+                    _issue(
+                        "ERROR",
+                        "spatial_mask_inconsistency",
+                        msg=f"Pos {p}: spatial_mask False but cell_type is {int(ct[p])} (not CELL_PAD)",
+                    )
+                )
+        if "target_trajectory" in data:
+            padding_nonzero = np.where(
+                (~sm) & (np.asarray(data["target_trajectory"]) > 1e-7)
+            )[0]
+            if len(padding_nonzero) > 0:
+                issues.append(
+                    _issue(
+                        "ERROR",
+                        "target_in_padding",
+                        msg=f"{len(padding_nonzero)} padding positions have non-zero trajectory target",
+                    )
+                )
+        if "target_waypoint" in data:
+            padding_nonzero = np.where(
+                (~sm) & (np.asarray(data["target_waypoint"]) > 1e-7)
+            )[0]
+            if len(padding_nonzero) > 0:
+                issues.append(
+                    _issue(
+                        "ERROR",
+                        "target_in_padding",
+                        msg=f"{len(padding_nonzero)} padding positions have non-zero waypoint target",
+                    )
+                )
 
     for name, field in [("target_trajectory", tf), ("target_waypoint", wf)]:
         if np.any(np.isnan(field)):
@@ -420,6 +459,7 @@ def validate_stored_sample(
     S: int,
     gamma_space: float,
     gamma_semantic: float,
+    grid_width: int | None = None,
 ) -> list[ValidationIssue]:
     """Validate a stored sample from persisted arrays (no oracle metadata).
 
@@ -434,6 +474,9 @@ def validate_stored_sample(
         S: Number of spatial positions.
         gamma_space: Spatial decay factor.
         gamma_semantic: Semantic decay factor.
+        grid_width: Grid width in cells.  When provided, enables non-square
+            grid route extraction.  Falls back to square-grid inference when
+            ``None``.
 
     Returns:
         List of validation issues.
@@ -482,7 +525,12 @@ def validate_stored_sample(
             )
 
     # Value ranges
-    invalid_ct = set(ct.tolist()) - {CELL_WALL, CELL_FREE, CELL_OBSERVATION}
+    invalid_ct = set(ct.tolist()) - {
+        CELL_WALL,
+        CELL_FREE,
+        CELL_OBSERVATION,
+        CELL_PAD,
+    }
     if invalid_ct:
         issues.append(
             _issue(
@@ -490,9 +538,54 @@ def validate_stored_sample(
                 "invalid_cell_type",
                 msg=f"Invalid cell types: {sorted(invalid_ct)}",
                 obs=sorted(invalid_ct),
-                exp="{0,1,2}",
+                exp="{0,1,2,3}",
             )
         )
+
+    # Spatial mask consistency
+    if "spatial_mask" in data:
+        sm = np.asarray(data["spatial_mask"])
+        for p in range(S):
+            if sm[p] and int(ct[p]) == CELL_PAD:
+                issues.append(
+                    _issue(
+                        "ERROR",
+                        "spatial_mask_inconsistency",
+                        msg=f"Pos {p}: spatial_mask True but cell_type is CELL_PAD",
+                    )
+                )
+            if not sm[p] and int(ct[p]) != CELL_PAD:
+                issues.append(
+                    _issue(
+                        "ERROR",
+                        "spatial_mask_inconsistency",
+                        msg=f"Pos {p}: spatial_mask False but cell_type is {int(ct[p])} (not CELL_PAD)",
+                    )
+                )
+        if "target_trajectory" in data:
+            padding_nonzero = np.where(
+                (~sm) & (np.asarray(data["target_trajectory"]) > 1e-7)
+            )[0]
+            if len(padding_nonzero) > 0:
+                issues.append(
+                    _issue(
+                        "ERROR",
+                        "target_in_padding",
+                        msg=f"{len(padding_nonzero)} padding positions have non-zero trajectory target",
+                    )
+                )
+        if "target_waypoint" in data:
+            padding_nonzero = np.where(
+                (~sm) & (np.asarray(data["target_waypoint"]) > 1e-7)
+            )[0]
+            if len(padding_nonzero) > 0:
+                issues.append(
+                    _issue(
+                        "ERROR",
+                        "target_in_padding",
+                        msg=f"{len(padding_nonzero)} padding positions have non-zero waypoint target",
+                    )
+                )
 
     for name, field in [("target_trajectory", tf), ("target_waypoint", wf)]:
         if np.any(np.isnan(field)):
@@ -548,7 +641,9 @@ def validate_stored_sample(
             extract_route_from_trajectory_field,
         )
 
-        route = extract_route_from_trajectory_field(tf, sp, ct)
+        route = extract_route_from_trajectory_field(
+            tf, sp, ct, grid_width=grid_width
+        )
         if route:
             violations = validate_decay_consistency(tf, route, gamma_space)
             for v in violations[:3]:
@@ -583,13 +678,18 @@ def validate_stored_sample(
 _VALID_CORPUS_CHANNELS = frozenset(ROUTEBIND_SCHEMA.all_channels)
 
 
-def validate_corpus_root(root: Path) -> tuple[dict, list[ValidationIssue]]:
+def validate_corpus_root(
+    root: Path,
+    max_root_samples: int = -1,
+) -> tuple[dict, list[ValidationIssue]]:
     """Validate a routebind task corpus root against task-owned semantics.
 
     Returns (manifest, issues).  The caller decides severity thresholds.
 
     Args:
         root: Resolved versioned routebind corpus root.
+        max_root_samples: Maximum per-split samples validated at the root
+            level (structural scan).  ``-1`` (default) validates all.
 
     Returns:
         Tuple of (manifest dict, issues list).
@@ -623,9 +723,9 @@ def validate_corpus_root(root: Path) -> tuple[dict, list[ValidationIssue]]:
             )
         )
 
-    num_slots = manifest.get("n_states")
+    num_slots = manifest.get("num_spatial_slots") or manifest.get("n_states")
     if num_slots is None:
-        issues.append(_issue("ERROR", "missing_n_states"))
+        issues.append(_issue("ERROR", "missing_num_spatial_slots"))
 
     declared_channels: list[str] = manifest.get("channels", [])
     for ch in _VALID_CORPUS_CHANNELS:
@@ -676,8 +776,10 @@ def validate_corpus_root(root: Path) -> tuple[dict, list[ValidationIssue]]:
                 arrays[ch] = np.load(ch_file, mmap_mode="r")
 
         if arrays:
-            n_samples = min(n, 100)  # validate up to 100 per split
-            for i in range(n_samples):
+            n_root_samples = (
+                min(n, max_root_samples) if max_root_samples > 0 else n
+            )
+            for i in range(n_root_samples):
                 sample = {
                     ch: arrays[ch][i]
                     for ch in declared_channels
@@ -694,6 +796,7 @@ def validate_corpus_root(root: Path) -> tuple[dict, list[ValidationIssue]]:
                     S=num_slots or 900,
                     gamma_space=manifest.get("field_decay_spatial", 0.9848),
                     gamma_semantic=manifest.get("field_decay_semantic", 0.8),
+                    grid_width=manifest.get("canvas_width", None),
                 )
                 for si in sample_issues:
                     si.split = split
@@ -715,6 +818,7 @@ def check_route_field(
     gamma_space: float,
     split: str = "",
     idx: int = -1,
+    grid_width: int | None = None,
 ) -> list[ValidationIssue]:
     """Validate the trajectory field against the decay contract.
 
@@ -748,7 +852,7 @@ def check_route_field(
     if int(sf.sum()) != 1:
         return []
     sp = int(np.argmax(sf))
-    route = extract_route_from_trajectory_field(tf, sp)
+    route = extract_route_from_trajectory_field(tf, sp, grid_width=grid_width)
     if not route:
         return [
             _issue(
@@ -761,6 +865,8 @@ def check_route_field(
         ]
 
     width = int(math.sqrt(S))
+    if grid_width is not None:
+        width = grid_width
 
     if route[0] != sp:
         return [
@@ -854,6 +960,7 @@ def check_waypoint_field(
     gamma_semantic: float,
     split: str = "",
     idx: int = -1,
+    grid_width: int | None = None,
 ) -> list[ValidationIssue]:
     """Validate the waypoint field against the oracle contract.
 
@@ -888,7 +995,7 @@ def check_waypoint_field(
     if int(sf.sum()) != 1:
         return []
     sp = int(np.argmax(sf))
-    route = extract_route_from_trajectory_field(tf, sp)
+    route = extract_route_from_trajectory_field(tf, sp, grid_width=grid_width)
     if not route:
         return []
 
@@ -968,6 +1075,7 @@ def check_auxiliary_targets(
     S: int,
     split: str = "",
     idx: int = -1,
+    grid_width: int | None = None,
 ) -> list[ValidationIssue]:
     """Validate auxiliary targets against the oracle route.
 
@@ -1007,11 +1115,13 @@ def check_auxiliary_targets(
     if int(sf.sum()) != 1:
         return []
     sp = int(np.argmax(sf))
-    route = extract_route_from_trajectory_field(tf, sp)
+    route = extract_route_from_trajectory_field(tf, sp, grid_width=grid_width)
     if not route or len(route) < 2:
         return []
 
     width = int(math.sqrt(S))
+    if grid_width is not None:
+        width = grid_width
     fs = route[1]
     dr = fs // width - sp // width
     dc = fs % width - sp % width
@@ -1062,9 +1172,79 @@ def check_auxiliary_targets(
     return issues
 
 
+def check_dag_transitions(
+    data: dict[str, np.ndarray],
+    *,
+    adjacency: list[list[int]],
+    split: str = "",
+    idx: int = -1,
+    grid_width: int | None = None,
+) -> list[ValidationIssue]:
+    """Validate that consecutive accepted waypoint observations follow DAG edges.
+
+    For every consecutive pair ``(o_i, o_{i+1})`` of observation IDs in the
+    decoded waypoint sequence, checks that ``o_{i+1}`` is a valid successor
+    of ``o_i`` in the DAG adjacency list.
+
+    Args:
+        data: Sample channel dict.
+        adjacency: ``adjacency[o]`` lists valid successor public observation
+            IDs for node ``o``.
+        split: Optional split label for issue context.
+        idx: Optional sample index for issue context.
+
+    Returns:
+        List of validation issues (empty = all transitions valid).
+    """
+    from ehc_sn.tasks.routebind.decoding import (
+        extract_route_from_trajectory_field,
+        extract_waypoint_sequence,
+    )
+
+    E = lambda c, m, o=None, e=None: _issue("ERROR", c, split, idx, m, o, e)
+
+    ct = np.asarray(data["cell_type"])
+    oid = np.asarray(data["observation_id"])
+    sf = np.asarray(data["start_flag"])
+    tf = np.asarray(data["target_trajectory"])
+    wf = np.asarray(data["target_waypoint"])
+
+    if int(sf.sum()) != 1:
+        return []
+    sp = int(np.argmax(sf))
+    route = extract_route_from_trajectory_field(tf, sp, grid_width=grid_width)
+    if not route:
+        return []
+
+    waypoints = extract_waypoint_sequence(wf, route, oid)
+    if len(waypoints) < 2:
+        return []
+
+    issues: list[ValidationIssue] = []
+    for i in range(len(waypoints) - 1):
+        src_obs = waypoints[i][1]
+        dst_obs = waypoints[i + 1][1]
+        if src_obs < 0 or dst_obs < 0:
+            continue
+        if dst_obs not in adjacency[src_obs]:
+            issues.append(
+                E(
+                    "missing_dag_edge",
+                    f"Waypoint {i} (obs {src_obs}) -> "
+                    f"waypoint {i + 1} (obs {dst_obs}): "
+                    f"edge not in DAG adjacency",
+                    f"{src_obs} -> {dst_obs}",
+                    f"{dst_obs} in adjacency[{src_obs}]",
+                )
+            )
+
+    return issues
+
+
 __all__ = [
     "ValidationIssue",
     "check_auxiliary_targets",
+    "check_dag_transitions",
     "check_route_field",
     "check_waypoint_field",
     "validate_corpus_root",

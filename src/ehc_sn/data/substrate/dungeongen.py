@@ -20,7 +20,7 @@ Shared substrate: ``data/processed/dungeongen/v<version>/``
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final, Iterator
+from typing import Any, Final, Iterator
 
 import numpy as np
 
@@ -76,6 +76,10 @@ def ensure_raw(
     raw_root: Path,
     base_seed: int,
     split_counts: dict[str, int],
+    *,
+    generator_config: dict[str, Any] | None = None,
+    max_extent: tuple[int, int] | None = None,
+    attempt_budget: int = 100,
 ) -> None:
     """Create or validate the canonical tar-sharded raw snapshot.
 
@@ -83,8 +87,20 @@ def ensure_raw(
         raw_root: Canonical raw root (e.g. ``data/raw/dungeongen``).
         base_seed: Root base seed used across splits.
         split_counts: Mapping of split name to number of samples.
+        generator_config: Optional ``GenerationParams`` kwargs forwarded to
+            the dungeon generator.
+        max_extent: Optional ``(max_height, max_width)`` bound.  When set,
+            every exported layout fits within this extent via retry.
+        attempt_budget: Max attempts per layout (default 100).
     """
-    ensure_raw_snapshot(raw_root, base_seed, split_counts)
+    ensure_raw_snapshot(
+        raw_root,
+        base_seed,
+        split_counts,
+        generator_config=generator_config,
+        max_extent=max_extent,
+        attempt_budget=attempt_budget,
+    )
 
 
 def prepare_interim(
@@ -132,7 +148,7 @@ def prepare_interim(
         topologies: list[np.ndarray] = []
         regions_list: list[np.ndarray] = []
 
-        for idx, (topology, regions, seed) in enumerate(
+        for idx, (topology, regions, seed, _attempt) in enumerate(
             iter_raw_topologies(raw_root, split)
         ):
             if idx >= n:
@@ -174,15 +190,20 @@ def prepare_interim(
 
 def _iter_interim_topologies(
     interim_root: Path, split: str
-) -> Iterator[tuple[np.ndarray, np.ndarray, int]]:
-    """Yield ``(topology, regions, seed)`` from the dungeongen interim split file.
+) -> Iterator[tuple[np.ndarray, np.ndarray, int, int, int]]:
+    """Yield ``(topology, regions, seed, natural_h, natural_w)`` from the
+    dungeongen interim split file.
+
+    ``natural_h`` and ``natural_w`` are the raster dimensions derived from the
+    generated dungeon's geometric bounds (before any padding).
 
     Args:
         interim_root: Interim root (e.g. ``data/interim/dungeongen``).
         split: Split name.
 
     Yields:
-        ``(topology, regions, seed)`` tuples in deterministic index order.
+        ``(topology, regions, seed, natural_h, natural_w)`` tuples in
+        deterministic index order.
 
     Raises:
         FileNotFoundError: When the interim split NPZ does not exist.
@@ -199,23 +220,25 @@ def _iter_interim_topologies(
     topologies = data["topology"]
     regions_arr = data["regions"]
     for i in range(len(heights)):
-        h, w = int(heights[i]), int(widths[i])
-        yield topologies[i, :h, :w], regions_arr[i, :h, :w], int(seeds[i])
+        nh, nw = int(heights[i]), int(widths[i])
+        yield topologies[i, :nh, :nw], regions_arr[i, :nh, :nw], int(
+            seeds[i]
+        ), nh, nw
 
 
 # ---------------------------------------------------------------------------
 def _pad_to_shape(
-    arr: np.ndarray, target_h: int, target_w: int, *, fill: int | bool
+    arr: np.ndarray, pad_h: int, pad_w: int, *, fill: int | bool
 ) -> np.ndarray:
     h, w = arr.shape
-    if h > target_h or w > target_w:
+    if h > pad_h or w > pad_w:
         raise ValueError(
-            f"Source shape ({h}, {w}) exceeds target ({target_h}, {target_w}). "
-            "Increase --height/--width."
+            f"Source shape ({h}, {w}) exceeds target ({pad_h}, {pad_w}). "
+            "Increase --pad-height/--pad-width."
         )
-    if h == target_h and w == target_w:
+    if h == pad_h and w == pad_w:
         return arr
-    out = np.full((target_h, target_w), fill, dtype=arr.dtype)
+    out = np.full((pad_h, pad_w), fill, dtype=arr.dtype)
     out[:h, :w] = arr
     return out
 
@@ -224,18 +247,18 @@ def _build_substrate_sample(
     topology: np.ndarray,
     dungeongen_regions: np.ndarray,
     *,
-    target_h: int,
-    target_w: int,
+    pad_h: int,
+    pad_w: int,
     s_size: int,
     topology_seed: int,
 ) -> dict[str, np.ndarray]:
     """Normalize a raw dungeongen topology into shared-substrate channels."""
     rng = np.random.default_rng(topology_seed)
 
-    topology = _pad_to_shape(topology, target_h, target_w, fill=False)
-    regions = _pad_to_shape(
-        dungeongen_regions, target_h, target_w, fill=-1
-    ).astype(np.int32)
+    topology = _pad_to_shape(topology, pad_h, pad_w, fill=False)
+    regions = _pad_to_shape(dungeongen_regions, pad_h, pad_w, fill=-1).astype(
+        np.int32
+    )
 
     mask_valid = largest_component_mask(topology)
     observations = sample_observations(
@@ -264,7 +287,7 @@ def _infer_shape(
     max_h = 0
     max_w = 0
     for split, n in split_counts.items():
-        for idx, (topology, _, _) in enumerate(
+        for idx, (topology, _, _, _, _) in enumerate(
             _iter_interim_topologies(interim_root, split)
         ):
             if idx >= n:
@@ -367,12 +390,12 @@ def build_shared_substrate(
                 _build_substrate_sample(
                     topology,
                     dungeon_regions,
-                    target_h=resolved_h,
-                    target_w=resolved_w,
-                    n_observations=n_observations,
-                    seed=_sample_seed(seed, split, idx),
+                    pad_h=resolved_h,
+                    pad_w=resolved_w,
+                    s_size=n_observations,
+                    topology_seed=_sample_seed(seed, split, idx),
                 )
-                for idx, (topology, dungeon_regions, _) in enumerate(
+                for idx, (topology, dungeon_regions, _, _, _) in enumerate(
                     interim_topologies
                 )
             ]
@@ -523,21 +546,25 @@ def build_dungeongen_layouts(
         )
 
     layouts: list[SpatialLayout] = []
-    topology_type = "grid2d"
+    topology_type = "rectangle"
 
     for split in _SPLITS:
         n = split_counts[split]
         interim_topologies = list(
             _iter_interim_topologies(interim_root, split)
         )[:n]
-        for idx, (topology, dungeon_regions, _) in enumerate(
-            interim_topologies
-        ):
+        for idx, (
+            topology,
+            dungeon_regions,
+            _,
+            natural_h,
+            natural_w,
+        ) in enumerate(interim_topologies):
             sample = _build_substrate_sample(
                 topology,
                 dungeon_regions,
-                target_h=resolved_h,
-                target_w=resolved_w,
+                pad_h=resolved_h,
+                pad_w=resolved_w,
                 s_size=s_size,
                 topology_seed=_sample_seed(topology_seed, split, idx),
             )
@@ -562,52 +589,66 @@ def build_dungeongen_layouts(
                 region_id[i] = int(regions[r, c])
                 landmark_id[i] = int(landmarks[r, c])
 
-            # Build adjacency over the valid-state index (4-neighbor).
-            adj = np.zeros((n_states, n_states), dtype=bool)
+            # Build next_state and action_valid over the valid-state index (4-neighbor).
+            # Action order: STAY=0, UP=1, RIGHT=2, DOWN=3, LEFT=4.
+            _DG_DIRS: list[tuple[int, int]] = [
+                (0, 0),  # STAY
+                (-1, 0),  # UP
+                (0, 1),  # RIGHT
+                (1, 0),  # DOWN
+                (0, -1),  # LEFT
+            ]
+            n_actions = 5
+            next_state = np.zeros((n_states, n_actions), dtype=np.int32)
+            action_valid = np.zeros((n_states, n_actions), dtype=bool)
+
             for i, (r, c) in enumerate(coords):
-                adj[i, i] = True  # stay-still
-                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                    nr, nc = int(r + dr), int(c + dc)
-                    if 0 <= nr < resolved_h and 0 <= nc < resolved_w:
-                        if mask_valid[nr, nc]:
+                for a, (dr, dc) in enumerate(_DG_DIRS):
+                    if a == 0:  # STAY
+                        next_state[i, a] = i
+                        action_valid[i, a] = True
+                    else:
+                        nr, nc = int(r + dr), int(c + dc)
+                        if (
+                            0 <= nr < resolved_h
+                            and 0 <= nc < resolved_w
+                            and mask_valid[nr, nc]
+                        ):
                             j = np.where(
                                 (coords[:, 0] == nr) & (coords[:, 1] == nc)
                             )[0][0]
-                            adj[i, j] = True
-
-            # Transition matrix from adjacency.
-            tm = adj.astype(np.float64)
-            row_sums = tm.sum(axis=1, keepdims=True)
-            row_sums[row_sums == 0] = 1.0
-            tm = tm / row_sums
+                            next_state[i, a] = j
+                            action_valid[i, a] = True
+                        else:
+                            next_state[i, a] = i  # self-loop sentinel
+                            action_valid[i, a] = False
 
             for inst_idx in range(n_sensory_instances):
-                sensory_seed = (
-                    _sample_seed(topology_seed, split, idx) + inst_idx
-                )
-                sensory_rng = np.random.default_rng(np.uint64(sensory_seed))
-                obs_ids = sensory_rng.integers(0, s_size, size=n_states).astype(
+                obs_seed = _sample_seed(topology_seed, split, idx) + inst_idx
+                obs_rng = np.random.default_rng(np.uint64(obs_seed))
+                obs_ids = obs_rng.integers(0, s_size, size=n_states).astype(
                     np.int32
                 )
 
                 layout_id = (
-                    f"dungeongen-{split}-{idx:06d}" f"-sens{inst_idx:02d}"
+                    f"dungeongen-{split}-{idx:06d}" f"-obs{inst_idx:02d}"
                 )
 
                 layout: SpatialLayout = {
                     "layout_id": layout_id,
                     "layout_family": "dungeongen",
                     "topology_type": topology_type,
+                    "topology_kind": "grid2d",
                     "graph_state_count": n_states,
-                    "valid_state_mask": valid_state_mask,
                     "state_to_row_col": state_to_row_col,
                     "observation_id": obs_ids,
-                    "adjacency": adj,
+                    "extent": (int(natural_h), int(natural_w)),
+                    "next_state": next_state,
+                    "action_valid": action_valid,
                     "action_space": dict(DEFAULT_GRID_ACTION_SPACE),
-                    "transition_matrix": tm,
                     "topology_seed": topology_seed,
-                    "sensory_seed": sensory_seed,
-                    "sensory_vocab_size": s_size,
+                    "observation_seed": obs_seed,
+                    "observation_vocabulary_size": s_size,
                     "split": split,
                 }
                 # Attach optional dungeon-specific fields.
@@ -627,6 +668,7 @@ def build_dungeongen_layouts(
         version=extract_version(version_root),
         layout_family="dungeongen",
         preset=preset,
+        extent=[resolved_h, resolved_w],
     )
 
 

@@ -107,6 +107,33 @@ handling) recorded in the manifest `stage_params`.
 - Walls are absent from `state_to_row_col`; they exist only as missing positions.
 - `extent` records the natural bounding box, not the internal storage canvas.
 
+## Presets
+
+| Preset         | Description                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------------- |
+| `default`      | General-purpose dungeongen generation with no extent bound. Produces layouts up to ~44×42 cells.  |
+| `routebind-30` | Routebind-compatible bounded profile. Every exported layout has natural extent ≤ 30×30.           |
+
+### `routebind-30` details
+
+The `routebind-30` preset generates dungeons using source-native compact settings
+(DungeonSize.SMALL, cozy room-size bias, high density, no symmetry, passage
+width 1). After rasterization, any layout whose natural extent exceeds 30×30 is
+deterministically rejected and retried with the next seed in the attempt
+sequence. The layout dataset records the accepted attempt index in each
+`SpatialLayout` record.
+
+Seeding is deterministic: given the same `--topology-seed` and attempt budget,
+the same set of accepted layouts is produced. The observation vocabulary size
+defaults to 45 and may be overridden via `--observation-vocabulary-size`.
+
+Usage:
+
+```bash
+python build-dungeongen.py build --preset routebind-30
+python build-routebind.py build --topology-root data/interim/dungeongen/routebind-30/v1 ...
+```
+
 ## Build configuration
 
 | Parameter                       | Default | Description                         |

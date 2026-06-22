@@ -25,7 +25,6 @@ from ehc_sn.data.layout import (
 )
 from ehc_sn.data.layout.openfield import (
     OPENFIELD_PRESETS,
-    rectangle_adjacency,
 )
 from ehc_sn.data.lifecycle._write import create_version_root
 from ehc_sn.data.manifest import write_manifest
@@ -199,7 +198,35 @@ def expand_openfield_source_specs(
                 w = spec["width"]
                 h = spec["height"]
                 n_states = w * h
-                adj = rectangle_adjacency(w, h, stay_still=True)
+
+                # Build action-conditioned transition table for grid4.
+                # Action order: STAY=0, UP=1, RIGHT=2, DOWN=3, LEFT=4.
+                _GRID4_DELTAS: list[tuple[int, int]] = [
+                    (0, 0),  # STAY
+                    (-1, 0),  # UP
+                    (0, 1),  # RIGHT
+                    (1, 0),  # DOWN
+                    (0, -1),  # LEFT
+                ]
+                n_actions = 5
+                next_state = np.zeros((n_states, n_actions), dtype=np.int32)
+                action_valid = np.zeros((n_states, n_actions), dtype=bool)
+
+                for s in range(n_states):
+                    r, c = divmod(s, w)
+                    for a, (dr, dc) in enumerate(_GRID4_DELTAS):
+                        if a == 0:  # STAY
+                            next_state[s, a] = s
+                            action_valid[s, a] = True
+                        else:
+                            nr, nc = r + dr, c + dc
+                            if 0 <= nr < h and 0 <= nc < w:
+                                npos = nr * w + nc
+                                next_state[s, a] = npos
+                                action_valid[s, a] = True
+                            else:
+                                next_state[s, a] = s
+                                action_valid[s, a] = False
 
                 obs_ids = np.full(n_states, -1, dtype=np.int32)
                 example_id = spec["example_id"]
@@ -209,7 +236,6 @@ def expand_openfield_source_specs(
                     "layout_family": "openfield",
                     "topology_type": spec["topology_type"],
                     "graph_state_count": n_states,
-                    "valid_state_mask": np.ones(n_states, dtype=bool),
                     "state_to_row_col": np.column_stack(
                         (
                             np.arange(n_states, dtype=np.int32) // w,
@@ -217,25 +243,18 @@ def expand_openfield_source_specs(
                         )
                     ),
                     "observation_id": obs_ids,
-                    "adjacency": adj,
+                    "next_state": next_state,
+                    "action_valid": action_valid,
                     "action_space": dict(DEFAULT_GRID_ACTION_SPACE),
-                    "transition_matrix": _build_transition_matrix(adj),
                     "topology_seed": topology_seed,
-                    "sensory_seed": -1,
-                    "sensory_vocab_size": 0,
+                    "observation_seed": -1,
+                    "observation_vocabulary_size": 0,
+                    "extent": (h, w),
                     "split": split,
                 }
                 validate_spatial_layout(layout)
                 layouts.append(layout)
 
     return layouts
-
-
-# ---------------------------------------------------------------------------
-def _build_transition_matrix(adj: np.ndarray) -> np.ndarray:
-    """Convert a boolean adjacency matrix to a row-stochastic transition matrix."""
-    tm = adj.astype(np.float64)
-    row_sums = tm.sum(axis=1, keepdims=True)
-    row_sums[row_sums == 0] = 1.0
     tm = tm / row_sums
     return tm

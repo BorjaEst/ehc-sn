@@ -64,7 +64,7 @@ def generate_anchor_grid(
     cols = chosen % grid_width
     anchors = np.column_stack([rows, cols]).astype(np.int32)
 
-    grid_adj = rectangle_adjacency(grid_width, grid_height, stay_still=False)
+    grid_adj = rectangle_adjacency(grid_width, grid_height, include_stay=False)
 
     return anchors, grid_adj
 
@@ -202,9 +202,7 @@ def combine_relational_topology(
                     f"geo_support[{i}, {j}] = {geo_support[i, j]:.6f}"
                 )
             if has_weight and not has_edge:
-                raise ValueError(
-                    f"Weight positive at ({i}, {j}) but no edge."
-                )
+                raise ValueError(f"Weight positive at ({i}, {j}) but no edge.")
 
     return W
 

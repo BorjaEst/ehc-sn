@@ -48,6 +48,11 @@ class DatasetIndexEntry(BaseModel, extra="forbid"):
         "Structure is task-defined; tasks document the schema in their corpus "
         "spec section. Null unless the task builder supplies it.",
     )
+    content_digest: str | None = Field(
+        default=None,
+        description="SHA-256 content digest of the sample artifact "
+        "(e.g. 'sha256:...'). Null for task corpora; set for substrate samples.",
+    )
 
 
 # =============================================================================

@@ -465,58 +465,175 @@ def _observations_per_component(
     return result
 
 
-def _build_physical_neighbors(
-    traversable: np.ndarray,
-    row_col: np.ndarray,
-    height: int,
-    width: int,
-    n_slots: int,
-) -> np.ndarray:
-    """Build (n_slots, 4) int32 neighbor index array, -1 for no neighbor.
-
-    Order: UP, RIGHT, DOWN, LEFT.
-    """
-    neighbor_idx = np.full((n_slots, 4), -1, dtype=np.int32)
-    _DIRS = [(-1, 0), (0, 1), (1, 0), (0, -1)]
-    for p in range(n_slots):
-        if not traversable[p]:
-            continue
-        r = int(row_col[p, 0])
-        c = int(row_col[p, 1])
-        for k, (dr, dc) in enumerate(_DIRS):
-            nr, nc = r + dr, c + dc
-            if 0 <= nr < height and 0 <= nc < width:
-                npos = nr * width + nc
-                if traversable[npos]:
-                    neighbor_idx[p, k] = npos
-    return neighbor_idx
-
-
-def _derive_spatial_channels(
+def _build_dense_neighbors_from_layout(
     layout: dict,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Derive cell type and mask from the spatial topology substrate.
+    action_space: dict,
+    canvas_h: int,
+    canvas_w: int,
+) -> np.ndarray:
+    """Build ``(S, 4)`` dense canvas neighbor index from parent layout.
 
-    The topology source owns geometry (traversability).  Observations are
-    handled separately by the builder — this function does not set
-    ``CELL_OBSERVATION``; that assignment happens after the observation_id
-    is read from the topology and the DAG reverse lookup is applied.
+    Reads the layout's ``next_state`` and ``action_valid`` in compact
+    graph index space and maps them to dense row-major canvas positions
+    using ``state_to_row_col``.  Non-traversable canvas positions have
+    all-1 neighbor entries.
+
+    Direction order: UP=0, RIGHT=1, DOWN=2, LEFT=3.
+
+    Args:
+        layout: Compact ``SpatialLayout`` record.
+        action_space: ActionSpace descriptor (must be ``grid4_dir``).
+        canvas_h: Grid height in cells.
+        canvas_w: Grid width in cells.
 
     Returns:
-        Tuple of (cell_type, cell_mask):
-        - cell_type: (n_slots,) int32 — {0: WALL, 1: FREE}.
-        - cell_mask: (n_slots,) bool — all True (v1 fixed-size).
+        ``(S, 4)`` int32 neighbor index array, -1 for no neighbor.
     """
-    n_slots = int(layout["graph_state_count"])
-    valid = layout["valid_state_mask"]
+    from ehc_sn.tasks.routebind.contracts import (
+        DIRECTION_DELTA,
+        Direction,
+    )
 
-    cell_type = np.full(n_slots, 0, dtype=np.int32)  # default WALL
-    is_accessible = valid.astype(bool)
-    for p in range(n_slots):
-        if is_accessible[p]:
-            cell_type[p] = 1  # FREE (observation subtype assigned later)
-    cell_mask = np.ones(n_slots, dtype=bool)
-    return cell_type, cell_mask
+    num_slots = canvas_h * canvas_w
+    neighbors = np.full((num_slots, 4), -1, dtype=np.int32)
+
+    # Map direction deltas to action indices.
+    action_names = action_space["action_names"]
+    stay_idx = action_space.get("stay_action")
+    dir_to_action: dict[int, int] = {}
+    for dir_val in [
+        Direction.UP,
+        Direction.RIGHT,
+        Direction.DOWN,
+        Direction.LEFT,
+    ]:
+        delta = DIRECTION_DELTA[Direction(dir_val)]
+        for a, name in enumerate(action_names):
+            if a == stay_idx:
+                continue
+            ad = tuple(action_space["action_deltas"][a])
+            if ad == delta:
+                dir_to_action[dir_val] = a
+                break
+
+    next_state = layout["next_state"]
+    action_valid = layout["action_valid"]
+    row_col = layout["state_to_row_col"]
+    n_comp = layout["graph_state_count"]
+
+    # Build dense-position → compact-state lookup.
+    dense_to_compact = np.full(num_slots, -1, dtype=np.int32)
+    for s in range(n_comp):
+        r = int(row_col[s, 0])
+        c = int(row_col[s, 1])
+        p = r * canvas_w + c
+        dense_to_compact[p] = s
+
+    for s in range(n_comp):
+        p = int(row_col[s, 0]) * canvas_w + int(row_col[s, 1])
+        for dir_val in [
+            Direction.UP,
+            Direction.RIGHT,
+            Direction.DOWN,
+            Direction.LEFT,
+        ]:
+            a = dir_to_action.get(dir_val)
+            if a is None:
+                continue
+            if action_valid[s, a]:
+                q = int(next_state[s, a])
+                qr = int(row_col[q, 0])
+                qc = int(row_col[q, 1])
+                qp = qr * canvas_w + qc
+                neighbors[p, int(dir_val)] = qp
+
+    return neighbors
+
+
+def _canonicalize_layout_to_canvas(
+    layout: dict,
+    storage_h: int,
+    storage_w: int,
+    n_obs: int,
+    *,
+    natural_h: int,
+    natural_w: int,
+    row_offset: int,
+    col_offset: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Canonicalize a compact SpatialLayout into a padded storage canvas.
+
+    The topology substrate stores a compact graph of traversable states.
+    Routebind requires a dense fixed-size storage canvas with centered
+    embedding of the natural layout.
+
+    - Positions within the embedded natural extent are populated from the
+      compact graph: traversable states become ``CELL_OBSERVATION`` or
+      ``CELL_FREE``; positions without a compact state become ``CELL_WALL``.
+    - Positions outside the embedded natural extent become ``CELL_PAD``
+      (storage padding, not part of the topology).
+
+    Args:
+        layout: Compact ``SpatialLayout`` record.
+        storage_h: Storage canvas height in cells.
+        storage_w: Storage canvas width in cells.
+        n_obs: Number of DAG observation nodes (vocabulary size).
+        natural_h: Natural layout height in cells.
+        natural_w: Natural layout width in cells.
+        row_offset: Row offset for embedding the natural layout into the
+            storage canvas (centered placement).
+        col_offset: Col offset for embedding.
+
+    Returns:
+        Tuple ``(cell_type, observation_id, node_at_position, spatial_mask)``:
+        - cell_type: ``(num_slots,)`` int32.
+        - observation_id: ``(num_slots,)`` int32.
+        - node_at_position: ``(num_slots,)`` int32.
+        - spatial_mask: ``(num_slots,)`` bool — ``True`` inside the embedded
+          natural extent.
+    """
+    from ehc_sn.tasks.routebind.contracts import (
+        CELL_OBSERVATION,
+        CELL_PAD,
+        CELL_WALL,
+    )
+
+    num_slots = storage_h * storage_w
+    cell_type = np.full(num_slots, CELL_PAD, dtype=np.int32)
+    observation_id = np.full(num_slots, -1, dtype=np.int32)
+    node_at_position = np.full(num_slots, -1, dtype=np.int32)
+    spatial_mask = np.zeros(num_slots, dtype=bool)
+
+    # Compute the bounding box of the natural extent within the storage canvas.
+    r_start = row_offset
+    r_end = row_offset + natural_h
+    c_start = col_offset
+    c_end = col_offset + natural_w
+
+    # Mark positions inside the natural extent.
+    for r in range(natural_h):
+        for c in range(natural_w):
+            p = (r_start + r) * storage_w + (c_start + c)
+            spatial_mask[p] = True
+            # Default: WALL inside natural extent (no compact state at this position).
+            cell_type[p] = CELL_WALL
+
+    # Scatter compact graph states into the natural extent.
+    row_col = layout["state_to_row_col"]
+    compact_obs = layout["observation_id"]
+    for i in range(layout["graph_state_count"]):
+        r = int(row_col[i, 0])
+        c = int(row_col[i, 1])
+        p = (r_start + r) * storage_w + (c_start + c)
+        oid = int(compact_obs[i])
+        observation_id[p] = oid
+        # Every traversable state with a valid observation is OBSERVATION.
+        # CELL_FREE is reserved for future use.
+        cell_type[p] = CELL_OBSERVATION
+        if 0 <= oid < n_obs:
+            node_at_position[p] = oid
+
+    return cell_type, observation_id, node_at_position, spatial_mask
 
 
 # =============================================================================
@@ -643,6 +760,8 @@ def build_routebind_task_corpus(
     dagflow_root: Path,
     dagflow_graph_id: str,
     corpus: str = "default",
+    storage_height: int = 32,
+    storage_width: int = 32,
     field_decay_spatial: float = 0.9848,
     field_decay_semantic: float = 0.8,
     max_supported_route_length: int = 150,
@@ -666,12 +785,16 @@ def build_routebind_task_corpus(
     query samples.  Split assignment follows the topology layout's own
     ``split`` field.
 
+    Heterogeneous parental natural extents are permitted.  Every corpus
+    declares one configured *storage_extent* ``[storage_height, storage_width]``.
+    Each parent layout must fit within that storage extent and is embedded
+    via centered placement.
+
     Args:
         version_root: Destination versioned root
             (e.g. ``data/processed/routebind/default/v1``).  Must not exist.
         layouts: Pre-validated topology layout records
-            (``list[SpatialLayout]``).  Must all share the same
-            ``graph_state_count``.  Observation identities are read from
+            (``list[SpatialLayout]``).  Observation identities are read from
             ``layout["observation_id"]`` and preserved unchanged.
         topology_manifest: Parsed manifest from the topology root.
         dagflow_root: Path to dagflow versioned root containing the
@@ -679,6 +802,8 @@ def build_routebind_task_corpus(
         dagflow_graph_id: Stable artifact ID within *dagflow_root*
             identifying the single DAG used for this corpus.
         corpus: Corpus label (e.g. ``"default"``).
+        storage_height: Storage canvas height in cells (default: 32).
+        storage_width: Storage canvas width in cells (default: 32).
         field_decay_spatial: Spatial field decay factor gamma_space in
             ``(0, 1)``.
         field_decay_semantic: Semantic field decay factor gamma_sem in
@@ -695,9 +820,8 @@ def build_routebind_task_corpus(
 
     Raises:
         FileExistsError: When *version_root* already exists (immutable root).
-        ValueError: When topology family is unsupported, layouts have
-            heterogeneous ``graph_state_count``, or
-            ``n_queries_per_layout < 1``.
+        ValueError: When topology family is unsupported, any layout exceeds
+            the configured storage extent, or ``n_queries_per_layout < 1``.
     """
     version = extract_version(version_root)
 
@@ -715,6 +839,29 @@ def build_routebind_task_corpus(
             f"n_queries_per_layout={n_queries_per_layout} must be >= 1."
         )
 
+    if storage_height <= 0 or storage_width <= 0:
+        raise ValueError(
+            f"Storage dimensions must be positive, got "
+            f"[{storage_height}, {storage_width}]."
+        )
+
+    num_slots = storage_height * storage_width
+
+    # --- Validate topology compatibility per layout ---
+    # Routebind v1 requires 4-neighbor rectangular grid movement (grid4_canonical).
+    for ly in layouts:
+        ly_action = ly.get("action_space", {})
+        ly_movement = ly_action.get("movement_kind", "")
+        if ly_movement != "grid4":
+            raise ValueError(
+                f"Layout {ly['layout_id']!r} has action_space.movement_kind="
+                f"{ly_movement!r}. Routebind v1 requires movement_kind='grid4' "
+                f"(4-direction orthogonal movement: UP, DOWN, LEFT, RIGHT)."
+            )
+
+    if not layouts:
+        raise ValueError("At least one topology layout is required.")
+
     # --- Derive canonical parent paths ---
     topology_preset = topology_manifest.get("preset", "default")
     canonical_topology = (
@@ -722,25 +869,29 @@ def build_routebind_task_corpus(
         f"v{topology_manifest['version']}"
     )
 
-    # --- Validate uniform grid size across all layouts ---
-    first_slots = layouts[0]["graph_state_count"]
+    # --- Compute natural extent statistics and validate fit ---
+    natural_heights: list[int] = []
+    natural_widths: list[int] = []
     for ly in layouts:
-        if ly["graph_state_count"] != first_slots:
+        ly_ext = ly.get("extent")
+        if ly_ext is None or len(ly_ext) != 2:
             raise ValueError(
-                "Topology layouts have heterogeneous graph_state_count: "
-                f"found {first_slots} and {ly['graph_state_count']}. "
-                "All layouts must share the same size."
+                f"Layout {ly['layout_id']!r} is missing per-layout 'extent'."
             )
-    num_slots = int(first_slots)
-
-    first_rc = layouts[0]["state_to_row_col"]
-    auto_height = int(first_rc[:, 0].max()) + 1
-    auto_width = int(first_rc[:, 1].max()) + 1
-    if auto_height * auto_width != num_slots:
-        raise ValueError(
-            f"Layout dimensions ({auto_height}x{auto_width}) "
-            f"don't match graph_state_count ({num_slots})."
-        )
+        ly_h, ly_w = int(ly_ext[0]), int(ly_ext[1])
+        if ly_h <= 0 or ly_w <= 0:
+            raise ValueError(
+                f"Layout {ly['layout_id']!r} has invalid extent: [{ly_h}, {ly_w}]."
+            )
+        if ly_h > storage_height or ly_w > storage_width:
+            raise ValueError(
+                f"Layout {ly['layout_id']!r} has natural extent [{ly_h}, {ly_w}] "
+                f"which exceeds configured storage extent "
+                f"[{storage_height}, {storage_width}]. "
+                "All layouts must fit within the storage extent."
+            )
+        natural_heights.append(ly_h)
+        natural_widths.append(ly_w)
 
     # --- Load semantic DAG from dagflow parent ---
     dagflow_entry, dagflow_sample = find_artifact_by_id(
@@ -799,11 +950,14 @@ def build_routebind_task_corpus(
         spl = ly.get("split", "train")
         layouts_by_split[spl].append(ly)
 
+    natural_extent_homogeneous = (
+        len(set(natural_heights)) == 1 and len(set(natural_widths)) == 1
+    )
     stage_params: dict[str, Any] = {
         "corpus": corpus,
         "n_observations": n_actual,
-        "grid_height": auto_height,
-        "grid_width": auto_width,
+        "storage_extent": [storage_height, storage_width],
+        "num_spatial_slots": num_slots,
         "field_decay_spatial": field_decay_spatial,
         "field_decay_semantic": field_decay_semantic,
         "max_supported_route_length": max_supported_route_length,
@@ -815,6 +969,11 @@ def build_routebind_task_corpus(
         "dagflow_root": str(dagflow_root),
         "dagflow_graph_id": dagflow_graph_id,
         "preset": ("balanced" if preset is None else "custom"),
+        "spatial_storage_policy": "pad_to_configured_max",
+        "placement_policy": "center",
+        "natural_extent_homogeneous": natural_extent_homogeneous,
+        "natural_height_range": [min(natural_heights), max(natural_heights)],
+        "natural_width_range": [min(natural_widths), max(natural_widths)],
     }
     # Diagnostic counters (will be filled per-split)
     search_metrics: dict[str, dict[str, int]] = {
@@ -847,38 +1006,92 @@ def build_routebind_task_corpus(
             split_funnels: dict[int, GenerationFunnel] = {}
 
             for layout_idx, layout in enumerate(shuffled_layouts):
-                # --- Per-layout precomputation ---
-                n_slots = int(layout["graph_state_count"])
-                valid_mask = layout["valid_state_mask"]
-                traversable_positions = [
-                    p for p in range(n_slots) if valid_mask[p]
-                ]
-                row_col = layout["state_to_row_col"]
+                # --- Determine natural extent and centered placement ---
+                ly_ext = layout["extent"]
+                natural_h = int(ly_ext[0])
+                natural_w = int(ly_ext[1])
+                row_offset = (storage_height - natural_h) // 2
+                col_offset = (storage_width - natural_w) // 2
 
-                physical_neighbors = _build_physical_neighbors(
-                    valid_mask, row_col, auto_height, auto_width, n_slots
+                # --- Dense canonicalization: compact SpatialLayout → padded storage canvas ---
+                n_slots = (
+                    num_slots  # storage canvas size, not graph_state_count
                 )
+                cell_type, observation_id, node_at_position, spatial_mask = (
+                    _canonicalize_layout_to_canvas(
+                        layout,
+                        storage_height,
+                        storage_width,
+                        n_actual,
+                        natural_h=natural_h,
+                        natural_w=natural_w,
+                        row_offset=row_offset,
+                        col_offset=col_offset,
+                    )
+                )
+
+                from ehc_sn.tasks.routebind.contracts import CELL_OBSERVATION
+
+                # Build dense canvas row/col array for oracle reconstruction.
+                # Shape (num_slots, 2) — row-major: slot p = r * storage_w + c.
+                dense_row_col = np.stack(
+                    [
+                        np.repeat(np.arange(storage_height), storage_width),
+                        np.tile(np.arange(storage_width), storage_height),
+                    ],
+                    axis=1,
+                ).astype(np.int32)
+
+                # Build traversable mask and physical neighbors from parent layout.
+                # Only consider positions inside the natural extent (spatial_mask).
+                traversable = (cell_type == CELL_OBSERVATION) & spatial_mask
+                traversable_positions = [
+                    p for p in range(n_slots) if traversable[p]
+                ]
+
+                # Build physical neighbors from the compact layout (unpadded).
+                physical_neighbors = _build_dense_neighbors_from_layout(
+                    layout, layout["action_space"], natural_h, natural_w
+                )
+                # Build dense-position → compact-state lookup for the natural grid.
+                # _build_dense_neighbors_from_layout returns an array indexed by
+                # dense row-major position (p_nat = r * natural_w + c) containing
+                # dense row-major destination positions.  We need compact state
+                # indices to look up row/col from state_to_row_col.
+                nat_n_slots = natural_h * natural_w
+                nat_dense_to_compact = np.full(nat_n_slots, -1, dtype=np.int32)
+                for s in range(layout["graph_state_count"]):
+                    r = int(layout["state_to_row_col"][s, 0])
+                    c = int(layout["state_to_row_col"][s, 1])
+                    nat_dense_to_compact[r * natural_w + c] = s
+                # Remap natural-grid dense neighbors to storage-canvas coordinates.
+                remapped_neighbors = np.full((n_slots, 4), -1, dtype=np.int32)
+                for s in range(layout["graph_state_count"]):
+                    rc = layout["state_to_row_col"][s]
+                    p_nat = int(rc[0]) * natural_w + int(rc[1])
+                    p_storage = (int(rc[0]) + row_offset) * storage_width + (
+                        int(rc[1]) + col_offset
+                    )
+                    for d in range(4):
+                        q_nat = int(physical_neighbors[p_nat, d])
+                        if q_nat >= 0:
+                            q_compact = int(nat_dense_to_compact[q_nat])
+                            if q_compact >= 0:
+                                qr = int(
+                                    layout["state_to_row_col"][q_compact, 0]
+                                )
+                                qc = int(
+                                    layout["state_to_row_col"][q_compact, 1]
+                                )
+                                qp = (qr + row_offset) * storage_width + (
+                                    qc + col_offset
+                                )
+                                remapped_neighbors[p_storage, d] = qp
+                physical_neighbors = remapped_neighbors
 
                 component_labels = _compute_connected_components(
                     physical_neighbors, n_slots
                 )
-
-                cell_type, cell_mask = _derive_spatial_channels(layout)
-
-                # Read observation identities from topology substrate verbatim.
-                # Routebind does not place, modify, or remap observations.
-                # The adjacency is in public observation ID space, so
-                # node_at_position IS the public observation_id — no mapping.
-                observation_id = (
-                    layout["observation_id"].copy().astype(np.int32)
-                )
-                node_at_position = observation_id.copy()
-                for p in range(n_slots):
-                    oid = int(observation_id[p])
-                    if 0 <= oid < n_obs:
-                        cell_type[p] = 2  # CELL_OBSERVATION
-                    else:
-                        node_at_position[p] = -1  # not in DAG vocabulary
 
                 obs_per_component = _observations_per_component(
                     component_labels, node_at_position, n_actual
@@ -890,14 +1103,7 @@ def build_routebind_task_corpus(
                 query_count = 0
                 funnel = GenerationFunnel()
 
-                # All observation-bearing traversable positions
-                dag_obs_positions = [
-                    p for p in traversable_positions if node_at_position[p] >= 0
-                ]
-                if not dag_obs_positions:
-                    break
-
-                # Deficit-driven query generation using the profile
+                # --- Deficit-driven query generation using the profile ---
                 profile = (
                     preset if preset is not None else resolve_preset("balanced")
                 )
@@ -917,7 +1123,7 @@ def build_routebind_task_corpus(
                     p for p in traversable_positions if node_at_position[p] >= 0
                 ]
                 if not dag_obs_positions:
-                    break
+                    continue
 
                 # Collect valid start positions (per layout RNG)
                 layout_rng = np.random.default_rng(
@@ -1057,7 +1263,7 @@ def build_routebind_task_corpus(
                                 policy_kind=table["policy_kind"],
                                 policy_next=table["policy_next"],
                                 opt_count=table["opt_count"],
-                                row_col=row_col,
+                                row_col=dense_row_col,
                                 node_at_position=node_at_position,
                             )
 
@@ -1136,7 +1342,11 @@ def build_routebind_task_corpus(
                                 ),
                                 "start_flag": start_flag,
                                 "goal_flag": goal_mask,
-                                "cell_mask": cell_mask,
+                                "spatial_mask": spatial_mask,
+                                "natural_height": np.int32(natural_h),
+                                "natural_width": np.int32(natural_w),
+                                "row_offset": np.int32(row_offset),
+                                "col_offset": np.int32(col_offset),
                                 "target_trajectory": target_trajectory,
                                 "target_waypoint": target_waypoint,
                                 "target_next_dir": np.int32(result.next_dir),
@@ -1229,7 +1439,7 @@ def build_routebind_task_corpus(
                 channels=ROUTEBIND_CORPUS_CHANNELS,
                 topology_kind="grid2d",
                 n_states=num_slots,
-                extent=[auto_height, auto_width],
+                extent=[storage_height, storage_width],
                 index_kwargs={
                     "task_metadata": {
                         "task": TASK_FAMILY,
@@ -1261,7 +1471,7 @@ def build_routebind_task_corpus(
             channels=ROUTEBIND_CORPUS_CHANNELS,
             topology_kind="grid2d",
             n_states=num_slots,
-            extent=[auto_height, auto_width],
+            extent=[storage_height, storage_width],
             n_samples=final_counts,
             source_id=f"synthetic/{topology_family}",
             builder="ehc_sn.tasks.routebind.builder.build_routebind_task_corpus",
@@ -1290,17 +1500,24 @@ def build_routebind_task_corpus(
             n_observations=n_actual,
             topology_observation_vocabulary_size=n_actual,
             observation_sentinel_id=n_actual,
-            grid_height=auto_height,
-            grid_width=auto_width,
+            storage_extent=[storage_height, storage_width],
+            num_spatial_slots=num_slots,
+            canvas_height=storage_height,
+            canvas_width=storage_width,
+            num_slots=num_slots,
             field_decay_spatial=field_decay_spatial,
             field_decay_semantic=field_decay_semantic,
+            max_supported_route_length=max_supported_route_length,
+            minimum_terminal_activation=field_decay_spatial
+            ** max_supported_route_length,
         )
 
 
 def validate_routebind_root(root: Path) -> dict:
     """Validate a routebind task corpus root against task-owned semantics.
 
-    Validates against the channels declared in the manifest.
+    Delegates to ``validate_corpus_root`` in ``validation.py`` and raises
+    ``ValueError`` on any ERROR-severity issue.
 
     Args:
         root: Resolved versioned routebind task corpus root.
@@ -1310,79 +1527,16 @@ def validate_routebind_root(root: Path) -> dict:
 
     Raises:
         ValueError: On any contract violation.
-        FileNotFoundError: When a required file is absent.
     """
-    manifest = validate_version_root(root)
-    if manifest.get("dataset_class") != "task_corpus":
-        raise ValueError("Root is not a task_corpus.")
-    if manifest.get("task") != TASK_FAMILY:
+    from ehc_sn.tasks.routebind.validation import validate_corpus_root
+
+    manifest, issues = validate_corpus_root(root)
+    errors = [i for i in issues if i.severity == "ERROR"]
+    if errors:
         raise ValueError(
-            f"Root task is {manifest.get('task')!r}, expected {TASK_FAMILY!r}."
+            f"Corpus root validation failed with {len(errors)} error(s). "
+            f"First: [{errors[0].code}] {errors[0].message}"
         )
-
-    num_slots = manifest.get("n_states")
-    if num_slots is None:
-        raise ValueError("Manifest missing n_states.")
-
-    declared_channels: list[str] = manifest.get(
-        "channels", list(ROUTEBIND_CORPUS_CHANNELS)
-    )
-
-    for split, n in manifest["n_samples"].items():
-        if n == 0:
-            continue
-        split_dir = root / split
-        arrays: dict[str, np.ndarray] = {}
-        for ch in declared_channels:
-            ch_file = split_dir / f"{ch}.npy"
-            if not ch_file.exists():
-                raise FileNotFoundError(
-                    f"Missing task channel '{ch}' in {split_dir}."
-                )
-            arrays[ch] = np.load(ch_file, mmap_mode="r")
-            if arrays[ch].shape[0] != n:
-                raise ValueError(
-                    f"Task channel '{ch}' in split '{split}' "
-                    f"has {arrays[ch].shape[0]} samples, "
-                    f"manifest declares {n}."
-                )
-            # Scalar target channels (next_dir, next_obs) are 1-D (B,)
-            # after stacking; spatial channels are 2-D (B, S).
-            if (
-                arrays[ch].ndim >= 2
-                and arrays[ch].shape[1] != num_slots
-                and ch
-                not in (
-                    "target_next_dir",
-                    "target_next_obs",
-                )
-            ):
-                raise ValueError(
-                    f"Channel '{ch}' first sample dim is "
-                    f"{arrays[ch].shape[1]}, expected {num_slots}."
-                )
-
-        for i in range(min(n, 100)):
-            sample = {ch: arrays[ch][i] for ch in declared_channels}
-            stored_issues = validate_stored_sample(
-                sample,
-                n_obs=manifest.get("n_observations", 0),
-                topo_vocab_size=manifest.get(
-                    "topology_observation_vocab_size", 0
-                )
-                or manifest.get("n_observations", 0),
-                S=num_slots or 900,
-                gamma_space=manifest.get("field_decay_spatial", 0.9848),
-                gamma_semantic=manifest.get("field_decay_semantic", 0.8),
-            )
-            errors = [i for i in stored_issues if i.severity == "ERROR"]
-            if errors:
-                raise ValueError(
-                    f"Stored sample {i} in split '{split}': "
-                    f"{len(errors)} error(s). "
-                    f"First: [{errors[0].code}] {errors[0].message}"
-                )
-
     return manifest
 
 

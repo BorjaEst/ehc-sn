@@ -45,7 +45,6 @@ PFC_TRACE_KEY_Z_L = "pfc/z_L"
 WORLD_TRACE_KEY_LOCATION_IDS = "world_step/location_ids"
 WORLD_TRACE_KEY_OBSERVATION = "world_step/observation"
 
-
 # ── LEC ──────────────────────────────────────────────────────────────────────
 LEC_TRACE_KEY_CELLS = "diagnostic/lec/cells"
 LEC_TRACE_KEY_FILTERED = "diagnostic/lec/filtered"
@@ -60,7 +59,6 @@ MEC_TRACE_KEY_CELLS = "diagnostic/mec/location_mean"
 HPC_TRACE_KEY_CELLS = "diagnostic/hpc/location_mean"
 HPC_TRACE_KEY_MEMORY = "diagnostic/hpc/memory"
 
-
 # ── SeqMaze ────────────────────────────────────────────────────────────────
 SEQMAZE_META_KEY_TARGET_PATH = "target_path"
 SEQMAZE_META_KEY_PATH_MASK = "path_mask"
@@ -70,7 +68,6 @@ SEQMAZE_META_KEY_NODE_START_FLAG = "node_start_flag"
 SEQMAZE_META_KEY_NODE_GOAL_FLAG = "node_goal_flag"
 SEQMAZE_META_KEY_N_NODES = "n_nodes"
 SEQMAZE_META_KEY_TARGET_PATH_LEN = "target_path_len"
-
 
 # ── Goaltrace ────────────────────────────────────────────────────────────────
 GOALTRACE_TRACE_KEY_FIRING_FIELD = "goaltrace/firing_field"
@@ -82,3 +79,15 @@ GOALTRACE_META_KEY_CURRENT_FLAG = "goaltrace/current_flag"
 GOALTRACE_META_KEY_GOAL_FLAG = "goaltrace/goal_flag"
 GOALTRACE_META_KEY_SUCCESSOR_INDICES = "goaltrace/successor_indices"
 GOALTRACE_META_KEY_SUCCESSOR_MASK = "goaltrace/successor_mask"
+
+# ── Routebind ────────────────────────────────────────────────────────────────
+ROUTEBIND_META_KEY_CELL_TYPE = "routebind/cell_type"
+ROUTEBIND_META_KEY_OBSERVATION_ID = "routebind/observation_id"
+ROUTEBIND_META_KEY_START_FLAG = "routebind/start_flag"
+ROUTEBIND_META_KEY_GOAL_FLAG = "routebind/goal_flag"
+ROUTEBIND_META_KEY_CELL_MASK = "routebind/cell_mask"
+ROUTEBIND_META_KEY_TARGET_TRAJECTORY = "routebind/target_trajectory"
+ROUTEBIND_META_KEY_TARGET_WAYPOINT = "routebind/target_waypoint"
+ROUTEBIND_META_KEY_N_OBSERVATIONS = "routebind/n_observations"
+ROUTEBIND_META_KEY_CANVAS_WIDTH = "routebind/canvas_width"
+ROUTEBIND_META_KEY_CANVAS_HEIGHT = "routebind/canvas_height"

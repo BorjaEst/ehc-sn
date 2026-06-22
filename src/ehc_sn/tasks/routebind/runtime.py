@@ -23,11 +23,15 @@ ROUTEBIND_BATCH_KEYS: Final[tuple[str, ...]] = (
     "observation_id",
     "start_flag",
     "goal_flag",
-    "cell_mask",
+    "spatial_mask",
     "target_trajectory",
     "target_waypoint",
     "target_next_dir",
     "target_next_obs",
+    "natural_height",
+    "natural_width",
+    "row_offset",
+    "col_offset",
 )
 """All keys present in a collated routebind batch.
 
@@ -64,7 +68,7 @@ def extract_routebind_task_input(batch: Batch) -> RoutebindTaskInput:
         "observation_id",
         "start_flag",
         "goal_flag",
-        "cell_mask",
+        "spatial_mask",
     ):
         _require_key(batch, k)
     return RoutebindTaskInput(
@@ -72,7 +76,7 @@ def extract_routebind_task_input(batch: Batch) -> RoutebindTaskInput:
         observation_id=batch["observation_id"].to(dtype=torch.int64),
         start_flag=batch["start_flag"].to(dtype=torch.bool),
         goal_flag=batch["goal_flag"].to(dtype=torch.bool),
-        cell_mask=batch["cell_mask"].to(dtype=torch.bool),
+        spatial_mask=batch["spatial_mask"].to(dtype=torch.bool),
     )
 
 

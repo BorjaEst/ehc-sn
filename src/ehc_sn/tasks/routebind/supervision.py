@@ -48,7 +48,7 @@ def build_routebind_supervision(
     Args:
         executed_batch: Must contain ``"target_trajectory"``,
             ``"target_waypoint"``, ``"target_next_dir"``,
-            ``"target_next_obs"``, and ``"cell_mask"``.
+            ``"target_next_obs"``, ``"spatial_mask"``.
 
     Returns:
         Typed supervision struct.
@@ -61,7 +61,7 @@ def build_routebind_supervision(
         "target_waypoint",
         "target_next_dir",
         "target_next_obs",
-        "cell_mask",
+        "spatial_mask",
     )
     for key in required_keys:
         if key not in executed_batch:
@@ -69,6 +69,7 @@ def build_routebind_supervision(
                 f"build_routebind_supervision: '{key}' missing from "
                 f"executed_batch."
             )
+    mask = executed_batch["spatial_mask"].to(dtype=torch.bool)
     return RoutebindFieldSupervision(
         target_trajectory=executed_batch["target_trajectory"].to(
             dtype=torch.float32
@@ -78,7 +79,7 @@ def build_routebind_supervision(
         ),
         target_next_dir=executed_batch["target_next_dir"].to(dtype=torch.int64),
         target_next_obs=executed_batch["target_next_obs"].to(dtype=torch.int64),
-        mask=executed_batch["cell_mask"].to(dtype=torch.bool),
+        mask=mask,
     )
 
 
