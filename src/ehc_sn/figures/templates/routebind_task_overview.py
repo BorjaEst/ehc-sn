@@ -36,9 +36,17 @@ _OBS_CMAP = "tab20"
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
-    return RoutebindTaskOverviewFigure(
-        select_routebind_task_overview(trace, ctx), ctx
-    ).plot()
+    """Render the Routebind task overview figure from a persisted eval trace.
+
+    Args:
+        trace: ``TraceTree`` containing ``routebind/*`` keys.
+        ctx: Figure context for styling.
+
+    Returns:
+        Matplotlib ``Figure`` with three panels.
+    """
+    data = select_routebind_task_overview(trace, ctx)
+    return RoutebindTaskOverviewFigure(data, ctx).plot()
 
 
 # ── Figure template ──────────────────────────────────────────────────────────
@@ -48,9 +56,8 @@ class RoutebindTaskOverviewFigure(BaseFigureTemplate):
     """Three-panel task-overview figure for routebind."""
 
     HEIGHT_FRAC: float = 0.22
-    WIDTH_FRAC: float = 1.0
     MOSAIC = [["input", "field", "summary"]]
-    MOSAIC_KWARGS = {"gridspec_kw": {"wspace": 0.12}}
+    MOSAIC_KWARGS = {"gridspec_kw": {"wspace": 0.08}}
 
     def __init__(
         self,
@@ -195,11 +202,11 @@ class RoutebindTaskOverviewFigure(BaseFigureTemplate):
             "and must be learned.",
         ]
         ax.text(
-            0.06,
-            0.93,
+            0.08,
+            0.92,
             "\n".join(lines),
             transform=ax.transAxes,
-            fontsize=5.0,
+            fontsize=5.5,
             verticalalignment="top",
             fontfamily="monospace",
         )

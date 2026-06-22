@@ -36,6 +36,7 @@ from ehc_sn.figures.selectors.arena_task import (
     ArenaTaskOverviewData,
     select_arena_task_overview,
 )
+from ehc_sn.figures.utils.axes import _environment_locations
 from ehc_sn.traces.trace_tree import TraceTree
 
 # ── Public entry point ──────────────────────────────────────────────────────
@@ -273,8 +274,6 @@ def _overlay_revisit_rings(
     ring communicates "this location was visited before" without
     occluding the time-coloured trajectory segment at that position.
     """
-    from ehc_sn.figures.utils.axes import _environment_locations
-
     locations = _environment_locations(world)
     revisit_coords: list[list[float]] = []
     for i, loc_id in enumerate(trajectory_locations.tolist()):
