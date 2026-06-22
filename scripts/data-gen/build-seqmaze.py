@@ -21,12 +21,12 @@ Examples
 Build the SeqMaze task corpus against a dagflow layout dataset::
 
     python build-seqmaze.py materialize-task \\
-        --layout-root data/interim/dagflow/default/v1
+        --layout-root data/interim/dagflow/sparse/v1
 
 With custom sizes::
 
     python build-seqmaze.py materialize-task \\
-        --layout-root data/interim/dagflow/default/v1 \\
+        --layout-root data/interim/dagflow/sparse/v1 \\
         --n-max 64 --t-max 48 --n-train 8000 --n-val 1000 --n-test 1000 --seed 7
 
 Validate an existing task corpus::
@@ -38,7 +38,7 @@ Prerequisites
 A dagflow shared substrate must exist before running.
 Build it first::
 
-    python scripts/data-gen/build-dagflow.py build-all
+    python scripts/data-gen/build-dagflow.py build --preset sparse --version 1
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def materialize_task(
         Path,
         typer.Option(
             "--layout-root",
-            help="Path to dagflow layout dataset root (e.g. data/interim/dagflow/default/v1).",
+            help="Path to dagflow layout dataset root (e.g. data/interim/dagflow/sparse/v1).",
         ),
     ],
     corpus: Annotated[

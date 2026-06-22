@@ -1,20 +1,19 @@
-"""Staged CLI for generating dagflow layout interim assets.
+"""CLI for building dagflow layout interim assets.
 
 Dagflow is a layout source (peer to openfield, dungeongen) that generates
 random DAG topologies with permuted node order and remapped observation IDs.
 
-The output is an interim layout dataset root consumed by build-seqmaze.py.
+The output is an interim layout dataset root consumed by downstream task
+builders (build-seqmaze.py, build-goaltrace.py, build-routebind.py).
 
-Stages
-------
-generate-topology    Generate per-split source spec JSONL files (raw stage).
-materialize-layouts  Expand source specs, assign structure, write layout dataset.
-validate             Validate manifest.json and data of a layout version root.
-build-all            Convenience alias: generate-topology -> materialize-layouts.
+Commands
+--------
+build       Generate graph layouts and write a versioned layout dataset.
+validate    Validate a version root's manifest, channels, and data.
+inspect     Print a human-readable summary of a version root manifest.
 
 Default paths
 -------------
-Raw source specs:  data/raw/dagflow/{preset}/v{version}
 Layout dataset:    data/interim/dagflow/{preset}/v{version}
 
 Prerequisites
@@ -23,27 +22,41 @@ None — layouts are generated procedurally.
 
 Examples
 --------
-Quick local build::
+Quick local build with default preset::
 
-    python build-dagflow.py build-all
+    python build-dagflow.py build --preset routing --version 1
 
-Custom sizes::
+Small smoke test::
 
-    python build-dagflow.py build-all \\
-        --n-max 64 --t-max 48 --n-train 8000 --n-val 1000 --n-test 1000 --seed 7
+    python build-dagflow.py build --preset small --version 1
 
-Validate a dagflow layout dataset::
+Canonical routing graph::
 
-    python build-dagflow.py validate data/interim/dagflow/default/v1
+    python build-dagflow.py build --preset routing --version 1
 
-Build a SeqMaze task corpus from dagflow layouts::
+Long-composition stress test::
 
-    python build-seqmaze.py materialize-task \\
-        --layout-root data/interim/dagflow/default/v1
+    python build-dagflow.py build --preset chain16 --version 1
+
+Custom density and span profile::
+
+    python build-dagflow.py build \\
+        --preset sparse --version 1 \\
+        --extra-edge-density 0.20 --span-profile heavy
+
+Validate an existing version root::
+
+    python build-dagflow.py validate data/interim/dagflow/routing/v1
+
+Inspect manifest::
+
+    python build-dagflow.py inspect data/interim/dagflow/routing/v1
 """
 
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 from typing import Annotated
 
@@ -51,262 +64,221 @@ import typer
 
 from ehc_sn.data.lifecycle import validate_version_root
 from ehc_sn.data.substrate.dagflow import (
+    _SPAN_PROFILES,
+    DAGFLOW_PRESETS,
     LAYOUT_FAMILY,
     build_dagflow_layouts,
     validate_dagflow_layout_root,
 )
 
 # ---------------------------------------------------------------------------
-_DEFAULT_PRESET = "default"
-_DEFAULT_RAW_ROOT = Path("data/raw/dagflow")
-_DEFAULT_INTERIM_ROOT = Path("data/interim/dagflow")
+_DEFAULT_OUTPUT_ROOT = Path("data/interim/dagflow")
+_DEFAULT_PRESET = "routing"
 _DEFAULT_VERSION = 1
-_DEFAULT_N_MAX = 45
-_DEFAULT_T_MAX = 16
-_DEFAULT_MAX_OUT_DEGREE = 4
-_DEFAULT_TARGET_EDGES = 105
-_DEFAULT_FIXED_N_ACTUAL = True
-_DEFAULT_MIN_EXTRA_EDGES = 1
 _DEFAULT_N_TRAIN = 4000
 _DEFAULT_N_VAL = 500
 _DEFAULT_N_TEST = 500
 _DEFAULT_SEED = 42
 
+_PRESET_HELP = (
+    f"Named generation preset ({', '.join(sorted(DAGFLOW_PRESETS))})."
+)
+
+_SPAN_PROFILE_HELP = (
+    f"Rank-span distribution profile ({', '.join(sorted(_SPAN_PROFILES))}). "
+    "Overrides the preset's profile when set."
+)
+
 app = typer.Typer(add_completion=False, help=__doc__)
 
 
 # =============================================================================
-@app.command("generate-topology")
-def generate_topology(
-    preset: Annotated[
-        str,
-        typer.Option(
-            "--preset",
-            help="Named source preset (default: 'default').",
-        ),
-    ] = _DEFAULT_PRESET,
-    n_train: Annotated[
-        int,
-        typer.Option(
-            "--n-train",
-            help=f"Number of training samples (default: {_DEFAULT_N_TRAIN}).",
-        ),
-    ] = _DEFAULT_N_TRAIN,
-    n_val: Annotated[
-        int,
-        typer.Option(
-            "--n-val",
-            help=f"Number of validation samples (default: {_DEFAULT_N_VAL}).",
-        ),
-    ] = _DEFAULT_N_VAL,
-    n_test: Annotated[
-        int,
-        typer.Option(
-            "--n-test",
-            help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
-        ),
-    ] = _DEFAULT_N_TEST,
-    topology_seed: Annotated[
-        int,
-        typer.Option(
-            "--topology-seed",
-            help=f"Seed controlling topology generation (default: {_DEFAULT_SEED}).",
-        ),
-    ] = _DEFAULT_SEED,
-    version: Annotated[
-        int,
-        typer.Option(
-            "--version",
-            help=f"Version of the emitted dataset (default: {_DEFAULT_VERSION}).",
-        ),
-    ] = _DEFAULT_VERSION,
-    raw_root: Annotated[
-        Path,
-        typer.Option(
-            "--raw-root",
-            help=f"Root path for raw source specs (default: {_DEFAULT_RAW_ROOT}).",
-        ),
-    ] = _DEFAULT_RAW_ROOT,
-) -> None:
-    """Produce source-spec JSONL topology records (raw stage).
+def _resolve_dest(
+    output_root: Path,
+    preset: str,
+    version: int,
+) -> Path:
+    """Return the destination version leaf path."""
+    return output_root / preset / f"v{version}"
 
-    Generates a reproducible source-spec corpus (per-split JSONL topology
-    specs under ``{raw_root}/{preset}/v{version}/``).
-    """
-    raw_leaf = raw_root / preset / f"v{version}"
-    if raw_leaf.exists():
-        typer.echo(f"Source specs already exist at {raw_leaf}, skipping.")
-        return
 
-    import json
-
-    raw_leaf.mkdir(parents=True, exist_ok=True)
-    rng = __import__("numpy").random.SeedSequence(topology_seed)
-
-    for split, n in [
-        ("train", n_train),
-        ("val", n_val),
-        ("test", n_test),
-    ]:
-        (raw_leaf / split).mkdir(parents=True, exist_ok=True)
-        specs = []
-        split_rng = __import__("numpy").random.default_rng(rng.spawn(1)[0])
-        for _ in range(n):
-            sample_seed = int(split_rng.integers(0, 2**31))
-            specs.append(
-                {
-                    "example_id": f"dagflow-{preset}-{split}-{sample_seed}",
-                    "n_max": _DEFAULT_N_MAX,
-                    "t_max": _DEFAULT_T_MAX,
-                    "max_out_degree": _DEFAULT_MAX_OUT_DEGREE,
-                    "seed_offset": sample_seed,
-                    "split": split,
-                }
-            )
-        spec_file = raw_leaf / split / "specs.jsonl"
-        with spec_file.open("w") as fh:
-            for s in specs:
-                fh.write(json.dumps(s) + "\n")
-
+def _print_manifest_summary(manifest: dict) -> None:
+    """Print a human-readable summary of a version root manifest."""
+    typer.echo(f"  dataset_class  : {manifest.get('dataset_class', '?')}")
+    typer.echo(f"  family         : {manifest.get('family', '?')}")
+    typer.echo(f"  version        : {manifest.get('version', '?')}")
+    typer.echo(f"  preset         : {manifest.get('preset', '?')}")
+    typer.echo(f"  n_max          : {manifest.get('n_max', '?')}")
+    typer.echo(f"  max_out_degree : {manifest.get('max_out_degree', '?')}")
+    typer.echo(f"  target_edges   : {manifest.get('target_edges', '?')}")
     typer.echo(
-        f"Source specs written to {raw_leaf}.  "
-        "Run materialize-layouts to expand."
+        f"  extra_edge_density: " f"{manifest.get('extra_edge_density', '?')}"
+    )
+    typer.echo(f"  span_profile   : {manifest.get('span_profile', '?')}")
+    typer.echo(f"  channels       : {manifest.get('channels', [])}")
+    typer.echo(f"  n_samples      : {manifest.get('n_samples', {})}")
+    typer.echo(f"  seed           : {manifest.get('seed', '?')}")
+    typer.echo(
+        f"  input_fingerprint: " f"{manifest.get('input_fingerprint', '?')}"
     )
 
 
 # =============================================================================
-@app.command("materialize-layouts")
-def materialize_layouts(
+_SPAN_PROFILES_VALUES = sorted(_SPAN_PROFILES)
+
+
+@app.command("build")
+def build(
     preset: Annotated[
         str,
         typer.Option(
             "--preset",
-            help="Named source preset (default: 'default').",
+            help=_PRESET_HELP,
         ),
     ] = _DEFAULT_PRESET,
+    version: Annotated[
+        int,
+        typer.Option(
+            "--version",
+            help="Substrate artifact version integer.  Must be ≥ 1.",
+        ),
+    ] = _DEFAULT_VERSION,
     n_max: Annotated[
         int,
         typer.Option(
             "--n-max",
-            help=f"Maximum candidate nodes N (default: {_DEFAULT_N_MAX}).",
+            help="Number of candidate nodes N (overrides preset).  Must be ≥ 2.",
         ),
-    ] = _DEFAULT_N_MAX,
-    t_max: Annotated[
-        int,
-        typer.Option(
-            "--t-max",
-            help=f"Maximum path length T (default: {_DEFAULT_T_MAX}).",
-        ),
-    ] = _DEFAULT_T_MAX,
-    max_out_degree: Annotated[
-        int,
-        typer.Option(
-            "--max-out-degree",
-            help=f"Maximum out-degree K (default: {_DEFAULT_MAX_OUT_DEGREE}).",
-        ),
-    ] = _DEFAULT_MAX_OUT_DEGREE,
+    ] = None,  # type: ignore[arg-type]
     n_train: Annotated[
         int,
         typer.Option(
             "--n-train",
-            help=f"Number of training samples (default: {_DEFAULT_N_TRAIN}).",
+            help=f"Number of training graph artifacts (default: {_DEFAULT_N_TRAIN}).",
         ),
     ] = _DEFAULT_N_TRAIN,
     n_val: Annotated[
         int,
         typer.Option(
             "--n-val",
-            help=f"Number of validation samples (default: {_DEFAULT_N_VAL}).",
+            help=f"Number of validation graph artifacts (default: {_DEFAULT_N_VAL}).",
         ),
     ] = _DEFAULT_N_VAL,
     n_test: Annotated[
         int,
         typer.Option(
             "--n-test",
-            help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
+            help=f"Number of test graph artifacts (default: {_DEFAULT_N_TEST}).",
         ),
     ] = _DEFAULT_N_TEST,
-    target_edges: Annotated[
+    extra_edge_density: Annotated[
+        float | None,
+        typer.Option(
+            "--extra-edge-density",
+            help="Fraction of possible extra forward edges beyond the backbone. "
+            "0.0 = backbone only; 1.0 = complete forward DAG. Overrides preset.",
+        ),
+    ] = None,
+    max_out_degree: Annotated[
+        int | None,
+        typer.Option(
+            "--max-out-degree",
+            help="Maximum out-degree K (overrides preset).  Must be ≥ 2.",
+        ),
+    ] = None,
+    span_profile: Annotated[
+        str | None,
+        typer.Option(
+            "--span-profile",
+            help=_SPAN_PROFILE_HELP,
+        ),
+    ] = None,
+    seed: Annotated[
         int,
         typer.Option(
-            "--target-edges",
-            help=f"Desired total edge count per graph "
-            f"(default: {_DEFAULT_TARGET_EDGES}).",
-        ),
-    ] = _DEFAULT_TARGET_EDGES,
-    fixed_n_actual: Annotated[
-        bool,
-        typer.Option(
-            "--fixed-n-actual/--no-fixed-n-actual",
-            help="When True, always use exactly n_max nodes "
-            f"(default: {_DEFAULT_FIXED_N_ACTUAL}).",
-        ),
-    ] = _DEFAULT_FIXED_N_ACTUAL,
-    min_extra_edges: Annotated[
-        int,
-        typer.Option(
-            "--min-extra-edges",
-            help="Minimum extra edges per non-terminal node beyond the "
-            "Hamiltonian backbone "
-            f"(default: {_DEFAULT_MIN_EXTRA_EDGES}).",
-        ),
-    ] = _DEFAULT_MIN_EXTRA_EDGES,
-    topology_seed: Annotated[
-        int,
-        typer.Option(
-            "--topology-seed",
-            help=f"Seed controlling topology generation (default: {_DEFAULT_SEED}).",
+            "--seed",
+            help=f"Deterministic base seed (default: {_DEFAULT_SEED}).",
         ),
     ] = _DEFAULT_SEED,
-    version: Annotated[
-        int,
-        typer.Option(
-            "--version",
-            help=f"Version of the emitted layout dataset (default: {_DEFAULT_VERSION}).",
-        ),
-    ] = _DEFAULT_VERSION,
-    raw_root: Annotated[
+    output_root: Annotated[
         Path,
         typer.Option(
-            "--raw-root",
-            help=f"Root path for raw source specs (default: {_DEFAULT_RAW_ROOT}).",
+            "--output-root",
+            help=f"Root path for interim files (default: {_DEFAULT_OUTPUT_ROOT}).",
         ),
-    ] = _DEFAULT_RAW_ROOT,
-    interim_root: Annotated[
-        Path,
+    ] = _DEFAULT_OUTPUT_ROOT,
+    force: Annotated[
+        bool,
         typer.Option(
-            "--interim-root",
-            help=f"Root path for interim files (default: {_DEFAULT_INTERIM_ROOT}).",
+            "--force",
+            help="Delete the existing version root before building, if present.",
         ),
-    ] = _DEFAULT_INTERIM_ROOT,
+    ] = False,
 ) -> None:
-    """Expand source specs and write the dagflow layout dataset.
+    """Generate graph layouts and write a versioned layout dataset.
 
-    Writes layout records to ``{interim_root}/{preset}/v{version}/``.
+    Produces a dagflow layout dataset at ``{output_root}/{preset}/v{version}/``
+    with all ``LAYOUT_CHANNELS`` written as per-split NPY files.
+
+    The Hamiltonian backbone (0→1→…→N-1) is mandatory and non-configurable.
+    All graphs have permuted public observation IDs (rank→obs_id bijection).
+
+    Preset parameters (n_max, max_out_degree, extra_edge_density,
+    span_profile) can be overridden individually via CLI flags.
     """
-    raw_leaf = raw_root / preset / f"v{version}"
-    if not raw_leaf.exists():
+    if version < 1:
+        typer.echo("Error: --version must be ≥ 1.", err=True)
+        raise typer.Exit(code=1)
+    if n_max is not None and n_max < 2:
+        typer.echo("Error: --n-max must be ≥ 2.", err=True)
+        raise typer.Exit(code=1)
+    if max_out_degree is not None and max_out_degree < 2:
+        typer.echo("Error: --max-out-degree must be ≥ 2.", err=True)
+        raise typer.Exit(code=1)
+    if extra_edge_density is not None and not (
+        0.0 <= extra_edge_density <= 1.0
+    ):
         typer.echo(
-            f"Error: source specs not found at {raw_leaf}. "
-            f"Run generate-topology first.",
+            "Error: --extra-edge-density must be in [0.0, 1.0].", err=True
+        )
+        raise typer.Exit(code=1)
+    if span_profile is not None and span_profile not in _SPAN_PROFILES:
+        typer.echo(
+            f"Error: unknown --span-profile '{span_profile}'. "
+            f"Choose from: {', '.join(_SPAN_PROFILES_VALUES)}.",
             err=True,
         )
         raise typer.Exit(code=1)
+    if n_train < 0 or n_val < 0 or n_test < 0:
+        typer.echo("Error: split counts must be ≥ 0.", err=True)
+        raise typer.Exit(code=1)
 
-    layout_leaf = interim_root / preset / f"v{version}"
+    dest = _resolve_dest(output_root, preset, version)
+
+    if dest.exists():
+        if force:
+            typer.echo(f"Warning: --force set; deleting existing root: {dest}")
+            shutil.rmtree(dest)
+        else:
+            typer.echo(
+                f"Error: version root already exists (dataset roots are "
+                f"immutable): {dest}\n"
+                f"Use --force to delete and rebuild, or bump --version.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
     build_dagflow_layouts(
-        layout_leaf,
+        version_root=dest,
         preset=preset,
         n_max=n_max,
-        t_max=t_max,
         max_out_degree=max_out_degree,
-        target_edges=target_edges,
+        extra_edge_density=extra_edge_density,
         n_train=n_train,
         n_val=n_val,
         n_test=n_test,
-        seed=topology_seed,
-        fixed_n_actual=fixed_n_actual,
-        min_extra_edges_per_node=min_extra_edges,
+        seed=seed,
+        span_profile=span_profile,
     )
 
 
@@ -315,18 +287,35 @@ def materialize_layouts(
 def validate(
     root: Annotated[
         Path,
-        typer.Argument(help="Dagflow version root to validate."),
+        typer.Argument(
+            help="Dagflow version root to validate "
+            "(e.g. data/interim/dagflow/balanced/v1)."
+        ),
     ],
 ) -> None:
-    """Validate a dagflow version root's manifest and data.
+    """Validate a dagflow version root's manifest, channels, and data.
 
-    Supports both ``source_spec`` and ``layout_dataset`` roots.
+    Performs structural validation (manifest fields, path grammar, split
+    presence, channel files, sample counts) followed by per-sample semantic
+    validation for layout_dataset roots.
     """
     manifest = validate_version_root(root.resolve())
     dc = manifest.get("dataset_class", "")
+
     if dc == "layout_dataset":
         manifest = validate_dagflow_layout_root(root.resolve())
-    elif dc != "source_spec":
+        typer.echo(f"OK  {root}")
+        typer.echo(f"    dataset_class : {manifest['dataset_class']}")
+        typer.echo(f"    family        : {manifest['family']}")
+        typer.echo(f"    version       : {manifest['version']}")
+        typer.echo(f"    channels      : {manifest['channels']}")
+        typer.echo(f"    n_samples     : {manifest['n_samples']}")
+    elif dc == "source_spec":
+        typer.echo(f"OK  {root}")
+        typer.echo(f"    dataset_class : {manifest['dataset_class']}")
+        typer.echo(f"    family        : {manifest['family']}")
+        typer.echo(f"    version       : {manifest['version']}")
+    else:
         typer.echo(
             f"Error: expected dataset_class 'layout_dataset' or 'source_spec', "
             f"got '{dc}'.",
@@ -334,147 +323,21 @@ def validate(
         )
         raise typer.Exit(code=1)
 
-    typer.echo(f"OK  {root}")
-    typer.echo(f"    dataset_class : {manifest['dataset_class']}")
-    typer.echo(f"    family        : {manifest['family']}")
-    typer.echo(f"    version       : {manifest['version']}")
-    if dc == "layout_dataset":
-        typer.echo(f"    channels      : {manifest['channels']}")
-        typer.echo(f"    n_samples     : {manifest['n_samples']}")
-
 
 # =============================================================================
-@app.command("build-all")
-def build_all(
-    preset: Annotated[
-        str,
-        typer.Option(
-            "--preset",
-            help="Named source preset (default: 'default').",
-        ),
-    ] = _DEFAULT_PRESET,
-    n_max: Annotated[
-        int,
-        typer.Option(
-            "--n-max",
-            help=f"Maximum candidate nodes N (default: {_DEFAULT_N_MAX}).",
-        ),
-    ] = _DEFAULT_N_MAX,
-    t_max: Annotated[
-        int,
-        typer.Option(
-            "--t-max",
-            help=f"Maximum path length T (default: {_DEFAULT_T_MAX}).",
-        ),
-    ] = _DEFAULT_T_MAX,
-    max_out_degree: Annotated[
-        int,
-        typer.Option(
-            "--max-out-degree",
-            help=f"Maximum out-degree K (default: {_DEFAULT_MAX_OUT_DEGREE}).",
-        ),
-    ] = _DEFAULT_MAX_OUT_DEGREE,
-    n_train: Annotated[
-        int,
-        typer.Option(
-            "--n-train",
-            help=f"Number of training samples (default: {_DEFAULT_N_TRAIN}).",
-        ),
-    ] = _DEFAULT_N_TRAIN,
-    n_val: Annotated[
-        int,
-        typer.Option(
-            "--n-val",
-            help=f"Number of validation samples (default: {_DEFAULT_N_VAL}).",
-        ),
-    ] = _DEFAULT_N_VAL,
-    n_test: Annotated[
-        int,
-        typer.Option(
-            "--n-test",
-            help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
-        ),
-    ] = _DEFAULT_N_TEST,
-    target_edges: Annotated[
-        int,
-        typer.Option(
-            "--target-edges",
-            help=f"Desired total edge count per graph "
-            f"(default: {_DEFAULT_TARGET_EDGES}).",
-        ),
-    ] = _DEFAULT_TARGET_EDGES,
-    fixed_n_actual: Annotated[
-        bool,
-        typer.Option(
-            "--fixed-n-actual/--no-fixed-n-actual",
-            help="When True, always use exactly n_max nodes "
-            f"(default: {_DEFAULT_FIXED_N_ACTUAL}).",
-        ),
-    ] = _DEFAULT_FIXED_N_ACTUAL,
-    min_extra_edges: Annotated[
-        int,
-        typer.Option(
-            "--min-extra-edges",
-            help="Minimum extra edges per non-terminal node beyond the "
-            "Hamiltonian backbone "
-            f"(default: {_DEFAULT_MIN_EXTRA_EDGES}).",
-        ),
-    ] = _DEFAULT_MIN_EXTRA_EDGES,
-    topology_seed: Annotated[
-        int,
-        typer.Option(
-            "--topology-seed",
-            help=f"Seed controlling topology generation (default: {_DEFAULT_SEED}).",
-        ),
-    ] = _DEFAULT_SEED,
-    version: Annotated[
-        int,
-        typer.Option(
-            "--version",
-            help=f"Version of the emitted dataset (default: {_DEFAULT_VERSION}).",
-        ),
-    ] = _DEFAULT_VERSION,
-    raw_root: Annotated[
+@app.command("inspect")
+def inspect(
+    root: Annotated[
         Path,
-        typer.Option(
-            "--raw-root",
-            help=f"Root path for raw source specs (default: {_DEFAULT_RAW_ROOT}).",
+        typer.Argument(
+            help="Dagflow version root to inspect "
+            "(e.g. data/interim/dagflow/balanced/v1)."
         ),
-    ] = _DEFAULT_RAW_ROOT,
-    interim_root: Annotated[
-        Path,
-        typer.Option(
-            "--interim-root",
-            help=f"Root path for interim files (default: {_DEFAULT_INTERIM_ROOT}).",
-        ),
-    ] = _DEFAULT_INTERIM_ROOT,
+    ],
 ) -> None:
-    """Full pipeline: generate-topology -> materialize-layouts."""
-    generate_topology(
-        preset=preset,
-        n_train=n_train,
-        n_val=n_val,
-        n_test=n_test,
-        topology_seed=topology_seed,
-        version=version,
-        raw_root=raw_root,
-    )
-    materialize_layouts(
-        preset=preset,
-        n_max=n_max,
-        t_max=t_max,
-        max_out_degree=max_out_degree,
-        target_edges=target_edges,
-        n_train=n_train,
-        n_val=n_val,
-        n_test=n_test,
-        topology_seed=topology_seed,
-        fixed_n_actual=fixed_n_actual,
-        min_extra_edges=min_extra_edges,
-        version=version,
-        raw_root=raw_root,
-        interim_root=interim_root,
-    )
+    """Print a human-readable summary of a version root manifest."""
+    manifest = validate_version_root(root.resolve())
+    _print_manifest_summary(manifest)
 
 
 if __name__ == "__main__":

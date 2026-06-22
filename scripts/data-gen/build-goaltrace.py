@@ -21,12 +21,12 @@ Examples
 Build the Goaltrace task corpus against a dagflow layout dataset::
 
     python build-goaltrace.py materialize-task \\
-        --layout-root data/interim/dagflow/default/v1
+        --layout-root data/interim/dagflow/sparse/v1
 
 With custom sizes::
 
     python build-goaltrace.py materialize-task \\
-        --layout-root data/interim/dagflow/default/v1 \\
+        --layout-root data/interim/dagflow/sparse/v1 \\
         --n-observations 64 --num-graphs 1 \\
         --oracle-semantics reliability --field-decay 0.8 \\
         --n-train 8000 --n-val 1000 --n-test 1000 --seed 7
@@ -34,7 +34,7 @@ With custom sizes::
 With multiple DAGs::
 
     python build-goaltrace.py materialize-task \\
-        --layout-root data/interim/dagflow/default/v1 \\
+        --layout-root data/interim/dagflow/sparse/v1 \\
         --num-graphs 8 --n-train 4000
 
 Validate an existing task corpus::
@@ -44,7 +44,7 @@ Validate an existing task corpus::
 Build a static-weight corpus (deterministic, contradiction-free)::
 
     python build-goaltrace.py materialize-task \\
-        --layout-root data/interim/dagflow/default/v1 \\
+        --layout-root data/interim/dagflow/sparse/v1 \\
         --static-weights \\
         --n-train 500 --n-val 250 --n-test 240 \\
         --distance-tau 8.0 \\
@@ -56,12 +56,11 @@ Prerequisites
 A dagflow shared substrate must exist before running.
 Build it first::
 
-    python scripts/data-gen/build-dagflow.py build-all
+    python scripts/data-gen/build-dagflow.py build --preset sparse --version 1
 
-For static-weight corpora, the dagflow substrate should be built with
-``generate_hamiltonian_dag`` (the default after 2026-06-20).  Run::
+For static-weight corpora, a larger dagflow substrate can be built with::
 
-    python scripts/data-gen/build-dagflow.py build-all \\
+    python scripts/data-gen/build-dagflow.py build --preset sparse \\
         --n-max 45 --max-out-degree 4 --version 2
 """
 
@@ -109,7 +108,7 @@ def materialize_task(
         typer.Option(
             "--layout-root",
             help="Path to dagflow layout dataset root "
-            "(e.g. data/interim/dagflow/default/v1).",
+            "(e.g. data/interim/dagflow/sparse/v1).",
         ),
     ],
     corpus: Annotated[

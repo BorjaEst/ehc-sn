@@ -29,8 +29,8 @@ Build the Routebind task corpus with a dagflow graph::
 
     python build-routebind.py materialize-task \
         --topology-root data/interim/openfield/big-square/v1 \
-        --dagflow-root data/interim/dagflow/default/v1 \
-        --dagflow-graph-id dagflow-train-000001 \
+        --dagflow-root data/interim/dagflow/sparse/v1 \
+        --dagflow-graph-id dagflow-sparse-v1-train-000000 \
         --n-queries-per-layout 10 --seed 42
 
 Validate an existing task corpus::
@@ -43,7 +43,7 @@ An openfield (or dungeongen) layout dataset and a dagflow graph artifact
 must exist before building.  Build them first::
 
     python scripts/data-gen/build-openfield.py build-all
-    python scripts/data-gen/build-dagflow.py build-all
+    python scripts/data-gen/build-dagflow.py build --preset sparse --version 1
 """
 
 from __future__ import annotations
@@ -58,10 +58,12 @@ from ehc_sn.data.manifest import read_manifest
 from ehc_sn.tasks.routebind.builder import (
     TASK_FAMILY,
     build_routebind_task_corpus,
+    resolve_preset,
     validate_routebind_root,
 )
 
 # ---------------------------------------------------------------------------
+_DEFAULT_PRESET = "balanced"
 _DEFAULT_VERSION = 1
 _DEFAULT_CORPUS = "default"
 _DEFAULT_FIELD_DECAY_SPATIAL = 0.9848
@@ -88,7 +90,7 @@ def materialize_task(
         typer.Option(
             "--dagflow-root",
             help="Path to dagflow dataset root "
-            "(e.g. data/interim/dagflow/default/v1).",
+            "(e.g. data/interim/dagflow/sparse/v1).",
         ),
     ],
     dagflow_graph_id: Annotated[
@@ -129,7 +131,8 @@ def materialize_task(
         int,
         typer.Option(
             "--n-queries-per-layout",
-            help="Number of start/goal queries per layout (default: 10).",
+            help="Number of start/goal queries per layout (default: 10). "
+            "Deprecated in favour of --preset budget.",
         ),
     ] = _DEFAULT_N_QUERIES_PER_LAYOUT,
     version: Annotated[
@@ -143,6 +146,34 @@ def materialize_task(
         int,
         typer.Option("--seed", help="Deterministic base seed (default: 42)."),
     ] = _DEFAULT_SEED,
+    preset: Annotated[
+        str | None,
+        typer.Option(
+            "--preset",
+            help="Named Routebind preset (default: 'balanced').",
+        ),
+    ] = None,
+    min_route_length: Annotated[
+        int | None,
+        typer.Option(
+            "--min-route-length",
+            help="Override hard minimum route length.",
+        ),
+    ] = None,
+    max_route_length_override: Annotated[
+        int | None,
+        typer.Option(
+            "--max-route-length",
+            help="Override hard maximum route length.",
+        ),
+    ] = None,
+    attempt_budget: Annotated[
+        int | None,
+        typer.Option(
+            "--attempt-budget",
+            help="Override preset's attempt budget.",
+        ),
+    ] = None,
 ) -> None:
     """Build the Routebind task corpus over spatial topology + dagflow graph."""
     root = Path(f"data/processed/{TASK_FAMILY}/{corpus}/v{version}")
@@ -164,7 +195,7 @@ def materialize_task(
         typer.echo(
             f"Error: dagflow root not found at {dagflow_root_resolved}.\n"
             "Build dagflow first with:\n"
-            "    python scripts/data-gen/build-dagflow.py build-all",
+            "    python scripts/data-gen/build-dagflow.py build --preset sparse --version 1",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -173,6 +204,18 @@ def materialize_task(
     layouts = load_layout_dataset(topology_root_resolved)
 
     version_root = root.resolve()
+
+    # Resolve preset with CLI overrides
+    preset_name = preset or _DEFAULT_PRESET
+    overrides: dict = {}
+    if min_route_length is not None:
+        overrides["hard_min_route_length"] = min_route_length
+    if max_route_length_override is not None:
+        overrides["hard_max_route_length"] = max_route_length_override
+    if attempt_budget is not None:
+        overrides["attempt_budget"] = attempt_budget
+    profile = resolve_preset(preset_name, overrides or None)
+
     build_routebind_task_corpus(
         version_root=version_root,
         layouts=layouts,
@@ -185,11 +228,12 @@ def materialize_task(
         max_supported_route_length=max_supported_route_length,
         n_queries_per_layout=n_queries_per_layout,
         seed=seed,
+        preset=profile,
     )
     print(f"Routebind corpus built at {version_root}")
     print(f"  Topology: {topology_root_resolved}")
     print(f"  DAG graph: {dagflow_graph_id} @ {dagflow_root_resolved}")
-    print(f"  Queries per layout: {n_queries_per_layout}")
+    print(f"  Preset: {preset_name}")
 
 
 # =============================================================================
