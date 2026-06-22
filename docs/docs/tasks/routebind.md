@@ -650,6 +650,66 @@ routebind must not replace them. The topology must not contain routebind
 query semantics: the hidden DAG, start/goal selection, waypoints, or
 routebind targets.
 
+### Three-layer preset architecture
+
+Routebind separates configuration into three independent preset families
+that together determine the difficulty distribution of the generated
+corpus:
+
+```text
+topology preset       dagflow preset       routebind preset
+    │                      │                       │
+    │  (physical world)    │  (semantic graph)     │  (retained distribution)
+    │                      │                       │
+    └──────────────────────┴───────────────────────┘
+                                │
+                     builder reconciles them
+                     through deficit-driven
+                     query selection
+```
+
+**Topology preset** controls the physical world: wall density, connected-
+component structure, corridor widths, bottlenecks, and observation
+placement. Examples: `openfield`, `sparse-dungeon`,
+`balanced-dungeon`.
+
+**Dagflow preset** controls semantic structure: number of observations,
+branch and merge structure, shortcuts, semantic diameter. Examples:
+`routing`, `chain16`, `branching16`.
+
+**Routebind preset** controls the retained task-query
+distribution: physical route length, semantic waypoint count, start/goal
+observation coverage, and edge coverage. Selection is driven by
+deficit-aware goal and start prioritisation rather than random sampling.
+The preset declares target proportions over difficulty dimensions
+and the builder fills underfilled buckets first.
+
+Concrete presets are registered in
+`ROUTEBIND_PRESETS` in the builder module.
+
+| Preset     | Purpose                                                 |
+| ---------- | ------------------------------------------------------- |
+| `smoke`    | Accept-all; one bucket covering all lengths.            |
+| `balanced` | Broad physical (2–80) and semantic (2–10) distribution. |
+
+### Deficit-driven query generation
+
+The builder does not randomly select goals and starts and accept whatever
+distribution emerges. Instead:
+
+1. It inspects current joint-bucket deficits for the split.
+2. It selects candidate goals most likely to fill underfilled buckets.
+3. For each goal, it computes the reverse distance table once and bins all
+   eligible start positions by physical-distance bucket (`_bin_starts_by_distance`).
+4. It iterates buckets in deficit-priority order.
+5. It reconstructs only candidates from underfilled buckets.
+6. It checks the semantic-length bucket post-reconstruction before accepting.
+7. It places accepted samples into the joint `(physical_bucket, semantic_bucket)`
+   bin and updates deficit scores.
+
+Candidates that fail the uniqueness check (`opt_count >= 2`) are counted
+in the **generation funnel** rather than silently excluded.
+
 ### Generation phases
 
 **Phase A — Load the hidden semantic DAG.** One fixed DAG per corpus,
@@ -760,9 +820,9 @@ Goaltrace) because semantic sequences are short (2–6 steps).
     },
     "semantic_graph": {
       "family": "dagflow",
-      "root": "data/interim/dagflow/default/v1",
+      "root": "data/interim/dagflow/balanced/v1",
       "version": 1,
-      "artifact_id": "dagflow-train-000001",
+      "artifact_id": "dagflow-balanced-v1-train-000000",
       "content_digest": "sha256:..."
     }
   },
@@ -809,16 +869,45 @@ the authoritative decay parameter. `minimum_terminal_activation` and
 
 ```bash
 # Build the dagflow graph first:
-python scripts/data-gen/build-dagflow.py build-all
+python scripts/data-gen/build-dagflow.py build --preset balanced --version 1
 
-# Build the routebind corpus consuming both parents:
+# Build the routebind corpus consuming both parents (default preset: balanced):
 python scripts/data-gen/build-routebind.py materialize-task \
     --topology-root data/interim/openfield/big-square/v1 \
-    --dagflow-root data/interim/dagflow/default/v1 \
-    --dagflow-graph-id dagflow-default-v1-train-000000 \
+    --dagflow-root data/interim/dagflow/balanced/v1 \
+    --dagflow-graph-id dagflow-balanced-v1-train-000000 \
     --corpus default --version 1 \
     --field-decay-spatial 0.9848 --field-decay-semantic 0.8 \
-    --n-queries-per-layout 10 \
+    --seed 42
+
+# Build with an explicit preset:
+python scripts/data-gen/build-routebind.py materialize-task \
+    --topology-root data/interim/openfield/big-square/v1 \
+    --dagflow-root data/interim/dagflow/routing/v1 \
+    --dagflow-graph-id dagflow-routing-v1-train-000000 \
+    --corpus default --version 1 \
+    --preset balanced \
+    --seed 42
+
+# Build with a smoke preset (accept-all, for calibration runs):
+python scripts/data-gen/build-routebind.py materialize-task \
+    --topology-root data/interim/openfield/big-square/v1 \
+    --dagflow-root data/interim/dagflow/routing/v1 \
+    --dagflow-graph-id dagflow-routing-v1-train-000000 \
+    --corpus calibration --version 1 \
+    --preset smoke \
+    --seed 42
+
+# Override individual preset fields from the CLI:
+python scripts/data-gen/build-routebind.py materialize-task \
+    --topology-root data/interim/openfield/big-square/v1 \
+    --dagflow-root data/interim/dagflow/routing/v1 \
+    --dagflow-graph-id dagflow-routing-v1-train-000000 \
+    --corpus long --version 1 \
+    --preset balanced \
+    --min-route-length 30 \
+    --max-route-length 120 \
+    --attempt-budget 20 \
     --seed 42
 ```
 
@@ -827,6 +916,11 @@ Routebind reads the selected graph by stable artifact ID. Parameters
 such as `--n-observations` and `--max-out-degree` are owned by dagflow;
 routebind reads them from the dagflow manifest and validates
 compatibility.
+
+The `--preset` option selects a named `RoutebindSamplingProfile`
+from `ROUTEBIND_PRESETS`. Individual fields may be overridden
+with `--min-route-length`, `--max-route-length`, and
+`--attempt-budget`. When omitted the default is `balanced`.
 
 Output path: `data/processed/routebind/<corpus>/v<version>/`
 
