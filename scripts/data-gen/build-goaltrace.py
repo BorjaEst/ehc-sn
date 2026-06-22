@@ -8,8 +8,9 @@ This CLI does not generate graph topology.  That stage belongs in
 
 Stages
 ------
-materialize-task     Build the Goaltrace task corpus over a shared substrate.
-validate             Validate a Goaltrace task-corpus version root.
+build      Build the Goaltrace task corpus over a shared substrate.
+validate   Validate a Goaltrace task-corpus version root.
+inspect    Print a human-readable summary of a version root manifest.
 
 Default paths
 -------------
@@ -20,12 +21,12 @@ Examples
 --------
 Build the Goaltrace task corpus against a dagflow layout dataset::
 
-    python build-goaltrace.py materialize-task \\
+    python build-goaltrace.py build \\
         --layout-root data/interim/dagflow/sparse/v1
 
 With custom sizes::
 
-    python build-goaltrace.py materialize-task \\
+    python build-goaltrace.py build \\
         --layout-root data/interim/dagflow/sparse/v1 \\
         --n-observations 64 --num-graphs 1 \\
         --oracle-semantics reliability --field-decay 0.8 \\
@@ -33,7 +34,7 @@ With custom sizes::
 
 With multiple DAGs::
 
-    python build-goaltrace.py materialize-task \\
+    python build-goaltrace.py build \\
         --layout-root data/interim/dagflow/sparse/v1 \\
         --num-graphs 8 --n-train 4000
 
@@ -41,9 +42,13 @@ Validate an existing task corpus::
 
     python build-goaltrace.py validate data/processed/goaltrace/default/v1
 
+Inspect an existing corpus::
+
+    python build-goaltrace.py inspect data/processed/goaltrace/default/v1
+
 Build a static-weight corpus (deterministic, contradiction-free)::
 
-    python build-goaltrace.py materialize-task \\
+    python build-goaltrace.py build \\
         --layout-root data/interim/dagflow/sparse/v1 \\
         --static-weights \\
         --n-train 500 --n-val 250 --n-test 240 \\
@@ -56,11 +61,11 @@ Prerequisites
 A dagflow shared substrate must exist before running.
 Build it first::
 
-    python scripts/data-gen/build-dagflow.py build --preset sparse --version 1
+    python scripts/data-gen/build-dagflow.py build --preset branching --version 1
 
 For static-weight corpora, a larger dagflow substrate can be built with::
 
-    python scripts/data-gen/build-dagflow.py build --preset sparse \\
+    python scripts/data-gen/build-dagflow.py build --preset branching \
         --n-max 45 --max-out-degree 4 --version 2
 """
 
@@ -97,12 +102,13 @@ _DEFAULT_GW = 20
 _DEFAULT_GH = 30
 _DEFAULT_GEOM_SEED = 42
 
-app = typer.Typer(help="Goaltrace task corpus builder.")
+app = typer.Typer(add_completion=False, help="Goaltrace task corpus builder.")
 
 
 # =============================================================================
-@app.command("materialize-task")
-def materialize_task(
+@app.command("build")
+def build(
+    ctx: typer.Context,
     layout_root: Annotated[
         Path,
         typer.Option(
@@ -286,11 +292,11 @@ def materialize_task(
         grid_height=grid_height,
         geometry_seed=geometry_seed,
     )
-    print(f"Goaltrace corpus built at {root.resolve()}")
-    print(f"  Profile: N={n_observations}, num_graphs={num_graphs}")
-    print(f"  Oracle: {oracle_semantics}, field_decay={field_decay}")
+    typer.echo(f"Goaltrace corpus built at {root.resolve()}")
+    typer.echo(f"  Profile: N={n_observations}, num_graphs={num_graphs}")
+    typer.echo(f"  Oracle: {oracle_semantics}, field_decay={field_decay}")
     if static_weights:
-        print(
+        typer.echo(
             f"  Mode: static weights  tau={distance_tau}  "
             f"grid={grid_width}x{grid_height}  margin={min_optimality_margin}"
         )
@@ -310,11 +316,37 @@ def validate(
     """Validate a goaltrace task-corpus version root."""
     root = root.resolve()
     manifest = validate_goaltrace_root(root)
-    print(f"Goaltrace corpus valid: {root}")
-    print(f"  Observations: {manifest.get('n_observations', '?')}")
-    print(f"  Samples: {manifest.get('n_samples', {})}")
-    print(f"  Oracle: {manifest.get('oracle_semantics', '?')}")
-    print(f"  Field decay: {manifest.get('field_decay', '?')}")
+    typer.echo(f"Goaltrace corpus valid: {root}")
+    typer.echo(f"  Observations: {manifest.get('n_observations', '?')}")
+    typer.echo(f"  Samples: {manifest.get('n_samples', {})}")
+    typer.echo(f"  Oracle: {manifest.get('oracle_semantics', '?')}")
+    typer.echo(f"  Field decay: {manifest.get('field_decay', '?')}")
+
+
+# =============================================================================
+@app.command("inspect")
+def inspect(
+    root: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to the goaltrace task corpus version root, "
+            "e.g. data/processed/goaltrace/default/v1.",
+        ),
+    ],
+) -> None:
+    """Print a human-readable summary of a Goaltrace version root manifest."""
+    root = root.resolve()
+    manifest = validate_goaltrace_root(root)
+    typer.echo(f"Root: {root}")
+    typer.echo(f"  dataset_class : {manifest.get('dataset_class', '?')}")
+    typer.echo(f"  task          : {manifest.get('task', '?')}")
+    typer.echo(f"  corpus        : {manifest.get('corpus', '?')}")
+    typer.echo(f"  version       : {manifest.get('version', '?')}")
+    typer.echo(f"  channels      : {manifest.get('channels', [])}")
+    typer.echo(f"  n_samples     : {manifest.get('n_samples', {})}")
+    typer.echo(f"  Observations  : {manifest.get('n_observations', '?')}")
+    typer.echo(f"  Oracle        : {manifest.get('oracle_semantics', '?')}")
+    typer.echo(f"  Field decay   : {manifest.get('field_decay', '?')}")
 
 
 # =============================================================================

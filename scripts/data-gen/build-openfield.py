@@ -1,17 +1,14 @@
-"""Staged CLI for generating openfield layout interim assets.
+"""CLI for building openfield layout interim assets.
 
-Openfield is a layout source (peer to dungeongen) that generates
-legacy-TEM-compatible square, rectangle, and future hex grid worlds
-with random sensory assignments.
+Openfield generates square and rectangle grid worlds with random sensory
+assignments.  The output is an interim layout dataset consumed by task
+builders (build-arena.py, build-routebind.py).
 
-The output is an interim layout dataset root consumed by build-arena.py.
-
-Stages
-------
-generate-topology   Generate per-split source spec JSONL files (raw stage).
-materialize-layouts Expand source specs, assign sensory IDs, write layout dataset.
-validate            Validate manifest.json, index.jsonl, NPZ files, and dataset_class.
-build-all           Convenience alias: generate-topology -> materialize-layouts.
+Commands
+--------
+build       Produce a complete openfield layout dataset.
+validate    Validate a version root's manifest, channels, and data.
+inspect     Print a human-readable summary of a version root manifest.
 
 
 Default paths
@@ -27,36 +24,30 @@ Examples
 --------
 Default faithful TEM reproduction (16 square grids)::
 
-    python build-openfield.py build-all
+    python build-openfield.py build
 
 Rectangle grids::
 
-    python build-openfield.py build-all --preset tem-rectangle
+    python build-openfield.py build --preset tem-rectangle
 
 Small smoke test::
 
-    python build-openfield.py build-all --preset small
+    python build-openfield.py build --preset small
 
 Custom widths::
 
-    python build-openfield.py build-all --widths 10 --widths 10 --widths 11
+    python build-openfield.py build --widths 10 --widths 10 --widths 11
 
-Two-phase pipeline::
+Inspect an existing root::
 
-    python build-openfield.py generate-topology --preset small
-    python build-openfield.py materialize-layouts --preset small
+    python build-openfield.py inspect data/interim/openfield/tem-square/v1
 
-Notes
------
-- The arena task corpus is built separately by build-arena.py.
-  After generating layouts::
-
-      python build-arena.py materialize-task --layout-root data/interim/openfield/{preset}/v{version} --corpus openfield-{preset}
 """
 
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Annotated
 
@@ -91,7 +82,225 @@ _DEFAULT_N_TEST = 10
 app = typer.Typer(add_completion=False, help=__doc__)
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
+@app.command("build")
+def build(  # -----------------------------------------------------------------
+    preset: Annotated[
+        str,
+        typer.Option(
+            "--preset",
+            help=f"Named source preset ({', '.join(OPENFIELD_PRESETS)}).",
+        ),
+    ] = _DEFAULT_PRESET,
+    n_train: Annotated[
+        int,
+        typer.Option(
+            "--n-train",
+            help=f"Number of training samples (default: {_DEFAULT_N_TRAIN}).",
+        ),
+    ] = _DEFAULT_N_TRAIN,
+    n_val: Annotated[
+        int,
+        typer.Option(
+            "--n-val",
+            help=f"Number of validation samples (default: {_DEFAULT_N_VAL}).",
+        ),
+    ] = _DEFAULT_N_VAL,
+    n_test: Annotated[
+        int,
+        typer.Option(
+            "--n-test",
+            help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
+        ),
+    ] = _DEFAULT_N_TEST,
+    height: Annotated[
+        int | None,
+        typer.Option("--height", help="Grid height override."),
+    ] = None,
+    width: Annotated[
+        int | None,
+        typer.Option("--width", help="Grid width override."),
+    ] = None,
+    widths: Annotated[
+        list[int] | None,
+        typer.Option(
+            "--widths", help="Grid widths (repeat for multiple values)."
+        ),
+    ] = None,
+    s_size: Annotated[
+        int,
+        typer.Option(
+            "--s-size",
+            help="Sensory vocabulary size (deprecated; use --observation-vocabulary-size).",
+        ),
+    ] = _DEFAULT_S_SIZE,
+    observation_vocabulary_size: Annotated[
+        int | None,
+        typer.Option(
+            "--observation-vocabulary-size",
+            help=f"Observation vocabulary size (default: {_DEFAULT_S_SIZE}).",
+        ),
+    ] = None,
+    n_sensory_instances: Annotated[
+        int,
+        typer.Option(
+            "--n-sensory-instances",
+            help="Number of randomized sensory assignments per topology.",
+        ),
+    ] = _DEFAULT_N_SENSORY_INSTANCES,
+    topology_seed: Annotated[
+        int,
+        typer.Option(
+            "--topology-seed",
+            help=f"Seed controlling topology generation (default: {_DEFAULT_TOPOLOGY_SEED}).",
+        ),
+    ] = _DEFAULT_TOPOLOGY_SEED,
+    version: Annotated[
+        int,
+        typer.Option(
+            "--version",
+            help=f"Version of the emitted dataset (default: {_DEFAULT_VERSION}).",
+        ),
+    ] = _DEFAULT_VERSION,
+    raw_root: Annotated[
+        Path,
+        typer.Option(
+            "--raw-root",
+            help=f"Root path for raw source specs (default: {_DEFAULT_RAW_ROOT}).",
+        ),
+    ] = _DEFAULT_RAW_ROOT,
+    interim_root: Annotated[
+        Path,
+        typer.Option(
+            "--interim-root",
+            help=f"Root path for interim files (default: {_DEFAULT_INTERIM_ROOT}).",
+        ),
+    ] = _DEFAULT_INTERIM_ROOT,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Delete the existing version root before building, if present.",
+        ),
+    ] = False,
+) -> None:
+    """Produce a complete openfield layout dataset (topology + layouts).
+
+    Chains the two internal stages into one command.
+    """
+    if observation_vocabulary_size is not None:
+        s_size = observation_vocabulary_size
+    elif s_size != _DEFAULT_S_SIZE:
+        typer.echo(
+            "Warning: --s-size is deprecated, use --observation-vocabulary-size instead.",
+            err=True,
+        )
+
+    dest = interim_root / preset / f"v{version}"
+    if dest.exists():
+        if force:
+            typer.echo(f"Warning: --force set; deleting existing root: {dest}")
+            shutil.rmtree(dest)
+        else:
+            typer.echo(
+                f"Error: version root already exists (dataset roots are "
+                f"immutable): {dest}\n"
+                f"Use --force to delete and rebuild, or bump --version.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+    _generate_topology(
+        preset=preset,
+        n_train=n_train,
+        n_val=n_val,
+        n_test=n_test,
+        height=height,
+        width=width,
+        widths=widths,
+        topology_seed=topology_seed,
+        version=version,
+        raw_root=raw_root,
+    )
+    _materialize_layouts(
+        preset=preset,
+        n_train=n_train,
+        n_val=n_val,
+        n_test=n_test,
+        s_size=s_size,
+        n_sensory_instances=n_sensory_instances,
+        topology_seed=topology_seed,
+        version=version,
+        raw_root=raw_root,
+        interim_root=interim_root,
+    )
+
+
+# =============================================================================
+@app.command("validate")
+def validate(  # --------------------------------------------------------------
+    root: Annotated[
+        Path,
+        typer.Argument(help="Openfield version root to validate."),
+    ],
+) -> None:
+    """Validate manifest.json, index.jsonl, NPZ files, and dataset_class constraints.
+
+    Supports both ``source_spec`` and ``layout_dataset`` roots.
+    """
+    manifest = validate_version_root(root.resolve())
+
+    typer.echo(f"OK  {root}")
+    typer.echo(f"    dataset_class : {manifest['dataset_class']}")
+    typer.echo(f"    family        : {manifest['family']}")
+    typer.echo(f"    version       : {manifest['version']}")
+    if manifest["dataset_class"] == "source_spec":
+        typer.echo(f"    preset        : {manifest.get('preset', '')}")
+        typer.echo(
+            f"    spec_schema   : {manifest.get('spec_schema_version', '')}"
+        )
+    typer.echo(f"    n_samples     : {manifest['n_samples']}")
+
+
+# =============================================================================
+@app.command("inspect")
+def inspect_command(  # -------------------------------------------------------
+    root: Annotated[
+        Path,
+        typer.Argument(help="Openfield version root to inspect."),
+    ],
+) -> None:
+    """Print a human-readable summary of a version root manifest."""
+    manifest = validate_version_root(root.resolve())
+
+    typer.echo(f"Root: {root}")
+    typer.echo(f"  dataset_class : {manifest.get('dataset_class', '?')}")
+    typer.echo(f"  family        : {manifest.get('family', '?')}")
+    typer.echo(f"  version       : {manifest.get('version', '?')}")
+    typer.echo(f"  preset        : {manifest.get('preset', '?')}")
+    typer.echo(f"  n_samples     : {manifest.get('n_samples', {})}")
+    typer.echo(f"  channels      : {manifest.get('channels', [])}")
+
+    if manifest.get("dataset_class") == "source_spec":
+        typer.echo(
+            f"  spec_schema   : {manifest.get('spec_schema_version', '')}"
+        )
+
+    stage_params = manifest.get("stage_params", {})
+    topology_type = stage_params.get("topology_type")
+    if topology_type:
+        typer.echo(f"  topology_type : {topology_type}")
+
+    extent = manifest.get("extent")
+    if extent:
+        typer.echo(f"  extent        : {extent}")
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+
 def _resolve_preset(preset: str) -> dict:
     try:
         return dict(OPENFIELD_PRESETS[preset])
@@ -146,79 +355,19 @@ def _apply_shape_overrides(
 
 
 # =============================================================================
-@app.command("generate-topology")
-def generate_topology(  # ----------------------------------------------------
-    preset: Annotated[
-        str,
-        typer.Option(
-            "--preset",
-            help=f"Named source preset ({', '.join(OPENFIELD_PRESETS)}).",
-        ),
-    ] = _DEFAULT_PRESET,
-    n_train: Annotated[
-        int,
-        typer.Option(
-            "--n-train",
-            help=f"Number of training samples (default: {_DEFAULT_N_TRAIN}).",
-        ),
-    ] = _DEFAULT_N_TRAIN,
-    n_val: Annotated[
-        int,
-        typer.Option(
-            "--n-val",
-            help=f"Number of validation samples (default: {_DEFAULT_N_VAL}).",
-        ),
-    ] = _DEFAULT_N_VAL,
-    n_test: Annotated[
-        int,
-        typer.Option(
-            "--n-test",
-            help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
-        ),
-    ] = _DEFAULT_N_TEST,
-    height: Annotated[
-        int | None,
-        typer.Option("--height", help="Grid height override."),
-    ] = None,
-    width: Annotated[
-        int | None,
-        typer.Option("--width", help="Grid width override."),
-    ] = None,
-    widths: Annotated[
-        list[int] | None,
-        typer.Option(
-            "--widths", help="Grid widths (repeat for multiple values)."
-        ),
-    ] = None,
-    topology_seed: Annotated[
-        int,
-        typer.Option(
-            "--topology-seed",
-            help=f"Seed controlling topology generation (default: {_DEFAULT_TOPOLOGY_SEED}).",
-        ),
-    ] = _DEFAULT_TOPOLOGY_SEED,
-    version: Annotated[
-        int,
-        typer.Option(
-            "--version",
-            help=f"Version of the emitted dataset (default: {_DEFAULT_VERSION}).",
-        ),
-    ] = _DEFAULT_VERSION,
-    raw_root: Annotated[
-        Path,
-        typer.Option(
-            "--raw-root",
-            help=f"Root path for raw source specs (default: {_DEFAULT_RAW_ROOT}).",
-        ),
-    ] = _DEFAULT_RAW_ROOT,
+def _generate_topology(  # ----------------------------------------------------
+    preset: str = _DEFAULT_PRESET,
+    n_train: int = _DEFAULT_N_TRAIN,
+    n_val: int = _DEFAULT_N_VAL,
+    n_test: int = _DEFAULT_N_TEST,
+    height: int | None = None,
+    width: int | None = None,
+    widths: list[int] | None = None,
+    topology_seed: int = _DEFAULT_TOPOLOGY_SEED,
+    version: int = _DEFAULT_VERSION,
+    raw_root: Path = _DEFAULT_RAW_ROOT,
 ) -> None:
-    """Produce source-spec JSONL topology records (raw stage).
-
-    Generates a reproducible ``source_spec`` corpus (per-split JSONL topology
-    specs under ``{raw_root}/{preset}/v{version}/``).  This is the raw/source
-    stage only — topology expansion and sensory assignment happen in
-    ``materialize-layouts``.
-    """
+    """Internal stage: produce source-spec JSONL topology records (raw stage)."""
     _resolve_preset(preset)
     _check_widths_conflict(widths, height, width)
 
@@ -247,93 +396,26 @@ def generate_topology(  # ----------------------------------------------------
         _overridden_heights=cfg.get("heights"),
     )
 
-    print("Done — source specs written.  Run materialize-layouts to expand.")
+    print("Done — source specs written.")
 
 
 # =============================================================================
-@app.command("materialize-layouts")
-def materialize_layouts(  # ---------------------------------------------------
-    preset: Annotated[
-        str,
-        typer.Option(
-            "--preset",
-            help=f"Named source preset ({', '.join(OPENFIELD_PRESETS)}).",
-        ),
-    ] = _DEFAULT_PRESET,
-    n_train: Annotated[
-        int,
-        typer.Option(
-            "--n-train",
-            help=f"Number of training samples (default: {_DEFAULT_N_TRAIN}).",
-        ),
-    ] = _DEFAULT_N_TRAIN,
-    n_val: Annotated[
-        int,
-        typer.Option(
-            "--n-val",
-            help=f"Number of validation samples (default: {_DEFAULT_N_VAL}).",
-        ),
-    ] = _DEFAULT_N_VAL,
-    n_test: Annotated[
-        int,
-        typer.Option(
-            "--n-test",
-            help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
-        ),
-    ] = _DEFAULT_N_TEST,
-    s_size: Annotated[
-        int,
-        typer.Option(
-            "--s-size",
-            help=f"Sensory vocabulary size (default: {_DEFAULT_S_SIZE}).",
-        ),
-    ] = _DEFAULT_S_SIZE,
-    n_sensory_instances: Annotated[
-        int,
-        typer.Option(
-            "--n-sensory-instances",
-            help="Number of randomized sensory assignments per topology.",
-        ),
-    ] = _DEFAULT_N_SENSORY_INSTANCES,
-    topology_seed: Annotated[
-        int,
-        typer.Option(
-            "--topology-seed",
-            help=f"Seed controlling topology generation (default: {_DEFAULT_TOPOLOGY_SEED}).",
-        ),
-    ] = _DEFAULT_TOPOLOGY_SEED,
-    version: Annotated[
-        int,
-        typer.Option(
-            "--version",
-            help=f"Version of the emitted dataset (default: {_DEFAULT_VERSION}).",
-        ),
-    ] = _DEFAULT_VERSION,
-    raw_root: Annotated[
-        Path,
-        typer.Option(
-            "--raw-root",
-            help=f"Root path for raw source specs (default: {_DEFAULT_RAW_ROOT}).",
-        ),
-    ] = _DEFAULT_RAW_ROOT,
-    interim_root: Annotated[
-        Path,
-        typer.Option(
-            "--interim-root",
-            help=f"Root path for interim files (default: {_DEFAULT_INTERIM_ROOT}).",
-        ),
-    ] = _DEFAULT_INTERIM_ROOT,
+def _materialize_layouts(  # ---------------------------------------------------
+    preset: str = _DEFAULT_PRESET,
+    n_train: int = _DEFAULT_N_TRAIN,
+    n_val: int = _DEFAULT_N_VAL,
+    n_test: int = _DEFAULT_N_TEST,
+    s_size: int = _DEFAULT_S_SIZE,
+    observation_vocabulary_size: int | None = None,
+    n_sensory_instances: int = _DEFAULT_N_SENSORY_INSTANCES,
+    topology_seed: int = _DEFAULT_TOPOLOGY_SEED,
+    version: int = _DEFAULT_VERSION,
+    raw_root: Path = _DEFAULT_RAW_ROOT,
+    interim_root: Path = _DEFAULT_INTERIM_ROOT,
 ) -> None:
-    """Expand source specs, assign sensory IDs, and write SpatialLayout records.
-
-    Reads source specs from a prior ``generate-topology`` run
-    (``{raw_root}/{preset}/v{version}/``), expands each spec to a
-    topology-only :class:`SpatialLayout`, enriches with sensory assignment,
-    and writes the layout dataset to ``{interim_root}/{preset}/v{version}/``.
-
-    At most ``--n-train`` / ``--n-val`` / ``--n-test`` records are
-    consumed per split from the source-spec pool.
-    """
+    """Internal stage: expand source specs, assign sensory IDs, write SpatialLayout records."""
+    if observation_vocabulary_size is not None:
+        s_size = observation_vocabulary_size
     _resolve_preset(preset)
 
     raw_leaf = raw_root / preset / f"v{version}"
@@ -404,8 +486,8 @@ def materialize_layouts(  # ---------------------------------------------------
                 sensory_seed = topology_seed + spec["seed_offset"] + inst_idx
                 enriched = enrich_layout_with_sensory(
                     tl,
-                    s_size=s_size,
-                    sensory_seed=sensory_seed,
+                    observation_vocabulary_size=s_size,
+                    observation_seed=sensory_seed,
                 )
                 # split is preserved by enrich_layout_with_sensory.
                 layouts.append(enriched)
@@ -420,6 +502,15 @@ def materialize_layouts(  # ---------------------------------------------------
     topology_type = cfg["topology_type"]
     materialized_leaf = interim_root / preset / f"v{version}"
 
+    # Derive declared extent from the preset configuration.
+    widths_list: list[int] = cfg.get("widths", [30])
+    heights_list: list[int] | None = cfg.get("heights")
+    extent_w = max(widths_list)
+    if heights_list:
+        extent_h = max(heights_list)
+    else:
+        extent_h = extent_w  # square: height == width
+
     write_layout_dataset(
         layouts,
         materialized_leaf,
@@ -429,149 +520,9 @@ def materialize_layouts(  # ---------------------------------------------------
         version=version,
         layout_family="openfield",
         preset=preset,
+        extent=[extent_h, extent_w],
     )
     print("Done.")
-
-
-# =============================================================================
-@app.command("validate")
-def validate(  # --------------------------------------------------------------
-    root: Annotated[
-        Path,
-        typer.Argument(help="Openfield version root to validate."),
-    ],
-) -> None:
-    """Validate manifest.json, index.jsonl, NPZ files, and dataset_class constraints.
-
-    Supports both ``source_spec`` and ``layout_dataset`` roots.
-    """
-    manifest = validate_version_root(root.resolve())
-
-    typer.echo(f"OK  {root}")
-    typer.echo(f"    dataset_class : {manifest['dataset_class']}")
-    typer.echo(f"    family        : {manifest['family']}")
-    typer.echo(f"    version       : {manifest['version']}")
-    if manifest["dataset_class"] == "source_spec":
-        typer.echo(f"    preset        : {manifest.get('preset', '')}")
-        typer.echo(
-            f"    spec_schema   : {manifest.get('spec_schema_version', '')}"
-        )
-    typer.echo(f"    n_samples     : {manifest['n_samples']}")
-
-
-# ==========================================================================
-@app.command("build-all")
-def build_all(  # -------------------------------------------------------------
-    preset: Annotated[
-        str,
-        typer.Option(
-            "--preset",
-            help=f"Named source preset ({', '.join(OPENFIELD_PRESETS)}).",
-        ),
-    ] = _DEFAULT_PRESET,
-    n_train: Annotated[
-        int,
-        typer.Option(
-            "--n-train",
-            help=f"Number of training samples (default: {_DEFAULT_N_TRAIN}).",
-        ),
-    ] = _DEFAULT_N_TRAIN,
-    n_val: Annotated[
-        int,
-        typer.Option(
-            "--n-val",
-            help=f"Number of validation samples (default: {_DEFAULT_N_VAL}).",
-        ),
-    ] = _DEFAULT_N_VAL,
-    n_test: Annotated[
-        int,
-        typer.Option(
-            "--n-test",
-            help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
-        ),
-    ] = _DEFAULT_N_TEST,
-    height: Annotated[
-        int | None,
-        typer.Option("--height", help="Grid height override."),
-    ] = None,
-    width: Annotated[
-        int | None,
-        typer.Option("--width", help="Grid width override."),
-    ] = None,
-    widths: Annotated[
-        list[int] | None,
-        typer.Option(
-            "--widths", help="Grid widths (repeat for multiple values)."
-        ),
-    ] = None,
-    s_size: Annotated[
-        int,
-        typer.Option(
-            "--s-size",
-            help=f"Sensory vocabulary size (default: {_DEFAULT_S_SIZE}).",
-        ),
-    ] = _DEFAULT_S_SIZE,
-    n_sensory_instances: Annotated[
-        int,
-        typer.Option(
-            "--n-sensory-instances",
-            help="Number of randomized sensory assignments per topology.",
-        ),
-    ] = _DEFAULT_N_SENSORY_INSTANCES,
-    topology_seed: Annotated[
-        int,
-        typer.Option(
-            "--topology-seed",
-            help=f"Seed controlling topology generation (default: {_DEFAULT_TOPOLOGY_SEED}).",
-        ),
-    ] = _DEFAULT_TOPOLOGY_SEED,
-    version: Annotated[
-        int,
-        typer.Option(
-            "--version",
-            help=f"Version of the emitted dataset (default: {_DEFAULT_VERSION}).",
-        ),
-    ] = _DEFAULT_VERSION,
-    raw_root: Annotated[
-        Path,
-        typer.Option(
-            "--raw-root",
-            help=f"Root path for raw source specs (default: {_DEFAULT_RAW_ROOT}).",
-        ),
-    ] = _DEFAULT_RAW_ROOT,
-    interim_root: Annotated[
-        Path,
-        typer.Option(
-            "--interim-root",
-            help=f"Root path for interim files (default: {_DEFAULT_INTERIM_ROOT}).",
-        ),
-    ] = _DEFAULT_INTERIM_ROOT,
-) -> None:
-    """Run generate-topology followed by materialize-layouts."""
-    generate_topology(
-        preset=preset,
-        n_train=n_train,
-        n_val=n_val,
-        n_test=n_test,
-        height=height,
-        width=width,
-        widths=widths,
-        topology_seed=topology_seed,
-        version=version,
-        raw_root=raw_root,
-    )
-    materialize_layouts(
-        preset=preset,
-        n_train=n_train,
-        n_val=n_val,
-        n_test=n_test,
-        s_size=s_size,
-        n_sensory_instances=n_sensory_instances,
-        topology_seed=topology_seed,
-        version=version,
-        raw_root=raw_root,
-        interim_root=interim_root,
-    )
 
 
 # =============================================================================

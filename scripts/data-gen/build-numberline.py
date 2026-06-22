@@ -47,7 +47,7 @@ _DEFAULT_SEED = 42
 app = typer.Typer(add_completion=False, help=__doc__)
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 @app.command("materialize-shared")
 def materialize_shared(
     version: Annotated[
@@ -85,6 +85,7 @@ def materialize_shared(
     typer.echo("Done.")
 
 
+# =============================================================================
 @app.command("validate")
 def validate(
     root: Annotated[
@@ -99,6 +100,5 @@ def validate(
 
 # build-all removed — this script has a single stage: materialize-shared.
 
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     app()

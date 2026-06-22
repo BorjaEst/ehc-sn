@@ -1,15 +1,15 @@
-"""Staged CLI for the dungeongen shared-family pipeline.
+"""CLI for building dungeongen layout datasets.
 
-This script is the sole CLI owner of all dungeongen raw, interim, and layout
-stages.  Task-level materialization is owned by the respective task CLIs
-(build-arena.py, build-dungeon.py).
+Dungeongen generates procedurally varied 2-D grid topologies with random
+sensory assignments.  The output is an interim layout dataset consumed by
+task builders (build-arena.py, build-dungeon.py).
 
-Stages
-------
-generate-topology   Ensure raw snapshot exists + normalize to interim topology records.
-materialize-layouts Build the dungeongen layout dataset (consumable by build-arena).
-validate            Validate a dungeongen shared-substrate or layout version root.
-build-all           Convenience alias: generate-topology -> materialize-layouts.
+Commands
+--------
+build       Produce a complete dungeongen layout dataset.
+validate    Validate a version root's manifest, channels, and data.
+inspect     Print a human-readable summary of a version root manifest.
+
 
 Default paths
 -------------
@@ -19,30 +19,23 @@ Layout dataset:  data/interim/dungeongen/{preset}/v{version}
 
 Examples
 --------
-Quick local build (grid shape inferred from interim slice)::
+Quick local build::
 
-    python build-dungeongen.py build-all
+    python build-dungeongen.py build
 
 Custom version::
 
-    python build-dungeongen.py build-all --version 2
+    python build-dungeongen.py build --version 2
 
-With explicit grid shape override::
+Inspect an existing root::
 
-    python build-dungeongen.py build-all \\
-        --n-train 2000 --n-val 200 --n-test 200 \\
-        --height 48 --width 48 --s-size 8 --topology-seed 7
+    python build-dungeongen.py inspect data/interim/dungeongen/default/v1
 
-Build an Arena corpus from dungeongen layouts::
-
-    python build-arena.py materialize-task \
-        --layout-root data/interim/dungeongen/default/v1 \\
-        --corpus dungeons
 """
 
 from __future__ import annotations
 
-import json
+import shutil
 from pathlib import Path
 from typing import Annotated
 
@@ -73,8 +66,8 @@ app = typer.Typer(add_completion=False, help=__doc__)
 
 
 # =============================================================================
-@app.command("generate-topology")
-def generate_topology(  # ----------------------------------------------------
+@app.command("build")
+def build(  # -----------------------------------------------------------------
     preset: Annotated[
         str,
         typer.Option(
@@ -103,110 +96,38 @@ def generate_topology(  # ----------------------------------------------------
             help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
         ),
     ] = _DEFAULT_N_TEST,
-    topology_seed: Annotated[
-        int,
-        typer.Option(
-            "--topology-seed",
-            help=f"Seed controlling topology generation (default: {_DEFAULT_TOPOLOGY_SEED}).",
-        ),
-    ] = _DEFAULT_TOPOLOGY_SEED,
-    version: Annotated[
-        int,
-        typer.Option(
-            "--version",
-            help=f"Version of the emitted interim dataset (default: {_DEFAULT_VERSION}).",
-        ),
-    ] = _DEFAULT_VERSION,
-    raw_root: Annotated[
-        Path,
-        typer.Option(
-            "--raw-root",
-            help=f"Root path for raw corpus (default: {_DEFAULT_RAW_ROOT}).",
-        ),
-    ] = _DEFAULT_RAW_ROOT,
-    interim_root: Annotated[
-        Path,
-        typer.Option(
-            "--interim-root",
-            help=f"Root path for interim files (default: {_DEFAULT_INTERIM_ROOT}).",
-        ),
-    ] = _DEFAULT_INTERIM_ROOT,
-) -> None:
-    """Ensure raw snapshot exists + normalize to interim topology records.
-
-    Raw snapshot is written to ``{raw_root}/{preset}/v{version}/``.
-    Interim topology NPZ files are written to
-    ``{interim_root}/{preset}/interim/v{version}/``.
-    """
-    raw_leaf = raw_root / preset / f"v{version}"
-    _ensure_raw(
-        raw_leaf,
-        topology_seed,
-        {"train": n_train, "val": n_val, "test": n_test},
-    )
-    print(f"Raw corpus at {raw_leaf}")
-    interim_path = interim_root / preset / "interim" / f"v{version}"
-    interim_path.mkdir(parents=True, exist_ok=True)
-    _prepare_interim(
-        raw_leaf.resolve(),
-        interim_path.resolve(),
-        n_train=n_train,
-        n_val=n_val,
-        n_test=n_test,
-    )
-    print(f"Interim written to {interim_path}")
-
-
-# ---------------------------------------------------------------------------
-@app.command("materialize-layouts")
-def materialize_layouts(  # ---------------------------------------------------
-    preset: Annotated[
-        str,
-        typer.Option(
-            "--preset",
-            help="Named source preset (currently only 'default' is supported).",
-        ),
-    ] = _DEFAULT_PRESET,
-    n_train: Annotated[
-        int,
-        typer.Option(
-            "--n-train",
-            help=f"Number of training samples (default: {_DEFAULT_N_TRAIN}).",
-        ),
-    ] = _DEFAULT_N_TRAIN,
-    n_val: Annotated[
-        int,
-        typer.Option(
-            "--n-val",
-            help=f"Number of validation samples (default: {_DEFAULT_N_VAL}).",
-        ),
-    ] = _DEFAULT_N_VAL,
-    n_test: Annotated[
-        int,
-        typer.Option(
-            "--n-test",
-            help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
-        ),
-    ] = _DEFAULT_N_TEST,
-    height: Annotated[
+    pad_height: Annotated[
         int | None,
         typer.Option(
-            "--height", help="Target grid height. Inferred when omitted."
+            "--pad-height",
+            help="Uniform storage canvas height target for padding. "
+            "When omitted, inferred from max natural extent. "
+            "Does not affect dungeon generation.",
         ),
     ] = None,
-    width: Annotated[
+    pad_width: Annotated[
         int | None,
         typer.Option(
-            "--width", help="Target grid width. Inferred when omitted."
+            "--pad-width",
+            help="Uniform storage canvas width target for padding. "
+            "When omitted, inferred from max natural extent. "
+            "Does not affect dungeon generation.",
         ),
     ] = None,
     s_size: Annotated[
         int,
         typer.Option(
             "--s-size",
-            help=f"Sensory vocabulary size (default: {_DEFAULT_S_SIZE}).",
+            help="Sensory vocabulary size (deprecated; use --observation-vocabulary-size).",
         ),
     ] = _DEFAULT_S_SIZE,
+    observation_vocabulary_size: Annotated[
+        int | None,
+        typer.Option(
+            "--observation-vocabulary-size",
+            help=f"Observation vocabulary size (default: {_DEFAULT_S_SIZE}).",
+        ),
+    ] = None,
     n_sensory_instances: Annotated[
         int,
         typer.Option(
@@ -228,6 +149,13 @@ def materialize_layouts(  # ---------------------------------------------------
             help=f"Version of the emitted dataset (default: {_DEFAULT_VERSION}).",
         ),
     ] = _DEFAULT_VERSION,
+    raw_root: Annotated[
+        Path,
+        typer.Option(
+            "--raw-root",
+            help=f"Root path for raw corpus (default: {_DEFAULT_RAW_ROOT}).",
+        ),
+    ] = _DEFAULT_RAW_ROOT,
     interim_root: Annotated[
         Path,
         typer.Option(
@@ -235,32 +163,64 @@ def materialize_layouts(  # ---------------------------------------------------
             help=f"Root path for interim files (default: {_DEFAULT_INTERIM_ROOT}).",
         ),
     ] = _DEFAULT_INTERIM_ROOT,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Delete the existing version root before building, if present.",
+        ),
+    ] = False,
 ) -> None:
-    """Build the dungeongen layout dataset.
+    """Produce a complete dungeongen layout dataset (topology + layouts).
 
-    Reads interim topology files, assigns sensory IDs, and writes
-    :class:`SpatialLayout` records to
-    ``{interim_root}/{preset}/v{version}/``.
+    Chains the two internal stages into one command.
     """
-    interim_leaf = interim_root / preset / "interim" / f"v{version}"
-    layout_leaf = interim_root / preset / f"v{version}"
-
-    build_dungeongen_layouts(
-        layout_leaf,
-        interim_root=interim_leaf.resolve(),
+    if observation_vocabulary_size is not None:
+        s_size = observation_vocabulary_size
+    elif s_size != _DEFAULT_S_SIZE:
+        typer.echo(
+            "Warning: --s-size is deprecated, use --observation-vocabulary-size instead.",
+            err=True,
+        )
+    dest = interim_root / preset / f"v{version}"
+    if dest.exists():
+        if force:
+            typer.echo(f"Warning: --force set; deleting existing root: {dest}")
+            shutil.rmtree(dest)
+        else:
+            typer.echo(
+                f"Error: version root already exists (dataset roots are "
+                f"immutable): {dest}\n"
+                f"Use --force to delete and rebuild, or bump --version.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+    _generate_topology(
+        preset=preset,
         n_train=n_train,
         n_val=n_val,
         n_test=n_test,
-        height=height,
-        width=width,
-        s_size=s_size,
         topology_seed=topology_seed,
+        version=version,
+        raw_root=raw_root,
+        interim_root=interim_root,
+    )
+    _materialize_layouts(
         preset=preset,
+        n_train=n_train,
+        n_val=n_val,
+        n_test=n_test,
+        pad_height=pad_height,
+        pad_width=pad_width,
+        s_size=s_size,
         n_sensory_instances=n_sensory_instances,
+        topology_seed=topology_seed,
+        version=version,
+        interim_root=interim_root,
     )
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 @app.command("validate")
 def validate(
     root: Annotated[
@@ -302,121 +262,105 @@ def validate(
     typer.echo(f"    n_samples     : {manifest['n_samples']}")
 
 
-# ---------------------------------------------------------------------------
-@app.command("build-all")
-def build_all(
-    preset: Annotated[
-        str,
-        typer.Option(
-            "--preset",
-            help="Named source preset (currently only 'default' is supported).",
-        ),
-    ] = _DEFAULT_PRESET,
-    n_train: Annotated[
-        int,
-        typer.Option(
-            "--n-train",
-            help=f"Number of training samples (default: {_DEFAULT_N_TRAIN}).",
-        ),
-    ] = _DEFAULT_N_TRAIN,
-    n_val: Annotated[
-        int,
-        typer.Option(
-            "--n-val",
-            help=f"Number of validation samples (default: {_DEFAULT_N_VAL}).",
-        ),
-    ] = _DEFAULT_N_VAL,
-    n_test: Annotated[
-        int,
-        typer.Option(
-            "--n-test",
-            help=f"Number of test samples (default: {_DEFAULT_N_TEST}).",
-        ),
-    ] = _DEFAULT_N_TEST,
-    height: Annotated[
-        int | None,
-        typer.Option(
-            "--height", help="Target grid height. Inferred when omitted."
-        ),
-    ] = None,
-    width: Annotated[
-        int | None,
-        typer.Option(
-            "--width", help="Target grid width. Inferred when omitted."
-        ),
-    ] = None,
-    s_size: Annotated[
-        int,
-        typer.Option(
-            "--s-size",
-            help=f"Sensory vocabulary size (default: {_DEFAULT_S_SIZE}).",
-        ),
-    ] = _DEFAULT_S_SIZE,
-    n_sensory_instances: Annotated[
-        int,
-        typer.Option(
-            "--n-sensory-instances",
-            help="Number of randomized sensory assignments per topology.",
-        ),
-    ] = _DEFAULT_N_SENSORY_INSTANCES,
-    topology_seed: Annotated[
-        int,
-        typer.Option(
-            "--topology-seed",
-            help=f"Seed controlling topology generation (default: {_DEFAULT_TOPOLOGY_SEED}).",
-        ),
-    ] = _DEFAULT_TOPOLOGY_SEED,
-    version: Annotated[
-        int,
-        typer.Option(
-            "--version",
-            help=f"Version of the emitted dataset (default: {_DEFAULT_VERSION}).",
-        ),
-    ] = _DEFAULT_VERSION,
-    raw_root: Annotated[
+# =============================================================================
+@app.command("inspect")
+def inspect_command(  # -------------------------------------------------------
+    root: Annotated[
         Path,
-        typer.Option(
-            "--raw-root",
-            help=f"Root path for raw corpus (default: {_DEFAULT_RAW_ROOT}).",
-        ),
-    ] = _DEFAULT_RAW_ROOT,
-    interim_root: Annotated[
-        Path,
-        typer.Option(
-            "--interim-root",
-            help=f"Root path for interim files (default: {_DEFAULT_INTERIM_ROOT}).",
-        ),
-    ] = _DEFAULT_INTERIM_ROOT,
+        typer.Argument(help="Dungeongen version root to inspect."),
+    ],
 ) -> None:
-    """Full pipeline: generate-topology -> materialize-layouts.
+    """Print a human-readable summary of a version root manifest."""
+    manifest = validate_version_root(root.resolve())
 
-    Grid shape is inferred from the interim slice unless --height/--width
-    are given explicitly on the materialize-layouts stage.
-    """
-    generate_topology(
-        preset=preset,
-        n_train=n_train,
-        n_val=n_val,
-        n_test=n_test,
-        topology_seed=topology_seed,
-        version=version,
-        raw_root=raw_root,
-        interim_root=interim_root,
+    typer.echo(f"Root: {root}")
+    typer.echo(f"  dataset_class : {manifest.get('dataset_class', '?')}")
+    typer.echo(f"  family        : {manifest.get('family', '?')}")
+    typer.echo(f"  version       : {manifest.get('version', '?')}")
+    typer.echo(f"  channels      : {manifest.get('channels', [])}")
+    typer.echo(f"  n_samples     : {manifest.get('n_samples', {})}")
+
+    stage_params = manifest.get("stage_params", {})
+    topology_type = stage_params.get("topology_type")
+    if topology_type:
+        typer.echo(f"  topology_type : {topology_type}")
+
+    extent = manifest.get("extent")
+    if extent:
+        typer.echo(f"  extent        : {extent}")
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+
+def _generate_topology(  # ----------------------------------------------------
+    preset: str = _DEFAULT_PRESET,
+    n_train: int = _DEFAULT_N_TRAIN,
+    n_val: int = _DEFAULT_N_VAL,
+    n_test: int = _DEFAULT_N_TEST,
+    topology_seed: int = _DEFAULT_TOPOLOGY_SEED,
+    version: int = _DEFAULT_VERSION,
+    raw_root: Path = _DEFAULT_RAW_ROOT,
+    interim_root: Path = _DEFAULT_INTERIM_ROOT,
+) -> None:
+    """Internal stage: generate raw dungeongen corpus and prepare interim files."""
+    raw_leaf = raw_root / preset / f"v{version}"
+    _ensure_raw(
+        raw_leaf,
+        topology_seed,
+        {"train": n_train, "val": n_val, "test": n_test},
     )
-    materialize_layouts(
-        preset=preset,
+    print(f"Raw corpus at {raw_leaf}")
+    interim_path = interim_root / preset / "interim" / f"v{version}"
+    interim_path.mkdir(parents=True, exist_ok=True)
+    _prepare_interim(
+        raw_leaf.resolve(),
+        interim_path.resolve(),
         n_train=n_train,
         n_val=n_val,
         n_test=n_test,
-        height=height,
-        width=width,
+    )
+    print(f"Interim written to {interim_path}")
+
+
+# ---------------------------------------------------------------------------
+def _materialize_layouts(  # ---------------------------------------------------
+    preset: str = _DEFAULT_PRESET,
+    n_train: int = _DEFAULT_N_TRAIN,
+    n_val: int = _DEFAULT_N_VAL,
+    n_test: int = _DEFAULT_N_TEST,
+    pad_height: int | None = None,
+    pad_width: int | None = None,
+    s_size: int = _DEFAULT_S_SIZE,
+    observation_vocabulary_size: int | None = None,
+    n_sensory_instances: int = _DEFAULT_N_SENSORY_INSTANCES,
+    topology_seed: int = _DEFAULT_TOPOLOGY_SEED,
+    version: int = _DEFAULT_VERSION,
+    interim_root: Path = _DEFAULT_INTERIM_ROOT,
+) -> None:
+    """Internal stage: materialize layout datasets from interim files."""
+    if observation_vocabulary_size is not None:
+        s_size = observation_vocabulary_size
+    interim_leaf = interim_root / preset / "interim" / f"v{version}"
+    layout_leaf = interim_root / preset / f"v{version}"
+
+    build_dungeongen_layouts(
+        layout_leaf,
+        interim_root=interim_leaf.resolve(),
+        n_train=n_train,
+        n_val=n_val,
+        n_test=n_test,
+        height=pad_height,
+        width=pad_width,
         s_size=s_size,
-        n_sensory_instances=n_sensory_instances,
         topology_seed=topology_seed,
-        version=version,
-        interim_root=interim_root,
+        preset=preset,
+        n_sensory_instances=n_sensory_instances,
     )
 
 
+# =============================================================================
 if __name__ == "__main__":
     app()

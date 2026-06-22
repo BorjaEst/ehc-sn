@@ -15,9 +15,9 @@ protocol cells (digit/set cue × anchor-only/sparse-reanchor).
 
 Stages
 ------
-materialize-task  Build the Countwalk task corpus over a NumberLine substrate.
-validate          Validate a Countwalk task-corpus version root (generic + family).
-build-all         Convenience alias: materialize-task (requires substrate to exist).
+build      Build the Countwalk task corpus over a NumberLine substrate.
+validate   Validate a Countwalk task-corpus version root (generic + family).
+inspect    Print a human-readable summary of a version root manifest.
 
 Default paths
 -------------
@@ -39,11 +39,15 @@ Build the default Countwalk corpus::
 
 With explicit versions and custom parameters::
 
-    python build-countwalk.py materialize-task --shared-version 2 --version 2 --n-episodes-per-world 80
+    python build-countwalk.py build --shared-version 2 --version 2 --n-episodes-per-world 80
 
 Validate an existing corpus::
 
-    python build-countwalk.py validate
+    python build-countwalk.py validate data/processed/countwalk/default/v1
+
+Inspect an existing corpus::
+
+    python build-countwalk.py inspect data/processed/countwalk/default/v1
 """
 
 from __future__ import annotations
@@ -74,9 +78,9 @@ _DEFAULT_SEED = 42
 app = typer.Typer(add_completion=False, help=__doc__)
 
 
-# ---------------------------------------------------------------------------
-@app.command("materialize-task")
-def materialize_task(
+# =============================================================================
+@app.command("build")
+def build(
     shared_version: Annotated[
         int,
         typer.Option(
@@ -134,6 +138,7 @@ def materialize_task(
     typer.echo("Done.")
 
 
+# =============================================================================
 @app.command("validate")
 def validate(
     root: Annotated[
@@ -145,8 +150,19 @@ def validate(
     typer.echo(f"OK  {root}")
 
 
-# build-all removed — this script has a single stage: materialize-task.
+# =============================================================================
+@app.command("inspect")
+def inspect(
+    root: Annotated[
+        Path, typer.Argument(help="Countwalk task-corpus root to inspect.")
+    ],
+) -> None:
+    """Print a human-readable summary of a Countwalk version root manifest."""
+    validate_countwalk_task_root(root.resolve())
+    typer.echo(f"Root: {root}")
 
-# ---------------------------------------------------------------------------
+
+# build-all removed — this script has a single stage: build.
+
 if __name__ == "__main__":
     app()

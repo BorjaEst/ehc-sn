@@ -7,9 +7,9 @@ scripts/data-gen/build-dungeongen.py.
 
 Stages
 ------
-materialize-task  Build the Dungeon task corpus over a dungeongen shared substrate.
-validate          Validate a Dungeon task-corpus version root.
-build-all         Convenience alias: materialize-task (requires substrate to exist).
+build      Build the Dungeon task corpus over a dungeongen shared substrate.
+validate   Validate a Dungeon task-corpus version root.
+inspect    Print a human-readable summary of a version root manifest.
 
 Default paths
 -------------
@@ -27,15 +27,23 @@ Examples
 --------
 Build the Dungeon task corpus against the default shared substrate::
 
-    python build-dungeon.py build-all
+    python build-dungeon.py build
 
 With an explicit shared-substrate version::
 
-    python build-dungeon.py build-all --shared-version 2 --version 2
+    python build-dungeon.py build --shared-version 2 --version 2
 
 Custom trajectory length::
 
-    python build-dungeon.py materialize-task --max-steps 80 --seed 7
+    python build-dungeon.py build --max-steps 80 --seed 7
+
+Validate an existing corpus::
+
+    python build-dungeon.py validate data/processed/dungeon/default/v1
+
+Inspect an existing corpus::
+
+    python build-dungeon.py inspect data/processed/dungeon/default/v1
 """
 
 from __future__ import annotations
@@ -61,24 +69,9 @@ _DEFAULT_CORPUS = "default"
 app = typer.Typer(add_completion=False, help=__doc__)
 
 
-def _require_shared_substrate(shared_root: Path) -> None:
-    """Fail fast with an actionable error when the parent substrate is missing."""
-    if not shared_root.exists():
-        typer.echo(
-            f"Error: parent shared substrate not found at {shared_root}.\n"
-            "Build it first with:\n"
-            "    python scripts/data-gen/build-dungeongen.py build-all\n"
-            "or:\n"
-            f"    python scripts/data-gen/build-dungeongen.py materialize-layouts\n"
-            "Requires generate-topology first.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
-
-# ---------------------------------------------------------------------------
-@app.command("materialize-task")
-def materialize_task(
+# =============================================================================
+@app.command("build")
+def build(
     corpus: Annotated[str, typer.Option("--corpus")] = _DEFAULT_CORPUS,
     n_train: Annotated[int, typer.Option("--n-train")] = 200,
     n_val: Annotated[int, typer.Option("--n-val")] = 40,
@@ -106,7 +99,7 @@ def materialize_task(
     )
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 @app.command("validate")
 def validate(
     root: Annotated[
@@ -126,7 +119,43 @@ def validate(
     typer.echo(f"    n_samples     : {manifest['n_samples']}")
 
 
-# build-all removed — this script has a single stage: materialize-task.
+# =============================================================================
+@app.command("inspect")
+def inspect(
+    root: Annotated[
+        Path, typer.Argument(help="Dungeon task-corpus root to inspect.")
+    ],
+) -> None:
+    """Print a human-readable summary of a Dungeon version root manifest."""
+    manifest = validate_dungeon_task_root(root.resolve())
+    typer.echo(f"Root: {root}")
+    typer.echo(f"  dataset_class : {manifest.get('dataset_class', '?')}")
+    typer.echo(f"  task          : {manifest.get('task', '?')}")
+    typer.echo(f"  corpus        : {manifest.get('corpus', '?')}")
+    typer.echo(f"  version       : {manifest.get('version', '?')}")
+    typer.echo(f"  channels      : {manifest.get('channels', [])}")
+    typer.echo(f"  n_samples     : {manifest.get('n_samples', {})}")
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+
+def _require_shared_substrate(shared_root: Path) -> None:
+    """Fail fast with an actionable error when the parent substrate is missing."""
+    if not shared_root.exists():
+        typer.echo(
+            f"Error: parent shared substrate not found at {shared_root}.\n"
+            "Build it first with:\n"
+            "    python scripts/data-gen/build-dungeongen.py build-all\n"
+            "or:\n"
+            f"    python scripts/data-gen/build-dungeongen.py materialize-layouts\n"
+            "Requires generate-topology first.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
 
 if __name__ == "__main__":
     app()

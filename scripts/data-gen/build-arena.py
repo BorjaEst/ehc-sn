@@ -1,17 +1,14 @@
-"""Staged CLI for building the Arena task corpus from layout datasets.
+"""CLI for building the Arena task corpus from layout datasets.
 
 Arena consumes an interim layout dataset root and generates topology-free
 episode trajectories.  Layout generation is owned by the respective layout
 CLIs (build-dungeongen.py, build-openfield.py).
 
-This CLI has no source-specific code.  It reads the layout manifest to
-determine the action space, topology type, and observation vocabulary size,
-then calls :func:`build_arena_task_corpus`.
-
-Stages
-------
-materialize-task   Build an Arena task corpus over a layout dataset.
-validate           Validate an Arena task-corpus version root.
+Commands
+--------
+build       Build an Arena task corpus over a layout dataset.
+validate    Validate an Arena task-corpus version root.
+inspect     Print a human-readable summary of a version root manifest.
 
 
 Default paths
@@ -19,35 +16,23 @@ Default paths
 Parent layout dataset:  <user-specified --layout-root>
 Task corpus:            data/processed/arena/<corpus>/v<version>
 
-Documented recipes
-------------------
-Openfield square (TEM reproduction)::
-
-    python build-arena.py materialize-task \\
-        --layout-root data/interim/openfield/square/v1 \\
-        --corpus openfield-square \\
-        --walk-policy angle_bias
-
-Standard dungeongen recipe::
-
-    python build-arena.py materialize-task \\
-        --layout-root data/interim/dungeongen/default/v1 \\
-        --corpus dungeons \\
-        --walk-policy no_backtrack
-
 Examples
 --------
 Build from openfield square layouts::
 
-    python build-arena.py materialize-task \\
+    python build-arena.py build \\
         --layout-root data/interim/openfield/tem-square/v1 \\
         --corpus openfield-square
 
 Build from dungeongen layouts::
 
-    python build-arena.py materialize-task \\
+    python build-arena.py build \\
         --layout-root data/interim/dungeongen/default/v1 \\
         --corpus dungeons
+
+Inspect an existing corpus::
+
+    python build-arena.py inspect data/processed/arena/openfield-square/v1
 """
 
 from __future__ import annotations
@@ -76,8 +61,8 @@ app = typer.Typer(add_completion=False, help=__doc__)
 
 
 # =============================================================================
-@app.command("materialize-task")
-def materialize_task(  # ------------------------------------------------------
+@app.command("build")
+def build(  # -----------------------------------------------------------------
     layout_root: Annotated[
         Path,
         typer.Option(
@@ -128,18 +113,14 @@ def materialize_task(  # ------------------------------------------------------
         ),
     ] = _DEFAULT_WALK_SEED,
 ) -> None:
-    """Build the Arena task corpus from an interim layout dataset.
-    ...
-    """
+    """Build the Arena task corpus from an interim layout dataset."""
     if not layout_root.exists():
         typer.echo(
             f"Error: layout root not found at {layout_root.resolve()}.\n"
             "Build layouts first with:\n"
-            "    python scripts/data-gen/build-openfield.py build-all\n"
+            "    python scripts/data-gen/build-openfield.py build\n"
             "or:\n"
-            "    python scripts/data-gen/build-dungeongen.py build-all\n"
-            "or:\n"
-            "    python scripts/data-gen/build-dungeongen.py materialize-layouts",
+            "    python scripts/data-gen/build-dungeongen.py build",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -187,7 +168,32 @@ def validate(  # --------------------------------------------------------------
     )
 
 
-# build-all removed — this script has a single stage: materialize-task.
+# =============================================================================
+@app.command("inspect")
+def inspect_command(  # -------------------------------------------------------
+    root: Annotated[
+        Path, typer.Argument(help="Arena task-corpus root to inspect.")
+    ],
+) -> None:
+    """Print a human-readable summary of a version root manifest."""
+    manifest = validate_arena_task_root(root.resolve())
+
+    typer.echo(f"Root: {root}")
+    typer.echo(
+        f"  dataset_class          : {manifest.get('dataset_class', '?')}"
+    )
+    typer.echo(f"  task                   : {manifest.get('task', '?')}")
+    typer.echo(f"  corpus                 : {manifest.get('corpus', '?')}")
+    typer.echo(f"  version                : {manifest.get('version', '?')}")
+    typer.echo(
+        f"  task_protocol_version  : {manifest.get('task_protocol_version')}"
+    )
+    typer.echo(f"  channels               : {manifest.get('channels', [])}")
+    typer.echo(f"  n_samples              : {manifest.get('n_samples', {})}")
+    typer.echo(
+        f"  observation_vocab_size : {manifest.get('observation_vocab_size')}"
+    )
+
 
 # =============================================================================
 if __name__ == "__main__":

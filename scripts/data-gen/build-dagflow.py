@@ -41,7 +41,7 @@ Long-composition stress test::
 Custom density and span profile::
 
     python build-dagflow.py build \\
-        --preset sparse --version 1 \\
+        --preset branching --version 1 \
         --extra-edge-density 0.20 --span-profile heavy
 
 Validate an existing version root::
@@ -88,45 +88,12 @@ _SPAN_PROFILE_HELP = (
     f"Rank-span distribution profile ({', '.join(sorted(_SPAN_PROFILES))}). "
     "Overrides the preset's profile when set."
 )
+_SPAN_PROFILES_VALUES = sorted(_SPAN_PROFILES)
 
 app = typer.Typer(add_completion=False, help=__doc__)
 
 
 # =============================================================================
-def _resolve_dest(
-    output_root: Path,
-    preset: str,
-    version: int,
-) -> Path:
-    """Return the destination version leaf path."""
-    return output_root / preset / f"v{version}"
-
-
-def _print_manifest_summary(manifest: dict) -> None:
-    """Print a human-readable summary of a version root manifest."""
-    typer.echo(f"  dataset_class  : {manifest.get('dataset_class', '?')}")
-    typer.echo(f"  family         : {manifest.get('family', '?')}")
-    typer.echo(f"  version        : {manifest.get('version', '?')}")
-    typer.echo(f"  preset         : {manifest.get('preset', '?')}")
-    typer.echo(f"  n_max          : {manifest.get('n_max', '?')}")
-    typer.echo(f"  max_out_degree : {manifest.get('max_out_degree', '?')}")
-    typer.echo(f"  target_edges   : {manifest.get('target_edges', '?')}")
-    typer.echo(
-        f"  extra_edge_density: " f"{manifest.get('extra_edge_density', '?')}"
-    )
-    typer.echo(f"  span_profile   : {manifest.get('span_profile', '?')}")
-    typer.echo(f"  channels       : {manifest.get('channels', [])}")
-    typer.echo(f"  n_samples      : {manifest.get('n_samples', {})}")
-    typer.echo(f"  seed           : {manifest.get('seed', '?')}")
-    typer.echo(
-        f"  input_fingerprint: " f"{manifest.get('input_fingerprint', '?')}"
-    )
-
-
-# =============================================================================
-_SPAN_PROFILES_VALUES = sorted(_SPAN_PROFILES)
-
-
 @app.command("build")
 def build(
     preset: Annotated[
@@ -289,7 +256,7 @@ def validate(
         Path,
         typer.Argument(
             help="Dagflow version root to validate "
-            "(e.g. data/interim/dagflow/balanced/v1)."
+            "(e.g. data/interim/dagflow/routing/v1)."
         ),
     ],
 ) -> None:
@@ -331,13 +298,48 @@ def inspect(
         Path,
         typer.Argument(
             help="Dagflow version root to inspect "
-            "(e.g. data/interim/dagflow/balanced/v1)."
+            "(e.g. data/interim/dagflow/routing/v1)."
         ),
     ],
 ) -> None:
     """Print a human-readable summary of a version root manifest."""
     manifest = validate_version_root(root.resolve())
     _print_manifest_summary(manifest)
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+
+def _resolve_dest(
+    output_root: Path,
+    preset: str,
+    version: int,
+) -> Path:
+    """Return the destination version leaf path."""
+    return output_root / preset / f"v{version}"
+
+
+def _print_manifest_summary(manifest: dict) -> None:
+    """Print a human-readable summary of a version root manifest."""
+    typer.echo(f"  dataset_class  : {manifest.get('dataset_class', '?')}")
+    typer.echo(f"  family         : {manifest.get('family', '?')}")
+    typer.echo(f"  version        : {manifest.get('version', '?')}")
+    typer.echo(f"  preset         : {manifest.get('preset', '?')}")
+    typer.echo(f"  n_max          : {manifest.get('n_max', '?')}")
+    typer.echo(f"  max_out_degree : {manifest.get('max_out_degree', '?')}")
+    typer.echo(f"  target_edges   : {manifest.get('target_edges', '?')}")
+    typer.echo(
+        f"  extra_edge_density: " f"{manifest.get('extra_edge_density', '?')}"
+    )
+    typer.echo(f"  span_profile   : {manifest.get('span_profile', '?')}")
+    typer.echo(f"  channels       : {manifest.get('channels', [])}")
+    typer.echo(f"  n_samples      : {manifest.get('n_samples', {})}")
+    typer.echo(f"  seed           : {manifest.get('seed', '?')}")
+    typer.echo(
+        f"  input_fingerprint: " f"{manifest.get('input_fingerprint', '?')}"
+    )
 
 
 if __name__ == "__main__":

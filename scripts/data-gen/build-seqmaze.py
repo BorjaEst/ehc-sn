@@ -8,8 +8,9 @@ This CLI does not generate graph topology.  That stage belongs in
 
 Stages
 ------
-materialize-task     Build the SeqMaze task corpus over a shared substrate.
-validate             Validate a SeqMaze task-corpus version root.
+build      Build the SeqMaze task corpus over a shared substrate.
+validate   Validate a SeqMaze task-corpus version root.
+inspect    Print a human-readable summary of a version root manifest.
 
 Default paths
 -------------
@@ -20,12 +21,12 @@ Examples
 --------
 Build the SeqMaze task corpus against a dagflow layout dataset::
 
-    python build-seqmaze.py materialize-task \\
+    python build-seqmaze.py build \\
         --layout-root data/interim/dagflow/sparse/v1
 
 With custom sizes::
 
-    python build-seqmaze.py materialize-task \\
+    python build-seqmaze.py build \\
         --layout-root data/interim/dagflow/sparse/v1 \\
         --n-max 64 --t-max 48 --n-train 8000 --n-val 1000 --n-test 1000 --seed 7
 
@@ -33,12 +34,16 @@ Validate an existing task corpus::
 
     python build-seqmaze.py validate data/processed/seqmaze/default/v1
 
+Inspect an existing corpus::
+
+    python build-seqmaze.py inspect data/processed/seqmaze/default/v1
+
 Prerequisites
 -------------
 A dagflow shared substrate must exist before running.
 Build it first::
 
-    python scripts/data-gen/build-dagflow.py build --preset sparse --version 1
+    python scripts/data-gen/build-dagflow.py build --preset branching --version 1
 """
 
 from __future__ import annotations
@@ -66,12 +71,12 @@ _DEFAULT_N_VAL = 500
 _DEFAULT_N_TEST = 500
 _DEFAULT_SEED = 42
 
-app = typer.Typer(help="SeqMaze task corpus builder.")
+app = typer.Typer(add_completion=False, help="SeqMaze task corpus builder.")
 
 
 # =============================================================================
-@app.command("materialize-task")
-def materialize_task(
+@app.command("build")
+def build(
     layout_root: Annotated[
         Path,
         typer.Option(
@@ -140,9 +145,9 @@ def materialize_task(
         n_test=n_test,
         seed=seed,
     )
-    print(f"SeqMaze corpus built at {root.resolve()}")
-    print(f"  Profile: N={n_max}, T={t_max}, K={max_out_degree}")
-    print(f"  S={n_max + t_max}, V={n_max + 2}")
+    typer.echo(f"SeqMaze corpus built at {root.resolve()}")
+    typer.echo(f"  Profile: N={n_max}, T={t_max}, K={max_out_degree}")
+    typer.echo(f"  S={n_max + t_max}, V={n_max + 2}")
 
 
 # =============================================================================
@@ -157,12 +162,37 @@ def validate(
 ) -> None:
     """Validate an existing versioned root's manifest and data."""
     manifest = validate_seqmaze_root(root.resolve())
-    print(f"SeqMaze corpus at {root.resolve()} is valid.")
-    print(f"  Profile: N={manifest['n_max']}, T={manifest['t_max']}")
-    print(
+    typer.echo(f"SeqMaze corpus at {root.resolve()} is valid.")
+    typer.echo(f"  Profile: N={manifest['n_max']}, T={manifest['t_max']}")
+    typer.echo(
         f"  S={manifest['n_max'] + manifest['t_max']}, V={manifest['path_vocab_size']}"
     )
-    print(f"  Samples: {manifest['n_samples']}")
+    typer.echo(f"  Samples: {manifest['n_samples']}")
+
+
+# =============================================================================
+@app.command("inspect")
+def inspect(
+    root: Annotated[
+        Path,
+        typer.Argument(
+            help="Versioned root to inspect (e.g. data/processed/seqmaze/default/v1)."
+        ),
+    ],
+) -> None:
+    """Print a human-readable summary of a SeqMaze version root manifest."""
+    manifest = validate_seqmaze_root(root.resolve())
+    typer.echo(f"Root: {root}")
+    typer.echo(f"  dataset_class : {manifest.get('dataset_class', '?')}")
+    typer.echo(f"  task          : {manifest.get('task', '?')}")
+    typer.echo(f"  corpus        : {manifest.get('corpus', '?')}")
+    typer.echo(f"  version       : {manifest.get('version', '?')}")
+    typer.echo(f"  channels      : {manifest.get('channels', [])}")
+    typer.echo(f"  n_samples     : {manifest.get('n_samples', {})}")
+    typer.echo(f"  Profile: N={manifest['n_max']}, T={manifest['t_max']}")
+    typer.echo(
+        f"  S={manifest['n_max'] + manifest['t_max']}, V={manifest['path_vocab_size']}"
+    )
 
 
 # =============================================================================

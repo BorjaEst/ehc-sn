@@ -56,7 +56,7 @@ from ehc_sn.data.substrate.maze_nd import (
     validate_maze_nd_shared_root,
 )
 
-# =============================================================================
+# ---------------------------------------------------------------------------
 _DEFAULT_INTERIM_ROOT = Path("data/interim/maze-nd")
 _DEFAULT_RAW_ROOT = Path("data/raw/maze-nd")
 _DEFAULT_EXTERNAL_ROOT = Path("data/external/maze_hard_augmented")
@@ -182,7 +182,6 @@ def materialize_shared(
     )
 
 
-# ---------------------------------------------------------------------------
 # =============================================================================
 @app.command("validate")
 def validate(
@@ -207,7 +206,6 @@ def validate(
     )
 
 
-# ---------------------------------------------------------------------------
 # =============================================================================
 @app.command("build-all")
 def build_all(

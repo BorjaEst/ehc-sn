@@ -1,82 +1,88 @@
-"""Staged CLI for building the Routebind task corpus.
+"""Single Routebind task-family CLI — build, validate, inspect.
 
-Routebind consumes two parent artifacts:
-1. A spatial topology interim (openfield or dungeongen) providing the
-   complete visible spatial world, including observation identities.
-2. A dagflow graph artifact providing the hidden semantic DAG over the
-   same public observation vocabulary.
-
-Routebind does not place, modify, or remap observations.  It reads
-observation identities from the topology substrate verbatim.
-
-This CLI does not generate topology layouts or DAGs.  Those stages belong
-in ``build-openfield.py`` / ``build-dungeongen.py`` and ``build-dagflow.py``.
-
-Stages
-------
-materialize-task     Build the Routebind task corpus over both parents.
-validate             Validate a Routebind task-corpus version root.
-
-Default paths
--------------
-Topology dataset:       <user-specified --topology-root>
-Dagflow dataset:        <user-specified --dagflow-root>
-Task corpus:            data/processed/routebind/<corpus>/v<version>
-
-Examples
+Commands
 --------
-Build the Routebind task corpus with a dagflow graph::
+build               Materialize a Routebind corpus from topology and dagflow parents.
+validate            Verify an existing corpus against structural, semantic, and corpus contracts.
+inspect             Examine corpus metadata, samples, diagnostics, and visualizations.
+materialize-task    Deprecated alias for ``build``.
 
-    python build-routebind.py materialize-task \
-        --topology-root data/interim/openfield/big-square/v1 \
-        --dagflow-root data/interim/dagflow/sparse/v1 \
-        --dagflow-graph-id dagflow-sparse-v1-train-000000 \
-        --n-queries-per-layout 10 --seed 42
+Usage
+-----
+::
 
-Validate an existing task corpus::
-
+    python build-routebind.py build --topology-root ... --dagflow-root ... --dagflow-graph-id ...
     python build-routebind.py validate data/processed/routebind/default/v1
-
-Prerequisites
--------------
-An openfield (or dungeongen) layout dataset and a dagflow graph artifact
-must exist before building.  Build them first::
-
-    python scripts/data-gen/build-openfield.py build-all
-    python scripts/data-gen/build-dagflow.py build --preset sparse --version 1
+    python build-routebind.py inspect data/processed/routebind/default/v1 --summary
 """
 
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
 from typing import Annotated
 
+import numpy as np
 import typer
 
 from ehc_sn.data.layout.io import load_layout_dataset
 from ehc_sn.data.manifest import read_manifest
+from ehc_sn.data.substrate.dagflow import validate_dagflow_layout_sample
+from ehc_sn.data.substrate.reader import find_artifact_by_id
+from ehc_sn.figures import FigureContext, render
+from ehc_sn.reporting.routebind import (
+    format_validation_summary,
+    serialize_validation_result,
+    write_validation_bundle,
+)
 from ehc_sn.tasks.routebind.builder import (
     TASK_FAMILY,
     build_routebind_task_corpus,
     resolve_preset,
-    validate_routebind_root,
 )
+from ehc_sn.tasks.routebind.corpus import load_sample, load_split_arrays
+from ehc_sn.tasks.routebind.diagnostics import (
+    compute_corpus_statistics,
+    select_samples,
+)
+from ehc_sn.tasks.routebind.inspection import prepare_sample_inspection
+from ehc_sn.tasks.routebind.validation import (
+    check_auxiliary_targets,
+    check_dag_transitions,
+    check_route_field,
+    check_waypoint_field,
+    validate_corpus_root,
+    validate_stored_sample,
+)
+from ehc_sn.traces.keys import (
+    ROUTEBIND_META_KEY_CELL_TYPE,
+    ROUTEBIND_META_KEY_GOAL_FLAG,
+    ROUTEBIND_META_KEY_OBSERVATION_ID,
+    ROUTEBIND_META_KEY_START_FLAG,
+    ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
+)
+from ehc_sn.traces.trace_tree import TraceTree
 
 # ---------------------------------------------------------------------------
 _DEFAULT_PRESET = "balanced"
 _DEFAULT_VERSION = 1
 _DEFAULT_CORPUS = "default"
+_DEFAULT_STORAGE_HEIGHT = 32
+_DEFAULT_STORAGE_WIDTH = 32
 _DEFAULT_FIELD_DECAY_SPATIAL = 0.9848
 _DEFAULT_FIELD_DECAY_SEMANTIC = 0.8
 _DEFAULT_MAX_ROUTE_LENGTH = 150
 _DEFAULT_N_QUERIES_PER_LAYOUT = 10
 _DEFAULT_SEED = 42
-app = typer.Typer(help="Routebind task corpus builder.")
+_DEFAULT_OUTPUT_DIR = Path("outputs/routebind-validation")
+
+app = typer.Typer(add_completion=False, help="Routebind task corpus toolchain.")
 
 
 # =============================================================================
-@app.command("materialize-task")
-def materialize_task(
+@app.command("build")
+def build(
     topology_root: Annotated[
         Path,
         typer.Option(
@@ -90,7 +96,7 @@ def materialize_task(
         typer.Option(
             "--dagflow-root",
             help="Path to dagflow dataset root "
-            "(e.g. data/interim/dagflow/sparse/v1).",
+            "(e.g. data/interim/dagflow/routing/v1).",
         ),
     ],
     dagflow_graph_id: Annotated[
@@ -131,10 +137,23 @@ def materialize_task(
         int,
         typer.Option(
             "--n-queries-per-layout",
-            help="Number of start/goal queries per layout (default: 10). "
-            "Deprecated in favour of --preset budget.",
+            help="Number of start/goal queries per layout (default: 10).",
         ),
     ] = _DEFAULT_N_QUERIES_PER_LAYOUT,
+    storage_height: Annotated[
+        int,
+        typer.Option(
+            "--storage-height",
+            help="Storage canvas height in cells (default: 32).",
+        ),
+    ] = _DEFAULT_STORAGE_HEIGHT,
+    storage_width: Annotated[
+        int,
+        typer.Option(
+            "--storage-width",
+            help="Storage canvas width in cells (default: 32).",
+        ),
+    ] = _DEFAULT_STORAGE_WIDTH,
     version: Annotated[
         int,
         typer.Option(
@@ -195,7 +214,7 @@ def materialize_task(
         typer.echo(
             f"Error: dagflow root not found at {dagflow_root_resolved}.\n"
             "Build dagflow first with:\n"
-            "    python scripts/data-gen/build-dagflow.py build --preset sparse --version 1",
+            "    python scripts/data-gen/build-dagflow.py build --preset routing --version 1",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -205,7 +224,6 @@ def materialize_task(
 
     version_root = root.resolve()
 
-    # Resolve preset with CLI overrides
     preset_name = preset or _DEFAULT_PRESET
     overrides: dict = {}
     if min_route_length is not None:
@@ -223,6 +241,8 @@ def materialize_task(
         dagflow_root=dagflow_root_resolved,
         dagflow_graph_id=dagflow_graph_id,
         corpus=corpus,
+        storage_height=storage_height,
+        storage_width=storage_width,
         field_decay_spatial=field_decay_spatial,
         field_decay_semantic=field_decay_semantic,
         max_supported_route_length=max_supported_route_length,
@@ -230,13 +250,17 @@ def materialize_task(
         seed=seed,
         preset=profile,
     )
-    print(f"Routebind corpus built at {version_root}")
-    print(f"  Topology: {topology_root_resolved}")
-    print(f"  DAG graph: {dagflow_graph_id} @ {dagflow_root_resolved}")
-    print(f"  Preset: {preset_name}")
+    typer.echo(f"Routebind corpus built at {version_root}")
+    typer.echo(f"  Topology: {topology_root_resolved}")
+    typer.echo(f"  DAG graph: {dagflow_graph_id} @ {dagflow_root_resolved}")
+    typer.echo(f"  Preset: {preset_name}")
 
 
 # =============================================================================
+# Validate
+# =============================================================================
+
+
 @app.command("validate")
 def validate(
     root: Annotated[
@@ -246,15 +270,541 @@ def validate(
             "(e.g. data/processed/routebind/default/v1)."
         ),
     ],
+    split: Annotated[
+        str | None,
+        typer.Option(
+            "--split",
+            help="Validate a single split only (default: all).",
+        ),
+    ] = None,
+    max_samples: Annotated[
+        int,
+        typer.Option(
+            "--max-samples",
+            help="Max samples to check per split (default: all).",
+        ),
+    ] = -1,
+    max_root_samples: Annotated[
+        int,
+        typer.Option(
+            "--max-root-samples",
+            help="Max samples for root-level structural scan (default: all).",
+        ),
+    ] = -1,
+    json_out: Annotated[
+        Path | None,
+        typer.Option(
+            "--json-out",
+            help="Write validation JSON to this path.",
+        ),
+    ] = None,
+    summary_out: Annotated[
+        Path | None,
+        typer.Option(
+            "--summary-out",
+            help="Write text summary to this path.",
+        ),
+    ] = None,
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            help="Write report bundle to this directory.",
+        ),
+    ] = _DEFAULT_OUTPUT_DIR,
 ) -> None:
-    """Validate an existing versioned root's manifest and data."""
-    manifest = validate_routebind_root(root.resolve())
-    print(f"Routebind corpus at {root.resolve()} is valid.")
-    print(
-        f"  Profile: N_obs={manifest.get('n_observations', '?')}, "
-        f"Grid={manifest.get('grid_height', '?')}x{manifest.get('grid_width', '?')}"
+    """Validate an existing Routebind task corpus against declared contracts."""
+    _run_validate(
+        root,
+        splits=[split] if split else None,
+        max_samples=max_samples,
+        max_root_samples=max_root_samples,
+        json_out=json_out,
+        summary_out=summary_out,
+        output_dir=output_dir,
     )
-    print(f"  Samples: {manifest['n_samples']}")
+
+
+def _run_validate(
+    root: Path,
+    splits: list[str] | None = None,
+    max_samples: int = -1,
+    max_root_samples: int = -1,
+    json_out: Path | None = None,
+    summary_out: Path | None = None,
+    output_dir: Path = _DEFAULT_OUTPUT_DIR,
+) -> int:
+    """Shared validation logic for ``validate`` and ``build --validate-after-build``."""
+    root = root.resolve()
+
+    # Load manifest
+    try:
+        manifest = read_manifest(root)
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        return 1
+
+    # Determine splits
+    all_splits = list(manifest.get("n_samples", {}).keys())
+    if splits is None:
+        splits = all_splits
+
+    n_obs = manifest.get("n_observations", 0)
+    topo_vocab_size = manifest.get(
+        "topology_observation_vocabulary_size", n_obs
+    )
+    gs = manifest.get("field_decay_spatial", 0.9848)
+    gw = manifest.get("field_decay_semantic", 0.8)
+    canvas_width = manifest.get("canvas_width", None)
+
+    # Determine S from manifest: prefer num_spatial_slots, then n_states,
+    # then derive from extent.
+    S = manifest.get("num_spatial_slots", 0) or manifest.get("n_states", 0)
+    if S <= 0:
+        ext = manifest.get("storage_extent") or manifest.get("extent", [])
+        if len(ext) == 2:
+            S = int(ext[0]) * int(ext[1])
+        else:
+            # Fall back to reading array shape from first available split.
+            for split in splits:
+                arrays = load_split_arrays(root, split)
+                if arrays is not None and "cell_type" in arrays:
+                    S = int(arrays["cell_type"].shape[1])
+                    break
+    if S <= 0:
+        typer.echo(
+            "Error: cannot determine corpus spatial dimension S.", err=True
+        )
+        raise typer.Exit(code=1)
+
+    # Corpus-level validation
+    _, corpus_issues = validate_corpus_root(
+        root, max_root_samples=max_root_samples
+    )
+    all_issues = list(corpus_issues)
+
+    # Load semantic DAG adjacency for DAG-transition validation
+    dag_adjacency: list[list[int]] | None = None
+    parents = manifest.get("parents", {})
+    sem_ref = parents.get("semantic_graph", {})
+    dag_root_str = sem_ref.get("root", "")
+    dag_graph_id = sem_ref.get("artifact_id", "")
+    if dag_root_str and dag_graph_id:
+        try:
+            dag_root = Path(dag_root_str)
+            if not dag_root.is_absolute():
+                dag_root = (
+                    root.parent.parent.parent.parent / dag_root
+                ).resolve()
+            dagflow_manifest = read_manifest(dag_root)
+            dagflow_max_out_degree = dagflow_manifest.get("max_out_degree", 4)
+            _, dagflow_sample = find_artifact_by_id(dag_root, dag_graph_id)
+            validate_dagflow_layout_sample(dagflow_sample)
+            n_actual = int(dagflow_sample["node_mask"].sum())
+            pub_adjacency: list[list[int]] = [[] for _ in range(n_actual)]
+            for rank in range(n_actual):
+                src_pub = int(dagflow_sample["node_obs_id"][rank])
+                for k in range(dagflow_max_out_degree):
+                    if dagflow_sample["successor_mask"][rank, k]:
+                        succ_pub = int(
+                            dagflow_sample["successor_indices"][rank, k]
+                        )
+                        if 0 <= succ_pub < n_actual:
+                            pub_adjacency[src_pub].append(succ_pub)
+            dag_adjacency = pub_adjacency
+        except Exception as e:
+            all_issues.append(
+                ValidationIssue(
+                    severity="WARNING",
+                    code="dag_parent_unavailable",
+                    message=f"Cannot load semantic DAG parent: {e}",
+                )
+            )
+    else:
+        all_issues.append(
+            ValidationIssue(
+                severity="INFO",
+                code="dag_parent_not_configured",
+                message="No semantic_graph parent reference found in manifest",
+            )
+        )
+
+    # Per-sample structural checks
+    sample_counts: dict[str, int] = {}
+    for split in splits:
+        arrays = load_split_arrays(root, split)
+        if arrays is None:
+            sample_counts[split] = 0
+            continue
+        n = next(iter(arrays.values())).shape[0]
+        sample_counts[split] = n
+        n_check = min(n, max_samples) if max_samples > 0 else n
+
+        for idx in range(n_check):
+            sample = {
+                ch: arrays[ch][idx]
+                for ch in manifest.get("channels", [])
+                if ch in arrays
+            }
+
+            struct_issues = validate_stored_sample(
+                sample,
+                n_obs=n_obs,
+                topo_vocab_size=topo_vocab_size,
+                S=S,
+                gamma_space=gs,
+                gamma_semantic=gw,
+                grid_width=canvas_width,
+            )
+            for si in struct_issues:
+                si.split = split
+                si.sample_index = idx
+            all_issues.extend(struct_issues)
+
+            route_issues = check_route_field(
+                sample,
+                S=S,
+                gamma_space=gs,
+                split=split,
+                idx=idx,
+                grid_width=canvas_width,
+            )
+            all_issues.extend(route_issues)
+
+            wp_issues = check_waypoint_field(
+                sample,
+                S=S,
+                gamma_semantic=gw,
+                split=split,
+                idx=idx,
+                grid_width=canvas_width,
+            )
+            all_issues.extend(wp_issues)
+
+            aux_issues = check_auxiliary_targets(
+                sample,
+                S=S,
+                split=split,
+                idx=idx,
+                grid_width=canvas_width,
+            )
+            all_issues.extend(aux_issues)
+
+            if dag_adjacency is not None:
+                dag_issues = check_dag_transitions(
+                    sample,
+                    adjacency=dag_adjacency,
+                    split=split,
+                    idx=idx,
+                    grid_width=canvas_width,
+                )
+                all_issues.extend(dag_issues)
+
+    # Statistics
+    stats = compute_corpus_statistics(
+        root, manifest, splits, max_samples, grid_width=canvas_width
+    )
+
+    # Reports
+    paths = write_validation_bundle(
+        all_issues,
+        stats,
+        sample_counts,
+        output_dir=output_dir,
+    )
+    typer.echo(f"  Validation report: {paths['validation']}")
+    typer.echo(f"  Diagnostics:       {paths['diagnostics']}")
+    typer.echo(f"  Summary:           {paths['summary']}")
+    if json_out is not None:
+        json_out.write_text(
+            json.dumps(
+                serialize_validation_result(all_issues, sample_counts), indent=2
+            )
+        )
+    if summary_out is not None:
+        summary_out.write_text(format_validation_summary(stats, all_issues))
+
+    # Terminal summary
+    errors = [i for i in all_issues if i.severity == "ERROR"]
+    n_err = len(errors)
+    typer.echo(f"Validated {sum(sample_counts.values())} samples")
+    typer.echo(
+        f"  Errors: {n_err}  Warnings: "
+        f"{len([i for i in all_issues if i.severity == 'WARNING'])}"
+    )
+    if n_err > 0:
+        typer.echo("\n  First 5 errors:")
+        for e in errors[:5]:
+            typer.echo(
+                f"    [{e.split}/{e.sample_index}] {e.code}: {e.message}"
+            )
+
+    return 1 if n_err > 0 else 0
+
+
+# =============================================================================
+# Inspect
+# =============================================================================
+
+
+@app.command("inspect")
+def inspect(
+    root: Annotated[
+        Path,
+        typer.Argument(
+            help="Versioned root to inspect "
+            "(e.g. data/processed/routebind/default/v1)."
+        ),
+    ],
+    summary: Annotated[
+        bool,
+        typer.Option("--summary", help="Display corpus summary."),
+    ] = False,
+    split: Annotated[
+        str,
+        typer.Option("--split", help="Split name for sample inspection."),
+    ] = "train",
+    sample_index: Annotated[
+        int | None,
+        typer.Option("--sample-index", help="Sample index to inspect."),
+    ] = None,
+    sample_figure: Annotated[
+        bool,
+        typer.Option(
+            "--sample-figure",
+            help="Render routebind_task_overview for the selected sample.",
+            show_default=False,
+        ),
+    ] = False,
+    show: Annotated[
+        bool,
+        typer.Option("--show", help="Display figures interactively."),
+    ] = False,
+    gallery: Annotated[
+        int,
+        typer.Option(
+            "--gallery",
+            help="Number of overview figures to produce.",
+            show_default=False,
+        ),
+    ] = 0,
+    selection: Annotated[
+        str,
+        typer.Option(
+            "--selection",
+            help="Sample selection policy: random, stratified, "
+            "longest_route, shortest_route, most_waypoints, "
+            "most_goal_occurrences, largest_spatial_detour.",
+        ),
+    ] = "stratified",
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            help="Output directory for figures and reports.",
+        ),
+    ] = Path("outputs/routebind-inspection"),
+    figure_seed: Annotated[
+        int | None,
+        typer.Option("--figure-seed", help="RNG seed for figure selection."),
+    ] = None,
+    json_out: Annotated[
+        Path | None,
+        typer.Option("--json-out", help="Write inspection JSON to path."),
+    ] = None,
+) -> None:
+    """Inspect a Routebind corpus — metadata, samples, diagnostics, figures."""
+    root = root.resolve()
+
+    try:
+        manifest = read_manifest(root)
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(code=1)
+
+    all_splits = list(manifest.get("n_samples", {}).keys())
+
+    # ── Summary ────────────────────────────────────────────────────────────
+    if summary:
+        cw = manifest.get("canvas_width", None)
+        stats = compute_corpus_statistics(
+            root, manifest, all_splits, grid_width=cw
+        )
+        typer.echo("=" * 72)
+        typer.echo("Routebind corpus summary")
+        typer.echo("=" * 72)
+        for k in ("task", "corpus", "version", "n_observations", "grid"):
+            if k in stats:
+                typer.echo(f"  {k}: {stats[k]}")
+        typer.echo("")
+        typer.echo("Samples:")
+        for s, c in stats.get("per_split", {}).items():
+            typer.echo(f"  {s}: {c}")
+        typer.echo("")
+        rl = stats.get("route_length", {})
+        if rl.get("count", 0) > 0:
+            typer.echo(
+                f"  Route length: min={rl['min']:.0f} "
+                f"median={rl['median']:.0f} max={rl['max']:.0f}"
+            )
+        sl = stats.get("semantic_length", {})
+        if sl.get("count", 0) > 0:
+            typer.echo(
+                f"  Semantic length: min={sl['min']:.0f} "
+                f"median={sl['median']:.0f} max={sl['max']:.0f}"
+            )
+
+    # ── Single sample inspection ─────────────────────────────────────────
+    if sample_index is not None:
+        sample = load_sample(root, split, sample_index)
+        cw_inspect = manifest.get("canvas_width", None)
+        ins = prepare_sample_inspection(
+            sample, split=split, index=sample_index, grid_width=cw_inspect
+        )
+        start_obs = (
+            int(ins.observation_id[ins.start_position])
+            if ins.start_position >= 0
+            else -1
+        )
+        typer.echo(f"\nSample {sample_index} ({split}):")
+        typer.echo(f"  Start: pos {ins.start_position} / obs {start_obs}")
+        typer.echo(f"  Goal obs: {ins.goal_observation}")
+        typer.echo(f"  Goal occurrences: {len(ins.goal_positions)}")
+        typer.echo(f"  Route length: {ins.route_length}")
+        typer.echo(f"  Waypoints: {ins.semantic_length}")
+        obs_chain = " → ".join(str(obs) for _, obs, _ in ins.waypoint_events)
+        if obs_chain:
+            typer.echo(f"  Waypoint seq: {obs_chain}")
+        typer.echo(f"  Next direction: {ins.next_direction}")
+        typer.echo(f"  Next observation: {ins.next_observation}")
+        typer.echo(f"  Wall density: {ins.wall_density:.1%}")
+        if ins.warnings:
+            typer.echo(f"  Warnings ({len(ins.warnings)}):")
+            for w in ins.warnings:
+                typer.echo(f"    {w}")
+
+        if sample_figure:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            fpath = _render_overview_figure(
+                sample, output_dir, split, sample_index, manifest=manifest
+            )
+            typer.echo(f"  Figure: {fpath}")
+
+    # ── Sample gallery ────────────────────────────────────────────────────
+    if gallery > 0:
+        selected = select_samples(
+            root,
+            all_splits,
+            policy=selection,
+            n=gallery,
+            seed=figure_seed,
+        )
+        for s, idx in selected:
+            sample = load_sample(root, s, idx)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            fpath = _render_overview_figure(
+                sample, output_dir, s, idx, manifest=manifest
+            )
+            typer.echo(f"  Figure: {fpath}")
+
+    if show:
+        try:
+            import matplotlib.pyplot as plt
+
+            plt.show()
+        except ImportError:
+            pass
+
+    if json_out is not None:
+        cw = manifest.get("canvas_width", None)
+        stats = compute_corpus_statistics(
+            root, manifest, all_splits, grid_width=cw
+        )
+        json_out.write_text(json.dumps(stats, indent=2, default=str))
+
+
+# =============================================================================
+# Figure helpers
+# =============================================================================
+
+
+def _build_trace_for_sample(
+    sample: dict[str, np.ndarray],
+    *,
+    n_observations: int | None = None,
+    canvas_width: int | None = None,
+    canvas_height: int | None = None,
+) -> TraceTree:
+    """Build a minimal TraceTree with routebind meta keys from a corpus sample.
+
+    Args:
+        sample: Channel dict for one corpus sample.
+        n_observations: Corpus-wide observation vocabulary size.
+        canvas_width: Grid width in cells.
+        canvas_height: Grid height in cells.
+    """
+    trace = TraceTree()
+    ct = np.asarray(sample["cell_type"], dtype=np.int32)
+    oid = np.asarray(sample["observation_id"], dtype=np.int32)
+    sf = np.asarray(sample["start_flag"], dtype=bool)
+    gf = np.asarray(sample["goal_flag"], dtype=bool)
+    tf = np.asarray(sample["target_trajectory"], dtype=np.float32)
+
+    meta: dict[str, object] = {
+        "routebind": {
+            "cell_type": np.expand_dims(ct, 0),
+            "observation_id": np.expand_dims(oid, 0),
+            "start_flag": np.expand_dims(sf, 0),
+            "goal_flag": np.expand_dims(gf, 0),
+            "target_trajectory": np.expand_dims(tf, 0),
+        }
+    }
+    if n_observations is not None:
+        meta["routebind"]["n_observations"] = n_observations  # type: ignore[index]
+    if canvas_width is not None:
+        meta["routebind"]["canvas_width"] = canvas_width  # type: ignore[index]
+    if canvas_height is not None:
+        meta["routebind"]["canvas_height"] = canvas_height  # type: ignore[index]
+
+    trace.attach_meta(meta)
+    return trace
+
+
+def _render_overview_figure(
+    sample: dict[str, np.ndarray],
+    output_dir: Path,
+    split: str,
+    index: int,
+    *,
+    manifest: dict[str, object] | None = None,
+) -> Path:
+    """Render routebind_task_overview for one sample via the registry.
+
+    Args:
+        sample: Channel dict for one corpus sample.
+        output_dir: Output directory.
+        split: Dataset split label.
+        index: Sample index within the split.
+        manifest: Optional corpus manifest; when provided, canonical
+            task-schema metadata (n_observations, canvas dimensions)
+            are attached to the trace so the figure selector uses
+            authoritative values.
+    """
+    kb = _build_trace_for_sample(
+        sample,
+        n_observations=manifest.get("n_observations") if manifest else None,  # type: ignore[arg-type]
+        canvas_width=manifest.get("canvas_width") if manifest else None,  # type: ignore[arg-type]
+        canvas_height=manifest.get("canvas_height") if manifest else None,  # type: ignore[arg-type]
+    )
+    ctx = FigureContext(sample_idx=0)
+    fig = render("routebind_task_overview", kb, ctx)
+    fname = f"routebind_task_overview_{split}_{index}.png"
+    fpath = output_dir / fname
+    fig.savefig(fpath, dpi=200, bbox_inches="tight")
+    import matplotlib.pyplot as plt
+
+    plt.close(fig)
+    return fpath
 
 
 # =============================================================================

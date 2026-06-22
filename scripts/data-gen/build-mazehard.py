@@ -8,8 +8,9 @@ the shared substrate.  Those stages belong in ``build-maze-nd.py``.
 
 Stages
 ------
-materialize-task     Build the MazeHard task corpus over a shared substrate.
-validate             Validate a MazeHard task-corpus version root.
+build      Build the MazeHard task corpus over a shared substrate.
+validate   Validate a MazeHard task-corpus version root.
+inspect    Print a human-readable summary of a version root manifest.
 
 Default paths
 -------------
@@ -20,18 +21,22 @@ Examples
 --------
 Build the MazeHard task corpus against a maze-nd shared substrate::
 
-    python build-mazehard.py materialize-task \\
+    python build-mazehard.py build \\
         --parent-substrate data/interim/maze-nd/v2
 
 With custom sizes::
 
-    python build-mazehard.py materialize-task \\
+    python build-mazehard.py build \\
         --parent-substrate data/interim/maze-nd/v2 \\
         --n-train 4000 --n-val 500 --n-test 500 --seed 7
 
 Validate an existing task corpus::
 
     python build-mazehard.py validate data/processed/mazehard/default/v1
+
+Inspect an existing corpus::
+
+    python build-mazehard.py inspect data/processed/mazehard/default/v1
 
 Prerequisites
 -------------
@@ -65,9 +70,9 @@ _DEFAULT_SEED = 42
 app = typer.Typer(add_completion=False, help=__doc__)
 
 
-# ---------------------------------------------------------------------------
-@app.command("materialize-task")
-def materialize_task(
+# =============================================================================
+@app.command("build")
+def build(
     parent_substrate: Annotated[
         Path,
         typer.Option(
@@ -137,7 +142,7 @@ def materialize_task(
     )
 
 
-# ---------------------------------------------------------------------------
+# =============================================================================
 @app.command("validate")
 def validate(
     root: Annotated[
@@ -149,6 +154,26 @@ def validate(
 
     validate_mazehard_task_root(root.resolve())
     typer.echo(f"OK  {root}")
+
+
+# =============================================================================
+@app.command("inspect")
+def inspect(
+    root: Annotated[
+        Path, typer.Argument(help="MazeHard task-corpus root to inspect.")
+    ],
+) -> None:
+    """Print a human-readable summary of a MazeHard version root manifest."""
+    from ehc_sn.tasks.mazehard import validate_mazehard_task_root
+
+    manifest = validate_mazehard_task_root(root.resolve())
+    typer.echo(f"Root: {root}")
+    typer.echo(f"  dataset_class : {manifest.get('dataset_class', '?')}")
+    typer.echo(f"  task          : {manifest.get('task', '?')}")
+    typer.echo(f"  corpus        : {manifest.get('corpus', '?')}")
+    typer.echo(f"  version       : {manifest.get('version', '?')}")
+    typer.echo(f"  channels      : {manifest.get('channels', [])}")
+    typer.echo(f"  n_samples     : {manifest.get('n_samples', {})}")
 
 
 if __name__ == "__main__":
