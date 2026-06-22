@@ -21,10 +21,18 @@ nav:
       - Run Cookbook: run-cookbook.md
   - Concepts:
       - Architecture: architecture.md
+      - EHP Model: models/ehp.md
       - Model Family Selection: model-family-selection.md
   - Usage:
       - Data and Paths: data-and-paths.md
       - Data Generation: data-generation.md
+      - Substrates:
+          - Overview: substrates/_index.md
+          - maze-nd: substrates/maze-nd.md
+          - dungeongen: substrates/dungeongen.md
+          - dagflow: substrates/dagflow.md
+          - openfield: substrates/openfield.md
+          - numberline: substrates/numberline.md
       - Training: training.md
       - Benchmarks: benchmarks.md
       - Evaluation: evaluation.md
@@ -46,7 +54,8 @@ nav:
       - Specs And Governance: specs-and-governance.md
       - Legacy Context: legacy-context.md
   - Theory:
-      - EHP Theory Foundations: ehp-theory-foundations.md
+      - EHP Theory Foundations: ehc-theory-foundations.md
+      - Memory-Mediated Reasoning: memory-mediated-reasoning.md
       - Notation Map: notation-map.md
       - PFC Working Memory Theory: pfc-working-memory-theory.md
 

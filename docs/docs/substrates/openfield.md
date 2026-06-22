@@ -13,125 +13,141 @@
 | Output path    | `data/interim/openfield/<preset>/v<version>/` |
 | Dataset class  | `layout_dataset`                              |
 
-## Description
+## Purpose and ownership
 
-The openfield layout dataset generates legacy-TEM-compatible grid worlds:
-square, rectangle, and future hex topologies. Each layout is a
-`SpatialLayout` record with graph-state-indexed channels — adjacency,
-transition matrix, row/col coordinates, observation IDs, and action space.
+Openfield generates grid worlds (square, rectangle, hex) with random sensory
+assignments. Each layout is a `SpatialLayout` record — a compact
+graph-indexed representation of traversable states with physical movement
+connectivity, action space, and observation identities.
 
-Openfield worlds have no walls: every state is valid and reachable from every
-other state via 4-direction (or 6-direction for hex) + stay movement.
-Sensory assignment is fully random, controlled by a per-layout sensory seed.
+Every exported graph state is traversable. Square and rectangle layouts
+occupy their complete rectangular extent. Hex layouts may use an internal
+rectangular backing raster; invalid backing positions are removed before
+export. The compact representation contains only valid states — walls are
+absent from the index space.
 
-## Topology Types
+## Semantic model
 
-| Type        | Adjacency         | Action Space | Actions |
-| ----------- | ----------------- | ------------ | ------- |
-| `square`    | 4-neighbor + stay | `grid4_dir`  | 5       |
-| `rectangle` | 4-neighbor + stay | `grid4_dir`  | 5       |
-| `hex`       | 6-neighbor + stay | `hex6_dir`   | 7       |
+### Topology types
 
-For hex grids, the internal graph width is `2*w - 1` and `square2hex` pruning
-is applied via `valid_state_mask`.
+| Type        | Movement adjacency | Action space | Actions |
+| ----------- | ------------------ | ------------ | ------- |
+| `square`    | 4-neighbor         | `grid4_dir`  | 5       |
+| `rectangle` | 4-neighbor         | `grid4_dir`  | 5       |
+| `hex`       | 6-neighbor         | `hex6_dir`   | 7       |
 
-## Presets
+Three distinct concepts are kept separate:
 
-| Preset          | Type      | Grid Count | Widths/Heights                                    |
-| --------------- | --------- | ---------- | ------------------------------------------------- |
-| `tem-square`    | square    | 16         | [10,10,11,11,8,9,10,11,8,9,10,11,8,8,9,9]         |
-| `tem-rectangle` | rectangle | 16         | widths: [11,11,12,12,8,8,9,9,11,11,12,12,8,8,9,9] |
-| `tem-hex`       | hex       | 16         | [6,6,7,7,5,5,6,7,5,6,6,7,5,5,6,6]                 |
-| `small`         | square    | 4          | [8,8,9,9]                                         |
-| `big-square`    | square    | 1          | [30]                                              |
+- **Movement adjacency**: state-changing physical edges only (no self-loops),
+  exposed as `next_state` (SxA) + `action_valid` (SxA).
+- **Action space**: all movement actions including STAY.
+- **Transition matrix**: not stored — row-stochastic transitions are derived
+  from `next_state` + `action_valid` + STAY self-loop on demand.
 
-Each preset matches legacy TEM default environment sizes. The `small` preset
-is intended for smoke tests; `big-square` for routebind topology generation.
+### Observation assignment
 
-## SpatialLayout Record Fields
+Each traversable state receives one random observation ID drawn from
+`{0, …, observation_vocabulary_size-1}`. IDs are assigned independently
+per layout, controlled by the per-layout `observation_seed`.
 
-Each sample is a `SpatialLayout` TypedDict with these graph-indexed arrays:
+### Extent
 
-| Field                | Type    | Shape  | Description                              |
-| -------------------- | ------- | ------ | ---------------------------------------- |
-| `layout_id`          | str     | —      | Unique layout instance identifier.       |
-| `layout_family`      | str     | —      | Always `"openfield"`.                    |
-| `topology_type`      | str     | —      | `"square"`, `"rectangle"`, or `"hex"`.   |
-| `graph_state_count`  | int     | —      | Number of graph nodes (W×H).             |
-| `valid_state_mask`   | bool    | (S,)   | All `True` for openfield (no walls).     |
-| `state_to_row_col`   | int32   | (S, 2) | (row, col) per graph state.              |
-| `observation_id`     | int32   | (S,)   | Sensory observation ID per state.        |
-| `adjacency`          | bool    | (S, S) | Undirected connectivity matrix.          |
-| `action_space`       | dict    | —      | `ActionSpace` with names and deltas.     |
-| `transition_matrix`  | float64 | (S, S) | Row-stochastic transition probabilities. |
-| `topology_seed`      | int     | —      | Seed for topology generation.            |
-| `sensory_seed`       | int     | —      | Seed for observation ID assignment.      |
-| `sensory_vocab_size` | int     | —      | Number of distinct observation IDs.      |
-| `split`              | str     | —      | `"train"`, `"val"`, or `"test"`.         |
+`extent` is the natural canvas dimensions `(height, width)` derived from the
+generated geometry's bounds. For square and rectangle layouts the extent is
+exactly filled by traversable states; no wall cells exist within the extent.
+Hex layouts may have a larger extent than their exported state count due to
+backing-pruning.
 
-## Pipeline Stages
+## Extent heterogeneity
 
-| Stage                 | Command                                  | Description                                  |
-| --------------------- | ---------------------------------------- | -------------------------------------------- |
-| `generate-topology`   | `build-openfield.py generate-topology`   | Write per-split source spec JSONL.           |
-| `materialize-layouts` | `build-openfield.py materialize-layouts` | Assign sensory IDs, write layout dataset.    |
-| `validate`            | `build-openfield.py validate`            | Validate manifest and channel contracts.     |
-| `build-all`           | `build-openfield.py build-all`           | Run generate-topology → materialize-layouts. |
+An openfield layout dataset may contain layouts with heterogeneous natural
+extents. Each layout's declared `extent` is authoritative for that layout.
+Downstream tasks (arena, routebind) read extent from each `SpatialLayout`
+record, not from the manifest-level convenience copy.
 
-The two-stage pipeline supports topology-only generation in stage 1
-(`observation_id = -1` sentinel) and sensory enrichment in stage 2. This
-allows multiple sensory instances per topology template via
-`--n-sensory-instances`.
+Presets such as `big-square` produce a single fixed extent; presets such
+as `tem-square` and `small` produce multiple extents. Both patterns
+are valid.
 
-## Default Parameters
+The manifest reports:
 
-| Parameter               | Default    | Description                          |
-| ----------------------- | ---------- | ------------------------------------ |
-| `--version`             | 1          | Layout dataset version integer.      |
-| `--preset`              | tem-square | Named preset (or custom `--widths`). |
-| `--s-size`              | 45         | Sensory vocabulary size.             |
-| `--n-sensory-instances` | 1          | Sensory realizations per topology.   |
-| `--topology-seed`       | 42         | Base seed for topology generation.   |
-
-When `--preset` is omitted, custom `--widths` (and optionally `--heights`
-and `--topology-type`) can be supplied directly.
-
-## Usage Examples
-
-```bash
-# Default faithful TEM reproduction (16 square grids)
-python scripts/data-gen/build-openfield.py build-all
-
-# Rectangle grids
-python scripts/data-gen/build-openfield.py build-all --preset tem-rectangle
-
-# Small smoke test
-python scripts/data-gen/build-openfield.py build-all --preset small
-
-# Custom widths
-python scripts/data-gen/build-openfield.py build-all \
-    --widths 10 --widths 10 --widths 11
-
-# Two-phase pipeline (topology-only then sensory enrichment)
-python scripts/data-gen/build-openfield.py generate-topology --preset small
-python scripts/data-gen/build-openfield.py materialize-layouts --preset small
-
-# Build an Arena corpus from openfield layouts
-python scripts/data-gen/build-arena.py materialize-task \
-    --layout-root data/interim/openfield/tem-square/v1 --corpus openfield-tem-square
+```json
+{
+  "natural_extent_homogeneous": false,
+  "natural_height_range": [8, 11],
+  "natural_width_range": [8, 11]
+}
 ```
 
-## Downstream Consumers
+Openfield validation must not reject heterogeneous extents.
 
-| Task      | CLI Script                            | Parent Layout Path                      |
-| --------- | ------------------------------------- | --------------------------------------- |
-| arena     | `scripts/data-gen/build-arena.py`     | `data/interim/openfield/<preset>/v<N>/` |
-| routebind | `scripts/data-gen/build-routebind.py` | `data/interim/openfield/<preset>/v<N>/` |
+## Output artifact
 
-## Related
+Each sample is a `SpatialLayout` record with these graph-indexed arrays:
 
-- [Spec: Data Contracts §3.1](../../spec/spec-data-contracts.md)
-- [Spec: Openfield Layout](../../spec/spec-openfield-layout.md)
-- [SpatialLayout Protocol](../../src/ehc_sn/data/layout/_protocol.py)
-- [Openfield Generator](../../src/ehc_sn/data/layout/openfield.py)
-- [Arena Task Builder](../../scripts/data-gen/build-arena.py)
+| Field                         | Type      | Shape  | Description                                                        |
+| ----------------------------- | --------- | ------ | ------------------------------------------------------------------ |
+| `layout_id`                   | str       | —      | Unique layout instance identifier.                                 |
+| `layout_family`               | str       | —      | Always `"openfield"`.                                              |
+| `topology_type`               | str       | —      | `"square"`, `"rectangle"`, or `"hex"`.                             |
+| `topology_kind`               | str       | —      | Always `"grid2d"`.                                                 |
+| `graph_state_count`           | int       | —      | Number of traversable graph nodes.                                 |
+| `state_to_row_col`            | int32     | (S, 2) | (row, col) per graph state.                                        |
+| `observation_id`              | int32     | (S,)   | Observation ID per state.                                          |
+| `extent`                      | (int,int) | —      | Natural canvas dimensions `(height, width)`.                       |
+| `next_state`                  | int32     | (S, A) | Destination state index per action; -1 sentinel for invalid moves. |
+| `action_valid`                | bool      | (S, A) | True where `next_state != -1`.                                     |
+| `action_space`                | dict      | —      | `ActionSpace` with names, deltas, and `movement_kind`.             |
+| `topology_seed`               | int       | —      | Seed for topology generation.                                      |
+| `observation_seed`            | int       | —      | Seed for observation ID assignment.                                |
+| `observation_vocabulary_size` | int       | —      | Cardinality of the observation-ID domain `{0, …, N−1}`.            |
+| `split`                       | str       | —      | `"train"`, `"val"`, or `"test"`.                                   |
+
+## Invariants
+
+- `graph_state_count` = W×H for square/rectangle; ≤ W×H for hex.
+- `next_state[i, a]` ∈ {−1} ∪ {0, …, S−1}; −1 indicates an invalid move.
+- `action_valid[i, a]` == True iff `next_state[i, a] != -1`.
+- Every coordinate in `state_to_row_col` satisfies `0 ≤ r < extent[0]`, `0 ≤ c < extent[1]`.
+- `observation_id` values are drawn from `{0, …, observation_vocabulary_size-1}`.
+- `state_to_row_col` is invertible (no two states share the same row/col).
+
+## Build configuration
+
+| Preset          | Type      | Grid shape(s)                      |
+| --------------- | --------- | ---------------------------------- |
+| `tem-square`    | square    | 16 grids, widths [8, 9, 10, 11]    |
+| `tem-rectangle` | rectangle | 16 grids, mixed widths and heights |
+| `tem-hex`       | hex       | 16 grids, widths [5, 6, 7]         |
+| `small`         | square    | 4 grids, widths [8, 9]             |
+| `big-square`    | square    | 1 grid, width 30                   |
+
+Parameters: `--preset`, `--version`, `--n-train`, `--n-val`, `--n-test`,
+`--observation-vocabulary-size`, `--height`, `--width`, `--widths`, `--n-sensory-instances`,
+`--topology-seed`, `--raw-root`, `--interim-root`, `--force`.
+
+Seeding: a single `--topology-seed` is expanded per layout using
+`numpy.random.SeedSequence` split streams for topology shape and sensory
+assignment.
+
+## CLI
+
+| Command    | Description                                            |
+| ---------- | ------------------------------------------------------ |
+| `build`    | Produce a complete openfield layout dataset.           |
+| `validate` | Validate manifest, NPZ files, and dataset constraints. |
+| `inspect`  | Print a human-readable manifest summary.               |
+
+Usage:
+
+```bash
+python build-openfield.py build --preset small
+python build-openfield.py validate data/interim/openfield/small/v1
+python build-openfield.py inspect data/interim/openfield/small/v1
+```
+
+## Manifest
+
+Root file: `manifest.json`. Dataset class: `layout_dataset`.
+Channels: (none — per-layout NPZ files). See `spec-data-contracts.md` §4.5
+for the full manifest field table.

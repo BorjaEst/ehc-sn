@@ -38,5 +38,6 @@ Entorhinal-Hippocampal Circuit (EHP) Spatial Navigation library.
 ## Theory References
 
 - [EHP Theory Foundations](ehp-theory-foundations.md)
+- [Memory-Mediated Reasoning](memory-mediated-reasoning.md)
 - [Notation Map](notation-map.md)
 - [PFC Working Memory Theory](pfc-working-memory-theory.md)

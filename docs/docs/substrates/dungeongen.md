@@ -1,4 +1,4 @@
-# dungeongen Shared Substrate
+# dungeongen Layout Dataset
 
 ## Identity
 
@@ -11,98 +11,136 @@
 | CLI script     | `scripts/data-gen/build-dungeongen.py`           |
 | Builder module | `ehc_sn.data.substrate.dungeongen`               |
 | Output paths   | `data/interim/dungeongen/<preset>/v<version>/`   |
-| Dataset class  | `shared_substrate` or `layout_dataset`           |
+| Dataset class  | `layout_dataset`                                 |
 
-## Description
+## Purpose and ownership
 
-The dungeongen substrate generates procedurally varied 2-D grid topologies
-using the local dungeongen library. Each sample is a variable-size grid
-with wall/passable cells, room regions, and a largest-4-connected-component
-mask. The substrate assigns random observation IDs and structural landmarks
-to each passable cell.
+Dungeongen generates procedurally varied 2-D grid topologies with walls,
+passable cells, room regions, and random sensory assignment. Each layout is
+a `SpatialLayout` record — a compact graph-indexed representation of
+traversable states. The exported state set is exactly the largest
+4-connected component of passable cells.
 
-Dungeongen is the canonical substrate for dungeon-navigation tasks
-(dungeon, arena, routebind). It is purely structural — no trajectory,
-episode, or replay data lives here.
+Dungeongen produces spatial layouts only. It does not produce task queries,
+trajectories, targets, episodes, or semantic-transition graphs.
 
-## Channels
+## Semantic model
 
-| Channel        | Dtype | Shape  | Description                                      |
-| -------------- | ----- | ------ | ------------------------------------------------ |
-| `topology`     | bool  | (H, W) | Passable cells (`True`) vs walls (`False`).      |
-| `observations` | int32 | (H, W) | Unique observation ID per passable cell.         |
-| `mask_valid`   | bool  | (H, W) | Largest 4-connected component of `topology`.     |
-| `regions`      | int32 | (H, W) | Room/region ID per cell (`-1` for walls).        |
-| `landmarks`    | int32 | (H, W) | Structural landmark IDs (binary classification). |
+### Geometry
 
-All spatial channels are padded to a uniform `(H, W)` per substrate version.
-See `ehc_sn.data.substrate.grid2d.validate_grid2d_sample` for the per-sample
-contract.
+Each generated dungeon is a rectangular grid with wall and passable cells.
+The builder may use padded dense intermediates internally; padding does not
+appear as compact graph states in the exported `SpatialLayout`.
 
-## Pipeline Stages
+Two distinct spatial domains:
 
-| Stage                 | Command                                   | Description                                     |
-| --------------------- | ----------------------------------------- | ----------------------------------------------- |
-| `generate-topology`   | `build-dungeongen.py generate-topology`   | Ensure raw snapshot + normalize to interim NPZ. |
-| `materialize-layouts` | `build-dungeongen.py materialize-layouts` | Build versioned layout dataset root.            |
-| `validate`            | `build-dungeongen.py validate`            | Validate manifest and channel contracts.        |
-| `build-all`           | `build-dungeongen.py build-all`           | Run generate-topology → materialize-layouts.    |
+| Quantity                        | Key                   | Description                                          |
+| ------------------------------- | --------------------- | ---------------------------------------------------- |
+| Natural extent                  | `extent` (per layout) | Raster bounds `(H_i, W_i)` of the generated dungeon. |
+| Compact traversable-state count | `graph_state_count`   | Number of passable cells (walls excluded).           |
 
-The raw stage (`ensure_raw_snapshot`) creates a deterministic tar-sharded
-snapshot in `data/raw/dungeongen`. The interim stage (`prepare_interim`)
-normalizes topologies into per-split NPZ files in `data/interim/dungeongen`.
-The materialize stage pads topologies to uniform shape, assigns observations
-and landmarks, and writes the versioned layout dataset.
+Positions outside a dungeon's natural extent are padding and have no
+compact graph representation.
 
-## Default Parameters
+### Observation assignment
 
-| Parameter                       | Default | Description                               |
-| ------------------------------- | ------- | ----------------------------------------- |
-| `--version`                     | 1       | Substrate version integer.                |
-| `--preset`                      | default | Named source preset.                      |
-| `--n-train`                     | 250     | Training samples.                         |
-| `--n-val`                       | 10      | Validation samples.                       |
-| `--n-test`                      | 10      | Test samples.                             |
-| `--height`                      | (infer) | Target grid height (inferred if omitted). |
-| `--width`                       | (infer) | Target grid width (inferred if omitted).  |
-| `--s-size` (`--n-observations`) | 45      | Distinct observation IDs to assign.       |
-| `--topology-seed`               | 42      | Base seed for topology generation.        |
-| `--n-sensory-instances`         | 1       | Sensory realizations per topology.        |
+Every traversable cell receives an observation ID from `{0, …, s_size-1}`.
+IDs may repeat — there are typically more traversable cells than distinct
+IDs. Every traversable cell is an observation cell (no FREE cells in the
+compact representation).
 
-When `--height` and `--width` are omitted, the builder infers the required
-grid dimensions from the maximum topology shape in the selected interim
-slice.
+Walls have no compact state and therefore no `observation_id` entry.
+Dense consumers may represent absent positions with a sentinel during
+projection.
 
-## Usage Examples
+### Extent heterogeneity
 
-```bash
-# Quick local build (grid shape inferred)
-python scripts/data-gen/build-dungeongen.py build-all
+A dungeongen layout dataset may contain layouts with heterogeneous natural
+extents. Each layout's declared `extent` is authoritative for that layout.
+Downstream tasks read extent from each `SpatialLayout` record, not from
+the manifest-level convenience copy.
 
-# Custom version
-python scripts/data-gen/build-dungeongen.py build-all --version 2
+The manifest reports:
 
-# Explicit grid shape override
-python scripts/data-gen/build-dungeongen.py build-all \
-    --n-train 2000 --n-val 200 --n-test 200 \
-    --height 48 --width 48 --s-size 8 --topology-seed 7
-
-# Build an Arena corpus from dungeongen layouts
-python scripts/data-gen/build-arena.py materialize-task \
-    --layout-root data/interim/dungeongen/default/v1 --corpus dungeons
+```json
+{
+  "natural_extent_homogeneous": false,
+  "natural_height_range": [20, 32],
+  "natural_width_range": [20, 32]
+}
 ```
 
-## Downstream Consumers
+Dungeongen validation must not reject heterogeneous extents.
 
-| Task      | CLI Script                            | Parent Substrate Path                    |
-| --------- | ------------------------------------- | ---------------------------------------- |
-| dungeon   | `scripts/data-gen/build-dungeon.py`   | `data/interim/dungeongen/<preset>/v<N>/` |
-| arena     | `scripts/data-gen/build-arena.py`     | `data/interim/dungeongen/<preset>/v<N>/` |
-| routebind | `scripts/data-gen/build-routebind.py` | `data/interim/dungeongen/<preset>/v<N>/` |
+### Conversion
 
-## Related
+Conversion from raw dungeon geometry to `SpatialLayout` is governed by
+versioned policy fields (rasterization, component selection, door/corridor
+handling) recorded in the manifest `stage_params`.
 
-- [Spec: Data Contracts §3.1](../../spec/spec-data-contracts.md)
-- [Grid2D Channel Contracts](../../src/ehc_sn/data/substrate/grid2d.py)
-- [Dungeon Task Builder](../../scripts/data-gen/build-dungeon.py)
-- [Arena Task Builder](../../scripts/data-gen/build-arena.py)
+## Output artifact
+
+| Field                         | Type      | Shape  | Description                                                        |
+| ----------------------------- | --------- | ------ | ------------------------------------------------------------------ |
+| `layout_id`                   | str       | —      | Unique layout instance identifier.                                 |
+| `layout_family`               | str       | —      | Always `"dungeongen"`.                                             |
+| `topology_type`               | str       | —      | `"rectangle"` (4-neighbor rectangular grid).                       |
+| `topology_kind`               | str       | —      | Always `"grid2d"`.                                                 |
+| `graph_state_count`           | int       | —      | Number of traversable graph nodes.                                 |
+| `state_to_row_col`            | int32     | (S, 2) | (row, col) per graph state.                                        |
+| `observation_id`              | int32     | (S,)   | Observation ID per state (may repeat).                             |
+| `extent`                      | (int,int) | —      | Natural canvas dimensions `(height, width)`.                       |
+| `next_state`                  | int32     | (S, A) | Destination state index per action; -1 sentinel for invalid moves. |
+| `action_valid`                | bool      | (S, A) | True where `next_state != -1`.                                     |
+| `action_space`                | dict      | —      | `ActionSpace` with names, deltas, and `movement_kind`.             |
+| `topology_seed`               | int       | —      | Seed for topology generation.                                      |
+| `observation_seed`            | int       | —      | Seed for observation ID assignment.                                |
+| `observation_vocabulary_size` | int       | —      | Cardinality of the observation-ID domain `{0, …, N−1}`.            |
+| `split`                       | str       | —      | `"train"`, `"val"`, or `"test"`.                                   |
+
+## Invariants
+
+- The compact graph contains only the largest 4-connected component of passable cells.
+- `next_state[i, a]` ∈ {−1} ∪ {0, …, S−1}; −1 indicates an invalid move.
+- `action_valid[i, a]` == True iff `next_state[i, a] != -1`.
+- `observation_id` values are drawn from `{0, …, observation_vocabulary_size-1}`.
+- Walls are absent from `state_to_row_col`; they exist only as missing positions.
+- `extent` records the natural bounding box, not the internal storage canvas.
+
+## Build configuration
+
+| Parameter                       | Default | Description                         |
+| ------------------------------- | ------- | ----------------------------------- |
+| `--version`                     | 1       | Substrate version integer.          |
+| `--preset`                      | default | Named source preset.                |
+| `--n-train`                     | 250     | Training samples.                   |
+| `--n-val`                       | 10      | Validation samples.                 |
+| `--n-test`                      | 10      | Test samples.                       |
+| `--observation-vocabulary-size` | 45      | Distinct observation IDs to assign. |
+| `--topology-seed`               | 42      | Base seed for topology generation.  |
+| `--n-sensory-instances`         | 1       | Sensory realizations per topology.  |
+
+Seeding: a single `--topology-seed` is expanded per layout via
+`numpy.random.SeedSequence`.
+
+## CLI
+
+| Command    | Description                                   |
+| ---------- | --------------------------------------------- |
+| `build`    | Produce a complete dungeongen layout dataset. |
+| `validate` | Validate manifest and channel contracts.      |
+| `inspect`  | Print a human-readable manifest summary.      |
+
+Usage:
+
+```bash
+python build-dungeongen.py build
+python build-dungeongen.py validate data/interim/dungeongen/default/v1
+python build-dungeongen.py inspect data/interim/dungeongen/default/v1
+```
+
+## Manifest
+
+Root file: `manifest.json`. Dataset class: `layout_dataset`.
+Channels: (none — per-layout NPZ files). See `spec-data-contracts.md` §4.5
+for the full manifest field table.
