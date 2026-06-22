@@ -250,6 +250,7 @@ class SeqMazeValidationScorer:
         adj = _build_adjacency(
             batch["successor_indices"],
             batch["successor_mask"],
+            batch["obs_id_to_rank"],
             self._n_max,
         )
         goal_idx = batch["node_goal_flag"].to(torch.int64).argmax(dim=-1)
@@ -463,7 +464,9 @@ def build_seqmaze_step_score(
         goal_reached[b] = (prefix == goal_idx[b]).any()
 
     # all_transitions_valid
-    adj = _build_adjacency(successor_indices, successor_mask, n_max)
+    adj = _build_adjacency(
+        successor_indices, successor_mask, obs_id_to_rank, n_max
+    )
     all_transitions_valid = torch.ones(B, dtype=torch.bool, device=device)
     for b in range(B):
         t_len = int(pred_eos_pos[b].item())
@@ -542,26 +545,40 @@ def _extract_eos_position(
 
 # =============================================================================
 def _build_adjacency(
-    successor_indices: Tensor,  # (B, N, K)
+    successor_indices: Tensor,  # (B, N, K) — public observation IDs
     successor_mask: Tensor,  # (B, N, K)
+    obs_id_to_rank: Tensor,  # (B, N) — maps public obs ID → rank
     n_max: int,
 ) -> Tensor:
     """Build a dense (B, N, N) adjacency matrix from successor indices.
 
-    adj[b, i, j] = 1 if node j is a valid successor of node i.
+    ``successor_indices[b, i, k]`` contains the **public observation ID**
+    of the k-th successor of rank ``i``.  The matrix maps from ranks to
+    ranks: ``adj[b, i, j] = 1`` if rank ``j`` is a valid successor of
+    rank ``i``.
+
+    The public ID is converted to a rank via ``obs_id_to_rank``, with
+    out-of-range values clamped to ``n_max - 1`` and masked out.
     """
     B, N, K = successor_indices.shape
-    adj = torch.zeros(
-        B, N, n_max, dtype=torch.bool, device=successor_indices.device
+    device = successor_indices.device
+
+    # Convert public observation IDs to ranks via obs_id_to_rank.
+    # obs_id_to_rank[b, pub_id] = rank; clamp to valid range.
+    pub_ids = successor_indices  # (B, N, K)
+    pub_clamped = pub_ids.clamp(min=0, max=n_max - 1)  # (B, N, K)
+
+    # Gather ranks: rank_j = obs_id_to_rank[b, pub_clamped]
+    # Expand obs_id_to_rank for gather indexing
+    batch_idx = torch.arange(B, device=device).view(-1, 1, 1).expand(-1, N, K)
+    rank_indices = obs_id_to_rank[batch_idx, pub_clamped]  # (B, N, K)
+
+    adj = torch.zeros(B, N, n_max, dtype=torch.bool, device=device)
+    batch_arange = torch.arange(B, device=device).view(-1, 1, 1)
+    node_arange = torch.arange(N, device=device).view(1, -1, 1)
+    adj[batch_arange, node_arange, rank_indices.clamp(min=0, max=n_max - 1)] = (
+        successor_mask
     )
-    valid = successor_mask  # (B, N, K)
-    idx = successor_indices  # (B, N, K)
-    # Clamp indices to valid range to avoid scatter OOB
-    idx_clamped = idx.clamp(min=0, max=n_max - 1)
-    # Expand dims for scatter
-    batch_arange = torch.arange(B, device=idx.device).view(-1, 1, 1)
-    node_arange = torch.arange(N, device=idx.device).view(1, -1, 1)
-    adj[batch_arange, node_arange, idx_clamped] = valid
     return adj
 
 
@@ -571,6 +588,7 @@ def compute_seqmaze_score_report(
     targets: SeqMazeTargets,
     successor_indices: Tensor,  # (B, N, K)
     successor_mask: Tensor,  # (B, N, K)
+    obs_id_to_rank: Tensor,  # (B, N) — public obs ID → rank lookup
     goal_candidate_index: Tensor,  # (B, N) — one-hot or index; we take argmax
     eos_id: int,
     pad_id: int,
@@ -624,9 +642,9 @@ def compute_seqmaze_score_report(
     )  # (B,)
 
     # --- valid_transition_rate ---
-    # Build adjacency matrix
+    # Build adjacency matrix (rank-indexed)
     adj = _build_adjacency(
-        successor_indices, successor_mask, n_max
+        successor_indices, successor_mask, obs_id_to_rank, n_max
     )  # (B, N, N)
 
     # Extract prefix before first EOS from canonical prediction

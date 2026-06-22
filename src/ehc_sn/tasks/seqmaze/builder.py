@@ -3,7 +3,7 @@
 Owns seqmaze-specific task protocol validation and the builder that produces
 the seqmaze task corpus over a parent dagflow shared substrate.
 
-All structural channels (node_obs_id, node_candidate_index, start/goal flags,
+All structural channels (node_obs_id, successor_indices/mask, node_mask)
 successor indices/mask, node_mask) are read from the dagflow layout dataset.
 The task builder computes shortest paths and encodes task protocol labels
 (target_path, path_mask, path_length, edge_label, edge_mask).
@@ -37,6 +37,9 @@ TASK_FAMILY: Final[str] = "seqmaze"
 
 SEQMAZE_TASK_CHANNELS: Final[list[str]] = [
     "node_obs_id",
+    "node_rank",
+    "rank_to_obs_id",
+    "obs_id_to_rank",
     "node_candidate_index",
     "node_start_flag",
     "node_goal_flag",
@@ -51,9 +54,11 @@ SEQMAZE_TASK_CHANNELS: Final[list[str]] = [
 ]
 """All channels in the seqmaze task corpus.
 
-Structural channels (node_obs_id, node_candidate_index, start/goal flags,
-successor indices/mask, node_mask) are read from the parent dagflow
-shared substrate.  The task builder does not generate graph topology.
+Structural channels (node_obs_id, successor_indices/mask, node_mask) are
+read from the parent dagflow shared substrate.  ``node_candidate_index``,
+``node_start_flag``, ``node_goal_flag`` are derived from rank information
+in the substrate.  Source and sink are derived from the graph structure
+(in-degree / out-degree) rather than pre-annotated flags.
 
 Edge channels (edge_label, edge_mask) support the Phase 0 probe evaluation.
 Path channels (target_path, path_mask, path_length) support the v1
@@ -62,17 +67,20 @@ path-prediction task.
 
 _REQUIRED_PARENT_CHANNELS: tuple[str, ...] = (
     "node_obs_id",
-    "node_candidate_index",
-    "node_start_flag",
-    "node_goal_flag",
+    "node_rank",
     "successor_indices",
     "successor_mask",
     "node_mask",
+    "obs_id_to_rank",
+    "rank_to_obs_id",
 )
 """Channels the seqmaze task builder requires in the parent dagflow substrate."""
 
 SEQMAZE_TASK_CHANNEL_DTYPES: dict[str, np.dtype] = {
     "node_obs_id": np.dtype(np.int32),
+    "node_rank": np.dtype(np.int32),
+    "rank_to_obs_id": np.dtype(np.int32),
+    "obs_id_to_rank": np.dtype(np.int32),
     "node_candidate_index": np.dtype(np.int32),
     "node_start_flag": np.dtype(bool),
     "node_goal_flag": np.dtype(bool),
@@ -93,6 +101,11 @@ _SPLITS: tuple[str, ...] = ("train", "val", "test")
 # =============================================================================
 def validate_seqmaze_sample(data: dict[str, np.ndarray]) -> None:
     """Validate a seqmaze task corpus sample against the task channel schema.
+
+    In rank-indexed storage, row ``i`` corresponds to rank ``i``.
+    ``successor_indices[i, k]`` contains the **public observation ID** of
+    the k-th successor.  The validator maps public IDs back to ranks via
+    ``obs_id_to_rank`` to build adjacency in consistent rank space.
 
     Raises:
         ValueError: On any contract violation.
@@ -116,8 +129,6 @@ def validate_seqmaze_sample(data: dict[str, np.ndarray]) -> None:
     k_max = data["successor_indices"].shape[1]
     t_max = data["target_path"].shape[0]
 
-    if data["node_candidate_index"].shape[0] != n_max:
-        raise ValueError("node_candidate_index does not match N.")
     if data["successor_indices"].shape[0] != n_max:
         raise ValueError("successor_indices first dim does not match N.")
     if data["successor_mask"].shape != (n_max, k_max):
@@ -126,23 +137,41 @@ def validate_seqmaze_sample(data: dict[str, np.ndarray]) -> None:
         raise ValueError("node_mask does not match N.")
     if data["target_path"].shape[0] != t_max:
         raise ValueError("target_path length mismatch.")
+    if data["node_candidate_index"].shape[0] != n_max:
+        raise ValueError("node_candidate_index does not match N.")
+    if data["node_start_flag"].shape[0] != n_max:
+        raise ValueError("node_start_flag does not match N.")
+    if data["node_goal_flag"].shape[0] != n_max:
+        raise ValueError("node_goal_flag does not match N.")
 
-    # Check unique shortest path
+    # Build rank-space adjacency using obs_id_to_rank.
+    # With rank-indexed storage, row i = rank i.
     n_actual = int(data["node_mask"].sum())
+    o2r = data["obs_id_to_rank"]
     adjacency = [[] for _ in range(n_actual)]
-    for i in range(n_actual):
+    for r in range(n_actual):
         for k in range(k_max):
-            if data["successor_mask"][i, k]:
-                succ = int(data["successor_indices"][i, k])
-                if succ < n_actual:
-                    adjacency[i].append(succ)
+            if data["successor_mask"][r, k]:
+                succ_pub = int(data["successor_indices"][r, k])
+                if 0 <= succ_pub < n_actual:
+                    succ_rank = int(o2r[succ_pub])
+                    adjacency[r].append(succ_rank)
 
-    start_idx = int(data["node_start_flag"].argmax())
-    goal_idx = int(data["node_goal_flag"].argmax())
+    # Derive source (rank 0) and sink (rank n_actual-1) from graph structure.
+    in_deg = [0] * n_actual
+    out_deg = [0] * n_actual
+    for u in range(n_actual):
+        for v in adjacency[u]:
+            out_deg[u] += 1
+            in_deg[v] += 1
+    start_idx = next(i for i, d in enumerate(in_deg) if d == 0)
+    goal_idx = next(i for i, d in enumerate(out_deg) if d == 0)
+
     sp = bfs_shortest_path(adjacency, start_idx, goal_idx)
 
     if not sp:
         raise ValueError("No path exists from start to goal.")
+    # target_path is stored in rank-space (row indices equal rank indices)
     if sp != list(data["target_path"][: len(sp)]):
         raise ValueError("Target path does not match BFS shortest path.")
 
@@ -153,42 +182,48 @@ def _encode_path_labels(
     n_max: int,
     t_max: int,
     adjacency: list[list[int]],
-    start_idx: int,
-    goal_idx: int,
-    perm: list[int],
 ) -> dict[str, np.ndarray]:
     """Compute path and edge labels from graph structure.
+
+    With rank-indexed storage, row ``i`` = rank ``i``.  Adjacency is in
+    rank-space (successor ranks), and the target path is stored as rank
+    indices.
 
     Args:
         n_actual: Number of actual (non-padded) nodes.
         n_max: Maximum padded N.
         t_max: Maximum path length T.
-        adjacency: Adjacency list for actual nodes.
-        start_idx: Original start node index.
-        goal_idx: Original goal node index.
-        perm: Permutation mapping original → permuted indices.
+        adjacency: Adjacency list for actual nodes in **rank space**.
 
     Returns:
         Dict with target_path, path_mask, path_length, edge_label, edge_mask.
     """
-    sp = bfs_shortest_path(adjacency, start_idx, goal_idx)
+    # Source is the unique node with in-degree 0; sink has out-degree 0.
+    in_deg = [0] * n_actual
+    out_deg = [0] * n_actual
+    for u in range(n_actual):
+        for v in adjacency[u]:
+            out_deg[u] += 1
+            in_deg[v] += 1
+    start_rank = next(i for i, d in enumerate(in_deg) if d == 0)
+    goal_rank = next(i for i, d in enumerate(out_deg) if d == 0)
+
+    sp = bfs_shortest_path(adjacency, start_rank, goal_rank)
     if not sp:
         raise RuntimeError("No path from start to goal.")
 
-    target_path_raw = [perm[node] for node in sp]
+    # Path is already in rank space — no obs_to_row conversion needed.
+    target_path_raw = sp
 
-    # Edge label matrix (for probe): edge_label[i,j] = 1 if j in adj[i]
+    # Edge label matrix: edge_label[r, s] = 1 if s in adj[r] (in rank space)
     edge_label = np.zeros((n_max, n_max), dtype=np.int32)
     edge_mask = np.zeros((n_max, n_max), dtype=bool)
 
-    for orig_i in range(n_actual):
-        pi = perm[orig_i]
-        for succ_orig in adjacency[orig_i]:
-            pj = perm[succ_orig]
-            edge_label[pi, pj] = 1
-        for j_orig in range(n_actual):
-            pj = perm[j_orig]
-            edge_mask[pi, pj] = True
+    for r in range(n_actual):
+        for sr in adjacency[r]:
+            edge_label[r, sr] = 1
+        for j in range(n_actual):
+            edge_mask[r, j] = True
 
     # Pad target path to t_max
     target_path = np.full(
@@ -264,7 +299,7 @@ def validate_seqmaze_root(root: Path) -> dict:
                 )
 
             # Validate per-channel dimensions
-            if ch == "node_obs_id" or ch == "node_candidate_index":
+            if ch == "node_obs_id":
                 if arrays[ch].shape[1] != n_max:
                     raise ValueError(
                         f"Channel '{ch}' has N={arrays[ch].shape[1]}, "
@@ -378,7 +413,9 @@ def build_seqmaze_task_corpus(
         "layout_version": layout_manifest["version"],
     }
     canonical_layout = (
-        f"data/interim/dagflow/default/" f"v{layout_manifest['version']}"
+        f"data/interim/dagflow/"
+        f"{layout_manifest.get('preset', 'balanced-default')}/"
+        f"v{layout_manifest['version']}"
     )
 
     with staging_root(version_root) as tmp:
@@ -396,39 +433,59 @@ def build_seqmaze_task_corpus(
             samples = []
             for entry, substrate_sample in entry_sample_pairs[:n]:
                 n_actual = int(substrate_sample["node_mask"].sum())
-                start_idx = int(substrate_sample["node_start_flag"].argmax())
-                goal_idx = int(substrate_sample["node_goal_flag"].argmax())
+                o2r = substrate_sample["obs_id_to_rank"]  # (n_actual,) int32
+                k_max = substrate_sample["successor_indices"].shape[-1]
 
-                # Reconstruct adjacency to compute shortest path
+                # Build rank-space adjacency: map public observation IDs
+                # back to ranks using obs_id_to_rank.  With rank-indexed
+                # storage, row r = rank r.
                 adjacency = [[] for _ in range(n_actual)]
-                for i in range(n_actual):
-                    for k in range(max_out_degree):
-                        if substrate_sample["successor_mask"][i, k]:
-                            succ = int(
-                                substrate_sample["successor_indices"][i, k]
+                for r in range(n_actual):
+                    for k in range(k_max):
+                        if substrate_sample["successor_mask"][r, k]:
+                            succ_pub = int(
+                                substrate_sample["successor_indices"][r, k]
                             )
-                            if succ < n_actual:
-                                adjacency[i].append(succ)
-
-                # Reconstruct the permuted index mapping
-                # In the substrate, node_candidate_index == permuted position
-                # for each actual node; we need original->permuted mapping.
-                perm = [
-                    int(substrate_sample["node_candidate_index"][i])
-                    for i in range(n_actual)
-                ]
+                            if 0 <= succ_pub < n_actual:
+                                succ_rank = int(o2r[succ_pub])
+                                adjacency[r].append(succ_rank)
 
                 path_labels = _encode_path_labels(
                     n_actual=n_actual,
                     n_max=n_max,
                     t_max=t_max,
                     adjacency=adjacency,
-                    start_idx=start_idx,
-                    goal_idx=goal_idx,
-                    perm=perm,
                 )
 
-                sample = {**substrate_sample, **path_labels}
+                # Derive start/goal flags from rank 0 and rank n_actual-1
+                node_start_flag = np.zeros(n_max, dtype=bool)
+                node_goal_flag = np.zeros(n_max, dtype=bool)
+                node_start_flag[0] = True
+                node_goal_flag[n_actual - 1] = True
+
+                # Node candidate index: row index = rank index
+                node_candidate_index = np.arange(n_max, dtype=np.int32)
+
+                # Pad rank lookup tables to n_max for uniform shape stacking
+                sentinel = n_actual
+                padded_o2r = np.full(n_max, sentinel, dtype=np.int32)
+                padded_r2o = np.full(n_max, sentinel, dtype=np.int32)
+                padded_o2r[:n_actual] = substrate_sample["obs_id_to_rank"]
+                padded_r2o[:n_actual] = substrate_sample["rank_to_obs_id"]
+
+                sample = {
+                    "node_obs_id": substrate_sample["node_obs_id"],
+                    "node_rank": substrate_sample["node_rank"],
+                    "rank_to_obs_id": padded_r2o,
+                    "obs_id_to_rank": padded_o2r,
+                    "successor_indices": substrate_sample["successor_indices"],
+                    "successor_mask": substrate_sample["successor_mask"],
+                    "node_mask": substrate_sample["node_mask"],
+                    **path_labels,
+                    "node_candidate_index": node_candidate_index,
+                    "node_start_flag": node_start_flag,
+                    "node_goal_flag": node_goal_flag,
+                }
                 samples.append(sample)
 
             entries = write_split(
@@ -457,6 +514,7 @@ def build_seqmaze_task_corpus(
             dataset_class="task_corpus",
             family=TASK_FAMILY,
             version=version,
+            manifest_schema_version=1,
             channels=SEQMAZE_TASK_CHANNELS,
             topology_kind="dag",
             n_states=n_max,

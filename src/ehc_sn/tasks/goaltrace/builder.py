@@ -78,11 +78,11 @@ GOALTRACE_TASK_CHANNELS: Final[list[str]] = list(GOALTRACE_CORPUS_CHANNELS)
 
 _REQUIRED_PARENT_CHANNELS: tuple[str, ...] = (
     "node_obs_id",
-    "node_start_flag",
-    "node_goal_flag",
     "successor_indices",
     "successor_mask",
     "node_mask",
+    "obs_id_to_rank",
+    "rank_to_obs_id",
 )
 """Channels the goaltrace task builder requires in the parent dagflow substrate."""
 
@@ -324,16 +324,16 @@ def _assign_goaltrace_sample(
     Samples a (current, goal) pair, relational weights, computes the oracle
     path, and encodes the target field.
 
-    The dagflow substrate stores nodes in permuted (final) order with
-    ``node_start_flag`` and ``node_goal_flag`` marking the start and goal
-    positions.  This function samples a (current, goal) pair **independent of
-    the substrate's start/goal** — every goaltrace sample redefines these.
+    The dagflow substrate stores nodes in **rank order** (row = rank).
+    ``obs_id_to_rank`` provides the bijection from public observation ID
+    to rank, used for weight extraction targeting the current node's
+    outgoing edges.
 
     Args:
         substrate_sample: Dagflow substrate sample with structural channels.
-            Nodes are already in permuted (final) position order.
+            Nodes are in rank order.
         n_nodes: Number of actual nodes.
-        adjacency: Adjacency list for actual nodes (original index space).
+        adjacency: Adjacency list for actual nodes (rank space).
         rng: Seeded random generator.
         semantics: Oracle semantics string.
         field_decay: Field decay factor gamma.
@@ -343,27 +343,15 @@ def _assign_goaltrace_sample(
     Returns:
         Sample dict with goaltrace task channels.
     """
-    # Build the permuted-index mapping: original_idx -> permuted_idx
-    # The dagflow substrate stores nodes in permuted order, so the
-    # i-th actual (masked) node IS the permuted position.
-    # We need to find all actual nodes and their observation IDs.
-    node_mask_np = substrate_sample["node_mask"]
-    obs_ids = substrate_sample["node_obs_id"]
-    actual_indices = np.where(node_mask_np)[
-        0
-    ]  # permuted positions of actual nodes
-
-    # Convert adjacency (original indices) to permuted indices
-    perm_to_orig = {pi: oi for oi, pi in enumerate(actual_indices)}
-    orig_to_perm = {oi: pi for oi, pi in enumerate(actual_indices)}
+    actual_indices = list(range(n_nodes))  # row = rank
 
     # Sample (current, goal) pair — must have a valid path between them
     while True:
-        current_orig = int(rng.integers(0, n_nodes))
-        goal_orig = int(rng.integers(0, n_nodes))
-        if current_orig == goal_orig:
+        current_rank = int(rng.integers(0, n_nodes))
+        goal_rank = int(rng.integers(0, n_nodes))
+        if current_rank == goal_rank:
             continue
-        sp = bfs_shortest_path(adjacency, current_orig, goal_orig)
+        sp = bfs_shortest_path(adjacency, current_rank, goal_rank)
         if sp:
             break
 
@@ -371,54 +359,53 @@ def _assign_goaltrace_sample(
     full_weights = _sample_weight_vector(n_nodes, rng)
     masked = _apply_adjacency_mask(full_weights, adjacency)
 
-    # Select optimal path (in original index space)
+    # Select optimal path (in rank space)
     path_orig = _select_optimal_path(
-        adjacency, masked, current_orig, goal_orig, semantics, step_penalty
+        adjacency, masked, current_rank, goal_rank, semantics, step_penalty
     )
 
-    # Encode target field (in original index space)
+    # Encode target field (in rank space)
     target_field_orig = _encode_target_field(
-        path_orig, n_nodes, field_decay, current_orig
+        path_orig, n_nodes, field_decay, current_rank
     )
 
-    # Build padded output arrays in permuted (final) position order
+    # Build padded output arrays in rank order (row = rank)
     current_flag = np.zeros(num_observations, dtype=bool)
     goal_flag = np.zeros(num_observations, dtype=bool)
     node_mask_out = np.zeros(num_observations, dtype=bool)
     weight = np.zeros(num_observations, dtype=np.float32)
     padded_target = np.zeros(num_observations, dtype=np.float32)
+    o2r = substrate_sample["obs_id_to_rank"]
 
-    for orig_i in range(n_nodes):
-        pi = orig_to_perm[orig_i]
-        current_flag[pi] = orig_i == current_orig
-        goal_flag[pi] = orig_i == goal_orig
-        node_mask_out[pi] = True
-        # Only expose edge weights to the model; non-edges → 0.0 (unavailable).
-        if orig_i in adjacency[current_orig]:
-            weight[pi] = full_weights[current_orig, orig_i]
+    for r in range(n_nodes):
+        current_flag[r] = r == current_rank
+        goal_flag[r] = r == goal_rank
+        node_mask_out[r] = True
+        # Only expose edge weights to the model; non-edges → 0.0.
+        if r in adjacency[current_rank]:
+            weight[r] = full_weights[current_rank, r]
         else:
-            weight[pi] = 0.0
-        padded_target[pi] = float(target_field_orig[orig_i])
+            weight[r] = 0.0
+        padded_target[r] = float(target_field_orig[r])
 
-    # Pad observation_id: real nodes get ids 0..n_nodes-1, padding gets n_nodes.
-    PAD_OBS_ID = n_nodes  # sentinel outside valid observation ID range
+    # Pad observation_id: real nodes get ids from rank_to_obs_id, padding gets n_nodes.
+    PAD_OBS_ID = n_nodes
     padded_obs_ids = np.full(num_observations, PAD_OBS_ID, dtype=np.int32)
-    actual_obs = np.array(obs_ids[:n_nodes], dtype=np.int32)
-    padded_obs_ids[: len(actual_obs)] = actual_obs
+    r2o = substrate_sample["rank_to_obs_id"]
+    for r in range(n_nodes):
+        padded_obs_ids[r] = int(r2o[r])
 
     # Forward topology from parent substrate, padded to num_observations
     K = substrate_sample["successor_indices"].shape[-1]
     raw_succ_idx = substrate_sample["successor_indices"]  # (n_actual, K)
     raw_succ_mask = substrate_sample["successor_mask"]  # (n_actual, K)
     if raw_succ_idx.ndim == 2:
-        # Single-graph substrate: shape (n_actual, K), pad rows to N
         padded_succ_idx = np.zeros((num_observations, K), dtype=np.int32)
         padded_succ_mask = np.zeros((num_observations, K), dtype=bool)
         n_actual = raw_succ_idx.shape[0]
         padded_succ_idx[:n_actual, :] = raw_succ_idx
         padded_succ_mask[:n_actual, :] = raw_succ_mask
     else:
-        # Multi-sample: keep as-is (already batched)
         padded_succ_idx = raw_succ_idx
         padded_succ_mask = raw_succ_mask
 
@@ -838,6 +825,7 @@ def build_goaltrace_task_corpus(
     corpus: str = "default",
     n_observations: int = 45,
     num_graphs: int = 1,
+    dagflow_graph_id: str | None = None,
     oracle_semantics: str = "reliability",
     field_decay: float = 0.8,
     preference_step_penalty: float = 0.0,
@@ -877,6 +865,10 @@ def build_goaltrace_task_corpus(
         n_observations: Maximum padded node count N.
         num_graphs: Number of DAGs to sample from the layout pool.  Must be
             at most the number of available layouts per split.
+        dagflow_graph_id: Stable artifact ID within *layout_root* identifying
+            a single graph.  When provided, overrides ``num_graphs`` and
+            selects exactly one graph.  Pass ``entry.id`` from a dagflow index.
+            When not provided, falls back to ``num_graphs`` (deprecated).
         oracle_semantics: Weight semantics for path selection.
             One of ``"reliability"``, ``"linear_cost"``, ``"preference"``.
         field_decay: Decay factor gamma in ``(0, 1)``.
@@ -971,7 +963,7 @@ def build_goaltrace_task_corpus(
 
     # Derive layout dataset canonical path for manifest
     canonical_layout = (
-        f"data/interim/dagflow/{layout_manifest.get('preset', 'default')}/"
+        f"data/interim/dagflow/{layout_manifest.get('preset', 'balanced-default')}/"
         f"v{layout_manifest['version']}"
     )
 
@@ -1057,14 +1049,16 @@ def build_goaltrace_task_corpus(
                 obs_ids = substrate_sample["node_obs_id"][:n_actual].astype(
                     np.int32
                 )
+                # Build reverse map: public obs ID → storage row.
+                pub_to_row = {int(obs_ids[i]): i for i in range(n_actual)}
                 for i in range(n_actual):
                     for k in range(k_max):
                         if substrate_sample["successor_mask"][i, k]:
-                            succ = int(
+                            succ_pub = int(
                                 substrate_sample["successor_indices"][i, k]
                             )
-                            if succ < n_actual:
-                                adjacency[i].append(succ)
+                            if succ_pub in pub_to_row:
+                                adjacency[i].append(pub_to_row[succ_pub])
                 layout_graphs.append(
                     {
                         "sample": substrate_sample,
@@ -1202,8 +1196,10 @@ def build_goaltrace_task_corpus(
 
         write_index_at_root(all_entries, tmp)
 
-        write_manifest(
-            tmp,
+        # Build manifest: when an explicit dagflow_graph_id was provided,
+        # record role-addressed parents (v2); otherwise fall back to flat
+        # single-parent format for backward compatibility.
+        manifest_kwargs: dict[str, Any] = dict(
             dataset_class="task_corpus",
             family=TASK_FAMILY,
             version=version,
@@ -1220,14 +1216,36 @@ def build_goaltrace_task_corpus(
             corpus=corpus,
             task_schema_version=1,
             task_protocol_version=1,
-            parent_substrate=canonical_layout,
-            parent_family="dagflow",
-            parent_version=layout_manifest["version"],
             n_observations=n_observations,
             num_graphs=num_graphs,
             oracle_semantics=oracle_semantics,
             field_decay=field_decay,
         )
+        if dagflow_graph_id is not None:
+            # Look up the graph entry for its content_digest
+            from ehc_sn.data.substrate.reader import find_artifact_by_id
+
+            graph_entry, _graph_sample = find_artifact_by_id(
+                layout_root, dagflow_graph_id
+            )
+            manifest_kwargs["manifest_schema_version"] = 2
+            manifest_kwargs["parents"] = {
+                "semantic_graph": {
+                    "family": "dagflow",
+                    "root": str(layout_root),
+                    "version": layout_manifest["version"],
+                    "artifact_id": dagflow_graph_id,
+                    "split": graph_entry.split,
+                    "content_digest": graph_entry.content_digest,
+                },
+            }
+        else:
+            # v1 flat fields (backward compat)
+            manifest_kwargs["parent_substrate"] = canonical_layout
+            manifest_kwargs["parent_family"] = "dagflow"
+            manifest_kwargs["parent_version"] = layout_manifest["version"]
+
+        write_manifest(tmp, **manifest_kwargs)
 
 
 __all__ = [

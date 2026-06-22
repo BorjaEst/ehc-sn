@@ -14,12 +14,23 @@ Canonical task families defined by their semantic domain:
   task owns digit-prediction evaluation and replay capability.
 - :mod:`ehc_sn.tasks.goaltrace` — goal-conditioned prospective field prediction;
   task owns field contracts, evaluation, and oracle-based corpus builder.
+- :mod:`ehc_sn.tasks.routebind` — goal-conditioned spatial prospective-field
+  prediction; task owns two-field output contracts, product-state oracle, and
+  dual-substrate corpus builder.
 
 Execution-binding capabilities (replay, online control, deliberation) live in
 ``<task>.capabilities.*`` sub-packages when implemented for that task family.
 """
 
-from ehc_sn.tasks import arena, countwalk, dungeon, goaltrace, mazehard, seqmaze
+from ehc_sn.tasks import (
+    arena,
+    countwalk,
+    dungeon,
+    goaltrace,
+    mazehard,
+    routebind,
+    seqmaze,
+)
 
 __all__ = [
     "arena",
@@ -27,5 +38,6 @@ __all__ = [
     "dungeon",
     "goaltrace",
     "mazehard",
+    "routebind",
     "seqmaze",
 ]
