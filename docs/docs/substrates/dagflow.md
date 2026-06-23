@@ -104,8 +104,14 @@ included in learning inputs whose objective is to infer public graph structure.
 | ----------- | --------- | ---------------- | -------------- | -------------- | ---------------------------------------------- |
 | `small`     | 8         | 3                | 11             | `balanced`     | Smoke tests.                                   |
 | `routing`   | 45        | 4                | 80             | `local`        | Canonical routing profile, moderate branching. |
+| `sparse`    | 45        | 4                | 60             | `local`        | Sparse routing: 44 backbone + 16 extra edges.  |
 | `branching` | 45        | 4                | 139            | `local`        | High shortcut density, multi-path stress.      |
 | `chain16`   | 16        | 3                | 18             | `local`        | Long composition, limited shortcuts.           |
+
+> **Edge count convention**: `target_edges` is the **total** number of directed edges,
+> including the mandatory Hamiltonian backbone of `n_nodes − 1` edges. Extra shortcut
+> edges = `target_edges − (n_nodes − 1)`. For example, `sparse` with
+> `target_edges=60`, n=45 has 44 backbone + 16 extra (~1.7% extra-edge density).
 
 Edge density for `--extra-edge-density` override:
 

@@ -314,10 +314,39 @@ ambiguous `--canvas-height`/`--canvas-width` aliases.
 
 ### Routebind presets
 
-| Preset   | Purpose                                                 |
-| -------- | ------------------------------------------------------- |
-| smoke    | Accept-all; one bucket covering all lengths.            |
-| balanced | Broad physical (2-80) and semantic (2-10) distribution. |
+Each preset defines a target empirical distribution over oracle-solution
+properties — physical route length (number of positions) and accepted waypoint
+count. The builder uses deficit-driven joint-bucket selection to match
+target proportions within tolerance.
+
+Conventions:
+
+- `physical_move_count = len(physical\_route) − 1` (number of physical steps).
+- `waypoint_count = len(waypoints)` (number of accepted observation events,
+  including start and goal).
+- Bins below use physical **route positions** (= `move_count + 1`) to match
+  the profile API. To convert: subtract 1 to get move-count ranges.
+
+| Preset          | Physical bins                                                | Semantic bins                                    | Hard limits      | Attempt budget | Purpose                                      |
+| --------------- | ------------------------------------------------------------ | ------------------------------------------------ | ---------------- | -------------- | -------------------------------------------- |
+| `smoke`         | 2–150 (100%)                                                 | 2–20 (100%)                                      | max 150 / max 20 | 10             | Tests and calibration runs.                  |
+| `balanced`      | 2–7 (10%), 8–15 (20%), 16–30 (35%), 31–50 (25%), 51–80 (10%) | 2 (15%), 3 (25%), 4 (25%), 5–6 (25%), 7–10 (10%) | max 80 / max 10  | 10             | Canonical training distribution.             |
+| `long-spatial`  | 2–25 (15%), 26–50 (35%), 51–80 (35%), 81–120 (15%)           | 2–3 (45%), 4–5 (40%), 6–10 (15%)                 | max 120 / max 10 | 50             | Emphasize physical planning.                 |
+| `long-semantic` | 2–20 (20%), 21–50 (45%), 51–80 (25%), 81–120 (10%)           | 4–5 (20%), 6–8 (50%), 9–12 (25%), 13–15 (5%)     | max 120 / max 15 | 50             | Emphasize DAG composition.                   |
+| `joint-hard`    | 20–40 (20%), 41–70 (40%), 71–100 (30%), 101–140 (10%)        | 4–5 (15%), 6–8 (45%), 9–12 (30%), 13–15 (10%)    | max 140 / max 15 | 200            | Jointly long spatial and semantic solutions. |
+
+#### Preset-parent recommendations
+
+Not every preset is feasible under every parent topology/DAG pair.
+The table below documents recommended pairings:
+
+| Routebind preset | Recommended DAG        | Recommended topology                                | Notes                                                                |
+| ---------------- | ---------------------- | --------------------------------------------------- | -------------------------------------------------------------------- |
+| `smoke`          | `small`                | `openfield small`                                   | Fast generation.                                                     |
+| `balanced`       | `routing`              | `openfield big-square` or `dungeongen routebind-30` | Canonical training pairing.                                          |
+| `long-spatial`   | `sparse`               | `dungeongen routebind-30`                           | Sparse DAG forces longer physical detours.                           |
+| `long-semantic`  | `chain16` or `routing` | `openfield big-square`                              | Chain DAG for many waypoints; openfield for large traversable space. |
+| `joint-hard`     | `chain16` or `sparse`  | `dungeongen routebind-30`                           | May need large attempt budget (200+).                                |
 
 Parameters: --preset, --topology-root, --dagflow-root,
 --dagflow-graph-id, --corpus, --version, --field-decay-spatial,

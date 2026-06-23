@@ -362,6 +362,84 @@ ROUTEBIND_PRESETS: dict[str, RoutebindSamplingProfile] = {
             "training corpus."
         ),
     ),
+    "long-spatial": RoutebindSamplingProfile(
+        physical_length_bins=[
+            (2, 25),
+            (26, 50),
+            (51, 80),
+            (81, 120),
+        ],
+        physical_length_targets=[0.15, 0.35, 0.35, 0.15],
+        semantic_length_bins=[
+            (2, 3),
+            (4, 5),
+            (6, 10),
+        ],
+        semantic_length_targets=[0.45, 0.40, 0.15],
+        hard_min_route_length=2,
+        hard_max_route_length=120,
+        tolerances={
+            "*": (0.0, 1.0),
+        },
+        attempt_budget=50,
+        description=(
+            "Emphasize physical planning; moderate semantic complexity.  "
+            "Recommended with dungeongen topology and a sparse DAG."
+        ),
+    ),
+    "long-semantic": RoutebindSamplingProfile(
+        physical_length_bins=[
+            (2, 20),
+            (21, 50),
+            (51, 80),
+            (81, 120),
+        ],
+        physical_length_targets=[0.20, 0.45, 0.25, 0.10],
+        semantic_length_bins=[
+            (4, 5),
+            (6, 8),
+            (9, 12),
+            (13, 15),
+        ],
+        semantic_length_targets=[0.20, 0.50, 0.25, 0.05],
+        hard_min_route_length=2,
+        hard_max_route_length=120,
+        tolerances={
+            "*": (0.0, 1.0),
+        },
+        attempt_budget=50,
+        description=(
+            "Emphasize DAG composition; many waypoints.  "
+            "Recommended with chain16 or another low-shortcut DAG."
+        ),
+    ),
+    "joint-hard": RoutebindSamplingProfile(
+        physical_length_bins=[
+            (20, 40),
+            (41, 70),
+            (71, 100),
+            (101, 140),
+        ],
+        physical_length_targets=[0.20, 0.40, 0.30, 0.10],
+        semantic_length_bins=[
+            (4, 5),
+            (6, 8),
+            (9, 12),
+            (13, 15),
+        ],
+        semantic_length_targets=[0.15, 0.45, 0.30, 0.10],
+        hard_min_route_length=20,
+        hard_max_route_length=140,
+        tolerances={
+            "*": (0.0, 1.0),
+        },
+        attempt_budget=200,
+        description=(
+            "Jointly long spatial and semantic solutions.  "
+            "Requires large attempt budgets.  Recommended with dungeongen "
+            "topology and a sparse DAG (sparse or chain16)."
+        ),
+    ),
 }
 
 
