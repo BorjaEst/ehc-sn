@@ -55,9 +55,21 @@ def serialize_validation_result(
                 "code": i.code,
                 "message": i.message,
                 **({"split": i.split} if i.split else {}),
-                **({"sample_index": i.sample_index} if i.sample_index >= 0 else {}),
-                **({"observed": _safe_value(i.observed)} if i.observed is not None else {}),
-                **({"expected": _safe_value(i.expected)} if i.expected is not None else {}),
+                **(
+                    {"sample_index": i.sample_index}
+                    if i.sample_index >= 0
+                    else {}
+                ),
+                **(
+                    {"observed": _safe_value(i.observed)}
+                    if i.observed is not None
+                    else {}
+                ),
+                **(
+                    {"expected": _safe_value(i.expected)}
+                    if i.expected is not None
+                    else {}
+                ),
             }
             for i in issues
         ],
@@ -146,7 +158,9 @@ def format_validation_summary(
         L.append("Baselines:")
         L.append(f"{I}zero-field traj MSE: median={zt['median']:.6f}")
         st_stats = stats.get("start_only_mse_trajectory", {})
-        L.append(f"{I}start-only traj MSE: median={st_stats.get('median', 0):.6f}")
+        L.append(
+            f"{I}start-only traj MSE: median={st_stats.get('median', 0):.6f}"
+        )
         if "spatial_only_exact_match_rate" in stats:
             L.append(
                 f"{I}spatial-only exact: {stats['spatial_only_exact_match_rate']:.1%}"

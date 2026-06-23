@@ -137,9 +137,9 @@ def build_arena_trace_supplements(
     arena_manifest = read_manifest(dataset_path)
     observation_vocab_size: int = arena_manifest["observation_vocab_size"]
 
-    # parent_substrate is provenance metadata only — spatial arrays are loaded
-    # directly from the arena corpus (self-contained task corpus).
-    _ = arena_manifest.get("parent_substrate")  # unused, kept for provenance.
+    # spatial arrays are loaded directly from the arena corpus
+    # (self-contained task corpus).  Parent provenance is in parents.spatial_topology.root.
+    _ = arena_manifest.get("parents", {}).get("spatial_topology", {})
 
     # ── 2. Load Arena index → sample order ────────────────────────────────────
     arena_all = read_index(dataset_path / "index.jsonl")

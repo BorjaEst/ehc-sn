@@ -326,8 +326,9 @@ def select_samples(
 
     Policies:
         ``"random"`` — uniform random selection.
-        ``"stratified"`` — one sample per non-empty joint (physical, semantic)
-            bucket, up to *n*.
+        ``"stratified"`` — proportional allocation across joint (physical,
+            semantic) buckets using largest-remainder rounding.
+            Returns exactly ``min(n, total_candidates)`` samples.
         ``"longest_route"`` — samples with the longest extracted physical route.
         ``"shortest_route"`` — samples with the shortest extracted physical route.
         ``"most_waypoints"`` — samples with the most semantic waypoints.
@@ -411,14 +412,28 @@ def select_samples(
             pb = 0 if rl <= 10 else (1 if rl <= 30 else 2)
             sb = 0 if wc <= 2 else (1 if wc <= 5 else 2)
             buckets.setdefault((pb, sb), []).append((split, idx))
+
+        total = sum(len(v) for v in buckets.values())
+        n_actual = min(n, total)
+        bk_sorted = sorted(buckets.keys())
+
+        # Proportional allocation with largest-remainder rounding (Hamilton)
+        raw = {bk: len(buckets[bk]) * n_actual / total for bk in bk_sorted}
+        alloc = {bk: int(raw[bk]) for bk in bk_sorted}
+        remainder = n_actual - sum(alloc.values())
+        # Distribute remainders — one each to buckets with largest fractional parts
+        for bk in sorted(raw, key=lambda b: raw[b] - int(raw[b]), reverse=True):
+            if remainder <= 0:
+                break
+            alloc[bk] += 1
+            remainder -= 1
+
         selected: list[tuple[str, int]] = []
-        for bk in sorted(buckets.keys()):
+        for bk in bk_sorted:
             pool = buckets[bk]
             rng.shuffle(pool)
-            selected.extend(pool[: max(1, n // max(len(buckets), 1))])
-            if len(selected) >= n:
-                break
-        return selected[:n]
+            selected.extend(pool[: alloc[bk]])
+        return selected
 
     # Sorting-based policies
     reverse = policy in (

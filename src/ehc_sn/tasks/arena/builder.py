@@ -517,11 +517,14 @@ def validate_arena_task_root(
         raise ValueError(
             f"Manifest 'action_count' must be a positive int, got {act_count!r}."
         )
-    # parent_family must be present (value is layout-dependent).
-    parent_family = manifest.get("parent_family")
+    # parent family must be present (value is layout-dependent).
+    arena_parents = manifest.get("parents", {})
+    spatial_parent = arena_parents.get("spatial_topology", {})
+    parent_family = spatial_parent.get("family")
     if not isinstance(parent_family, str) or not parent_family:
         raise ValueError(
-            f"Manifest 'parent_family' must be a non-empty string, got {parent_family!r}."
+            f"Manifest 'parents.spatial_topology.family' must be a non-empty "
+            f"string, got {parent_family!r}."
         )
     start_policy_id = manifest.get("start_policy_id")
     if start_policy_id not in _ALLOWED_START_POLICY_IDS:
@@ -591,9 +594,14 @@ def validate_arena_task_root(
 
     # Validate parent substrate lineage via per-sample index metadata.
     all_entries = read_index(root / "index.jsonl")
-    parent_substrate_rel = manifest.get("parent_substrate")
+    arena_parents = manifest.get("parents", {})
+    spatial_parent = arena_parents.get("spatial_topology", {})
+    parent_substrate_rel = spatial_parent.get("root", "")
     if not parent_substrate_rel:
-        raise ValueError("Manifest missing required field 'parent_substrate'.")
+        raise ValueError(
+            "Manifest missing parents.spatial_topology.root for lineage "
+            "validation."
+        )
 
     resolved_repo_root = (
         _repo_root if _repo_root is not None else _find_repo_root(root)
@@ -815,13 +823,17 @@ def build_arena_task_corpus(
             builder="ehc_sn.tasks.arena.build_arena_task_corpus",
             seed=seed,
             stage_params=stage_params,
-            parent_family=layout_family,
-            parent_version="1",
-            task_schema_version=TASK_SCHEMA_VERSION,
-            task_protocol_version=TASK_PROTOCOL_VERSION,
             task=TASK_FAMILY,
             corpus=corpus,
-            parent_substrate=f"data/interim/{layout_family}/v1",
+            task_schema_version=TASK_SCHEMA_VERSION,
+            task_protocol_version=TASK_PROTOCOL_VERSION,
+            parents={
+                "spatial_topology": {
+                    "family": layout_family,
+                    "root": f"data/interim/{layout_family}/v1",
+                    "version": 1,
+                },
+            },
             start_policy_id=START_POLICY_RANDOM_VALID_ID,
             walk_policy_id=walk_policy_id,
             action_count=action_count,

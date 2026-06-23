@@ -40,7 +40,10 @@ def extract_version(version_root: Path) -> int:
     """
     name = version_root.name
     if not (name.startswith("v") and name[1:].isdigit()):
-        raise ValueError(f"Version root leaf must be 'v<integer>', got: {name!r}.  " "Use a path like 'data/processed/numberline/v1'.")
+        raise ValueError(
+            f"Version root leaf must be 'v<integer>', got: {name!r}.  "
+            "Use a path like 'data/processed/arena/default/v1'."
+        )
     return int(name[1:])
 
 
@@ -60,7 +63,7 @@ def staging_root(version_root: Path) -> Iterator[Path]:
 
     Args:
         version_root: The intended final versioned root (e.g.
-            ``data/processed/numberline/v1``).  Must not already exist.
+            ``data/processed/arena/default/v1``).  Must not already exist.
 
     Yields:
         A temporary sibling directory to write all output into.
@@ -99,7 +102,7 @@ def create_version_root(version_root: Path) -> None:
     """Create an immutable version-leaf directory.
 
     Args:
-        version_root: Target directory (e.g. ``data/processed/numberline/v1``).
+        version_root: Target directory (e.g. ``data/processed/arena/default/v1``).
 
     Raises:
         FileExistsError: When *version_root* already exists.
@@ -150,12 +153,17 @@ def write_split(
     """
     n = len(samples)
     if per_sample_ids is not None and len(per_sample_ids) != n:
-        raise ValueError(f"per_sample_ids length {len(per_sample_ids)} does not match samples length {n}.")
+        raise ValueError(
+            f"per_sample_ids length {len(per_sample_ids)} "
+            "does not match samples length {n}."
+        )
 
     split_dir = output_root / split
     split_dir.mkdir()
 
-    stacked: dict[str, np.ndarray] = {ch: np.stack([s[ch] for s in samples], axis=0) for ch in channels}
+    stacked: dict[str, np.ndarray] = {
+        ch: np.stack([s[ch] for s in samples], axis=0) for ch in channels
+    }
 
     if sample_validator is not None:
         for i in range(n):
@@ -181,7 +189,11 @@ def write_split(
 
     return [
         DatasetIndexEntry(
-            id=per_sample_ids[idx] if per_sample_ids else f"{source}-{split}-{idx + 1:06d}",
+            id=(
+                per_sample_ids[idx]
+                if per_sample_ids
+                else f"{source}-{split}-{idx + 1:06d}"
+            ),
             source=source,
             split=split,
             channels=channels,

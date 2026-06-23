@@ -197,9 +197,6 @@ class RoutebindTaskOverviewFigure(BaseFigureTemplate):
             "  (1) the spatial trajectory",
             "  (2) the semantic waypoints",
             "",
-            "Spatial reachability is visible;",
-            "observation transitions are hidden",
-            "and must be learned.",
         ]
         ax.text(
             0.08,

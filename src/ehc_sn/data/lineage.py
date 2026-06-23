@@ -8,8 +8,6 @@ semantic DAG).
 
 from __future__ import annotations
 
-from ehc_sn.data.manifest import normalize_manifest_parents
-
 
 # =============================================================================
 def validate_shared_parent(
@@ -36,8 +34,8 @@ def validate_shared_parent(
     Raises:
         ValueError: On any mismatch or missing parent reference.
     """
-    parents_a = normalize_manifest_parents(manifest_a)
-    parents_b = normalize_manifest_parents(manifest_b)
+    parents_a = manifest_a.get("parents", {})
+    parents_b = manifest_b.get("parents", {})
 
     if role not in parents_a:
         raise ValueError(

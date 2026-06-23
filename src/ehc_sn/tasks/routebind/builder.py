@@ -1481,7 +1481,7 @@ def build_routebind_task_corpus(
             corpus=corpus,
             task_schema_version=1,
             task_protocol_version=2,
-            manifest_schema_version=2,
+            manifest_schema_version=1,
             parents={
                 "spatial_topology": {
                     "family": topology_family,

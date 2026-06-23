@@ -25,25 +25,12 @@ MANIFEST_FILENAME: str = "manifest.json"
 """Canonical manifest filename at each versioned dataset root."""
 
 # ── Manifest schema version ──────────────────────────────────────────────
-# Professional pattern: keep the legacy name as a public alias so old
-# import paths and inline references (e.g. the JSON key "schema_version")
-# continue to resolve correctly.  NumPy follows the same approach with
-# np.__version__ as an alias for numpy.version.version.
-# https://github.com/numpy/numpy/blob/main/numpy/__init__.py
 
-SCHEMA_VERSION: int = 2
-"""Legacy alias for MANIFEST_SCHEMA_VERSION — written as ``"schema_version"``
-in every manifest to identify the manifest-schema format.  Retained as a
-module-level constant for backward compatibility with inline references."""
+MANIFEST_SCHEMA_VERSION: int = 1
+"""Manifest schema version for the first-release contract.
 
-MANIFEST_SCHEMA_VERSION: int = SCHEMA_VERSION
-"""Current manifest schema version (distinct from dataset content version).
-Emitted as both ``manifest_schema_version`` (v2+ field) and statically as
-``schema_version`` in every manifest for backward compatibility.
-
-v2 introduced ``parents``, ``manifest_schema_version``, and ``content_digest``.
-v1 implied ``manifest_schema_version=1`` and used flat ``parent_substrate``
-fields for single-parent lineage."""
+The canonical lineage format is the ``parents`` role-addressed dict.
+There is no alternative representation."""
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +60,7 @@ def write_manifest(
     dataset_class: str,
     family: str,
     version: int,
-    manifest_schema_version: int | None = MANIFEST_SCHEMA_VERSION,
+    manifest_schema_version: int = MANIFEST_SCHEMA_VERSION,
     channels: list[str] | None = None,
     topology_kind: str | None = None,
     n_states: int | None = None,
@@ -89,12 +76,9 @@ def write_manifest(
     # task-corpus-only fields
     task: str | None = None,
     corpus: str | None = None,
-    parent_substrate: str | None = None,
-    parent_family: str | None = None,
-    parent_version: int | None = None,
     task_schema_version: int | None = None,
     task_protocol_version: int | None = None,
-    # multi-parent lineage (v2+)
+    # lineage (role-addressed parent references)
     parents: dict[str, dict] | None = None,
     content_digest: str | None = None,
     **extra_fields: Any,
@@ -113,7 +97,6 @@ def write_manifest(
         family: Shared family name (e.g. ``"maze-nd"``) or task namespace.
         version: Version integer.
         manifest_schema_version: Manifest schema version (default ``MANIFEST_SCHEMA_VERSION``).
-            Deprecated ``_TASK_REQUIRED`` still accepted for backward-compat omission.
         channels: Channel names present in every sample.
         topology_kind: Canonical topology kind string (e.g. ``"grid2d"``, ``"line1d"``).
         n_states: Total number of states in the topology.
@@ -130,13 +113,9 @@ def write_manifest(
             when available.
         task: Owning task namespace for task corpora.
         corpus: Corpus label for task corpora.
-        parent_substrate: Canonical repo-relative path to the parent shared
-            substrate root for task corpora.
-        parent_family: Parent shared-substrate family name.
-        parent_version: Parent shared-substrate version integer.
         task_schema_version: Task channel schema version.
         task_protocol_version: Task protocol (episode/replay) version.
-        parents: Role-addressed parent artifact references (v2+).  Keys are
+        parents: Role-addressed parent artifact references.  Keys are
             role names (e.g. ``"spatial_topology"``, ``"semantic_graph"``).
             Each value is a dict with keys ``family``, ``root``, ``version``,
             and optionally ``artifact_id``, ``split``, ``content_digest``.
@@ -156,11 +135,6 @@ def write_manifest(
         stage_params = {}
 
     manifest: dict[str, Any] = {
-        # "schema_version" is the legacy key — always written for backward
-        # compat so old manifest readers can still parse the version format.
-        # "manifest_schema_version" is the v2+ explicit field (may be None
-        # for v1 manifests that omit it; we always write it).
-        "schema_version": MANIFEST_SCHEMA_VERSION,
         "manifest_schema_version": manifest_schema_version,
         "dataset_class": dataset_class,
         "family": family,
@@ -191,12 +165,6 @@ def write_manifest(
         manifest["task"] = task
     if corpus is not None:
         manifest["corpus"] = corpus
-    if parent_substrate is not None:
-        manifest["parent_substrate"] = parent_substrate
-    if parent_family is not None:
-        manifest["parent_family"] = parent_family
-    if parent_version is not None:
-        manifest["parent_version"] = parent_version
     if task_schema_version is not None:
         manifest["task_schema_version"] = task_schema_version
     if task_protocol_version is not None:
@@ -231,43 +199,9 @@ def read_manifest(version_root: Path) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
-# =============================================================================
-def normalize_manifest_parents(manifest: dict[str, Any]) -> dict[str, dict]:
-    """Return a uniform ``role -> ref`` dict from any manifest version.
-
-    v2 manifests with ``parents`` are returned as-is.
-    v1 manifests with flat ``parent_substrate``/``parent_family``/``parent_version``
-    are normalized into a single ``"primary"`` role.
-
-    Args:
-        manifest: Parsed manifest dict (any schema version).
-
-    Returns:
-        Dict mapping role names to parent-ref dicts.  Each ref has at least
-        ``family``, ``root``, ``version``.
-    """
-    parents = manifest.get("parents")
-    if parents is not None:
-        return dict(parents)
-
-    # v1 fallback: synthesize "primary" role from flat fields
-    primary: dict[str, Any] = {}
-    if "parent_substrate" in manifest:
-        primary["root"] = manifest["parent_substrate"]
-    if "parent_family" in manifest:
-        primary["family"] = manifest["parent_family"]
-    if "parent_version" in manifest:
-        primary["version"] = manifest["parent_version"]
-    if primary:
-        return {"primary": primary}
-    return {}
-
-
 __all__ = [
     "MANIFEST_FILENAME",
-    "SCHEMA_VERSION",  # legacy alias, kept for backward compat
-    "MANIFEST_SCHEMA_VERSION",  # canonical name
+    "MANIFEST_SCHEMA_VERSION",
     "write_manifest",
     "read_manifest",
-    "normalize_manifest_parents",
 ]

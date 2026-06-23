@@ -70,6 +70,82 @@ _SPLIT_SEED_OFFSET: dict[str, int] = {
 }
 _SOURCE_ID: Final[str] = "dungeongen"
 
+# Named preset configurations for the dungeon generator.
+# Each value is (generator_config_dict_or_None, max_extent_or_None).
+# Enum-type values are stored as importable attribute strings and resolved
+# at call time to avoid import-time coupling.
+DUNGEONGEN_PRESETS: dict[str, tuple[dict | None, tuple[int, int] | None]] = {
+    "default": (None, None),
+    "routebind-30": (
+        {
+            "size": "DungeonSize.SMALL",
+            "room_count": (6, 10),
+            "room_size_bias": -1.0,
+            "density": 0.6,
+            "symmetry": "SymmetryType.NONE",
+            "passage_width": 1,
+            "linearity": 0.1,
+            "loop_factor": 0.0,
+            "extra_room_connections": 0.0,
+            "extra_passage_junctions": 0.0,
+            "winding": 0.0,
+        },
+        (30, 30),
+    ),
+}
+"""Named preset registry for dungeon generation.
+
+Each entry maps a preset name to ``(generator_config, max_extent)``:
+
+- ``generator_config``: dict of kwargs forwarded to the dungeon generator,
+  or ``None`` to use native defaults.
+- ``max_extent``: ``(max_height, max_width)`` bound for rejection sampling,
+  or ``None`` for no bound.
+
+Enum-string values (``"DungeonSize.SMALL"``, ``"SymmetryType.NONE"``) are
+resolved via :func:`resolve_dungeongen_preset`.
+"""
+
+
+def resolve_dungeongen_preset(
+    name: str,
+) -> tuple[dict | None, tuple[int, int] | None]:
+    """Resolve a named preset to ``(generator_config, max_extent)``.
+
+    Args:
+        name: Preset key in :data:`DUNGEONGEN_PRESETS`.
+
+    Returns:
+        ``(generator_config, max_extent)`` tuple, where each element may be
+        ``None`` when the preset specifies no value.
+
+    Raises:
+        ValueError: When *name* is not a known preset.
+    """
+    entry = DUNGEONGEN_PRESETS.get(name)
+    if entry is None:
+        raise ValueError(
+            f"Unknown dungeongen preset {name!r}. "
+            f"Valid: {sorted(DUNGEONGEN_PRESETS)}."
+        )
+    cfg, extent = entry
+    if cfg is None:
+        return (None, extent)
+    # Late-import dungeongen enums to avoid import-time coupling.
+    from dungeongen.layout.params import DungeonSize, SymmetryType
+
+    enum_map = {
+        "DungeonSize.SMALL": DungeonSize.SMALL,
+        "SymmetryType.NONE": SymmetryType.NONE,
+    }
+    resolved: dict = {}
+    for k, v in cfg.items():
+        if isinstance(v, str) and v in enum_map:
+            resolved[k] = enum_map[v]
+        else:
+            resolved[k] = v
+    return (resolved, extent)
+
 
 # ---------------------------------------------------------------------------
 def ensure_raw(
@@ -675,9 +751,11 @@ def build_dungeongen_layouts(
 __all__ = [
     "SHARED_FAMILY",
     "SHARED_CHANNELS",
+    "DUNGEONGEN_PRESETS",
     "build_dungeongen_layouts",
     "ensure_raw",
     "prepare_interim",
     "build_shared_substrate",
+    "resolve_dungeongen_preset",
     "validate_dungeongen_shared_root",
 ]
