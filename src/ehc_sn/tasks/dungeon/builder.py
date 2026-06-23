@@ -371,13 +371,18 @@ def build_dungeon_task_corpus(  # ---------------------------------------------
             builder="ehc_sn.tasks.dungeon.build_dungeon_task_corpus",
             seed=seed,
             stage_params=stage_params,
-            parent_family=parent_manifest["family"],
-            parent_version=parent_manifest["version"],
             task_schema_version=1,
             task_protocol_version=1,
             task=TASK_FAMILY,
             corpus=corpus,
-            parent_substrate=canonical_parent,
+            manifest_schema_version=1,
+            parents={
+                "shared_substrate": {
+                    "family": parent_manifest["family"],
+                    "root": canonical_parent,
+                    "version": parent_manifest["version"],
+                },
+            },
         )
 
     n_total = n_train + n_val + n_test

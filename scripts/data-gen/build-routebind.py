@@ -11,7 +11,10 @@ Usage
 -----
 ::
 
-    python build-routebind.py build --topology-root ... --dagflow-root ... --dagflow-graph-id ...
+    python build-routebind.py build \
+        --topology-root data/interim/dungeongen/routebind-30/v1 \
+        --dagflow-root data/interim/dagflow/routing/v1 \
+        --dagflow-graph-id dagflow-routing-v1-train-000000
     python build-routebind.py validate data/processed/routebind/default/v1
     python build-routebind.py inspect data/processed/routebind/default/v1 --summary
 """
@@ -37,6 +40,7 @@ from ehc_sn.reporting.routebind import (
     write_validation_bundle,
 )
 from ehc_sn.tasks.routebind.builder import (
+    ROUTEBIND_PRESETS,
     TASK_FAMILY,
     build_routebind_task_corpus,
     resolve_preset,
@@ -48,6 +52,7 @@ from ehc_sn.tasks.routebind.diagnostics import (
 )
 from ehc_sn.tasks.routebind.inspection import prepare_sample_inspection
 from ehc_sn.tasks.routebind.validation import (
+    ValidationIssue,
     check_auxiliary_targets,
     check_dag_transitions,
     check_route_field,
@@ -66,8 +71,8 @@ from ehc_sn.traces.trace_tree import TraceTree
 
 # ---------------------------------------------------------------------------
 _DEFAULT_PRESET = "balanced"
-_DEFAULT_VERSION = 1
 _DEFAULT_CORPUS = "default"
+_DEFAULT_VERSION = 1
 _DEFAULT_STORAGE_HEIGHT = 32
 _DEFAULT_STORAGE_WIDTH = 32
 _DEFAULT_FIELD_DECAY_SPATIAL = 0.9848
@@ -107,10 +112,25 @@ def build(
             "(e.g. dagflow-default-v1-train-000042).",
         ),
     ],
+    preset: Annotated[
+        str | None,
+        typer.Option(
+            "--preset",
+            help=f"Named Routebind preset ({', '.join(sorted(ROUTEBIND_PRESETS))})."
+            " (default: 'balanced').",
+        ),
+    ] = _DEFAULT_PRESET,
     corpus: Annotated[
         str,
         typer.Option("--corpus", help="Corpus label (default: 'default')."),
     ] = _DEFAULT_CORPUS,
+    version: Annotated[
+        int,
+        typer.Option(
+            "--version",
+            help="Task corpus version integer (default: 1).",
+        ),
+    ] = _DEFAULT_VERSION,
     field_decay_spatial: Annotated[
         float,
         typer.Option(
@@ -154,24 +174,10 @@ def build(
             help="Storage canvas width in cells (default: 32).",
         ),
     ] = _DEFAULT_STORAGE_WIDTH,
-    version: Annotated[
-        int,
-        typer.Option(
-            "--version",
-            help="Task corpus version integer (default: 1).",
-        ),
-    ] = _DEFAULT_VERSION,
     seed: Annotated[
         int,
         typer.Option("--seed", help="Deterministic base seed (default: 42)."),
     ] = _DEFAULT_SEED,
-    preset: Annotated[
-        str | None,
-        typer.Option(
-            "--preset",
-            help="Named Routebind preset (default: 'balanced').",
-        ),
-    ] = None,
     min_route_length: Annotated[
         int | None,
         typer.Option(
@@ -203,9 +209,9 @@ def build(
         typer.echo(
             f"Error: topology root not found at {topology_root_resolved}.\n"
             "Build topology first with:\n"
-            "    python scripts/data-gen/build-openfield.py build-all\n"
+            "    python scripts/data-gen/build-openfield.py build\n"
             "or:\n"
-            "    python scripts/data-gen/build-dungeongen.py build-all",
+            "    python scripts/data-gen/build-dungeongen.py build",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -224,7 +230,6 @@ def build(
 
     version_root = root.resolve()
 
-    preset_name = preset or _DEFAULT_PRESET
     overrides: dict = {}
     if min_route_length is not None:
         overrides["hard_min_route_length"] = min_route_length
@@ -232,7 +237,7 @@ def build(
         overrides["hard_max_route_length"] = max_route_length_override
     if attempt_budget is not None:
         overrides["attempt_budget"] = attempt_budget
-    profile = resolve_preset(preset_name, overrides or None)
+    profile = resolve_preset(preset, overrides or None)
 
     build_routebind_task_corpus(
         version_root=version_root,
@@ -253,7 +258,7 @@ def build(
     typer.echo(f"Routebind corpus built at {version_root}")
     typer.echo(f"  Topology: {topology_root_resolved}")
     typer.echo(f"  DAG graph: {dagflow_graph_id} @ {dagflow_root_resolved}")
-    typer.echo(f"  Preset: {preset_name}")
+    typer.echo(f"  Preset: {preset}")
 
 
 # =============================================================================

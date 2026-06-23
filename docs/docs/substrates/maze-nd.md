@@ -74,11 +74,11 @@ python scripts/data-gen/build-maze-nd.py build-all \
     --n-train 4000 --n-val 500 --n-test 500 --seed 7
 
 # Validate an existing root
-python scripts/data-gen/build-maze-nd.py validate data/interim/maze-nd/v2
+python scripts/data-gen/build-maze-nd.py validate data/interim/maze-nd/v1
 
 # Build the MazeHard task corpus from this substrate
 python scripts/data-gen/build-mazehard.py materialize-task \
-    --parent-substrate data/interim/maze-nd/v2
+    --parent-substrate data/interim/maze-nd/v1
 ```
 
 ## Downstream Consumers

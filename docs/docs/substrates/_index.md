@@ -32,7 +32,6 @@ canonical path grammar.
 | `dungeongen` | grid2d   | procedural (local lib) | `data/interim/dungeongen/<preset>/v<N>/` | dungeon, arena, routebind |
 | `dagflow`    | dag      | synthetic              | `data/interim/dagflow/<preset>/v<N>/`    | seqmaze, goaltrace        |
 | `openfield`  | grid2d   | synthetic              | `data/interim/openfield/<preset>/v<N>/`  | arena, routebind          |
-| `numberline` | line1d   | synthetic              | `data/processed/numberline/v<N>/`        | countwalk                 |
 
 ## Common Properties
 
@@ -55,16 +54,14 @@ Each family has a staged CLI under `scripts/data-gen/`:
 python scripts/data-gen/build-maze-nd.py build-all
 
 # dungeongen: generate topologies, materialize layout dataset
-python scripts/data-gen/build-dungeongen.py build-all
+python scripts/data-gen/build-dungeongen.py build
 
 # dagflow: generate DAG topologies
 python scripts/data-gen/build-dagflow.py build --preset balanced --version 1
 
 # openfield: generate grid layouts, assign sensory IDs
-python scripts/data-gen/build-openfield.py build-all
+python scripts/data-gen/build-openfield.py build
 
-# numberline: synthesize directly (no raw/interim separation)
-python scripts/data-gen/build-numberline.py build-all
 ```
 
 See the per-family pages for detailed stage breakdowns and parameters.

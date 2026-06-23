@@ -5,13 +5,8 @@ Canonical task families defined by their semantic domain:
 - :mod:`ehc_sn.tasks.arena` — structural navigation: agent moves through a
   maze world; task owns observation/action ontology, revisit semantics, and
   additive structural score.
-- :mod:`ehc_sn.tasks.dungeon` — goal-directed navigation: agent reaches goals
-  in a dungeon world; task owns observation/action ontology, episode semantics,
-  and episode score.
 - :mod:`ehc_sn.tasks.mazehard` — batch token prediction over full-maze token
   sequences; task owns sequence evaluation and aggregate benchmark score.
-- :mod:`ehc_sn.tasks.countwalk` — replay over a bounded integer number line;
-  task owns digit-prediction evaluation and replay capability.
 - :mod:`ehc_sn.tasks.goaltrace` — goal-conditioned prospective field prediction;
   task owns field contracts, evaluation, and oracle-based corpus builder.
 - :mod:`ehc_sn.tasks.routebind` — goal-conditioned spatial prospective-field
@@ -24,8 +19,6 @@ Execution-binding capabilities (replay, online control, deliberation) live in
 
 from ehc_sn.tasks import (
     arena,
-    countwalk,
-    dungeon,
     goaltrace,
     mazehard,
     routebind,
@@ -34,8 +27,6 @@ from ehc_sn.tasks import (
 
 __all__ = [
     "arena",
-    "countwalk",
-    "dungeon",
     "goaltrace",
     "mazehard",
     "routebind",

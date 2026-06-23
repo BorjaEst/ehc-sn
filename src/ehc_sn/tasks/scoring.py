@@ -10,16 +10,11 @@ fragmented lookups across the codebase.
 
 from __future__ import annotations
 
-from ehc_sn.task_families import KNOWN_TASKS
 from ehc_sn.tasks.arena.evaluation import ARENA_PRIMARY_METRIC_NAME
-from ehc_sn.tasks.countwalk.evaluation import COUNTWALK_PRIMARY_METRIC_NAME
-from ehc_sn.tasks.dungeon.evaluation import DUNGEON_PRIMARY_METRIC_NAME
 from ehc_sn.tasks.mazehard.evaluation import MAZEHARD_PRIMARY_METRIC_NAME
 
 PRIMARY_METRIC_BY_TASK: dict[str, str] = {
     "arena": ARENA_PRIMARY_METRIC_NAME,
-    "countwalk": COUNTWALK_PRIMARY_METRIC_NAME,
-    "dungeon": DUNGEON_PRIMARY_METRIC_NAME,
     "mazehard": MAZEHARD_PRIMARY_METRIC_NAME,
 }
 """Mapping from task-family name to its canonical primary benchmark metric.

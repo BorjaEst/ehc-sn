@@ -528,9 +528,13 @@ def build_seqmaze_task_corpus(
             corpus=corpus,
             task_schema_version=1,
             task_protocol_version=1,
-            parent_substrate=canonical_layout,
-            parent_family="dagflow",
-            parent_version=layout_manifest["version"],
+            parents={
+                "semantic_graph": {
+                    "family": "dagflow",
+                    "root": canonical_layout,
+                    "version": layout_manifest["version"],
+                },
+            },
             n_max=n_max,
             t_max=t_max,
             max_out_degree=max_out_degree,

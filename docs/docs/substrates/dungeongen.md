@@ -109,10 +109,10 @@ handling) recorded in the manifest `stage_params`.
 
 ## Presets
 
-| Preset         | Description                                                                                       |
-| -------------- | ------------------------------------------------------------------------------------------------- |
-| `default`      | General-purpose dungeongen generation with no extent bound. Produces layouts up to ~44×42 cells.  |
-| `routebind-30` | Routebind-compatible bounded profile. Every exported layout has natural extent ≤ 30×30.           |
+| Preset         | Description                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------ |
+| `default`      | General-purpose dungeongen generation with no extent bound. Produces layouts up to ~44×42 cells. |
+| `routebind-30` | Routebind-compatible bounded profile. Every exported layout has natural extent ≤ 30×30.          |
 
 ### `routebind-30` details
 
@@ -136,16 +136,16 @@ python build-routebind.py build --topology-root data/interim/dungeongen/routebin
 
 ## Build configuration
 
-| Parameter                       | Default | Description                         |
-| ------------------------------- | ------- | ----------------------------------- |
-| `--version`                     | 1       | Substrate version integer.          |
-| `--preset`                      | default | Named source preset.                |
-| `--n-train`                     | 250     | Training samples.                   |
-| `--n-val`                       | 10      | Validation samples.                 |
-| `--n-test`                      | 10      | Test samples.                       |
-| `--observation-vocabulary-size` | 45      | Distinct observation IDs to assign. |
-| `--topology-seed`               | 42      | Base seed for topology generation.  |
-| `--n-sensory-instances`         | 1       | Sensory realizations per topology.  |
+| Parameter                       | Default | Description                                         |
+| ------------------------------- | ------- | --------------------------------------------------- |
+| `--version`                     | 1       | Substrate version integer.                          |
+| `--preset`                      | default | Named source preset (see ``--help`` for available). |
+| `--n-train`                     | 250     | Training samples.                                   |
+| `--n-val`                       | 10      | Validation samples.                                 |
+| `--n-test`                      | 10      | Test samples.                                       |
+| `--observation-vocabulary-size` | 45      | Distinct observation IDs to assign.                 |
+| `--topology-seed`               | 42      | Base seed for topology generation.                  |
+| `--n-sensory-instances`         | 1       | Sensory realizations per topology.                  |
 
 Seeding: a single `--topology-seed` is expanded per layout via
 `numpy.random.SeedSequence`.

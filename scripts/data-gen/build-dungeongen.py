@@ -2,7 +2,7 @@
 
 Dungeongen generates procedurally varied 2-D grid topologies with random
 sensory assignments.  The output is an interim layout dataset consumed by
-task builders (build-arena.py, build-dungeon.py).
+task builders (build-arena.py, build-routebind.py).
 
 Commands
 --------
@@ -22,6 +22,10 @@ Examples
 Quick local build::
 
     python build-dungeongen.py build
+
+Routebind-compatible bounded build::
+
+    python build-dungeongen.py build --preset routebind-30
 
 Custom version::
 
@@ -43,11 +47,15 @@ import typer
 
 from ehc_sn.data.lifecycle import validate_version_root
 from ehc_sn.data.substrate.dungeongen import (
+    DUNGEONGEN_PRESETS,
     SHARED_FAMILY,
     build_dungeongen_layouts,
 )
 from ehc_sn.data.substrate.dungeongen import ensure_raw as _ensure_raw
 from ehc_sn.data.substrate.dungeongen import prepare_interim as _prepare_interim
+from ehc_sn.data.substrate.dungeongen import (
+    resolve_dungeongen_preset,
+)
 
 # ---------------------------------------------------------------------------
 _DEFAULT_RAW_ROOT = Path("data/raw/dungeongen")
@@ -62,30 +70,6 @@ _DEFAULT_N_VAL = 10
 _DEFAULT_N_TEST = 10
 _DEFAULT_ATTEMPT_BUDGET = 100
 
-# Named preset configurations for the dungeon generator.
-# Each value is (generator_config_dict_or_None, max_extent_or_None).
-# Enum-type values are stored as importable attribute strings and resolved
-# at call time to avoid import-time coupling.
-_PRESET_GENERATOR: dict[str, tuple[dict | None, tuple[int, int] | None]] = {
-    "default": (None, None),
-    "routebind-30": (
-        {
-            "size": "DungeonSize.SMALL",
-            "room_count": (6, 10),
-            "room_size_bias": -1.0,
-            "density": 0.6,
-            "symmetry": "SymmetryType.NONE",
-            "passage_width": 1,
-            "linearity": 0.1,
-            "loop_factor": 0.0,
-            "extra_room_connections": 0.0,
-            "extra_passage_junctions": 0.0,
-            "winding": 0.0,
-        },
-        (30, 30),
-    ),
-}
-
 
 app = typer.Typer(add_completion=False, help=__doc__)
 
@@ -97,7 +81,7 @@ def build(  # -----------------------------------------------------------------
         str,
         typer.Option(
             "--preset",
-            help="Named source preset (currently only 'default' is supported).",
+            help=f"Named source preset ({', '.join(sorted(DUNGEONGEN_PRESETS))}).",
         ),
     ] = _DEFAULT_PRESET,
     n_train: Annotated[
@@ -332,8 +316,7 @@ def _generate_topology(  # ----------------------------------------------------
 ) -> None:
     """Internal stage: generate raw dungeongen corpus and prepare interim files."""
     raw_leaf = raw_root / preset / f"v{version}"
-    generator_config = _resolve_generator_config(preset)
-    max_extent = _resolve_max_extent(preset)
+    generator_config, max_extent = resolve_dungeongen_preset(preset)
     _ensure_raw(
         raw_leaf,
         topology_seed,
@@ -389,41 +372,6 @@ def _materialize_layouts(  # ---------------------------------------------------
         preset=preset,
         n_sensory_instances=n_sensory_instances,
     )
-
-
-def _resolve_generator_config(preset: str) -> dict | None:
-    """Return the ``generator_config`` dict for *preset*, or ``None``."""
-    entry = _PRESET_GENERATOR.get(preset)
-    if entry is None:
-        raise ValueError(
-            f"Unknown preset {preset!r}. " f"Valid: {sorted(_PRESET_GENERATOR)}"
-        )
-    cfg, _ = entry
-    if cfg is None:
-        return None
-    # Late-import dungeongen enums to avoid import-time coupling.
-    from dungeongen.layout.params import DungeonSize, SymmetryType
-
-    enum_map = {
-        "DungeonSize.SMALL": DungeonSize.SMALL,
-        "SymmetryType.NONE": SymmetryType.NONE,
-    }
-    resolved: dict = {}
-    for k, v in cfg.items():
-        if isinstance(v, str) and v in enum_map:
-            resolved[k] = enum_map[v]
-        else:
-            resolved[k] = v
-    return resolved
-
-
-def _resolve_max_extent(preset: str) -> tuple[int, int] | None:
-    """Return the ``max_extent`` for *preset*, or ``None``."""
-    entry = _PRESET_GENERATOR.get(preset)
-    if entry is None:
-        raise ValueError(f"Unknown preset {preset!r}.")
-    _, extent = entry
-    return extent
 
 
 # =============================================================================

@@ -32,7 +32,6 @@ nav:
           - dungeongen: substrates/dungeongen.md
           - dagflow: substrates/dagflow.md
           - openfield: substrates/openfield.md
-          - numberline: substrates/numberline.md
       - Training: training.md
       - Benchmarks: benchmarks.md
       - Evaluation: evaluation.md

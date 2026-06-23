@@ -1196,9 +1196,7 @@ def build_goaltrace_task_corpus(
 
         write_index_at_root(all_entries, tmp)
 
-        # Build manifest: when an explicit dagflow_graph_id was provided,
-        # record role-addressed parents (v2); otherwise fall back to flat
-        # single-parent format for backward compatibility.
+        # Build manifest with role-addressed parents dict.
         manifest_kwargs: dict[str, Any] = dict(
             dataset_class="task_corpus",
             family=TASK_FAMILY,
@@ -1220,6 +1218,14 @@ def build_goaltrace_task_corpus(
             num_graphs=num_graphs,
             oracle_semantics=oracle_semantics,
             field_decay=field_decay,
+            manifest_schema_version=1,
+            parents={
+                "semantic_graph": {
+                    "family": "dagflow",
+                    "root": str(layout_root),
+                    "version": layout_manifest["version"],
+                },
+            },
         )
         if dagflow_graph_id is not None:
             # Look up the graph entry for its content_digest
@@ -1228,22 +1234,13 @@ def build_goaltrace_task_corpus(
             graph_entry, _graph_sample = find_artifact_by_id(
                 layout_root, dagflow_graph_id
             )
-            manifest_kwargs["manifest_schema_version"] = 2
-            manifest_kwargs["parents"] = {
-                "semantic_graph": {
-                    "family": "dagflow",
-                    "root": str(layout_root),
-                    "version": layout_manifest["version"],
+            manifest_kwargs["parents"]["semantic_graph"].update(
+                {
                     "artifact_id": dagflow_graph_id,
                     "split": graph_entry.split,
                     "content_digest": graph_entry.content_digest,
-                },
-            }
-        else:
-            # v1 flat fields (backward compat)
-            manifest_kwargs["parent_substrate"] = canonical_layout
-            manifest_kwargs["parent_family"] = "dagflow"
-            manifest_kwargs["parent_version"] = layout_manifest["version"]
+                }
+            )
 
         write_manifest(tmp, **manifest_kwargs)
 

@@ -74,14 +74,34 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
+import numpy as np
 import typer
 
-from ehc_sn.data.lifecycle import validate_version_root
+from ehc_sn.figures import FigureContext, render
+from ehc_sn.reporting.goaltrace import (
+    format_validation_summary,
+    serialize_validation_result,
+    write_validation_bundle,
+)
 from ehc_sn.tasks.goaltrace.builder import (
     TASK_FAMILY,
     build_goaltrace_task_corpus,
-    validate_goaltrace_root,
 )
+from ehc_sn.tasks.goaltrace.corpus import load_sample, load_split_arrays
+from ehc_sn.tasks.goaltrace.diagnostics import compute_corpus_statistics
+from ehc_sn.tasks.goaltrace.inspection import prepare_sample_inspection
+from ehc_sn.tasks.goaltrace.validation import validate_all_samples
+from ehc_sn.traces.keys import (
+    GOALTRACE_META_KEY_CURRENT_FLAG,
+    GOALTRACE_META_KEY_GOAL_FLAG,
+    GOALTRACE_META_KEY_NODE_MASK,
+    GOALTRACE_META_KEY_OBSERVATION_ID,
+    GOALTRACE_META_KEY_SUCCESSOR_INDICES,
+    GOALTRACE_META_KEY_SUCCESSOR_MASK,
+    GOALTRACE_META_KEY_TARGET_FIELD,
+    GOALTRACE_META_KEY_WEIGHT,
+)
+from ehc_sn.traces.trace_tree import TraceTree
 
 # ---------------------------------------------------------------------------
 _DEFAULT_VERSION = 1
@@ -312,15 +332,72 @@ def validate(
             "e.g. data/processed/goaltrace/default/v1.",
         ),
     ],
+    split: Annotated[
+        str | None,
+        typer.Option(
+            "--split",
+            help="Validate a single split only (default: all).",
+        ),
+    ] = None,
+    max_samples: Annotated[
+        int,
+        typer.Option(
+            "--max-samples",
+            help="Max samples to check per split (default: all).",
+        ),
+    ] = -1,
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            help="Write report bundle to this directory.",
+        ),
+    ] = Path("outputs/goaltrace-validation"),
 ) -> None:
-    """Validate a goaltrace task-corpus version root."""
+    """Validate a goaltrace task-corpus version root with structured reports."""
+    from ehc_sn.data.manifest import read_manifest
+
     root = root.resolve()
-    manifest = validate_goaltrace_root(root)
-    typer.echo(f"Goaltrace corpus valid: {root}")
-    typer.echo(f"  Observations: {manifest.get('n_observations', '?')}")
-    typer.echo(f"  Samples: {manifest.get('n_samples', {})}")
-    typer.echo(f"  Oracle: {manifest.get('oracle_semantics', '?')}")
-    typer.echo(f"  Field decay: {manifest.get('field_decay', '?')}")
+    manifest = read_manifest(root)
+    all_splits = list(manifest.get("n_samples", {}).keys())
+    splits = [split] if split else all_splits
+
+    # Run validation
+    issues, sample_counts = validate_all_samples(
+        root, splits=splits, max_samples=max_samples
+    )
+
+    # Statistics
+    stats = compute_corpus_statistics(root, manifest, splits, max_samples)
+    stats["n_observations"] = manifest.get("n_observations", 0)
+    stats["corpus"] = manifest.get("corpus", "?")
+    stats["version"] = manifest.get("version", "?")
+    stats["field_decay"] = manifest.get("field_decay", 0.8)
+
+    # Reports
+    paths = write_validation_bundle(
+        issues, stats, sample_counts, output_dir=output_dir
+    )
+    typer.echo(f"Goaltrace corpus validation: {root}")
+    typer.echo(f"  Validation report: {paths['validation']}")
+    typer.echo(f"  Diagnostics:       {paths['diagnostics']}")
+    typer.echo(f"  Summary:           {paths['summary']}")
+
+    errors = [i for i in issues if i.severity == "ERROR"]
+    n_err = len(errors)
+    typer.echo(f"Validated {sum(sample_counts.values())} samples")
+    typer.echo(
+        f"  Errors: {n_err}  Warnings: "
+        f"{len([i for i in issues if i.severity == 'WARNING'])}"
+    )
+    if n_err > 0:
+        typer.echo("\n  First 5 errors:")
+        for e in errors[:5]:
+            typer.echo(
+                f"    [{e.split}/{e.sample_index}] {e.code}: {e.message}"
+            )
+
+    raise typer.Exit(code=1 if n_err > 0 else 0)
 
 
 # =============================================================================
@@ -333,20 +410,264 @@ def inspect(
             "e.g. data/processed/goaltrace/default/v1.",
         ),
     ],
+    summary: Annotated[
+        bool,
+        typer.Option("--summary", help="Display corpus summary."),
+    ] = False,
+    split: Annotated[
+        str,
+        typer.Option("--split", help="Split name for sample inspection."),
+    ] = "train",
+    sample_index: Annotated[
+        int | None,
+        typer.Option("--sample-index", help="Sample index to inspect."),
+    ] = None,
+    sample_figure: Annotated[
+        bool,
+        typer.Option(
+            "--sample-figure",
+            help="Render goaltrace_task_overview for the selected sample.",
+            show_default=False,
+        ),
+    ] = False,
+    show: Annotated[
+        bool,
+        typer.Option("--show", help="Display figures interactively."),
+    ] = False,
+    gallery: Annotated[
+        int,
+        typer.Option(
+            "--gallery",
+            help="Number of overview figures to produce.",
+            show_default=False,
+        ),
+    ] = 0,
+    output_dir: Annotated[
+        Path,
+        typer.Option(
+            "--output-dir",
+            help="Output directory for figures.",
+        ),
+    ] = Path("outputs/goaltrace-inspection"),
 ) -> None:
-    """Print a human-readable summary of a Goaltrace version root manifest."""
+    """Inspect a Goaltrace corpus — metadata, samples, diagnostics, figures."""
+    from ehc_sn.data.manifest import read_manifest
+
     root = root.resolve()
-    manifest = validate_goaltrace_root(root)
-    typer.echo(f"Root: {root}")
-    typer.echo(f"  dataset_class : {manifest.get('dataset_class', '?')}")
-    typer.echo(f"  task          : {manifest.get('task', '?')}")
-    typer.echo(f"  corpus        : {manifest.get('corpus', '?')}")
-    typer.echo(f"  version       : {manifest.get('version', '?')}")
-    typer.echo(f"  channels      : {manifest.get('channels', [])}")
-    typer.echo(f"  n_samples     : {manifest.get('n_samples', {})}")
-    typer.echo(f"  Observations  : {manifest.get('n_observations', '?')}")
-    typer.echo(f"  Oracle        : {manifest.get('oracle_semantics', '?')}")
-    typer.echo(f"  Field decay   : {manifest.get('field_decay', '?')}")
+    manifest = read_manifest(root)
+    all_splits = list(manifest.get("n_samples", {}).keys())
+    n_obs = manifest.get("n_observations", 0)
+    field_decay = manifest.get("field_decay", 0.8)
+
+    # ── Summary ────────────────────────────────────────────────────────────
+    if summary:
+        stats = compute_corpus_statistics(root, manifest, all_splits)
+        typer.echo("=" * 72)
+        typer.echo("Goaltrace corpus summary")
+        typer.echo("=" * 72)
+        typer.echo(f"  Corpus: {manifest.get('corpus', '?')}")
+        typer.echo(f"  Version: {manifest.get('version', '?')}")
+        typer.echo(f"  Observations: {n_obs}")
+        typer.echo(f"  Field decay: {field_decay}")
+        typer.echo("")
+        typer.echo("Samples:")
+        for s, c in stats.get("per_split", {}).items():
+            typer.echo(f"  {s}: {c}")
+        typer.echo("")
+        for split_name in all_splits:
+            rp = stats.get("reachable_pairs", {}).get(split_name, {})
+            if rp:
+                typer.echo(
+                    f"  {split_name}: reachable pairs "
+                    f"{rp.get('reachable', 0)}/{rp.get('total', 0)}"
+                )
+            dc = stats.get("decay_consistency", {}).get(split_name, {})
+            if dc:
+                typer.echo(
+                    f"  {split_name}: decay consistent "
+                    f"{dc.get('passes', 0)}/{dc.get('total', 0)}"
+                )
+            iu = stats.get("input_uniqueness", {}).get(split_name, {})
+            if iu:
+                typer.echo(
+                    f"  {split_name}: unique keys "
+                    f"{iu.get('unique_keys', 0)}, "
+                    f"contradictions {iu.get('contradictions', 0)}"
+                )
+            bl = stats.get("baselines", {}).get(split_name, {})
+            if bl:
+                typer.echo(
+                    f"  {split_name}: baseline current_only "
+                    f"{bl.get('current_only', 0):.4f}"
+                )
+
+    # ── Single sample inspection ─────────────────────────────────────────
+    if sample_index is not None:
+        sample = load_sample(root, split, sample_index)
+        ins = prepare_sample_inspection(
+            sample, split=split, index=sample_index, field_decay=field_decay
+        )
+        typer.echo(f"\nSample {sample_index} ({split}):")
+        typer.echo(
+            f"  Current: obs {ins.current_observation_id} "
+            f"(idx {ins.current_idx})"
+        )
+        typer.echo(
+            f"  Goal: obs {ins.goal_observation_id} " f"(idx {ins.goal_idx})"
+        )
+        typer.echo(f"  Valid nodes: {ins.n_valid}  Padded: {ins.n_padded}")
+        typer.echo(f"  Path length: {ins.path_length} hops")
+        if ins.optimal_path:
+            path_str = " -> ".join(str(n) for n in ins.optimal_path)
+            typer.echo(f"  Optimal path: {path_str}")
+        typer.echo(f"  Current target: {ins.current_target:.4f}")
+        typer.echo(f"  Goal target: {ins.goal_target:.4f}")
+        typer.echo(f"  Decay consistent: {ins.decay_consistent}")
+        if ins.weight_stats:
+            ws = ins.weight_stats
+            typer.echo(
+                f"  Edge weights: min={ws['min']:.3f} "
+                f"mean={ws['mean']:.3f} max={ws['max']:.3f}"
+            )
+        if ins.warnings:
+            typer.echo(f"  Warnings ({len(ins.warnings)}):")
+            for w in ins.warnings:
+                typer.echo(f"    {w}")
+
+        if sample_figure:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            fpath = _render_overview_figure(
+                sample,
+                output_dir,
+                split,
+                sample_index,
+                manifest=manifest,
+            )
+            typer.echo(f"  Figure: {fpath}")
+
+    # ── Sample gallery ────────────────────────────────────────────────────
+    if gallery > 0:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for g_idx in range(gallery):
+            fpath = _render_overview_figure(
+                None,
+                output_dir,
+                split,
+                g_idx,
+                manifest=manifest,
+                root=root,
+            )
+            typer.echo(f"  Figure: {fpath}")
+
+    if show:
+        try:
+            import matplotlib.pyplot as plt
+
+            plt.show()
+        except ImportError:
+            pass
+
+
+# =============================================================================
+# Figure helpers
+# =============================================================================
+
+
+def _build_trace_for_sample(
+    sample: dict[str, np.ndarray],
+    *,
+    n_observations: int | None = None,
+) -> TraceTree:
+    """Build a minimal TraceTree with goaltrace meta keys from a corpus sample.
+
+    Args:
+        sample: Channel dict for one corpus sample.
+        n_observations: Corpus-wide observation vocabulary size.
+
+    Returns:
+        TraceTree with goaltrace meta keys populated.
+    """
+    trace = TraceTree()
+    oid = np.asarray(sample["observation_id"], dtype=np.int32)
+    w = np.asarray(sample["weight"], dtype=np.float32)
+    cf = np.asarray(sample["current_flag"], dtype=bool)
+    gf = np.asarray(sample["goal_flag"], dtype=bool)
+    nm = np.asarray(sample["node_mask"], dtype=bool)
+    tf = np.asarray(sample["target_field"], dtype=np.float32)
+    si = np.asarray(
+        sample.get("successor_indices", np.zeros_like(oid)), dtype=np.int32
+    )
+    sm = np.asarray(sample.get("successor_mask", np.zeros_like(si)), dtype=bool)
+
+    meta: dict[str, object] = {
+        "goaltrace": {
+            GOALTRACE_META_KEY_OBSERVATION_ID.split("/")[-1]: np.expand_dims(
+                oid, 0
+            ),
+            GOALTRACE_META_KEY_WEIGHT.split("/")[-1]: np.expand_dims(w, 0),
+            GOALTRACE_META_KEY_CURRENT_FLAG.split("/")[-1]: np.expand_dims(
+                cf, 0
+            ),
+            GOALTRACE_META_KEY_GOAL_FLAG.split("/")[-1]: np.expand_dims(gf, 0),
+            GOALTRACE_META_KEY_NODE_MASK.split("/")[-1]: np.expand_dims(nm, 0),
+            GOALTRACE_META_KEY_TARGET_FIELD.split("/")[-1]: np.expand_dims(
+                tf, 0
+            ),
+            GOALTRACE_META_KEY_SUCCESSOR_INDICES.split("/")[-1]: np.expand_dims(
+                si, 0
+            ),
+            GOALTRACE_META_KEY_SUCCESSOR_MASK.split("/")[-1]: np.expand_dims(
+                sm, 0
+            ),
+        }
+    }
+    if n_observations is not None:
+        meta["goaltrace"]["n_observations"] = n_observations  # type: ignore[index]
+
+    trace.attach_meta(meta)
+    return trace
+
+
+def _render_overview_figure(
+    sample: dict[str, np.ndarray] | None,
+    output_dir: Path,
+    split: str,
+    index: int,
+    *,
+    manifest: dict[str, object] | None = None,
+    root: Path | None = None,
+) -> Path:
+    """Render goaltrace_task_overview for one sample via the registry.
+
+    Args:
+        sample: Channel dict for one corpus sample.  If None, loads from
+            *root* using *split* and *index*.
+        output_dir: Output directory.
+        split: Dataset split label.
+        index: Sample index within the split.
+        manifest: Optional corpus manifest for authoritative metadata.
+        root: Versioned corpus root (required when *sample* is None).
+
+    Returns:
+        Path to the saved figure.
+    """
+    if sample is None:
+        if root is None:
+            raise ValueError("root required when sample is None")
+        sample = load_sample(root, split, index)
+    kb = _build_trace_for_sample(
+        sample,
+        n_observations=manifest.get("n_observations") if manifest else None,  # type: ignore[arg-type]
+    )
+    ctx = FigureContext(sample_idx=0)
+    fig = render("goaltrace_task_overview", kb, ctx)
+    fname = f"goaltrace_task_overview_{split}_{index}.png"
+    fpath = output_dir / fname
+    fig.savefig(fpath, dpi=200, bbox_inches="tight")
+    import matplotlib.pyplot as plt
+
+    plt.close(fig)
+    return fpath
 
 
 # =============================================================================

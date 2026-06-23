@@ -80,9 +80,6 @@ _DEFAULT_N_VAL = 500
 _DEFAULT_N_TEST = 500
 _DEFAULT_SEED = 42
 
-_PRESET_HELP = (
-    f"Named generation preset ({', '.join(sorted(DAGFLOW_PRESETS))})."
-)
 
 _SPAN_PROFILE_HELP = (
     f"Rank-span distribution profile ({', '.join(sorted(_SPAN_PROFILES))}). "
@@ -95,12 +92,12 @@ app = typer.Typer(add_completion=False, help=__doc__)
 
 # =============================================================================
 @app.command("build")
-def build(
+def build(  # -----------------------------------------------------------------
     preset: Annotated[
         str,
         typer.Option(
             "--preset",
-            help=_PRESET_HELP,
+            help=f"Named generation preset ({', '.join(sorted(DAGFLOW_PRESETS))}).",
         ),
     ] = _DEFAULT_PRESET,
     version: Annotated[
