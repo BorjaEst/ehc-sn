@@ -207,13 +207,6 @@ def build(
             "(default: n_queries_per_layout * n_layouts).",
         ),
     ] = None,
-    allow_partial: Annotated[
-        bool,
-        typer.Option(
-            "--allow-partial",
-            help="Write partial corpus when target sample count is not met.",
-        ),
-    ] = False,
 ) -> None:
     """Build the Routebind task corpus over spatial topology + dagflow graph."""
     root = Path(f"data/processed/{TASK_FAMILY}/{corpus}/v{version}")
@@ -247,9 +240,9 @@ def build(
 
     overrides: dict = {}
     if min_route_length is not None:
-        overrides["hard_min_route_length"] = min_route_length
+        overrides["hard_min_semantic_edges"] = min_route_length
     if max_route_length_override is not None:
-        overrides["hard_max_route_length"] = max_route_length_override
+        overrides["hard_max_semantic_edges"] = max_route_length_override
     if attempt_budget is not None:
         overrides["attempt_budget"] = attempt_budget
     profile = resolve_preset(preset, overrides or None)
@@ -270,7 +263,6 @@ def build(
         seed=seed,
         preset=profile,
         target_samples_total=target_samples,
-        allow_partial=allow_partial,
     )
     typer.echo(f"Routebind corpus built at {version_root}")
     typer.echo(f"  Topology: {topology_root_resolved}")
@@ -634,6 +626,13 @@ def inspect(
         Path | None,
         typer.Option("--json-out", help="Write inspection JSON to path."),
     ] = None,
+    show_dag_distances: Annotated[
+        bool,
+        typer.Option(
+            "--show-dag-distances",
+            help="Print DAG semantic distance distribution from corpus manifest.",
+        ),
+    ] = False,
 ) -> None:
     """Inspect a Routebind corpus — metadata, samples, diagnostics, figures."""
     root = root.resolve()
@@ -645,6 +644,26 @@ def inspect(
         raise typer.Exit(code=1)
 
     all_splits = list(manifest.get("n_samples", {}).keys())
+
+    # ── DAG distance distribution ─────────────────────────────────────
+    if show_dag_distances:
+        stage = manifest.get("stage_params", {})
+        diam = stage.get("semantic_distance_diameter")
+        if diam is None:
+            typer.echo(
+                "DAG distance distribution not available — "
+                "this corpus predates semantic-distance precomputation."
+            )
+            raise typer.Exit(code=0)
+        n_obs = manifest.get("stage_params", {}).get("n_observations", "?")
+        typer.echo(
+            f"DAG semantic distance distribution\n"
+            f"  observation vocabulary: {n_obs} nodes\n"
+            f"  diameter: {diam} edges\n"
+            f"  (Full histogram can be regenerated from the original\n"
+            f"   dagflow artifact via ``build-dagflow.py inspect``)."
+        )
+        raise typer.Exit(code=0)
 
     # ── Summary ────────────────────────────────────────────────────────────
     if summary:
