@@ -682,7 +682,7 @@ def inspect(
         bool,
         typer.Option(
             "--sample-figure",
-            help="Render routebind_task_overview for the selected sample.",
+            help="Render task_overview_routebind for the selected sample.",
             show_default=False,
         ),
     ] = False,
@@ -921,7 +921,7 @@ def _render_overview_figure(
     *,
     manifest: dict[str, object] | None = None,
 ) -> Path:
-    """Render routebind_task_overview for one sample via the registry.
+    """Render task_overview_routebind for one sample via the registry.
 
     Args:
         sample: Channel dict for one corpus sample.
@@ -940,8 +940,8 @@ def _render_overview_figure(
         canvas_height=manifest.get("canvas_height") if manifest else None,  # type: ignore[arg-type]
     )
     ctx = FigureContext(sample_idx=0)
-    fig = render("routebind_task_overview", kb, ctx)
-    fname = f"routebind_task_overview_{split}_{index}.png"
+    fig = render("task_overview_routebind", kb, ctx)
+    fname = f"task_overview_routebind_{split}_{index}.png"
     fpath = output_dir / fname
     fig.savefig(fpath, dpi=200, bbox_inches="tight")
     import matplotlib.pyplot as plt

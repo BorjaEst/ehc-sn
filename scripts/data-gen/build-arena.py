@@ -253,7 +253,7 @@ def inspect_command(
         bool,
         typer.Option(
             "--sample-figure",
-            help="Render arena_task_layout for the selected sample.",
+            help="Render task_overview_arena for the selected sample.",
             show_default=False,
         ),
     ] = False,
@@ -363,7 +363,7 @@ def _build_trace_for_sample(
 ) -> TraceTree:
     """Build a minimal TraceTree with arena trace keys from a corpus sample.
 
-    The arena_task_layout figure selector reads from trace keys
+    The task_overview_arena figure selector reads from trace keys
     (``trace.get()``), not meta keys.  We use ``attach_dense`` to inject
     them.
 
@@ -410,7 +410,7 @@ def _render_overview_figure(
     *,
     root: Path | None = None,
 ) -> Path:
-    """Render arena_task_layout for one sample via the registry.
+    """Render task_overview_arena for one sample via the registry.
 
     Args:
         sample: Channel dict for one corpus sample.  If None, loads from
@@ -429,8 +429,8 @@ def _render_overview_figure(
         sample = load_sample(root, split, index)
     kb = _build_trace_for_sample(sample)
     ctx = FigureContext(sample_idx=0)
-    fig = render("arena_task_layout", kb, ctx)
-    fname = f"arena_task_layout_{split}_{index}.png"
+    fig = render("task_overview_arena", kb, ctx)
+    fname = f"task_overview_arena_{split}_{index}.png"
     fpath = output_dir / fname
     fig.savefig(fpath, dpi=200, bbox_inches="tight")
     import matplotlib.pyplot as plt

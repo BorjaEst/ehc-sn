@@ -143,7 +143,7 @@ class MazehardPredictionAccuracyFigureData:
 
 @dataclass
 class MazehardTaskLayoutFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.mazehard_task_layout.MazehardTaskLayoutFigure`."""
+    """Prepared data for :class:`~ehc_sn.figures.templates.task_overview_mazehard.MazehardTaskLayoutFigure`."""
 
     input_ids: NDArray  # (side, side) — categorical input grid
     target_overlay: NDArray  # (side, side) — float32 target path

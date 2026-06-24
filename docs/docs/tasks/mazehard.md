@@ -226,7 +226,7 @@ python scripts/data-gen/build-mazehard.py inspect \
 | `--summary`       | Display corpus summary with statistics.                              |
 | `--split`         | Split name for sample inspection (default: train).                   |
 | `--sample-index`  | Specific sample index to inspect.                                    |
-| `--sample-figure` | Render `mazehard_task_layout` for the selected sample.               |
+| `--sample-figure` | Render `task_overview_mazehard` for the selected sample.             |
 | `--gallery`       | Number of overview figures to produce.                               |
 | `--selection`     | Sample selection policy: random, stratified.                         |
 | `--figure-seed`   | RNG seed for figure selection.                                       |
@@ -236,7 +236,7 @@ python scripts/data-gen/build-mazehard.py inspect \
 
 ### Figures
 
-`mazehard_task_layout` (registry name) — three-panel horizontal figure showing
+`task_overview_mazehard` (registry name) — three-panel horizontal figure showing
 the input token grid, the target solution path, and task metadata summary.
 Consumes only meta keys (`input_ids`, `target/solution_overlay`) and works
 directly from the corpus without requiring an evaluation trace.

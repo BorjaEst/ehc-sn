@@ -23,7 +23,7 @@ from ehc_sn.figures.core.task_overview import TaskOverviewTemplate
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.selectors.routebind import (
     RoutebindTaskOverviewData,
-    select_routebind_task_overview,
+    select_task_overview_routebind,
 )
 from ehc_sn.traces.trace_tree import TraceTree
 
@@ -33,7 +33,7 @@ _OBS_CMAP = "tab20"
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
-    data = select_routebind_task_overview(trace, ctx)
+    data = select_task_overview_routebind(trace, ctx)
     return RoutebindTaskOverviewFigure(data, ctx).plot()
 
 

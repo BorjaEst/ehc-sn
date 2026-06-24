@@ -44,7 +44,7 @@ from ehc_sn.traces.trace_tree import TraceTree
 # =============================================================================
 @dataclass
 class RoutebindTaskOverviewData:
-    """Prepared data for the ``routebind_task_overview`` figure template.
+    """Prepared data for the ``task_overview_routebind`` figure template.
 
     Attributes:
         cell_type: ``(S,)`` int32 — cell categories.
@@ -79,7 +79,7 @@ def _to_1d(arr: np.ndarray) -> np.ndarray:
     return arr
 
 
-def select_routebind_task_overview(
+def select_task_overview_routebind(
     trace: TraceTree,
     ctx: FigureContext,
 ) -> RoutebindTaskOverviewData:
@@ -258,5 +258,5 @@ def _extract_waypoint_obs_sequence(
 
 __all__ = [
     "RoutebindTaskOverviewData",
-    "select_routebind_task_overview",
+    "select_task_overview_routebind",
 ]

@@ -23,14 +23,14 @@ from ehc_sn.figures.core.task_overview import TaskOverviewTemplate
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.selectors.goaltrace import (
     GoaltraceTaskOverviewFigureData,
-    select_goaltrace_task_overview,
+    select_task_overview_goaltrace,
 )
 from ehc_sn.traces.trace_tree import TraceTree
 
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
     return GoaltraceTaskOverviewFigure(
-        select_goaltrace_task_overview(trace, ctx), ctx
+        select_task_overview_goaltrace(trace, ctx), ctx
     ).plot()
 
 

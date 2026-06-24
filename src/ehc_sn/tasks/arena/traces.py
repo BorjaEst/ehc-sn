@@ -51,7 +51,7 @@ class ArenaEvaluationSourceContext:
         split: Dataset split the samples belong to (e.g. ``"val"``).
         sample_ids: Ordered list of Arena sample ids in this batch.
         task_evidence_arrays: Optional dict of name → ndarray for task-context
-            figures (e.g. ``arena_task_layout``). Keys are namespaced trace
+            figures (e.g. ``task_overview_arena``). Keys are namespaced trace
             paths such as ``"arena/wall_mask"``, ``"arena/observation_ids"``,
             ``"arena/trajectory_locations"``, ``"arena/revisit_mask"``.
             Populated by the Arena provider.  ``None`` when not available.

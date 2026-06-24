@@ -214,7 +214,7 @@ def _compact_arrays(
 # =============================================================================
 
 
-def select_goaltrace_task_overview(
+def select_task_overview_goaltrace(
     trace: TraceTree,
     ctx: FigureContext,
 ) -> GoaltraceTaskOverviewFigureData:
@@ -389,5 +389,5 @@ __all__ = [
     "GoaltracePredictionExampleFigureData",
     "GoaltraceTaskOverviewFigureData",
     "select_goaltrace_prediction_example",
-    "select_goaltrace_task_overview",
+    "select_task_overview_goaltrace",
 ]

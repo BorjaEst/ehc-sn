@@ -429,7 +429,7 @@ def inspect(
         bool,
         typer.Option(
             "--sample-figure",
-            help="Render goaltrace_task_overview for the selected sample.",
+            help="Render task_overview_goaltrace for the selected sample.",
             show_default=False,
         ),
     ] = False,
@@ -661,7 +661,7 @@ def _render_overview_figure(
     manifest: dict[str, object] | None = None,
     root: Path | None = None,
 ) -> Path:
-    """Render goaltrace_task_overview for one sample via the registry.
+    """Render task_overview_goaltrace for one sample via the registry.
 
     Args:
         sample: Channel dict for one corpus sample.  If None, loads from
@@ -684,8 +684,8 @@ def _render_overview_figure(
         n_observations=manifest.get("n_observations") if manifest else None,  # type: ignore[arg-type]
     )
     ctx = FigureContext(sample_idx=0)
-    fig = render("goaltrace_task_overview", kb, ctx)
-    fname = f"goaltrace_task_overview_{split}_{index}.png"
+    fig = render("task_overview_goaltrace", kb, ctx)
+    fname = f"task_overview_goaltrace_{split}_{index}.png"
     fpath = output_dir / fname
     fig.savefig(fpath, dpi=200, bbox_inches="tight")
     import matplotlib.pyplot as plt

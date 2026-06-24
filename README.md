@@ -38,12 +38,11 @@ single canonical namespace: ehc_sn.
 
 ### Tasks
 
-| Task          | Execution mode                  | Eval surface                                               | Readiness                 |
-| ------------- | ------------------------------- | ---------------------------------------------------------- | ------------------------- |
-| **Arena**     | Replay (structural exposure)    | `ArenaScoreReport` — accuracy_all, accuracy_revisit        | Production                |
-| **MazeHard**  | Deliberation (puzzle batches)   | `MazeHardScoreReport` — sequences_exact, tokens_accuracy   | Production                |
-| **Dungeon**   | Live navigation (goal-directed) | `DungeonScoreReport` — success_rate, mean_score            | Deferred                  |
-| **Countwalk** | Replay (value regression)       | `CountwalkScoreReport` — value_accuracy, sequence_accuracy | No wired training surface |
+| Task          | Execution mode                | Eval surface                                             | Readiness  |
+| ------------- | ----------------------------- | -------------------------------------------------------- | ---------- |
+| **Arena**     | Replay (structural exposure)  | `ArenaScoreReport` — accuracy_all, accuracy_revisit      | Production |
+| **MazeHard**  | Deliberation (puzzle batches) | `MazeHardScoreReport` — sequences_exact, tokens_accuracy | Production |
+| **routebind** |                               |                                                          |            |
 
 ### Adapters
 

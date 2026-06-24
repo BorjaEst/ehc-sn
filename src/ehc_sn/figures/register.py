@@ -16,9 +16,7 @@ def register_builtin_figures() -> None:
     # ``ehc_sn.figures`` does not eagerly pull in all template modules.
     from ehc_sn.figures.templates import (
         arena_prediction_overlay,
-        arena_task_layout,
         goaltrace_prediction_example,
-        goaltrace_task_overview,
         h_l_residuals_over_steps,
         halt_logit_evolution,
         halting_timeline,
@@ -29,7 +27,6 @@ def register_builtin_figures() -> None:
         lec_content_structure_rsa,
         mazehard_prediction_evolution,
         mazehard_solution_overlay,
-        mazehard_task_layout,
         mec_autocorr_mosaic,
         mec_grid_metrics,
         occupancy_histogram,
@@ -38,7 +35,10 @@ def register_builtin_figures() -> None:
         prediction_accuracy_over_steps,
         q_value_evolution,
         reasoning_budget_summary,
-        routebind_task_overview,
+        task_overview_arena,
+        task_overview_goaltrace,
+        task_overview_mazehard,
+        task_overview_routebind,
     )
     from ehc_sn.traces.keys import (
         ARENA_TRACE_KEY_OBSERVATION_IDS,
@@ -107,13 +107,13 @@ def register_builtin_figures() -> None:
             )
         )
 
-    if not REGISTRY.has("mazehard_task_layout"):
+    if not REGISTRY.has("task_overview_mazehard"):
         REGISTRY.register(
             FigureSpec(
-                name="mazehard_task_layout",
+                name="task_overview_mazehard",
                 description="MazeHard task layout: input grid + target path for case-level orientation",
-                plot=mazehard_task_layout.plot,
-                default_filename="mazehard_task_layout",
+                plot=task_overview_mazehard.plot,
+                default_filename="task_overview_mazehard",
                 maturity="stable",
                 allowed_surfaces={"diagnostic", "report"},
                 input_contract="offline_artifact",
@@ -216,17 +216,17 @@ def register_builtin_figures() -> None:
             )
         )
 
-    if not REGISTRY.has("arena_task_layout"):
+    if not REGISTRY.has("task_overview_arena"):
         REGISTRY.register(
             FigureSpec(
-                name="arena_task_layout",
+                name="task_overview_arena",
                 description=(
                     "Task input figure: arena topology, observation map, "
                     "trajectory, and revisit markers. "
                     "Not a model diagnostic."
                 ),
-                plot=arena_task_layout.plot,
-                default_filename="arena_task_layout",
+                plot=task_overview_arena.plot,
+                default_filename="task_overview_arena",
                 maturity="stable",
                 allowed_surfaces={"report"},
                 input_contract="offline_artifact",
@@ -521,17 +521,17 @@ def register_builtin_figures() -> None:
             )
         )
 
-    if not REGISTRY.has("routebind_task_overview"):
+    if not REGISTRY.has("task_overview_routebind"):
         REGISTRY.register(
             FigureSpec(
-                name="routebind_task_overview",
+                name="task_overview_routebind",
                 description=(
                     "Routebind task overview: input layout \u2192 oracle "
                     "trajectory field. Task-context figure only; no "
                     "dense model trace required."
                 ),
-                plot=routebind_task_overview.plot,
-                default_filename="routebind_task_overview",
+                plot=task_overview_routebind.plot,
+                default_filename="task_overview_routebind",
                 maturity="experimental",
                 allowed_surfaces={"diagnostic", "report"},
                 input_contract="offline_artifact",
@@ -550,17 +550,17 @@ def register_builtin_figures() -> None:
             )
         )
 
-    if not REGISTRY.has("goaltrace_task_overview"):
+    if not REGISTRY.has("task_overview_goaltrace"):
         REGISTRY.register(
             FigureSpec(
-                name="goaltrace_task_overview",
+                name="task_overview_goaltrace",
                 description=(
                     "Goaltrace task overview: oracle input weights → target "
                     "prospective firing field transformation.  Task-context "
                     "figure only; no dense model trace required."
                 ),
-                plot=goaltrace_task_overview.plot,
-                default_filename="goaltrace_task_overview",
+                plot=task_overview_goaltrace.plot,
+                default_filename="task_overview_goaltrace",
                 maturity="experimental",
                 allowed_surfaces={"diagnostic", "report"},
                 input_contract="offline_artifact",

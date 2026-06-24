@@ -252,7 +252,7 @@ def inspect(
         bool,
         typer.Option(
             "--sample-figure",
-            help="Render mazehard_task_layout for the selected sample.",
+            help="Render task_overview_mazehard for the selected sample.",
             show_default=False,
         ),
     ] = False,
@@ -391,7 +391,7 @@ def _build_trace_for_sample(
 
     Converts corpus channels (topology, start, goals, solution) into the
     ``input_ids`` / ``target/solution_overlay`` meta keys that the
-    ``mazehard_task_layout`` figure selector expects.
+    ``task_overview_mazehard`` figure selector expects.
 
     Args:
         sample: Channel dict for one corpus sample.
@@ -443,7 +443,7 @@ def _render_overview_figure(
     *,
     root: Path | None = None,
 ) -> Path:
-    """Render mazehard_task_layout for one sample via the registry.
+    """Render task_overview_mazehard for one sample via the registry.
 
     Args:
         sample: Channel dict for one corpus sample.  If None, loads from
@@ -463,8 +463,8 @@ def _render_overview_figure(
     case_id = f"{split}/{index}"
     kb = _build_trace_for_sample(sample, case_id=case_id)
     ctx = FigureContext(sample_idx=0)
-    fig = render("mazehard_task_layout", kb, ctx)
-    fname = f"mazehard_task_layout_{split}_{index}.png"
+    fig = render("task_overview_mazehard", kb, ctx)
+    fname = f"task_overview_mazehard_{split}_{index}.png"
     fpath = output_dir / fname
     fig.savefig(fpath, dpi=200, bbox_inches="tight")
     import matplotlib.pyplot as plt

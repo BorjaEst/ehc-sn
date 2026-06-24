@@ -1,4 +1,4 @@
-"""Selector for the ``arena_task_layout`` figure.
+"""Selector for the ``task_overview_arena`` figure.
 
 Reads ``arena/*`` trace keys from a persisted eval artifact and produces a
 typed data object for the overview template.  The data includes the
@@ -53,7 +53,7 @@ _REQUIRED_KEYS: frozenset[str] = frozenset(
 # =============================================================================
 @dataclass
 class ArenaTaskOverviewData:
-    """Prepared data for the ``arena_task_layout`` figure template.
+    """Prepared data for the ``task_overview_arena`` figure template.
 
     Attributes:
         wall_mask: ``(H, W)`` bool — True for passable cells.
