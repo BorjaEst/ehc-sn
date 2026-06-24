@@ -199,6 +199,21 @@ def build(
             help="Override preset's attempt budget.",
         ),
     ] = None,
+    target_samples: Annotated[
+        int | None,
+        typer.Option(
+            "--target-samples",
+            help="Explicit corpus-level sample target "
+            "(default: n_queries_per_layout * n_layouts).",
+        ),
+    ] = None,
+    allow_partial: Annotated[
+        bool,
+        typer.Option(
+            "--allow-partial",
+            help="Write partial corpus when target sample count is not met.",
+        ),
+    ] = False,
 ) -> None:
     """Build the Routebind task corpus over spatial topology + dagflow graph."""
     root = Path(f"data/processed/{TASK_FAMILY}/{corpus}/v{version}")
@@ -254,6 +269,8 @@ def build(
         n_queries_per_layout=n_queries_per_layout,
         seed=seed,
         preset=profile,
+        target_samples_total=target_samples,
+        allow_partial=allow_partial,
     )
     typer.echo(f"Routebind corpus built at {version_root}")
     typer.echo(f"  Topology: {topology_root_resolved}")
@@ -756,6 +773,8 @@ def _build_trace_for_sample(
     sf = np.asarray(sample["start_flag"], dtype=bool)
     gf = np.asarray(sample["goal_flag"], dtype=bool)
     tf = np.asarray(sample["target_trajectory"], dtype=np.float32)
+    tw = np.asarray(sample["target_waypoint"], dtype=np.float32)
+    cm = np.asarray(sample["spatial_mask"], dtype=bool)
 
     meta: dict[str, object] = {
         "routebind": {
@@ -764,6 +783,8 @@ def _build_trace_for_sample(
             "start_flag": np.expand_dims(sf, 0),
             "goal_flag": np.expand_dims(gf, 0),
             "target_trajectory": np.expand_dims(tf, 0),
+            "target_waypoint": np.expand_dims(tw, 0),
+            "cell_mask": np.expand_dims(cm, 0),
         }
     }
     if n_observations is not None:

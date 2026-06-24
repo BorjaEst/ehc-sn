@@ -17,6 +17,8 @@ def register_builtin_figures() -> None:
     from ehc_sn.figures.templates import (
         arena_prediction_overlay,
         arena_task_layout,
+        goaltrace_prediction_example,
+        goaltrace_task_overview,
         h_l_residuals_over_steps,
         halt_logit_evolution,
         halting_timeline,
@@ -36,12 +38,22 @@ def register_builtin_figures() -> None:
         prediction_accuracy_over_steps,
         q_value_evolution,
         reasoning_budget_summary,
+        routebind_task_overview,
     )
     from ehc_sn.traces.keys import (
         ARENA_TRACE_KEY_OBSERVATION_IDS,
         ARENA_TRACE_KEY_REVISIT_MASK,
         ARENA_TRACE_KEY_TRAJECTORY_LOCATIONS,
         ARENA_TRACE_KEY_WALL_MASK,
+        GOALTRACE_META_KEY_CURRENT_FLAG,
+        GOALTRACE_META_KEY_GOAL_FLAG,
+        GOALTRACE_META_KEY_NODE_MASK,
+        GOALTRACE_META_KEY_OBSERVATION_ID,
+        GOALTRACE_META_KEY_SUCCESSOR_INDICES,
+        GOALTRACE_META_KEY_SUCCESSOR_MASK,
+        GOALTRACE_META_KEY_TARGET_FIELD,
+        GOALTRACE_META_KEY_WEIGHT,
+        GOALTRACE_TRACE_KEY_FIRING_FIELD,
         HPC_TRACE_KEY_CELLS,
         HPC_TRACE_KEY_MEMORY,
         LEC_META_KEY_ALPHA,
@@ -54,6 +66,17 @@ def register_builtin_figures() -> None:
         MAZEHARD_TRACE_KEY_PRED_OVERLAY,
         MEC_TRACE_KEY_CELLS,
         META_KEY_ENVIRONMENTS,
+        PFC_TRACE_KEY_Z_H,
+        PFC_TRACE_KEY_Z_L,
+        ROUTEBIND_META_KEY_CANVAS_HEIGHT,
+        ROUTEBIND_META_KEY_CANVAS_WIDTH,
+        ROUTEBIND_META_KEY_CELL_TYPE,
+        ROUTEBIND_META_KEY_GOAL_FLAG,
+        ROUTEBIND_META_KEY_N_OBSERVATIONS,
+        ROUTEBIND_META_KEY_OBSERVATION_ID,
+        ROUTEBIND_META_KEY_START_FLAG,
+        ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
+        ROUTEBIND_META_KEY_TARGET_WAYPOINT,
         TEM_META_KEY_TARGET_OBS_ID,
         TEM_TRACE_KEY_PRED_PATH,
         TEM_TRACE_KEY_PRED_POST,
@@ -280,7 +303,7 @@ def register_builtin_figures() -> None:
                 allowed_surfaces={"diagnostic", "report"},
                 input_contract="offline_artifact",
                 tags={"hrm", "dynamics", "latent"},
-                trace_keys={"pfc/z_H", "pfc/z_L"},
+                trace_keys={PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L},
                 meta_keys=set(),
             )
         )
@@ -300,7 +323,7 @@ def register_builtin_figures() -> None:
                 allowed_surfaces={"diagnostic"},
                 input_contract="offline_artifact",
                 tags={"hrm", "dynamics", "latent"},
-                trace_keys={"pfc/z_H", "pfc/z_L"},
+                trace_keys={PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L},
                 meta_keys=set(),
             )
         )
@@ -495,6 +518,101 @@ def register_builtin_figures() -> None:
                     WORLD_TRACE_KEY_LOCATION_IDS,
                 },
                 meta_keys={TEM_META_KEY_TARGET_OBS_ID},
+            )
+        )
+
+    if not REGISTRY.has("routebind_task_overview"):
+        REGISTRY.register(
+            FigureSpec(
+                name="routebind_task_overview",
+                description=(
+                    "Routebind task overview: input layout \u2192 oracle "
+                    "trajectory field. Task-context figure only; no "
+                    "dense model trace required."
+                ),
+                plot=routebind_task_overview.plot,
+                default_filename="routebind_task_overview",
+                maturity="experimental",
+                allowed_surfaces={"diagnostic", "report"},
+                input_contract="offline_artifact",
+                tags={"routebind", "task-context"},
+                trace_keys=frozenset(),
+                meta_keys=frozenset(
+                    {
+                        ROUTEBIND_META_KEY_CELL_TYPE,
+                        ROUTEBIND_META_KEY_GOAL_FLAG,
+                        ROUTEBIND_META_KEY_OBSERVATION_ID,
+                        ROUTEBIND_META_KEY_START_FLAG,
+                        ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
+                        ROUTEBIND_META_KEY_TARGET_WAYPOINT,
+                    }
+                ),
+            )
+        )
+
+    if not REGISTRY.has("goaltrace_task_overview"):
+        REGISTRY.register(
+            FigureSpec(
+                name="goaltrace_task_overview",
+                description=(
+                    "Goaltrace task overview: oracle input weights → target "
+                    "prospective firing field transformation.  Task-context "
+                    "figure only; no dense model trace required."
+                ),
+                plot=goaltrace_task_overview.plot,
+                default_filename="goaltrace_task_overview",
+                maturity="experimental",
+                allowed_surfaces={"diagnostic", "report"},
+                input_contract="offline_artifact",
+                tags={"goaltrace", "task-context"},
+                trace_keys=frozenset(),
+                meta_keys=frozenset(
+                    {
+                        GOALTRACE_META_KEY_OBSERVATION_ID,
+                        GOALTRACE_META_KEY_WEIGHT,
+                        GOALTRACE_META_KEY_CURRENT_FLAG,
+                        GOALTRACE_META_KEY_GOAL_FLAG,
+                        GOALTRACE_META_KEY_NODE_MASK,
+                        GOALTRACE_META_KEY_TARGET_FIELD,
+                        GOALTRACE_META_KEY_SUCCESSOR_INDICES,
+                        GOALTRACE_META_KEY_SUCCESSOR_MASK,
+                    }
+                ),
+            )
+        )
+
+    if not REGISTRY.has("goaltrace_prediction_example"):
+        REGISTRY.register(
+            FigureSpec(
+                name="goaltrace_prediction_example",
+                description=(
+                    "Goaltrace prediction example: input weights, target "
+                    "field, and predicted field rendered on the same DAG "
+                    "topology with panel-level diagnostics."
+                ),
+                plot=goaltrace_prediction_example.plot,
+                default_filename="goaltrace_prediction_example",
+                maturity="experimental",
+                allowed_surfaces={"diagnostic", "report"},
+                input_contract="evaluation_artifact",
+                tags={"goaltrace", "prediction"},
+                trace_keys=frozenset(
+                    {
+                        GOALTRACE_TRACE_KEY_FIRING_FIELD,
+                    }
+                ),
+                meta_keys=frozenset(
+                    {
+                        GOALTRACE_META_KEY_OBSERVATION_ID,
+                        GOALTRACE_META_KEY_WEIGHT,
+                        GOALTRACE_META_KEY_CURRENT_FLAG,
+                        GOALTRACE_META_KEY_GOAL_FLAG,
+                        GOALTRACE_META_KEY_NODE_MASK,
+                        GOALTRACE_META_KEY_TARGET_FIELD,
+                        GOALTRACE_META_KEY_SUCCESSOR_INDICES,
+                        GOALTRACE_META_KEY_SUCCESSOR_MASK,
+                    }
+                ),
             )
         )
 

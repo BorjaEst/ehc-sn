@@ -180,16 +180,24 @@ class RoutebindTaskOverviewFigure(BaseFigureTemplate):
 
         tf_active = int((data.target_trajectory > 0.01).sum())
 
+        waypoint_line = (
+            "Waypoints: ["
+            + " → ".join(str(obs) for obs in data.waypoint_obs_sequence)
+            + "]"
+        )
+
         lines = [
             "Routebind Task",
             "",
-            f"Grid: {W}\u2009\u00d7\u2009{W}",
+            f"Grid: {W} × {W}",
             f"Walls: {n_walls}  Free: {n_free}",
             f"Observation cells: {n_obs_cells}",
             f"Distinct obs IDs: {data.n_observations}",
             f"Goal occurrences: {n_goal_occurrences}",
             f"Start: ({start_r},{start_c}) obs={start_obs}",
             f"Traj field active: {tf_active} cells",
+            "",
+            waypoint_line,
             "",
             "Given a spatial layout and a",
             "semantic goal, the model must",

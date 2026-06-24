@@ -133,6 +133,20 @@ DAGFLOW_PRESETS: dict[str, dict] = {
             "NOT the canonical Routebind v1 profile."
         ),
     },
+    "sparse": {
+        "span_profile": "local",
+        "target_edges": 60,
+        "n_max": 45,
+        "max_out_degree": 4,
+        "public_id_policy": "permuted",
+        "description": (
+            "Sparse routing DAG: 45 nodes, 60 edges (44 backbone + 16 extra, "
+            "~1.7% extra-edge density).  Fewer shortcuts than the canonical "
+            "routing preset; the oracle must follow longer observation "
+            "sequences, producing longer physical routes.  Recommended with "
+            "the long-spatial or joint-hard Routebind preset."
+        ),
+    },
 }
 """Named generation presets bundling span profile, target edge count, and dimensions.
 
@@ -180,25 +194,11 @@ def _resolve_preset(
     specification and ``extra_edge_density`` is a fallback for CLI
     compatibility.
     """
-    # Backward-compatible alias: "sparse" → "branching"
-    _PRESET_ALIASES: dict[str, str] = {"sparse": "branching"}
-    resolved_preset = _PRESET_ALIASES.get(preset, preset)
-    if resolved_preset != preset:
-        import warnings
-
-        warnings.warn(
-            f"dagflow preset {preset!r} is deprecated; use "
-            f"{resolved_preset!r} instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-    if resolved_preset not in DAGFLOW_PRESETS:
+    if preset not in DAGFLOW_PRESETS:
         raise ValueError(
-            f"Unknown dagflow preset {resolved_preset!r}. "
+            f"Unknown dagflow preset {preset!r}. "
             f"Valid: {sorted(DAGFLOW_PRESETS)}."
         )
-    preset = resolved_preset
 
     p = DAGFLOW_PRESETS[preset]
 

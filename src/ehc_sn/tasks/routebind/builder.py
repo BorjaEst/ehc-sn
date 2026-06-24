@@ -97,13 +97,25 @@ class RoutebindSamplingProfile:
     means the number of accepted observation events (including the start
     observation).
 
+    Two modes are supported:
+
+    * ``"distribution"`` — the profile shapes which valid candidates are
+      selected but never rejects a valid sample.  Samples that fall outside
+      all named bins are mapped to a catch-all overflow zone.
+    * ``"restricted_domain"`` — samples outside the hard bin boundaries are
+      rejected and counted in ``rejected_bucket_mismatch``.
+
     Attributes:
+        mode: ``"distribution"`` or ``"restricted_domain"``.
         physical_length_bins: Inclusive ``(lo, hi)`` bins for physical
-            route length, in order.  Must be contiguous and cover
+            route length, in order.  For ``mode="restricted_domain"`` bins
+            must be contiguous and cover
             ``[hard_min_route_length, hard_max_route_length]``.
+            For ``mode="distribution"`` bins need not be contiguous.
         physical_length_targets: Target proportion per bin (must sum to 1).
         semantic_length_bins: Inclusive ``(lo, hi)`` bins for semantic
-            waypoint count, in order.  Must be contiguous.
+            waypoint count, in order.  For ``mode="restricted_domain"`` bins
+            must be contiguous.
         semantic_length_targets: Target proportion per bin (must sum to 1).
         hard_min_route_length: Absolute minimum physical route length.
         hard_max_route_length: Absolute maximum physical route length.
@@ -116,10 +128,12 @@ class RoutebindSamplingProfile:
         description: Human-readable label.
     """
 
+    semantic_length_targets: list[float]
+    mode: str
     physical_length_bins: list[tuple[int, int]]
     physical_length_targets: list[float]
     semantic_length_bins: list[tuple[int, int]]
-    semantic_length_targets: list[float]
+    # All fields below have defaults
     hard_min_route_length: int = 2
     hard_max_route_length: int = 150
     tolerances: dict[str, tuple[float, float]] = field(
@@ -133,6 +147,11 @@ class RoutebindSamplingProfile:
 
     def __post_init__(self) -> None:
         """Validate structural invariants at construction time."""
+        if self.mode not in ("distribution", "restricted_domain"):
+            raise ValueError(
+                f"mode={self.mode!r} must be 'distribution' or 'restricted_domain'."
+            )
+        is_restricted = self.mode == "restricted_domain"
         # --- Physical bins ---
         if not self.physical_length_bins:
             raise ValueError("physical_length_bins must not be empty.")
@@ -168,7 +187,7 @@ class RoutebindSamplingProfile:
                 raise ValueError(
                     f"physical_length_targets[{i}] = {tgt} outside [0, 1]."
                 )
-            if i > 0:
+            if is_restricted and i > 0:
                 prev_hi = self.physical_length_bins[i - 1][1]
                 if lo1 != prev_hi + 1:
                     raise ValueError(
@@ -265,6 +284,7 @@ class GenerationFunnel:
     rejected_trivial_waypoint: int = 0
     rejected_invalid_next_dir: int = 0
     rejected_target_validation: int = 0
+    rejected_bucket_mismatch: int = 0
 
     def _bkey(self, phys_idx: int) -> tuple[int, int]:
         return (phys_idx, -1)
@@ -314,6 +334,7 @@ class GenerationFunnel:
             "rejected_trivial_waypoint": self.rejected_trivial_waypoint,
             "rejected_invalid_next_dir": self.rejected_invalid_next_dir,
             "rejected_target_validation": self.rejected_target_validation,
+            "rejected_bucket_mismatch": self.rejected_bucket_mismatch,
         }
 
 
@@ -324,6 +345,7 @@ class GenerationFunnel:
 
 ROUTEBIND_PRESETS: dict[str, RoutebindSamplingProfile] = {
     "smoke": RoutebindSamplingProfile(
+        mode="distribution",
         physical_length_bins=[(2, 150)],
         physical_length_targets=[1.0],
         semantic_length_bins=[(2, 20)],
@@ -335,6 +357,7 @@ ROUTEBIND_PRESETS: dict[str, RoutebindSamplingProfile] = {
         description="Accept-all preset for tests and calibration runs.",
     ),
     "balanced": RoutebindSamplingProfile(
+        mode="distribution",
         physical_length_bins=[
             (2, 7),
             (8, 15),
@@ -363,6 +386,7 @@ ROUTEBIND_PRESETS: dict[str, RoutebindSamplingProfile] = {
         ),
     ),
     "long-spatial": RoutebindSamplingProfile(
+        mode="distribution",
         physical_length_bins=[
             (2, 25),
             (26, 50),
@@ -388,6 +412,7 @@ ROUTEBIND_PRESETS: dict[str, RoutebindSamplingProfile] = {
         ),
     ),
     "long-semantic": RoutebindSamplingProfile(
+        mode="distribution",
         physical_length_bins=[
             (2, 20),
             (21, 50),
@@ -414,6 +439,37 @@ ROUTEBIND_PRESETS: dict[str, RoutebindSamplingProfile] = {
         ),
     ),
     "joint-hard": RoutebindSamplingProfile(
+        mode="distribution",
+        physical_length_bins=[
+            (2, 19),
+            (20, 40),
+            (41, 70),
+            (71, 100),
+            (101, 140),
+        ],
+        physical_length_targets=[0.05, 0.20, 0.35, 0.30, 0.10],
+        semantic_length_bins=[
+            (2, 3),
+            (4, 5),
+            (6, 8),
+            (9, 12),
+            (13, 15),
+        ],
+        semantic_length_targets=[0.05, 0.15, 0.40, 0.30, 0.10],
+        hard_min_route_length=2,
+        hard_max_route_length=140,
+        tolerances={
+            "*": (0.0, 3.0),
+        },
+        attempt_budget=200,
+        description=(
+            "Jointly long spatial and semantic solutions (distribution mode).  "
+            "Short/easy samples go into low-target catch-all bins.  "
+            "Recommended with dungeongen topology and a sparse DAG."
+        ),
+    ),
+    "joint-hard-only": RoutebindSamplingProfile(
+        mode="restricted_domain",
         physical_length_bins=[
             (20, 40),
             (41, 70),
@@ -435,9 +491,9 @@ ROUTEBIND_PRESETS: dict[str, RoutebindSamplingProfile] = {
         },
         attempt_budget=200,
         description=(
-            "Jointly long spatial and semantic solutions.  "
+            "Jointly long only — samples outside hard bounds are rejected.  "
             "Requires large attempt budgets.  Recommended with dungeongen "
-            "topology and a sparse DAG (sparse or chain16)."
+            "topology and a sparse DAG."
         ),
     ),
 }
@@ -467,6 +523,7 @@ def resolve_preset(
         return base
     # Build a new profile with overrides
     kwargs = {
+        "mode": base.mode,
         "physical_length_bins": base.physical_length_bins,
         "physical_length_targets": base.physical_length_targets,
         "semantic_length_bins": base.semantic_length_bins,
@@ -752,17 +809,29 @@ def _bin_starts_by_distance(
             continue
         s = p * n_obs + obs
         d = int(distance[s])
+        if d >= INF:
+            continue
         # Map distance to physical route length = distance + 1
         rlen = d + 1
         bi = profile.physical_bucket_index(rlen)
         if bi is None:
-            # Distance doesn't fit any bucket; rare but possible if
-            # max_supported_route_length < hard_max_route_length.
-            continue
+            if profile.mode == "distribution":
+                # In distribution mode, assign to the nearest physical bin
+                # rather than dropping the candidate.  The catch-all first
+                # bin (always present in distribution presets) will absorb
+                # routes below its lo; routes above hard_max_route_length
+                # go into the last bin.
+                for i, (lo, hi) in enumerate(profile.physical_length_bins):
+                    if rlen < lo:
+                        bi = i
+                        break
+                if bi is None:
+                    bi = len(profile.physical_length_bins) - 1
+            else:
+                # restricted_domain: reject silently (funnel counts below)
+                funnel.rejected_bucket_mismatch += 1
+                continue
         funnel.inc_examined(bi)
-        if d >= INF:
-            funnel.inc_unreachable(bi)
-            continue
         if opt_count[s] >= 2:
             funnel.inc_ambiguous(bi)
             continue
@@ -846,6 +915,8 @@ def build_routebind_task_corpus(
     n_queries_per_layout: int = 10,
     seed: int = 42,
     preset: RoutebindSamplingProfile | None = None,
+    target_samples_total: int | None = None,
+    allow_partial: bool = False,
 ) -> None:
     """Build the routebind task corpus at *version_root* over spatial
     topology and semantic DAG parent artifacts.
@@ -895,11 +966,18 @@ def build_routebind_task_corpus(
         seed: Deterministic base seed for overall reproducibility.
         preset: Target distribution for deficit-driven query
             selection.  When ``None``, defaults to ``balanced``.
+        target_samples_total: Hard output size target across all splits.
+            When set, the builder raises ``ValueError`` if the accepted
+            sample count falls short unless *allow_partial* is ``True``.
+        allow_partial: When ``True`` and *target_samples_total* is set,
+            a shortfall writes ``build_status: "partial"`` to the manifest
+            instead of raising.
 
     Raises:
         FileExistsError: When *version_root* already exists (immutable root).
         ValueError: When topology family is unsupported, any layout exceeds
-            the configured storage extent, or ``n_queries_per_layout < 1``.
+            the configured storage extent, ``n_queries_per_layout < 1``,
+            or target_samples_total is not met and allow_partial is False.
     """
     version = extract_version(version_root)
 
@@ -970,6 +1048,10 @@ def build_routebind_task_corpus(
             )
         natural_heights.append(ly_h)
         natural_widths.append(ly_w)
+
+    # --- Resolve corpus-level sample target ---
+    if target_samples_total is None:
+        target_samples_total = n_queries_per_layout * len(layouts)
 
     # --- Load semantic DAG from dagflow parent ---
     dagflow_entry, dagflow_sample = find_artifact_by_id(
@@ -1052,6 +1134,7 @@ def build_routebind_task_corpus(
         "natural_extent_homogeneous": natural_extent_homogeneous,
         "natural_height_range": [min(natural_heights), max(natural_heights)],
         "natural_width_range": [min(natural_widths), max(natural_widths)],
+        "requested_sample_count": target_samples_total,
     }
     # Diagnostic counters (will be filled per-split)
     search_metrics: dict[str, dict[str, int]] = {
@@ -1371,23 +1454,71 @@ def build_routebind_task_corpus(
                             phy_bi = profile.physical_bucket_index(route_len)
                             sem_bi = profile.semantic_bucket_index(sem_len)
                             if phy_bi is None or sem_bi is None:
-                                continue
+                                if profile.mode == "distribution":
+                                    # Distribution mode: map to nearest
+                                    # bucket (catch-all) instead of dropping.
+                                    if phy_bi is None:
+                                        for i, (lo, hi) in enumerate(
+                                            profile.physical_length_bins
+                                        ):
+                                            if route_len < lo:
+                                                phy_bi = i
+                                                break
+                                        if phy_bi is None:
+                                            phy_bi = (
+                                                len(
+                                                    profile.physical_length_bins
+                                                )
+                                                - 1
+                                            )
+                                    if sem_bi is None:
+                                        for i, (lo, hi) in enumerate(
+                                            profile.semantic_length_bins
+                                        ):
+                                            if sem_len < lo:
+                                                sem_bi = i
+                                                break
+                                        if sem_bi is None:
+                                            sem_bi = (
+                                                len(
+                                                    profile.semantic_length_bins
+                                                )
+                                                - 1
+                                            )
+                                else:
+                                    funnel.rejected_bucket_mismatch += 1
+                                    continue
 
                             funnel.inc_reconstructed(phy_bi, sem_bi)
 
                             # Check if joint bucket is full (tolerance max)
                             joint_key = (phy_bi, sem_bi)
-                            total_target = (
-                                sum(profile.physical_length_targets)
-                                * sum(profile.semantic_length_targets)
-                                * (query_count + 1)  # rough per-layout target
-                            )
                             tol = profile.tolerances.get(
                                 str(joint_key),
                                 profile.tolerances.get("*", (0.0, 1.0)),
                             )
                             current_n = joint_accepted.get(joint_key, 0)
-                            max_n = max(1, round(tol[1] * (query_count + 1)))
+                            if profile.mode == "distribution":
+                                # The catch-all joint bin (first bin in both
+                                # dimensions) is never capped — it absorbs
+                                # overflow when hard supply is short.
+                                if phy_bi == 0 and sem_bi == 0:
+                                    max_n = 2**31 - 1
+                                else:
+                                    joint_targets = profile.joint_targets()
+                                    tgt_frac = joint_targets.get(joint_key, 0.0)
+                                    max_n = max(
+                                        1,
+                                        round(
+                                            tgt_frac
+                                            * (query_count + 1)
+                                            * tol[1]
+                                        ),
+                                    )
+                            else:
+                                max_n = max(
+                                    1, round(tol[1] * (query_count + 1))
+                                )
                             if current_n >= max_n:
                                 funnel.inc_bucket_full(phy_bi, sem_bi)
                                 continue
@@ -1496,6 +1627,9 @@ def build_routebind_task_corpus(
                 merged_funnel.rejected_target_validation += (
                     lf.rejected_target_validation
                 )
+                merged_funnel.rejected_bucket_mismatch += (
+                    lf.rejected_bucket_mismatch
+                )
             stage_params[f"funnel_{split}"] = merged_funnel.serialize()
 
             # Record realized distribution
@@ -1532,6 +1666,37 @@ def build_routebind_task_corpus(
         final_counts: dict[str, int] = {}
         for e in all_entries:
             final_counts[e.split] = final_counts.get(e.split, 0) + 1
+
+        total_accepted = sum(final_counts.values())
+        if (
+            target_samples_total is not None
+            and total_accepted < target_samples_total
+        ):
+            if not allow_partial:
+                # Build a detailed shortfall message
+                lines = [
+                    f"Routebind corpus target not met.",
+                    f"",
+                    f"  Requested samples: {target_samples_total}",
+                    f"  Accepted samples: {total_accepted}",
+                    f"  Attempt budget: {profile.attempt_budget if preset else n_queries_per_layout} per layout",
+                    f"  Preset: {preset.description if preset else 'balanced'}",
+                    f"",
+                ]
+                # Per-split counts
+                for s in _SPLITS:
+                    cnt = final_counts.get(s, 0)
+                    lines.append(f"  Split {s}: {cnt}")
+                lines.append("")
+                # Rejection breakdown
+                for s, reasons in rejection_counts.items():
+                    for reason, count in reasons.items():
+                        lines.append(f"  Rejected {s}/{reason}: {count}")
+                lines.append("")
+                raise ValueError("\n".join(lines))
+            stage_params["build_status"] = "partial"
+        else:
+            stage_params["build_status"] = "complete"
 
         for s, reasons in rejection_counts.items():
             for reason, count in reasons.items():
