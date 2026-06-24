@@ -1,9 +1,12 @@
 """MazeHard task layout figure — task-context orientation for §7.
 
-Three-panel horizontal figure (meta keys only, no dense traces):
-    1. Input token grid (categorical).
-    2. Target solution path (binary foreground).
-    3. Task summary text.
+Two-row figure (meta keys only, no dense traces):
+    Row 0: Input token grid (categorical) | Target solution path (binary) | Summary.
+    Row 1: Categorical legend              | (empty)                       | Summary.
+
+Refactored to inherit ``TaskOverviewTemplate`` — owns layout, annotation
+slots, and three-zone summary.  This template owns only the task-specific
+visual encoding and summary text.
 """
 
 from __future__ import annotations
@@ -13,8 +16,8 @@ from matplotlib.axes import Axes
 from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
 
-from ehc_sn.figures.core.base import BaseFigureTemplate
-from ehc_sn.figures.core.panels import panel
+from ehc_sn.figures._contracts import CategoricalLegend
+from ehc_sn.figures.core.task_overview import TaskOverviewTemplate
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.selectors.mazehard import (
     MazehardTaskLayoutFigureData,
@@ -22,29 +25,26 @@ from ehc_sn.figures.selectors.mazehard import (
 )
 from ehc_sn.traces.trace_tree import TraceTree
 
+# ── Public entry point ─────────────────────────────────────────────────────
+
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
+    """Render the MazeHard task overview figure from a persisted eval trace."""
     return MazehardTaskLayoutFigure(select_task_layout(trace, ctx), ctx).plot()
 
 
-class MazehardTaskLayoutFigure(BaseFigureTemplate):
-    HEIGHT_FRAC: float = 0.22
-    MOSAIC = [["input", "target", "summary_text"]]
-    MOSAIC_KWARGS = {"gridspec_kw": {"wspace": 0.08}}
+# ── Figure template ────────────────────────────────────────────────────────
 
-    def __init__(
-        self,
-        data: MazehardTaskLayoutFigureData,
-        ctx: FigureContext,
-    ) -> None:
-        super().__init__(data, ctx)
 
-    # ── Panel A: input token grid ────────────────────────────────────────────
-    @panel(slots=["input"])
-    def input_panel(self, ax: Axes) -> None:
-        grid = self.data.input_ids
+class MazehardTaskLayoutFigure(TaskOverviewTemplate):
+    """MazeHard task-overview: input grid → target path → summary."""
+
+    # ── Visual encoding (task-owned) ────────────────────────────────────
+
+    def render_input(self, ax: Axes) -> None:
+        """Categorical input token grid — wall/free/start/goal."""
         ax.imshow(
-            grid,
+            self.data.input_ids,
             cmap="Set2",
             interpolation="nearest",
             origin="upper",
@@ -53,12 +53,10 @@ class MazehardTaskLayoutFigure(BaseFigureTemplate):
         ax.set_yticks([])
         ax.set_title("(a) Input — Maze grid", fontsize=7)
 
-    # ── Panel B: target path ─────────────────────────────────────────────────
-    @panel(slots=["target"])
-    def target_panel(self, ax: Axes) -> None:
-        target = self.data.target_overlay.astype(float)
+    def render_target(self, ax: Axes) -> None:
+        """Binary target solution path — red foreground."""
         ax.imshow(
-            target,
+            self.data.target_overlay,
             cmap=ListedColormap(["#f0f0f0", "#e53e3e"]),
             vmin=0,
             vmax=1,
@@ -67,37 +65,56 @@ class MazehardTaskLayoutFigure(BaseFigureTemplate):
         )
         ax.set_xticks([])
         ax.set_yticks([])
-        ax.set_title("(b) Target path", fontsize=7)
+        ax.set_title("(b) Target — Solution path", fontsize=7)
 
-    # ── Panel C: task summary ────────────────────────────────────────────────
-    @panel(slots=["summary_text"])
-    def summary_panel(self, ax: Axes) -> None:
-        data: MazehardTaskLayoutFigureData = self.data
-        ax.axis("off")
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
+    # ── Annotation slots (task-owned) ───────────────────────────────────
 
-        lines = [
-            "Task objective",
-            "",
-            "Predict the solution-path overlay",
-            "for the MazeHard input grid.",
-            "",
-            f"Case: {data.case_id}",
-            f"Grid: {data.grid_shape[0]} x {data.grid_shape[1]}",
-            f"Output cells: {data.grid_shape[0] * data.grid_shape[1]}",
-            f"Target path cells: {data.target_path_cells}",
-            f"Rollout steps: {data.rollout_steps}",
-            "",
-            "Prediction figures below compare",
-            "model outputs to this target.",
-        ]
-        ax.text(
-            0.08,
-            0.92,
-            "\n".join(lines),
-            transform=ax.transAxes,
-            fontsize=5.5,
-            verticalalignment="top",
-            fontfamily="monospace",
+    def annotation_for_input(self) -> CategoricalLegend:
+        return CategoricalLegend(
+            entries=[
+                ("Wall", "#1b1f24"),
+                ("Free", "#f7f4ef"),
+                ("Start", "#2b6cb0"),
+                ("Goal", "#d69e2e"),
+            ],
+            ncol=4,
         )
+
+    def annotation_for_target(self) -> None:
+        return None  # binary path is self-explanatory
+
+    def summary_title(self) -> str:
+        return "MazeHard Task"
+
+    # ── Summary content (task-owned) ────────────────────────────────────
+
+    def objective_text(self) -> list[str]:
+        return [
+            "Predict shortest path",
+            "overlay for the input",
+            "maze grid.",
+        ]
+
+    def sample_rows(self) -> list[tuple[str, str]]:
+        data: MazehardTaskLayoutFigureData = self.data
+        return [
+            ("Case:", data.case_id),
+            (
+                "Grid:",
+                f"{data.grid_shape[0]}\u2009\u00d7\u2009{data.grid_shape[1]}",
+            ),
+            (
+                "Output cells:",
+                str(data.grid_shape[0] * data.grid_shape[1]),
+            ),
+            ("Target path cells:", str(data.target_path_cells)),
+        ]
+
+    def contract_notation(self) -> str:
+        return (
+            r"$(\mathrm{grid}, \mathrm{start}, \mathrm{goal})"
+            r"\;\longrightarrow\; \mathrm{path}$"
+        )
+
+
+__all__ = ["MazehardTaskLayoutFigure", "plot"]

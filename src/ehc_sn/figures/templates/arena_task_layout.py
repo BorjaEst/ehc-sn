@@ -1,34 +1,24 @@
 """Arena task overview figure template.
 
-A three-panel paradigm figure that explains the Arena evaluation task:
+Two-row figure (meta keys only, no dense traces):
+    Row 0: Environment map (obs IDs) | Agent trajectory | Summary.
+    Row 1: (empty)                    | Start/end/revisit legend | Summary.
 
-- **Panel (a) — Environment**: Renders the dungeon topology with per-cell
-  observation IDs using ``plot_map()``.  Wall cells are shown in a neutral
-  background colour, passable cells are coloured by categorical observation ID.
-
-- **Panel (b) — Trajectory**: Renders the agent's trajectory through the
-  environment using ``plot_time_colored_trajectory()`` with large start/end
-  markers and hollow gold revisit rings.
-
-- **Panel (c) — Summary**: Compact text panel with task statistics and
-  paradigm description.
-
-This is a **paradigm figure**, not a results figure.  It is rendered once
-per regime (first valid case) and answers "what task is being evaluated?"
+Refactored to inherit ``TaskOverviewTemplate`` — owns layout, annotation
+slots, and three-zone summary.  This template owns only the task-specific
+visual encoding and summary text.
 """
 
 from __future__ import annotations
 
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import colormaps as mpl_colormaps
 from matplotlib.axes import Axes
 from matplotlib.colors import ListedColormap
 from matplotlib.figure import Figure
 
-from ehc_sn.figures._contracts import AnyWorld
-from ehc_sn.figures.core.base import BaseFigureTemplate
-from ehc_sn.figures.core.panels import panel
+from ehc_sn.figures._contracts import AnyWorld, CategoricalLegend, ColorStrip
+from ehc_sn.figures.core.task_overview import TaskOverviewTemplate
 from ehc_sn.figures.plots.map import plot_map
 from ehc_sn.figures.plots.trajectory import plot_time_colored_trajectory
 from ehc_sn.figures.registry import FigureContext
@@ -59,26 +49,14 @@ def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
 # ── Figure template ─────────────────────────────────────────────────────────
 
 
-class ArenaTaskLayoutFigure(BaseFigureTemplate):
-    """Three-panel paradigm figure for the Arena evaluation task."""
+class ArenaTaskLayoutFigure(TaskOverviewTemplate):
+    """Arena task-overview: env map → agent trajectory → summary."""
 
-    HEIGHT_FRAC: float = 0.22
-    MOSAIC = [["environment", "trajectory", "summary_text"]]
-    MOSAIC_KWARGS = {"gridspec_kw": {"wspace": 0.08}}
-
-    # Rendering parameters scoped to this figure — no global changes.
     _TRAJECTORY_LW: float = 2.0
 
-    def __init__(
-        self,
-        data: ArenaTaskOverviewData,
-        ctx: FigureContext,
-    ) -> None:
-        super().__init__(data, ctx)
+    # ── Visual encoding (task-owned) ────────────────────────────────────
 
-    # ── Panel (a): Environment ──────────────────────────────────────────
-    @panel(order=0)
-    def environment(self, ax: Axes) -> None:
+    def render_input(self, ax: Axes) -> None:
         """Panel (a): Dungeon topology with per-cell observation IDs."""
         data: ArenaTaskOverviewData = self.data
         world: AnyWorld = data.world
@@ -100,18 +78,15 @@ class ArenaTaskLayoutFigure(BaseFigureTemplate):
             vmax=n_obs,
             radius=0.75,
         )
-        ax.set_title("(a) Environment — Observation IDs", fontsize=7)
+        ax.set_title("(a) Input — Observation IDs", fontsize=7)
         ax.axis("off")
 
-    # ── Panel (b): Trajectory ───────────────────────────────────────────
-    @panel(order=1)
-    def trajectory(self, ax: Axes) -> None:
+    def render_target(self, ax: Axes) -> None:
         """Panel (b): Agent trajectory with start, end, and revisit rings."""
         data: ArenaTaskOverviewData = self.data
         world: AnyWorld = data.world
         location_ids = data.trajectory_locations.tolist()
 
-        # Base map + time-coloured trajectory (no default endpoint markers).
         plot_time_colored_trajectory(
             ax,
             world,
@@ -122,69 +97,67 @@ class ArenaTaskLayoutFigure(BaseFigureTemplate):
             line_width=self._TRAJECTORY_LW,
         )
 
-        # Custom large markers.
         _overlay_endpoints(ax, world, location_ids)
         _overlay_revisit_rings(
             ax, world, data.trajectory_locations, data.revisit_mask
         )
 
-        ax.legend(
-            loc="upper center",
-            bbox_to_anchor=(0.5, -0.06),
+        ax.set_title("(b) Target — Agent Trajectory", fontsize=7)
+
+    # ── Annotation slots ────────────────────────────────────────────────
+
+    def annotation_for_input(self) -> ColorStrip:
+        """Observation-ID colour strip — compact bar row to fit annotation slot."""
+        data: ArenaTaskOverviewData = self.data
+        n_obs = int(data.observation_ids.max())
+        cmap = _build_observation_cmap(max(n_obs, 2))
+        entries: list[tuple[str, str]] = []
+        for obs_id in range(1, n_obs + 1):
+            rgba = cmap(obs_id)
+            hex_color = f"#{int(rgba[0]*255):02x}{int(rgba[1]*255):02x}{int(rgba[2]*255):02x}"
+            entries.append((str(obs_id), hex_color))
+        return ColorStrip(entries=entries, rows=2)
+
+    def annotation_for_target(self) -> CategoricalLegend:
+        return CategoricalLegend(
+            entries=[
+                ("start", "forestgreen"),
+                ("end", "firebrick"),
+                ("revisit", "gold"),
+            ],
             ncol=3,
-            fontsize=5,
-            framealpha=0.85,
-            borderpad=0.2,
-            handlelength=0.8,
-            handletextpad=0.3,
         )
 
-        ax.set_title("(b) Agent Trajectory (time-coloured)", fontsize=7)
+    def summary_title(self) -> str:
+        return "Arena Replay Task"
 
-    # ── Panel (c): Summary ──────────────────────────────────────────────
-    @panel(order=2)
-    def summary_text(self, ax: Axes) -> None:
-        """Text summary panel: task description and statistics."""
+    # ── Summary content ─────────────────────────────────────────────────
+
+    def objective_text(self) -> list[str]:
+        return [
+            "Navigates a dungeon;",
+            "predicts next obs at each step.",
+            "Revisit accuracy is key memory",
+            "diagnostic.",
+        ]
+
+    def sample_rows(self) -> list[tuple[str, str]]:
         data: ArenaTaskOverviewData = self.data
-        ax.axis("off")
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-
         n_steps = len(data.trajectory_locations)
         n_revisits = int(data.revisit_mask.sum())
         n_obs = int(data.observation_ids.max())
         H, W = data.wall_mask.shape
         n_passable = int(data.wall_mask.sum())
-
         revisit_pct = 100.0 * n_revisits / max(n_steps, 1)
-
-        lines = [
-            "Arena Replay Task",
-            "",
-            f"Grid: {H}\u2009\u00d7\u2009{W}",
-            f"Passable cells: {n_passable}",
-            f"Unique observations: {n_obs}",
-            f"Trajectory steps: {n_steps}",
-            f"Revisits: {n_revisits} ({revisit_pct:.0f}%)",
-            "",
-            "Agents navigate a dungeon",
-            "topology. At each step the",
-            "model predicts the observation",
-            "at the next position.",
-            "",
-            "Revisit accuracy is the",
-            "primary structural-memory",
-            "diagnostic.",
+        return [
+            ("Grid:", f"{H}\u2009\u00d7\u2009{W}, {n_passable} passable"),
+            ("Unique obs:", str(n_obs)),
+            ("Steps:", str(n_steps)),
+            ("Revisits:", f"{n_revisits} ({revisit_pct:.0f}%)"),
         ]
-        ax.text(
-            0.08,
-            0.92,
-            "\n".join(lines),
-            transform=ax.transAxes,
-            fontsize=5.5,
-            verticalalignment="top",
-            fontfamily="monospace",
-        )
+
+    def contract_notation(self) -> str:
+        return r"$(o_t, a_t)_{1:T}\;\longrightarrow\;" r"\text{learned memory}$"
 
 
 # ── Internal helpers ────────────────────────────────────────────────────────
@@ -296,3 +269,6 @@ def _overlay_revisit_rings(
             zorder=9,
             label="revisit",
         )
+
+
+__all__ = ["ArenaTaskLayoutFigure", "plot"]

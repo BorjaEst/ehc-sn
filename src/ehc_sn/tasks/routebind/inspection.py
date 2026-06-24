@@ -101,8 +101,6 @@ def prepare_sample_inspection(
         "goal_flag",
         "target_trajectory",
         "target_waypoint",
-        "target_next_dir",
-        "target_next_obs",
     )
     for k in required:
         if k not in sample:
@@ -116,11 +114,6 @@ def prepare_sample_inspection(
     gf: NDArray[np.bool_] = np.asarray(sample["goal_flag"])
     tf: NDArray[np.float32] = np.asarray(sample["target_trajectory"])
     wf: NDArray[np.float32] = np.asarray(sample["target_waypoint"])
-
-    nd_raw = sample.get("target_next_dir", -1)
-    no_raw = sample.get("target_next_obs", -1)
-    nd: int = int(nd_raw.item()) if hasattr(nd_raw, "item") else int(nd_raw)
-    no: int = int(no_raw.item()) if hasattr(no_raw, "item") else int(no_raw)
 
     n_slots = len(ct)
     S = n_slots
@@ -156,9 +149,7 @@ def prepare_sample_inspection(
     route_length = len(physical_route)
     semantic_length = len(waypoint_events)
 
-    if start_pos >= 0 and route_length > 0 and float(tf[start_pos]) != 1.0:
-        warnings.append(f"Start activation {float(tf[start_pos]):.4f} != 1.0")
-
+    # Derive next-direction and next-observation from the decoded route.
     if route_length >= 2:
         width = int(np.sqrt(S))
         if grid_width is not None:
@@ -166,8 +157,8 @@ def prepare_sample_inspection(
         sr, sc = divmod(start_pos, width)
         fs = physical_route[1]
         fr, fc = divmod(fs, width)
-        exp_dir = -1
         dr, dc = fr - sr, fc - sc
+        nd = -1
         for dir_val, ddr, ddc in [
             (0, -1, 0),
             (1, 0, 1),
@@ -175,12 +166,15 @@ def prepare_sample_inspection(
             (3, 0, -1),
         ]:
             if (dr, dc) == (ddr, ddc):
-                exp_dir = dir_val
+                nd = dir_val
                 break
-        if exp_dir >= 0 and nd != exp_dir:
-            warnings.append(
-                f"target_next_dir={nd} but first physical step direction={exp_dir}"
-            )
+        no = int(oid[fs])
+    else:
+        nd = -1
+        no = -1
+
+    if start_pos >= 0 and route_length > 0 and float(tf[start_pos]) != 1.0:
+        warnings.append(f"Start activation {float(tf[start_pos]):.4f} != 1.0")
 
     # DAG transition check
     if dag_adjacency is not None and waypoint_events:

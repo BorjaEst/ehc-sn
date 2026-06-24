@@ -58,7 +58,6 @@ from typing import Annotated
 import numpy as np
 import typer
 
-from ehc_sn.data.manifest import read_manifest
 from ehc_sn.figures import FigureContext, render
 from ehc_sn.tasks.mazehard import (
     MAZEHARD_TASK_CHANNELS,
@@ -67,7 +66,10 @@ from ehc_sn.tasks.mazehard import (
     validate_mazehard_root,
 )
 from ehc_sn.tasks.mazehard.corpus import load_sample, load_split_arrays
-from ehc_sn.tasks.mazehard.diagnostics import compute_corpus_statistics
+from ehc_sn.tasks.mazehard.diagnostics import (
+    compute_corpus_statistics,
+    select_samples,
+)
 from ehc_sn.tasks.mazehard.inspection import prepare_sample_inspection
 
 # ---------------------------------------------------------------------------
@@ -347,11 +349,17 @@ def inspect(
 
     # ── Sample gallery ────────────────────────────────────────────────────
     if gallery > 0:
+        selected = select_samples(
+            root,
+            all_splits,
+            policy=selection,
+            n=gallery,
+            seed=figure_seed,
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
-        for g_idx in range(gallery):
-            fpath = _render_overview_figure(
-                None, output_dir, split, g_idx, root=root
-            )
+        for s, idx in selected:
+            sample = load_sample(root, s, idx)
+            fpath = _render_overview_figure(sample, output_dir, s, idx)
             typer.echo(f"  Figure: {fpath}")
 
     if show:
