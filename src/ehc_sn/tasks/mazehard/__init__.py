@@ -37,7 +37,7 @@ from .contracts import (
     MazeHardTaskOutput,
 )
 from .corpus import load_sample, load_split_arrays, load_split_manifest
-from .diagnostics import compute_corpus_statistics
+from .diagnostics import compute_corpus_statistics, select_samples
 from .evaluation import MazeHardScoreReport, MazeHardStepScore
 from .evaluators.step import MazeHardStepEvaluator
 from .inspection import MazeHardSampleInspection, prepare_sample_inspection
@@ -78,6 +78,7 @@ __all__ = [
     "load_split_arrays",
     "load_split_manifest",
     "prepare_sample_inspection",
+    "select_samples",
     "validate_all_samples",
     "validate_mazehard_root",
     "validate_mazehard_sample",

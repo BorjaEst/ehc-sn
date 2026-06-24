@@ -378,7 +378,7 @@ __all__ = [
     "TASK_FAMILY",
     "MAZEHARD_TASK_CHANNELS",
     "MAZEHARD_TASK_CHANNEL_DTYPES",
-    "validate_mazehard_task_sample",
-    "validate_mazehard_task_root",
+    "validate_mazehard_sample",
+    "validate_mazehard_root",
     "build_mazehard_task_corpus",
 ]

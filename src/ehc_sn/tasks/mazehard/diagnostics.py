@@ -85,6 +85,131 @@ def compute_corpus_statistics(
     return stats
 
 
+def select_samples(
+    root: Path,
+    splits: list[str],
+    *,
+    policy: str = "random",
+    n: int = 1,
+    seed: int | None = None,
+) -> list[tuple[str, int]]:
+    """Select sample references from a mazehard corpus using the given policy.
+
+    Policies:
+        ``"random"`` — uniform random selection across splits.
+        ``"stratified"`` — proportional allocation across solution-length
+            buckets (short: ≤25, medium: 26-50, long: ≥51) using
+            largest-remainder rounding.
+        ``"longest"`` — samples with the longest solution paths.
+        ``"shortest"`` — samples with the shortest solution paths.
+
+    Args:
+        root: Versioned corpus root.
+        splits: Splits to search (order determines priority).
+        policy: Selection policy.
+        n: Maximum number of samples to return.
+        seed: RNG seed for deterministic selection.
+
+    Returns:
+        List of ``(split, index)`` tuples.
+    """
+    valid_policies = {"random", "stratified", "longest", "shortest"}
+    if policy not in valid_policies:
+        raise ValueError(
+            f"Unknown selection policy '{policy}'. "
+            f"Valid: {', '.join(sorted(valid_policies))}."
+        )
+
+    rng = np.random.default_rng(seed)
+
+    candidates: list[tuple[str, int, dict[str, Any]]] = []
+
+    for split in splits:
+        arrays = load_split_arrays(root, split)
+        if arrays is None:
+            continue
+        n_total = next(iter(arrays.values())).shape[0]
+        for idx in range(n_total):
+            sol = np.asarray(arrays["solution"][idx])
+            sol_len = int((sol > 0).sum())
+            candidates.append((split, idx, {"solution_length": sol_len}))
+
+    if not candidates:
+        return []
+
+    if policy == "random":
+        indices = rng.choice(
+            len(candidates), size=min(n, len(candidates)), replace=False
+        )
+        return [(candidates[int(i)][0], candidates[int(i)][1]) for i in indices]
+
+    if policy == "longest":
+        candidates.sort(key=lambda x: x[2]["solution_length"], reverse=True)
+        return [(c[0], c[1]) for c in candidates[:n]]
+
+    if policy == "shortest":
+        candidates.sort(key=lambda x: x[2]["solution_length"])
+        return [(c[0], c[1]) for c in candidates[:n]]
+
+    # Stratified: bucket by solution length
+    buckets: dict[str, list[tuple[str, int]]] = {
+        "short": [],
+        "medium": [],
+        "long": [],
+    }
+    for split, idx, meta in candidates:
+        sl = meta["solution_length"]
+        if sl <= 25:
+            buckets["short"].append((split, idx))
+        elif sl <= 50:
+            buckets["medium"].append((split, idx))
+        else:
+            buckets["long"].append((split, idx))
+
+    # Filter empty buckets
+    non_empty = {k: v for k, v in buckets.items() if v}
+    if not non_empty:
+        return []
+
+    # Largest-remainder proportional allocation
+    total_available = sum(len(v) for v in non_empty.values())
+    bucket_alloc: dict[str, float] = {}
+    for name, items in non_empty.items():
+        bucket_alloc[name] = len(items) / total_available
+
+    # Assign integer seats via largest-remainder
+    seats: dict[str, int] = {}
+    remainders: dict[str, float] = {}
+    assigned = 0
+    for name, frac in bucket_alloc.items():
+        raw = frac * n
+        seats[name] = int(raw)
+        remainders[name] = raw - int(raw)
+        assigned += seats[name]
+
+    # Distribute remaining seats by largest remainder
+    for name in sorted(remainders, key=remainders.get, reverse=True):  # type: ignore[arg-type]
+        if assigned >= n:
+            break
+        seats[name] = seats.get(name, 0) + 1  # type: ignore[operator]
+        assigned += 1
+
+    result: list[tuple[str, int]] = []
+    for name in ("short", "medium", "long"):
+        items = non_empty.get(name, [])
+        alloc = seats.get(name, 0)
+        if alloc > 0 and items:
+            chosen = rng.choice(
+                len(items), size=min(alloc, len(items)), replace=False
+            )
+            result.extend(items[int(i)] for i in chosen)
+
+    # Shuffle to avoid sorted-by-bucket ordering
+    rng.shuffle(result)
+    return result
+
+
 __all__ = [
     "compute_corpus_statistics",
+    "select_samples",
 ]
