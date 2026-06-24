@@ -50,8 +50,8 @@ canonical path grammar.
 Each family has a staged CLI under `scripts/data-gen/`:
 
 ```bash
-# maze-nd: fetch from HuggingFace, normalize, materialize
-python scripts/data-gen/build-maze-nd.py build-all
+# maze-nd: fetch from HuggingFace, normalize, build
+python scripts/data-gen/build-maze-nd.py build
 
 # dungeongen: generate topologies, materialize layout dataset
 python scripts/data-gen/build-dungeongen.py build

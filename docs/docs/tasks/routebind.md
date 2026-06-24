@@ -87,6 +87,34 @@ Semantic acceptance transitions constrain validity but do not add cost.
 The oracle jointly selects: the observation sequence, concrete occurrences,
 physical route between occurrences, and final goal occurrence.
 
+**Canonical oracle truth.** The oracle does NOT commit to a single
+reconstructed path. Instead it stores the complete optimal subgraph:
+
+- The **reverse distance table** $d^*(p, o)$ — minimum remaining physical
+  moves from product state $(p, o)$ to any terminal state $(q, o_g)$
+  where $\phi(q) = o_g$. Computed by one reverse 0-1 BFS per goal
+  observation. Well-defined even when many optimal solutions exist.
+- The **optimal transition relation** — derived from Bellman equality:
+  $x \rightarrow y$ is optimal iff $d^*(x) = c(x,y) + d^*(y)$. For
+  physical moves $c = 1$, for semantic acceptances $c = 0$.
+- The **query-reachable optimal subgraph** — all product states reachable
+  from a given start via optimal transitions.
+
+From the optimal subgraph, four target projections are derived:
+
+- **Trajectory support** $s_{\text{traj}}(p)$ — binary mask: $p$ belongs
+  to at least one optimal physical route.
+- **Trajectory forward depth** $k_{\min}(p) = \min_{o} D - d^*(p, o)$
+  where $D = d^*(p_{\text{start}}, o_{\text{start}})$ is the optimal
+  cost. This is the earliest physical step at which $p$ can appear.
+- **Waypoint support** $s_{\text{wp}}(p)$ — binary mask: an optimal
+  semantic acceptance occurs at $p$ (plus the start position).
+- **Waypoint semantic depth** $m_{\min}(p)$ — minimum number of
+  acceptance events from start.
+
+The optimal subgraph is traversed once per selected query — no path
+enumeration, no uniqueness gating, no arbitrary tie-breaking.
+
 **Three canonical route objects:**
 
 - Product-state path Pi\* = ((p_0, o_0), ..., (p_T, o_T)) --
@@ -97,34 +125,47 @@ physical route between occurrences, and final goal occurrence.
 - Accepted waypoint sequence W\* = ((p_i0, o_0), ..., (p_iM, o_M)) --
   semantic acceptance events. This is what the waypoint field represents.
 
-**Uniqueness**: Two solutions are task-equivalent when they produce the
-same projected physical route and the same ordered accepted waypoint events.
-The builder enforces strict uniqueness:
-
-1. Exactly one optimal task-equivalence class exists.
-2. The projected physical route is simple -- no position is revisited:
-   p_i != p_j for all i != j.
-
-Samples violating either constraint are rejected with recorded reasons.
+**Ambiguity is not a rejection criterion.** When multiple optimal
+solutions exist (different physical routes or different waypoint
+sequences at equal cost), all are represented in the optimal-support
+targets. The trajectory field encodes every position reachable on any
+optimal route; the auxiliary masks encode every optimal first action.
 
 ### Outputs
 
 **Primary output -- spatial trajectory field (f_traj):**
 
-For the selected physical route pi\*\_space = (p_0, ..., p_L):
+Derived from optimal-subgraph projections:
 
-f_traj*(p_k) = gamma_space^k
-f_traj*(p) = 0 for p not in pi\*\_space
+f_traj*(p) = s_traj(p) * gamma_space^{k_min(p)}
+f_traj\*(p) = 0 where s_traj(p) = False
 
-where gamma_space in (0, 1) is the spatial field-decay factor.
+where:
+
+- $s_{\text{traj}}(p)$ is the trajectory support mask (True for any
+  position participating in at least one optimal route),
+- $k_{\min}(p)$ is the earliest optimal forward depth at position $p$,
+- $\gamma_{\text{space}} \in (0, 1)$ is the spatial field-decay factor.
+
+When exactly one optimal route exists, this is identical to the
+single-path decay field $\gamma_{\text{space}}^k$ at route position $k$.
+When multiple optimal routes exist, every position on any optimal
+branch is supported, at its earliest possible depth.
 
 **Structural supervision -- semantic waypoint field (f_wp):**
 
-For accepted observations (p_i0, o_0), ..., (p_iM, o_M) where
-o_M = o_goal and m = 0 receives 1.0:
+Derived from optimal-subgraph projections:
 
-f_wp*(p_im) = gamma_semantic^m
-f_wp*(p) = 0 otherwise
+f_wp*(p) = s_wp(p) * gamma_semantic^{m_min(p)}
+f_wp\*(p) = 0 where s_wp(p) = False
+
+where:
+
+- $s_{\text{wp}}(p)$ is the waypoint support mask (True for any
+  position where an optimal semantic acceptance occurs, plus the start),
+- $m_{\min}(p)$ is the minimum number of acceptance events from start
+  to a waypoint event at $p$,
+- $\gamma_{\text{semantic}} \in (0, 1)$ is the semantic field-decay factor.
 
 Spatial and semantic decay are independent. Spatial decay counts physical
 moves; semantic decay counts acceptance events.
@@ -137,21 +178,43 @@ moves; semantic decay counts acceptance events.
 | semantic_transition_count   | edges traversed                   | M     |
 | intermediate_waypoint_count | accepted excluding start and goal | M-1   |
 
-**Auxiliary outputs:**
+**Primary auxiliary output — optimal direction mask:**
 
-| Output                  | Shape      | Description                              |
-| ----------------------- | ---------- | ---------------------------------------- |
-| next_direction_logits   | (B, 4)     | categorical over {UP, RIGHT, DOWN, LEFT} |
-| next_observation_logits | (B, N_obs) | categorical over observation vocabulary  |
+| Output                    | Shape  | Description                                         |
+| ------------------------- | ------ | --------------------------------------------------- |
+| target_optimal_directions | (B, 4) | multi-label bool over {UP, RIGHT, DOWN, LEFT}; True |
+|                           |        | for every Bellman-optimal first physical step.      |
+
+**Primary auxiliary output — optimal observation mask:**
+
+| Output                           | Shape      | Description                                        |
+| -------------------------------- | ---------- | -------------------------------------------------- |
+| target_optimal_next_observations | (B, N_obs) | multi-label bool over observation vocabulary; True |
+|                                  |            | for every observation that can be the first        |
+|                                  |            | post-start acceptance in an optimal solution.      |
+
+When multiple optimal first actions exist, every optimal action is marked
+in the mask. Models should use multi-label binary cross-entropy for
+training and multi-label precision/recall/F1 for evaluation — a model is
+not penalized for predicting an optimal direction or observation that
+differs from an arbitrary tie-break selection.
 
 ### Target encoding
 
-| Target            | Source                                               |
-| ----------------- | ---------------------------------------------------- |
-| target_trajectory | spatial decay over the projected physical route      |
-| target_waypoint   | semantic decay over accepted observation occurrences |
-| target_next_dir   | first physical step of the optimal route             |
-| target_next_obs   | first post-start accepted observation                |
+| Target                           | Source                                                                      |
+| -------------------------------- | --------------------------------------------------------------------------- |
+| target_trajectory                | support × γ_space^{forward_depth} over optimal subgraph                     |
+| target_waypoint                  | support × γ_semantic^{semantic_depth} over optimal subgraph                 |
+| trajectory_support               | bool mask — positions on any optimal route                                  |
+| trajectory_forward_depth         | int16 — earliest physical depth per supported position (-1 if unsupported)  |
+| waypoint_support                 | bool mask — waypoint event positions                                        |
+| waypoint_semantic_depth          | int16 — earliest acceptance depth per waypoint position (-1 if unsupported) |
+| target_optimal_directions        | bool[4] — multi-label optimal first directions                              |
+| target_optimal_next_observations | bool[N_obs] — multi-label optimal first observations                        |
+
+The decayed fields (`target_trajectory`, `target_waypoint`) are derived
+from the support and depth arrays: `field[p] = support[p] × γ^{depth[p]}`
+when `support[p]` is True, 0 otherwise.
 
 ## Parent requirements
 
@@ -248,9 +311,17 @@ geometry from the padded storage tensor.
 Per-sample channels stored in the task corpus (one NPY array per channel
 per split):
 
-cell_type, observation_id, start_flag, goal_flag, spatial_mask,
-natural_height, natural_width, row_offset, col_offset,
-target_trajectory, target_waypoint, target_next_dir, target_next_obs.
+**Model input channels:** cell_type, observation_id, start_flag, goal_flag,
+spatial_mask.
+
+**Metadata channels:** natural_height, natural_width, row_offset,
+col_offset.
+
+**Target channels:** target_trajectory (float32[S]),
+target_waypoint (float32[S]), trajectory_support (bool[S]),
+trajectory_forward_depth (int16[S], sentinel -1), waypoint_support (bool[S]),
+waypoint_semantic_depth (int16[S], sentinel -1), target_optimal_directions (bool[4]),
+target_optimal_next_observations (bool[N_obs]), total_physical_cost (int16 scalar).
 
 ## Invariants
 
@@ -259,14 +330,25 @@ target_trajectory, target_waypoint, target_next_dir, target_next_obs.
 - The start cell is traversable and contains a real observation.
 - The goal differs from the start observation and is semantically reachable.
 - At least one physical occurrence of the goal is present.
-- Exactly one optimal task-equivalence class exists.
-- The projected physical route contains no repeated positions.
-- Every physical step is a valid four-neighbor non-wall move.
-- Every semantic acceptance follows an edge in the hidden DAG.
+- The reverse distance table $d^*(p, o)$ is well-defined for every
+  traversable product state, regardless of how many optimal paths exist.
+- The optimal-transition relation is derived from Bellman equality:
+  $x \rightarrow y$ is optimal iff $d^*(x) = c(x,y) + d^*(y)$.
+- Trajectory support includes every position belonging to at least one
+  optimal route; trajectory forward depth is the minimum physical depth
+  among all optimal routes reaching that position.
+- Waypoint support includes every position where an optimal semantic
+  acceptance occurs, plus the start; waypoint semantic depth is the
+  minimum number of acceptances from start.
+- Optimal direction/observation masks include every Bellman-optimal first
+  action — no arbitrary tie-breaking among equal-cost alternatives.
+- Depth channels use sentinel -1 for unsupported positions:
+  `trajectory_forward_depth[p] == -1` iff `trajectory_support[p] == False`;
+  `waypoint_semantic_depth[p] == -1` iff `waypoint_support[p] == False`.
+  Supported positions have `depth >= 0`.
 - Crossed but unaccepted observation cells are excluded from the waypoint field.
-- The trajectory and waypoint fields follow their respective decay rules.
-- The next-direction target matches the first physical step.
-- The next-observation target matches the first post-start acceptance.
+- The trajectory and waypoint fields follow their respective decay rules
+  derived from support × γ^{depth}.
 - Regeneration with the same substrates, task seed, and query produces
   identical tensors.
 - Padding positions (spatial_mask == False) have zero-valued target fields.
@@ -314,10 +396,28 @@ ambiguous `--canvas-height`/`--canvas-width` aliases.
 
 ### Routebind presets
 
-Each preset defines a target empirical distribution over oracle-solution
-properties — physical route length (number of positions) and accepted waypoint
-count. The builder uses deficit-driven joint-bucket selection to match
-target proportions within tolerance.
+Each preset is a `RoutebindPreset` composed of three layered contracts:
+
+- **`QuerySelectionProfile`** — pre-oracle, normative. Controls the
+  optimal physical route-position distribution by sampling from a
+  precomputed product-state oracle query table. The query table records
+  the exact minimum physical move count for every possible
+  `(start_position, goal_observation)` pair, computed by one reverse
+  0-1 BFS per goal observation. Physical route positions =
+  `move_count + 1`.
+- **`RealizedAdmissionPolicy`** — post-oracle, conditional. Applies
+  optional waypoint-count admission quotas. When absent, the builder
+  accepts all eligible samples regardless of waypoint count.
+  Ambiguity (multiple optimal solutions) is not a rejection criterion —
+  the optimal-subgraph targets represent all optimal continuations.
+- **`CompletionPolicy`** — artifact validity. `"strict"` requires all
+  quotas to be met; `"allow_degraded"` permits corpus emission with
+  deficits reported in `capability_report.json`.
+
+The preset table below lists the selection-profile physical-position
+bins (pre-oracle, enforced by direct pool sampling). The waypoint-count
+admission bins are defined in the preset source
+(`builder.py` `ROUTEBIND_PRESETS`).
 
 Conventions:
 
@@ -327,26 +427,102 @@ Conventions:
 - Bins below use physical **route positions** (= `move_count + 1`) to match
   the profile API. To convert: subtract 1 to get move-count ranges.
 
-| Preset          | Physical bins                                                | Semantic bins                                    | Hard limits      | Attempt budget | Purpose                                      |
-| --------------- | ------------------------------------------------------------ | ------------------------------------------------ | ---------------- | -------------- | -------------------------------------------- |
-| `smoke`         | 2–150 (100%)                                                 | 2–20 (100%)                                      | max 150 / max 20 | 10             | Tests and calibration runs.                  |
-| `balanced`      | 2–7 (10%), 8–15 (20%), 16–30 (35%), 31–50 (25%), 51–80 (10%) | 2 (15%), 3 (25%), 4 (25%), 5–6 (25%), 7–10 (10%) | max 80 / max 10  | 10             | Canonical training distribution.             |
-| `long-spatial`  | 2–25 (15%), 26–50 (35%), 51–80 (35%), 81–120 (15%)           | 2–3 (45%), 4–5 (40%), 6–10 (15%)                 | max 120 / max 10 | 50             | Emphasize physical planning.                 |
-| `long-semantic` | 2–20 (20%), 21–50 (45%), 51–80 (25%), 81–120 (10%)           | 4–5 (20%), 6–8 (50%), 9–12 (25%), 13–15 (5%)     | max 120 / max 15 | 50             | Emphasize DAG composition.                   |
-| `joint-hard`    | 20–40 (20%), 41–70 (40%), 71–100 (30%), 101–140 (10%)        | 4–5 (15%), 6–8 (45%), 9–12 (30%), 13–15 (10%)    | max 140 / max 15 | 200            | Jointly long spatial and semantic solutions. |
+| Preset          | Physical route-position bins (pre-oracle selection)          | Waypoint-count bins (post-oracle admission)      | Hard limits | Purpose                                      |
+| --------------- | ------------------------------------------------------------ | ------------------------------------------------ | ----------- | -------------------------------------------- |
+| `smoke`         | 2–150 (100%)                                                 | (none — accept all)                              | max 150     | Tests and calibration runs.                  |
+| `balanced`      | 2–7 (10%), 8–15 (20%), 16–30 (35%), 31–50 (25%), 51–80 (10%) | 2 (15%), 3 (25%), 4 (25%), 5–6 (25%), 7–10 (10%) | max 80      | Canonical training distribution.             |
+| `long-spatial`  | 2–25 (15%), 26–50 (35%), 51–80 (35%), 81–120 (15%)           | 2–3 (45%), 4–5 (40%), 6–10 (15%)                 | max 120     | Emphasize physical planning.                 |
+| `long-semantic` | 2–20 (20%), 21–50 (45%), 51–80 (25%), 81–120 (10%)           | 4–5 (20%), 6–8 (50%), 9–12 (25%), 13–15 (5%)     | max 120     | Emphasize DAG composition.                   |
+| `joint-hard`    | 20–40 (20%), 41–70 (40%), 71–100 (30%), 101–140 (10%)        | 4–5 (15%), 6–8 (45%), 9–12 (30%), 13–15 (10%)    | max 140     | Jointly long spatial and semantic solutions. |
 
-#### Preset-parent recommendations
+The `joint-hard-only` variant uses the same bins with `CompletionPolicy(mode="strict")`.
 
-Not every preset is feasible under every parent topology/DAG pair.
-The table below documents recommended pairings:
+Physical route-position bins are guaranteed by direct pool sampling from the
+precomputed query table. Waypoint-count bins are applied as a post-reconstruction
+admission filter and may be underfilled when a topology's available queries
+produce waypoint counts outside the target range.
 
-| Routebind preset | Recommended DAG        | Recommended topology                                | Notes                                                                |
-| ---------------- | ---------------------- | --------------------------------------------------- | -------------------------------------------------------------------- |
-| `smoke`          | `small`                | `openfield small`                                   | Fast generation.                                                     |
-| `balanced`       | `routing`              | `openfield big-square` or `dungeongen routebind-30` | Canonical training pairing.                                          |
-| `long-spatial`   | `sparse`               | `dungeongen routebind-30`                           | Sparse DAG forces longer physical detours.                           |
-| `long-semantic`  | `chain16` or `routing` | `openfield big-square`                              | Chain DAG for many waypoints; openfield for large traversable space. |
-| `joint-hard`     | `chain16` or `sparse`  | `dungeongen routebind-30`                           | May need large attempt budget (200+).                                |
+**Pre-build capability gate.** When `CompletionPolicy.mode == "strict"`, the
+builder raises `ValueError` before writing any corpus sample if any mandatory
+joint bin has fewer than `QuerySelectionProfile.minimum_bin_support` (default: 1)
+eligible candidates across all processed layouts. The error message lists
+per-bin candidate counts. To obtain sufficient support, provide more topology
+layouts or choose a different preset.
+
+#### Parent-substrate recommendations
+
+No substrate pairing is canonical for any preset until a capability
+calibration artifact exists for the exact tuple:
+
+```text
+topology family/version
+DAG artifact ID
+observation placement policy
+query selection profile
+oracle version
+```
+
+Calibration data from early runs is available under
+`artifacts/calibration/` — see the **Capability Calibration**
+subsection below. Note: early calibration runs used the legacy
+unique-path contract; ambiguity rates there represent the fraction
+of candidates that would have been rejected, not task failure.
+
+### Capability Calibration
+
+The following five runs use the `smoke` preset (accept-all,
+no admission filtering) to measure substrate capability without
+sample-count pressure. All runs use `--seed 42` and
+`--target-samples 0`. These runs used the legacy unique-path contract;
+under the current optimal-subgraph contract, all eligible candidates
+are accepted and ambiguity is measured as an informational statistic
+rather than a rejection reason.
+
+| Run | Policy        | Topology  | DAG       | Examined | Eligible | Accepted | Ambig% | Med Route |
+| --- | ------------- | --------- | --------- | -------- | -------- | -------- | ------ | --------- |
+| A   | dense_uniform | dungeon   | sparse    | 6,291    | 500      | 408      | 92.1%  | 4.0       |
+| B   | bounded k=2   | dungeon   | sparse    | 16,011   | 502      | 390      | 96.9%  | 6.0       |
+| C   | exactly_one   | openfield | sparse    | 65,390   | 263      | 259      | 99.6%  | 11.0      |
+| D   | dense_uniform | dungeon   | branching | 11,329   | 1,004    | 746      | 91.1%  | 5.0       |
+| E   | dense_uniform | openfield | sparse    | 107,455  | 2,936    | 2,002    | 97.3%  | 4.0       |
+
+**Key findings:**
+
+1. **Topology structure is the primary ambiguity driver.** The dungeon
+   topology (runs A–D) produces consistent ambiguity rates of 91–97%
+   regardless of DAG and observation placement. The openfield grid
+   (run E) produces 97% ambiguity even with dense observation placement,
+   reflecting the large number of equal-cost physical paths in an open
+   30×30 grid.
+
+2. **Observation repetition is a secondary factor.** Reducing duplicate
+   observations (run B: bounded k=2, median duplicate obs 23.5 vs run A:
+   39.3) _increases_ ambiguity (96.9% vs 92.1%) because the sparser
+   placement creates more symmetric cell-choice patterns that produce
+   additional equal-cost alternatives. Unique landmarks (run C,
+   duplicate obs = 0) eliminate occurrence-choice ambiguity, but the
+   open grid's physical symmetry sustains 99.6% ambiguity.
+
+3. **DAG shortcut density has a small effect.** The branching DAG
+   (run D, 139 edges) has slightly lower ambiguity than the sparse DAG
+   (run A, 60 edges): 91.1% vs 92.1%. More DAG alternatives create more
+   semantically-distinct solutions, which _increases_ the pool of
+   uniquely-optimal eligible starts (1,004 vs 500) by enabling semantic
+   differentiation at equal physical cost.
+
+4. **Physical route length increases with unique landmarks.** Run C
+   (exactly_one) produces median route length 11.0 vs 4.0 for run E
+   (dense openfield). Unique landmarks force the agent to visit
+   specific cells rather than whichever occurrence is nearest.
+
+The primary lever for reducing ambiguity is **asymmetric physical
+topology** (corridors, bottlenecks) rather than observation placement
+density. A future substrate designed for strict uniqueness should
+prioritise near-tree physical structure with deterministically unique
+shortest paths between semantic landmarks.
+
+Each run's full capability report is stored at
+`artifacts/calibration/{A,B,C,D,E}/capability_report.json`.
 
 Parameters: --preset, --topology-root, --dagflow-root,
 --dagflow-graph-id, --corpus, --version, --field-decay-spatial,
@@ -362,17 +538,19 @@ Example: L_max = 150, f_min = 0.1 gives gamma_space ~ 0.9848.
 | Command  | Description                                             |
 | -------- | ------------------------------------------------------- |
 | build    | Materialize a Routebind corpus from topology + dagflow. |
-| validate | Verify a corpus against structural and semantic checks. |
+| validate | Full certification: structural + oracle on all samples. |
 | inspect  | Examine corpus metadata, samples, and diagnostics.      |
 
 Usage:
 
 ```bash
 python build-routebind.py build \
-  --topology-root data/interim/openfield/big-square/v1 \
-  --dagflow-root data/interim/dagflow/routing/v1 \
-  --dagflow-graph-id dagflow-routing-v1-train-000000
+  --topology-root data/interim/dungeongen/routebind-30/v1 \
+  --dagflow-root data/interim/dagflow/sparse/v1 \
+  --dagflow-graph-id dagflow-sparse-v1-train-000000
+
 python build-routebind.py validate data/processed/routebind/default/v1
+
 python build-routebind.py inspect data/processed/routebind/default/v1 --summary
 ```
 
@@ -380,38 +558,59 @@ python build-routebind.py inspect data/processed/routebind/default/v1 --summary
 
 Root file: manifest.json. Key fields:
 
-| Field                        | Description                                         |
-| ---------------------------- | --------------------------------------------------- |
-| storage_extent               | Storage canvas [height, width].                     |
-| num_spatial_slots            | Fixed tensor width S = H_store \* W_store.          |
-| spatial_storage_policy       | `"pad_to_configured_max"`                           |
-| placement_policy             | `"center"`                                          |
-| natural_extent_homogeneous   | Whether all parent layouts share a single extent    |
-| natural_height_range         | `[min_height, max_height]` across parent layouts    |
-| natural_width_range          | `[min_width, max_width]` across parent layouts      |
-| n_observations               | Observation vocabulary cardinality.                 |
-| field_decay_spatial          | Spatial field decay factor.                         |
-| field_decay_semantic         | Semantic field decay factor.                        |
-| max_supported_physical_moves | Maximum route length for terminal activation check. |
-| parents.spatial_topology     | Topology parent (family, root, version).            |
-| parents.semantic_graph       | Dagflow parent (artifact_id, content_digest).       |
+| Field                        | Description                                            |
+| ---------------------------- | ------------------------------------------------------ |
+| target_schema_version        | Schema version: `1`.                                   |
+| target_semantics             | `"optimal_subgraph_support"`.                          |
+| depth_sentinel               | Sentinel value for unsupported depth positions (`-1`). |
+| storage_extent               | Storage canvas [height, width].                        |
+| num_spatial_slots            | Fixed tensor width S = H_store \* W_store.             |
+| spatial_storage_policy       | `"pad_to_configured_max"`                              |
+| placement_policy             | `"center"`                                             |
+| natural_extent_homogeneous   | Whether all parent layouts share a single extent       |
+| natural_height_range         | `[min_height, max_height]` across parent layouts       |
+| natural_width_range          | `[min_width, max_width]` across parent layouts         |
+| n_observations               | Observation vocabulary cardinality.                    |
+| field_decay_spatial          | Spatial field decay factor.                            |
+| field_decay_semantic         | Semantic field decay factor.                           |
+| max_supported_physical_moves | Maximum route length for terminal activation check.    |
+| parents.spatial_topology     | Topology parent (family, root, version).               |
+| parents.semantic_graph       | Dagflow parent (artifact_id, content_digest).          |
 
 The deprecated n_states key is a synonym for num_spatial_slots.
 n_observations must equal topology_observation_vocabulary_size.
 
+### Validation
+
+The `validate` command runs two layers on every sample:
+
+- **Structural validation** — bidirectional support/depth/field algebra,
+  sentinel consistency (-1 for unsupported), traversability and
+  observation-cell constraints, padding zeros, mask shape/dtype/non-empty,
+  start depth-zero invariants.
+- **Oracle recomputation validation** — recomputes the optimal product-state
+  subgraph from the parent topology and DAG via
+  `compute_goal_distance_table` + `derive_optimal_transition_masks` +
+  `traverse_optimal_subgraph`, then compares every stored support/depth/mask
+  channel exactly against the recomputed projection.
+
+Corpora not declaring `target_semantics: "optimal_subgraph_support"` are
+rejected with `target_semantics_manifest_mismatch`.
+
 ## Targets and metrics
 
-| Aspect                          | Value                                              |
-| ------------------------------- | -------------------------------------------------- |
-| Benchmark track                 | Routebind-Field                                    |
-| Claim family                    | goal_conditioned_spatial_route_binding             |
-| Execution mode                  | single-step field prediction                       |
-| Primary metric                  | valid_semantic_spatial_route_rate (behavioral)     |
-| Primary optimality metric       | semantic_spatial_path_cost_ratio                   |
-| Primary representational metric | balanced_trajectory_field_error                    |
-| Calibration metric              | trajectory_field_mse                               |
-| Structural metric               | balanced_waypoint_field_error                      |
-| Auxiliary metrics               | next_direction_accuracy, next_observation_accuracy |
+| Aspect                          | Value                                          |
+| ------------------------------- | ---------------------------------------------- |
+| Benchmark track                 | Routebind-Field                                |
+| Claim family                    | goal_conditioned_spatial_route_binding         |
+| Execution mode                  | single-step field prediction                   |
+| Primary metric                  | valid_semantic_spatial_route_rate (behavioral) |
+| Primary optimality metric       | semantic_spatial_path_cost_ratio               |
+| Primary representational metric | balanced_trajectory_field_error                |
+| Calibration metric              | trajectory_field_mse                           |
+| Structural metric               | balanced_waypoint_field_error                  |
+| Auxiliary metrics               | next_direction_precision/recall/F1,            |
+|                                 | next_observation_precision/recall/F1           |
 
 valid_semantic_spatial_route_rate: fraction of samples whose extracted
 route begins at p_start, uses traversable four-neighbor moves,
@@ -421,4 +620,10 @@ has a valid semantic acceptance subsequence under the hidden DAG.
 semantic_spatial_path_cost_ratio: for valid routes, the ratio of
 predicted route cost to oracle optimal cost C(R_hat) / C(R_star).
 C(R) = |R| - 1 (number of physical moves). A value of 1.0 indicates
-exact optimality.
+exact optimality. When multiple optimal routes exist, any optimal
+cost (cost = d\*(start)) satisfies the ratio test.
+
+Multi-label auxiliary metrics evaluate the model's ability to
+identify all equally-optimal first actions. A model should not be
+penalized for predicting an optimal direction or observation that
+differs from an arbitrary tie-break selection.

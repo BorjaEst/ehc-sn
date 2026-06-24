@@ -1,312 +1,523 @@
 # `prospect` Benchmark Task
 
-## Task identity and overview
+## Identity
 
-Task name: `prospect`
+| Property      | Value                                          |
+| ------------- | ---------------------------------------------- |
+| Task name     | `prospect`                                     |
+| Benchmark     | memory-conditioned spatial route binding       |
+| Package path  | `src/ehc_sn/tasks/prospect/`                   |
+| CLI script    | `scripts/data-gen/build-prospect.py`           |
+| Output path   | `data/processed/prospect/<corpus>/v<version>/` |
+| Dataset class | `task_corpus`                                  |
 
-Benchmark family: memory-derived goal-conditioned prospective field prediction
+## Purpose and ownership
 
-| Symbol            | Surface | Description                                                             |
-| ----------------- | ------- | ----------------------------------------------------------------------- |
-| $o_{\text{goal}}$ | yes     | goal observation as sensory cue (task boundary input)                   |
-| $x_{\text{goal}}$ | —       | LEC-encoded goal sensory state (model-internal)                         |
-| $g_t$             | —       | MEC current location state (model-internal, derived from experience)    |
-| $p_t$             | —       | HPC conjunctive state (model-internal)                                  |
-| $\mathbf{r}_t$    | —       | relational evidence retrieved from HPC memory (model-internal)          |
-| $\mathbf{f}_t$    | yes     | goal-conditioned prospective firing field over $N$ nodes (model output) |
-| $z_H$             | —       | HRM/PFC recurrent state (model-internal)                                |
-| $M$               | —       | episodic memory store (TEM-derived, model-internal)                     |
+Prospect is a memory-conditioned spatial prospective-field task. Each
+sample supplies one start position, a spatial mask identifying all physical
+occurrences of the selected semantic goal observation, a spatial slot mask,
+and a reference to a separately acquired EC–HPC memory state. The scalar
+semantic goal observation identity is not exposed in v1; goal localization
+has been resolved by the dataset builder. Unlike `routebind`, the model
+does **not** receive the spatial topology, wall positions, or
+observation-to-position bindings in the current input.
 
-_Surface_ symbols appear in the task input/output contract.
-_Model-internal_ symbols (—) are emergent representations the model learns
-but are not part of the task-level data contract.
+The scientific question is:
 
-Canonical package path:
+> Can an EHP model use an acquired EC–HPC state to solve novel start–goal
+> route queries without receiving the spatial topology or observation bindings
+> in the current input?
 
-```text
-src/ehc_sn/tasks/prospect/
-```
+The following conditions hold:
 
-`prospect` is the **integrated EHP training task**. It tests whether the
-combined TEM (EC/HPC memory) and HRM (PFC deliberation) system can produce
-a goal-conditioned prospective firing field when the task provides only a
-sensory goal cue and ongoing environmental experience — not oracle positions
-or weights.
+- The arena was experienced before the Prospect query.
+- Memory acquisition is not performed inside a Prospect task step.
+- The route query may be novel (unseen start–goal pair over the same topology).
+- The complete route must be reasoned, not retrieved as a memorized start–goal
+  answer.
+- Prospect does not expose the spatial topology directly.
+- Prospect does not train or generate the memory during corpus generation.
+- The memory is a separately produced, topology-specific resource.
 
-The task requires a distributed prospective field that can represent
-multiple viable branches and need not commit to a single path — in contrast
-to tasks that require an explicit ordered chain output
-($v_0 \rightarrow v_1 \rightarrow \cdots \rightarrow v_g$).
+## Semantic model
 
-The integrated computation is:
+### Symbol table
 
-```text
-o_goal + current EC/HPC state
-    → LEC encodes x_goal
-    → HPC retrieves relational evidence r_t from M
-    → MEC provides current location g_t
-    → HRM deliberates over (g_t, x_goal, r_t)
-    → produce prospective field f_t
-```
+| Symbol  | Persisted | Resolved | Model | Description                                                  |
+| ------- | --------- | -------- | ----- | ------------------------------------------------------------ |
+| P       | yes       | yes      | no    | S = H x W spatial grid positions (row-major)                 |
+| O       | ---       | ---      | ---   | stable observation identities, O = {0, ..., N-1}             |
+| E_obs   | ---       | ---      | ---   | directed observation-transition edges (hidden)               |
+| G_obs   | ---       | ---      | ---   | fixed hidden DAG (O, E_obs)                                  |
+| M       | no        | yes      | no    | acquired EC–HPC memory state (resolved resource)             |
+| p_start | yes       | yes      | no    | unique physical start position (via start_flag)              |
+| o_goal  | ---       | ---      | ---   | semantic goal observation identity (not exposed in v1 input) |
+| f_traj  | yes       | yes      | yes   | spatial trajectory field over S positions (output)           |
+| f_wp    | yes       | yes      | yes   | semantic waypoint field over S positions (output)            |
 
-Crucially, the task does **not** supply $g_t$ or $\mathbf{w}_t$ as oracle
-inputs. These must emerge from TEM/HPC memory. This is the integration test:
-can memory-derived relational evidence substitute for oracle-quality
-position and weight signals?
+- **Persisted**: stored in the corpus record (NPY arrays).
+- **Resolved**: available at task-input construction after memory-provider resolution.
+- **Model**: surfaced in the model-facing representation after adapter encoding.
+- **(—)**: model-internal structure, not part of any data contract surface.
 
----
+### Information regime
 
-## Scientific purpose
+The defining epistemic boundary is:
 
-`prospect` tests whether EHP can:
+| Provided to model                        | Withheld from model                        |
+| ---------------------------------------- | ------------------------------------------ |
+| `start_flag` — one unique start position | `cell_type` — wall/free/observation labels |
+| `goal_flag` — all goal-observation cells | `observation_id` — identity per position   |
+| `spatial_mask` — real vs. padding slots  | Spatial adjacency / connectivity           |
+| resolved acquired-memory resource        | Precomputed route or waypoint sequence     |
+|                                          | Oracle target fields                       |
+|                                          | Observation-transition adjacency matrix    |
+|                                          | `memory_id` string (storage metadata only) |
 
-1. encode a sensory goal cue via LEC into $x_{\text{goal}}$;
-2. maintain a current location state $g_t$ via MEC from ongoing experience;
-3. retrieve relational evidence $\mathbf{r}_t$ from HPC memory $M$ given
-   $g_t$ and $x_{\text{goal}}$;
-4. use HRM deliberation to transform $(g_t, x_{\text{goal}}, \mathbf{r}_t)$
-   into a goal-conditioned prospective field $\mathbf{f}_t$;
-5. demonstrate that $\mathbf{r}_t$ causally shapes $\mathbf{f}_t$ (ablating
-   or corrupting retrieval should degrade the field).
+The `memory_id` string reference is persisted in the corpus record but resolved
+to a typed `AcquiredMemoryV1` object before the adapter sees it. The model never
+receives `memory_id` directly.
 
-The relevant computation is:
+The model must determine traversability (which positions are walls vs. free)
+solely from the acquired memory state. The `spatial_mask` identifies which
+positions correspond to real cells in the natural domain, but it does not
+encode traversability.
 
-```text
-sensory goal + environmental experience
-    → memory encoding + retrieval
-    → recurrent PFC deliberation over memory-derived evidence
-    → goal-conditioned prospective field
-```
+### Memory resource
 
-Interpretation:
-
-| Component | Role in `prospect`                                                                |
-| --------- | --------------------------------------------------------------------------------- |
-| LEC       | encodes sensory goal observation into $x_{\text{goal}}$                           |
-| MEC       | tracks current structural location $g_t$ from movement history                    |
-| HPC       | stores episodic bindings in $M$; retrieves $\mathbf{r}_t$ given cues              |
-| HRM / PFC | deliberates over $(g_t, x_{\text{goal}}, \mathbf{r}_t)$ to produce $\mathbf{f}_t$ |
-
-The central question is:
-
-> Can EHP derive a goal-conditioned prospective field from episodic memory,
-> without oracle access to the current location or transition weights?
-
-Success demonstrates that memory causally guides deliberation — not merely
-that a feed-forward network can compute distances on a memorized graph.
-
----
-
-## Input and output
-
-### Execution mode
-
-`prospect` uses **single-step field prediction after memory retrieval and
-recurrent deliberation**. The model does not navigate or select actions.
-
-1. The task provides $o_{\text{goal}}$ (sensory goal observation) and the
-   current environmental state (observation, action history).
-2. TEM processes the inputs: LEC encodes $o_{\text{goal}} \rightarrow x_{\text{goal}}$,
-   MEC tracks $g_t$, HPC retrieves $\mathbf{r}_t$ from $M$.
-3. HRM deliberates over $(g_t, x_{\text{goal}}, \mathbf{r}_t)$ for $K$
-   recurrent iterations. $g_t$ is fixed throughout deliberation.
-4. A decoder reads HRM node states and produces $\hat{\mathbf{f}}_t \in [0,1]^N$
-   via sigmoid activation per node.
-5. The field is compared against the target field for supervision.
-
-### Task boundary contract
-
-The task provides:
-
-| Field               | Description                                          |
-| ------------------- | ---------------------------------------------------- |
-| $o_{\text{goal}}$   | goal observation as sensory identifier               |
-| environmental state | current observation, action history, episode context |
-
-The task does **not** provide:
-
-| Withheld                | Must be derived by                                       |
-| ----------------------- | -------------------------------------------------------- |
-| $g_t$                   | MEC from movement history and structural knowledge       |
-| $x_{\text{goal}}$       | LEC from $o_{\text{goal}}$                               |
-| $\mathbf{r}_t$          | HPC retrieval from $M$ given $g_t$ and $x_{\text{goal}}$ |
-| $\mathbf{w}_t$ (oracle) | not available; replaced by memory-derived $\mathbf{r}_t$ |
-
-### Adapter input (task-data → model)
-
-The adapter provides the environmental context needed for memory retrieval
-and current-state inference. The exact fields depend on the TEM architecture
-and training strategy (frozen vs fine-tuned).
-
-### Adapter output (model → evaluation)
+Prospect does not own memory acquisition. The acquired EC–HPC memory state is
+a separately produced, topology-specific resource:
 
 ```text
-GoalFieldStepOutput:
-  firing_field:  FloatTensor[B, N]  ∈ [0, 1] via sigmoid
+checkpoint + acquisition history
+    → memory-bank entry (exported, qualified, versioned)
 ```
 
-The output is a continuous firing field over $N$ nodes. The field satisfies:
+Key invariants:
+
+- The memory is topology-compatible: `memory.spatial_layout_id == query.spatial_layout_id`
+  and `memory.topology_digest == query.topology_digest`.
+- The memory was acquired before the Prospect query; acquisition did not
+  consume query-specific route targets or oracle solutions.
+- One memory entry may serve many start–goal queries over the same topology.
+- Memory acquisition, export, and qualification are separate pipeline stages
+  (Arena training → memory export). They do not occur during Prospect corpus
+  generation or training.
+
+### Semantic graph
+
+The hidden semantic DAG (G_obs = (O, E_obs)) is shared across the corpus but
+never exposed in model inputs. The DAG must be learned parametrically by the
+model from route supervision across the Prospect corpus, not from the acquired
+memory. The acquired EC–HPC memory supplies the spatial topology and
+observation-to-position bindings; the semantic DAG is a separate corpus-level
+construct from dagflow.
+
+If the design instead intended the semantic DAG to be stored in HPC memory,
+the Arena acquisition task would need to expose semantic-acceptance transitions,
+which it currently does not. That would be a different acquisition task and a
+different scientific claim.
+
+The semantic parent must provide a single fixed directed acyclic graph over
+exactly the same declared observation vocabulary as the spatial parent:
+O_DAG = O_topology. The graph is consumed as hidden
+oracle structure; adjacency is never exposed in model inputs.
+
+### Semantic-state initialization and transition rule
+
+The planning state is (p, o). The start position must contain a real
+observation: o_0 = phi(p_start). The start observation is already accepted;
+the first post-start acceptance must satisfy (o_0, o_1) in E_obs.
+
+Two transition types:
+
+- **Physical movement** — move to an adjacent traversable position q:
+  (p, o) → (q, o) with cost 1.
+- **Semantic acceptance** — accept the observation at the current position:
+  (p, o) → (p, o') with cost 0, where phi(p) = o' and (o, o') in E_obs.
+
+Conventions:
+
+- Semantic acceptance is optional at any observation cell.
+- An observation cannot be accepted unless it is a valid DAG successor.
+- After accepting the goal observation, the task terminates immediately.
+- Physical presence and semantic acceptance are independent. Crossing an
+  observation cell without explicit acceptance does not update the semantic
+  state.
+
+### Oracle
+
+The oracle is a joint product-state shortest-path search over
+X = P_free × O. Goal states are any (p, o_goal) where phi(p) = o_goal.
+The optimization minimizes total physical path length:
+
+π\* = argmin_π sum_over_physical_transitions 1
+
+Semantic acceptance transitions constrain validity but do not add cost.
+The oracle jointly selects: the observation sequence, concrete occurrences,
+physical route between occurrences, and final goal occurrence.
+
+**Three canonical route objects:**
+
+- Product-state path Pi\* = ((p_0, o_0), ..., (p_T, o_T))
+- Projected physical route R\* = (p_0, p_1, ..., p_L)
+- Accepted waypoint sequence W\* = ((p_i0, o_0), ..., (p_iM, o_M))
+
+**Uniqueness**: Exactly one optimal task-equivalence class exists. The
+projected physical route is simple (no repeated positions). Samples violating
+either constraint are rejected with recorded reasons.
+
+**Targets are computed from the source topology and semantic graph, never from
+the acquired memory state.** A degraded memory must not alter ground truth.
+
+### Outputs
+
+**Primary output — spatial trajectory field (f_traj):**
+
+For the selected physical route pi\*\_space = (p_0, ..., p_L):
+
+f_traj*(p_k) = gamma_space^k
+f_traj*(p) = 0 for p not in pi\*\_space
+
+where gamma_space in (0, 1) is the spatial field-decay factor.
+
+**Structural supervision — semantic waypoint field (f_wp):**
+
+For accepted observations (p_i0, o_0), ..., (p_iM, o_M) where
+o_M = o_goal and m = 0 receives 1.0:
+
+f_wp*(p_im) = gamma_semantic^m
+f_wp*(p) = 0 otherwise
+
+Spatial and semantic decay are independent. Spatial decay counts physical
+moves; semantic decay counts acceptance events.
+
+**Auxiliary outputs:**
+
+| Output                  | Shape      | Description                              |
+| ----------------------- | ---------- | ---------------------------------------- |
+| next_direction_logits   | (B, 4)     | categorical over {UP, RIGHT, DOWN, LEFT} |
+| next_observation_logits | (B, N_obs) | categorical over observation vocabulary  |
+
+### Target encoding
+
+| Target            | Source                                               |
+| ----------------- | ---------------------------------------------------- |
+| target_trajectory | spatial decay over the projected physical route      |
+| target_waypoint   | semantic decay over accepted observation occurrences |
+| target_next_dir   | first physical step of the optimal route             |
+| target_next_obs   | first post-start accepted observation                |
+
+### Semantic-length terminology
+
+| Term                        | Definition                        | Value |
+| --------------------------- | --------------------------------- | ----- |
+| waypoint_count              | total accepted observations       | M+1   |
+| semantic_transition_count   | edges traversed                   | M     |
+| intermediate_waypoint_count | accepted excluding start and goal | M-1   |
+
+## Parent requirements
+
+### Spatial topology
+
+The oracle topology parent must provide:
+
+- extent — declared canvas dimensions (H, W).
+- state_to_row_col — compact state coordinates (N, 2).
+- observation_id — observation identity per traversable state (N,).
+- next_state (N, A) with action_valid (N, A) — four-neighbor physical
+  connectivity, validated against `movement_kind == "grid4"`.
+- observation_vocabulary_size — declared observation domain size.
+- topology_kind == grid2d and topology_type in {square, rectangle}.
+- action_space with `movement_kind == "grid4"` (no hex).
+
+### Dense canonicalization
+
+Prospect converts each compact graph-indexed SpatialLayout into a dense
+fixed-size storage canvas of S = H_store × W_store row-major positions.
+The parent layout's natural extent H_i × W_i may be smaller than the
+storage canvas. Positions outside the embedded natural extent become
+CELL_PAD (storage padding, neither a real wall nor free space).
+
+Within the embedded natural extent:
+
+- Positions with a compact graph state become CELL_OBSERVATION.
+- Positions without a compact graph state become CELL_WALL.
+- Physical-neighbor adjacency is consumed from the parent layout's
+  `next_state` + `action_valid` and validated against canonical grid4
+  expectations.
+- The required action space is four-neighbor undirected movement, no
+  one-way passages.
+
+Each stored sample carries a `spatial_mask` — True where the slot
+corresponds to a real position in the sample's natural domain, False
+for storage padding. Losses, metrics, route extraction, and figure
+rendering must exclude padding positions.
+
+Four cell classes are distinguished:
+
+| Cell type       | Belongs to layout | Traversable | Observation |
+| --------------- | ----------------- | ----------- | ----------- |
+| `CELL_PAD (3)`  | No                | No          | No          |
+| `CELL_WALL (0)` | Yes               | No          | No          |
+| `CELL_FREE (1)` | Yes               | Yes         | No          |
+| `CELL_OBS (2)`  | Yes               | Yes         | Yes         |
+
+CELL_PAD positions (spatial_mask == False) have zero-valued target fields
+and do not contribute to losses, metrics, route extraction, or figure
+rendering.
+
+### Memory compatibility
+
+Every Prospect sample resolves to exactly one compatible memory entry. The
+compatibility relation is memory ↔ spatial topology only:
+
+- `query.spatial_layout_id == memory.spatial_layout_id`
+- `query.topology_digest == memory.topology_digest`
+- Spatial extent and slot schema match.
+- Observation vocabulary cardinality matches.
+- Coordinate convention matches.
+
+The memory-bank artifact must not depend on the Prospect semantic DAG or
+on query-specific route targets. The query ↔ semantic-graph relation is
+separate from memory compatibility.
+
+## Output artifact
+
+### Input channels
+
+| Field        | Shape  | Type | Description                                                       |
+| ------------ | ------ | ---- | ----------------------------------------------------------------- |
+| start_flag   | (B, S) | bool | True for exactly one traversable position                         |
+| goal_flag    | (B, S) | bool | True for all positions containing the goal observation            |
+| spatial_mask | (B, S) | bool | True inside the natural spatial domain; False for storage padding |
+| memory_id    | scalar | str  | Reference to a compatible acquired memory entry                   |
+
+The task input does not contain `cell_type`, `observation_id`, spatial
+adjacency, wall mask, precomputed route, oracle waypoint sequence, or
+target fields.
+
+### Metadata channels (per sample)
+
+| Field          | Shape  | Type  | Description                                                         |
+| -------------- | ------ | ----- | ------------------------------------------------------------------- |
+| natural_height | scalar | int32 | Natural layout height in cells                                      |
+| natural_width  | scalar | int32 | Natural layout width in cells                                       |
+| row_offset     | scalar | int32 | Row offset for embedding the natural extent into the storage canvas |
+| col_offset     | scalar | int32 | Col offset for embedding the natural extent into the storage canvas |
+
+### Corpus channels
+
+Per-sample channels stored in the task corpus (one NPY array per channel
+per split):
+
+start_flag, goal_flag, spatial_mask, memory_id,
+natural_height, natural_width, row_offset, col_offset,
+target_trajectory, target_waypoint, target_next_dir, target_next_obs.
+
+### Resolved runtime input
+
+The persisted corpus record differs from the runtime model input. At load time,
+`memory_id` is resolved through a memory provider to a typed memory object:
 
 ```text
-f_t(i_t) = 1                           current location at maximum
-f_t(j) ∈ [0, 1) for j ≠ i_t            decays over prospective states
-f_t(j) = 0 for nodes off viable goal-reaching paths
+Persisted record:
+    memory_id (string reference)
+
+Resolved task input:
+    memory (AcquiredMemoryV1 — typed resolved object)
 ```
 
-### Target
+The resolution is performed by the data-loading layer, not by the adapter.
+The adapter receives resolved memory and constructs model representations.
 
-```text
-GoalFieldTargets:
-  target_field:  FloatTensor[B, N]  ∈ [0, 1]
-```
+## Invariants
 
-The target is the discounted prospective relevance from the current location
-toward the goal, restricted to nodes on viable goal-reaching continuations
-(see `goaltrace.md` for the full target formula).
+- One fixed DAG per corpus; all samples share (O, E_obs).
+- O_DAG = O_topology (declared vocabularies match).
+- The start cell is traversable and contains a real observation.
+- The goal differs from the start observation and is semantically reachable.
+- At least one physical occurrence of the goal is present.
+- Exactly one optimal task-equivalence class exists.
+- The projected physical route contains no repeated positions.
+- Every physical step is a valid four-neighbor non-wall move.
+- Every semantic acceptance follows an edge in the hidden DAG.
+- The trajectory and waypoint fields follow their respective decay rules.
+- The next-direction target matches the first physical step.
+- The next-observation target matches the first post-start acceptance.
+- Padding positions (spatial_mask == False) have zero-valued target fields.
+- Padding positions do not contribute to losses, metrics, route extraction,
+  or figure rendering.
+- Regeneration with the same route-query artifact and build configuration
+  produces identical query and target tensors. Changing the compatible
+  memory-bank parent may change only memory references and lineage, not
+  oracle targets.
+- Targets are computed from the source topology and semantic graph, not from
+  the acquired memory. A degraded or substituted memory must not alter
+  ground truth.
+- One memory entry may serve many start–goal queries.
+- Memory acquisition did not consume query-specific oracle targets.
+- Prospect test start–goal pairs must be held out from acquisition
+  trajectories.
+- Every sample carries `acquisition_exact_route_seen` (bool) and
+  `acquisition_fragment_coverage` (float) diagnostic fields.
+- The evaluator may access source topology and the hidden semantic graph
+  for route-validity computation. These are privileged evaluation resources
+  and are never exposed to the model.
+- The observation vocabulary cardinality and index domain are corpus-level
+  schema parameters available at model construction, although per-position
+  observation identities are withheld from the query input.
 
----
+## Build configuration
 
-## Training strategy
+### Storage policy
 
-### Pretraining requirements
+Prospect accepts heterogeneous parent natural extents. Every corpus declares
+one configured storage extent `[storage_height, storage_width]`. Each
+selected parent layout must fit within that storage extent:
 
-`prospect` requires pretrained components:
+    0 < H_i <= H_store    and    0 < W_i <= W_store
 
-| Component                | Pretrained on                      | Frozen during `prospect`?      |
-| ------------------------ | ---------------------------------- | ------------------------------ |
-| TEM (LEC, MEC, HPC, $M$) | structural exposure (replay)       | Frozen (v1) or fine-tuned (v2) |
-| HRM                      | oracle field prediction (optional) | Trainable                      |
+Layouts are embedded into the storage canvas via deterministic centering.
 
-The recommended v1 strategy is **frozen TEM + trainable HRM**:
+| Policy                 | Value                   |
+| ---------------------- | ----------------------- |
+| spatial_storage_policy | `pad_to_configured_max` |
+| storage_extent         | `[H_store, W_store]`    |
+| placement_policy       | `center`                |
 
-1. Pretrain TEM on structural exposure.
-2. Optionally pretrain HRM on oracle-quality field prediction.
-3. Train on `prospect` with TEM frozen, HRM trainable.
+### Memory bank requirement
 
-This tests whether HRM can adapt from oracle-quality relational evidence to
-memory-derived relational evidence without retraining TEM.
+Prospect corpora require a separately produced, validated memory-bank artifact.
+The memory-bank entry must satisfy the qualification thresholds declared by the
+experiment configuration.
 
-### Loss
+### Routebind preset compatibility
 
-The primary loss is mean squared error over the firing field:
+Prospect may reuse the same route-query sampling configuration as `routebind`
+for target generation. The route targets are computed identically; the input
+contract is what differs.
 
-```text
-L_field = (1/N) Σ_j (f̂_t(j) − f_t^*(j))²
-```
+## CLI
 
-### Causal memory test
+| Command  | Description                                                |
+| -------- | ---------------------------------------------------------- |
+| build    | Materialize a Prospect corpus from route queries + memory. |
+| validate | Verify a corpus against structural and semantic checks.    |
+| inspect  | Examine corpus metadata, samples, and diagnostics.         |
 
-To verify that $\mathbf{r}_t$ causally shapes $\mathbf{f}_t$:
-
-- Ablate $\mathbf{r}_t$ (set to zero or shuffle) and measure field degradation.
-- If the field quality does not degrade, HRM is solving the task through
-  parametric shortcuts rather than using memory-derived evidence.
-
----
-
-## Corpus and data generation
-
-`prospect` corpora require a pretrained TEM checkpoint from structural
-exposure training. The data generation pipeline runs TEM over layouts to
-produce the memory state $M$ and latent representations.
-
-### Data pipeline
-
-1. A pretrained TEM model is run over a layout to produce $M$, $g_t$,
-   and $p_t$.
-2. Start locations and goal observations are sampled.
-3. The oracle computes the target field $\mathbf{f}_t^*$ from the optimal
-   remaining path.
-4. The environmental state, $o_{\text{goal}}$, $M$, and target field are
-   packaged as one sample.
-
-### Graph topology
-
-v1 uses fixed DAGs. The DAG is fixed per corpus. Observation IDs are stable.
-The topology class matches the isolated field-prediction task for
-cross-task parity.
-
-### Data generation
+Usage:
 
 ```bash
-python scripts/data-gen/build-prospect.py build-all \
+python scripts/data-gen/build-prospect.py build \
     --corpus default --version 1 \
-    --arena-checkpoint checkpoints/arena/tem-v1-weights-only.pt \
-    --n-observations 32 --max-out-degree 4 \
-    --oracle-semantics reliability --field-decay 0.8 \
+    --topology-root data/interim/openfield/big-square/v1 \
+    --dagflow-root data/interim/dagflow/routing/v1 \
+    --memory-bank data/interim/memorybank/tem-v1/v1 \
+    --field-decay-spatial 0.9848 \
+    --field-decay-semantic 0.8 \
     --n-train 4000 --n-val 500 --n-test 500 \
     --seed 42
+python scripts/data-gen/build-prospect.py validate data/processed/prospect/default/v1
+python scripts/data-gen/build-prospect.py inspect data/processed/prospect/default/v1 --summary
 ```
 
-Output path: `data/processed/prospect/<corpus>/v<version>/`
+## Manifest
 
----
+Root file: manifest.json. Key fields:
 
-## Benchmark and evaluation
+| Field                        | Description                                         |
+| ---------------------------- | --------------------------------------------------- |
+| storage_extent               | Storage canvas [height, width].                     |
+| num_spatial_slots            | Fixed tensor width S = H_store \* W_store.          |
+| spatial_storage_policy       | `"pad_to_configured_max"`                           |
+| placement_policy             | `"center"`                                          |
+| n_observations               | Observation vocabulary cardinality.                 |
+| field_decay_spatial          | Spatial field decay factor.                         |
+| field_decay_semantic         | Semantic field decay factor.                        |
+| max_supported_physical_moves | Maximum route length for terminal activation check. |
+| parents.spatial_topology     | Topology parent (family, root, version).            |
+| parents.semantic_graph       | Dagflow parent.                                     |
+| parents.memory_bank          | Memory-bank parent (root, version, producer).       |
 
-### Prospect-Mem track
+## Targets and metrics
 
-| Aspect            | Value                                                                          |
-| ----------------- | ------------------------------------------------------------------------------ |
-| Benchmark track   | Prospect-Mem                                                                   |
-| Claim family      | `memory_derived_prospective_field`                                             |
-| Execution mode    | single-step field prediction after memory retrieval + deliberation             |
-| Primary metric    | `field_mse`                                                                    |
-| Secondary metrics | `current_accuracy`, `successor_accuracy`, `goal_activation`,                   |
-|                   | `off_path_suppression`, `field_decay_correlation`                              |
-| Diagnostic metric | `retrieval_ablation_delta` (field_mse increase when $\mathbf{r}_t$ is ablated) |
+| Aspect                          | Value                                                                                                                   |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Benchmark track                 | Prospect-Field                                                                                                          |
+| Claim family                    | memory_conditioned_spatial_route_binding                                                                                |
+| Execution mode                  | field prediction from a static query (model may perform internal recurrent deliberation and multiple memory retrievals) |
+| Primary metric                  | valid_semantic_spatial_route_rate (behavioral)                                                                          |
+| Primary optimality metric       | semantic_spatial_path_cost_ratio                                                                                        |
+| Primary representational metric | balanced_trajectory_field_error                                                                                         |
+| Calibration metric              | trajectory_field_mse                                                                                                    |
+| Structural metric               | balanced_waypoint_field_error                                                                                           |
+| Auxiliary metrics               | next_direction_accuracy, next_observation_accuracy                                                                      |
+| Diagnostic metrics              | wrong_memory_validity_delta, memory_zero_ablation_field_error_delta                                                     |
 
-### Primary metric: `field_mse`
+- `valid_semantic_spatial_route_rate`: fraction of samples whose extracted
+  route begins at p_start, uses traversable four-neighbor moves, contains no
+  repeated positions, terminates at a goal_flag position, and has a valid
+  semantic acceptance subsequence under the hidden DAG.
 
-Mean squared error between predicted and target field, as in the isolated
-field-prediction task.
+- `semantic_spatial_path_cost_ratio`: for valid routes, the ratio of predicted
+  route cost to oracle optimal cost C(R_hat) / C(R_star). A value of 1.0
+  indicates exact optimality.
 
-### Diagnostic metric: `retrieval_ablation_delta`
+- `wrong_memory_validity_delta`: change in `valid_semantic_spatial_route_rate`
+  when the acquired memory is substituted with a memory from a different
+  topology. A large negative delta indicates causal reliance on the correct
+  memory. This is the primary diagnostic for memory-usage attribution.
 
-The increase in `field_mse` when $\mathbf{r}_t$ is zeroed or shuffled.
-A large delta indicates causal reliance on memory retrieval. A near-zero
-delta indicates the model ignores HPC output and uses parametric shortcuts.
+- `memory_zero_ablation_field_error_delta`: increase in
+  `trajectory_field_mse` when memory tensors are zeroed. Separates
+  reliance on memory content from reliance on memory presence.
 
-### Score accumulation
+## Deferred features
 
-`field_mse` and component metrics are mean-aggregated over samples. The
-ablation delta is computed as `field_mse(ablated) − field_mse(clean)`.
+The following capabilities are deliberately deferred to later Prospect versions
+and are not part of the initial v1 contract:
 
----
+- **Semantic goal-to-location retrieval**: v1 supplies `goal_flag` directly.
+  A future version will require the model to retrieve goal-position bindings
+  from memory given only a goal observation identity.
+- **Online end-to-end Arena→Prospect training**: v1 uses a frozen, pre-exported
+  memory bank. Joint acquisition-and-reasoning is deferred.
+- **Semantic goal cue encoding via LEC**: v1 supplies `goal_flag` as a
+  spatial-position cue. Encoding a raw observation ID into a sensory
+  representation is deferred.
+- **Multiple retrievals during deliberation**: v1 does not prescribe the
+  number, timing, or form of memory retrieval operations. Retrieval control
+  belongs to the EHP model and experiment. A single-retrieval baseline may
+  be defined in the experiment specification, not in the task contract.
 
-## Open questions
+## Pipeline overview
 
-1. **Frozen vs fine-tuned TEM**: Does freezing TEM preserve structurally
-   learned representations, or does fine-tuning cause representational
-   collapse (e.g., MEC learning to output oracle-like $g_t$ directly)?
+Prospect does not own the full EHP pipeline. The canonical stages are:
 
-2. **HRM transfer from oracle pretraining**: Does an HRM pretrained on
-   oracle-quality weights transfer to memory-derived evidence without
-   retraining? If not, how much integrated training is needed to adapt?
+```text
+Stage A: Build task-neutral environment artifacts
+    topology generator → spatial layouts
+    dagflow → semantic graph
+    spatial layouts + semantic graph → canonical route-query artifact
 
-3. **Form of $\mathbf{r}_t$**: What shape and semantics should the retrieved
-   relational evidence have? A per-node vector (matching oracle weight
-   format) enables direct transfer; a richer representation may improve
-   field quality at the cost of compatibility.
+Stage B: Build Arena acquisition corpus
+    spatial layouts + acquisition policy → Arena trajectories
 
-4. **Causal sufficiency of $\mathbf{r}_t$**: Is memory-derived $\mathbf{r}_t$
-   sufficient to replace oracle-quality weights, or does HRM need additional
-   structural information from TEM (e.g., $p_t$, successor embeddings)?
+Stage C: Train TEM / EC–HPC
+    Arena corpus + TEM config → Arena checkpoint
 
-5. **Multiple retrievals per deliberation step**: Should HRM query HPC
-   multiple times during deliberation ($\mathbf{r}_t^{(k)}$ varies with $k$),
-   or is a single retrieval before deliberation sufficient?
+Stage D: Export memory states
+    Arena checkpoint + acquisition trajectories → memory-bank artifact
 
-6. **Scaling to spatial layouts**: The initial v1 uses abstract DAGs for
-   cross-task parity. When should the task transition to spatial layouts
-   (dungeon graphs, openfield grids) where MEC spatial representations
-   provide genuine localization?
+Stage E: Materialize Prospect corpus
+    canonical route queries + memory-bank manifest → Prospect corpus
 
-7. **Goal cue format**: Should $o_{\text{goal}}$ be a raw observation ID
-   (requiring LEC encoding) or a richer cue (image, description) that
-   exercises LEC's sensory encoding capabilities?
+Stage F: Train EHP
+    Prospect corpus + memory bank + EHP model → EHP checkpoint
+```
 
-8. **Oracle baseline comparison**: What is the performance gap between
-   memory-derived $\mathbf{r}_t$ and an oracle-weight baseline on the same
-   DAG? This gap quantifies the cost of replacing oracle evidence with
-   memory retrieval.
+Prospect owns Stage E. Stage F (training the EHP model) is owned by the
+Prospect/EHP experiment layer — task packages must not own model training
+per the repository architecture. Stages A–D are owned by upstream data
+pipelines, the Arena task, and the TEM training pipeline, respectively.

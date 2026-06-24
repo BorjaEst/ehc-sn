@@ -421,6 +421,53 @@ The following must be validated at startup:
 All three values must match exactly — not just $S$. A model trained on
 `n32_t32_s64` must not silently evaluate on `n40_t24_s64`.
 
+### Build configuration
+
+| Parameter          | Default      | Description                          |
+| ------------------ | ------------ | ------------------------------------ |
+| `--layout-root`    | _(required)_ | Path to dagflow layout dataset root. |
+| `--corpus`         | `default`    | Corpus label.                        |
+| `--n-max`          | 32           | Maximum candidate nodes $N$.         |
+| `--t-max`          | 32           | Maximum path length $T$.             |
+| `--max-out-degree` | 4            | Maximum out-degree $K$ per node.     |
+| `--n-train`        | 4000         | Number of training samples.          |
+| `--n-val`          | 500          | Number of validation samples.        |
+| `--n-test`         | 500          | Number of test samples.              |
+| `--version`        | 1            | Task corpus version integer.         |
+| `--seed`           | 42           | Deterministic base seed.             |
+
+### CLI
+
+| Command    | Description                                           |
+| ---------- | ----------------------------------------------------- |
+| `build`    | Build a SeqMaze task corpus over a dagflow substrate. |
+| `validate` | Validate a SeqMaze task-corpus version root.          |
+| `inspect`  | Print a human-readable summary of a version root.     |
+
+Usage:
+
+```bash
+# Build
+python scripts/data-gen/build-seqmaze.py build \
+    --layout-root data/interim/dagflow/sparse/v1
+
+# Validate
+python scripts/data-gen/build-seqmaze.py validate \
+    data/processed/seqmaze/default/v1
+
+# Inspect
+python scripts/data-gen/build-seqmaze.py inspect \
+    data/processed/seqmaze/default/v1 --summary
+```
+
+### Prerequisites
+
+A dagflow shared substrate must exist before running. Build it first:
+
+```bash
+python scripts/data-gen/build-dagflow.py build --preset branching --version 1
+```
+
 ### Utilities
 
 Graph generation and validation utilities live in
@@ -440,17 +487,23 @@ These are task-internal utilities, not a shared substrate. `seqmaze` has no
 
 ```text
 data/processed/seqmaze/<corpus>/v<version>/
-  train.npz
-  val.npz
-  test.npz
+  train/
+  val/
+  test/
   manifest.json
   index.jsonl
+
+Per split, each channel (``obs_id``, ``candidate_index``, ``start_flag``,
+``goal_flag``, ``successor_indices``, ``successor_mask``, ``node_mask``,
+``path_index``, ``path_mask``, ``path_length``) is stored as a separate
+``{channel}.npy`` file.
 ```
 
 ### Build
 
 ```bash
-python scripts/data-gen/build-seqmaze.py build-all \
+python scripts/data-gen/build-seqmaze.py build \
+    --layout-root data/interim/dagflow/sparse/v1 \
     --corpus default --version 1 \
     --n-max 32 --t-max 32 --max-out-degree 4 \
     --n-train 4000 --n-val 500 --n-test 500 \

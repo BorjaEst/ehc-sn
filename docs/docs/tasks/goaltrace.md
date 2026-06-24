@@ -379,13 +379,13 @@ diagnostics but excluded from the model input surface.
 
 ```bash
 # Requires dagflow substrate first:
-python scripts/data-gen/build-dagflow.py materialize-layouts --version 1
-python scripts/data-gen/build-goaltrace.py materialize-task \
-    --layout-root data/interim/dagflow/default/v1
+python scripts/data-gen/build-dagflow.py build --preset branching --version 1
+python scripts/data-gen/build-goaltrace.py build \
+    --layout-root data/interim/dagflow/branching/v1
 
 # All flags have sensible defaults.  Explicit:
-python scripts/data-gen/build-goaltrace.py materialize-task \
-    --layout-root data/interim/dagflow/default/v1 \
+python scripts/data-gen/build-goaltrace.py build \
+    --layout-root data/interim/dagflow/branching/v1 \
     --static-weights --min-optimality-margin 0.0 \
     --distance-tau 8.0 --distance-max 0 \
     --grid-width 20 --grid-height 30 \
