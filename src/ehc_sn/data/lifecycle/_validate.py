@@ -24,7 +24,7 @@ from ehc_sn.data.manifest import read_manifest
 # Required manifest fields per dataset_class
 # ---------------------------------------------------------------------------
 
-_SHARED_REQUIRED: frozenset[str] = frozenset(
+_SHARED_SUBSTRATE_REQUIRED: frozenset[str] = frozenset(
     {
         "manifest_schema_version",
         "dataset_class",
@@ -39,14 +39,37 @@ _SHARED_REQUIRED: frozenset[str] = frozenset(
         "builder",
         "seed",
         "normalization_version",
-        "shared_schema_version",
+        "artifact_schema_version",
         "stage_params",
         "producer_revision",
         "input_fingerprint",
     }
 )
+"""Required manifest fields for shared_substrate datasets."""
 
-_TASK_REQUIRED: frozenset[str] = _SHARED_REQUIRED | frozenset(
+_LAYOUT_REQUIRED: frozenset[str] = frozenset(
+    {
+        "manifest_schema_version",
+        "dataset_class",
+        "family",
+        "version",
+        "channels",
+        "topology_kind",
+        "n_states",
+        "extent",
+        "n_samples",
+        "source_id",
+        "builder",
+        "seed",
+        "normalization_version",
+        "stage_params",
+        "producer_revision",
+        "input_fingerprint",
+    }
+)
+"""Required manifest fields for layout_dataset datasets."""
+
+_TASK_REQUIRED: frozenset[str] = _LAYOUT_REQUIRED | frozenset(
     {
         "task",
         "corpus",
@@ -120,8 +143,10 @@ def _validate_structure(root: Path) -> dict[str, Any]:
         required = _SOURCE_SPEC_REQUIRED
     elif dataset_class == "task_corpus":
         required = _TASK_REQUIRED
+    elif dataset_class == "shared_substrate":
+        required = _SHARED_SUBSTRATE_REQUIRED
     else:
-        required = _SHARED_REQUIRED
+        required = _LAYOUT_REQUIRED
     missing = required - manifest.keys()
     if missing:
         raise ValueError(f"manifest missing required fields: {sorted(missing)}")

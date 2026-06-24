@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 from ehc_sn.figures.registry import FigureContext
 from ehc_sn.figures.utils.grids import first_halt_index
 from ehc_sn.traces.keys import (
+    MAZEHARD_META_KEY_CASE_ID,
     MAZEHARD_META_KEY_GT_OVERLAY,
     MAZEHARD_META_KEY_INPUT_IDS,
     MAZEHARD_TRACE_KEY_HALTED,
@@ -145,11 +146,10 @@ class MazehardTaskLayoutFigureData:
     """Prepared data for :class:`~ehc_sn.figures.templates.mazehard_task_layout.MazehardTaskLayoutFigure`."""
 
     input_ids: NDArray  # (side, side) — categorical input grid
-    target_overlay: NDArray  # (side, side) — binary target path
+    target_overlay: NDArray  # (side, side) — float32 target path
     target_path_cells: int
     case_id: str
     grid_shape: tuple[int, int]
-    rollout_steps: int
 
 
 def select_prediction_accuracy(
@@ -248,7 +248,9 @@ def select_task_layout(
 
     Returns the input grid, binary target-path overlay, and case metadata.
     """
-    input_raw = np.asarray(_to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_INPUT_IDS)))
+    input_raw = np.asarray(
+        _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_INPUT_IDS))
+    )
     target_raw = np.asarray(
         _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_GT_OVERLAY))
     )
@@ -272,18 +274,29 @@ def select_task_layout(
     # Infer background value as the mode of the target overlay.
     values, counts = np.unique(target_raw, return_counts=True)
     background = values[np.argmax(counts)]
-    target_fg = (target_raw != background).astype(bool).reshape(side, side)
+    target_fg = (
+        (target_raw != background).astype(np.float32).reshape(side, side)
+    )
 
     # Count target-path cells.
     n_fg = int(target_fg.sum())
+
+    # Read case_id from meta, fall back to hardcoded default.
+    try:
+        case_id = str(
+            np.asarray(
+                _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_CASE_ID))
+            ).flat[0]
+        )
+    except (KeyError, IndexError):
+        case_id = "mazehard-test-0000"
 
     return MazehardTaskLayoutFigureData(
         input_ids=input_grid,
         target_overlay=target_fg,
         target_path_cells=n_fg,
-        case_id="mazehard-test-0000",
+        case_id=case_id,
         grid_shape=(side, side),
-        rollout_steps=16,
     )
 
 

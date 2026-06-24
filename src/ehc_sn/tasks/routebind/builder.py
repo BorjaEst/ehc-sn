@@ -36,15 +36,20 @@ from ehc_sn.tasks.routebind.contracts import ROUTEBIND_SCHEMA
 from ehc_sn.tasks.routebind.oracle import (
     _build_dag_csr,
     compute_goal_distance_table,
+    derive_optimal_transition_masks,
     reconstruct_from_policy,
+    traverse_optimal_subgraph,
 )
 from ehc_sn.tasks.routebind.targets import (
     encode_trajectory_field,
+    encode_trajectory_support,
     encode_waypoint_field,
+    encode_waypoint_support,
 )
 from ehc_sn.tasks.routebind.validation import (
     validate_generated_sample,
     validate_stored_sample,
+    validate_support_channels,
 )
 from ehc_sn.utils.graph import canonical_dag_digest
 
@@ -184,8 +189,6 @@ class RealizedAdmissionPolicy:
 
     waypoint_count_bins: list[tuple[int, int]] | None = None
     waypoint_count_targets: list[float] | None = None
-    require_unique: bool = True
-    require_simple_route: bool = True
 
     def semantic_bucket_index(self, waypoint_count: int) -> int | None:
         """Return the bin index for *waypoint_count*, or None."""
@@ -739,40 +742,29 @@ def _build_query_table(
     goal_obs: list[int],
     max_supported_route_length: int,
 ) -> dict:
-    """Precompute the complete oracle query table for one layout.
+    """Precompute the oracle distance table for one layout.
 
-    Runs one reverse 0-1 BFS per goal observation and eagerly
-    reconstructs every reachable+unique candidate to populate
-    ``simple_projection`` and ``waypoint_count``.
+    Runs one reverse 0-1 BFS per goal observation and extracts
+    ``move_count`` and ``reachable`` for all ``(position, goal)`` pairs
+    that have a finite-cost product-state solution.
 
-    Policy arrays are discarded after reconstruction; callers that
-    need to reconstruct selected candidates re-run the per-goal BFS
-    via ``compute_goal_distance_table`` directly (the BFS is the
-    expensive part, not the policy chain walk).
+    The returned table is start-position independent and requires no
+    path reconstruction — ambiguity is not a rejection criterion.
 
     Returns a dict with keys:
 
         move_count: (n_slots, n_obs) int32 — minimum physical moves from
-            each (position, observation) pair to a valid accepted goal.
+            each (position, observation_at_position) to a valid accepted goal.
         reachable: (n_slots, n_obs) bool — True iff a finite-cost path
             exists.
-        unique: (n_slots, n_obs) bool — True iff exactly one optimal
-            product-state path exists (opt_count == 1).
-        simple_projection: (n_slots, n_obs) bool — True iff the projected
-            physical route contains no repeated positions.
-        waypoint_count: (n_slots, n_obs) int16 — number of accepted
-            observation events (including start).  0 for unreachable /
-            non-unique / unsupported pairs.
     """
     n_states = n_slots * n_obs
-    move_count = np.full((n_slots, n_obs), INF, dtype=np.int32)
+    INF_VAL = np.iinfo(np.int32).max
+    move_count = np.full((n_slots, n_obs), INF_VAL, dtype=np.int32)
     reachable = np.zeros((n_slots, n_obs), dtype=bool)
-    unique = np.zeros((n_slots, n_obs), dtype=bool)
-    simple_projection = np.zeros((n_slots, n_obs), dtype=bool)
-    waypoint_count = np.zeros((n_slots, n_obs), dtype=np.int16)
 
     # Pre-allocated kernel workspace (reused per goal)
-    _dist = np.full(n_states, INF, dtype=np.int32)
+    _dist = np.full(n_states, INF_VAL, dtype=np.int32)
     _pkind = np.zeros(n_states, dtype=np.int8)
     _pnext = np.full(n_states, -1, dtype=np.int32)
     _optct = np.zeros(n_states, dtype=np.uint8)
@@ -791,7 +783,7 @@ def _build_query_table(
             continue
 
         # Reset workspace
-        _dist[:] = INF
+        _dist[:] = INF_VAL
         _pkind[:] = 0
         _pnext[:] = -1
         _optct[:] = 0
@@ -812,10 +804,7 @@ def _build_query_table(
             continue
 
         d_arr = table["distance"]
-        oc_arr = table["opt_count"]
 
-        # Extract D[p, g] = distance[p * n_obs + φ(p)] and eagerly
-        # reconstruct reachable+unique candidates.
         for p in range(n_slots):
             obs = int(node_at_position[p])
             if obs < 0 or obs >= n_obs:
@@ -824,48 +813,16 @@ def _build_query_table(
                 continue
             s = p * n_obs + obs
             d = int(d_arr[s])
-            if d >= INF:
+            if d >= INF_VAL:
                 continue
             if d > max_supported_route_length:
                 continue
             move_count[p, goal_idx] = d
             reachable[p, goal_idx] = True
-            is_unique = int(oc_arr[s]) == 1
-            unique[p, goal_idx] = is_unique
-            if not is_unique:
-                continue
 
-            # Eager reconstruction for simple_projection and waypoint_count.
-            result = reconstruct_from_policy(
-                start_pos=p,
-                start_obs=obs,
-                goal_node_idx=goal_idx,
-                n_obs=n_obs,
-                distance=d_arr,
-                policy_kind=table["policy_kind"],
-                policy_next=table["policy_next"],
-                opt_count=oc_arr,
-                row_col=dense_row_col,
-                node_at_position=node_at_position,
-            )
-            if result is None:
-                unique[p, goal_idx] = False
-                continue
-
-            simple = len(set(result.physical_route)) == len(
-                result.physical_route
-            )
-            simple_projection[p, goal_idx] = simple
-            waypoint_count[p, goal_idx] = np.int16(len(result.waypoints))
-
-    # Policy arrays are discarded here.  Callers re-run per-goal BFS
-    # for selected candidates only.
     return {
         "move_count": move_count,
         "reachable": reachable,
-        "unique": unique,
-        "simple_projection": simple_projection,
-        "waypoint_count": waypoint_count,
     }
 
 
@@ -896,20 +853,18 @@ def _build_candidate_pools(
     Reads the precomputed query table and returns
     ``{(phys_bucket_idx, waypoint_bucket_idx): [CatalogEntry, ...]}``.
 
-    Excludes unreachable, non-unique, non-simple, and out-of-bin pairs.
-    When ``admission`` has no waypoint bins, all simple candidates with
-    waypoint_count >= 2 are accepted into bin 0.
+    Unreachable and out-of-bin pairs are excluded.  Ambiguous pairs
+    (multiple optimal solutions) are NOT rejected — ambiguity is
+    informational only.
+
+    When ``admission`` has no waypoint bins, all candidates with
+    physical route positions >= 2 are accepted into bin 0.
     """
-    INF = np.iinfo(np.int32).max
-    n_phys_bins = len(selection.physical_route_position_bins)
+    INF_VAL = np.iinfo(np.int32).max
 
     pools: dict[tuple[int, int], list[CatalogEntry]] = {}
-
     move_count = query_table["move_count"]
     reachable = query_table["reachable"]
-    unique = query_table["unique"]
-    simple_projection = query_table["simple_projection"]
-    wpc = query_table["waypoint_count"]
 
     for p in range(n_slots):
         obs_start = int(node_at_position[p])
@@ -925,25 +880,17 @@ def _build_candidate_pools(
             if phy_bi is None:
                 continue
             funnel.inc_examined(phy_bi)
-            if not unique[p, g]:
-                funnel.inc_ambiguous(phy_bi)
-                continue
-            if not simple_projection[p, g]:
-                funnel.inc_examined(phy_bi)  # already counted above
-                continue  # non-simple — skip
-            wc = int(wpc[p, g])
-            if wc < 2:
-                continue  # trivial waypoint — skip
+            funnel.inc_eligible(phy_bi)
             if (
                 admission is not None
                 and admission.waypoint_count_bins is not None
             ):
-                sem_bi = admission.semantic_bucket_index(wc)
-                if sem_bi is None:
-                    continue  # out of waypoint bin — skip
+                # Waypoint count unknown pre-reconstruction; treat as
+                # post-oracle admission: allocate to all sem bins,
+                # check during Phase D.
+                sem_bi = 0
             else:
                 sem_bi = 0
-            funnel.inc_eligible(phy_bi)
             key = (phy_bi, sem_bi)
             if key not in pools:
                 pools[key] = []
@@ -952,7 +899,7 @@ def _build_candidate_pools(
                     layout_idx=layout_idx,
                     start_pos=p,
                     goal_obs=int(g),
-                    waypoint_count=wc,
+                    waypoint_count=0,  # unknown until Phase D
                     physical_bin=phy_bi,
                     waypoint_bin=sem_bi,
                 )
@@ -1234,6 +1181,16 @@ def build_routebind_task_corpus(
 
     pred_offsets, pred_nodes = _build_dag_csr(pub_adjacency, n_obs)
 
+    # Build public-ID-indexed successor mask/indices for
+    # ``derive_optimal_transition_masks`` (Phase D).
+    max_out_degree = max((len(succs) for succs in pub_adjacency), default=0)
+    pub_succ_mask = np.zeros((n_obs, max_out_degree), dtype=bool)
+    pub_succ_indices = np.full((n_obs, max_out_degree), -1, dtype=np.int32)
+    for src_pub in range(n_obs):
+        for k, dst_pub in enumerate(pub_adjacency[src_pub]):
+            pub_succ_mask[src_pub, k] = True
+            pub_succ_indices[src_pub, k] = np.int32(dst_pub)
+
     # Verify content digest if stored
     if dagflow_entry.content_digest:
         computed = canonical_dag_digest(rank_adjacency, dagflow_obs_ids)
@@ -1271,6 +1228,9 @@ def build_routebind_task_corpus(
         "spatial_storage_policy": "pad_to_configured_max",
         "placement_policy": "center",
         "natural_extent_homogeneous": natural_extent_homogeneous,
+        "target_semantics": "optimal_subgraph_support",
+        "target_schema_version": 1,
+        "depth_sentinel": -1,
         "natural_height_range": [min(natural_heights), max(natural_heights)],
         "natural_width_range": [min(natural_widths), max(natural_widths)],
         "requested_sample_count": target_samples_total,
@@ -1461,46 +1421,28 @@ def build_routebind_task_corpus(
                 max_instances, len(shuffled_layouts)
             )
 
-            # Build a list of mandatory joint bins (non-zero target proportion).
-            mandatory_bins: list[tuple[int, int, str]] = []
+            # Build a list of mandatory physical bins (non-zero target proportion).
+            # Waypoint-count bins are a post-hoc admission filter applied in
+            # Phase D; the pool only knows physical bins.
+            mandatory_bins: list[tuple[int, str]] = []
             for phy_bi, phy_tgt in enumerate(
                 selection_profile.physical_route_position_targets
             ):
-                if phy_tgt == 0.0:
-                    continue
-                if (
-                    admission_policy.waypoint_count_bins is not None
-                    and admission_policy.waypoint_count_targets is not None
-                ):
-                    for sem_bi, sem_tgt in enumerate(
-                        admission_policy.waypoint_count_targets
-                    ):
-                        if sem_tgt > 0.0:
-                            lo_p, hi_p = (
-                                selection_profile.physical_route_position_bins[
-                                    phy_bi
-                                ]
-                            )
-                            lo_s, hi_s = admission_policy.waypoint_count_bins[
-                                sem_bi
-                            ]
-                            mandatory_bins.append(
-                                (
-                                    phy_bi,
-                                    sem_bi,
-                                    f"({lo_p},{hi_p})×({lo_s},{hi_s})",
-                                )
-                            )
-                else:
+                if phy_tgt > 0.0:
                     lo_p, hi_p = selection_profile.physical_route_position_bins[
                         phy_bi
                     ]
-                    mandatory_bins.append((phy_bi, 0, f"({lo_p},{hi_p})"))
+                    mandatory_bins.append((phy_bi, f"({lo_p},{hi_p})"))
 
             min_support = selection_profile.minimum_bin_support
             insufficient_bins: list[str] = []
-            for phy_bi, sem_bi, label in mandatory_bins:
-                actual = len(global_catalog.get((phy_bi, sem_bi), []))
+            for phy_bi, label in mandatory_bins:
+                # Sum all semantic-bin entries for this physical bin
+                actual = sum(
+                    len(entries)
+                    for (pb, _), entries in global_catalog.items()
+                    if pb == phy_bi
+                )
                 if actual < min_support:
                     insufficient_bins.append(
                         f"  {label}: {actual} candidates "
@@ -1572,13 +1514,12 @@ def build_routebind_task_corpus(
             split_rng.shuffle(selected_entries)
 
             # =============================================================
-            # Phase D: Reconstruct and encode selected candidates
+            # Phase D: Traverse optimal subgraph and encode targets
             # =============================================================
             samples: list[dict[str, np.ndarray]] = []
             query_count = 0
-            _, search_metrics_accepted = 0, 0
 
-            # Pre-allocate kernel workspace for selected-candidate BFS.
+            # Pre-allocate kernel workspace for per-goal BFS.
             n_states = num_slots * n_actual
             _kernel_distance = np.full(
                 n_states, np.iinfo(np.int32).max, dtype=np.int32
@@ -1587,6 +1528,10 @@ def build_routebind_task_corpus(
             _kernel_policy_next = np.full(n_states, -1, dtype=np.int32)
             _kernel_opt_count = np.zeros(n_states, dtype=np.uint8)
             _kernel_deque_buf = np.zeros(2 * n_states, dtype=np.int32)
+
+            # Pre-allocate optimal-subgraph traversal workspace (reused
+            # across queries for the same goal).
+            _traversal_workspace: dict | None = None
 
             for entry in selected_entries:
                 state = per_layout_state[entry.layout_idx]
@@ -1631,54 +1576,75 @@ def build_routebind_task_corpus(
                 if gdt["deque_overflow"]:
                     continue
 
-                result = reconstruct_from_policy(
-                    start_pos=start_pos,
-                    start_obs=start_obs,
-                    goal_node_idx=goal_idx,
-                    n_obs=n_actual,
+                # Derive optimal transition masks from distance table.
+                phys_opt, accept_opt = derive_optimal_transition_masks(
                     distance=gdt["distance"],
-                    policy_kind=gdt["policy_kind"],
-                    policy_next=gdt["policy_next"],
-                    opt_count=gdt["opt_count"],
-                    row_col=state["dense_row_col"],
+                    physical_neighbors=state["physical_neighbors"],
                     node_at_position=state["node_at_position"],
+                    succ_mask=pub_succ_mask,
+                    succ_indices=pub_succ_indices,
+                    n_slots=num_slots,
+                    n_obs=n_actual,
                 )
 
-                if result is None:
+                # Traverse the optimal subgraph — no path reconstruction.
+                try:
+                    sup = traverse_optimal_subgraph(
+                        start_pos=start_pos,
+                        start_obs=start_obs,
+                        distance=gdt["distance"],
+                        physical_optimal_mask=phys_opt,
+                        accept_optimal_mask=accept_opt,
+                        physical_neighbors=state["physical_neighbors"],
+                        node_at_position=state["node_at_position"],
+                        n_slots=num_slots,
+                        n_obs=n_actual,
+                        _workspace=_traversal_workspace,
+                    )
+                except ValueError:
                     continue
 
-                physical_route = result.physical_route
-                waypoints = result.waypoints
+                # Compute waypoint count from waypoint_support
+                waypoint_count = int(sup.waypoint_support.sum())
 
-                # These checks should never fire because the catalog was
-                # pre-filtered, but keep them as defensive guards.
-                if len(physical_route) > max_supported_route_length:
-                    funnel.rejected_route_too_long += 1
-                    continue
-                if len(waypoints) < 2:
+                # Waypoint-count admission filter
+                if (
+                    preset_.admission is not None
+                    and preset_.admission.waypoint_count_bins is not None
+                ):
+                    sem_bi = preset_.admission.semantic_bucket_index(
+                        waypoint_count
+                    )
+                    if sem_bi is None:
+                        funnel.inc_examined(entry.physical_bin)
+                        continue  # out of waypoint bin — skip
+                else:
+                    sem_bi = 0
+
+                if waypoint_count < 2:
                     funnel.rejected_trivial_waypoint += 1
                     continue
-                if result.next_dir < 0 or result.next_dir > 3:
-                    funnel.rejected_invalid_next_dir += 1
-                    continue
 
-                funnel.inc_reconstructed(entry.physical_bin, entry.waypoint_bin)
+                funnel.inc_reconstructed(entry.physical_bin, sem_bi)
 
                 # --- Encode targets ---
                 goal_mask = state["node_at_position"] == goal_idx
-                target_trajectory = encode_trajectory_field(
-                    list(physical_route),
-                    num_slots,
+                target_trajectory = encode_trajectory_support(
+                    sup.trajectory_support,
+                    sup.trajectory_forward_depth,
                     field_decay_spatial,
                 )
-                target_waypoint = encode_waypoint_field(
-                    list(waypoints),
-                    num_slots,
+                target_waypoint = encode_waypoint_support(
+                    sup.waypoint_support,
+                    sup.waypoint_semantic_depth,
                     field_decay_semantic,
                 )
 
-                next_obs = int(result.next_obs)
-                target_next_obs = np.int32(next_obs if next_obs >= 0 else -1)
+                # Multi-label auxiliary masks
+                target_optimal_directions = sup.target_optimal_directions.copy()
+                target_optimal_next_observations = (
+                    sup.target_optimal_next_observations.copy()
+                )
 
                 start_flag = np.zeros(num_slots, dtype=bool)
                 start_flag[start_pos] = True
@@ -1695,13 +1661,34 @@ def build_routebind_task_corpus(
                     "col_offset": state["col_offset"],
                     "target_trajectory": target_trajectory,
                     "target_waypoint": target_waypoint,
-                    "target_next_dir": np.int32(result.next_dir),
-                    "target_next_obs": target_next_obs,
+                    "trajectory_support": sup.trajectory_support,
+                    "trajectory_forward_depth": sup.trajectory_forward_depth,
+                    "waypoint_support": sup.waypoint_support,
+                    "waypoint_semantic_depth": sup.waypoint_semantic_depth,
+                    "target_optimal_directions": target_optimal_directions,
+                    "target_optimal_next_observations": target_optimal_next_observations,
+                    "total_physical_cost": np.int16(sup.total_physical_cost),
                 }
 
+                # Build-time support/algebra validation — catches encoding
+                # defects before writing the corpus.
+                support_issues = validate_support_channels(
+                    sample_data,
+                    S=num_slots,
+                    gamma_space=field_decay_spatial,
+                    gamma_semantic=field_decay_semantic,
+                )
+                support_errors = [
+                    i for i in support_issues if i.severity == "ERROR"
+                ]
+                if support_errors:
+                    funnel.rejected_target_validation += 1
+                    continue
+
+                # Simplified target validation — no single-path assumptions.
                 target_issues = validate_generated_sample(
                     sample_data,
-                    oracle_result=result,
+                    oracle_result=None,
                     n_obs=n_actual,
                     topo_vocab_size=n_actual,
                     S=num_slots,
@@ -1717,7 +1704,7 @@ def build_routebind_task_corpus(
 
                 samples.append(sample_data)
                 search_metrics[split]["accepted"] += 1
-                funnel.inc_accepted(entry.physical_bin, entry.waypoint_bin)
+                funnel.inc_accepted(entry.physical_bin, sem_bi)
                 query_count += 1
 
             if query_count == 0:
@@ -1856,6 +1843,10 @@ def build_routebind_task_corpus(
         stage_params["capability_calibration_digest"] = capability_report[
             "capability_calibration_digest"
         ]
+        stage_params["corpus_schema_version"] = 1
+        stage_params["target_semantics"] = "optimal_subgraph_support"
+        stage_params["target_schema_version"] = 1
+        stage_params["depth_sentinel"] = -1
 
         for s, reasons in rejection_counts.items():
             for reason, count in reasons.items():

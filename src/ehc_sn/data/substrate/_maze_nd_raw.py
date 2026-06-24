@@ -18,9 +18,11 @@ it from the training records.
 
 Canonical raw layout::
 
-    <raw_root>/huggingface/maze_hard_augmented/
+    <raw_root>/
         train.jsonl.gz
         test.jsonl.gz
+
+Default *raw_root* is ``data/external/maze_hard_augmented``.
 """
 
 from __future__ import annotations

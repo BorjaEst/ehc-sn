@@ -179,6 +179,20 @@ def build(  # -----------------------------------------------------------------
             help="Delete the existing version root before building, if present.",
         ),
     ] = False,
+    observation_policy: Annotated[
+        str,
+        typer.Option(
+            "--observation-policy",
+            help="Observation placement policy: dense_uniform, exactly_one, or bounded.",
+        ),
+    ] = "dense_uniform",
+    observation_max_occurrences: Annotated[
+        int,
+        typer.Option(
+            "--observation-max-occurrences",
+            help="Max occurrences per obs ID (for bounded policy).",
+        ),
+    ] = 1,
 ) -> None:
     """Produce a complete dungeongen layout dataset (topology + layouts).
 
@@ -226,6 +240,8 @@ def build(  # -----------------------------------------------------------------
         topology_seed=topology_seed,
         version=version,
         interim_root=interim_root,
+        observation_policy=observation_policy,
+        observation_max_occurrences=observation_max_occurrences,
     )
 
 
@@ -352,12 +368,25 @@ def _materialize_layouts(  # ---------------------------------------------------
     topology_seed: int = _DEFAULT_TOPOLOGY_SEED,
     version: int = _DEFAULT_VERSION,
     interim_root: Path = _DEFAULT_INTERIM_ROOT,
+    observation_policy: str = "dense_uniform",
+    observation_max_occurrences: int = 1,
 ) -> None:
     """Internal stage: materialize layout datasets from interim files."""
     if observation_vocabulary_size is not None:
         s_size = observation_vocabulary_size
     interim_leaf = interim_root / preset / "interim" / f"v{version}"
     layout_leaf = interim_root / preset / f"v{version}"
+
+    obs_placement_cfg = None
+    if observation_policy != "dense_uniform":
+        from ehc_sn.data.layout.observation_placement import (
+            ObservationPlacementConfig,
+        )
+
+        obs_placement_cfg = ObservationPlacementConfig(
+            policy=observation_policy,
+            max_occurrences=observation_max_occurrences,
+        )
 
     build_dungeongen_layouts(
         layout_leaf,
@@ -371,6 +400,7 @@ def _materialize_layouts(  # ---------------------------------------------------
         topology_seed=topology_seed,
         preset=preset,
         n_sensory_instances=n_sensory_instances,
+        observation_placement=obs_placement_cfg,
     )
 
 

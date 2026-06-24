@@ -183,6 +183,20 @@ def build(  # -----------------------------------------------------------------
             help="Delete the existing version root before building, if present.",
         ),
     ] = False,
+    observation_policy: Annotated[
+        str,
+        typer.Option(
+            "--observation-policy",
+            help="Observation placement policy: dense_uniform, exactly_one, or bounded.",
+        ),
+    ] = "dense_uniform",
+    observation_max_occurrences: Annotated[
+        int,
+        typer.Option(
+            "--observation-max-occurrences",
+            help="Max occurrences per obs ID (for bounded policy).",
+        ),
+    ] = 1,
 ) -> None:
     """Produce a complete openfield layout dataset (topology + layouts).
 
@@ -233,6 +247,8 @@ def build(  # -----------------------------------------------------------------
         version=version,
         raw_root=raw_root,
         interim_root=interim_root,
+        observation_policy=observation_policy,
+        observation_max_occurrences=observation_max_occurrences,
     )
 
 
@@ -412,6 +428,8 @@ def _materialize_layouts(  # ---------------------------------------------------
     version: int = _DEFAULT_VERSION,
     raw_root: Path = _DEFAULT_RAW_ROOT,
     interim_root: Path = _DEFAULT_INTERIM_ROOT,
+    observation_policy: str = "dense_uniform",
+    observation_max_occurrences: int = 1,
 ) -> None:
     """Internal stage: expand source specs, assign sensory IDs, write SpatialLayout records."""
     if observation_vocabulary_size is not None:
@@ -484,10 +502,21 @@ def _materialize_layouts(  # ---------------------------------------------------
                 raise typer.Exit(code=1)
             for inst_idx in range(n_sensory_instances):
                 sensory_seed = topology_seed + spec["seed_offset"] + inst_idx
+                obs_placement_cfg = None
+                if observation_policy != "dense_uniform":
+                    from ehc_sn.data.layout.observation_placement import (
+                        ObservationPlacementConfig,
+                    )
+
+                    obs_placement_cfg = ObservationPlacementConfig(
+                        policy=observation_policy,
+                        max_occurrences=observation_max_occurrences,
+                    )
                 enriched = enrich_layout_with_sensory(
                     tl,
                     observation_vocabulary_size=s_size,
                     observation_seed=sensory_seed,
+                    observation_placement=obs_placement_cfg,
                 )
                 # split is preserved by enrich_layout_with_sensory.
                 layouts.append(enriched)

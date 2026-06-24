@@ -1,12 +1,12 @@
 """MazeHard task corpus materialization.
 
 Owns MazeHard-specific task channel schema, validation, and the builder that
-produces the MazeHard task corpus over a parent maze-nd shared substrate.
+produces the MazeHard task corpus over a maze-nd shared substrate.
 
 All channels (topology, mask_valid, start, goals, solution) are read from
-the parent substrate, which is enriched with source problem annotations from
-schema version 2 onward.  The task builder does not depend on interim or raw
-records.
+the maze-nd shared substrate, which preserves source problem annotations from
+artifact_schema_version 1 onward.  The task builder does not depend on interim
+or raw records.
 
 Path written: ``data/processed/mazehard/<corpus>/v<version>/``
 """
@@ -46,9 +46,9 @@ MAZEHARD_TASK_CHANNELS: Final[list[str]] = [
 """All channels in the MazeHard task corpus.
 
 All channels are read from the parent maze-nd shared substrate, which
-preserves source problem annotations from :attr:`shared_schema_version`
-2 onward.  The task builder does not depend on interim or raw records.
-"""
+preserves source problem annotations from
+:attr:`artifact_schema_version` 1 onward.  The task builder does not
+depend on interim or raw records."""
 
 _MAZEHARD_REQUIRED_PARENT_CHANNELS: tuple[str, ...] = (
     "topology",
@@ -72,7 +72,7 @@ _SPLITS: tuple[str, ...] = ("train", "val", "test")
 
 
 # =============================================================================
-def validate_mazehard_task_sample(data: dict[str, np.ndarray]) -> None:
+def validate_mazehard_sample(data: dict[str, np.ndarray]) -> None:
     """Validate a MazeHard task corpus sample against the task channel schema.
 
     Raises:
@@ -106,7 +106,11 @@ def validate_mazehard_task_sample(data: dict[str, np.ndarray]) -> None:
         )
 
 
-def validate_mazehard_task_root(root: Path) -> dict:
+# Backward-compat alias
+validate_mazehard_task_sample = validate_mazehard_sample
+
+
+def validate_mazehard_root(root: Path) -> dict:
     """Validate a MazeHard task corpus root against task-owned semantics.
 
     Args:
@@ -145,9 +149,13 @@ def validate_mazehard_task_root(root: Path) -> dict:
 
         for i in range(n):
             sample = {ch: arrays[ch][i] for ch in MAZEHARD_TASK_CHANNELS}
-            validate_mazehard_task_sample(sample)
+            validate_mazehard_sample(sample)
 
     return manifest
+
+
+# Backward-compat alias
+validate_mazehard_task_root = validate_mazehard_root
 
 
 def _sample_entry_pairs(
@@ -167,9 +175,9 @@ def _sample_entry_pairs(
 def build_mazehard_task_corpus(
     version_root: Path,
     *,
-    parent_substrate: Path,
+    substrate_root: Path,
     corpus: str = "default",
-    n_train: int = 200,
+    n_train: int = 1000,
     n_val: int = 40,
     n_test: int = 40,
     seed: int = 42,
@@ -177,7 +185,7 @@ def build_mazehard_task_corpus(
     """Build the MazeHard task corpus at *version_root*.
 
     All channels (topology, mask_valid, start, goals, solution) are read
-    from the parent maze-nd shared substrate.  The task builder does not
+    from the maze-nd shared substrate.  The task builder does not
     depend on interim or raw records.
 
     The version integer is derived from the ``v<N>`` leaf of *version_root*;
@@ -186,7 +194,7 @@ def build_mazehard_task_corpus(
     Args:
         version_root: Destination versioned root
             (e.g. ``data/processed/mazehard/default/v1``).  Must not exist.
-        parent_substrate: Path to the parent maze-nd shared substrate version
+        substrate_root: Path to the maze-nd shared substrate version
             root.  Must contain a ``manifest.json`` with all required
             channels (topology, mask_valid, start, goals, solution).
         corpus: Corpus label (e.g. ``"default"``).
@@ -197,18 +205,29 @@ def build_mazehard_task_corpus(
 
     Raises:
         FileExistsError: When *version_root* already exists (immutable root).
-        FileNotFoundError: When *parent_substrate* has no manifest.
+        FileNotFoundError: When *substrate_root* has no manifest.
         ValueError: When the parent is not a ``maze-nd`` shared_substrate, or
             the parent lacks required source annotation channels (start,
             goals, solution), or requested split counts exceed availability.
     """
     version = extract_version(version_root)
-    parent_manifest = load_substrate_manifest(parent_substrate)
+    parent_manifest = load_substrate_manifest(substrate_root)
 
     if parent_manifest.get("family") != MAZE_ND_SHARED_FAMILY:
         raise ValueError(
             f"MazeHard task corpus requires a {MAZE_ND_SHARED_FAMILY!r} shared "
             f"substrate, got family={parent_manifest.get('family')!r}."
+        )
+
+    # Validate parent substrate has the expected content-schema version.
+    parent_artifact_version = parent_manifest.get("artifact_schema_version")
+    if parent_artifact_version != 1:
+        raise ValueError(
+            f"Parent shared_substrate has unsupported "
+            f"artifact_schema_version={parent_artifact_version}. "
+            f"Expected 1.\n"
+            f"Rebuild the maze-nd substrate:\n"
+            f"    python scripts/data-gen/build-maze-nd.py build"
         )
 
     # Validate parent substrate has all required channels.
@@ -222,8 +241,8 @@ def build_mazehard_task_corpus(
         raise ValueError(
             f"Parent substrate is maze-nd but lacks required source annotation "
             f"channels: {', '.join(missing)}. "
-            f"Rebuild the maze-nd substrate with shared_schema_version >= 2.\n"
-            f"    python scripts/data-gen/build-maze-nd.py build-all"
+            f"Rebuild the maze-nd substrate with the current builder:\n"
+            f"    python scripts/data-gen/build-maze-nd.py build"
         )
 
     split_counts = {"train": n_train, "val": n_val, "test": n_test}
@@ -266,7 +285,7 @@ def build_mazehard_task_corpus(
             n = split_counts[split]
             entry_sample_pairs = list(
                 iter_substrate_entries_and_samples(
-                    parent_substrate,
+                    substrate_root,
                     split,
                     list(_MAZEHARD_REQUIRED_PARENT_CHANNELS),
                 )

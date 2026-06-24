@@ -30,6 +30,10 @@ from ehc_sn.data.layout import (
     validate_spatial_layout,
     write_layout_dataset,
 )
+from ehc_sn.data.layout.observation_placement import (
+    ObservationPlacementConfig,
+    assign_observations,
+)
 from ehc_sn.data.lifecycle import (
     extract_version,
     staging_root,
@@ -566,6 +570,7 @@ def build_dungeongen_layouts(
     topology_seed: int = 42,
     n_sensory_instances: int = 1,
     preset: str = "default",
+    observation_placement: ObservationPlacementConfig | None = None,
 ) -> None:
     """Build a dungeongen layout dataset at *version_root*.
 
@@ -589,6 +594,8 @@ def build_dungeongen_layouts(
         topology_seed: Base RNG seed for topology and sensory assignment.
         n_sensory_instances: Number of sensory realizations per topology sample.
             Must be >= 1.
+        observation_placement: Placement policy for observation identities.
+            When ``None``, defaults to ``dense_uniform`` (legacy behavior).
 
     Raises:
         ValueError: When explicit height/width is smaller than the inferred max, or
@@ -702,8 +709,11 @@ def build_dungeongen_layouts(
             for inst_idx in range(n_sensory_instances):
                 obs_seed = _sample_seed(topology_seed, split, idx) + inst_idx
                 obs_rng = np.random.default_rng(np.uint64(obs_seed))
-                obs_ids = obs_rng.integers(0, s_size, size=n_states).astype(
-                    np.int32
+                effective_placement = (
+                    observation_placement or ObservationPlacementConfig()
+                )
+                obs_ids, _ = assign_observations(
+                    n_states, s_size, effective_placement, obs_rng
                 )
 
                 layout_id = (

@@ -25,6 +25,8 @@ from .builder import (
     MAZEHARD_TASK_CHANNELS,
     TASK_FAMILY,
     build_mazehard_task_corpus,
+    validate_mazehard_root,
+    validate_mazehard_sample,
     validate_mazehard_task_root,
     validate_mazehard_task_sample,
 )
@@ -34,8 +36,11 @@ from .contracts import (
     MazeHardTaskInput,
     MazeHardTaskOutput,
 )
+from .corpus import load_sample, load_split_arrays, load_split_manifest
+from .diagnostics import compute_corpus_statistics
 from .evaluation import MazeHardScoreReport, MazeHardStepScore
 from .evaluators.step import MazeHardStepEvaluator
+from .inspection import MazeHardSampleInspection, prepare_sample_inspection
 from .reward import MazeHardRewardConfig, MazeHardRewardProjector
 from .traces import (
     MazeHardEvaluationSourceContext,
@@ -43,24 +48,40 @@ from .traces import (
     apply_mazehard_trace_supplements,
     build_mazehard_trace_supplements,
 )
+from .validation import (
+    MazeHardValidationIssue,
+    validate_all_samples,
+    validate_stored_sample,
+)
 
 __all__ = [
     "MAZE_HARD_IGNORE_LABEL_ID",
     "MAZEHARD_TASK_CHANNELS",
-    "MazeHardStepEvaluator",
     "MazeHardEvaluationSourceContext",
     "MazeHardRewardConfig",
     "MazeHardRewardProjector",
+    "MazeHardSampleInspection",
     "MazeHardScoreReport",
+    "MazeHardStepEvaluator",
     "MazeHardStepScore",
     "MazeHardTargets",
     "MazeHardTaskInput",
     "MazeHardTaskOutput",
     "MazeHardTraceSupplements",
+    "MazeHardValidationIssue",
     "TASK_FAMILY",
     "apply_mazehard_trace_supplements",
     "build_mazehard_task_corpus",
     "build_mazehard_trace_supplements",
+    "compute_corpus_statistics",
+    "load_sample",
+    "load_split_arrays",
+    "load_split_manifest",
+    "prepare_sample_inspection",
+    "validate_all_samples",
+    "validate_mazehard_root",
+    "validate_mazehard_sample",
     "validate_mazehard_task_root",
     "validate_mazehard_task_sample",
+    "validate_stored_sample",
 ]

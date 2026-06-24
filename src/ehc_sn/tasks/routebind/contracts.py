@@ -24,6 +24,20 @@ from torch import Tensor
 # loss (e.g. next_observation_logits when the task uses fewer than N_obs).
 ROUTEBIND_IGNORE_LABEL_ID: Final[int] = -100
 
+# Canonical target-semantics identifier (Routebind v1 contract)
+TARGET_SEMANTICS: Final[str] = "optimal_subgraph_support"
+"""Optimal-product-state-subgraph contract:
+trajectory/waypoint support + minimum forward/semantic depth channels,
+multi-label first-action masks, no single-path uniqueness requirement."""
+
+TARGET_SCHEMA_VERSION: Final[int] = 1
+"""Current corpus-schema version for ``target_semantics: optimal_subgraph_support``."""
+
+# Depth sentinel for unsupported positions
+ROUTEBIND_DEPTH_SENTINEL: Final[int] = -1
+"""Value of trajectory_forward_depth or waypoint_semantic_depth when
+support is False.  Depths >= 0 indicate valid optimal depth."""
+
 # Cell type constants
 CELL_WALL: Final[int] = 0
 """Cell is a wall (not traversable)."""
@@ -97,11 +111,20 @@ class RoutebindCorpusSchema:
     row_offset: str = "row_offset"
     col_offset: str = "col_offset"
 
-    # Target channels
+    # Decayed target fields (derived from support × γ^depth)
     target_trajectory: str = "target_trajectory"
     target_waypoint: str = "target_waypoint"
-    target_next_dir: str = "target_next_dir"
-    target_next_obs: str = "target_next_obs"
+
+    # Optimal-support channels (canonical oracle projection)
+    trajectory_support: str = "trajectory_support"
+    trajectory_forward_depth: str = "trajectory_forward_depth"
+    waypoint_support: str = "waypoint_support"
+    waypoint_semantic_depth: str = "waypoint_semantic_depth"
+    target_optimal_directions: str = "target_optimal_directions"
+    target_optimal_next_observations: str = "target_optimal_next_observations"
+
+    # Scalar metadata
+    total_physical_cost: str = "total_physical_cost"
 
     @property
     def model_input_channels(self) -> tuple[str, ...]:
@@ -124,11 +147,29 @@ class RoutebindCorpusSchema:
 
     @property
     def target_channels(self) -> tuple[str, ...]:
+        """All target and support channels."""
         return (
             self.target_trajectory,
             self.target_waypoint,
-            self.target_next_dir,
-            self.target_next_obs,
+            self.trajectory_support,
+            self.trajectory_forward_depth,
+            self.waypoint_support,
+            self.waypoint_semantic_depth,
+            self.target_optimal_directions,
+            self.target_optimal_next_observations,
+            self.total_physical_cost,
+        )
+
+    @property
+    def support_channels(self) -> tuple[str, ...]:
+        """Optimal-support channels."""
+        return (
+            self.trajectory_support,
+            self.trajectory_forward_depth,
+            self.waypoint_support,
+            self.waypoint_semantic_depth,
+            self.target_optimal_directions,
+            self.target_optimal_next_observations,
         )
 
     @property
@@ -137,6 +178,22 @@ class RoutebindCorpusSchema:
             self.model_input_channels
             + self.metadata_channels
             + self.target_channels
+            + self.support_channels
+        )
+
+    @property
+    def training_target_channels(self) -> tuple[str, ...]:
+        """Channels typically used as training supervision."""
+        return (
+            self.target_trajectory,
+            self.target_waypoint,
+            self.trajectory_support,
+            self.trajectory_forward_depth,
+            self.waypoint_support,
+            self.waypoint_semantic_depth,
+            self.target_optimal_directions,
+            self.target_optimal_next_observations,
+            self.total_physical_cost,
         )
 
     @property
@@ -153,8 +210,13 @@ class RoutebindCorpusSchema:
             self.col_offset: np.dtype(np.int32),
             self.target_trajectory: np.dtype(np.float32),
             self.target_waypoint: np.dtype(np.float32),
-            self.target_next_dir: np.dtype(np.int32),
-            self.target_next_obs: np.dtype(np.int32),
+            self.trajectory_support: np.dtype(bool),
+            self.trajectory_forward_depth: np.dtype(np.int16),
+            self.waypoint_support: np.dtype(bool),
+            self.waypoint_semantic_depth: np.dtype(np.int16),
+            self.target_optimal_directions: np.dtype(bool),
+            self.target_optimal_next_observations: np.dtype(bool),
+            self.total_physical_cost: np.dtype(np.int16),
         }
 
 

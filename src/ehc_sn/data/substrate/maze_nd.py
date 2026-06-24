@@ -101,39 +101,39 @@ def ensure_raw(
     ensure_raw_corpus(raw_root, repo_id=repo_id)
 
 
-def prepare_interim(raw_root: Path, interim_root: Path) -> None:
+def prepare_interim(raw_root: Path, staging_root: Path) -> None:
     """Validate and write raw maze-nd records to the normalized staging leaf.
 
     Reads both raw splits (``"train"`` and ``"test"``), validates they are
     non-empty, then writes one uncompressed JSONL file per split under
-    *interim_root*.
+    *staging_root*.
 
     Args:
         raw_root: Directory containing the raw HuggingFace corpus files.
-        interim_root: Destination normalized staging leaf (e.g. ``data/raw/maze-nd``).
+        staging_root: Destination normalized staging leaf (e.g. ``data/raw/maze-nd``).
 
     Raises:
         RuntimeError: When a raw split is empty.
     """
-    interim_root.mkdir(parents=True, exist_ok=True)
+    staging_root.mkdir(parents=True, exist_ok=True)
     for split in ("train", "test"):
         records = list(iter_raw_records(raw_root, split))
         if not records:
             raise RuntimeError(
                 f"No raw records for split '{split}' in {raw_root}."
             )
-        out = interim_root / f"{split}.jsonl"
+        out = staging_root / f"{split}.jsonl"
         with out.open("w") as fh:
             for r in records:
                 fh.write(json.dumps(r) + "\n")
 
 
-def _iter_interim_records(interim_root: Path, split: str):
-    """Yield records from the maze-nd interim leaf."""
-    path = interim_root / f"{split}.jsonl"
+def _iter_staging_records(staging_root: Path, split: str):
+    """Yield records from the maze-nd staging leaf."""
+    path = staging_root / f"{split}.jsonl"
     if not path.exists():
         raise FileNotFoundError(
-            f"Interim file not found: {path}.  Run normalize first."
+            f"Staging file not found: {path}.  Run normalize first."
         )
     with path.open() as fh:
         for line in fh:
@@ -156,15 +156,15 @@ def _sample_records(
 def build_shared_substrate(
     version_root: Path,
     *,
-    interim_root: Path,
-    n_train: int = 200,
+    normalized_root: Path,
+    n_train: int = 1000,
     n_val: int = 40,
     n_test: int = 40,
     seed: int = 42,
 ) -> None:
     """Build the maze-nd shared substrate at *version_root*.
 
-    Reads normalized records from *interim_root* (produced by
+    Reads normalized records from *normalized_root* (produced by
     :func:`prepare_interim`) and writes a versioned, immutable dataset root
     containing structural channels (``topology``, ``mask_valid``) and source
     problem annotations (``start``, ``goals``, ``solution``).
@@ -180,7 +180,7 @@ def build_shared_substrate(
     Args:
         version_root: Destination versioned root
             (e.g. ``data/interim/maze-nd/v1``).  Must not already exist.
-        interim_root: Normalized staging leaf (e.g. ``data/raw/maze-nd``).
+        normalized_root: Normalized staging leaf (e.g. ``data/raw/maze-nd``).
         n_train: Number of training samples.
         n_val: Number of validation samples.
         n_test: Number of test samples.
@@ -189,21 +189,21 @@ def build_shared_substrate(
     Raises:
         FileExistsError: When *version_root* already exists (immutable root).
         ValueError: When the version leaf name is not ``v<integer>``.
-        RuntimeError: When the interim does not have enough records.
+        RuntimeError: When the staging does not have enough records.
     """
     version = extract_version(version_root)
-    train_population = list(_iter_interim_records(interim_root, "train"))
-    test_population = list(_iter_interim_records(interim_root, "test"))
+    train_population = list(_iter_staging_records(normalized_root, "train"))
+    test_population = list(_iter_staging_records(normalized_root, "test"))
 
     if len(train_population) < n_train:
         raise RuntimeError(
-            f"Interim maze-nd train split has only {len(train_population)} records, "
+            f"Staging train split has only {len(train_population)} records, "
             f"need {n_train} (n_train={n_train})."
         )
     raw_test_needed = n_val + n_test
     if len(test_population) < raw_test_needed:
         raise RuntimeError(
-            f"Interim maze-nd test split has only {len(test_population)} records, "
+            f"Staging test split has only {len(test_population)} records, "
             f"need {raw_test_needed} (n_val={n_val} + n_test={n_test})."
         )
 
@@ -282,7 +282,7 @@ def build_shared_substrate(
             builder="ehc_sn.data.substrate.maze_nd.build_shared_substrate",
             seed=seed,
             stage_params=stage_params,
-            shared_schema_version=2,
+            artifact_schema_version=1,
         )
 
     n_total = n_train + n_val + n_test
@@ -307,6 +307,11 @@ def validate_maze_nd_shared_root(root: Path) -> dict:
     from ehc_sn.data.lifecycle import validate_version_root
 
     manifest = validate_version_root(root)
+    if manifest.get("dataset_class") != "shared_substrate":
+        raise ValueError(
+            f"Expected dataset_class 'shared_substrate', "
+            f"got {manifest.get('dataset_class')!r}."
+        )
     if manifest.get("family") != SHARED_FAMILY:
         raise ValueError(
             f"Root family is {manifest.get('family')!r}, expected {SHARED_FAMILY!r}."

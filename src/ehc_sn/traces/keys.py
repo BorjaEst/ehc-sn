@@ -36,6 +36,7 @@ MAZEHARD_TRACE_KEY_HALTED = "act/halted"
 MAZEHARD_TRACE_KEY_PRED_OVERLAY = "pred/solution_overlay"
 MAZEHARD_META_KEY_INPUT_IDS = "input_ids"
 MAZEHARD_META_KEY_GT_OVERLAY = "target/solution_overlay"
+MAZEHARD_META_KEY_CASE_ID = "mazehard/case_id"
 
 # ── PFC / HRM hidden-state diagnostics ───────────────────────────────────────
 PFC_TRACE_KEY_Z_H = "pfc/z_H"

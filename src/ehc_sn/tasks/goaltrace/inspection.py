@@ -120,23 +120,19 @@ def prepare_sample_inspection(
     optimal_path = on_path[order].tolist() if len(on_path) > 0 else []
     path_length = max(len(optimal_path) - 1, 0)
 
-    # Weight stats for edges on path
-    edge_weights = []
-    for node in optimal_path:
-        if int(node) != current_idx or int(node) == goal_idx:
-            pass
-    actual_edge_weights = []
-    for step in range(path_length):
-        u = optimal_path[step]
-        v = optimal_path[step + 1]
-        actual_edge_weights.append(float(weight[u, v]))
-
+    # Weight stats for nodes on optimal path.
+    # Note: weight is per-node (relational weight from current to candidate),
+    # not per-edge. We report the weights of nodes on the optimal path,
+    # excluding the current node (weight[current] is always 1.0).
+    path_node_weights = [
+        float(weight[n]) for n in optimal_path if n != current_idx
+    ]
     ws = {}
-    if actual_edge_weights:
+    if path_node_weights:
         ws = {
-            "min": float(np.min(actual_edge_weights)),
-            "mean": float(np.mean(actual_edge_weights)),
-            "max": float(np.max(actual_edge_weights)),
+            "min": float(np.min(path_node_weights)),
+            "mean": float(np.mean(path_node_weights)),
+            "max": float(np.max(path_node_weights)),
         }
 
     # Decay consistency check

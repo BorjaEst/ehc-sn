@@ -87,25 +87,60 @@ ROUTEBIND_METRIC_SPECS: list[MetricSpec] = [
         description="Balanced MSE over the waypoint field (waypoint vs "
         "non-waypoint separate normalization).",
     ),
-    # Auxiliary metrics
+    # Auxiliary metrics (multi-label)
     MetricSpec(
-        name="next_direction_accuracy",
-        label="Next direction accuracy",
+        name="next_direction_precision",
+        label="Next direction precision",
         higher_is_better=True,
         unit="proportion",
         scope="task",
         benchmark_eligible=False,
-        description="Whether the predicted first movement direction "
-        "matches oracle.",
+        description="Multi-label precision over optimal direction mask.",
     ),
     MetricSpec(
-        name="next_observation_accuracy",
-        label="Next observation accuracy",
+        name="next_direction_recall",
+        label="Next direction recall",
         higher_is_better=True,
         unit="proportion",
         scope="task",
         benchmark_eligible=False,
-        description="Whether the predicted next observation matches oracle.",
+        description="Multi-label recall over optimal direction mask.",
+    ),
+    MetricSpec(
+        name="next_direction_f1",
+        label="Next direction F1",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=False,
+        description="Multi-label F1 over optimal direction mask.",
+    ),
+    MetricSpec(
+        name="next_observation_precision",
+        label="Next observation precision",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=False,
+        description="Multi-label precision over optimal observation mask.",
+    ),
+    MetricSpec(
+        name="next_observation_recall",
+        label="Next observation recall",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=False,
+        description="Multi-label recall over optimal observation mask.",
+    ),
+    MetricSpec(
+        name="next_observation_f1",
+        label="Next observation F1",
+        higher_is_better=True,
+        unit="proportion",
+        scope="task",
+        benchmark_eligible=False,
+        description="Multi-label F1 over optimal observation mask.",
     ),
 ]
 
@@ -132,8 +167,14 @@ class RoutebindStepScore:
         semantic_spatial_path_cost_ratio: Mean path cost ratio.
         trajectory_field_mse: Raw full-grid trajectory MSE.
         balanced_waypoint_field_error: Balanced MSE over waypoint field.
-        next_direction_accuracy: Next-direction prediction accuracy.
-        next_observation_accuracy: Next-observation prediction accuracy.
+        next_direction_accuracy: Next-direction prediction accuracy (single-label).
+        next_observation_accuracy: Next-observation prediction accuracy (single-label).
+        next_direction_precision: Multi-label direction precision.
+        next_direction_recall: Multi-label direction recall.
+        next_direction_f1: Multi-label direction F1.
+        next_observation_precision: Multi-label observation precision.
+        next_observation_recall: Multi-label observation recall.
+        next_observation_f1: Multi-label observation F1.
         n_samples: Number of samples in this batch.
     """
 
@@ -142,8 +183,13 @@ class RoutebindStepScore:
     semantic_spatial_path_cost_ratio: float = 0.0
     trajectory_field_mse: float = 0.0
     balanced_waypoint_field_error: float = 0.0
-    next_direction_accuracy: float = 0.0
-    next_observation_accuracy: float = 0.0
+    # Multi-label auxiliary metrics
+    next_direction_precision: float = 0.0
+    next_direction_recall: float = 0.0
+    next_direction_f1: float = 0.0
+    next_observation_precision: float = 0.0
+    next_observation_recall: float = 0.0
+    next_observation_f1: float = 0.0
     n_samples: int = 0
 
     def __str__(self) -> str:
@@ -153,8 +199,12 @@ class RoutebindStepScore:
             f"path_cost_ratio={self.semantic_spatial_path_cost_ratio:.4f}",
             f"traj_field_mse={self.trajectory_field_mse:.6f}",
             f"balanced_wp_field_err={self.balanced_waypoint_field_error:.6f}",
-            f"next_dir_acc={self.next_direction_accuracy:.4f}",
-            f"next_obs_acc={self.next_observation_accuracy:.4f}",
+            f"next_dir_prec={self.next_direction_precision:.4f}",
+            f"next_dir_rec={self.next_direction_recall:.4f}",
+            f"next_dir_f1={self.next_direction_f1:.4f}",
+            f"next_obs_prec={self.next_observation_precision:.4f}",
+            f"next_obs_rec={self.next_observation_recall:.4f}",
+            f"next_obs_f1={self.next_observation_f1:.4f}",
             f"samples={self.n_samples}",
         ]
         return "RoutebindStepScore(" + ", ".join(parts) + ")"
@@ -184,10 +234,18 @@ class RoutebindStepScore:
             balanced_waypoint_field_error=self.balanced_waypoint_field_error
             * w_self
             + other.balanced_waypoint_field_error * w_other,
-            next_direction_accuracy=self.next_direction_accuracy * w_self
-            + other.next_direction_accuracy * w_other,
-            next_observation_accuracy=self.next_observation_accuracy * w_self
-            + other.next_observation_accuracy * w_other,
+            next_direction_precision=self.next_direction_precision * w_self
+            + other.next_direction_precision * w_other,
+            next_direction_recall=self.next_direction_recall * w_self
+            + other.next_direction_recall * w_other,
+            next_direction_f1=self.next_direction_f1 * w_self
+            + other.next_direction_f1 * w_other,
+            next_observation_precision=self.next_observation_precision * w_self
+            + other.next_observation_precision * w_other,
+            next_observation_recall=self.next_observation_recall * w_self
+            + other.next_observation_recall * w_other,
+            next_observation_f1=self.next_observation_f1 * w_self
+            + other.next_observation_f1 * w_other,
             n_samples=total,
         )
 

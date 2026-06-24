@@ -83,12 +83,15 @@ from ehc_sn.reporting.goaltrace import (
     serialize_validation_result,
     write_validation_bundle,
 )
-from ehc_sn.tasks.goaltrace.builder import (
+from ehc_sn.tasks.goaltrace import (
     TASK_FAMILY,
     build_goaltrace_task_corpus,
 )
 from ehc_sn.tasks.goaltrace.corpus import load_sample, load_split_arrays
-from ehc_sn.tasks.goaltrace.diagnostics import compute_corpus_statistics
+from ehc_sn.tasks.goaltrace.diagnostics import (
+    compute_corpus_statistics,
+    select_samples,
+)
 from ehc_sn.tasks.goaltrace.inspection import prepare_sample_inspection
 from ehc_sn.tasks.goaltrace.validation import validate_all_samples
 from ehc_sn.traces.keys import (
@@ -442,6 +445,22 @@ def inspect(
             show_default=False,
         ),
     ] = 0,
+    selection: Annotated[
+        str,
+        typer.Option(
+            "--selection",
+            help="Sample selection policy: random, stratified, "
+            "longest_path, shortest_path.",
+        ),
+    ] = "random",
+    figure_seed: Annotated[
+        int | None,
+        typer.Option("--figure-seed", help="RNG seed for figure selection."),
+    ] = None,
+    json_out: Annotated[
+        Path | None,
+        typer.Option("--json-out", help="Write inspection JSON to path."),
+    ] = None,
     output_dir: Annotated[
         Path,
         typer.Option(
@@ -547,17 +566,22 @@ def inspect(
 
     # ── Sample gallery ────────────────────────────────────────────────────
     if gallery > 0:
+        selected = select_samples(
+            root, all_splits, policy=selection, n=gallery, seed=figure_seed
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
-        for g_idx in range(gallery):
+        for s, idx in selected:
+            sample = load_sample(root, s, idx)
             fpath = _render_overview_figure(
-                None,
-                output_dir,
-                split,
-                g_idx,
-                manifest=manifest,
-                root=root,
+                sample, output_dir, s, idx, manifest=manifest
             )
             typer.echo(f"  Figure: {fpath}")
+
+    if json_out is not None:
+        stats = compute_corpus_statistics(root, manifest, all_splits)
+        import json as _json
+
+        _json.dump(stats, json_out.open("w"), indent=2, default=str)
 
     if show:
         try:

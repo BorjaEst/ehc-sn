@@ -70,7 +70,7 @@ def write_manifest(
     builder: str,
     seed: int,
     normalization_version: int | None = 1,
-    shared_schema_version: int | None = 1,
+    artifact_schema_version: int | None = None,
     stage_params: dict[str, Any] | None = None,
     source_revision: str | None = None,
     # task-corpus-only fields
@@ -106,7 +106,8 @@ def write_manifest(
         builder: Qualified builder function name.
         seed: Deterministic base seed.
         normalization_version: Normalization scheme version (default ``1``).
-        shared_schema_version: Shared-schema version (default ``1``).
+        artifact_schema_version: Artifact content-schema version.  Only
+            meaningful for ``dataset_class="shared_substrate"`` (default ``None``).
         stage_params: Deterministic build parameter bundle.  Used to compute
             ``input_fingerprint``.  Defaults to an empty dict.
         source_revision: Upstream source revision (e.g. dataset commit hash),
@@ -157,8 +158,8 @@ def write_manifest(
         manifest["extent"] = list(extent)
     if normalization_version is not None:
         manifest["normalization_version"] = normalization_version
-    if shared_schema_version is not None:
-        manifest["shared_schema_version"] = shared_schema_version
+    if artifact_schema_version is not None:
+        manifest["artifact_schema_version"] = artifact_schema_version
     if source_revision is not None:
         manifest["source_revision"] = source_revision
     if task is not None:

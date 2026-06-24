@@ -41,6 +41,10 @@ from ehc_sn.data.layout import (
     SpatialLayout,
     validate_spatial_layout,
 )
+from ehc_sn.data.layout.observation_placement import (
+    ObservationPlacementConfig,
+    assign_observations,
+)
 
 _SQUARE_ACTION_DELTAS: Final[tuple[tuple[int, int], ...]] = (
     (0, 0),  # STAY
@@ -142,25 +146,29 @@ def enrich_layout_with_sensory(
     *,
     observation_vocabulary_size: int,
     observation_seed: int,
+    observation_placement: ObservationPlacementConfig | None = None,
 ) -> SpatialLayout:
-    """Return a new layout with random observation IDs assigned.
+    """Return a new layout with observation IDs assigned.
 
     Takes a topology-only layout (``observation_id = -1`` sentinel) and
-    returns a deep-ish copy with randomised ``observation_id``, updated
+    returns a deep-ish copy with observation IDs, updated
     ``observation_seed``, ``observation_vocabulary_size``, and ``layout_id``.
 
     Args:
         layout: Topology-only layout to enrich.
         observation_vocabulary_size: Number of distinct observation ids.
         observation_seed: Seed for the observation_id RNG.
+        observation_placement: Placement policy.  When ``None``, defaults
+            to ``dense_uniform`` (legacy behavior).
 
     Returns:
         New :class:`SpatialLayout` with sensory assignment.
     """
     N = layout["graph_state_count"]
     rng = np.random.default_rng(np.uint64(observation_seed))
-    obs_ids = rng.integers(0, observation_vocabulary_size, size=N).astype(
-        np.int32
+    effective_placement = observation_placement or ObservationPlacementConfig()
+    obs_ids, _ = assign_observations(
+        N, observation_vocabulary_size, effective_placement, rng
     )
 
     new_id = layout["layout_id"].replace(
@@ -191,6 +199,7 @@ def _generate_square_layouts(
     n_sensory_instances: int = 1,
     topology_seed: int = 42,
     sensory_assign: bool = True,
+    observation_placement: ObservationPlacementConfig | None = None,
 ) -> list[SpatialLayout]:
     """Generate square openfield layouts (height == width)."""
     return _generate_rectangle_layouts(
@@ -200,6 +209,7 @@ def _generate_square_layouts(
         n_sensory_instances=n_sensory_instances,
         topology_seed=topology_seed,
         sensory_assign=sensory_assign,
+        observation_placement=observation_placement,
     )
 
 
@@ -211,6 +221,7 @@ def _generate_rectangle_layouts(
     n_sensory_instances: int = 1,
     topology_seed: int = 42,
     sensory_assign: bool = True,
+    observation_placement: ObservationPlacementConfig | None = None,
 ) -> list[SpatialLayout]:
     """Generate rectangle (or square) openfield layouts.
 
@@ -271,8 +282,11 @@ def _generate_rectangle_layouts(
                     topology_seed + env_idx * n_sensory_instances + inst_idx
                 )
                 obs_rng = np.random.default_rng(np.uint64(obs_seed))
-                obs_ids = obs_rng.integers(0, s_size, size=n_states).astype(
-                    np.int32
+                effective_placement = (
+                    observation_placement or ObservationPlacementConfig()
+                )
+                obs_ids, _ = assign_observations(
+                    n_states, s_size, effective_placement, obs_rng
                 )
             else:
                 obs_seed = -1
@@ -349,6 +363,7 @@ def generate_openfield_layouts(
     n_sensory_instances: int = 1,
     topology_seed: int = 42,
     sensory_assign: bool = True,
+    observation_placement: ObservationPlacementConfig | None = None,
 ) -> list[SpatialLayout]:
     """Unified entry point for all openfield topology types.
 
@@ -364,6 +379,8 @@ def generate_openfield_layouts(
         topology_seed: Base seed for deterministic topology generation.
         sensory_assign: When ``False``, produce topology-only records with
             ``observation_id = -1`` sentinel and ``sensory_seed = -1``.
+        observation_placement: Placement policy for observation identities.
+            When ``None``, defaults to ``dense_uniform`` (legacy behavior).
 
     Returns:
         List of :class:`SpatialLayout` records.
@@ -378,6 +395,8 @@ def generate_openfield_layouts(
         n_instances = 1
         effective_s_size = 0
 
+    effective_placement = observation_placement or ObservationPlacementConfig()
+
     if topology_type == "rectangle":
         if heights is None:
             heights = list(widths)
@@ -388,6 +407,7 @@ def generate_openfield_layouts(
             n_sensory_instances=n_instances,
             topology_seed=topology_seed,
             sensory_assign=sensory_assign,
+            observation_placement=effective_placement,
         )
     # square
     return _generate_square_layouts(
@@ -396,6 +416,7 @@ def generate_openfield_layouts(
         n_sensory_instances=n_instances,
         topology_seed=topology_seed,
         sensory_assign=sensory_assign,
+        observation_placement=effective_placement,
     )
 
 

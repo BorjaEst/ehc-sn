@@ -331,7 +331,7 @@ def build_seqmaze_task_corpus(
     *,
     layout_root: Path,
     corpus: str = "default",
-    n_max: int = 45,
+    n_max: int = 32,
     t_max: int = 32,
     max_out_degree: int = 4,
     n_train: int = 4000,

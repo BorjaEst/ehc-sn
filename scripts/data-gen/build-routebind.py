@@ -39,7 +39,7 @@ from ehc_sn.reporting.routebind import (
     serialize_validation_result,
     write_validation_bundle,
 )
-from ehc_sn.tasks.routebind.builder import (
+from ehc_sn.tasks.routebind import (
     ROUTEBIND_PRESETS,
     TASK_FAMILY,
     build_routebind_task_corpus,
@@ -52,13 +52,12 @@ from ehc_sn.tasks.routebind.diagnostics import (
 )
 from ehc_sn.tasks.routebind.inspection import prepare_sample_inspection
 from ehc_sn.tasks.routebind.validation import (
+    OracleValidationContext,
     ValidationIssue,
-    check_auxiliary_targets,
-    check_dag_transitions,
-    check_route_field,
-    check_waypoint_field,
+    check_oracle_optimal_subgraph,
     validate_corpus_root,
     validate_stored_sample,
+    validate_support_channels,
 )
 from ehc_sn.traces.keys import (
     ROUTEBIND_META_KEY_CELL_TYPE,
@@ -83,6 +82,66 @@ _DEFAULT_SEED = 42
 _DEFAULT_OUTPUT_DIR = Path("outputs/routebind-validation")
 
 app = typer.Typer(add_completion=False, help="Routebind task corpus toolchain.")
+
+
+# =============================================================================
+# Helper: emit validation results and exit
+# =============================================================================
+
+
+def _emit_validation_results(
+    all_issues: list,
+    sample_counts: dict[str, int],
+    output_dir: Path,
+    json_out: Path | None = None,
+    summary_out: Path | None = None,
+    stats: dict | None = None,
+) -> int:
+    """Write validation bundle, print summary, return exit code."""
+    from ehc_sn.reporting.routebind import (
+        format_validation_summary,
+        serialize_validation_result,
+        write_validation_bundle,
+    )
+
+    if stats is None:
+        stats = {
+            "per_split": sample_counts,
+            "route_length": {},
+            "semantic_length": {},
+        }
+    paths = write_validation_bundle(
+        all_issues,
+        stats,
+        sample_counts,
+        output_dir=output_dir,
+    )
+    typer.echo(f"  Validation report: {paths['validation']}")
+    typer.echo(f"  Diagnostics:       {paths['diagnostics']}")
+    typer.echo(f"  Summary:           {paths['summary']}")
+    if json_out is not None:
+        json_out.write_text(
+            json.dumps(
+                serialize_validation_result(all_issues, sample_counts), indent=2
+            )
+        )
+    if summary_out is not None:
+        summary_out.write_text(format_validation_summary(stats, all_issues))
+
+    errors = [i for i in all_issues if i.severity == "ERROR"]
+    n_err = len(errors)
+    typer.echo(f"Validated {sum(sample_counts.values())} samples")
+    typer.echo(
+        f"  Errors: {n_err}  Warnings: "
+        f"{len([i for i in all_issues if i.severity == 'WARNING'])}"
+    )
+    if n_err > 0:
+        typer.echo("\n  First 5 errors:")
+        for e in errors[:5]:
+            typer.echo(
+                f"    [{e.split}/{e.sample_index}] {e.code}: {e.message}"
+            )
+    return 1 if n_err > 0 else 0
 
 
 # =============================================================================
@@ -327,7 +386,11 @@ def validate(
         ),
     ] = _DEFAULT_OUTPUT_DIR,
 ) -> None:
-    """Validate an existing Routebind task corpus against declared contracts."""
+    """Validate an existing Routebind task corpus against declared contracts.
+
+    Runs Layer 1 (structural support/depth algebra) and Layer 2
+    (Bellman-optimal product-state recomputation) on all samples.
+    """
     _run_validate(
         root,
         splits=[split] if split else None,
@@ -348,7 +411,13 @@ def _run_validate(
     summary_out: Path | None = None,
     output_dir: Path = _DEFAULT_OUTPUT_DIR,
 ) -> int:
-    """Shared validation logic for ``validate`` and ``build --validate-after-build``."""
+    """Shared validation logic for ``validate`` and ``build --validate-after-build``.
+
+    Applies the canonical Routebind optimal-subgraph validation:
+    - Layer 1: structural support/depth/field algebra on every sample.
+    - Layer 2: Bellman-optimal product-state recomputation on every sample
+      (requires ``oracle_ctx`` populated from the manifest's DAG reference).
+    """
     root = root.resolve()
 
     # Load manifest
@@ -371,15 +440,13 @@ def _run_validate(
     gw = manifest.get("field_decay_semantic", 0.8)
     canvas_width = manifest.get("canvas_width", None)
 
-    # Determine S from manifest: prefer num_spatial_slots, then n_states,
-    # then derive from extent.
+    # Determine S
     S = manifest.get("num_spatial_slots", 0) or manifest.get("n_states", 0)
     if S <= 0:
         ext = manifest.get("storage_extent") or manifest.get("extent", [])
         if len(ext) == 2:
             S = int(ext[0]) * int(ext[1])
         else:
-            # Fall back to reading array shape from first available split.
             for split in splits:
                 arrays = load_split_arrays(root, split)
                 if arrays is not None and "cell_type" in arrays:
@@ -397,8 +464,34 @@ def _run_validate(
     )
     all_issues = list(corpus_issues)
 
-    # Load semantic DAG adjacency for DAG-transition validation
-    dag_adjacency: list[list[int]] | None = None
+    # ── Target semantics check ────────────────────────────────────────
+    stage_params = manifest.get("stage_params", {})
+    target_semantics = stage_params.get("target_semantics", "")
+    target_schema_version = stage_params.get("target_schema_version", 0)
+    expected_semantics = "optimal_subgraph_support"
+    expected_schema_version = 1
+
+    if target_semantics != expected_semantics:
+        all_issues.append(
+            ValidationIssue(
+                severity="ERROR",
+                code="target_semantics_manifest_mismatch",
+                message=(
+                    f"Target semantics {target_semantics!r} "
+                    f"(version {target_schema_version}) "
+                    f"does not match expected "
+                    f"{expected_semantics!r} (v{expected_schema_version}). "
+                    f"This validator supports only the optimal-subgraph contract."
+                ),
+            )
+        )
+        # Abort — cannot validate with wrong contract
+        return _emit_validation_results(
+            all_issues, {}, output_dir, json_out, summary_out
+        )
+
+    # ── Load semantic DAG for oracle recomputation ────────────────────
+    oracle_ctx: OracleValidationContext | None = None
     parents = manifest.get("parents", {})
     sem_ref = parents.get("semantic_graph", {})
     dag_root_str = sem_ref.get("root", "")
@@ -425,7 +518,29 @@ def _run_validate(
                         )
                         if 0 <= succ_pub < n_actual:
                             pub_adjacency[src_pub].append(succ_pub)
-            dag_adjacency = pub_adjacency
+
+            from ehc_sn.tasks.routebind.oracle import _build_dag_csr
+
+            max_out = max((len(s) for s in pub_adjacency), default=0)
+            pub_succ_mask = np.zeros((n_actual, max_out), dtype=bool)
+            pub_succ_indices = np.full((n_actual, max_out), -1, dtype=np.int32)
+            for src_pub in range(n_actual):
+                for ki, dst_pub in enumerate(pub_adjacency[src_pub]):
+                    pub_succ_mask[src_pub, ki] = True
+                    pub_succ_indices[src_pub, ki] = np.int32(dst_pub)
+
+            pred_offsets, pred_nodes = _build_dag_csr(pub_adjacency, n_actual)
+
+            oracle_ctx = OracleValidationContext(
+                physical_neighbors=np.empty((0, 4), dtype=np.int32),
+                node_at_position=np.empty(0, dtype=np.int32),
+                pred_offsets=pred_offsets,
+                pred_nodes=pred_nodes,
+                pub_succ_mask=pub_succ_mask,
+                pub_succ_indices=pub_succ_indices,
+                n_slots=S,
+                n_obs=n_actual,
+            )
         except Exception as e:
             all_issues.append(
                 ValidationIssue(
@@ -443,7 +558,27 @@ def _run_validate(
             )
         )
 
-    # Per-sample structural checks
+    # Pre-allocate oracle workspace
+    n_obs_valid = (
+        n_obs
+        if n_obs > 0
+        else (oracle_ctx.n_obs if oracle_ctx is not None else 1)
+    )
+    n_states = S * n_obs_valid
+    _dist = np.full(n_states, np.iinfo(np.int32).max, dtype=np.int32)
+    _pkind = np.zeros(n_states, dtype=np.int8)
+    _pnext = np.full(n_states, -1, dtype=np.int32)
+    _optct = np.zeros(n_states, dtype=np.uint8)
+    _deque = np.zeros(2 * n_states, dtype=np.int32)
+    _oracle_workspace = dict(
+        distance=_dist,
+        policy_kind=_pkind,
+        policy_next=_pnext,
+        opt_count=_optct,
+        deque_buf=_deque,
+    )
+
+    # ── Per-sample validation ─────────────────────────────────────────
     sample_counts: dict[str, int] = {}
     for split in splits:
         arrays = load_split_arrays(root, split)
@@ -475,85 +610,46 @@ def _run_validate(
                 si.sample_index = idx
             all_issues.extend(struct_issues)
 
-            route_issues = check_route_field(
+            # Layer 1: structural support/depth/field algebra
+            support_issues = validate_support_channels(
                 sample,
                 S=S,
                 gamma_space=gs,
-                split=split,
-                idx=idx,
-                grid_width=canvas_width,
-            )
-            all_issues.extend(route_issues)
-
-            wp_issues = check_waypoint_field(
-                sample,
-                S=S,
                 gamma_semantic=gw,
                 split=split,
                 idx=idx,
-                grid_width=canvas_width,
             )
-            all_issues.extend(wp_issues)
+            for si in support_issues:
+                si.split = split
+                si.sample_index = idx
+            all_issues.extend(support_issues)
 
-            aux_issues = check_auxiliary_targets(
-                sample,
-                S=S,
-                split=split,
-                idx=idx,
-                grid_width=canvas_width,
-            )
-            all_issues.extend(aux_issues)
-
-            if dag_adjacency is not None:
-                dag_issues = check_dag_transitions(
+            # Layer 2: optional oracle recomputation
+            if (
+                oracle_ctx is not None
+                and oracle_ctx.physical_neighbors.size > 0
+            ):
+                oracle_issues = check_oracle_optimal_subgraph(
                     sample,
-                    adjacency=dag_adjacency,
+                    oracle_ctx,
+                    gamma_space=gs,
+                    gamma_semantic=gw,
                     split=split,
                     idx=idx,
-                    grid_width=canvas_width,
+                    _workspace=_oracle_workspace,
                 )
-                all_issues.extend(dag_issues)
+                for oi in oracle_issues:
+                    oi.split = split
+                    oi.sample_index = idx
+                all_issues.extend(oracle_issues)
 
-    # Statistics
+    # ── Statistics and reports ────────────────────────────────────────
     stats = compute_corpus_statistics(
         root, manifest, splits, max_samples, grid_width=canvas_width
     )
-
-    # Reports
-    paths = write_validation_bundle(
-        all_issues,
-        stats,
-        sample_counts,
-        output_dir=output_dir,
+    return _emit_validation_results(
+        all_issues, sample_counts, output_dir, json_out, summary_out, stats
     )
-    typer.echo(f"  Validation report: {paths['validation']}")
-    typer.echo(f"  Diagnostics:       {paths['diagnostics']}")
-    typer.echo(f"  Summary:           {paths['summary']}")
-    if json_out is not None:
-        json_out.write_text(
-            json.dumps(
-                serialize_validation_result(all_issues, sample_counts), indent=2
-            )
-        )
-    if summary_out is not None:
-        summary_out.write_text(format_validation_summary(stats, all_issues))
-
-    # Terminal summary
-    errors = [i for i in all_issues if i.severity == "ERROR"]
-    n_err = len(errors)
-    typer.echo(f"Validated {sum(sample_counts.values())} samples")
-    typer.echo(
-        f"  Errors: {n_err}  Warnings: "
-        f"{len([i for i in all_issues if i.severity == 'WARNING'])}"
-    )
-    if n_err > 0:
-        typer.echo("\n  First 5 errors:")
-        for e in errors[:5]:
-            typer.echo(
-                f"    [{e.split}/{e.sample_index}] {e.code}: {e.message}"
-            )
-
-    return 1 if n_err > 0 else 0
 
 
 # =============================================================================

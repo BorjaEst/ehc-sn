@@ -113,14 +113,13 @@ from .traces import (
     build_routebind_trace_supplements,
 )
 from .validation import (
+    OracleValidationContext,
     ValidationIssue,
-    check_auxiliary_targets,
-    check_dag_transitions,
-    check_route_field,
-    check_waypoint_field,
+    check_oracle_optimal_subgraph,
     validate_corpus_root,
     validate_generated_sample,
     validate_stored_sample,
+    validate_support_channels,
 )
 
 __all__ = [
@@ -156,15 +155,13 @@ __all__ = [
     "RoutebindTaskOutput",
     "RoutebindTraceSupplements",
     "TASK_FAMILY",
+    "OracleValidationContext",
     "ValidationIssue",
     "apply_routebind_trace_supplements",
     "build_routebind_supervision",
     "build_routebind_task_corpus",
     "build_routebind_trace_supplements",
-    "check_auxiliary_targets",
-    "check_dag_transitions",
-    "check_route_field",
-    "check_waypoint_field",
+    "check_oracle_optimal_subgraph",
     "compute_corpus_statistics",
     "compute_goal_distance_table",
     "decode_next_direction",
@@ -188,4 +185,5 @@ __all__ = [
     "validate_generated_sample",
     "validate_routebind_root",
     "validate_stored_sample",
+    "validate_support_channels",
 ]

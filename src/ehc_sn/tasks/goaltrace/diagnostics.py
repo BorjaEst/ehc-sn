@@ -360,6 +360,100 @@ def compute_corpus_statistics(
     return result
 
 
+def select_samples(
+    corpus_path: Path,
+    splits: list[str],
+    *,
+    policy: str = "random",
+    n: int = 1,
+    seed: int | None = None,
+) -> list[tuple[str, int]]:
+    """Select sample references from a goaltrace corpus using the given policy.
+
+    Policies:
+        ``"random"`` — uniform random selection across splits.
+        ``"stratified"`` — proportional allocation across path-length buckets
+            (short: ≤4 hops, medium: 5-10 hops, long: ≥11 hops) using
+            largest-remainder rounding.
+        ``"longest_path"`` — samples with the most hops on the optimal path.
+        ``"shortest_path"`` — samples with the fewest hops on the optimal path.
+
+    Args:
+        corpus_path: Versioned corpus root.
+        splits: Splits to search (order determines priority).
+        policy: Selection policy.
+        n: Maximum number of samples to return.
+        seed: RNG seed for deterministic selection.
+
+    Returns:
+        List of ``(split, index)`` tuples.
+    """
+    valid_policies = {"random", "stratified", "longest_path", "shortest_path"}
+    if policy not in valid_policies:
+        raise ValueError(
+            f"Unknown selection policy '{policy}'. "
+            f"Valid: {', '.join(sorted(valid_policies))}."
+        )
+
+    rng = np.random.default_rng(seed)
+
+    candidates: list[tuple[str, int, dict]] = []
+
+    for split in splits:
+        arrays = load_split_arrays(corpus_path, split)
+        if arrays is None:
+            continue
+        n_total = next(iter(arrays.values())).shape[0]
+        for idx in range(n_total):
+            tf = np.asarray(arrays["target_field"][idx])
+            nm = np.asarray(arrays["node_mask"][idx])
+            n_valid = int(nm.sum())
+            path_nodes = np.where(tf[:n_valid] > 0)[0]
+            path_len = max(len(path_nodes) - 1, 0)  # hop count
+            candidates.append((split, idx, {"path_len": path_len}))
+
+    if not candidates:
+        return []
+
+    if policy == "random":
+        indices = rng.choice(
+            len(candidates), size=min(n, len(candidates)), replace=False
+        )
+        return [(candidates[int(i)][0], candidates[int(i)][1]) for i in indices]
+
+    if policy == "stratified":
+        buckets: dict[int, list[tuple[str, int]]] = {}
+        for split, idx, meta in candidates:
+            pl = meta["path_len"]
+            bucket = 0 if pl <= 4 else (1 if pl <= 10 else 2)
+            buckets.setdefault(bucket, []).append((split, idx))
+
+        total = sum(len(v) for v in buckets.values())
+        n_actual = min(n, total)
+        bk_sorted = sorted(buckets.keys())
+
+        raw = {bk: len(buckets[bk]) * n_actual / total for bk in bk_sorted}
+        alloc = {bk: int(raw[bk]) for bk in bk_sorted}
+        remainder = n_actual - sum(alloc.values())
+        for bk in sorted(raw, key=lambda b: raw[b] - int(raw[b]), reverse=True):
+            if remainder <= 0:
+                break
+            alloc[bk] += 1
+            remainder -= 1
+
+        selected: list[tuple[str, int]] = []
+        for bk in bk_sorted:
+            pool = buckets[bk]
+            rng.shuffle(pool)
+            selected.extend(pool[: alloc[bk]])
+        return selected
+
+    reverse = policy in ("longest_path",)
+    candidates.sort(key=lambda x: x[2].get("path_len", 0), reverse=reverse)
+    return [(c[0], c[1]) for c in candidates[:n]]
+
+
 __all__ = [
     "compute_corpus_statistics",
+    "select_samples",
 ]
