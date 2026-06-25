@@ -74,10 +74,11 @@ experiment_id = "tem-v1-arena"
     [provider.settings]
         dataset_path = "data/processed/arena/default/v1"
         split = "val"
+        n_cases = 4
 
 [regime]
     id = "arena_diagnostic"
     kind = "diagnostic"
 
 [capture]
-    profile = "metrics_only"
+    profile = "full_diagnostic"

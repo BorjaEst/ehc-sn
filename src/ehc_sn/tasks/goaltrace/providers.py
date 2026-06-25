@@ -115,6 +115,7 @@ class GoaltraceReplayProvider:
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"goaltrace-{self._split}-{batch_idx:04d}",
+                n_samples=n_in_batch,
                 source_context=GoaltraceEvaluationSourceContext(
                     dataset_path=self._dataset_path,
                     split=self._split,

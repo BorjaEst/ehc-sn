@@ -26,12 +26,13 @@ experiment_id = "hrm-v2-mazehard"
 [provider]
     ref = "ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider"
     [provider.settings]
-        dataset_path = "data/processed/mazehard"
+        dataset_path = "data/processed/mazehard/default/v1"
         split = "val"
+        n_cases = 4
 
 [regime]
     id = "mazehard_diagnostic"
     kind = "diagnostic"
 
 [capture]
-    profile = "metrics_only"
+    profile = "full_diagnostic"

@@ -114,6 +114,7 @@ class MazeHardReplayProvider:
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"mazehard-{self._split}-{batch_idx:04d}",
+                n_samples=n_in_batch,
                 source_context=MazeHardEvaluationSourceContext(
                     task_family="mazehard",
                     dataset_path=self._dataset_path,
@@ -251,6 +252,7 @@ class MazeHardFixedProbeProvider:
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=case_id,
+                n_samples=n_in_batch,
                 source_context=MazeHardEvaluationSourceContext(
                     task_family="mazehard",
                     dataset_path=self._dataset_path,

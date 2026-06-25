@@ -19,10 +19,16 @@ from ehc_sn.types import Batch
 # =============================================================================
 @dataclass(frozen=True)
 class EvaluationCaseBatch:
-    """One provider-owned evaluation case batch and associated source context."""
+    """One provider-owned evaluation batch and associated source context.
+
+    ``batch`` contains one or more dataset samples (``n_samples >= 1``).
+    The artifact persists one manifest *case* per batch, which may
+    represent multiple samples when ``batch_size > 1``.
+    """
 
     batch: Batch
     case_id: str
+    n_samples: int = 1
     source_context: object | None = None
 
 
@@ -38,10 +44,15 @@ class EvaluationTraceRequest:
 # =============================================================================
 @dataclass(frozen=True)
 class EvaluationCaseResult:
-    """Result payload returned by ``execute_evaluation_batch``."""
+    """Result payload returned by ``execute_evaluation_batch``.
+
+    Represents one evaluated provider batch.  Contains outputs and
+    optional trace trees for ``n_samples`` dataset samples.
+    """
 
     case_id: str
     evaluated: EvaluatedChunk
+    n_samples: int = 1
     source_context: object | None = None
     trace: TraceTree | None = None
 

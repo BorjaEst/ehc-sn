@@ -115,6 +115,7 @@ class RoutebindReplayProvider:
             yield EvaluationCaseBatch(
                 batch=batch,
                 case_id=f"routebind-{self._split}-{batch_idx:04d}",
+                n_samples=n_in_batch,
                 source_context=RoutebindEvaluationSourceContext(
                     dataset_path=self._dataset_path,
                     split=self._split,

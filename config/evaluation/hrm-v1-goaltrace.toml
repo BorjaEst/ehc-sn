@@ -28,10 +28,11 @@ experiment_id = "hrm-v1-goaltrace"
     [provider.settings]
         dataset_path = "data/processed/goaltrace/default/v1"
         split = "val"
+        n_cases = 4
 
 [regime]
     id = "goaltrace_diagnostic"
     kind = "diagnostic"
 
 [capture]
-    profile = "metrics_only"
+    profile = "full_diagnostic"

@@ -31,10 +31,11 @@ experiment_id = "hrm-v1-routebind"
     [provider.settings]
         dataset_path = "data/processed/routebind/default/v1"
         split = "val"
+        n_cases = 4
 
 [regime]
     id = "routebind_diagnostic"
     kind = "diagnostic"
 
 [capture]
-    profile = "metrics_only"
+    profile = "full_diagnostic"

@@ -37,7 +37,6 @@ Boundary rules:
 from __future__ import annotations
 
 from dataclasses import replace
-from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -50,8 +49,6 @@ from ehc_sn.eval.artifacts import (
 )
 from ehc_sn.eval.contracts import (
     EvaluationCaseBatch,
-    EvaluationCaseResult,
-    EvaluationRegimeResult,
     EvaluationTraceRequest,
 )
 from ehc_sn.eval.executor import iter_evaluation_regime
@@ -59,61 +56,10 @@ from ehc_sn.experiments._infra import (
     EvaluationExperiment,
     EvaluationRunRequest,
 )
-from ehc_sn.metrics.values import validate_metric_value
 
 # ---------------------------------------------------------------------------
-# Reserved keys that model aggregation hooks must not return.
-# Mirrored from callbacks/evaluation.py to avoid cross-module coupling.
+# Helpers
 # ---------------------------------------------------------------------------
-
-_RESERVED_SUMMARY_KEYS: frozenset[str] = frozenset({"n_cases", "loss"})
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _extract_loss_scalar(evaluated: Any) -> float | None:
-    """Extract a scalar loss from an evaluated chunk, or None."""
-    loss = getattr(evaluated, "loss", None)
-    if loss is None:
-        return None
-    if torch.is_tensor(loss):
-        if loss.numel() != 1:
-            return None
-        return float(loss.detach().item())
-    if isinstance(loss, Real):
-        return float(loss)
-    return None
-
-
-def _validate_hook_metrics(
-    task_summary: dict[str, object],
-) -> dict[str, float | int]:
-    """Validate and type-narrow a family-owned hook return value.
-
-    Rules match ``callbacks/evaluation._validate_hook_metrics``:
-        - Keys in ``_RESERVED_SUMMARY_KEYS`` are rejected.
-        - Per-value validation delegates to
-          :func:`ehc_sn.metrics.values.validate_metric_value`.
-    """
-    collided = _RESERVED_SUMMARY_KEYS & task_summary.keys()
-    if collided:
-        raise ValueError(
-            "Hook returned reserved summary keys: " f"{sorted(collided)}."
-        )
-
-    validated: dict[str, float | int] = {}
-    for key, value in task_summary.items():
-        if not isinstance(key, str):
-            raise TypeError(
-                f"Metric key must be str, got {type(key).__name__} ({key!r})."
-            )
-        if not key:
-            raise ValueError("Metric key must be a non-empty string.")
-        validated[key] = validate_metric_value(key=key, value=value)
-    return validated
 
 
 def _to_device_batch(
@@ -188,55 +134,25 @@ def run_offline_eval(
         trace_request = EvaluationTraceRequest(trace_spec=experiment.trace_spec)
 
     identity = experiment.identity
+    task_name = identity.task if identity is not None else "unknown"
 
-    # ---- Run cases ----------------------------------------------------------
-    case_results: list[EvaluationCaseResult] = []
-    for result in iter_evaluation_regime(
+    # ---- Build case result generator ----------------------------------------
+    # Cases are streamed to collect_regime_artifact_bundle one at a time.
+    # No list of all case results is retained — only lightweight summary rows
+    # accumulate inside the artifact writer for the final manifest.
+    case_results = iter_evaluation_regime(
         provider,
         executor,
         max_batches=request.max_batches,
         trace_request=trace_request,
         prepare_case_batch=lambda case: _to_device_batch(case, device),
-    ):
-        case_results.append(result)
-
-    if not case_results:
-        raise RuntimeError(
-            "No evaluation cases were produced. "
-            f"Provider: {experiment.provider_ref!r}. "
-            f"Regime: {experiment.regime_id!r}."
-        )
-
-    # ---- Build summary ------------------------------------------------------
-    losses = [
-        value
-        for value in (_extract_loss_scalar(r.evaluated) for r in case_results)
-        if value is not None
-    ]
-    summary: dict[str, object] = {"n_cases": len(case_results)}
-    if losses:
-        summary["loss"] = sum(losses) / len(losses)
-
-    # Optional model-family aggregation hook.
-    task_name = identity.task if identity is not None else "unknown"
-    aggregate = getattr(executor, "aggregate_evaluation_case_metrics", None)
-    if aggregate is not None:
-        task_summary = aggregate(
-            task=task_name,
-            regime_id=experiment.regime_id,
-            regime_kind=experiment.regime_kind,
-            case_results=case_results,
-        )
-        validated = _validate_hook_metrics(task_summary)
-        summary.update(validated)
-
-    # ---- Persist ------------------------------------------------------------
-    regime_result = EvaluationRegimeResult(
-        regime_id=experiment.regime_id,
-        case_results=tuple(case_results),
-        summary=summary,
     )
-    collect_regime_artifact_bundle(
+
+    # ---- Persist (streaming) ------------------------------------------------
+    # collect_regime_artifact_bundle writes each case to .npz as it arrives
+    # and returns a lightweight regime result with summary metrics.
+    regime_result = collect_regime_artifact_bundle(
+        case_results=case_results,
         executor=executor,
         provider=provider,
         regime_id=experiment.regime_id,
@@ -257,6 +173,7 @@ def run_offline_eval(
             "capture_exclude": list(experiment.capture_exclude),
         },
     )
+
     return request.output_dir.resolve()
 
 

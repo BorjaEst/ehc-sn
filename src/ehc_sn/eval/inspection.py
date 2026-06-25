@@ -70,6 +70,7 @@ class EvaluationCaseSummary:
 
     index: int
     case_id: str
+    n_samples: int = 1
     step_count: int | None = None
     halt_step: int | None = None
     truncated: bool | None = None
@@ -96,6 +97,7 @@ class EvaluationArtifactInspection:
     capture_profile_version: int | None
     resolved_fields: tuple[str, ...]
     case_count: int
+    sample_count: int = 0
     cases: tuple[EvaluationCaseSummary, ...] = ()
     selected_case: EvaluationCaseInspection | None = None
     manifest_raw: dict[str, Any] | None = None
@@ -246,10 +248,11 @@ def inspect_evaluation_artifact(
         manifest.get("capture", {}).get("resolved_fields", [])
     )
 
-    # ---- Case count ---------------------------------------------------------
+    # ---- Case and sample counts --------------------------------------------
     case_count = manifest.get("summary", {}).get("n_cases") or len(
         manifest.get("cases", [])
     )
+    sample_count = manifest.get("summary", {}).get("n_samples", 0)
 
     # ---- Case summaries -----------------------------------------------------
     cases: tuple[EvaluationCaseSummary, ...] = ()
@@ -263,6 +266,7 @@ def inspect_evaluation_artifact(
                 EvaluationCaseSummary(
                     index=i,
                     case_id=row.get("case_id", f"case-{i}"),
+                    n_samples=row.get("n_samples", 1),
                     step_count=int(steps) if steps is not None else None,
                     halt_step=(
                         int(halt_step) if halt_step is not None else None
@@ -342,6 +346,7 @@ def inspect_evaluation_artifact(
         capture_profile_version=capture_profile_version,
         resolved_fields=resolved_fields,
         case_count=case_count,
+        sample_count=sample_count,
         cases=cases,
         selected_case=selected_case,
         manifest_raw=manifest if include_manifest else None,
@@ -388,7 +393,8 @@ def format_inspection_text(
                 f"{', '.join(inspection.resolved_fields[:6])}"
                 f"{'…' if len(inspection.resolved_fields) > 6 else ''}"
             )
-    lines.append(f"  Cases:            {inspection.case_count}")
+    lines.append(f"  Evaluated batches: {inspection.case_count}")
+    lines.append(f"  Evaluated samples: {inspection.sample_count}")
 
     # Case summaries
     if inspection.cases:

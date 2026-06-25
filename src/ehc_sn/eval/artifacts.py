@@ -10,6 +10,7 @@ import importlib
 import json
 import re
 import tomllib
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, is_dataclass
 from numbers import Real
 from pathlib import Path
@@ -151,8 +152,78 @@ def _atomic_write_directory(
 
 
 # =============================================================================
+# Per-step metric extraction (duck-typed — no imports from lightning/)
+# =============================================================================
+
+
+def _extract_step_metric_increments(
+    result: EvaluationCaseResult,
+) -> dict[str, float | int]:
+    """Extract per-step metric increments from *result* via duck-typing.
+
+    Returns a dict of scalar sums for this case.  Callers accumulate
+    the returned values across cases and compute derived ratios from
+    the running totals.
+
+    Mirrors the logic in ``ACTSupervisedModule.aggregate_evaluation_case_metrics``
+    without importing from ``lightning/``.
+    """
+    inc: dict[str, float | int] = {}
+    evaluated = result.evaluated
+    steps = getattr(evaluated, "steps", None)
+    if steps is None:
+        return inc
+    for step in steps:
+        metrics = getattr(step.outputs, "metrics", None)
+        if metrics is None:
+            continue
+        ep = getattr(metrics, "episode", None)
+        if ep is not None:
+            inc["completed_count"] = inc.get("completed_count", 0) + _to_int(
+                getattr(ep, "completed_count", 0)
+            )
+            inc["eligible_count"] = inc.get("eligible_count", 0) + _to_int(
+                getattr(ep, "eligible_count", 0)
+            )
+            inc["accuracy_sum"] = inc.get("accuracy_sum", 0.0) + _to_float(
+                getattr(ep, "accuracy_sum", 0.0)
+            )
+            inc["exact_sum"] = inc.get("exact_sum", 0.0) + _to_float(
+                getattr(ep, "exact_sum", 0.0)
+            )
+        ep_tok = getattr(metrics, "episode_tokens", None)
+        if ep_tok is not None:
+            inc["token_correct_sum"] = inc.get(
+                "token_correct_sum", 0
+            ) + _to_int(getattr(ep_tok, "token_correct_sum", 0))
+            inc["token_count_sum"] = inc.get("token_count_sum", 0) + _to_int(
+                getattr(ep_tok, "token_count_sum", 0)
+            )
+    return inc
+
+
+def _to_int(value: object) -> int:
+    """Coerce a numeric value to int (handles tensors and scalars)."""
+    import torch
+
+    if torch.is_tensor(value):
+        return int(value.item())
+    return int(value)
+
+
+def _to_float(value: object) -> float:
+    """Coerce a numeric value to float (handles tensors and scalars)."""
+    import torch
+
+    if torch.is_tensor(value):
+        return float(value.item())
+    return float(value)
+
+
+# =============================================================================
 def collect_regime_artifact_bundle(
     *,
+    case_results: Iterable[EvaluationCaseResult] | None = None,
     executor: Any,
     provider: Any,
     regime_id: str,
@@ -166,6 +237,15 @@ def collect_regime_artifact_bundle(
     provenance_overrides: dict[str, Any] | None = None,
 ) -> EvaluationRegimeResult:
     """Collect one evaluation regime and persist it as an artifact bundle.
+
+    Accepts an optional ``case_results`` iterable.  When provided,
+    the function streams over that iterable rather than constructing
+    its own ``iter_evaluation_regime`` loop — the caller owns
+    device placement, trace requests, and batch preparation.
+
+    When ``case_results`` is ``None`` (legacy path), the function
+    falls back to iterating ``provider`` through ``iter_evaluation_regime``
+    internally.  This is deprecated.
 
     The provider and trace specification must already be resolved by the
     caller (typically an experiment-specific builder).  The old signature
@@ -206,14 +286,31 @@ def collect_regime_artifact_bundle(
     loss_sum = 0.0
     loss_count = 0
 
-    for idx, result in enumerate(
-        iter_evaluation_regime(
+    # Per-step metric accumulators — populated via duck-typed extraction
+    # from ``step.outputs.metrics`` (no imports from lightning/).
+    total_completed_count: int = 0
+    total_eligible_count: int = 0
+    total_accuracy_sum: float = 0.0
+    total_exact_sum: float = 0.0
+    total_token_correct: int = 0
+    total_token_count: int = 0
+    total_samples: int = 0
+
+    # Determine the iteration source.
+    # When the caller provides case_results, stream it (new path).
+    # Otherwise, iterate internally (legacy path).
+    iterable: Iterable[EvaluationCaseResult]
+    if case_results is not None:
+        iterable = case_results
+    else:
+        iterable = iter_evaluation_regime(
             provider,
             executor,
             max_batches=max_batches,
             trace_request=trace_request,
         )
-    ):
+
+    for idx, result in enumerate(iterable):
         row = _persist_regime_case(
             run_dir=tmp_dir,
             result=result,
@@ -234,6 +331,16 @@ def collect_regime_artifact_bundle(
             loss_sum += float(loss)
             loss_count += 1
 
+        # Extract per-step metric increments before the case is released.
+        inc = _extract_step_metric_increments(result)
+        total_completed_count += int(inc.get("completed_count", 0))
+        total_eligible_count += int(inc.get("eligible_count", 0))
+        total_accuracy_sum += float(inc.get("accuracy_sum", 0.0))
+        total_exact_sum += float(inc.get("exact_sum", 0.0))
+        total_token_correct += int(inc.get("token_correct_sum", 0))
+        total_token_count += int(inc.get("token_count_sum", 0))
+        total_samples += result.n_samples
+
         lightweight_case_results.append(
             EvaluationCaseResult(
                 case_id=result.case_id,
@@ -246,6 +353,23 @@ def collect_regime_artifact_bundle(
     summary: dict[str, object] = {"n_cases": len(summary_rows)}
     if loss_count > 0:
         summary["loss"] = loss_sum / float(loss_count)
+    if total_samples > 0:
+        summary["n_samples"] = total_samples
+
+    # Merge aggregated per-step metrics into the summary.
+    if total_completed_count > 0 or total_eligible_count > 0:
+        summary["n_sequence_completed"] = total_completed_count
+        summary["n_sequence_eligible"] = total_eligible_count
+    if total_token_correct > 0 or total_token_count > 0:
+        summary["n_token_correct"] = total_token_correct
+        summary["n_token_total"] = total_token_count
+    if total_completed_count > 0:
+        summary["sequence_accuracy"] = (
+            total_accuracy_sum / total_completed_count
+        )
+        summary["sequence_exact"] = total_exact_sum / total_completed_count
+    if total_token_count > 0:
+        summary["token_accuracy"] = total_token_correct / total_token_count
 
     _write_regime_bundle_manifest(
         run_dir=tmp_dir,
@@ -548,6 +672,7 @@ def persist_regime_artifact_bundle(
         summary_rows.append(
             {
                 "case_id": result.case_id,
+                "n_samples": result.n_samples,
                 "source_context": source_context,
                 "loss": loss,
                 "has_trace": has_trace,
@@ -556,6 +681,7 @@ def persist_regime_artifact_bundle(
 
         row: dict[str, Any] = {
             "case_id": result.case_id,
+            "n_samples": result.n_samples,
             "source_context": source_context,
             "loss": loss,
             "has_trace": has_trace,
@@ -616,6 +742,7 @@ def _persist_regime_case(
     has_trace = result.trace is not None
     row: dict[str, Any] = {
         "case_id": result.case_id,
+        "n_samples": result.n_samples,
         "source_context": source_context,
         "loss": loss,
         "has_trace": has_trace,

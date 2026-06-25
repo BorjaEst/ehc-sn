@@ -28,10 +28,11 @@ experiment_id = "hrm-v1-mazehard"
     [provider.settings]
         dataset_path = "data/processed/mazehard/default/v1"
         split = "val"
+        n_cases = 4
 
 [regime]
     id = "mazehard_diagnostic"
     kind = "diagnostic"
 
 [capture]
-    profile = "metrics_only"
+    profile = "full_diagnostic"

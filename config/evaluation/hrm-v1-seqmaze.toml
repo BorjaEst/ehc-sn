@@ -30,10 +30,11 @@ experiment_id = "hrm-v1-seqmaze"
     [provider.settings]
         dataset_path = "data/processed/seqmaze/default/v1"
         split = "val"
+        n_cases = 4
 
 [regime]
     id = "seqmaze_diagnostic"
     kind = "diagnostic"
 
 [capture]
-    profile = "metrics_only"
+    profile = "full_diagnostic"
