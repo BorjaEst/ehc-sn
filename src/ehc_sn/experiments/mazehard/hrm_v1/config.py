@@ -36,13 +36,21 @@ from pydantic import BaseModel, Field
 from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
 from ehc_sn.controllers.deliberation.act import ACTControllerConfig
 from ehc_sn.data.datamodules import DatamoduleConfig
-from ehc_sn.experiments._infra import CheckpointingConfig, TrainerConfig
-from ehc_sn.lightning.modules.act_supervised import ACTSupervisedTrainingConfig
+from ehc_sn.experiments._infra import (
+    CaptureConfig,
+    CheckpointingConfig,
+    ProviderConfig,
+    RegimeConfig,
+    TrainerConfig,
+)
+from ehc_sn.lightning.modules.act_supervised import (
+    ACTSupervisedConfig,
+    ACTSupervisedTrainingConfig,
+)
 from ehc_sn.logging.tensorboard import LoggerSettings
 from ehc_sn.objectives.composites.act import ACTSupervisedScorerConfig
+from ehc_sn.objectives.task.mazehard import MazeHardTaskEvaluatorConfig
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
-from ehc_sn.training.schedules import SchedulerConfig
-from ehc_sn.training.stabilization import TargetNetworkConfig
 
 # =============================================================================
 # Model configuration (computational structure only)
@@ -63,9 +71,13 @@ class MazeHardHRMV1ComponentConfigs(BaseModel, extra="forbid"):
         ...,
         description="ACT deliberation controller configuration.",
     )
-    objective: ACTSupervisedScorerConfig = Field(
+    task_evaluator: MazeHardTaskEvaluatorConfig = Field(
         ...,
-        description="ACT supervised objective configuration.",
+        description="MazeHard task-evaluator configuration.",
+    )
+    scorer: ACTSupervisedScorerConfig = Field(
+        default_factory=ACTSupervisedScorerConfig,
+        description="ACT loss composition configuration.",
     )
 
 
@@ -107,6 +119,11 @@ class MazeHardHRMV1TrainingExperimentConfig(BaseModel, extra="forbid"):
         ...,
         description="Model structure (components + architecture path).",
     )
+    regime: ACTSupervisedConfig = Field(
+        default_factory=ACTSupervisedConfig,
+        description="ACT regime configuration (halt_disabled_steps, "
+        "target_network).",
+    )
     training: ACTSupervisedTrainingConfig = Field(
         ...,
         description="ACT supervised training configuration (optimizer, runtime). "
@@ -115,18 +132,6 @@ class MazeHardHRMV1TrainingExperimentConfig(BaseModel, extra="forbid"):
     execution: Optional[HRMRuntimeConfig] = Field(
         default=None,
         description="Execution policy (validation safety limits).",
-    )
-    scheduler: SchedulerConfig = Field(
-        default_factory=SchedulerConfig,
-        description="LR scheduler config.",
-    )
-    supervised_only_warmup_steps: int = Field(
-        default=500,
-        description="Optimizer steps with learned halting disabled.",
-    )
-    target_network: TargetNetworkConfig = Field(
-        default_factory=TargetNetworkConfig,
-        description="Optional EMA-lagged target network config.",
     )
     data: DatamoduleConfig = Field(
         ...,
@@ -156,6 +161,18 @@ class MazeHardHRMV1EvaluationExperimentConfig(BaseModel, extra="forbid"):
     execution: Optional[HRMRuntimeConfig] = Field(
         default=None,
         description="Execution policy for eval-time rollout bounds.",
+    )
+    provider: ProviderConfig = Field(
+        ...,
+        description="Evaluation data provider specification.",
+    )
+    regime: RegimeConfig = Field(
+        ...,
+        description="Evaluation regime identity.",
+    )
+    capture: CaptureConfig = Field(
+        default_factory=lambda: CaptureConfig(),
+        description="Trace capture policy.",
     )
 
 

@@ -21,7 +21,6 @@ from ehc_sn.tasks.arena.supervision import (
     build_arena_supervision,
     build_arena_tem_objective_supervision,
 )
-from ehc_sn.training.schedules import SchedulerConfig
 from ehc_sn.training.tem import RuntimeConfig as TEMRuntimeConfig
 
 from .config import ArenaTEMV1ModelConfig
@@ -32,7 +31,6 @@ def build_arena_tem_v1_model(
     *,
     training_config: TEMTrainingConfig | None = None,
     execution: TEMRuntimeConfig | None = None,
-    scheduler: SchedulerConfig | None = None,
 ) -> VariationalReplayModule:
     """Construct a VariationalReplayModule for Arena × TEM-v1."""
     components: VariationalReplayComponentConfigs = config.components  # type: ignore[assignment]
@@ -51,7 +49,6 @@ def build_arena_tem_v1_model(
     return VariationalReplayModule(
         config=VariationalReplayConfig(
             model_config_path=config.model_config_path,
-            scheduler=scheduler or SchedulerConfig(),
         ),
         component_configs=components,
         bindings=bindings,

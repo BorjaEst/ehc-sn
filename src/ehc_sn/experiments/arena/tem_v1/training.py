@@ -15,13 +15,13 @@ def build_arena_tem_v1_training_experiment(
 ) -> TrainingExperiment:
     transfer_training = TEMTrainingConfig(
         optimizer=config.training.optimizer,
+        scheduler=config.training.scheduler,
         num_slots=config.data.num_slots,
     )
     module = build_arena_tem_v1_model(
         config.model,
         training_config=transfer_training,
         execution=config.execution,
-        scheduler=config.scheduler,
     )
     datamodule = Datamodule(
         DatamoduleConfig(

@@ -239,6 +239,7 @@ class GoaltraceHRMV1BridgeAdapter(nn.Module):
         outputs = HRMOutputV1(
             theta_summary=outputs.theta_summary,
             schema_slots=inputs.schema_tokens,
+            schema_readout=outputs.schema_readout,
             action_logits=outputs.action_logits,
         )
         bridge_out = self.postprocess(outputs)

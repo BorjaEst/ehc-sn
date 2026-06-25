@@ -32,13 +32,18 @@ from ehc_sn.controllers.deliberation.actor_critic import (
     DeliberationACControllerConfig,
 )
 from ehc_sn.data.datamodules import DatamoduleConfig
-from ehc_sn.experiments._infra import CheckpointingConfig, TrainerConfig
+from ehc_sn.experiments._infra import (
+    CaptureConfig,
+    CheckpointingConfig,
+    ProviderConfig,
+    RegimeConfig,
+    TrainerConfig,
+)
 from ehc_sn.lightning.modules.actor_critic import ActorCriticTrainingConfig
 from ehc_sn.logging.tensorboard import LoggerSettings
 from ehc_sn.objectives.composites.hybrid_rl import HybridRLLossConfig
 from ehc_sn.tasks.seqmaze.runtime import SeqMazeRuntimeConfig
 from ehc_sn.training.hrm import ValidationRuntimeConfig
-from ehc_sn.training.schedules import SchedulerConfig
 
 # =============================================================================
 # Component configuration (task–model binding)
@@ -134,14 +139,6 @@ class SeqMazeHRMV2TrainingExperimentConfig(BaseModel, extra="forbid"):
         default_factory=SeqMazeDeliberationConfig,
         description="Deliberation execution policy (halt_action, episode_horizon).",
     )
-    scheduler: SchedulerConfig = Field(
-        default_factory=SchedulerConfig,
-        description="LR scheduler config.",
-    )
-    supervised_only_warmup_steps: int = Field(
-        default=5000,
-        description="Optimizer steps with learned halting disabled.",
-    )
     training: ActorCriticTrainingConfig = Field(
         ...,
         description="Actor-critic training configuration.",
@@ -174,6 +171,18 @@ class SeqMazeHRMV2EvaluationExperimentConfig(BaseModel, extra="forbid"):
     execution: SeqMazeDeliberationConfig = Field(
         default_factory=SeqMazeDeliberationConfig,
         description="Deliberation execution policy (halt_action, episode_horizon).",
+    )
+    provider: ProviderConfig = Field(
+        ...,
+        description="Evaluation data provider specification.",
+    )
+    regime: RegimeConfig = Field(
+        ...,
+        description="Evaluation regime identity.",
+    )
+    capture: CaptureConfig = Field(
+        default_factory=lambda: CaptureConfig(),
+        description="Trace capture policy.",
     )
 
 

@@ -46,7 +46,6 @@ from ehc_sn.training.actor_critic import (
     ZeroBootstrapActorCriticValidationScorer,
 )
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
-from ehc_sn.training.schedules import SchedulerConfig
 
 from .config import MazeHardHRMV2ModelConfig
 
@@ -56,8 +55,6 @@ def build_mazehard_hrm_v2_model(
     *,
     training_config: ActorCriticTrainingConfig | None = None,
     execution: MazeHardRuntimeConfig | None = None,
-    scheduler: SchedulerConfig | None = None,
-    supervised_only_warmup_steps: int | None = None,
 ) -> ActorCriticModule:
     """Construct an ActorCriticModule for MazeHard × HRM-v2.
 
@@ -103,8 +100,9 @@ def build_mazehard_hrm_v2_model(
     return ActorCriticModule(
         config=ActorCriticConfig(
             model_config_path=config.model_config_path,
-            scheduler=scheduler or SchedulerConfig(),
-            supervised_only_warmup_steps=supervised_only_warmup_steps or 0,
+            halt_disabled_steps=(
+                training_config.halt_disabled_steps if training_config else 0
+            ),
         ),
         component_configs=components,
         bindings=bindings,

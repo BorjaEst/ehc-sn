@@ -33,11 +33,16 @@ from ehc_sn.controllers.replay.trajectory import (
     ReplayTrajectoryControllerConfig,
 )
 from ehc_sn.data.datamodules import DatamoduleConfig
-from ehc_sn.experiments._infra import CheckpointingConfig, TrainerConfig
+from ehc_sn.experiments._infra import (
+    CaptureConfig,
+    CheckpointingConfig,
+    ProviderConfig,
+    RegimeConfig,
+    TrainerConfig,
+)
 from ehc_sn.lightning.modules.variational_replay import TEMTrainingConfig
 from ehc_sn.logging.tensorboard import LoggerSettings
 from ehc_sn.objectives.composites.tem import TEMObjectiveConfig
-from ehc_sn.training.schedules import SchedulerConfig
 from ehc_sn.training.tem import RuntimeConfig as TEMRuntimeConfig
 
 # =============================================================================
@@ -96,10 +101,6 @@ class ArenaTEMV2TrainingExperimentConfig(BaseModel, extra="forbid"):
         ...,
         description="TEM training configuration (optimizer).",
     )
-    scheduler: SchedulerConfig = Field(
-        default_factory=SchedulerConfig,
-        description="LR scheduler config.",
-    )
     data: DatamoduleConfig = Field(
         ...,
         description="Dataset and DataLoader settings.",
@@ -133,6 +134,18 @@ class ArenaTEMV2EvaluationExperimentConfig(BaseModel, extra="forbid"):
         default=None,
         description="Execution policy for eval-time runtime dynamics. "
         "None skips runtime configuration (not valid for actual eval).",
+    )
+    provider: ProviderConfig = Field(
+        ...,
+        description="Evaluation data provider specification.",
+    )
+    regime: RegimeConfig = Field(
+        ...,
+        description="Evaluation regime identity.",
+    )
+    capture: CaptureConfig = Field(
+        default_factory=lambda: CaptureConfig(),
+        description="Trace capture policy.",
     )
 
 

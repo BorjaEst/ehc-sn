@@ -73,7 +73,7 @@ from ehc_sn.tasks.seqmaze.validation import (
 # ---------------------------------------------------------------------------
 _DEFAULT_VERSION = 1
 _DEFAULT_CORPUS = "default"
-_DEFAULT_N_MAX = 32
+_DEFAULT_N_MAX = 45
 _DEFAULT_T_MAX = 32
 _DEFAULT_MAX_OUT_DEGREE = 4
 _DEFAULT_N_TRAIN = 4000
@@ -306,7 +306,7 @@ def inspect(
     root = root.resolve()
     manifest = validate_seqmaze_root(root)
     all_splits = list(manifest.get("n_samples", {}).keys())
-    n_max = manifest.get("n_max", 32)
+    n_max = manifest.get("n_max", 45)
     t_max = manifest.get("t_max", 32)
 
     # ── Summary ────────────────────────────────────────────────────────────

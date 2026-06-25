@@ -6,7 +6,7 @@ from .config import (
     ArenaTEMV1ModelConfig,
     ArenaTEMV1TrainingExperimentConfig,
 )
-from .evaluation import build_arena_tem_v1_evaluation_executor
+from .evaluation import build_arena_tem_v1_evaluation_experiment
 from .model import build_arena_tem_v1_model
 from .training import build_arena_tem_v1_training_experiment
 
@@ -17,5 +17,5 @@ __all__ = [
     "ArenaTEMV1EvaluationExperimentConfig",
     "build_arena_tem_v1_model",
     "build_arena_tem_v1_training_experiment",
-    "build_arena_tem_v1_evaluation_executor",
+    "build_arena_tem_v1_evaluation_experiment",
 ]

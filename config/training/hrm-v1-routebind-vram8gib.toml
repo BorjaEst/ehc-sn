@@ -1,0 +1,84 @@
+# Training config — Routebind × HRM-v1 (nested experiment schema)
+# =============================================================================
+
+[model]
+    model_config_path = "config/models/hrm-v1-base.toml"
+
+[model.components.adapter]
+    encoder_kind     = "rope"
+    num_cell_types   = 4
+    num_observations = 45
+    grid_height      = 30
+    grid_width       = 30
+
+[model.components.controller]
+    max_halt_steps     = 16
+    exploration_prob   = 0.1
+
+[model.components.task_evaluator]
+    trajectory_loss      = "mse"
+    acceptable_error     = 0.1
+    halt_temperature     = 0.1
+
+[model.components.scorer]
+    task_loss_coefficient   = 1.0
+    halt_loss_coefficient   = 0.05
+    continue_loss_coefficient = 0.05
+
+[training.optimizer]
+    lr           = 1e-4
+    weight_decay = 0.1
+    betas        = [0.9, 0.95]
+
+[training.scheduler]
+    warmup_steps = 2000
+    min_ratio    = 1.00
+
+[regime]
+    halt_disabled_steps = 500
+    single_step = true
+
+[execution.validation]
+    max_rollout_steps = 16
+
+[data]
+    dataset_path         = "data/processed/routebind/default/v1"
+    num_slots            = 100
+    eval_batch_size      = 64
+    num_workers          = 4
+    prefetch_factor      = 2
+    pin_memory           = true
+    persistent_workers   = true
+    augment              = false  # TODO: Enable augmentation once we have a better understanding of the task
+    seed                 = 42
+
+[trainer]
+    accelerator          = "gpu"
+    strategy             = "ddp"
+    devices              = 1
+    num_nodes            = 1
+    precision            = "16-mixed"
+    max_steps            = 50000
+    val_check_interval   = 1000
+    log_every_n_steps    = 10
+    enable_progress_bar  = true
+    limit_val_batches    = 1.0
+    seed                 = 42
+
+[checkpointing]
+    init_weights_groups          = ["all"]
+    diagnostic_level             = "standard"
+    non_finite_policy            = "raise"
+
+[checkpointing.checkpoint]
+    dirpath             = "checkpoints/hrm-v1-routebind"
+    filename            = "step={step:06d}.ckpt"
+    every_n_train_steps = 1000
+    save_last           = true
+    save_on_exception   = true
+
+[logging]
+    save_dir  = "logs"
+    name      = "hrm-v1-routebind"
+    log_graph = false
+    prefix    = ""

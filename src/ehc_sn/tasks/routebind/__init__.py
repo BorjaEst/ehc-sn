@@ -98,7 +98,7 @@ from .runtime import (
     extract_routebind_task_input,
 )
 from .supervision import (
-    RoutebindFieldSupervision,
+    RoutebindSupervision,
     build_routebind_supervision,
 )
 from .targets import (
@@ -146,7 +146,7 @@ __all__ = [
     "RealizedAdmissionPolicy",
     "RoutebindCorpusSchema",
     "RoutebindEvaluationSourceContext",
-    "RoutebindFieldSupervision",
+    "RoutebindSupervision",
     "RoutebindPreset",
     "RoutebindSampleInspection",
     "RoutebindStepScore",

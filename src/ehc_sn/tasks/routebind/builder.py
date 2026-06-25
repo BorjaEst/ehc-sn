@@ -994,8 +994,8 @@ def build_routebind_task_corpus(
     dagflow_root: Path,
     dagflow_graph_id: str,
     corpus: str = "default",
-    storage_height: int = 32,
-    storage_width: int = 32,
+    storage_height: int = 30,
+    storage_width: int = 30,
     field_decay_spatial: float = 0.9848,
     field_decay_semantic: float = 0.8,
     max_supported_route_length: int = 150,
@@ -1037,8 +1037,8 @@ def build_routebind_task_corpus(
         dagflow_graph_id: Stable artifact ID within *dagflow_root*
             identifying the single DAG used for this corpus.
         corpus: Corpus label (e.g. ``"default"``).
-        storage_height: Storage canvas height in cells (default: 32).
-        storage_width: Storage canvas width in cells (default: 32).
+        storage_height: Storage canvas height in cells (default: 30).
+        storage_width: Storage canvas width in cells (default: 30).
         field_decay_spatial: Spatial field decay factor gamma_space in
             ``(0, 1)``.
         field_decay_semantic: Semantic field decay factor gamma_sem in

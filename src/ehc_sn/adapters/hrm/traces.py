@@ -38,6 +38,13 @@ from ehc_sn.traces.keys import (  # fmt: skip
     GOALTRACE_TRACE_KEY_FIRING_FIELD,
     MAZEHARD_META_KEY_GT_OVERLAY,
     MAZEHARD_META_KEY_INPUT_IDS,
+    ROUTEBIND_META_KEY_CELL_MASK,
+    ROUTEBIND_META_KEY_CELL_TYPE,
+    ROUTEBIND_META_KEY_GOAL_FLAG,
+    ROUTEBIND_META_KEY_OBSERVATION_ID,
+    ROUTEBIND_META_KEY_START_FLAG,
+    ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
+    ROUTEBIND_META_KEY_TARGET_WAYPOINT,
     SEQMAZE_META_KEY_N_NODES,
     SEQMAZE_META_KEY_NODE_GOAL_FLAG,
     SEQMAZE_META_KEY_NODE_START_FLAG,
@@ -284,14 +291,87 @@ def build_goaltrace_hrm_trace_meta(
 
 
 # =============================================================================
+# Routebind HRM ACT trace fields
+# =============================================================================
+
+
+class _RoutebindACTTraceTaskOutput(Protocol):
+    """Minimal task payload exposing routebind trajectory field."""
+
+    trajectory_field: Tensor
+
+
+class _RoutebindACTTraceOutputs(Protocol):
+    """Minimal raw ACT controller-step output consumed by routebind trace getters."""
+
+    task: _RoutebindACTTraceTaskOutput
+
+
+class _RoutebindACTTraceContext(Protocol):
+    """Trace context expected by routebind ACT trace fields."""
+
+    outputs: _RoutebindACTTraceOutputs
+
+
+def _get_routebind_trajectory_field_act(
+    ctx: _RoutebindACTTraceContext,
+) -> TraceValue:
+    """Read routebind trajectory field from ACT backbone bridge output."""
+    return ctx.outputs.task.trajectory_field.detach().cpu()
+
+
+ROUTEBIND_HRM_ACT_TRAJECTORY_FIELD: TraceField = TraceField(
+    name="routebind/trajectory_field",
+    get=_get_routebind_trajectory_field_act,
+)
+
+ROUTEBIND_HRM_ACT_TRACE_FIELDS: tuple[TraceField, ...] = (
+    ROUTEBIND_HRM_ACT_TRAJECTORY_FIELD,
+)
+"""Trace fields for Routebind × HRM ACT evaluation."""
+
+
+def build_routebind_hrm_trace_meta(batch: dict) -> dict:
+    """Build trace metadata for routebind evaluation traces from a batch dict.
+
+    Extracts all sample-constant metadata fields (input channels, targets)
+    from the collated batch and returns them as a flat dict of numpy arrays
+    ready for insertion into ``TraceTree.attached_meta``.
+    """
+    import numpy as np
+
+    def _to_np(key: str) -> np.ndarray:
+        val = batch[key]
+        return val.cpu().numpy() if hasattr(val, "cpu") else np.asarray(val)
+
+    meta: dict[str, np.ndarray] = {
+        ROUTEBIND_META_KEY_CELL_TYPE: _to_np("cell_type"),
+        ROUTEBIND_META_KEY_OBSERVATION_ID: _to_np("observation_id"),
+        ROUTEBIND_META_KEY_START_FLAG: _to_np("start_flag"),
+        ROUTEBIND_META_KEY_GOAL_FLAG: _to_np("goal_flag"),
+        ROUTEBIND_META_KEY_CELL_MASK: _to_np("cell_mask"),
+    }
+
+    if "target_trajectory" in batch:
+        meta[ROUTEBIND_META_KEY_TARGET_TRAJECTORY] = _to_np("target_trajectory")
+    if "target_waypoint" in batch:
+        meta[ROUTEBIND_META_KEY_TARGET_WAYPOINT] = _to_np("target_waypoint")
+
+    return meta
+
+
+# =============================================================================
 __all__ = [
     "build_mazehard_hrm_trace_meta",
     "build_seqmaze_hrm_trace_meta",
     "build_seqmaze_hrm_actor_critic_trace_meta",
     "build_goaltrace_hrm_trace_meta",
+    "build_routebind_hrm_trace_meta",
     "MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS",
     "MAZE_HARD_HRM_ACT_TRACE_FIELDS",
     "MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY",
+    "ROUTEBIND_HRM_ACT_TRACE_FIELDS",
+    "ROUTEBIND_HRM_ACT_TRAJECTORY_FIELD",
     "SEQMAZE_HRM_ACTOR_CRITIC_TRACE_FIELDS",
     "MAZEHARD_META_KEY_GT_OVERLAY",
     "MAZEHARD_META_KEY_INPUT_IDS",

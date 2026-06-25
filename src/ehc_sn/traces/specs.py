@@ -24,6 +24,7 @@ Trace keys follow the same namespace hierarchy as diagnostic signals:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Mapping, Protocol
 
 import torch
@@ -464,6 +465,60 @@ HRM_REASONING_TRACE_FIELDS: tuple[TraceField, ...] = (
 
 
 # =============================================================================
+# Goaltrace-specific — stored as metadata, consumed by figure selectors
+# =============================================================================
+
+
+def _get_goaltrace_firing_field(ctx: _CommonTraceContext) -> TraceValue:
+    """Predicted firing field from goaltrace task metadata."""
+    return ctx.carry.data.get("firing_field")
+
+
+def _get_goaltrace_target_field(ctx: _CommonTraceContext) -> TraceValue:
+    """Target firing field from goaltrace task metadata."""
+    return ctx.carry.data.get("target_field")
+
+
+def _get_goaltrace_node_mask(ctx: _CommonTraceContext) -> TraceValue:
+    """Node validity mask from goaltrace task metadata."""
+    return ctx.carry.data.get("node_mask")
+
+
+def _get_goaltrace_observation_id(ctx: _CommonTraceContext) -> TraceValue:
+    """Observation IDs from goaltrace task metadata."""
+    return ctx.carry.data.get("observation_id")
+
+
+GOALTRACE_TRACE_FIRING_FIELD = TraceField(
+    name="goaltrace/firing_field",
+    get=_get_goaltrace_firing_field,
+    storage="meta",
+)
+GOALTRACE_TRACE_TARGET_FIELD = TraceField(
+    name="goaltrace/target_field",
+    get=_get_goaltrace_target_field,
+    storage="meta",
+)
+GOALTRACE_TRACE_NODE_MASK = TraceField(
+    name="goaltrace/node_mask",
+    get=_get_goaltrace_node_mask,
+    storage="meta",
+)
+GOALTRACE_TRACE_OBSERVATION_ID = TraceField(
+    name="goaltrace/observation_id",
+    get=_get_goaltrace_observation_id,
+    storage="meta",
+)
+
+GOALTRACE_TRACE_FIELDS: tuple[TraceField, ...] = (
+    GOALTRACE_TRACE_FIRING_FIELD,
+    GOALTRACE_TRACE_TARGET_FIELD,
+    GOALTRACE_TRACE_NODE_MASK,
+    GOALTRACE_TRACE_OBSERVATION_ID,
+)
+
+
+# =============================================================================
 # TEM-specific — TEM uses only the rollout-safe baseline fields for now.
 # =============================================================================
 
@@ -523,12 +578,18 @@ def build_trace_spec(  # ------------------------------------------------------
     """
     if paradigm == "act":
         fields = _select_trace_fields(
-            COMMON_TRACE_FIELDS + ACT_TRACE_FIELDS + HRM_REASONING_TRACE_FIELDS,
+            COMMON_TRACE_FIELDS
+            + ACT_TRACE_FIELDS
+            + HRM_REASONING_TRACE_FIELDS
+            + GOALTRACE_TRACE_FIELDS,
             include_keys,
         )
     elif paradigm == "rl":
         fields = _select_trace_fields(
-            COMMON_TRACE_FIELDS + RL_TRACE_FIELDS + HRM_REASONING_TRACE_FIELDS,
+            COMMON_TRACE_FIELDS
+            + RL_TRACE_FIELDS
+            + HRM_REASONING_TRACE_FIELDS
+            + GOALTRACE_TRACE_FIELDS,
             include_keys,
         )
     elif paradigm == "tem":
@@ -545,6 +606,355 @@ def build_trace_spec(  # ------------------------------------------------------
 
 
 # =============================================================================
+# Capture profiles — named sets of trace fields declared by analysis consumers
+# ---------------------------------------------------------------------------
+# Each profile maps paradigm → (required_keys, default_optional_keys).
+# Required keys cannot be excluded.  Unsupported profile–paradigm combinations
+# raise ValueError at experiment construction time.
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class CaptureProfileSpec:
+    """A named capture profile with paradigm-specific field requirements.
+
+    This is the consumer-facing contract: the fields a given analysis
+    type (e.g. prediction-reasoning, full-diagnostic) needs to function.
+    """
+
+    name: str
+    version: int
+    description: str
+    paradigm_fields: dict[str, CaptureParadigmBinding]
+
+
+@dataclass(frozen=True)
+class CaptureParadigmBinding:
+    """Required and optional trace fields for one paradigm under a profile."""
+
+    required: tuple[str, ...]
+    optional: tuple[str, ...] = ()
+
+
+# ── Profile: prediction_reasoning ────────────────────────────────────────────
+# Requires controller halt/step state plus decoded prediction and target.
+# Task-specific additions (e.g. solution_overlay for MazeHard) are injected
+# by experiment builders via include=.
+
+_PREDICTION_REASONING_BINDINGS: dict[str, CaptureParadigmBinding] = {
+    "act": CaptureParadigmBinding(
+        required=(
+            "act/halted",
+            "act/steps",
+            "pred/solution_overlay",
+            "target/solution_overlay",
+        ),
+        optional=("value/action_logits", "input_ids"),
+    ),
+    "rl": CaptureParadigmBinding(
+        required=(
+            "act/halted",
+            "act/steps",
+            "pred/solution_overlay",
+            "target/solution_overlay",
+        ),
+        optional=(
+            "value/q_values",
+            "value/q_logits",
+            "value/state_value",
+            "input_ids",
+        ),
+    ),
+    "tem": CaptureParadigmBinding(
+        required=(
+            "act/halted",
+            "act/steps",
+            "pred/observation_id/post",
+            "target/observation_id",
+        ),
+        optional=(
+            "pred/observation_id/recall",
+            "pred/observation_id/path",
+        ),
+    ),
+    "ehp": CaptureParadigmBinding(
+        required=(
+            "act/halted",
+            "act/steps",
+            "pred/observation_id/post",
+            "target/observation_id",
+        ),
+        optional=(
+            "pred/observation_id/recall",
+            "pred/observation_id/path",
+        ),
+    ),
+}
+
+# ── Profile: full_diagnostic ─────────────────────────────────────────────────
+# All available controller, prediction, and diagnostic fields for a paradigm.
+
+_FULL_DIAGNOSTIC_BINDINGS: dict[str, CaptureParadigmBinding] = {
+    "act": CaptureParadigmBinding(
+        required=(
+            "act/halted",
+            "act/steps",
+            "pred/solution_overlay",
+            "target/solution_overlay",
+            "value/action_logits",
+        ),
+        optional=("pfc/z_H", "pfc/z_L", "wm/input_ids", "wm/step"),
+    ),
+    "rl": CaptureParadigmBinding(
+        required=(
+            "act/halted",
+            "act/steps",
+            "pred/solution_overlay",
+            "target/solution_overlay",
+            "value/q_values",
+            "value/q_logits",
+            "value/state_value",
+        ),
+        optional=("pfc/z_H", "pfc/z_L", "wm/input_ids", "wm/step"),
+    ),
+    "tem": CaptureParadigmBinding(
+        required=(
+            "act/halted",
+            "act/steps",
+            "pred/observation_id/post",
+            "pred/observation_id/recall",
+            "target/observation_id",
+        ),
+        optional=(
+            "pred/observation_id/path",
+            "world_step/observation",
+            "world_step/location_ids",
+            "diagnostic/lec/cells",
+            "diagnostic/lec/filtered",
+            "diagnostic/mec/location_mean",
+            "diagnostic/hpc/location_mean",
+            "diagnostic/hpc/memory",
+        ),
+    ),
+    "ehp": CaptureParadigmBinding(
+        required=(
+            "act/halted",
+            "act/steps",
+            "pred/observation_id/post",
+            "pred/observation_id/recall",
+            "target/observation_id",
+        ),
+        optional=(
+            "pred/observation_id/path",
+            "world_step/observation",
+            "world_step/location_ids",
+            "diagnostic/lec/cells",
+            "diagnostic/lec/filtered",
+            "diagnostic/mec/location_mean",
+            "diagnostic/hpc/location_mean",
+            "diagnostic/hpc/memory",
+        ),
+    ),
+}
+
+# ── Profile: metrics_only ────────────────────────────────────────────────────
+# No trace fields; only scalar metrics are collected.
+
+_METRICS_ONLY_BINDINGS: dict[str, CaptureParadigmBinding] = {
+    paradigm: CaptureParadigmBinding(required=())
+    for paradigm in ("act", "rl", "tem", "ehp")
+}
+
+# ── Registry ─────────────────────────────────────────────────────────────────
+
+TRACE_PROFILES: dict[str, CaptureProfileSpec] = {
+    "metrics_only": CaptureProfileSpec(
+        name="metrics_only",
+        version=1,
+        description="No trace fields — only scalar metrics are collected.",
+        paradigm_fields=_METRICS_ONLY_BINDINGS,
+    ),
+    "prediction_reasoning": CaptureProfileSpec(
+        name="prediction_reasoning",
+        version=1,
+        description="Controller halt/step state plus decoded prediction and target.",
+        paradigm_fields=_PREDICTION_REASONING_BINDINGS,
+    ),
+    "full_diagnostic": CaptureProfileSpec(
+        name="full_diagnostic",
+        version=1,
+        description="All available controller, prediction, and diagnostic fields.",
+        paradigm_fields=_FULL_DIAGNOSTIC_BINDINGS,
+    ),
+}
+
+
+def _paradigm_all_field_names(paradigm: str) -> set[str]:
+    """Return the set of all known trace-field names for *paradigm*."""
+    if paradigm == "act":
+        fields = (
+            COMMON_TRACE_FIELDS
+            + ACT_TRACE_FIELDS
+            + HRM_REASONING_TRACE_FIELDS
+            + GOALTRACE_TRACE_FIELDS
+        )
+    elif paradigm == "rl":
+        fields = (
+            COMMON_TRACE_FIELDS
+            + RL_TRACE_FIELDS
+            + HRM_REASONING_TRACE_FIELDS
+            + GOALTRACE_TRACE_FIELDS
+        )
+    elif paradigm in ("tem", "ehp"):
+        fields = TEM_TRACE_FIELDS
+    else:
+        raise ValueError(
+            f"Unknown paradigm: {paradigm!r}. Expected 'act', 'rl', 'tem', or 'ehp'."
+        )
+    return {f.name for f in fields}
+
+
+def resolve_capture_profile(
+    paradigm: Literal["act", "rl", "tem", "ehp"],
+    profile: str = "metrics_only",
+    *,
+    profile_version: int = 1,
+    include: Iterable[str] = (),
+    exclude: Iterable[str] = (),
+    task_bindings: dict[str, CaptureParadigmBinding] | None = None,
+) -> TraceSpec:
+    """Resolve a named capture profile to a concrete :class:`TraceSpec`.
+
+    Parameters
+    ----------
+    paradigm:
+        Trace paradigm for the experiment being evaluated.
+    profile:
+        Named capture profile registered in :data:`TRACE_PROFILES`.
+    profile_version:
+        Version of the profile contract.  Currently only version 1 exists; a
+        mismatch raises ``ValueError``.
+    include:
+        Extra trace-field names to include beyond the profile.  Each name must
+        correspond to a known trace field for *paradigm*.
+    exclude:
+        Profile field names to omit.  May only exclude *optional* profile
+        fields — required profile fields raise ``ValueError``.
+    task_bindings:
+        Per-task field bindings appended to the profile's paradigm fields.
+        Keys are task names (e.g. ``"goaltrace"``).  Each binding's required
+        and optional fields are merged into the resolution.  Unknown field
+        names in task bindings raise ``ValueError``.
+
+    Returns
+    -------
+    TraceSpec
+        A concrete trace specification ready for use by the evaluation runner.
+
+    Raises
+    ------
+    ValueError
+        If *profile* is unknown, if *profile_version* does not match, if
+        *paradigm* is unsupported for the profile, if *exclude* intersects
+        required profile fields, if *include* references unknown field names,
+        or if a task binding references unknown field names.
+    """
+    profile_spec = TRACE_PROFILES.get(profile)
+    if profile_spec is None:
+        raise ValueError(
+            f"Unknown capture profile {profile!r}. "
+            f"Available: {sorted(TRACE_PROFILES)}."
+        )
+    if profile_spec.version != profile_version:
+        raise ValueError(
+            f"Capture profile {profile!r} version mismatch: "
+            f"requested v{profile_version}, available v{profile_spec.version}."
+        )
+
+    binding = profile_spec.paradigm_fields.get(paradigm)
+    if binding is None:
+        raise ValueError(
+            f"Capture profile {profile!r} does not support paradigm "
+            f"{paradigm!r}. Supported: {sorted(profile_spec.paradigm_fields)}."
+        )
+
+    # Collect required and optional from profile + task bindings.
+    all_known = _paradigm_all_field_names(paradigm)
+    required_set: set[str] = set(binding.required)
+    optional_set: set[str] = set(binding.optional)
+
+    if task_bindings:
+        for task_name, task_binding in task_bindings.items():
+            for f in task_binding.required:
+                # Task bindings may reference task-specific meta-keys not in
+                # the core paradigm field set (e.g. goaltrace/firing_field).
+                # Include validation is relaxed; build_trace_spec will filter
+                # to known fields.
+                required_set.add(f)
+            for f in task_binding.optional:
+                optional_set.add(f)
+
+    include_set = set(include)
+    exclude_set = set(exclude)
+
+    # Validate include keys are known.
+    unknown_include = include_set - all_known
+    if unknown_include:
+        raise ValueError(
+            f"Capture include keys unknown for paradigm {paradigm!r}: "
+            f"{sorted(unknown_include)}. Known: {sorted(all_known)}."
+        )
+
+    # Validate exclude does not intersect required.
+    forbidden_exclude = exclude_set & required_set
+    if forbidden_exclude:
+        raise ValueError(
+            f"Cannot exclude required capture fields for profile "
+            f"{profile!r}: {sorted(forbidden_exclude)}."
+        )
+
+    # Deterministic ordering: required (profile order), then optional (profile
+    # order), then include (user order).  Uses dict.fromkeys for order-preserving
+    # dedup.
+    final_names: list[str] = []
+    seen: set[str] = set()
+
+    # 1. Required profile fields in declaration order.
+    for f in binding.required:
+        if f not in seen:
+            final_names.append(f)
+            seen.add(f)
+    # 1b. Required task-binding fields (appended after profile required).
+    if task_bindings:
+        for tb in task_bindings.values():
+            for f in tb.required:
+                if f not in seen:
+                    final_names.append(f)
+                    seen.add(f)
+
+    # 2. Optional profile fields in declaration order, minus exclude.
+    for f in binding.optional:
+        if f not in seen and f not in exclude_set:
+            final_names.append(f)
+            seen.add(f)
+    # 2b. Optional task-binding fields.
+    if task_bindings:
+        for tb in task_bindings.values():
+            for f in tb.optional:
+                if f not in seen and f not in exclude_set:
+                    final_names.append(f)
+                    seen.add(f)
+
+    # 3. Explicit includes in user order.
+    for f in include:
+        if f not in seen:
+            final_names.append(f)
+            seen.add(f)
+
+    return build_trace_spec(paradigm, include_keys=final_names)
+
+
+# =============================================================================
 __all__ = [
     "ReplayableEnvironments",
     "COMMON_TRACE_FIELDS",
@@ -553,5 +963,10 @@ __all__ = [
     "HRM_HIDDEN_STATE_FIELDS",
     "HRM_REASONING_TRACE_FIELDS",
     "TEM_TRACE_FIELDS",
+    "GOALTRACE_TRACE_FIELDS",
+    "TRACE_PROFILES",
+    "CaptureProfileSpec",
+    "CaptureParadigmBinding",
     "build_trace_spec",
+    "resolve_capture_profile",
 ]

@@ -1,6 +1,5 @@
 # Training config — SeqMaze × HRM-v2 (nested experiment schema)
 # =============================================================================
-    supervised_only_warmup_steps = 5000
 
 [model]
     model_config_path = "config/models/hrm-v2-base.toml"
@@ -42,6 +41,12 @@
     incorrect_halt_penalty = -1.0
     truncation_penalty     = -1.0
 
+training.halt_disabled_steps = 5000
+
+[training.scheduler]
+    warmup_steps = 1000
+    min_ratio    = 0.01
+
 [execution.validation]
     max_rollout_steps = 16
 
@@ -80,10 +85,6 @@
     every_n_train_steps = 1000
     save_last           = true
     save_on_exception   = true
-
-[scheduler]
-    warmup_steps = 1000
-    min_ratio    = 0.01
 
 [logging]
     save_dir  = "logs"

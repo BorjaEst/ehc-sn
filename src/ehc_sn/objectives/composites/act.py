@@ -1,23 +1,25 @@
-"""Regime-level ACT scorer combining task and control objectives.
+"""Generic ACT scorer — composition of task, halt, and continuation losses.
 
-This module owns the composition of supervised task loss (token prediction
-or field regression) with ACT computation-control losses (halt BCE, optional
-continue bootstrap).
+This module owns only the ACT-level loss composition:
 
-Usage::
+    total_loss = task_loss_sum + c_halt * halt_loss + c_continue * continue_loss
 
-    scorer = ACTSupervisedScorer(
-        ACTSupervisedScorerConfig(task_modality="field"),
-        task_objective=FieldRegressionObjective(),
-        halt_objective=HaltClassificationObjective(),
-    )
-    step = scorer.evaluate_step(record, inputs=scoring_inputs)
+It does NOT know about:
+
+- task modalities (token, field, sequence, structured)
+- task attribute names (firing_field, trajectory_field, labels)
+- supervision struct shapes
+- task-output extraction
+- controller internals
+
+Those are owned by ``objectives/task/`` evaluators and the Lightning
+orchestration layer.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, TypeAlias
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -27,7 +29,6 @@ from torch import Tensor, nn
 from ehc_sn.metrics.keys import (
     ACT_LOSS_Q_CONTINUE,
     ACT_LOSS_Q_DONE,
-    LOSS_TOKEN,
 )
 from ehc_sn.metrics.signals import (
     CONTINUE_LOGIT_MEAN,
@@ -41,125 +42,37 @@ from ehc_sn.metrics.step_metrics import (
     TokenAgg,
     TransitionAgg,
 )
-from ehc_sn.metrics.token import (
-    AccuracyStats,
-    build_token_step_metrics,
+from ehc_sn.metrics.token import build_token_step_metrics
+from ehc_sn.objectives.contracts import (
+    ACTControlPrediction,
+    ACTSupervisedScoringInput,
+    TaskStepEvaluation,
 )
 from ehc_sn.objectives.control.halt import (
     HaltClassificationObjective,
     HaltObjectiveInput,
 )
-from ehc_sn.objectives.supervised.field import (
-    FieldObjectiveInput,
-    FieldRegressionObjective,
-)
-from ehc_sn.objectives.supervised.token import (
-    TokenObjectiveInput,
-    TokenPredictionObjective,
-)
 from ehc_sn.rollouts.runtime import StepRecord
 from ehc_sn.utils.detach import DetachMixin
 
-# =============================================================================
-# Per-step typed contracts
-# =============================================================================
-
-
-@dataclass(frozen=True)
-class TokenACTInput:
-    """Token-prediction supervision for one ACT step."""
-
-    logits: Tensor  # (B, S, V)
-    labels: Tensor  # (B, S)
-    weights: Tensor | None  # (B, S) optional token weights
-
-
-@dataclass(frozen=True)
-class FieldACTInput:
-    """Field-regression supervision for one ACT step."""
-
-    prediction: Tensor  # (B, N)
-    target: Tensor  # (B, N)
-    mask: Tensor  # (B, N) bool
-
-
-@dataclass(frozen=True)
-class ACTHaltInput:
-    """Halt-classification supervision for one ACT step."""
-
-    logits: Tensor  # (B,)
-    targets: Tensor  # (B,) float in [0, 1]
-
-
-@dataclass(frozen=True)
-class ACTContinuationInput:
-    """Continue-bootstrap supervision for one ACT step."""
-
-    continue_logit: Tensor  # (B,)
-    target_q: Tensor  # (B,) detached
-
-
-@dataclass(frozen=True)
-class TokenACTScoringInput:
-    """Complete typed scoring input for token-modality ACT steps."""
-
-    prediction: TokenACTInput
-    halt: ACTHaltInput
-    continuation: ACTContinuationInput | None = None
-    accuracy: AccuracyStats | None = None
-
-
-@dataclass(frozen=True)
-class FieldACTScoringInput:
-    """Complete typed scoring input for field-modality ACT steps."""
-
-    prediction: FieldACTInput
-    halt: ACTHaltInput
-    continuation: ACTContinuationInput | None = None
-
-
-# Union type used by traversal infrastructure.
-ACTScoringInput: TypeAlias = TokenACTScoringInput | FieldACTScoringInput
-
 
 # =============================================================================
-class ACTStepOutput(Protocol):
-    """Objective-facing output contract for ACT rollout steps."""
+class ACTSupervisedScorerConfig(BaseModel, extra="forbid", frozen=True):
+    """Configuration for generic ACT loss composition.
 
-    task: object
-    action_logits: Tensor
-    done_action: int
-
-
-# =============================================================================
-class ACTSupervisedScorerConfig(BaseModel, extra="forbid"):
-    """Configuration for :class:`ACTSupervisedScorer`.
+    Owns only the coefficients that compose task loss with control
+    losses.  Task-specific evaluation configuration belongs in the
+    corresponding ``*TaskEvaluatorConfig``.
 
     Attributes:
-        task_modality: Whether the scorer evaluates token predictions or
-            continuous-field predictions.
-        c_task: Task-supervision loss coefficient (token CE or field MSE).
-        c_halt: Halt BCE (Q-done) loss coefficient.
-        c_continue: Q(continue) bootstrap loss coefficient.
-        token_loss: Cross-entropy variant for token tasks.
-        field_loss: Loss function for field tasks (only ``"mse"`` in v1).
+        task_loss_coefficient: Weight applied to the task loss sum.
+        halt_loss_coefficient: Weight applied to the halt BCE.
+        continue_loss_coefficient: Weight applied to the continuation BCE.
     """
 
-    task_modality: Literal["token", "field"] = Field(
-        ...,
-        description="Modality of the task objective: 'token' or 'field'.",
-    )
-    c_task: float = Field(default=1.0, ge=0.0)
-    c_halt: float = Field(default=0.5, ge=0.0)
-    c_continue: float = Field(default=0.5, ge=0.0)
-    token_loss: str = Field(
-        default="softmax_cross_entropy",
-        description="Token CE loss variant (only used when task_modality='token').",
-    )
-    field_loss: str = Field(
-        default="mse",
-        description="Field loss variant (only used when task_modality='field').",
-    )
+    task_loss_coefficient: float = Field(default=1.0, ge=0.0)
+    halt_loss_coefficient: float = Field(default=0.5, ge=0.0)
+    continue_loss_coefficient: float = Field(default=0.5, ge=0.0)
 
 
 # =============================================================================
@@ -219,172 +132,178 @@ def _maybe_sum(tensor: Tensor | None) -> Tensor | None:
 
 # =============================================================================
 class ACTSupervisedScorer(nn.Module):
-    """Regime-level scorer composing task supervision with ACT control.
+    """Generic ACT scorer — task-agnostic loss composition.
 
-    Injects a task-specific objective (``TokenPredictionObjective`` or
-    ``FieldRegressionObjective``) and shares a common
-    ``HaltClassificationObjective``.  The task_losses are combined with
-    halt and optional continue losses using configurable coefficients.
+    Composes a pre-computed task evaluation with halt and continuation
+    losses.  Does NOT own task-specific objectives, supervision
+    interpretation, or output-name probing.
+
+    Example::
+
+        scorer = ACTSupervisedScorer(c_task=1.0, c_halt=0.5, c_continue=0.5)
+        step = scorer.evaluate_step(
+            task=task_eval,       # TaskStepEvaluation
+            control=control_pred, # ACTControlPrediction
+        )
     """
 
     def __init__(  # ----------------------------------------------------------
         self,
-        config: ACTSupervisedScorerConfig,
-        *,
-        task_objective: nn.Module | None = None,
         halt_objective: HaltClassificationObjective | None = None,
+        c_task: float = 1.0,
+        c_halt: float = 0.5,
+        c_continue: float = 0.5,
     ) -> None:
         super().__init__()
-        self._config = config
-        self._task_modality = config.task_modality
-
-        if task_objective is not None:
-            self._task = task_objective
-        elif self._task_modality == "token":
-            self._task = TokenPredictionObjective(loss_fn=config.token_loss)
-        elif self._task_modality == "field":
-            self._task = FieldRegressionObjective()
-        else:
-            raise ValueError(
-                f"Unknown task_modality: {config.task_modality!r}."
-            )
-
         self._halt = halt_objective or HaltClassificationObjective()
-
-    @property
-    def config(self) -> ACTSupervisedScorerConfig:
-        """Return the scorer configuration."""
-        return self._config
+        self._c_task = c_task
+        self._c_halt = c_halt
+        self._c_continue = c_continue
 
     # ------------------------------------------------------------------
 
+    # Public protocol-conforming entry point (RolloutScorer contract).
     def evaluate_step(  # -----------------------------------------------------
         self,
         record: StepRecord,
         *,
-        inputs: ACTScoringInput,
+        inputs: ACTSupervisedScoringInput,
     ) -> ACTSupervisedStep:
-        """Score one ACT rollout step for token or field tasks.
+        """Compose task loss with ACT control losses (RolloutScorer protocol).
+
+        Delegates to :meth:`_evaluate_task_control`.  The ``record``
+        parameter is accepted for protocol conformance but unused —
+        task evaluation is already complete in ``inputs``.
 
         Args:
-            record: Executed step record.
-            inputs: Typed per-step scoring input.
+            record: Executed step record (unused — protocol compat).
+            inputs: Named container with pre-computed task evaluation
+                and control prediction.
 
         Returns:
-            Scored step with unified :class:`ACTStepLosses`.
+            Composed step with all loss terms and signals.
         """
-        outputs = record.outputs
+        del record
+        return self._evaluate_task_control(
+            task=inputs.task,
+            control=inputs.control,
+        )
 
-        # --- Task loss -------------------------------------------------------
-        if isinstance(inputs, TokenACTScoringInput):
-            token_obj_input = TokenObjectiveInput(
-                logits=inputs.prediction.logits,
-                labels=inputs.prediction.labels,
-                weights=inputs.prediction.weights,
-            )
-            task_result = self._task(token_obj_input)
-            loss_task_per_sample = task_result.terms["token_per_sample"]
-            stats: AccuracyStats | None = inputs.accuracy
-        else:
-            field_obj_input = FieldObjectiveInput(
-                prediction=inputs.prediction.prediction,
-                target=inputs.prediction.target,
-                mask=inputs.prediction.mask,
-            )
-            task_result = self._task(field_obj_input)
-            loss_task_per_sample = task_result.terms["field_per_sample"]
-            stats = None
+    # Private task-agnostic implementation.
+    def _evaluate_task_control(  # --------------------------------------------
+        self,
+        *,
+        task: TaskStepEvaluation,
+        control: ACTControlPrediction,
+    ) -> ACTSupervisedStep:
+        """Compose task loss with ACT control losses (task-agnostic).
 
+        This is the core implementation.  ``evaluate_step`` delegates
+        to this method after unpacking the named input.
+
+        Args:
+            task: Pre-computed task evaluation (loss, completion, metrics).
+            control: Control prediction (halt logit, optionally continue).
+
+        Returns:
+            Composed step with all loss terms and signals.
+        """
         # --- Halt loss -------------------------------------------------------
         halt_result = self._halt(
             HaltObjectiveInput(
-                logits=inputs.halt.logits,
-                targets=inputs.halt.targets,
+                logits=control.halt_logit,
+                targets=task.completion_target,
             )
         )
         loss_halt_per_sample = halt_result.terms["halt_per_sample"]
 
         # --- Continue loss ---------------------------------------------------
         loss_continue_per_sample: Tensor | None = None
-        if inputs.continuation is not None:
+        if (
+            control.continue_logit is not None
+            and task.continuation_target is not None
+        ):
             loss_continue_per_sample = F.binary_cross_entropy_with_logits(
-                input=inputs.continuation.continue_logit,
-                target=inputs.continuation.target_q,
+                input=control.continue_logit,
+                target=task.continuation_target,
                 reduction="none",
             )
 
         # --- Assemble losses ------------------------------------------------
         losses = ACTStepLosses(
-            task_sum=loss_task_per_sample.sum(),
+            task_sum=task.task_loss_sum,
             halt_sum=loss_halt_per_sample.sum(),
             continue_sum=_maybe_sum(loss_continue_per_sample),
-            c_task=self.config.c_task,
-            c_halt=self.config.c_halt,
-            c_continue=self.config.c_continue,
+            c_task=self._c_task,
+            c_halt=self._c_halt,
+            c_continue=self._c_continue,
         )
 
-        # --- Metrics ---------------------------------------------------------
-        B = max(loss_task_per_sample.shape[0], 1)
-        snapshot = record.snapshot
-        steps_t = getattr(snapshot, "steps", None)
-        if steps_t is None:
-            steps_t = losses.task_sum.new_zeros(B, dtype=torch.long)
-        halted_t = getattr(snapshot, "halted", None)
-        if halted_t is None:
-            halted_t = torch.zeros(
-                B, dtype=torch.bool, device=losses.task_sum.device
-            )
+        # --- Signals ---------------------------------------------------------
+        done_logit = control.halt_logit
+        cont_logit = control.continue_logit
+        if cont_logit is None:
+            cont_logit = torch.tensor(0.0, device=done_logit.device)
+        signals: dict[str, Tensor] = {
+            LOSS_Q_DONE: losses.halt_sum.detach(),
+            HALT_LOGIT_MEAN: done_logit.detach().mean(),
+            CONTINUE_LOGIT_MEAN: cont_logit.detach().mean(),
+        }
+        if losses.continue_sum is not None:
+            signals["act_loss_q_continue"] = losses.continue_sum.detach()
 
+        # Build StepMetrics — use task accuracy stats when available
+        # (token tasks), fall back to zeros for non-token tasks (field).
+        B = max(task.completion_target.shape[0], 1)
+        bc = torch.tensor(float(B))
+        device = task.completion_target.device
+        task_metrics = task.metrics if isinstance(task.metrics, dict) else {}
         extras: dict[str, RatioStat] = {}
-        if isinstance(inputs, TokenACTScoringInput):
-            extra_ratios = self._build_token_metric_ratios(losses, B)
-            if extra_ratios:
-                extras.update(extra_ratios)
+        extras["loss_token"] = RatioStat(
+            numerator_sum=task_metrics.get(
+                "token_ce_sum", losses.halt_sum.new_zeros(())
+            ),
+            denominator_sum=task_metrics.get("token_ce_count", bc),
+        )
+        extras[ACT_LOSS_Q_DONE] = RatioStat(
+            numerator_sum=losses.halt_sum.detach(),
+            denominator_sum=bc,
+        )
+        extras[ACT_LOSS_Q_CONTINUE] = RatioStat(
+            numerator_sum=(
+                losses.continue_sum.detach()
+                if losses.continue_sum is not None
+                else losses.halt_sum.new_zeros(())
+            ),
+            denominator_sum=bc,
+        )
+
+        if task.accuracy_stats is not None:
             metrics = build_token_step_metrics(
-                steps_t,
-                halted_t,
-                stats,
-                extras,
+                steps=torch.zeros(B, dtype=torch.long, device=device),
+                completed=torch.zeros(B, dtype=torch.bool, device=device),
+                stats=task.accuracy_stats,
+                extras=extras,
             )
         else:
-            metrics = self._build_field_fallback_metrics(
-                halted_t,
-                steps_t,
-                losses,
-                B,
-            )
-            extras["field_mse"] = RatioStat(
-                numerator_sum=losses.task_sum.detach(),
-                denominator_sum=torch.tensor(float(B)),
-            )
-            done_logit = outputs.action_logits[..., outputs.done_action]
-            extras["q_done_accuracy"] = RatioStat(
-                numerator_sum=(
-                    (done_logit > 0.0) == (inputs.halt.targets > 0.5)
-                )
-                .sum()
-                .float()
-                .detach(),
-                denominator_sum=torch.tensor(float(B)),
-            )
             metrics = StepMetrics(
                 episode=RolloutAgg(
-                    completed_count=halted_t.sum(),
-                    eligible_count=torch.tensor(float(B)),
+                    completed_count=torch.tensor(0.0),
+                    eligible_count=bc,
                     accuracy_sum=torch.tensor(0.0),
                     exact_sum=torch.tensor(0.0),
-                    steps_sum=(steps_t * halted_t).sum(),
+                    steps_sum=torch.tensor(0.0),
                 ),
                 episode_tokens=TokenAgg(
                     token_correct_sum=torch.tensor(0.0),
                     token_count_sum=torch.tensor(0.0),
                 ),
                 step=TransitionAgg(
-                    evaluated_count=torch.tensor(float(B)),
-                    eligible_count=torch.tensor(float(B)),
+                    evaluated_count=bc,
+                    eligible_count=bc,
                     accuracy_sum=torch.tensor(0.0),
                     exact_sum=torch.tensor(0.0),
-                    steps_sum=steps_t.sum(),
+                    steps_sum=torch.tensor(0.0),
                 ),
                 step_tokens=TokenAgg(
                     token_correct_sum=torch.tensor(0.0),
@@ -393,109 +312,19 @@ class ACTSupervisedScorer(nn.Module):
                 extras=extras,
             )
 
-        # --- Signals ---------------------------------------------------------
-        done_logit = outputs.action_logits[..., outputs.done_action]
-        non_done = [
-            i
-            for i in range(outputs.action_logits.shape[-1])
-            if i != outputs.done_action
-        ]
-        continue_logit = outputs.action_logits[..., non_done].max(dim=-1).values
-        signals: dict[str, Tensor] = {
-            LOSS_Q_DONE: losses.halt_sum.detach(),
-            HALT_LOGIT_MEAN: done_logit.detach().mean(),
-            CONTINUE_LOGIT_MEAN: continue_logit.detach().mean(),
-            ACT_LOSS_Q_CONTINUE: (
-                losses.continue_sum.detach()
-                if losses.continue_sum is not None
-                else losses.task_sum.new_zeros(())
-            ),
-        }
-
-        target_q = (
-            inputs.continuation.target_q
-            if inputs.continuation is not None
-            else None
-        )
-
         return ACTSupervisedStep(
             losses=losses,
             metrics=metrics,
-            outputs=outputs,
-            target_q=target_q,
+            outputs=None,
+            target_q=task.continuation_target,
             signals=signals,
-        )
-
-    # ------------------------------------------------------------------
-    def _build_token_metric_ratios(
-        self,
-        losses: ACTStepLosses,
-        batch_size: int,
-    ) -> dict[str, RatioStat]:
-        """Build detached ratio metrics for token tasks."""
-        bc = losses.task_sum.new_tensor(float(batch_size))
-        cs = losses.continue_sum
-        return {
-            LOSS_TOKEN: RatioStat(losses.task_sum.detach(), bc),
-            ACT_LOSS_Q_DONE: RatioStat(losses.halt_sum.detach(), bc),
-            ACT_LOSS_Q_CONTINUE: RatioStat(
-                (
-                    cs.detach()
-                    if cs is not None
-                    else losses.task_sum.new_zeros(())
-                ),
-                bc,
-            ),
-        }
-
-    def _build_field_fallback_metrics(
-        self,
-        halted: Tensor,
-        steps: Tensor,
-        losses: ACTStepLosses,
-        batch_size: int,
-    ) -> StepMetrics:
-        """Build minimal StepMetrics when token stats are unavailable."""
-        B = max(batch_size, 1)
-        return StepMetrics(
-            episode=RolloutAgg(
-                completed_count=halted.sum(),
-                eligible_count=torch.tensor(float(B)),
-                accuracy_sum=torch.tensor(0.0),
-                exact_sum=torch.tensor(0.0),
-                steps_sum=(steps * halted).sum(),
-            ),
-            episode_tokens=TokenAgg(
-                token_correct_sum=torch.tensor(0.0),
-                token_count_sum=torch.tensor(0.0),
-            ),
-            step=TransitionAgg(
-                evaluated_count=torch.tensor(float(B)),
-                eligible_count=torch.tensor(float(B)),
-                accuracy_sum=torch.tensor(0.0),
-                exact_sum=torch.tensor(0.0),
-                steps_sum=steps.sum(),
-            ),
-            step_tokens=TokenAgg(
-                token_correct_sum=torch.tensor(0.0),
-                token_count_sum=torch.tensor(0.0),
-            ),
-            extras={},
         )
 
 
 # =============================================================================
 __all__ = [
-    "ACTSupervisedScorerConfig",
     "ACTSupervisedScorer",
     "ACTSupervisedStep",
     "ACTStepLosses",
-    "ACTStepOutput",
-    "ACTScoringInput",
-    "TokenACTScoringInput",
-    "FieldACTScoringInput",
-    "TokenACTInput",
-    "FieldACTInput",
-    "ACTHaltInput",
-    "ACTContinuationInput",
+    "ACTSupervisedScorerConfig",
 ]

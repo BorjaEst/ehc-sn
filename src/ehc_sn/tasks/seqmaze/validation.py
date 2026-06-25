@@ -117,7 +117,7 @@ def validate_stored_sample(
         return issues
 
     # --- Path length bounds ---
-    path_length = int(sample.get("path_length", np.array([0]))[0])
+    path_length = int(sample["path_length"])
     if path_length < 1 or path_length > t_max:
         issues.append(
             _issue(

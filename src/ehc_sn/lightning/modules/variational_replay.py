@@ -177,6 +177,10 @@ class TEMTrainingConfig(BaseModel, extra="forbid"):
         description="Per-rank carry buffer width (concurrent trajectory slots). "
         "``None`` during evaluation — carry is allocated from batch dimension.",
     )
+    scheduler: SchedulerConfig = Field(
+        default_factory=SchedulerConfig,
+        description="Learning-rate scheduler configuration.",
+    )
 
 
 class VariationalReplayConfig(BaseModel, extra="forbid"):
@@ -195,10 +199,6 @@ class VariationalReplayConfig(BaseModel, extra="forbid"):
     model_config_path: Path = Field(
         ...,
         description="Path to the model configuration TOML file.",
-    )
-    scheduler: SchedulerConfig = Field(
-        default_factory=SchedulerConfig,
-        description="Learning-rate scheduler configuration.",
     )
 
 
@@ -361,7 +361,7 @@ class VariationalReplayModule(L.LightningModule):
         schedulers: list[dict[str, Any]] = [
             {
                 "scheduler": CosineAnnealingLRWithWarmup(
-                    opt_sup, total_steps, self.config.scheduler
+                    opt_sup, total_steps, self._training_config.scheduler
                 ),
                 "interval": "step",
                 "frequency": 1,

@@ -24,9 +24,9 @@ def build_seqmaze_hrm_v2_training_experiment(
             optimizer_qv=config.training.optimizer_qv,
             reward=SeqMazeRewardConfig.model_validate(config.training.reward),
             num_slots=config.data.num_slots,
+            halt_disabled_steps=config.training.halt_disabled_steps,
+            scheduler=config.training.scheduler,
         ),
-        scheduler=config.scheduler,
-        supervised_only_warmup_steps=config.supervised_only_warmup_steps,
     )
     datamodule = Datamodule(
         DatamoduleConfig(

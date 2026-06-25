@@ -99,8 +99,10 @@ class RoutebindHRMAdapterSettings(BaseModel, extra="forbid"):
             OBSERVATION=2).  Default 3.
         num_observations: Number of observation identities in the hidden
             DAG.  Determines the observation-ID embedding table size.
-        grid_height: Grid height in cells (default 30 for v1).
-        grid_width: Grid width in cells (default 30 for v1).
+        grid_height: Grid height in cells.  Must be set by the experiment
+            builder from the corpus manifest; no default.
+        grid_width: Grid width in cells.  Must be set by the experiment
+            builder from the corpus manifest; no default.
         padding_obs_id: Observation ID sentinel for non-observation cells.
             Defaults to ``num_observations`` (the sentinel value used during
             data generation; the embedding at this index is frozen to zero).
@@ -111,9 +113,10 @@ class RoutebindHRMAdapterSettings(BaseModel, extra="forbid"):
         description="Positional front-end used by the Routebind token encoder.",
     )
     num_cell_types: int = Field(
-        default=3,
+        default=4,
         ge=1,
-        description="Number of cell type categories (WALL, FREE, OBSERVATION).",
+        description="Number of cell type categories (WALL=0, FREE=1, "
+        "OBSERVATION=2, PAD=3).  Default 4 covers all canonical cell types.",
     )
     num_observations: int = Field(
         default=16,
@@ -121,14 +124,14 @@ class RoutebindHRMAdapterSettings(BaseModel, extra="forbid"):
         description="Number of observation identities in the hidden DAG.",
     )
     grid_height: int = Field(
-        default=30,
+        ...,
         ge=1,
-        description="Grid height in cells.",
+        description="Grid height in cells. Resolved from corpus manifest by experiment builder.",
     )
     grid_width: int = Field(
-        default=30,
+        ...,
         ge=1,
-        description="Grid width in cells.",
+        description="Grid width in cells. Resolved from corpus manifest by experiment builder.",
     )
 
 
@@ -696,7 +699,7 @@ class RoutebindDecoder(nn.Module):
             - next_direction_logits: ``(B, 4)`` float32
             - next_observation_logits: ``(B, N_obs)`` float32
         """
-        slots = outputs.schema_slots
+        slots = outputs.schema_readout
         S = self._num_slots
         B = slots.shape[0]
 

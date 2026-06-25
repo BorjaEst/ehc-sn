@@ -105,12 +105,17 @@ class HRMOutputV1:
 
     Attributes:
         theta_summary: Controller summary vector with shape ``(B, D)``.
-        schema_slots: Schema-slot bank with shape ``(B, N, D)``.
+        schema_slots: Schema-slot bank with shape ``(B, N, D)`` — post-norm
+            workspace (final representation, may exhibit post-norm collapse).
+        schema_readout: Schema-slot bank explicitly intended for task decoding.
+            Shape ``(B, N, D)`` — same slots as ``schema_slots`` but sourced
+            from the residual-combined pre-normalization representation.
         action_logits: Policy logits for ACT action selection (halt/continue).
     """
 
     theta_summary: Tensor
     schema_slots: Tensor
+    schema_readout: Tensor
     action_logits: Tensor
 
 
@@ -192,9 +197,13 @@ class HRModelV1(nn.Module):
         )
 
         # Extract architecture-native readouts for the current step
+        # schema_readout: strip the CLS slot (position 0) from the PFC
+        # readout so body slots align with schema_slots.
+        schema_readout = pfc_out.schema_readout[:, 1:, :]
         output = HRMOutputV1(
             theta_summary=pfc_out.summary,
             schema_slots=pfc_out.workspace.family("schema"),
+            schema_readout=schema_readout,
             action_logits=pfc_out.q_values,
         )
 

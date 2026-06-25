@@ -35,19 +35,16 @@ def build_mazehard_hrm_v1_training_experiment(
     Returns:
         A ``TrainingExperiment`` ready for the generic runner.
     """
-    # Construct training config (optimizer only — runtime/execution policy
-    # is passed separately) and pass both through the model builder.
     transfer_training = ACTSupervisedTrainingConfig(
         optimizer=config.training.optimizer,
+        scheduler=config.training.scheduler,
         num_slots=config.data.num_slots,
     )
     module = build_mazehard_hrm_v1_model(
         config.model,
+        regime_config=config.regime,
         training_config=transfer_training,
         execution=config.execution,
-        scheduler=config.scheduler,
-        supervised_only_warmup_steps=config.supervised_only_warmup_steps,
-        target_network=config.target_network,
     )
 
     # Construct the datamodule.

@@ -16,21 +16,18 @@ def build_seqmaze_hrm_v1_training_experiment(
     config: SeqMazeHRMV1TrainingExperimentConfig,
 ) -> TrainingExperiment:
     """Build a complete training experiment for SeqMaze × HRM-v1."""
-    # Construct training config (optimizer only — runtime/execution policy
-    # is passed separately) and pass both through the model builder.
     training_config = ACTSupervisedTrainingConfig(
         optimizer=config.training.optimizer,
+        scheduler=config.training.scheduler,
         num_slots=config.data.num_slots,
         gradient_clip_val=getattr(config.trainer, "gradient_clip_val", None),
         use_token_weights=config.use_token_weights,
     )
     module = build_seqmaze_hrm_v1_model(
         config.model,
+        regime_config=config.regime,
         training_config=training_config,
         execution=config.execution,
-        scheduler=config.scheduler,
-        supervised_only_warmup_steps=config.supervised_only_warmup_steps,
-        target_network=config.target_network,
     )
     datamodule = Datamodule(
         DatamoduleConfig(

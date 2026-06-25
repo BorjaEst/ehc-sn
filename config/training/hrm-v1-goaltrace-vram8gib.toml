@@ -1,6 +1,5 @@
 # Training config — Goaltrace × HRM-v1 (nested experiment schema)
 # =============================================================================
-    supervised_only_warmup_steps = 500
 
 [model]
     model_config_path = "config/models/hrm-v1-base.toml"
@@ -13,16 +12,28 @@
     max_halt_steps     = 8
     exploration_prob   = 0.1
 
-[model.components.objective]
-    task_modality        = "field"
+[model.components.task_evaluator]
     field_loss           = "mse"
-    c_halt               = 0.05
-    c_continue           = 0.05
+    acceptable_error     = 0.1
+    halt_temperature     = 0.1
+
+[model.components.scorer]
+    task_loss_coefficient   = 1.0
+    halt_loss_coefficient   = 0.05
+    continue_loss_coefficient = 0.05
 
 [training.optimizer]
     lr           = 1e-4
     weight_decay = 0.1
     betas        = [0.9, 0.95]
+
+[training.scheduler]
+    warmup_steps = 2000
+    min_ratio    = 1.00
+
+[regime]
+    halt_disabled_steps = 500
+    single_step = true
 
 [execution.validation]
     max_rollout_steps = 16
@@ -62,13 +73,6 @@
     every_n_train_steps = 1000
     save_last           = true
     save_on_exception   = true
-
-[scheduler]
-    warmup_steps = 2000
-    min_ratio    = 1.00
-
-[target_network]
-    enabled = false
 
 [logging]
     save_dir  = "logs"

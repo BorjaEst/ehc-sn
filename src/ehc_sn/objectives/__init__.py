@@ -25,18 +25,10 @@ from ehc_sn.metrics.token import (
     compute_accuracy_stats,
 )
 from ehc_sn.objectives.composites.act import (
-    ACTContinuationInput,
-    ACTHaltInput,
-    ACTScoringInput,
     ACTStepLosses,
-    ACTStepOutput,
     ACTSupervisedScorer,
     ACTSupervisedScorerConfig,
     ACTSupervisedStep,
-    FieldACTInput,
-    FieldACTScoringInput,
-    TokenACTInput,
-    TokenACTScoringInput,
 )
 from ehc_sn.objectives.composites.hybrid_rl import (
     HybridRLLossConfig,
@@ -72,18 +64,10 @@ __all__ = [
     # variational family — implementation / compat
     "build_variational_step_metrics",
     # act — canonical
-    "ACTContinuationInput",
-    "ACTHaltInput",
-    "ACTScoringInput",
     "ACTStepLosses",
-    "ACTStepOutput",
     "ACTSupervisedScorer",
     "ACTSupervisedScorerConfig",
     "ACTSupervisedStep",
-    "FieldACTInput",
-    "FieldACTScoringInput",
-    "TokenACTInput",
-    "TokenACTScoringInput",
     # hybrid rl — batch-loss path (no *Objective* aliases; not a rollout scorer)
     "HybridRLLossConfig",
     "HybridRLObjective",

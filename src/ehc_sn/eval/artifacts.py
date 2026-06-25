@@ -28,14 +28,12 @@ from ehc_sn.eval.contracts import (
 from ehc_sn.eval.executor import iter_evaluation_regime
 from ehc_sn.figures import REGISTRY, list_figures
 from ehc_sn.traces import build_trace_spec
+from ehc_sn.traces.observer import TraceSpec
 from ehc_sn.traces.trace_tree import TraceTree
 
 _ARTIFACT_SCHEMA = "ehc_sn.eval.artifact.v3"
 _MANIFEST_FILENAME = "manifest.json"
 _SUCCESS_FILENAME = "_SUCCESS"
-_SUPPORTED_EXECUTOR_FAMILIES: frozenset[str] = frozenset(
-    {"ehp-v1", "hrm-v1", "hrm-v2", "tem-v1", "tem-v2"}
-)
 
 
 # =============================================================================
@@ -44,21 +42,52 @@ class EvalArtifactExecutorRef(BaseModel, extra="forbid"):
 
     schema_version: str = "1"
     artifact_type: Literal["evaluation_executor"] = "evaluation_executor"
-    model_family: str = Field(..., min_length=1)
+    experiment_id: str = Field(..., min_length=1)
     executor_config_path: Path
     checkpoint_path: Path
     checkpoint_format: Literal["weights_only"] = "weights_only"
 
     @model_validator(mode="after")
-    def _normalize_and_validate_family(self) -> "EvalArtifactExecutorRef":
-        self.model_family = self.model_family.strip().lower()
-        if self.model_family not in _SUPPORTED_EXECUTOR_FAMILIES:
+    def _validate_experiment_id(self) -> "EvalArtifactExecutorRef":
+        from ehc_sn.eval.registry import (
+            get_evaluation_experiment_registration,
+            list_experiment_ids,
+        )
+
+        self.experiment_id = self.experiment_id.strip().lower()
+        try:
+            get_evaluation_experiment_registration(self.experiment_id)
+        except KeyError:
             raise ValueError(
-                "Unsupported executor artifact model_family "
-                f"{self.model_family!r}. Supported families: "
-                f"{sorted(_SUPPORTED_EXECUTOR_FAMILIES)!r}."
-            )
+                f"Unsupported experiment_id {self.experiment_id!r}. "
+                f"Available: {list_experiment_ids()}."
+            ) from None
         return self
+
+    @classmethod
+    def from_legacy_family(
+        cls, *, model_family: str, task: str, **kwargs
+    ) -> "EvalArtifactExecutorRef":
+        """Construct from legacy ``model_family`` + ``task`` identity.
+
+        Raises ``ValueError`` if the combination does not resolve to a
+        known experiment_id.
+        """
+        from ehc_sn.eval.registry import (
+            get_evaluation_experiment_registration,
+            list_experiment_ids,
+        )
+
+        experiment_id = f"{model_family.strip().lower()}-{task.strip().lower()}"
+        try:
+            get_evaluation_experiment_registration(experiment_id)
+        except KeyError:
+            raise ValueError(
+                f"Cannot resolve legacy model_family={model_family!r} "
+                f"+ task={task!r} to a known experiment_id. "
+                f"Available: {list_experiment_ids()}."
+            ) from None
+        return cls(experiment_id=experiment_id, **kwargs)
 
 
 # =============================================================================
@@ -150,30 +179,41 @@ def _atomic_write_directory(
 def collect_regime_artifact_bundle(
     *,
     executor: Any,
-    task: str,
-    provider_ref: str,
-    provider_settings: dict[str, Any],
-    run_dir: Path,
+    provider: Any,
     regime_id: str,
     regime_kind: Literal["diagnostic", "benchmark"] = "diagnostic",
+    run_dir: Path,
+    trace_spec: TraceSpec | None = None,
     max_batches: int = 0,
-    trace_keys: list[str] | None = None,
-    figure_names: list[str] | None = None,
     trigger_kind: str = "manual",
     epoch: int = 0,
     step: int = 0,
+    provenance_overrides: dict[str, Any] | None = None,
 ) -> EvaluationRegimeResult:
-    """Collect one evaluation regime and persist it as an artifact bundle."""
-    provider = resolve_provider(provider_ref, provider_settings)
-    trace_request = _build_trace_request(
-        executor=executor,
-        trace_keys=trace_keys or [],
-        figure_names=figure_names or [],
-    )
+    """Collect one evaluation regime and persist it as an artifact bundle.
+
+    The provider and trace specification must already be resolved by the
+    caller (typically an experiment-specific builder).  The old signature
+    (accepting ``task``, ``provider_ref``, ``provider_settings``,
+    ``trace_keys``, ``figure_names``) is removed — use
+    :func:`collect_regime_artifact_bundle_from_ref` for artifact
+    reconstruction or switch to the new ``EvaluationExperiment`` flow.
+    """
     run_dir = Path(run_dir)
     model_family = _extract_model_family(executor)
     trace_paradigm = getattr(executor, "_trace_paradigm", None)
     temporal_semantics = _resolve_temporal_semantics(executor)
+
+    # Resolve provenance overrides — caller may supply task/identity info.
+    prov = provenance_overrides or {}
+    resolved_task: str = prov.get(
+        "task", _extract_model_family(executor) or "unknown"
+    )
+
+    # Build trace request from the pre-resolved trace spec.
+    trace_request: EvaluationTraceRequest | None = None
+    if trace_spec is not None:
+        trace_request = EvaluationTraceRequest(trace_spec=trace_spec)
 
     # Write to temporary directory for atomic commit.
     tmp_dir = run_dir.with_suffix(".tmp")
@@ -234,7 +274,7 @@ def collect_regime_artifact_bundle(
 
     _write_regime_bundle_manifest(
         run_dir=tmp_dir,
-        task=task,
+        task=resolved_task,
         regime_summary=summary,
         summary_rows=summary_rows,
         manifest_rows=manifest_rows,
@@ -246,6 +286,22 @@ def collect_regime_artifact_bundle(
         model_family=model_family,
         trace_paradigm=trace_paradigm,
         temporal_semantics=temporal_semantics,
+        capture_info=(
+            {
+                "profile": prov.get("capture_profile", "metrics_only"),
+                "profile_version": prov.get("capture_profile_version", 1),
+                "paradigm": prov.get("trace_paradigm", trace_paradigm),
+                "requested": {
+                    "include": prov.get("capture_include", []),
+                    "exclude": prov.get("capture_exclude", []),
+                },
+                "resolved_fields": (
+                    sorted(trace_spec.keys()) if trace_spec else []
+                ),
+            }
+            if trace_spec is not None
+            else None
+        ),
     )
     _atomic_write_directory(tmp_dir, run_dir)
     return EvaluationRegimeResult(
@@ -272,23 +328,52 @@ def collect_regime_artifact_bundle_from_ref(
     epoch: int = 0,
     step: int = 0,
 ) -> EvaluationRegimeResult:
-    """Collect and persist one artifact bundle from a typed executor ref."""
+    """Collect and persist one artifact bundle from a typed executor ref.
+
+    .. deprecated::
+        Use the new ``EvaluationExperiment`` flow instead.  This function
+        delegates to the new ``collect_regime_artifact_bundle`` with a
+        resolved provider and trace spec.
+    """
     executor = load_executor_from_artifact(artifact)
+    trace_paradigm = getattr(executor, "_trace_paradigm", None)
+
+    # Build trace request from keys (backward-compat path).
+    trace_spec: TraceSpec | None = None
+    all_keys: list[str] = list(trace_keys or [])
+    if figure_names:
+        from ehc_sn.figures import REGISTRY, list_figures
+
+        list_figures()
+        for name in figure_names:
+            spec = REGISTRY.get(name)
+            all_keys.extend(spec.trace_keys)
+            all_keys.extend(spec.meta_keys)
+    if all_keys and trace_paradigm is not None:
+        from ehc_sn.traces.specs import build_trace_spec
+
+        trace_spec = build_trace_spec(
+            trace_paradigm, include_keys=set(all_keys)
+        )
+
+    provider = resolve_provider(provider_ref, provider_settings)
 
     return collect_regime_artifact_bundle(
         executor=executor,
-        task=task,
-        provider_ref=provider_ref,
-        provider_settings=provider_settings,
-        run_dir=run_dir,
+        provider=provider,
         regime_id=regime_id,
         regime_kind=regime_kind,
+        run_dir=run_dir,
+        trace_spec=trace_spec,
         max_batches=max_batches,
-        trace_keys=trace_keys,
-        figure_names=figure_names,
         trigger_kind=trigger_kind,
         epoch=epoch,
         step=step,
+        provenance_overrides={
+            "task": task,
+            "model_family": artifact.model_family,
+            "trace_paradigm": trace_paradigm,
+        },
     )
 
 
@@ -308,7 +393,7 @@ def load_executor_from_artifact(artifact: EvalArtifactExecutorRef) -> Any:
 
     config_map = tomllib.loads(config_path.read_text(encoding="utf-8"))
     executor = _build_executor_from_family_artifact(
-        model_family=artifact.model_family,
+        experiment_id=artifact.experiment_id,
         config_map=config_map,
     )
     _hydrate_executor_from_checkpoint(executor, checkpoint_path)
@@ -318,107 +403,43 @@ def load_executor_from_artifact(artifact: EvalArtifactExecutorRef) -> Any:
 
 # =============================================================================
 # =============================================================================
-# Family registry — single source of truth for eval config → executor dispatch
+# Family registry access — dispatch lives in eval.registry
 # =============================================================================
 
-_EVAL_FAMILY_REGISTRY: dict[str, tuple[type[BaseModel], Any]] = {}
 
-
-def _build_registry() -> None:
-    """Lazy-populate the eval family registry.
-
-    Imports are deferred to this point to avoid circular imports at module
-    load time.  This function is idempotent and called once on first use.
-    """
-    if _EVAL_FAMILY_REGISTRY:
-        return
-
-    # -- hrm-v1 -----------------------------------------------------------------
-    from ehc_sn.experiments.mazehard.hrm_v1.config import (
-        MazeHardHRMV1EvaluationExperimentConfig,
-    )
-    from ehc_sn.experiments.mazehard.hrm_v1.evaluation import (
-        build_mazehard_hrm_v1_evaluation_executor,
-    )
-
-    _EVAL_FAMILY_REGISTRY["hrm-v1"] = (
-        MazeHardHRMV1EvaluationExperimentConfig,
-        build_mazehard_hrm_v1_evaluation_executor,
-    )
-
-    # -- hrm-v2 -----------------------------------------------------------------
-    from ehc_sn.experiments.mazehard.hrm_v2.config import (
-        MazeHardHRMV2EvaluationExperimentConfig,
-    )
-    from ehc_sn.experiments.mazehard.hrm_v2.evaluation import (
-        build_mazehard_hrm_v2_evaluation_executor,
-    )
-
-    _EVAL_FAMILY_REGISTRY["hrm-v2"] = (
-        MazeHardHRMV2EvaluationExperimentConfig,
-        build_mazehard_hrm_v2_evaluation_executor,
-    )
-
-    # -- tem-v1 -----------------------------------------------------------------
-    from ehc_sn.experiments.arena.tem_v1.config import (
-        ArenaTEMV1EvaluationExperimentConfig,
-    )
-    from ehc_sn.experiments.arena.tem_v1.evaluation import (
-        build_arena_tem_v1_evaluation_executor,
-    )
-
-    _EVAL_FAMILY_REGISTRY["tem-v1"] = (
-        ArenaTEMV1EvaluationExperimentConfig,
-        build_arena_tem_v1_evaluation_executor,
-    )
-
-    # -- tem-v2 -----------------------------------------------------------------
-    from ehc_sn.experiments.arena.tem_v2.config import (
-        ArenaTEMV2EvaluationExperimentConfig,
-    )
-    from ehc_sn.experiments.arena.tem_v2.evaluation import (
-        build_arena_tem_v2_evaluation_executor,
-    )
-
-    _EVAL_FAMILY_REGISTRY["tem-v2"] = (
-        ArenaTEMV2EvaluationExperimentConfig,
-        build_arena_tem_v2_evaluation_executor,
-    )
-
-
-# =============================================================================
 def _build_executor_from_family_artifact(
     *,
-    model_family: str,
+    experiment_id: str,
     config_map: dict[str, Any],
 ) -> Any:
-    """Instantiate one training/evaluation executor for a supported family.
+    """Instantiate one evaluation executor from a resolved experiment_id.
 
-    Dispatches to a registry mapping family name → (config class, build fn).
+    Dispatches through the experiment registry in :mod:`ehc_sn.eval.registry`.
     The config class validates the full TOML dict with ``model_validate``,
-    eliminating manual key-by-key extraction.  Training-only configs
-    (optimizers, reward shaping) are absent from the eval config classes.
+    eliminating manual key-by-key extraction.
 
     The executor's ``_trace_paradigm`` is read from the module itself,
     which every ``LightningModule`` subclass sets in ``__init__``.
     """
-    _build_registry()
-    try:
-        config_cls, build_fn = _EVAL_FAMILY_REGISTRY[model_family]
-    except KeyError:
-        raise ValueError(
-            "Unsupported executor artifact model_family "
-            f"{model_family!r}. Supported families: "
-            f"{sorted(_EVAL_FAMILY_REGISTRY)!r}."
-        ) from None
+    from ehc_sn.eval.registry import get_evaluation_experiment_registration
+
+    config_cls, build_fn = get_evaluation_experiment_registration(experiment_id)
 
     eval_config = config_cls.model_validate(config_map)
-    executor = build_fn(eval_config)
+    built = build_fn(eval_config)
+
+    # The builder now returns EvaluationExperiment; extract executor.
+    from ehc_sn.experiments._infra import EvaluationExperiment as _EvalExp
+
+    if isinstance(built, _EvalExp):
+        executor = built.executor
+    else:
+        executor = built
 
     # Tag the executor so _build_trace_request can construct a trace spec
     # without calling set_eval_trace_keys.  Every LightningModule subclass
     # already sets _trace_paradigm in __init__.
-    executor._trace_paradigm = getattr(executor, "_trace_paradigm", model_family.split("-")[0])  # type: ignore[attr-defined]
+    executor._trace_paradigm = getattr(executor, "_trace_paradigm", experiment_id.split("-")[0])  # type: ignore[attr-defined]
     return executor
 
 
@@ -658,6 +679,7 @@ def _write_regime_bundle_manifest(
     model_family: str | None = None,
     trace_paradigm: str | None = None,
     temporal_semantics: dict[str, object] | None = None,
+    capture_info: dict[str, object] | None = None,
 ) -> None:
     """Write canonical manifest payloads."""
     provenance: dict[str, object] = {}
@@ -668,7 +690,7 @@ def _write_regime_bundle_manifest(
     provenance["global_step"] = step
     provenance["epoch"] = epoch
 
-    manifest = {
+    manifest: dict[str, object] = {
         "schema": _ARTIFACT_SCHEMA,
         "status": "complete",
         "task": task,
@@ -689,6 +711,8 @@ def _write_regime_bundle_manifest(
         "summary": _to_jsonable(dict(regime_summary)),
         "cases": manifest_rows,
     }
+    if capture_info is not None:
+        manifest["capture"] = capture_info
     (run_dir / _MANIFEST_FILENAME).write_text(
         json.dumps(manifest, indent=2, sort_keys=True),
         encoding="utf-8",

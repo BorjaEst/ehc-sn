@@ -72,8 +72,8 @@ from ehc_sn.traces.trace_tree import TraceTree
 _DEFAULT_PRESET = "balanced"
 _DEFAULT_CORPUS = "default"
 _DEFAULT_VERSION = 1
-_DEFAULT_STORAGE_HEIGHT = 32
-_DEFAULT_STORAGE_WIDTH = 32
+_DEFAULT_STORAGE_HEIGHT = 30
+_DEFAULT_STORAGE_WIDTH = 30
 _DEFAULT_FIELD_DECAY_SPATIAL = 0.9848
 _DEFAULT_FIELD_DECAY_SEMANTIC = 0.8
 _DEFAULT_MAX_ROUTE_LENGTH = 150
@@ -223,14 +223,14 @@ def build(
         int,
         typer.Option(
             "--storage-height",
-            help="Storage canvas height in cells (default: 32).",
+            help="Storage canvas height in cells (default: 30).",
         ),
     ] = _DEFAULT_STORAGE_HEIGHT,
     storage_width: Annotated[
         int,
         typer.Option(
             "--storage-width",
-            help="Storage canvas width in cells (default: 32).",
+            help="Storage canvas width in cells (default: 30).",
         ),
     ] = _DEFAULT_STORAGE_WIDTH,
     seed: Annotated[

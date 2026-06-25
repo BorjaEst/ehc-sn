@@ -1,8 +1,5 @@
-"""MazeHard deliberation experiments.
+"""MazeHard experiment family.
 
-Each module wires a (model family, version) into its Lightning regime.
+Version-specific modules are imported directly by their training scripts
+rather than eagerly from this barrel, to isolate import-time failures.
 """
-
-from ehc_sn.experiments.mazehard import hrm_v1, hrm_v2
-
-__all__ = ["hrm_v1", "hrm_v2"]

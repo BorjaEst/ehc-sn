@@ -13,9 +13,20 @@ from torch import dtype as Dtype
 from torch import nn
 
 from ehc_sn.modules.pfc import reasoning as r
-from ehc_sn.modules.pfc.reasoning import HighLvRModule, LowLvRModule, ReasoningSettings, WorkingMemory
+from ehc_sn.modules.pfc.reasoning import (
+    HighLvRModule,
+    LowLvRModule,
+    ReasoningSettings,
+    WorkingMemory,
+)
 from ehc_sn.modules.pfc.values import QEstimatorSettings, QValueEstimator
-from ehc_sn.modules.pfc.workspace import FixedSlot, SlotFamily, Workspace, WorkspaceLayout, WorkspaceSchema
+from ehc_sn.modules.pfc.workspace import (
+    FixedSlot,
+    SlotFamily,
+    Workspace,
+    WorkspaceLayout,
+    WorkspaceSchema,
+)
 from ehc_sn.modules.transformer import TransformerBlockConfig
 from ehc_sn.utils import trunc_normal_init_
 
@@ -133,9 +144,13 @@ class PFCState:
         B, S, D = self.workspace.tokens.shape
         z_H, z_L = self.scratch.memory.z_H, self.scratch.memory.z_L
         if tuple(z_H.shape) != (B, S, D):
-            raise ValueError(f"PFC scratch z_H must have shape {(B, S, D)}, got {tuple(z_H.shape)}.")
+            raise ValueError(
+                f"PFC scratch z_H must have shape {(B, S, D)}, got {tuple(z_H.shape)}."
+            )
         if tuple(z_L.shape) != (B, S, D):
-            raise ValueError(f"PFC scratch z_L must have shape {(B, S, D)}, got {tuple(z_L.shape)}.")
+            raise ValueError(
+                f"PFC scratch z_L must have shape {(B, S, D)}, got {tuple(z_L.shape)}."
+            )
 
     @property
     def summary(self) -> Tensor:
@@ -150,7 +165,9 @@ class PFCState:
     def detach(self) -> "PFCState":
         """Return a detached copy of the public state."""
         return PFCState(
-            workspace=self.workspace.layout.bind(self.workspace.tokens.detach()),
+            workspace=self.workspace.layout.bind(
+                self.workspace.tokens.detach()
+            ),
             scratch=self.scratch.detach(),
         )
 
@@ -163,10 +180,14 @@ class PFCOutput:
     Attributes:
         workspace: Full public workspace view over z_H (controller + body).
         q_values: Auxiliary Q-value estimates from the value head. Shape ``(B, n_actions)``.
+        schema_readout: Pre-normalization representation of the workspace tokens
+            combined with the input residual (``memory.z_H + x``).
+            Shape ``(B, S+1, D)`` (CLS slot at position 0).
     """
 
     workspace: Workspace
     q_values: Tensor
+    schema_readout: Tensor
 
     @property
     def summary(self) -> Tensor:
@@ -200,10 +221,18 @@ class PFCModel(nn.Module):
         super().__init__()
         self._config = config
 
-        self.high_level = HighLvRModule(config.reasoning_h, device=device, dtype=dtype)
-        self.low_level = LowLvRModule(config.reasoning_l, device=device, dtype=dtype)
-        self.estimator = QValueEstimator(config.value_head, device=device, dtype=dtype)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, config.hidden_size, device=device, dtype=dtype))
+        self.high_level = HighLvRModule(
+            config.reasoning_h, device=device, dtype=dtype
+        )
+        self.low_level = LowLvRModule(
+            config.reasoning_l, device=device, dtype=dtype
+        )
+        self.estimator = QValueEstimator(
+            config.value_head, device=device, dtype=dtype
+        )
+        self.cls_token = nn.Parameter(
+            torch.zeros(1, 1, config.hidden_size, device=device, dtype=dtype)
+        )
 
         # Default schema layout (body-only) used by forward().
         self._default_schema_layout = WorkspaceLayout.from_schema(
@@ -213,7 +242,9 @@ class PFCModel(nn.Module):
             )
         )
 
-        self.optimizer = None  # Placeholder for future dACC reward-based updates
+        self.optimizer = (
+            None  # Placeholder for future dACC reward-based updates
+        )
         self.reset_parameters()
 
     @property
@@ -252,10 +283,16 @@ class PFCModel(nn.Module):
             Initialized :class:`PFCState` whose workspace exposes the full
             z_H surface: controller at position 0 followed by all body slots.
         """
-        schema = body_schema if body_schema is not None else self._default_schema_layout.schema
+        schema = (
+            body_schema
+            if body_schema is not None
+            else self._default_schema_layout.schema
+        )
         full_layout = _body_to_full_layout(WorkspaceLayout.from_schema(schema))
         self._validate_full_layout(full_layout)
-        memory = r.init_memory(batch_size, full_layout.size, self.high_level, self.low_level)
+        memory = r.init_memory(
+            batch_size, full_layout.size, self.high_level, self.low_level
+        )
         return _build_state_from_memory(memory, full_layout, detach=False)
 
     def _validate_full_layout(  # ---------------------------------------------
@@ -265,13 +302,19 @@ class PFCModel(nn.Module):
         """Validate that *layout* (controller + body) is compatible with this PFC configuration."""
         expected_size = self.config.seq_length + 1
         if layout.size != expected_size:
-            raise ValueError(f"Full workspace layout size must be seq_length + 1 = {expected_size}, got {layout.size}.")
+            raise ValueError(
+                f"Full workspace layout size must be seq_length + 1 = {expected_size}, got {layout.size}."
+            )
         try:
             ctrl_pos = layout.slot(_CONTROLLER)
         except KeyError:
-            raise ValueError(f"Full workspace layout must declare a '{_CONTROLLER}' fixed slot at position 0.") from None
+            raise ValueError(
+                f"Full workspace layout must declare a '{_CONTROLLER}' fixed slot at position 0."
+            ) from None
         if ctrl_pos != 0:
-            raise ValueError(f"Full workspace layout '{_CONTROLLER}' fixed slot must be at position 0, got {ctrl_pos}.")
+            raise ValueError(
+                f"Full workspace layout '{_CONTROLLER}' fixed slot must be at position 0, got {ctrl_pos}."
+            )
 
     def reset_state(  # -------------------------------------------------------
         self,
@@ -279,8 +322,12 @@ class PFCModel(nn.Module):
         reset_flag: Tensor,
     ) -> PFCState:
         """Selectively reset rows of the PFC state."""
-        memory = r.reset_memory(state.scratch.memory, reset_flag, self.high_level, self.low_level)
-        return _build_state_from_memory(memory, state.workspace.layout, detach=False)
+        memory = r.reset_memory(
+            state.scratch.memory, reset_flag, self.high_level, self.low_level
+        )
+        return _build_state_from_memory(
+            memory, state.workspace.layout, detach=False
+        )
 
     def step(  # --------------------------------------------------------------
         self,
@@ -310,7 +357,10 @@ class PFCModel(nn.Module):
             the same public z_H surface; ``output.q_values`` carries auxiliary Q logits.
         """
         if workspace.layout.size != self.config.seq_length:
-            raise ValueError(f"workspace size must equal seq_length {self.config.seq_length}, " f"got {workspace.layout.size}.")
+            raise ValueError(
+                f"workspace size must equal seq_length {self.config.seq_length}, "
+                f"got {workspace.layout.size}."
+            )
         full_layout = _body_to_full_layout(workspace.layout)
         if state is not None and state.workspace.layout != full_layout:
             raise ValueError(
@@ -319,19 +369,28 @@ class PFCModel(nn.Module):
             )
 
         if state is None:
-            state = self.init_state(int(workspace.tokens.shape[0]), body_schema=workspace.layout.schema)
+            state = self.init_state(
+                int(workspace.tokens.shape[0]),
+                body_schema=workspace.layout.schema,
+            )
 
         # Prepend CLS (controller) to body tokens: (B, seq_length, D) → (B, seq_length+1, D).
         batch_size = int(workspace.tokens.shape[0])
         cls_token = self.cls_token.expand(batch_size, -1, -1)
         if prefix_bias is not None:
-            cls_token = cls_token + prefix_bias.unsqueeze(1).to(dtype=cls_token.dtype)
+            cls_token = cls_token + prefix_bias.unsqueeze(1).to(
+                dtype=cls_token.dtype
+            )
         x = torch.cat([cls_token, workspace.tokens], dim=1)
 
         # Run the internal tensor-first reasoning core.  The last two steps run
         # with gradient tracking for value estimation; all prior steps are detached.
-        total_steps = self.config.reasoning_h.n_cycles * (self.config.reasoning_l.n_cycles + 1)
-        memory_gen = r.reasoning_gen(x, state.scratch.memory, self.high_level, self.low_level)
+        total_steps = self.config.reasoning_h.n_cycles * (
+            self.config.reasoning_l.n_cycles + 1
+        )
+        memory_gen = r.reasoning_gen(
+            x, state.scratch.memory, self.high_level, self.low_level
+        )
         with torch.no_grad():
             for _ in range(total_steps - 2):
                 memory = next(memory_gen)
@@ -339,8 +398,17 @@ class PFCModel(nn.Module):
         memory = next(memory_gen)  # step N-1: with gradients
         q_values = self.estimator(memory.z_H, memory.z_L)
 
+        # Schema readout: combine the reasoned state with the input residual.
+        # This preserves per-position identity while keeping HRM on the
+        # prediction path.  Shape ``(B, S+1, D)`` including the CLS slot.
+        schema_readout = memory.z_H + x
+
         new_state = _build_state_from_memory(memory, full_layout, detach=False)
-        output = PFCOutput(workspace=new_state.workspace, q_values=q_values)
+        output = PFCOutput(
+            workspace=new_state.workspace,
+            q_values=q_values,
+            schema_readout=schema_readout,
+        )
         return output, new_state
 
     def forward(  # -----------------------------------------------------------
@@ -363,8 +431,14 @@ class PFCModel(nn.Module):
             ``(output, next_state)`` — output first, state second.
         """
         if x.ndim != 3:
-            raise ValueError(f"PFC token inputs must have shape (B, S, D), got {tuple(x.shape)}.")
-        layout = schema_layout if schema_layout is not None else self._default_schema_layout
+            raise ValueError(
+                f"PFC token inputs must have shape (B, S, D), got {tuple(x.shape)}."
+            )
+        layout = (
+            schema_layout
+            if schema_layout is not None
+            else self._default_schema_layout
+        )
         return self.step(layout.bind(x), state=state, prefix_bias=prefix_bias)
 
 
@@ -397,4 +471,10 @@ def _body_to_full_layout(  # --------------------------------------------------
 
 
 # =============================================================================
-__all__ = ["PFCModel", "PFCOutput", "PFCScratchState", "PFCSettings", "PFCState"]
+__all__ = [
+    "PFCModel",
+    "PFCOutput",
+    "PFCScratchState",
+    "PFCSettings",
+    "PFCState",
+]

@@ -26,14 +26,15 @@ from ehc_sn.metrics.routes.act import ACT_EPISODE_ROUTES, ACT_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
 from ehc_sn.objectives.composites.act import (
     ACTSupervisedScorer,
-    ACTSupervisedScorerConfig,
+)
+from ehc_sn.objectives.task.mazehard import (
+    MazeHardTaskEvaluatorConfig,
+    MazeHardTokenEvaluator,
 )
 from ehc_sn.tasks.mazehard.supervision import build_mazehard_supervision
 from ehc_sn.traces.specs import HRM_HIDDEN_STATE_FIELDS
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
-from ehc_sn.training.schedules import SchedulerConfig
-from ehc_sn.training.stabilization import TargetNetworkConfig
 
 from .config import MazeHardHRMV1ModelConfig
 
@@ -41,11 +42,9 @@ from .config import MazeHardHRMV1ModelConfig
 def build_mazehard_hrm_v1_model(
     config: MazeHardHRMV1ModelConfig,
     *,
+    regime_config: ACTSupervisedConfig | None = None,
     training_config: ACTSupervisedTrainingConfig | None = None,
     execution: HRMRuntimeConfig | None = None,
-    scheduler: SchedulerConfig | None = None,
-    supervised_only_warmup_steps: int | None = None,
-    target_network: TargetNetworkConfig | None = None,
 ) -> ACTSupervisedModule:
     """Construct an ACTSupervisedModule for MazeHard × HRM-v1.
 
@@ -56,6 +55,9 @@ def build_mazehard_hrm_v1_model(
 
     Args:
         config: Model-level config (components only).
+        regime_config: ACT regime configuration (halt_disabled_steps,
+            target_network).  ``None`` during evaluation — safe defaults
+            are used.
         training_config: Training-only settings (optimizer, runtime).
             ``None`` during evaluation-only construction.
         execution: Execution policy for eval-time rollout bounds.
@@ -70,8 +72,8 @@ def build_mazehard_hrm_v1_model(
         adapter_settings_cls=MazeHardHRMAdapterSettings,
         controller_cls=ACTController,
         controller_config_cls=ACTControllerConfig,
-        objective_cls=ACTSupervisedScorer,
-        objective_config_cls=ACTSupervisedScorerConfig,
+        task_evaluator_cls=MazeHardTokenEvaluator,
+        task_evaluator_config_cls=MazeHardTaskEvaluatorConfig,
         optimizer_cls=AdamATan2,
         optimizer_config_cls=AdamATan2Config,
         trace_fields=MAZE_HARD_HRM_ACT_TRACE_FIELDS,
@@ -81,12 +83,12 @@ def build_mazehard_hrm_v1_model(
         hidden_state_fields=HRM_HIDDEN_STATE_FIELDS,
         supervision_builder=build_mazehard_supervision,
     )
+    _regime = (
+        regime_config if regime_config is not None else ACTSupervisedConfig()
+    )
     return ACTSupervisedModule(
-        config=ACTSupervisedConfig(
-            model_config_path=config.model_config_path,
-            scheduler=scheduler or SchedulerConfig(),
-            supervised_only_warmup_steps=supervised_only_warmup_steps or 0,
-            target_network=target_network or TargetNetworkConfig(),
+        config=_regime.model_copy(
+            update={"model_config_path": config.model_config_path},
         ),
         component_configs=components,
         bindings=bindings,

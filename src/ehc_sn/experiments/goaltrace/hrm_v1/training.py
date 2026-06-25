@@ -18,17 +18,15 @@ def build_goaltrace_hrm_v1_training_experiment(
     """Build a complete training experiment for Goaltrace × HRM-v1."""
     training_config = ACTSupervisedTrainingConfig(
         optimizer=config.training.optimizer,
+        scheduler=config.training.scheduler,
         num_slots=config.data.num_slots,
         gradient_clip_val=getattr(config.trainer, "gradient_clip_val", None),
     )
     module = build_goaltrace_hrm_v1_model(
         config.model,
+        regime_config=config.regime,
         training_config=training_config,
         execution=config.execution,
-        scheduler=config.scheduler,
-        supervised_only_warmup_steps=config.supervised_only_warmup_steps,
-        target_network=config.target_network,
-        single_step=config.single_step,
     )
     datamodule = Datamodule(
         DatamoduleConfig(

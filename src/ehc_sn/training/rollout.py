@@ -22,6 +22,7 @@ from ehc_sn.rollouts.runtime import (
 )
 from ehc_sn.rollouts.scoring import (
     RolloutScorer,
+    ScoredRecord,
     score_rollout_chunk,
     score_rollout_record,
 )
@@ -56,7 +57,7 @@ def run_captured_rollout(  # -------------------------------------------------
     max_rollout_steps: int | None = None,
     hard_max_rollout_steps: int | None = None,
     runner_options: Mapping[str, object] | None = None,
-    snapshot_model_state: bool = True,
+    snapshot_model_state: bool = False,
 ) -> RolloutChunk:
     """Execute a rollout and return the captured chunk."""
     executed = runner.run(
@@ -88,7 +89,7 @@ def score_captured_rollout(  # -----------------------------------------------
     hard_max_rollout_steps: int | None = None,
     runner_options: Mapping[str, object] | None = None,
     scoring_input_builder: Callable[[StepRecord], object] | None = None,
-    snapshot_model_state: bool = True,
+    snapshot_model_state: bool = False,
 ) -> CapturedRolloutResult:
     """Execute a rollout chunk and score it with a pure objective."""
     executed = run_captured_rollout(
@@ -120,9 +121,28 @@ def score_rollout_streaming(  # ----------------------------------------------
     runner_options: Mapping[str, object] | None = None,
     scoring_input_builder: Callable[[StepRecord], object],
     observed_step_observer: Callable[[ObservedStep], None] | None = None,
-    snapshot_model_state: bool = True,
+    scored_record_observer: Callable[["ScoredRecord"], None] | None = None,
+    snapshot_model_state: bool = False,
 ) -> StreamingRolloutResult:
-    """Execute a rollout and score records on the fly without storing the full chunk."""
+    """Execute a rollout and score records on the fly without storing the full chunk.
+
+    Parameters
+    ----------
+    observed_step_observer:
+        Optional callback invoked on each scored ``ObservedStep`` (detached
+        presentation evidence, no graph connection).  Safe for metric updates.
+    scored_record_observer:
+        Optional callback invoked on each ``ScoredRecord`` *after* the step
+        is scored but *before* the record is discarded.  The ``ScoredRecord``
+        contains the live loss tensor with its autograd graph intact.  This
+        is the appropriate hook for per-step backward.
+
+        .. warning::
+
+            The ``scored_record_observer`` receives a graph-bearing loss.
+            Call ``backward()`` or ``detach()`` before returning, or the
+            graph will leak.
+    """
     total_loss: Tensor | None = None
     last_step: ObservedStep | None = None
 
@@ -131,6 +151,8 @@ def score_rollout_streaming(  # ----------------------------------------------
         scored = score_rollout_record(
             record, objective, input_builder=scoring_input_builder
         )
+        if scored_record_observer is not None:
+            scored_record_observer(scored)
         if observed_step_observer is not None:
             observed_step_observer(scored.observed_step)
         last_step = scored.observed_step

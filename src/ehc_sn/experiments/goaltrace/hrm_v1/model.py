@@ -29,8 +29,8 @@ from ehc_sn.metrics.routes.continuous_field import (
 from ehc_sn.models.hrm.hrm_v1 import HRModelV1, ModelSettingsV1
 from ehc_sn.objectives.composites.act import (
     ACTSupervisedScorer,
-    ACTSupervisedScorerConfig,
 )
+from ehc_sn.objectives.task.goaltrace import GoaltraceFieldEvaluator
 from ehc_sn.targets.halt import (
     FieldQualityHaltTarget,
     FieldQualityHaltTargetConfig,
@@ -40,8 +40,6 @@ from ehc_sn.tasks.goaltrace.supervision import build_goaltrace_supervision
 from ehc_sn.traces.specs import HRM_HIDDEN_STATE_FIELDS
 from ehc_sn.training.hrm import RuntimeConfig as HRMRuntimeConfig
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
-from ehc_sn.training.schedules import SchedulerConfig
-from ehc_sn.training.stabilization import TargetNetworkConfig
 
 from .config import GoaltraceHRMV1ModelConfig
 
@@ -49,12 +47,9 @@ from .config import GoaltraceHRMV1ModelConfig
 def build_goaltrace_hrm_v1_model(
     config: GoaltraceHRMV1ModelConfig,
     *,
+    regime_config: ACTSupervisedConfig | None = None,
     training_config: ACTSupervisedTrainingConfig | None = None,
     execution: HRMRuntimeConfig | None = None,
-    scheduler: SchedulerConfig | None = None,
-    supervised_only_warmup_steps: int | None = None,
-    target_network: TargetNetworkConfig | None = None,
-    single_step: bool = True,
 ) -> ACTSupervisedModule:
     """Construct an ACTSupervisedModule for Goaltrace × HRM-v1.
 
@@ -64,12 +59,13 @@ def build_goaltrace_hrm_v1_model(
 
     Args:
         config: Model-level config (components only).
+        regime_config: ACT regime configuration (halt_disabled_steps,
+            target_network, single_step).  ``None`` during evaluation —
+            safe defaults are used.
         training_config: Training-only settings (optimizer, runtime).
             ``None`` during evaluation-only construction.
         execution: Execution policy for eval-time rollout bounds.
             Used only when ``training_config`` is ``None``.
-        single_step: When True (default), bypasses ACT rollout
-            and uses single-pass training with objective-delegated loss.
     """
     components: ACTSupervisedComponentConfigs = config.components
 
@@ -80,8 +76,8 @@ def build_goaltrace_hrm_v1_model(
         adapter_settings_cls=GoaltraceHRMAdapterSettings,
         controller_cls=ACTController,
         controller_config_cls=ACTControllerConfig,
-        objective_cls=ACTSupervisedScorer,
-        objective_config_cls=ACTSupervisedScorerConfig,
+        task_evaluator_cls=GoaltraceFieldEvaluator,
+        task_evaluator_config_cls=object,
         optimizer_cls=AdamATan2,
         optimizer_config_cls=AdamATan2Config,
         trace_fields=GOALTRACE_HRM_ACT_TRACE_FIELDS,
@@ -91,13 +87,12 @@ def build_goaltrace_hrm_v1_model(
         hidden_state_fields=HRM_HIDDEN_STATE_FIELDS,
         supervision_builder=build_goaltrace_supervision,
     )
+    _regime = (
+        regime_config if regime_config is not None else ACTSupervisedConfig()
+    )
     return ACTSupervisedModule(
-        config=ACTSupervisedConfig(
-            model_config_path=config.model_config_path,
-            scheduler=scheduler or SchedulerConfig(),
-            supervised_only_warmup_steps=supervised_only_warmup_steps or 0,
-            target_network=target_network or TargetNetworkConfig(),
-            single_step=single_step,
+        config=_regime.model_copy(
+            update={"model_config_path": config.model_config_path},
         ),
         component_configs=components,
         bindings=bindings,

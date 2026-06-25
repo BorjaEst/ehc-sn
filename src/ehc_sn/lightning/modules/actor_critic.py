@@ -164,6 +164,15 @@ class ActorCriticTrainingConfig(BaseModel, extra="forbid"):
         "``None`` during evaluation — carry is allocated per batch from the "
         "DataLoader batch dimension.",
     )
+    halt_disabled_steps: int = Field(
+        default=5000,
+        ge=0,
+        description="Optimizer steps during which learned halting is disabled.",
+    )
+    scheduler: SchedulerConfig = Field(
+        default_factory=SchedulerConfig,
+        description="Learning-rate scheduler configuration.",
+    )
 
 
 class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
@@ -208,15 +217,10 @@ class ActorCriticConfig(BaseModel, extra="forbid"):
         ...,
         description="Path to the model configuration TOML file.",
     )
-    scheduler: SchedulerConfig = Field(
-        default_factory=SchedulerConfig,
-        description="LR scheduler config.",
-    )
-    supervised_only_warmup_steps: int = Field(
+    halt_disabled_steps: int = Field(
         default=5000,
         ge=0,
-        description="Number of optimizer steps during which only the "
-        "supervised optimizer trains.",
+        description="Optimizer steps during which learned halting is disabled.",
     )
 
 
@@ -486,7 +490,7 @@ class ActorCriticModule(L.LightningModule):
         schedulers: list[dict[str, Any]] = [
             {
                 "scheduler": CosineAnnealingLRWithWarmup(
-                    opt_sup, total_steps, self.config.scheduler
+                    opt_sup, total_steps, tc.scheduler
                 ),
                 "interval": "step",
                 "frequency": 1,
@@ -494,7 +498,7 @@ class ActorCriticModule(L.LightningModule):
             },
             {
                 "scheduler": CosineAnnealingLRWithWarmup(
-                    opt_rl, total_steps, self.config.scheduler
+                    opt_rl, total_steps, tc.scheduler
                 ),
                 "interval": "step",
                 "frequency": 1,
@@ -502,7 +506,7 @@ class ActorCriticModule(L.LightningModule):
             },
             {
                 "scheduler": CosineAnnealingLRWithWarmup(
-                    opt_qv, total_steps, self.config.scheduler
+                    opt_qv, total_steps, tc.scheduler
                 ),
                 "interval": "step",
                 "frequency": 1,
@@ -598,14 +602,14 @@ class ActorCriticModule(L.LightningModule):
                 )
             self._payload_validated = True
 
-        is_warmup = self.global_step < self.config.supervised_only_warmup_steps
+        halt_disabled = self.global_step < self.config.halt_disabled_steps
         execution = run_captured_rollout(
             runner=self._train_runner,
             source=self._train_source,
             controller=self.controller,
             carry=self._train_carry,
             runner_options={
-                "allow_halt": not is_warmup,
+                "allow_halt": not halt_disabled,
                 "explore": True,
                 "halt_action": self._deliberation.halt_action,
                 "max_halt_steps": self._deliberation.episode_horizon,

@@ -4,19 +4,24 @@ Produces a persisted eval-artifact bundle from a model-family checkpoint
 without a Lightning Trainer or training callback.  Uses only public APIs
 from ``ehc_sn.eval``.
 
+The runner receives a pre-resolved :class:`EvaluationExperiment` — all
+provider, regime, capture, and identity resolution has already been
+performed by the experiment-specific builder.
+
 Usage::
 
+    from ehc_sn.experiments._infra import (
+        EvaluationExperiment,
+        EvaluationRunRequest,
+    )
+
     artifact_dir = run_offline_eval(
-        model_family="hrm_v2",
-        executor_config_path=Path("config.toml"),
-        checkpoint_path=Path("best.ckpt"),
-        task="mazehard",
-        provider_ref="ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider",
-        provider_settings={"dataset_path": str(data_root), "n_cases": 2},
-        regime_id="mazehard_smoke",
-        regime_kind="diagnostic",
-        output_dir=Path("/tmp/mazehard_smoke"),
-        device="cpu",
+        experiment=experiment,
+        request=EvaluationRunRequest(
+            checkpoint_path=Path("best.ckpt"),
+            output_dir=Path("/tmp/smoke"),
+            device="cpu",
+        ),
     )
 
 Boundary rules:
@@ -25,22 +30,22 @@ Boundary rules:
       ``ehc_sn.eval.artifacts``.
     - Must not import from ``lightning/``, ``models/``, ``tasks/``,
       ``adapters/``, or ``callbacks/``.
+    - Must not import from ``experiments/<task>/<family>/`` (receives
+      pre-resolved objects).
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import replace
 from numbers import Real
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import torch
 
 from ehc_sn.eval.artifacts import (
-    EvalArtifactExecutorRef,
-    load_executor_from_artifact,
-    persist_regime_artifact_bundle,
+    _hydrate_executor_from_checkpoint,
+    collect_regime_artifact_bundle,
     resolve_provider,
 )
 from ehc_sn.eval.contracts import (
@@ -50,9 +55,11 @@ from ehc_sn.eval.contracts import (
     EvaluationTraceRequest,
 )
 from ehc_sn.eval.executor import iter_evaluation_regime
+from ehc_sn.experiments._infra import (
+    EvaluationExperiment,
+    EvaluationRunRequest,
+)
 from ehc_sn.metrics.values import validate_metric_value
-from ehc_sn.traces import TraceField
-from ehc_sn.traces.specs import build_trace_spec
 
 # ---------------------------------------------------------------------------
 # Reserved keys that model aggregation hooks must not return.
@@ -128,59 +135,20 @@ def _to_device_batch(
 
 def run_offline_eval(
     *,
-    model_family: str,
-    executor_config_path: Path,
-    checkpoint_path: Path,
-    task: str,
-    provider_ref: str,
-    provider_settings: dict[str, Any],
-    regime_id: str,
-    regime_kind: Literal["diagnostic", "benchmark"],
-    output_dir: Path,
-    device: str | torch.device = "cpu",
-    max_batches: int = 0,
-    trace_keys: list[str] | None = None,
-    extra_trace_fields: Sequence[TraceField] | None = None,
+    experiment: EvaluationExperiment,
+    request: EvaluationRunRequest,
 ) -> Path:
     """Run one evaluation regime offline and persist the artifact bundle.
 
     Parameters
     ----------
-    model_family:
-        Canonical model-family identifier (e.g. ``"hrm_v2"``).  Validated
-        by ``EvalArtifactExecutorRef``.
-    executor_config_path:
-        Path to a TOML config file for the model family's executor.
-    checkpoint_path:
-        Path to a weights-only checkpoint file.
-    task:
-        Canonical task identifier (e.g. ``"mazehard"``).
-    provider_ref:
-        Dotted import path to an ``EvaluationSourceProvider`` class.
-    provider_settings:
-        Keyword arguments forwarded to the provider constructor.
-    regime_id:
-        Unique regime identifier written into the artifact manifest.
-    regime_kind:
-        Regime classification — ``"diagnostic"`` or ``"benchmark"``.
-    output_dir:
-        Target directory for the persisted eval artifact.
-    device:
-        PyTorch device for executor and batch placement.
-    max_batches:
-        Maximum provider batches to run.  ``0`` means all.
-    trace_keys:
-        Optional list of semantic trace key strings (e.g.
-        ``["act/halted", "pred/solution_overlay"]``).  When provided,
-        an ``EvaluationTraceRequest`` is built from the executor's
-        ``_trace_paradigm`` and passed to the evaluation loop so that
-        trace material is persisted in the artifact bundle.  ``None``
-        or empty list means no trace materialization (default).
-    extra_trace_fields:
-        Optional sequence of :class:`~ehc_sn.traces.TraceField` objects
-        appended to the trace spec as *extra_fields* (e.g.
-        ``HRM_HIDDEN_STATE_FIELDS``).  ``None`` or empty sequence
-        means no extra fields.
+    experiment:
+        Pre-resolved evaluation experiment returned by an experiment-specific
+        builder.  Contains the executor, provider specification, regime
+        identity, trace specification, and experiment identity.
+    request:
+        Run-instance parameters — checkpoint, output directory, device,
+        and bounded-execution overrides.
 
     Returns
     -------
@@ -192,57 +160,41 @@ def run_offline_eval(
     RuntimeError
         If no cases are produced by the provider.
     FileNotFoundError
-        If ``executor_config_path`` or ``checkpoint_path`` does not exist
-        (delegated to ``load_executor_from_artifact``).
+        If ``checkpoint_path`` does not exist (delegated to checkpoint loading).
     ValueError
-        If ``model_family`` is unsupported (delegated to
-        ``EvalArtifactExecutorRef`` validation), or if ``trace_keys``
-        includes unknown keys (delegated to ``build_trace_spec``).
+        If the capture profile cannot be resolved for the experiment's trace
+        paradigm (delegated to ``resolve_capture_profile``).
     KeyError
         If a required summary field from the aggregation hook collides with
         reserved keys.
     """
-    device = torch.device(device)
+    device = torch.device(request.device)
 
-    # ---- Construct executor -------------------------------------------------
-    ref = EvalArtifactExecutorRef(
-        model_family=model_family,
-        executor_config_path=executor_config_path,
-        checkpoint_path=checkpoint_path,
-    )
-    executor = load_executor_from_artifact(ref)
+    # ---- Hydrate executor ---------------------------------------------------
+    executor = experiment.executor
     executor.to(device)
 
-    # ---- Resolve provider and run cases -------------------------------------
-    provider = resolve_provider(provider_ref, provider_settings)
+    # ---- Load checkpoint ----------------------------------------------------
+    _hydrate_executor_from_checkpoint(executor, request.checkpoint_path)
 
-    # Build optional trace request.
+    # ---- Resolve provider ---------------------------------------------------
+    provider = resolve_provider(
+        experiment.provider_spec.ref, experiment.provider_spec.settings
+    )
+
+    # ---- Build trace request ------------------------------------------------
     trace_request: EvaluationTraceRequest | None = None
-    if trace_keys:
-        paradigm = getattr(executor, "_trace_paradigm", None)
-        if paradigm is None:
-            raise ValueError(
-                "Executor does not have a _trace_paradigm attribute. "
-                "Cannot build trace request without knowing the trace paradigm."
-            )
+    if experiment.trace_spec is not None:
+        trace_request = EvaluationTraceRequest(trace_spec=experiment.trace_spec)
 
-        # Discover adapter-specific trace fields from the executor.
-        extra = extra_trace_fields
-        if extra is None:
-            extra = getattr(executor, "_extra_trace_fields", None)
+    identity = experiment.identity
 
-        trace_spec = build_trace_spec(
-            paradigm,
-            include_keys=trace_keys,  # type: ignore[arg-type]
-            extra_fields=extra,
-        )
-        trace_request = EvaluationTraceRequest(trace_spec=trace_spec)
-
+    # ---- Run cases ----------------------------------------------------------
     case_results: list[EvaluationCaseResult] = []
     for result in iter_evaluation_regime(
         provider,
         executor,
-        max_batches=max_batches,
+        max_batches=request.max_batches,
         trace_request=trace_request,
         prepare_case_batch=lambda case: _to_device_batch(case, device),
     ):
@@ -251,8 +203,8 @@ def run_offline_eval(
     if not case_results:
         raise RuntimeError(
             "No evaluation cases were produced. "
-            f"Provider: {provider_ref!r}. "
-            f"Regime: {regime_id!r}."
+            f"Provider: {experiment.provider_ref!r}. "
+            f"Regime: {experiment.regime_id!r}."
         )
 
     # ---- Build summary ------------------------------------------------------
@@ -266,12 +218,13 @@ def run_offline_eval(
         summary["loss"] = sum(losses) / len(losses)
 
     # Optional model-family aggregation hook.
+    task_name = identity.task if identity is not None else "unknown"
     aggregate = getattr(executor, "aggregate_evaluation_case_metrics", None)
     if aggregate is not None:
         task_summary = aggregate(
-            task=task,
-            regime_id=regime_id,
-            regime_kind=regime_kind,
+            task=task_name,
+            regime_id=experiment.regime_id,
+            regime_kind=experiment.regime_kind,
             case_results=case_results,
         )
         validated = _validate_hook_metrics(task_summary)
@@ -279,21 +232,32 @@ def run_offline_eval(
 
     # ---- Persist ------------------------------------------------------------
     regime_result = EvaluationRegimeResult(
-        regime_id=regime_id,
+        regime_id=experiment.regime_id,
         case_results=tuple(case_results),
         summary=summary,
     )
-    persist_regime_artifact_bundle(
-        run_dir=output_dir,
-        task=task,
-        regime_kind=regime_kind,
-        regime_id=regime_id,
+    collect_regime_artifact_bundle(
+        executor=executor,
+        provider=provider,
+        regime_id=experiment.regime_id,
+        regime_kind=experiment.regime_kind,
+        run_dir=request.output_dir,
+        trace_spec=experiment.trace_spec,
+        max_batches=request.max_batches,
         trigger_kind="offline",
         epoch=0,
         step=0,
-        regime_result=regime_result,
+        provenance_overrides={
+            "model_family": identity.model_family if identity else None,
+            "trace_paradigm": identity.trace_paradigm if identity else None,
+            "task": task_name,
+            "capture_profile": experiment.capture_profile,
+            "capture_profile_version": 1,
+            "capture_include": list(experiment.capture_include),
+            "capture_exclude": list(experiment.capture_exclude),
+        },
     )
-    return output_dir.resolve()
+    return request.output_dir.resolve()
 
 
 # ---------------------------------------------------------------------------

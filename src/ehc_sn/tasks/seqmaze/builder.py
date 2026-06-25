@@ -13,6 +13,7 @@ Path written: ``data/processed/seqmaze/<corpus>/v<version>/``
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any, Final
 
@@ -171,9 +172,19 @@ def validate_seqmaze_sample(data: dict[str, np.ndarray]) -> None:
 
     if not sp:
         raise ValueError("No path exists from start to goal.")
-    # target_path is stored in rank-space (row indices equal rank indices)
-    if sp != list(data["target_path"][: len(sp)]):
-        raise ValueError("Target path does not match BFS shortest path.")
+    # Validate stored path is a correct prefix of the BFS shortest path.
+    # When the stored path is truncated (path_length == t_max because
+    # EOS was forced at position t_max-1), only the stored prefix is
+    # checked.  This mirrors the seq2seq truncation contract: the
+    # training code uses path_mask to ignore positions beyond the
+    # stored length, so only the prefix must match.
+    stored_len = int(data["path_length"]) - 1  # actual nodes, excl EOS
+    stored_path = list(data["target_path"][:stored_len])
+    if stored_path != sp[:stored_len]:
+        raise ValueError(
+            "Target path prefix does not match BFS shortest path. "
+            f"stored={stored_path} expected_prefix={sp[:stored_len]}"
+        )
 
 
 # =============================================================================
@@ -390,7 +401,23 @@ def build_seqmaze_task_corpus(
             f"Rebuild with:\n"
             f"    python scripts/data-gen/build-dagflow.py build-all"
         )
-
+    # Validate n_max capacity against substrate extent.
+    layout_n_max = layout_manifest.get("n_max", 0)
+    if n_max < layout_n_max:
+        raise ValueError(
+            f"n_max ({n_max}) is smaller than substrate n_max "
+            f"({layout_n_max}).  Real graph nodes would be truncated. "
+            f"Increase --n-max or regenerate the dagflow substrate "
+            f"with a smaller --n-max."
+        )
+    if n_max > layout_n_max:
+        warnings.warn(
+            f"n_max ({n_max}) exceeds substrate n_max "
+            f"({layout_n_max}).  Extra {n_max - layout_n_max} padding "
+            f"slots will be added to each sample.",
+            UserWarning,
+            stacklevel=2,
+        )
     split_counts = {"train": n_train, "val": n_val, "test": n_test}
     layout_n = layout_manifest.get("n_samples", {})
     for split, n in split_counts.items():

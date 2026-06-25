@@ -1,8 +1,9 @@
-"""HRM bridge adapters for MazeHard, SeqMaze, and Goaltrace task families."""
+"""HRM bridge adapters for MazeHard, SeqMaze, Goaltrace, and Routebind task families."""
 
 from ._base import (
     GoaltraceHRMAdapterSettings,
     MazeHardHRMAdapterSettings,
+    RoutebindHRMAdapterSettings,
     SeqMazeAdapterSettings,
     SeqMazeProbeAdapterSettings,
 )
@@ -12,6 +13,11 @@ from .goaltrace import (
     GoaltraceHRMV1ControlOutput,
 )
 from .mazehard import MazeHardHRMV1BridgeAdapter, MazeHardHRMV2BridgeAdapter
+from .routebind import (
+    RoutebindHRMV1BridgeAdapter,
+    RoutebindHRMV1BridgeOutput,
+    RoutebindHRMV1ControlOutput,
+)
 from .seqmaze import (
     SeqMazeBridgeOutput,
     SeqMazeHRMV1BridgeAdapter,
@@ -30,9 +36,12 @@ from .traces import (
     MAZE_HARD_HRM_ACT_TRACE_FIELDS,
     MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
     MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY,
+    ROUTEBIND_HRM_ACT_TRACE_FIELDS,
+    ROUTEBIND_HRM_ACT_TRAJECTORY_FIELD,
     SEQMAZE_HRM_ACTOR_CRITIC_TRACE_FIELDS,
     build_goaltrace_hrm_trace_meta,
     build_mazehard_hrm_trace_meta,
+    build_routebind_hrm_trace_meta,
     build_seqmaze_hrm_actor_critic_trace_meta,
     build_seqmaze_hrm_trace_meta,
 )
@@ -65,6 +74,13 @@ __all__ = [
     "SeqMazeHRMV2BridgeOutput",
     "SeqMazeHRMV2CriticOutput",
     "SeqMazeHRMV2PolicyOutput",
+    "RoutebindHRMAdapterSettings",
+    "RoutebindHRMV1BridgeAdapter",
+    "RoutebindHRMV1BridgeOutput",
+    "RoutebindHRMV1ControlOutput",
+    "ROUTEBIND_HRM_ACT_TRACE_FIELDS",
+    "ROUTEBIND_HRM_ACT_TRAJECTORY_FIELD",
+    "build_routebind_hrm_trace_meta",
     "SeqMazeProbeAdapterSettings",
     "SeqMazeProbeHRMV2BridgeAdapter",
     "SeqMazeProbeOutput",
