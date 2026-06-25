@@ -1,10 +1,8 @@
-# Evaluation executor config — HRM v1 on MazeHard.
-# Derived from config/training/hrm-v1-mazehard-vram8gib.toml.
-# Key eval override: exploration_prob = 0.0 (deterministic).
+# Evaluation executor config — HRM v1 on Routebind.
 # Nested structure matches Pydantic field names in
-# MazeHardHRMV1EvaluationExperimentConfig.
+# RoutebindHRMV1EvaluationExperimentConfig.
 
-experiment_id = "hrm-v1-mazehard"
+experiment_id = "hrm-v1-routebind"
 
 [model]
     model_config_path = "config/models/hrm-v1-base.toml"
@@ -24,13 +22,13 @@ experiment_id = "hrm-v1-mazehard"
     max_rollout_steps = 16
 
 [provider]
-    ref = "ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider"
+    ref = "ehc_sn.tasks.routebind.providers.RoutebindReplayProvider"
     [provider.settings]
-        dataset_path = "data/processed/mazehard"
+        dataset_path = "data/processed/routebind"
         split = "val"
 
 [regime]
-    id = "mazehard_diagnostic"
+    id = "routebind_diagnostic"
     kind = "diagnostic"
 
 [capture]

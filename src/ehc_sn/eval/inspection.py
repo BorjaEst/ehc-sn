@@ -218,9 +218,7 @@ def inspect_evaluation_artifact(
 
     # ---- Validate experiment identity ---------------------------------------
     if expected_experiment_id is not None:
-        artifact_id = manifest.get(
-            "experiment_id", manifest.get("task")
-        )
+        artifact_id = manifest.get("experiment_id", manifest.get("task"))
         if artifact_id != expected_experiment_id:
             raise EvaluationArtifactError(
                 f"Artifact experiment_id={artifact_id!r} does not "
@@ -269,7 +267,9 @@ def inspect_evaluation_artifact(
                     halt_step=(
                         int(halt_step) if halt_step is not None else None
                     ),
-                    truncated=bool(truncated) if truncated is not None else None,
+                    truncated=(
+                        bool(truncated) if truncated is not None else None
+                    ),
                 )
             )
         cases = tuple(case_rows)
@@ -379,7 +379,9 @@ def format_inspection_text(
             if inspection.capture_profile_version
             else ""
         )
-        lines.append(f"  Capture profile:  {inspection.capture_profile}{version}")
+        lines.append(
+            f"  Capture profile:  {inspection.capture_profile}{version}"
+        )
         if inspection.resolved_fields:
             lines.append(
                 f"  Resolved fields:  {len(inspection.resolved_fields)} — "
@@ -397,9 +399,7 @@ def format_inspection_text(
         lines.append(sep_line)
         for c in inspection.cases:
             steps = str(c.step_count) if c.step_count is not None else "-"
-            halted = (
-                f"step {c.halt_step}" if c.halt_step is not None else "-"
-            )
+            halted = f"step {c.halt_step}" if c.halt_step is not None else "-"
             truncated = "yes" if c.truncated else "no"
             lines.append(
                 f"  {c.index:<6} {c.case_id:<35} {steps:<8} {halted:<8} {truncated}"

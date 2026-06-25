@@ -64,31 +64,6 @@ class EvalArtifactExecutorRef(BaseModel, extra="forbid"):
             ) from None
         return self
 
-    @classmethod
-    def from_legacy_family(
-        cls, *, model_family: str, task: str, **kwargs
-    ) -> "EvalArtifactExecutorRef":
-        """Construct from legacy ``model_family`` + ``task`` identity.
-
-        Raises ``ValueError`` if the combination does not resolve to a
-        known experiment_id.
-        """
-        from ehc_sn.eval.registry import (
-            get_evaluation_experiment_registration,
-            list_experiment_ids,
-        )
-
-        experiment_id = f"{model_family.strip().lower()}-{task.strip().lower()}"
-        try:
-            get_evaluation_experiment_registration(experiment_id)
-        except KeyError:
-            raise ValueError(
-                f"Cannot resolve legacy model_family={model_family!r} "
-                f"+ task={task!r} to a known experiment_id. "
-                f"Available: {list_experiment_ids()}."
-            ) from None
-        return cls(experiment_id=experiment_id, **kwargs)
-
 
 # =============================================================================
 @dataclass(frozen=True)

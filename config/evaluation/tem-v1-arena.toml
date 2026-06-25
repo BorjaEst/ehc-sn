@@ -1,3 +1,5 @@
+experiment_id = "tem-v1-arena"
+
 # Evaluation executor config — TEM v1 on Arena.
 # Derived from config/training/tem-v1-arena-vram8gib.toml.
 # All training orchestration (optimizer, scheduler, data loading, logging,
@@ -8,13 +10,10 @@
 # ArenaTEMV1EvaluationExperimentConfig.
 #
 # Usage:
-#   python scripts/evaluation/run_eval.py \
-#       --model-family tem-v1 \
-#       --checkpoint models/tem-v1/eval-weights-only.pt \
+#   python scripts/evaluation/run_eval.py run \
 #       --config config/evaluation/tem-v1-arena.toml \
-#       --task arena \
-#       --provider-ref ehc_sn.tasks.arena.providers.ArenaReplayProvider \
-#       ...
+#       --checkpoint checkpoints/tem-v1-arena/best.ckpt \
+#       --output artifacts/eval/tem-v1-arena
 
 [model]
     model_config_path = "config/models/tem-v1-base.toml"
@@ -69,4 +68,16 @@
 
 [execution.validation]
     hard_max_rollout_steps = 6000
-    seed = 42
+
+[provider]
+    ref = "ehc_sn.tasks.arena.providers.ArenaReplayProvider"
+    [provider.settings]
+        dataset_path = "data/processed/arena"
+        split = "val"
+
+[regime]
+    id = "arena_diagnostic"
+    kind = "diagnostic"
+
+[capture]
+    profile = "metrics_only"

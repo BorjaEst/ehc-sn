@@ -81,7 +81,7 @@ training.halt_disabled_steps = 5000
 
 [checkpointing.checkpoint]
     dirpath             = "checkpoints/hrm-v2-seqmaze"
-    filename            = "step={step:06d}.ckpt"
+    filename            = "{step:06d}"
     every_n_train_steps = 1000
     save_last           = true
     save_on_exception   = true

@@ -69,7 +69,7 @@
 
 [checkpointing.checkpoint]
     dirpath             = "checkpoints/hrm-v1-goaltrace"
-    filename            = "step={step:06d}.ckpt"
+    filename            = "{step:06d}"
     every_n_train_steps = 1000
     save_last           = true
     save_on_exception   = true

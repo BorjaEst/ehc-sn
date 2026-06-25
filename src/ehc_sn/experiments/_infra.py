@@ -28,11 +28,6 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from ehc_sn.eval.registry import (
-    _build_registry,
-    get_evaluation_experiment_registration,
-    list_experiment_ids,
-)
 from ehc_sn.lightning.callbacks.checkpoint import CheckpointSettings
 from ehc_sn.traces.observer import TraceSpec
 

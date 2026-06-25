@@ -1,3 +1,5 @@
+experiment_id = "tem-v2-arena"
+
 # Evaluation executor config — TEM v2 on Arena.
 # Derived from config/training/tem-v2-arena-vram8gib.toml.
 # All training orchestration stripped.  Dynamics schedules preserved.
@@ -58,4 +60,16 @@
 
 [execution.validation]
     hard_max_rollout_steps = 6000
-    seed = 42
+
+[provider]
+    ref = "ehc_sn.tasks.arena.providers.ArenaReplayProvider"
+    [provider.settings]
+        dataset_path = "data/processed/arena"
+        split = "val"
+
+[regime]
+    id = "arena_diagnostic"
+    kind = "diagnostic"
+
+[capture]
+    profile = "metrics_only"

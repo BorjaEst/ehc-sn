@@ -149,9 +149,7 @@ def load_evaluation_experiment(
     # ---- Strip non-model key before Pydantic validation ---------------------
     # The Pydantic config classes use extra="forbid" and do not define
     # experiment_id as a field.  Strip before calling model_validate.
-    config_map = {
-        k: v for k, v in config_map.items() if k != "experiment_id"
-    }
+    config_map = {k: v for k, v in config_map.items() if k != "experiment_id"}
 
     # ---- Validate and build -------------------------------------------------
     try:
