@@ -8,15 +8,20 @@ experiment_id = "hrm-v1-routebind"
     model_config_path = "config/models/hrm-v1-base.toml"
 
 [model.components.adapter]
-    encoder_kind = "rope"
-    vocab_size   = 6
+    encoder_kind     = "rope"
+    num_cell_types   = 4
+    num_observations = 45
+    grid_height      = 30
+    grid_width       = 30
 
 [model.components.controller]
     max_halt_steps    = 16
     exploration_prob  = 0.0
 
 [model.components.task_evaluator]
-    token_loss = "stablemax_cross_entropy"
+    trajectory_loss   = "mse"
+    acceptable_error  = 0.1
+    halt_temperature  = 0.1
 
 [execution.validation]
     max_rollout_steps = 16
@@ -24,7 +29,7 @@ experiment_id = "hrm-v1-routebind"
 [provider]
     ref = "ehc_sn.tasks.routebind.providers.RoutebindReplayProvider"
     [provider.settings]
-        dataset_path = "data/processed/routebind"
+        dataset_path = "data/processed/routebind/default/v1"
         split = "val"
 
 [regime]

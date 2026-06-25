@@ -8,15 +8,17 @@ experiment_id = "hrm-v1-goaltrace"
     model_config_path = "config/models/hrm-v1-base.toml"
 
 [model.components.adapter]
-    encoder_kind = "rope"
-    vocab_size   = 9
+    encoder_kind      = "rope"
+    num_observations  = 45
 
 [model.components.controller]
     max_halt_steps    = 1
     exploration_prob  = 0.0
 
 [model.components.task_evaluator]
-    token_loss = "stablemax_cross_entropy"
+    field_loss        = "mse"
+    acceptable_error  = 0.1
+    halt_temperature  = 0.1
 
 [execution.validation]
     max_rollout_steps = 1
@@ -24,7 +26,7 @@ experiment_id = "hrm-v1-goaltrace"
 [provider]
     ref = "ehc_sn.tasks.goaltrace.providers.GoaltraceReplayProvider"
     [provider.settings]
-        dataset_path = "data/processed/goaltrace"
+        dataset_path = "data/processed/goaltrace/default/v1"
         split = "val"
 
 [regime]
