@@ -225,12 +225,33 @@ def select_task_overview_routebind(
         raise ValueError(
             f"target_waypoint length {len(target_waypoint)} != {S}"
         )
-    route = _extract_oracle_route(
-        target_trajectory, start_flag, cell_type, grid_width
-    )
-    waypoint_obs_sequence = _extract_waypoint_obs_sequence(
-        target_waypoint, route, observation_id
-    )
+
+    # Read waypoints directly from waypoint support channels.
+    # When the trace carries `waypoint_support` and `waypoint_semantic_depth`
+    # meta keys, use those for ordering.  Otherwise fall back to the
+    # greedy-route-based extraction for backward compat with v1 traces.
+    if trace.has_meta_path("routebind/waypoint_support"):
+        wp_sup = np.asarray(trace.get_meta_path("routebind/waypoint_support"))
+        if wp_sup.ndim >= 2:
+            wp_sup = wp_sup[sample_idx]
+        wp_sup = _to_1d(wp_sup)
+        wsd_key = "routebind/waypoint_semantic_depth"
+        if trace.has_meta_path(wsd_key):
+            wsd = np.asarray(trace.get_meta_path(wsd_key))
+            if wsd.ndim >= 2:
+                wsd = wsd[sample_idx]
+            wsd = _to_1d(wsd)
+        else:
+            wsd = np.full(S, -1, dtype=np.int16)
+        raw = _extract_waypoint_events_from_support(wp_sup, wsd, observation_id)
+        waypoint_obs_sequence = [obs for _, obs, _ in raw]
+    else:
+        route = _extract_oracle_route(
+            target_trajectory, start_flag, cell_type, grid_width
+        )
+        waypoint_obs_sequence = _extract_waypoint_obs_sequence(
+            target_waypoint, route, observation_id
+        )
 
     return RoutebindTaskOverviewData(
         cell_type=cell_type,
@@ -295,6 +316,26 @@ def _extract_oracle_route(
         visited.add(best_nbr)
 
     return route
+
+
+def _extract_waypoint_events_from_support(
+    waypoint_support: np.ndarray,
+    waypoint_semantic_depth: np.ndarray,
+    observation_id: np.ndarray,
+) -> list[tuple[int, int, int]]:
+    """Extract waypoint events from support arrays, ordered by semantic depth.
+
+    Semantics match ``tasks.routebind.decoding.extract_waypoint_events_from_support``
+    but with no dependency on that module (Layer-2 compatible).
+    """
+    events: list[tuple[int, int, int]] = []
+    for p in range(len(waypoint_support)):
+        if waypoint_support[p]:
+            sd = int(waypoint_semantic_depth[p])
+            if sd >= 0:
+                events.append((p, int(observation_id[p]), sd))
+    events.sort(key=lambda x: x[2])
+    return events
 
 
 def _extract_waypoint_obs_sequence(

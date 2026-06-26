@@ -12,12 +12,12 @@ from ehc_sn.controllers.deliberation.q_halting import (
     DeliberationQHaltingController,
     DeliberationQHaltingControllerConfig,
 )
-from ehc_sn.lightning.modules.q_halting import (
-    QHaltingBindings,
-    QHaltingComponentConfigs,
-    QHaltingConfig,
-    QHaltingModule,
-    QHaltingTrainingConfig,
+from ehc_sn.lightning.modules.actor_critic import (
+    ActorCriticBindings,
+    ActorCriticComponentConfigs,
+    ActorCriticConfig,
+    ActorCriticModule,
+    ActorCriticTrainingConfig,
 )
 from ehc_sn.metrics.routes.rl import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
@@ -37,8 +37,8 @@ from ehc_sn.tasks.seqmaze.supervision import build_seqmaze_supervision
 from ehc_sn.traces.specs import HRM_HIDDEN_STATE_FIELDS
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
 from ehc_sn.training.q_halting import (
-    TD0QHaltingBatchBuilder,
-    ZeroBootstrapQHaltingValidationScorer,
+    TD0ActorCriticBatchBuilder,
+    ZeroBootstrapActorCriticValidationScorer,
 )
 
 from .config import SeqMazeHRMV2ModelConfig
@@ -47,10 +47,10 @@ from .config import SeqMazeHRMV2ModelConfig
 def build_seqmaze_hrm_v2_model(
     config: SeqMazeHRMV2ModelConfig,
     *,
-    training_config: QHaltingTrainingConfig | None = None,
+    training_config: ActorCriticTrainingConfig | None = None,
     execution: SeqMazeRuntimeConfig | None = None,
-) -> QHaltingModule:
-    """Construct an QHaltingModule for SeqMaze × HRM-v2.
+) -> ActorCriticModule:
+    """Construct an ActorCriticModule for SeqMaze × HRM-v2.
 
     Parameters
     ----------
@@ -65,11 +65,11 @@ def build_seqmaze_hrm_v2_model(
         evaluation-only construction.  When provided, ``num_slots`` is
         read from ``training_config.num_slots`` in ``setup()``.
     """
-    components: QHaltingComponentConfigs = config.components  # type: ignore[assignment]
+    components: ActorCriticComponentConfigs = config.components  # type: ignore[assignment]
     adapter_settings: SeqMazeAdapterSettings = components.adapter  # type: ignore[assignment]
     n_max = adapter_settings.n_max
 
-    bindings = QHaltingBindings(
+    bindings = ActorCriticBindings(
         model_cls=HRModelV2,
         model_settings_cls=ModelSettingsV2,
         adapter_cls=SeqMazeHRMV2BridgeAdapter,
@@ -78,8 +78,8 @@ def build_seqmaze_hrm_v2_model(
         controller_config_cls=DeliberationQHaltingControllerConfig,
         objective_cls=HybridRLObjective,
         objective_config_cls=HybridRLLossConfig,
-        learner_cls=TD0QHaltingBatchBuilder,
-        val_scorer_cls=ZeroBootstrapQHaltingValidationScorer,
+        learner_cls=TD0ActorCriticBatchBuilder,
+        val_scorer_cls=ZeroBootstrapActorCriticValidationScorer,
         optimizer_cls=AdamATan2,
         optimizer_config_cls=AdamATan2Config,
         runtime_config_cls=SeqMazeRuntimeConfig,
@@ -94,8 +94,8 @@ def build_seqmaze_hrm_v2_model(
         supervision_builder=build_seqmaze_supervision,
         token_weight_builder=None,
     )
-    return QHaltingModule(
-        config=QHaltingConfig(
+    return ActorCriticModule(
+        config=ActorCriticConfig(
             model_config_path=config.model_config_path,
             halt_disabled_steps=(
                 training_config.halt_disabled_steps if training_config else 0

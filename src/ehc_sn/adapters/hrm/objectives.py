@@ -3,7 +3,7 @@
 The ACT binding reads from the objective-owned ACT step output protocol
 (``ACTStepOutput.task``).
 The hybrid RL binding reads task-specific fields from
-:class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord` for
+:class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord` for
 the value-control path.
 
 Mirrors the pattern used by
@@ -18,8 +18,8 @@ from typing import Any, Protocol, cast
 import torch
 from torch import Tensor
 
-from ehc_sn.controllers.contracts.value_control import (
-    ValueControlInteractionRecord,
+from ehc_sn.controllers.contracts.actor_critic import (
+    QHaltingInteractionRecord,
 )
 from ehc_sn.objectives._token import AccuracyStats, compute_accuracy_stats
 from ehc_sn.objectives.act import ACTObjectiveBinding
@@ -119,21 +119,21 @@ class MazeHardHRMV2HybridTaskBinding:
     task output on the interaction record and supervision labels from the
     observation dict used for the decision.
 
-    Injected into :class:`~ehc_sn.training.q_halting.TD0QHaltingBatchBuilder`
-    and :class:`~ehc_sn.training.q_halting.ZeroBootstrapQHaltingValidationScorer`
+    Injected into :class:`~ehc_sn.training.q_halting.TD0ActorCriticBatchBuilder`
+    and :class:`~ehc_sn.training.q_halting.ZeroBootstrapActorCriticValidationScorer`
     at wiring time in the Lightning module.
     """
 
     def extract_task_logits(  # -----------------------------------------------
         self,
-        record: ValueControlInteractionRecord,
+        record: QHaltingInteractionRecord,
     ) -> Tensor:
         """Return token-prediction logits from ``record.task_output.task_logits``."""
         return _extract_record_task_logits(record)
 
     def extract_labels(  # ----------------------------------------------------
         self,
-        record: ValueControlInteractionRecord,
+        record: QHaltingInteractionRecord,
     ) -> Tensor:
         """Return supervision labels from ``record.observation_used_for_decision``."""
         if "labels" not in record.observation_used_for_decision:
@@ -145,7 +145,7 @@ class MazeHardHRMV2HybridTaskBinding:
 
     def extract_token_weights(  # ---------------------------------------------
         self,
-        record: ValueControlInteractionRecord,
+        record: QHaltingInteractionRecord,
     ) -> Tensor:
         """Return per-token Token weights that emphasize MazeHard PATH labels."""
         labels = self.extract_labels(record)
@@ -166,7 +166,7 @@ def _extract_act_task_logits(  # ----------------------------------------------
 
 # =============================================================================
 def _extract_record_task_logits(  # -------------------------------------------
-    record: ValueControlInteractionRecord,
+    record: QHaltingInteractionRecord,
 ) -> Tensor:
     """Return task logits from any value-control record with task payload."""
     task_output = cast(_HasTaskLogits | None, record.task_output)
@@ -320,8 +320,8 @@ class SeqMazeHRMV2HybridTaskBinding:
     task output on the interaction record and supervision labels from the
     observation dict used for the decision.
 
-    Injected into :class:`~ehc_sn.training.q_halting.TD0QHaltingBatchBuilder`
-    and :class:`~ehc_sn.training.q_halting.ZeroBootstrapQHaltingValidationScorer`
+    Injected into :class:`~ehc_sn.training.q_halting.TD0ActorCriticBatchBuilder`
+    and :class:`~ehc_sn.training.q_halting.ZeroBootstrapActorCriticValidationScorer`
     at wiring time in the Lightning module.
     """
 
@@ -331,7 +331,7 @@ class SeqMazeHRMV2HybridTaskBinding:
 
     def extract_task_logits(
         self,
-        record: ValueControlInteractionRecord,
+        record: QHaltingInteractionRecord,
     ) -> Tensor:
         """Return path-prediction logits from ``record.task_output.path_logits``."""
         task_output = record.task_output
@@ -349,7 +349,7 @@ class SeqMazeHRMV2HybridTaskBinding:
 
     def extract_labels(
         self,
-        record: ValueControlInteractionRecord,
+        record: QHaltingInteractionRecord,
     ) -> Tensor:
         """Return supervision labels from ``record.observation_used_for_decision``.
 
@@ -373,7 +373,7 @@ class SeqMazeHRMV2HybridTaskBinding:
 
     def extract_token_weights(  # ------------------------------------------
         self,
-        record: ValueControlInteractionRecord,
+        record: QHaltingInteractionRecord,
     ) -> Tensor:
         """Return per-token loss weights for SeqMaze hybrid RL.
 

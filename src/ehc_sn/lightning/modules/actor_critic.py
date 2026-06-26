@@ -60,7 +60,7 @@ from ehc_sn.types import Batch
 # =============================================================================
 class RuntimeConfigLike(Protocol):
     """Protocol for deliberation/execution policy configs consumed by
-    :class:`QHaltingModule`.
+    :class:`ActorCriticModule`.
 
     Both :class:`~ehc_sn.tasks.mazehard.runtime.MazeHardRuntimeConfig` and
     :class:`~ehc_sn.tasks.seqmaze.runtime.SeqMazeRuntimeConfig` satisfy this
@@ -91,7 +91,7 @@ def _payload_width(batch: Batch) -> int:
 
 # =============================================================================
 @dataclass(frozen=True, slots=True, eq=False)
-class QHaltingBindings:
+class ActorCriticBindings:
     """Immutable experiment-to-module bindings for actor-critic regimes."""
 
     # eq=False: fields include callables and classes; structural equality
@@ -132,7 +132,7 @@ class QHaltingBindings:
     """
 
 
-class QHaltingTrainingConfig(BaseModel, extra="forbid"):
+class ActorCriticTrainingConfig(BaseModel, extra="forbid"):
     """Training-only configuration for an actor-critic experiment.
 
     Not required for evaluation — only used to construct optimizers
@@ -175,7 +175,7 @@ class QHaltingTrainingConfig(BaseModel, extra="forbid"):
     )
 
 
-class QHaltingComponentConfigs(BaseModel, extra="forbid"):
+class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
     """Concrete component configs for an actor-critic experiment.
 
     Validated and populated by the experiment builder, consumed by
@@ -183,7 +183,7 @@ class QHaltingComponentConfigs(BaseModel, extra="forbid"):
     concrete Pydantic types are determined by the experiment builder.
     Contains only the configs needed to construct the computational
     graph — optimizers and training-only settings live in
-    :class:`QHaltingTrainingConfig`.
+    :class:`ActorCriticTrainingConfig`.
     """
 
     adapter: BaseModel = Field(
@@ -201,12 +201,12 @@ class QHaltingComponentConfigs(BaseModel, extra="forbid"):
     )
 
 
-class QHaltingConfig(BaseModel, extra="forbid"):
+class ActorCriticConfig(BaseModel, extra="forbid"):
     """Regime-owned settings for an actor-critic Lightning experiment.
 
     Contains only fields the regime module can validate without knowing
     the concrete experiment.  Component-specific configs live in
-    :class:`QHaltingComponentConfigs`, validated by the
+    :class:`ActorCriticComponentConfigs`, validated by the
     experiment builder.
 
     ``num_slots`` is passed as a separate constructor argument,
@@ -224,21 +224,21 @@ class QHaltingConfig(BaseModel, extra="forbid"):
     )
 
 
-class QHaltingModule(L.LightningModule):
+class ActorCriticModule(L.LightningModule):
     """Generic LightningModule for actor-critic deliberation training.
 
-    Accepts an :class:`QHaltingConfig`, an
-    :class:`QHaltingComponentConfigs`, and an
-    :class:`QHaltingBindings` bundle.  Features three-optimizer
+    Accepts an :class:`ActorCriticConfig`, an
+    :class:`ActorCriticComponentConfigs`, and an
+    :class:`ActorCriticBindings` bundle.  Features three-optimizer
     training, partial-reset batching, and warmup gating.
     """
 
     def __init__(  # ----------------------------------------------------------
         self,
-        config: QHaltingConfig,
-        component_configs: QHaltingComponentConfigs,
-        bindings: QHaltingBindings,
-        training_config: QHaltingTrainingConfig | None = None,
+        config: ActorCriticConfig,
+        component_configs: ActorCriticComponentConfigs,
+        bindings: ActorCriticBindings,
+        training_config: ActorCriticTrainingConfig | None = None,
         *,
         execution: RuntimeConfigLike | None = None,
     ) -> None:
@@ -296,7 +296,7 @@ class QHaltingModule(L.LightningModule):
         return _loader(self.model, path, groups)
 
     @property
-    def config(self) -> QHaltingConfig:
+    def config(self) -> ActorCriticConfig:
         return self._config
 
     def validate_run_plan(  # -------------------------------------------------
@@ -315,7 +315,7 @@ class QHaltingModule(L.LightningModule):
         if self._training_config is None:
             raise RuntimeError(
                 "validate_run_plan: training_config is None. "
-                "Training requires a full QHaltingTrainingConfig."
+                "Training requires a full ActorCriticTrainingConfig."
             )
         rp = self._num_slots
         if rp is not None and rp <= 0:
@@ -419,7 +419,7 @@ class QHaltingModule(L.LightningModule):
             if tc.num_slots is None:
                 raise RuntimeError(
                     "num_slots is required for training. "
-                    "Set it via QHaltingTrainingConfig.num_slots."
+                    "Set it via ActorCriticTrainingConfig.num_slots."
                 )
             self._num_slots = tc.num_slots
 
@@ -440,16 +440,6 @@ class QHaltingModule(L.LightningModule):
                 carry0=self._train_carry,
                 device=self.device,
             )
-
-    def _assert_setup(self) -> None:
-        if self.controller is None:
-            raise RuntimeError("setup() not called.")
-        if self.objective is None:
-            raise RuntimeError("setup() not called.")
-        if self.learner is None:
-            raise RuntimeError("setup() not called.")
-        if self.val_scorer is None:
-            raise RuntimeError("setup() not called.")
 
     def _assert_setup(self) -> None:
         if self.controller is None:
@@ -871,8 +861,8 @@ class QHaltingModule(L.LightningModule):
 
 
 __all__ = [
-    "QHaltingBindings",
-    "QHaltingComponentConfigs",
-    "QHaltingConfig",
-    "QHaltingModule",
+    "ActorCriticBindings",
+    "ActorCriticComponentConfigs",
+    "ActorCriticConfig",
+    "ActorCriticModule",
 ]

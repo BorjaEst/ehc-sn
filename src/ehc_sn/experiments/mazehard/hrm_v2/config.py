@@ -11,7 +11,7 @@ Hierarchy (training):
     ├── execution: MazeHardDeliberationConfig
     │   ├── halt_action
     │   └── episode_horizon
-    ├── training: QHaltingTrainingConfig
+    ├── training: ActorCriticTrainingConfig
     │   ├── optimizer
     │   └── runtime
     ├── data: DatamoduleConfig
@@ -45,8 +45,8 @@ from ehc_sn.experiments._infra import (
     RegimeConfig,
     TrainerConfig,
 )
-from ehc_sn.lightning.modules.q_halting import (
-    QHaltingTrainingConfig,
+from ehc_sn.lightning.modules.actor_critic import (
+    ActorCriticTrainingConfig,
 )
 from ehc_sn.logging.tensorboard import LoggerSettings
 from ehc_sn.objectives.composites.hybrid_rl import HybridRLLossConfig
@@ -144,7 +144,7 @@ class MazeHardHRMV2TrainingExperimentConfig(BaseModel, extra="forbid"):
         ...,
         description="Model structure (components + architecture path).",
     )
-    training: QHaltingTrainingConfig = Field(
+    training: ActorCriticTrainingConfig = Field(
         ...,
         description="Actor-critic training configuration (optimizers, reward). "
         "Runtime/execution policy moved to deliberation.validation.",

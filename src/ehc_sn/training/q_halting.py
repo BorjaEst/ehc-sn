@@ -10,14 +10,14 @@ Task-specific field extraction is delegated to an injected
 
 Training path — online (TD(0) with live bootstrap)::
 
-    source -> controller.step() -> ValueControlInteractionRecord
-    -> TD0QHaltingBatchBuilder.build_ac_batch()  (TD(0) + V(s_{t+1}) bootstrap)
+    source -> controller.step() -> QHaltingInteractionRecord
+    -> TD0ActorCriticBatchBuilder.build_ac_batch()  (TD(0) + V(s_{t+1}) bootstrap)
     -> HybridRLObjective.compute_step(batch) -> loss
 
 Training path — deliberation (optional bootstrap)::
 
-    source -> controller.step() -> ValueControlInteractionRecord
-    -> TD0QHaltingBatchBuilder.build_deliberation_ac_batch(
+    source -> controller.step() -> QHaltingInteractionRecord
+    -> TD0ActorCriticBatchBuilder.build_deliberation_ac_batch(
            next_obs=..., carry=...  # optional
        )
        (TD(0), bootstrap = V(s_{t+1}) when provided)
@@ -25,7 +25,7 @@ Training path — deliberation (optional bootstrap)::
 
 Validation path (zero bootstrap)::
 
-    RolloutChunk -> ZeroBootstrapQHaltingValidationScorer(chunk)
+    RolloutChunk -> ZeroBootstrapActorCriticValidationScorer(chunk)
     -> HybridRLObjective.compute_step(zero-bootstrap batch) -> HybridRLObjectiveStep
 
 Both zero-bootstrap paths share :func:`_zero_bootstrap_batch`.
@@ -41,11 +41,9 @@ from torch import Tensor
 from ehc_sn.controllers.contracts.actor_critic import (
     OnlineBootstrapCarry,
     OnlineBootstrapRuntime,
-)
-from ehc_sn.controllers.contracts.value_control import (
-    ValueControlExecutionSnapshot,
-    ValueControlInteractionRecord,
-    ValueControlRolloutBackbone,
+    QHaltingExecutionSnapshot,
+    QHaltingInteractionRecord,
+    QHaltingRolloutBackbone,
 )
 from ehc_sn.objectives.composites.hybrid_rl import (
     HybridRLObjective,
@@ -59,8 +57,8 @@ from ehc_sn.types import Batch
 
 
 # =============================================================================
-class TD0QHaltingBatchBuilder:
-    """Single-step TD(0) post-processor for Q-halting training.
+class TD0ActorCriticBatchBuilder:
+    """Single-step TD(0) post-processor for actor-critic training.
 
     Owns:
         - bootstrap value computation via ``V(s_{t+1})`` (online-specific,
@@ -74,7 +72,7 @@ class TD0QHaltingBatchBuilder:
 
     def __init__(  # ----------------------------------------------------------
         self,
-        backbone: ValueControlRolloutBackbone,
+        backbone: QHaltingRolloutBackbone,
         runtime: OnlineBootstrapRuntime | None,
         gamma: float,
         supervision_builder: Callable[[Any], object],
@@ -115,7 +113,7 @@ class TD0QHaltingBatchBuilder:
         """
         if self._runtime is None:
             raise RuntimeError(
-                "TD0QHaltingBatchBuilder.compute_bootstrap_value requires a "
+                "TD0ActorCriticBatchBuilder.compute_bootstrap_value requires a "
                 "non-None runtime that implements "
                 "OnlineBootstrapRuntime.extract_next_step_obs. Pass "
                 "runtime=None only when using the zero-bootstrap deliberation "
@@ -142,8 +140,8 @@ class TD0QHaltingBatchBuilder:
 
     def assemble_batch(  # ----------------------------------------------------
         self,
-        record: ValueControlInteractionRecord,
-        snapshot: ValueControlExecutionSnapshot,
+        record: QHaltingInteractionRecord,
+        snapshot: QHaltingExecutionSnapshot,
         bootstrap_value: Tensor,
         *,
         use_token_weights: bool = False,
@@ -172,7 +170,7 @@ class TD0QHaltingBatchBuilder:
         task_logits = getattr(supervision, "task_logits", None)
         if task_logits is None:
             raise RuntimeError(
-                "TD0QHaltingBatchBuilder.assemble_batch: supervision "
+                "TD0ActorCriticBatchBuilder.assemble_batch: supervision "
                 "object has no 'task_logits' attribute."
             )
 
@@ -195,7 +193,7 @@ class TD0QHaltingBatchBuilder:
 
     def build_ac_batch(  # ----------------------------------------------------
         self,
-        record: ValueControlInteractionRecord,
+        record: QHaltingInteractionRecord,
         carry: OnlineBootstrapCarry,
         *,
         use_token_weights: bool = False,
@@ -212,7 +210,7 @@ class TD0QHaltingBatchBuilder:
         """
         if record.task_output is None:
             raise RuntimeError(
-                "TD0QHaltingBatchBuilder requires a non-None task_output on "
+                "TD0ActorCriticBatchBuilder requires a non-None task_output on "
                 "QHaltingInteractionRecord."
             )
         bootstrap_value = self.compute_bootstrap_value(carry)
@@ -225,8 +223,8 @@ class TD0QHaltingBatchBuilder:
 
     def build_deliberation_ac_batch(  # ---------------------------------------
         self,
-        record: ValueControlInteractionRecord,
-        snapshot: ValueControlExecutionSnapshot,
+        record: QHaltingInteractionRecord,
+        snapshot: QHaltingExecutionSnapshot,
         next_obs: Batch | None = None,
         carry: OnlineBootstrapCarry | None = None,
         *,
@@ -238,7 +236,7 @@ class TD0QHaltingBatchBuilder:
         context where no live environment provides ``V(s_{t+1})``. When
         ``next_obs`` and ``carry`` are provided, the next-step critic value
         is computed from the backbone and used for bootstrap.
-        Accepts any :class:`~ehc_sn.controllers.contracts.value_control.ValueControlExecutionSnapshot`.
+        Accepts any :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingExecutionSnapshot`.
 
         Args:
             record: Interaction record from the controller step.
@@ -249,7 +247,7 @@ class TD0QHaltingBatchBuilder:
         """
         if record.task_output is None:
             raise RuntimeError(
-                "TD0QHaltingBatchBuilder.build_deliberation_ac_batch "
+                "TD0ActorCriticBatchBuilder.build_deliberation_ac_batch "
                 "requires a non-None task_output on QHaltingInteractionRecord."
             )
         if next_obs is not None and carry is not None:
@@ -274,7 +272,7 @@ class TD0QHaltingBatchBuilder:
 
 # =============================================================================
 def _zero_bootstrap_batch(  # -------------------------------------------------
-    ir: ValueControlInteractionRecord,
+    ir: QHaltingInteractionRecord,
     steps: Tensor,
     halted: Tensor,
     supervision_builder: Callable[[Any], object],
@@ -284,8 +282,8 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
 ) -> HybridValueBatch:
     """Canonical zero-bootstrap TD(0) batch assembly.
 
-    Shared by :meth:`TD0QHaltingBatchBuilder.build_deliberation_ac_batch`
-    and :class:`ZeroBootstrapQHaltingValidationScorer`.
+    Shared by :meth:`TD0ActorCriticBatchBuilder.build_deliberation_ac_batch`
+    and :class:`ZeroBootstrapActorCriticValidationScorer`.
 
     With zero bootstrap: ``returns = reward + gamma * 0 * (1 - done) = reward``.
     Only the bootstrap term is zeroed.
@@ -323,18 +321,18 @@ def _zero_bootstrap_batch(  # -------------------------------------------------
 
 
 # =============================================================================
-class ZeroBootstrapQHaltingValidationScorer:
+class ZeroBootstrapActorCriticValidationScorer:
     """Zero-bootstrap validation scorer for value-control models.
 
     Adapts a :class:`~ehc_sn.rollouts.StepRecord` (whose ``outputs`` field
-    must be a :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`)
+    must be a :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`)
     into a :class:`~ehc_sn.objectives.hybrid_rl.HybridValueBatch` with zero
     bootstrap values via :func:`_zero_bootstrap_batch`, then calls
     :meth:`HybridRLObjective.compute_step`.
 
     Bootstrap value is zeroed; returns equal the immediate reward only.
     This is the same canonical construction path used by
-    :meth:`TD0QHaltingBatchBuilder.build_deliberation_ac_batch`.
+    :meth:`TD0ActorCriticBatchBuilder.build_deliberation_ac_batch`.
 
     Satisfies the :class:`~ehc_sn.objectives.rollout.RolloutScorer` protocol.
     """
@@ -366,7 +364,7 @@ class ZeroBootstrapQHaltingValidationScorer:
 
         Delegates to :func:`_zero_bootstrap_batch` — the same canonical
         construction path used by
-        :meth:`TD0QHaltingBatchBuilder.build_deliberation_ac_batch`.
+        :meth:`TD0ActorCriticBatchBuilder.build_deliberation_ac_batch`.
 
         Returns:
             :class:`~ehc_sn.objectives.hybrid_rl.HybridRLObjectiveStep` with
@@ -374,19 +372,19 @@ class ZeroBootstrapQHaltingValidationScorer:
 
         Raises:
             TypeError: If ``record.outputs`` is not a
-                ``ValueControlInteractionRecord``.
+                ``QHaltingInteractionRecord``.
             RuntimeError: If ``record.outputs.task_output`` is ``None``.
         """
-        ir: ValueControlInteractionRecord = record.outputs
-        if not isinstance(ir, ValueControlInteractionRecord):
+        ir: QHaltingInteractionRecord = record.outputs
+        if not isinstance(ir, QHaltingInteractionRecord):
             raise TypeError(
-                f"ZeroBootstrapQHaltingValidationScorer expects ValueControlInteractionRecord, "
+                f"ZeroBootstrapActorCriticValidationScorer expects QHaltingInteractionRecord, "
                 f"got {type(ir).__name__}."
             )
         if ir.task_output is None:
             raise RuntimeError(
-                "ZeroBootstrapQHaltingValidationScorer requires a non-None "
-                "task_output on ValueControlInteractionRecord."
+                "ZeroBootstrapActorCriticValidationScorer requires a non-None "
+                "task_output on QHaltingInteractionRecord."
             )
 
         steps = record.snapshot.steps
@@ -411,6 +409,6 @@ class ZeroBootstrapQHaltingValidationScorer:
 __all__ = [
     "OnlineBootstrapCarry",
     "OnlineBootstrapRuntime",
-    "TD0QHaltingBatchBuilder",
-    "ZeroBootstrapQHaltingValidationScorer",
+    "TD0ActorCriticBatchBuilder",
+    "ZeroBootstrapActorCriticValidationScorer",
 ]

@@ -5,7 +5,7 @@ steps.  Reward, termination, and observation dynamics are delegated to an
 injected :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`, keeping the
 controller generic over task semantics.
 
-Emits one :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`
+Emits one :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`
 per step.  No ``env_td``, no :class:`~ehc_sn.contracts.task_step.TaskStepEvaluator`,
 no :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter`,
 no TorchRL dependency.
@@ -29,9 +29,9 @@ from torch import Tensor
 
 from ehc_sn.contracts.task_runtime import TaskRuntime
 from ehc_sn.controllers._base import BaseController, RolloutState
-from ehc_sn.controllers.contracts.value_control import (
-    ValueControlInteractionRecord,
-    ValueControlRolloutBackbone,
+from ehc_sn.controllers.contracts.actor_critic import (
+    QHaltingInteractionRecord,
+    QHaltingRolloutBackbone,
 )
 from ehc_sn.controllers.deliberation.act import (
     collapse_act_halt_continue_logits,
@@ -94,7 +94,7 @@ class DeliberationQHaltingController[ModelState, RuntimeStateT](
         - samples actions from ``q_values`` via :class:`~ehc_sn.policies.categorical.CategoricalPolicy`
         - delegates reward, termination, and observation dynamics to the injected
           :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`
-        - emits one :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`
+        - emits one :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`
           per step
 
     Task-agnostic: the controller imports no task-specific types.  The only
@@ -105,7 +105,7 @@ class DeliberationQHaltingController[ModelState, RuntimeStateT](
 
     def __init__(  # ----------------------------------------------------------
         self,
-        backbone: ValueControlRolloutBackbone[ModelState],
+        backbone: QHaltingRolloutBackbone[ModelState],
         config: DeliberationQHaltingControllerConfig,
         runtime: TaskRuntime[RuntimeStateT],
     ) -> None:
@@ -122,9 +122,9 @@ class DeliberationQHaltingController[ModelState, RuntimeStateT](
         self._runtime = runtime
 
     @property
-    def backbone(self) -> ValueControlRolloutBackbone[ModelState]:
-        """Return the wrapped backbone typed to the value-control protocol."""
-        return cast(ValueControlRolloutBackbone[ModelState], super().backbone)
+    def backbone(self) -> QHaltingRolloutBackbone[ModelState]:
+        """Return the wrapped backbone typed to the actor-critic protocol."""
+        return cast(QHaltingRolloutBackbone[ModelState], super().backbone)
 
     @property
     def runtime(self) -> TaskRuntime[RuntimeStateT]:
@@ -160,7 +160,7 @@ class DeliberationQHaltingController[ModelState, RuntimeStateT](
         **options: Any,
     ) -> tuple[
         DeliberationQHaltingRolloutState[ModelState, RuntimeStateT],
-        ValueControlInteractionRecord,
+        QHaltingInteractionRecord,
     ]:
         """Advance the controller by one step.
 
@@ -171,7 +171,7 @@ class DeliberationQHaltingController[ModelState, RuntimeStateT](
             4. Sample an action via :class:`~ehc_sn.policies.categorical.CategoricalPolicy`.
             5. Call :meth:`TaskRuntime.step` for reward, termination, and next observation.
             6. Compute ``done`` as ``(terminated | truncated)``.
-            7. Emit :class:`~ehc_sn.controllers.contracts.value_control.ValueControlInteractionRecord`.
+            7. Emit :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`.
 
         The controller interacts with the runtime at exactly two points:
         ``reset_slots`` (step 1) and ``step`` (step 5).  No task-specific
@@ -276,9 +276,10 @@ class DeliberationQHaltingController[ModelState, RuntimeStateT](
             data=feedback.next_observation,
             runtime_state=feedback.next_state,
         )
-        record = ValueControlInteractionRecord(
+        record = QHaltingInteractionRecord(
             observation_used_for_decision=data,
             q_values=q_values,
+            policy_logits=q_values,
             sampled_action=action,
             reward=feedback.reward,
             done=done,

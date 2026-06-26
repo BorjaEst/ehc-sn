@@ -8,7 +8,7 @@ Hierarchy (training):
     │       ├── adapter: SeqMazeAdapterSettings
     │       ├── controller: DeliberationQHaltingControllerConfig
     │       └── objective: HybridRLLossConfig
-    ├── training: QHaltingTrainingConfig
+    ├── training: ActorCriticTrainingConfig
     ├── data: DatamoduleConfig
     ├── trainer: TrainerConfig
     ├── checkpointing: CheckpointingConfig
@@ -39,7 +39,7 @@ from ehc_sn.experiments._infra import (
     RegimeConfig,
     TrainerConfig,
 )
-from ehc_sn.lightning.modules.q_halting import QHaltingTrainingConfig
+from ehc_sn.lightning.modules.actor_critic import ActorCriticTrainingConfig
 from ehc_sn.logging.tensorboard import LoggerSettings
 from ehc_sn.objectives.composites.hybrid_rl import HybridRLLossConfig
 from ehc_sn.tasks.seqmaze.runtime import SeqMazeRuntimeConfig
@@ -139,7 +139,7 @@ class SeqMazeHRMV2TrainingExperimentConfig(BaseModel, extra="forbid"):
         default_factory=SeqMazeDeliberationConfig,
         description="Deliberation execution policy (halt_action, episode_horizon).",
     )
-    training: QHaltingTrainingConfig = Field(
+    training: ActorCriticTrainingConfig = Field(
         ...,
         description="Actor-critic training configuration.",
     )

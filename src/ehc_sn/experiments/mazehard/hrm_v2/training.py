@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.lightning.modules.q_halting import QHaltingTrainingConfig
+from ehc_sn.lightning.modules.actor_critic import ActorCriticTrainingConfig
 from ehc_sn.tasks.mazehard.reward import MazeHardRewardConfig
 from ehc_sn.tasks.mazehard.runtime import (
     MazeHardRuntimeConfig,
@@ -22,7 +22,7 @@ def build_mazehard_hrm_v2_training_experiment(
     module = build_mazehard_hrm_v2_model(
         config.model,
         execution=config.execution.to_runtime_config(),
-        training_config=QHaltingTrainingConfig(
+        training_config=ActorCriticTrainingConfig(
             optimizer_supervised=config.training.optimizer_supervised,
             optimizer_rl=config.training.optimizer_rl,
             optimizer_qv=config.training.optimizer_qv,

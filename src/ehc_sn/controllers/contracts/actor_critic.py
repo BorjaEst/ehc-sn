@@ -43,9 +43,14 @@ from ehc_sn.utils.detach import DetachMixin
 
 # =============================================================================
 class QHaltingPolicyOutput(Protocol):
-    """Policy payload produced by the actor head of a backbone step."""
+    """Policy payload produced by the actor head of a backbone step.
+
+    Actor-critic controllers populate ``policy_logits``; value-control
+    controllers populate ``q_values``.  Exactly one must be non-``None``.
+    """
 
     policy_logits: Tensor
+    q_values: Tensor | None = None
     valid_action_mask: Tensor | None
 
 
@@ -143,6 +148,7 @@ class QHaltingInteractionRecord(DetachMixin):
     truncated: Tensor  # (B,) episode truncated flag
     value_estimate: Tensor  # (B, 1) critic state value
     policy_decision: PolicyDecision  # rollout-time log_prob, entropy
+    q_values: Tensor | None = None  # (B, A) value scores for halt/continue
     task_output: object | None = None  # optional task-side model output
 
 

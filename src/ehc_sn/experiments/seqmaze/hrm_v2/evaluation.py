@@ -7,7 +7,7 @@ from ehc_sn.experiments._infra import (
     EvaluationIdentity,
     ProviderSpec,
 )
-from ehc_sn.lightning.modules.q_halting import QHaltingModule
+from ehc_sn.lightning.modules.actor_critic import ActorCriticModule
 from ehc_sn.tasks.seqmaze.runtime import SeqMazeRuntimeConfig
 from ehc_sn.traces import resolve_capture_profile
 
