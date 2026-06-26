@@ -74,6 +74,7 @@
     dirpath             = "checkpoints/hrm-v1-routebind"
     filename            = "{step:06d}"
     every_n_train_steps = 1000
+    save_top_k          = -1
     save_last           = true
     save_on_exception   = true
 
