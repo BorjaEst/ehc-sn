@@ -70,6 +70,7 @@ def iter_evaluation_regime(
     executor: EvaluationExecutor,
     *,
     max_batches: int = 0,
+    max_samples: int | None = None,
     trace_request: EvaluationTraceRequest | None = None,
     prepare_case_batch: (
         Callable[[EvaluationCaseBatch], EvaluationCaseBatch] | None
@@ -81,7 +82,9 @@ def iter_evaluation_regime(
     regime execution, where provider batches must be normalized or moved to the
     active runtime device before entering the family evaluation seam.
     """
-    for case in provider.provide_cases(max_batches=max_batches):
+    for case in provider.provide_cases(
+        max_batches=max_batches, max_samples=max_samples
+    ):
         if prepare_case_batch is not None:
             case = prepare_case_batch(case)
         yield executor.execute_evaluation_batch(

@@ -646,8 +646,6 @@ _PREDICTION_REASONING_BINDINGS: dict[str, CaptureParadigmBinding] = {
         required=(
             "act/halted",
             "act/steps",
-            "pred/solution_overlay",
-            "target/solution_overlay",
         ),
         optional=("value/action_logits", "input_ids"),
     ),
@@ -655,12 +653,9 @@ _PREDICTION_REASONING_BINDINGS: dict[str, CaptureParadigmBinding] = {
         required=(
             "act/halted",
             "act/steps",
-            "pred/solution_overlay",
-            "target/solution_overlay",
         ),
         optional=(
             "value/q_values",
-            "value/q_logits",
             "value/state_value",
             "input_ids",
         ),
@@ -669,25 +664,15 @@ _PREDICTION_REASONING_BINDINGS: dict[str, CaptureParadigmBinding] = {
         required=(
             "act/halted",
             "act/steps",
-            "pred/observation_id/post",
-            "target/observation_id",
         ),
-        optional=(
-            "pred/observation_id/recall",
-            "pred/observation_id/path",
-        ),
+        optional=(),
     ),
     "ehp": CaptureParadigmBinding(
         required=(
             "act/halted",
             "act/steps",
-            "pred/observation_id/post",
-            "target/observation_id",
         ),
-        optional=(
-            "pred/observation_id/recall",
-            "pred/observation_id/path",
-        ),
+        optional=(),
     ),
 }
 
@@ -699,34 +684,25 @@ _FULL_DIAGNOSTIC_BINDINGS: dict[str, CaptureParadigmBinding] = {
         required=(
             "act/halted",
             "act/steps",
-            "pred/solution_overlay",
-            "target/solution_overlay",
             "value/action_logits",
         ),
-        optional=("pfc/z_H", "pfc/z_L", "wm/input_ids", "wm/step"),
+        optional=("pfc/z_H", "pfc/z_L"),
     ),
     "rl": CaptureParadigmBinding(
         required=(
             "act/halted",
             "act/steps",
-            "pred/solution_overlay",
-            "target/solution_overlay",
             "value/q_values",
-            "value/q_logits",
             "value/state_value",
         ),
-        optional=("pfc/z_H", "pfc/z_L", "wm/input_ids", "wm/step"),
+        optional=("pfc/z_H", "pfc/z_L"),
     ),
     "tem": CaptureParadigmBinding(
         required=(
             "act/halted",
             "act/steps",
-            "pred/observation_id/post",
-            "pred/observation_id/recall",
-            "target/observation_id",
         ),
         optional=(
-            "pred/observation_id/path",
             "world_step/observation",
             "world_step/location_ids",
             "diagnostic/lec/cells",
@@ -740,12 +716,8 @@ _FULL_DIAGNOSTIC_BINDINGS: dict[str, CaptureParadigmBinding] = {
         required=(
             "act/halted",
             "act/steps",
-            "pred/observation_id/post",
-            "pred/observation_id/recall",
-            "target/observation_id",
         ),
         optional=(
-            "pred/observation_id/path",
             "world_step/observation",
             "world_step/location_ids",
             "diagnostic/lec/cells",
@@ -790,7 +762,13 @@ TRACE_PROFILES: dict[str, CaptureProfileSpec] = {
 
 
 def _paradigm_all_field_names(paradigm: str) -> set[str]:
-    """Return the set of all known trace-field names for *paradigm*."""
+    """Return the set of all known trace-field names for *paradigm*.
+
+    Includes both paradigm-specific ``TraceField`` names and vocabulary
+    field names (``traces.vocabulary``).  Vocabulary names are shared
+    across tasks and are provided by ``trace_task_fields()`` in task
+    packages.
+    """
     if paradigm == "act":
         fields = (
             COMMON_TRACE_FIELDS
@@ -811,7 +789,12 @@ def _paradigm_all_field_names(paradigm: str) -> set[str]:
         raise ValueError(
             f"Unknown paradigm: {paradigm!r}. Expected 'act', 'rl', 'tem', or 'ehp'."
         )
-    return {f.name for f in fields}
+
+    known = {f.name for f in fields}
+    from ehc_sn.traces.vocabulary import list_vocabulary_names as _list_voc
+
+    known.update(_list_voc())
+    return known
 
 
 def resolve_capture_profile(
@@ -822,6 +805,7 @@ def resolve_capture_profile(
     include: Iterable[str] = (),
     exclude: Iterable[str] = (),
     task_bindings: dict[str, CaptureParadigmBinding] | None = None,
+    extra_fields: Iterable[TraceField] | None = None,
 ) -> TraceSpec:
     """Resolve a named capture profile to a concrete :class:`TraceSpec`.
 
@@ -845,6 +829,12 @@ def resolve_capture_profile(
         Keys are task names (e.g. ``"goaltrace"``).  Each binding's required
         and optional fields are merged into the resolution.  Unknown field
         names in task bindings raise ``ValueError``.
+    extra_fields:
+        Additional ``TraceField`` objects to include in the resolved spec.
+        Unlike *include* (which selects from known paradigm fields),
+        *extra_fields* injects new fields with arbitrary getters (e.g.
+        task-specific fields from ``trace_task_fields()``).  These are
+        appended after all profile and include fields.
 
     Returns
     -------
@@ -951,7 +941,11 @@ def resolve_capture_profile(
             final_names.append(f)
             seen.add(f)
 
-    return build_trace_spec(paradigm, include_keys=final_names)
+    return build_trace_spec(
+        paradigm,
+        include_keys=final_names,
+        extra_fields=extra_fields,
+    )
 
 
 # =============================================================================

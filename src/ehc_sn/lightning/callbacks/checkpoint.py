@@ -60,6 +60,12 @@ class CheckpointSettings(BaseModel, extra="forbid"):
                 "When checkpoint.monitor is unset, checkpoint.save_top_k must "
                 "be 0 (last-only via save_last) or -1 (keep-all)."
             )
+        if self.every_n_train_steps is not None and self.save_top_k == 0:
+            raise ValueError(
+                "checkpoint.every_n_train_steps requires checkpoint.save_top_k "
+                "!= 0. Set save_top_k = -1 to keep all periodic checkpoints, "
+                "or a positive integer to keep only the top-K."
+            )
         return self
 
 

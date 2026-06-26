@@ -57,7 +57,9 @@ def build_goaltrace_hrm_v1_evaluation_experiment(
     return EvaluationExperiment(
         executor=executor,
         provider_spec=ProviderSpec(
-            ref=config.provider.ref, settings=config.provider.settings
+            ref=config.provider.ref,
+            settings=config.provider.settings,
+            batch_size=config.provider.batch_size,
         ),
         regime_id=config.regime.id,
         regime_kind=config.regime.kind,
@@ -65,6 +67,7 @@ def build_goaltrace_hrm_v1_evaluation_experiment(
         capture_profile=config.capture.profile,
         capture_include=config.capture.include,
         capture_exclude=config.capture.exclude,
+        capture_max_cases=config.capture.max_cases,
         identity=EvaluationIdentity(
             task="goaltrace",
             model_family="hrm-v1",

@@ -88,6 +88,26 @@ class EvaluationCaseInspection:
 
 
 @dataclass(frozen=True)
+class InspectionGalleryImage:
+    """One rendered inspection figure image."""
+
+    sample_index: int
+    role: str
+    path: Path  # relative to gallery output root
+    success: bool
+
+
+@dataclass(frozen=True)
+class InspectionGallery:
+    """Gallery result for an inspection run."""
+
+    output_root: Path
+    rendered_roles: tuple[str, ...]
+    sample_count: int
+    images: tuple[InspectionGalleryImage, ...]
+
+
+@dataclass(frozen=True)
 class EvaluationArtifactInspection:
     """Complete inspection result for one evaluation artifact."""
 
@@ -101,6 +121,7 @@ class EvaluationArtifactInspection:
     cases: tuple[EvaluationCaseSummary, ...] = ()
     selected_case: EvaluationCaseInspection | None = None
     manifest_raw: dict[str, Any] | None = None
+    gallery: InspectionGallery | None = None
 
 
 # =============================================================================
@@ -156,11 +177,18 @@ def inspect_evaluation_artifact(
     list_fields: bool = False,
     include_manifest: bool = False,
     expected_experiment_id: str | None = None,
+    gallery: bool = False,
+    gallery_output: Path | None = None,
+    max_gallery_samples: int = 8,
+    gallery_roles: tuple[str, ...] = ("prediction_reasoning",),
 ) -> EvaluationArtifactInspection:
     """Inspect a completed evaluation artifact.
 
     Reads the manifest and optional case data.  Does NOT construct a
     model, provider, or executor.
+
+    When ``gallery=True``, renders evaluation figures for the selected
+    cases and writes PNG images to ``gallery_output/images/``.
 
     Parameters
     ----------
@@ -179,6 +207,15 @@ def inspect_evaluation_artifact(
     expected_experiment_id:
         If provided, the artifact's ``experiment_id`` (or ``task``
         for older v3 artifacts) must match.
+    gallery:
+        If True, render evaluation figure images to ``gallery_output``.
+    gallery_output:
+        Destination directory for the generated inspection artifact.
+        Required when ``gallery=True``.
+    max_gallery_samples:
+        Maximum number of evaluation batches to render (default 8).
+    gallery_roles:
+        Figure roles to render (e.g. ``("prediction_reasoning",)``).
 
     Returns
     -------
@@ -188,10 +225,15 @@ def inspect_evaluation_artifact(
     ------
     EvaluationArtifactError
         On missing manifest, missing ``_SUCCESS``, schema mismatch,
-        or case index out of range.
+        case index out of range, or missing trace cases for gallery.
+    ValueError
+        If ``gallery=True`` but ``gallery_output`` is ``None``.
     FileNotFoundError
         If ``artifact_root`` does not exist (not caught).
     """
+    if gallery and gallery_output is None:
+        raise ValueError("gallery_output is required when gallery=True.")
+
     artifact_root = artifact_root.resolve()
 
     # ---- Validate structure -------------------------------------------------
@@ -339,6 +381,19 @@ def inspect_evaluation_artifact(
             fields=tuple(fields),
         )
 
+    # ---- Gallery (optional) -------------------------------------------------
+    gallery_result: InspectionGallery | None = None
+    if gallery and gallery_output is not None:
+        gallery_result = _build_gallery(
+            artifact_root=artifact_root,
+            manifest=manifest,
+            task=task or "",
+            resolved_fields=resolved_fields,
+            max_samples=max_gallery_samples,
+            roles=gallery_roles,
+            output_root=gallery_output,
+        )
+
     return EvaluationArtifactInspection(
         artifact_root=artifact_root,
         identity=identity,
@@ -350,6 +405,7 @@ def inspect_evaluation_artifact(
         cases=cases,
         selected_case=selected_case,
         manifest_raw=manifest if include_manifest else None,
+        gallery=gallery_result,
     )
 
 
@@ -442,12 +498,165 @@ def format_inspection_text(
     return "\n".join(lines)
 
 
+# =============================================================================
+# Gallery generation
+# =============================================================================
+
+
+def _build_gallery(
+    *,
+    artifact_root: Path,
+    manifest: dict[str, Any],
+    task: str,
+    resolved_fields: tuple[str, ...],
+    max_samples: int,
+    roles: tuple[str, ...],
+    output_root: Path,
+) -> InspectionGallery:
+    """Render evaluation figure images from an artifact and write them.
+
+    Dispatches to registered figure templates by ``category=evaluation``,
+    ``role``, and ``task``.  Skips roles with no matching registration
+    or missing required trace keys.
+    """
+    import hashlib
+
+    from ehc_sn.figures import (
+        REGISTRY,
+        FigureContext,
+        list_figure_specs,
+        render,
+    )
+
+    # Ensure built-in figures are registered.
+    list_figure_specs()
+
+    output_root = output_root.resolve()
+    images_dir = output_root / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    # Resolve the eval artifact digest for provenance.
+    source_digest = ""
+    try:
+        source_digest = hashlib.sha256(
+            (artifact_root / "manifest.json").read_bytes()
+        ).hexdigest()[:16]
+    except OSError:
+        pass
+
+    # Load cases.
+    loaded = load_artifact_run_cases(artifact_root)
+    if not loaded:
+        raise EvaluationArtifactError("No trace cases available for gallery.")
+
+    n_to_render = min(max_samples, len(loaded))
+
+    # Build a FigureContext for each sample.
+    ctx = FigureContext()
+
+    image_records: list[InspectionGalleryImage] = []
+    rendered_roles: set[str] = set()
+
+    for role in roles:
+        # Resolve figure spec for this task + role.
+        try:
+            spec = REGISTRY.resolve(
+                category="evaluation",
+                role=role,  # type: ignore[arg-type]
+                task=task,
+            )
+        except KeyError:
+            continue
+
+        rendered_roles.add(role)
+
+        for i in range(n_to_render):
+            trace = loaded[i].trace
+            # Validate required fields are present.
+            missing = (spec.trace_keys - set(trace.path_strs)) | {
+                mk for mk in spec.meta_keys if not trace.has_meta_path(mk)
+            }
+            if missing:
+                image_records.append(
+                    InspectionGalleryImage(
+                        sample_index=i,
+                        role=role,
+                        path=Path(),
+                        success=False,
+                    )
+                )
+                continue
+
+            try:
+                fig = render(spec.name, trace, ctx)
+                fname = f"{role}_{i:04d}.png"
+                fig_path = images_dir / fname
+                fig.savefig(
+                    fig_path,
+                    dpi=150,
+                    bbox_inches="tight",
+                    facecolor="white",
+                )
+                import matplotlib.pyplot as plt
+
+                plt.close(fig)
+                image_records.append(
+                    InspectionGalleryImage(
+                        sample_index=i,
+                        role=role,
+                        path=Path("images") / fname,
+                        success=True,
+                    )
+                )
+            except Exception:
+                image_records.append(
+                    InspectionGalleryImage(
+                        sample_index=i,
+                        role=role,
+                        path=Path(),
+                        success=False,
+                    )
+                )
+
+    # Write inspection manifest.
+    gallery_manifest: dict[str, object] = {
+        "schema": "ehc_sn.eval.inspection.v1",
+        "source_artifact": str(artifact_root),
+        "source_digest": source_digest,
+        "task": task,
+        "rendered_roles": sorted(rendered_roles),
+        "sample_count": n_to_render,
+        "images": [
+            {
+                "sample_index": img.sample_index,
+                "role": img.role,
+                "path": str(img.path) if img.path else None,
+                "success": img.success,
+            }
+            for img in image_records
+        ],
+    }
+    (output_root / "manifest.json").write_text(
+        json.dumps(gallery_manifest, indent=2), encoding="utf-8"
+    )
+    (output_root / "_SUCCESS").write_text("", encoding="utf-8")
+
+    return InspectionGallery(
+        output_root=output_root,
+        rendered_roles=tuple(sorted(rendered_roles)),
+        sample_count=n_to_render,
+        images=tuple(image_records),
+    )
+
+
 __all__ = [
     "CapturedFieldSummary",
     "EvaluationArtifactError",
     "EvaluationArtifactInspection",
     "EvaluationCaseInspection",
     "EvaluationCaseSummary",
+    "InspectionGallery",
+    "InspectionGalleryImage",
     "format_inspection_text",
     "inspect_evaluation_artifact",
 ]

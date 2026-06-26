@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ehc_sn.lightning.callbacks.checkpoint import CheckpointSettings
 from ehc_sn.traces.observer import TraceSpec
@@ -39,10 +39,15 @@ class ProviderSpec:
 
     Providers may own file handles, datasets, or device-local resources.
     Instantiation is deferred to the runner, close to execution time.
+
+    ``batch_size`` is a first-class field separated from ``settings`` for
+    config-level validation.  It is forwarded to the provider constructor
+    alongside ``settings`` at resolution time.
     """
 
     ref: str
     settings: dict[str, Any]
+    batch_size: int = 1
 
 
 # =============================================================================
@@ -188,6 +193,7 @@ class EvaluationExperiment:
     capture_profile: str = "metrics_only"
     capture_include: tuple[str, ...] = ()
     capture_exclude: tuple[str, ...] = ()
+    capture_max_cases: int | None = None
     identity: EvaluationIdentity | None = None
 
 
@@ -203,6 +209,7 @@ class EvaluationRunRequest:
     checkpoint_path: Path
     output_dir: Path
     device: str = "cpu"
+    max_samples: int | None = None
     max_batches: int = 0
     overwrite: bool = False
 
@@ -218,6 +225,9 @@ class ProviderConfig(BaseModel, extra="forbid"):
     ``ref`` is a dotted import path to an :class:`EvaluationSourceProvider`
     class.  Retained as a string (interim mechanism) — a typed provider
     registry is a deferred improvement.
+
+    ``batch_size`` is a typed first-class field.  The old ``settings``
+    dict must NOT contain a ``batch_size`` key — validation rejects it.
     """
 
     ref: str = Field(
@@ -225,10 +235,25 @@ class ProviderConfig(BaseModel, extra="forbid"):
         min_length=1,
         description="Dotted import path to an EvaluationSourceProvider class.",
     )
+    batch_size: int = Field(
+        default=1,
+        ge=1,
+        description="Samples per evaluation batch.",
+    )
     settings: dict[str, Any] = Field(
         default_factory=dict,
-        description="Keyword arguments forwarded to the provider constructor.",
+        description="Keyword arguments forwarded to the provider constructor. "
+        "Must not contain 'batch_size'.",
     )
+
+    @model_validator(mode="after")
+    def _check_settings_no_batch_size(self) -> "ProviderConfig":
+        if "batch_size" in self.settings:
+            raise ValueError(
+                "provider.settings.batch_size is no longer supported; "
+                "use provider.batch_size instead."
+            )
+        return self
 
 
 class RegimeConfig(BaseModel, extra="forbid"):
@@ -253,6 +278,11 @@ class CaptureConfig(BaseModel, extra="forbid"):
     ``exclude`` removes optional profile fields.  Required profile fields
     cannot be excluded — doing so raises a configuration error at builder
     time.
+
+    ``max_cases`` limits how many cases have detailed traces persisted.
+    ``None`` = all evaluated cases, ``0`` = no case traces, ``N`` = first N.
+    Trace suppression (metrics-only for later cases) is not yet implemented;
+    all cases still materialize traces if the profile requests them.
     """
 
     profile: str = Field(
@@ -272,6 +302,12 @@ class CaptureConfig(BaseModel, extra="forbid"):
         default_factory=tuple,
         description="Profile field paths to omit.  Must not intersect "
         "required profile fields.",
+    )
+    max_cases: int | None = Field(
+        default=None,
+        ge=0,
+        description="Max cases to persist detailed traces for. "
+        "None=all, 0=none, N=first N.",
     )
 
 

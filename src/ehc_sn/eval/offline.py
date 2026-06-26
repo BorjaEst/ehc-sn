@@ -44,6 +44,7 @@ import torch
 
 from ehc_sn.eval.artifacts import (
     _hydrate_executor_from_checkpoint,
+    _initialize_eval_runtime,
     collect_regime_artifact_bundle,
     resolve_provider,
 )
@@ -123,9 +124,17 @@ def run_offline_eval(
     # ---- Load checkpoint ----------------------------------------------------
     _hydrate_executor_from_checkpoint(executor, request.checkpoint_path)
 
+    # ---- Initialize evaluation runtime --------------------------------------
+    # Calls setup("validate") on the executor, which TEM modules need to
+    # initialize controllers.  ACT/RL modules are unaffected — their setup
+    # is a no-op since controllers are already created during construction.
+    _initialize_eval_runtime(executor)
+
     # ---- Resolve provider ---------------------------------------------------
     provider = resolve_provider(
-        experiment.provider_spec.ref, experiment.provider_spec.settings
+        experiment.provider_spec.ref,
+        experiment.provider_spec.settings,
+        batch_size=experiment.provider_spec.batch_size,
     )
 
     # ---- Build trace request ------------------------------------------------
@@ -144,6 +153,7 @@ def run_offline_eval(
         provider,
         executor,
         max_batches=request.max_batches,
+        max_samples=request.max_samples,
         trace_request=trace_request,
         prepare_case_batch=lambda case: _to_device_batch(case, device),
     )
@@ -171,6 +181,12 @@ def run_offline_eval(
             "capture_profile_version": 1,
             "capture_include": list(experiment.capture_include),
             "capture_exclude": list(experiment.capture_exclude),
+            "request": {
+                "max_batches": request.max_batches,
+                "max_samples": request.max_samples,
+                "batch_size": experiment.provider_spec.batch_size,
+                "max_cases": experiment.capture_max_cases,
+            },
         },
     )
 

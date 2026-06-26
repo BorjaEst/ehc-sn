@@ -202,6 +202,36 @@ def _extract_step_metric_increments(
     return inc
 
 
+# =============================================================================
+# Hook metrics validation — mirrors logic from eval.offline
+# =============================================================================
+
+_RESERVED_SUMMARY_KEYS: frozenset[str] = frozenset({"n_cases", "loss"})
+
+
+def _validate_hook_metrics(
+    task_summary: dict[str, object],
+) -> dict[str, float | int]:
+    """Validate and type-narrow a family-owned hook return value."""
+    from ehc_sn.metrics.values import validate_metric_value
+
+    collided = _RESERVED_SUMMARY_KEYS & task_summary.keys()
+    if collided:
+        raise ValueError(
+            "Hook returned reserved summary keys: " f"{sorted(collided)}."
+        )
+    validated: dict[str, float | int] = {}
+    for key, value in task_summary.items():
+        if not isinstance(key, str):
+            raise TypeError(
+                f"Metric key must be str, got {type(key).__name__} ({key!r})."
+            )
+        if not key:
+            raise ValueError("Metric key must be a non-empty string.")
+        validated[key] = validate_metric_value(key=key, value=value)
+    return validated
+
+
 def _to_int(value: object) -> int:
     """Coerce a numeric value to int (handles tensors and scalars)."""
     import torch
@@ -370,6 +400,23 @@ def collect_regime_artifact_bundle(
         summary["sequence_exact"] = total_exact_sum / total_completed_count
     if total_token_count > 0:
         summary["token_accuracy"] = total_token_correct / total_token_count
+
+    # Optional model-family aggregation hook.  The executor method receives
+    # lightweight case results (traces stripped, only scalar loss retained).
+    aggregate = getattr(executor, "aggregate_evaluation_case_metrics", None)
+    if aggregate is not None:
+        try:
+            task_summary = aggregate(
+                task=resolved_task,
+                regime_id=regime_id,
+                regime_kind=regime_kind,
+                case_results=tuple(lightweight_case_results),
+            )
+        except Exception:
+            pass
+        else:
+            validated = _validate_hook_metrics(task_summary)
+            summary.update(validated)
 
     _write_regime_bundle_manifest(
         run_dir=tmp_dir,
@@ -856,11 +903,25 @@ def resolve_dotted_symbol(symbol_ref: str) -> Any:
 
 # =============================================================================
 def resolve_provider(
-    provider_ref: str, provider_settings: dict[str, Any]
+    provider_ref: str,
+    provider_settings: dict[str, Any],
+    *,
+    batch_size: int | None = None,
 ) -> Any:
-    """Resolve and instantiate a provider class from dotted import path."""
+    """Resolve and instantiate a provider class from dotted import path.
+
+    Args:
+        provider_ref: Dotted import path to the provider class.
+        provider_settings: Keyword arguments for the provider constructor.
+        batch_size: Optional first-class batch size.  If given, overrides
+            any ``batch_size`` in ``provider_settings``.
+    """
     provider_cls = resolve_dotted_symbol(provider_ref)
-    return provider_cls(**provider_settings)
+    if batch_size is not None:
+        merged = dict(provider_settings, batch_size=batch_size)
+    else:
+        merged = provider_settings
+    return provider_cls(**merged)
 
 
 # =============================================================================

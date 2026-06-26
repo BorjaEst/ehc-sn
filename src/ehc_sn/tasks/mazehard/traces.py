@@ -22,6 +22,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import torch
+from torch import Tensor
+
+from ehc_sn.tasks.mazehard.runtime import PATH_ID
+from ehc_sn.traces.observer import TraceField, TraceValue
 from ehc_sn.traces.trace_tree import TraceTree
 
 
@@ -103,9 +108,80 @@ def apply_mazehard_trace_supplements(  # --------------------------------------
 
 
 # =============================================================================
+# Task-level trace fields — shared vocabulary names with MazeHard-specific getters
+# =============================================================================
+
+
+def _get_pred_solution_overlay(ctx) -> TraceValue:
+    """Decoded solution overlay from model task logits.
+
+    Reads ``task_logits`` from the controller output surface.
+    Supports ACT-style (``ctx.outputs.task.task_logits``) and
+    actor-critic-style (``ctx.outputs.task_output.task_logits``).
+    """
+    outputs = getattr(ctx, "outputs", None)
+    if outputs is None:
+        return None
+
+    # ACT path: outputs.task.task_logits
+    task = getattr(outputs, "task", None)
+    if task is not None:
+        task_logits: Tensor | None = getattr(task, "task_logits", None)
+        if task_logits is not None:
+            pred = torch.argmax(task_logits.detach(), dim=-1)
+            return (pred == PATH_ID).to(torch.uint8).cpu()
+
+    # Actor-critic fallback: outputs.task_output.task_logits
+    task_output = getattr(outputs, "task_output", None)
+    if task_output is not None:
+        task_logits: Tensor | None = getattr(task_output, "task_logits", None)
+        if task_logits is not None:
+            pred = torch.argmax(task_logits.detach(), dim=-1)
+            return (pred == PATH_ID).to(torch.uint8).cpu()
+
+    return None
+
+
+def _get_target_solution_overlay(ctx) -> TraceValue:
+    """Oracle solution overlay from the batch labels.
+
+    Labels are sample-constant and held in ``ctx.carry.data["labels"]``
+    (the carry's slot-data mirror of the batch).  Extracted once as
+    metadata.
+    """
+    carry = getattr(ctx, "carry", None)
+    if carry is None:
+        return None
+    data = getattr(carry, "data", None)
+    if data is None:
+        return None
+    labels = data.get("labels")
+    if labels is None:
+        return None
+    return (labels.detach() == PATH_ID).to(torch.uint8).cpu()
+
+
+def trace_task_fields() -> tuple[TraceField, ...]:
+    """Return TraceField objects for shared vocabulary names with MazeHard getters."""
+    return (
+        TraceField(
+            name="pred/solution_overlay",
+            get=_get_pred_solution_overlay,
+            storage="dense",
+        ),
+        TraceField(
+            name="target/solution_overlay",
+            get=_get_target_solution_overlay,
+            storage="meta",
+        ),
+    )
+
+
+# =============================================================================
 __all__ = [
     "MazeHardEvaluationSourceContext",
     "MazeHardTraceSupplements",
     "build_mazehard_trace_supplements",
     "apply_mazehard_trace_supplements",
+    "trace_task_fields",
 ]

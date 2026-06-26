@@ -73,9 +73,18 @@ class EvaluationSourceProvider(Protocol):
 
     def provide_cases(
         self,
+        *,
         max_batches: int = 0,
+        max_samples: int | None = None,
     ) -> Iterator[EvaluationCaseBatch]:
-        """Yield replay case batches in deterministic provider-owned order."""
+        """Yield replay case batches in deterministic provider-owned order.
+
+        Args:
+            max_batches: If > 0, yield at most this many batches.
+            max_samples: If not None, yield at most this many samples
+                (summed across batches).  ``max_batches`` takes precedence
+                if both are set.
+        """
 
 
 # =============================================================================

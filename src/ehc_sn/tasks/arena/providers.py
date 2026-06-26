@@ -155,11 +155,14 @@ class ArenaReplayProvider:
     def provide_cases(  # -----------------------------------------------------
         self,
         max_batches: int = 0,
+        max_samples: int | None = None,
     ) -> Iterator[EvaluationCaseBatch]:
         """Yield batched arena replay cases from the configured split.
 
         Args:
             max_batches: If > 0, yield at most this many batches; otherwise yield all.
+            max_samples: If not None, yield at most this many samples (summed
+                across batches).  ``max_batches`` takes precedence.
 
         Yields:
             :class:`~ehc_sn.eval.contracts.EvaluationCaseBatch` items with
@@ -190,13 +193,29 @@ class ArenaReplayProvider:
             drop_last=False,
         )
 
+        samples_yielded = 0
         for batch_idx, batch in enumerate(loader):
             if max_batches > 0 and batch_idx >= max_batches:
                 break
 
+            first_key = next(iter(batch))
+            n_in_batch = batch[first_key].shape[0]
+
+            if max_samples is not None and samples_yielded >= max_samples:
+                break
+
+            # Trim batch if it would exceed max_samples.
+            if (
+                max_samples is not None
+                and samples_yielded + n_in_batch > max_samples
+            ):
+                remaining = max_samples - samples_yielded
+                batch = {k: v[:remaining] for k, v in batch.items()}
+                n_in_batch = remaining
+
+            samples_yielded += n_in_batch
             start = batch_idx * self._batch_size
-            n_episodes = batch[next(iter(batch))].shape[0]
-            ids_in_batch = [e.id for e in entries[start : start + n_episodes]]
+            ids_in_batch = [e.id for e in entries[start : start + n_in_batch]]
 
             # Build task evidence arrays for the first episode in this batch.
             # Load spatial arrays directly from the arena split directory.

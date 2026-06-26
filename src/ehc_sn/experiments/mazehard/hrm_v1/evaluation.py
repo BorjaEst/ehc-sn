@@ -13,6 +13,7 @@ from ehc_sn.experiments._infra import (
 from ehc_sn.lightning.modules.act_supervised import (
     ACTSupervisedModule,
 )
+from ehc_sn.tasks.mazehard.traces import trace_task_fields
 from ehc_sn.traces import resolve_capture_profile
 
 from .config import MazeHardHRMV1EvaluationExperimentConfig
@@ -36,6 +37,7 @@ def build_mazehard_hrm_v1_evaluation_experiment(
             profile_version=config.capture.profile_version,
             include=config.capture.include,
             exclude=config.capture.exclude,
+            extra_fields=trace_task_fields(),
         )
         if config.capture.profile != "metrics_only"
         else None
@@ -44,7 +46,9 @@ def build_mazehard_hrm_v1_evaluation_experiment(
     return EvaluationExperiment(
         executor=executor,
         provider_spec=ProviderSpec(
-            ref=config.provider.ref, settings=config.provider.settings
+            ref=config.provider.ref,
+            settings=config.provider.settings,
+            batch_size=config.provider.batch_size,
         ),
         regime_id=config.regime.id,
         regime_kind=config.regime.kind,
@@ -52,6 +56,7 @@ def build_mazehard_hrm_v1_evaluation_experiment(
         capture_profile=config.capture.profile,
         capture_include=config.capture.include,
         capture_exclude=config.capture.exclude,
+        capture_max_cases=config.capture.max_cases,
         identity=EvaluationIdentity(
             task="mazehard",
             model_family="hrm-v1",

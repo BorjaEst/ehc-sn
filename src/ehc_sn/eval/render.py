@@ -14,7 +14,7 @@ Usage::
 
     previews = render_regime_preview_figures(
         case_results=regime_result.case_results,
-        figure_names=["mazehard_prediction_evolution"],
+        figure_names=["prediction_reasoning_mazehard"],
         figure_dir=Path("/output/figures"),
         max_cases=2,
         save_pdf=True,

@@ -254,10 +254,17 @@ class TraceTree:
         if path in self.path_to_index:
             idx = self.path_to_index[path]
             if not self.leaf_is_numeric[idx]:
-                raise ValueError(
-                    f"Cannot attach_dense at '{path}': existing leaf is metadata, not numeric."
-                )
-            if not overwrite:
+                if not overwrite:
+                    raise ValueError(
+                        f"Cannot attach_dense at '{path}': existing leaf is "
+                        f"metadata, not numeric. Pass overwrite=True to replace."
+                    )
+                # Convert metadata leaf to numeric (overwrite=True).
+                self.leaf_is_numeric[idx] = True
+                self.meta_first[idx] = None
+                self.buffers[idx] = None
+                self.leaf_signatures[idx] = None
+            elif not overwrite:
                 raise ValueError(
                     f"attach_dense collision at '{path}' and overwrite=False."
                 )

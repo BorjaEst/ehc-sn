@@ -349,7 +349,7 @@ def build_routebind_hrm_trace_meta(batch: dict) -> dict:
         ROUTEBIND_META_KEY_OBSERVATION_ID: _to_np("observation_id"),
         ROUTEBIND_META_KEY_START_FLAG: _to_np("start_flag"),
         ROUTEBIND_META_KEY_GOAL_FLAG: _to_np("goal_flag"),
-        ROUTEBIND_META_KEY_CELL_MASK: _to_np("cell_mask"),
+        ROUTEBIND_META_KEY_CELL_MASK: _to_np("spatial_mask"),
     }
 
     if "target_trajectory" in batch:
