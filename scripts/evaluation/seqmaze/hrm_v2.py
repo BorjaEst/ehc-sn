@@ -21,7 +21,8 @@ from ehc_sn.eval.offline import run_offline_eval
 from ehc_sn.experiments._infra import EvaluationRunRequest
 
 DEFAULT_CONFIG = Path("config/evaluation/hrm-v2-seqmaze.toml")
-DEFAULT_OUTPUT = Path("artifacts/eval/hrm-v2-seqmaze")
+DEFAULT_GALLERY_DIR = Path("artifacts/inspection/hrm-v2-seqmaze")
+DEFAULT_EVAL_ARTIFACT_DIR = Path("artifacts/eval/hrm-v2-seqmaze")
 
 app = typer.Typer(no_args_is_help=True, help="Evaluate HRM-V2 on seqmaze.")
 
@@ -49,7 +50,7 @@ def run(
             resolve_path=True,
             help="Destination for the evaluation artifact.",
         ),
-    ] = DEFAULT_OUTPUT,
+    ] = DEFAULT_EVAL_ARTIFACT_DIR,
     config: Annotated[
         Path,
         typer.Option(
@@ -109,13 +110,50 @@ def inspect(
             resolve_path=True,
             help="Completed evaluation artifact directory.",
         ),
-    ],
+    ] = DEFAULT_EVAL_ARTIFACT_DIR,
     case: Annotated[int | None, typer.Option("--case", min=0)] = None,
     list_cases: Annotated[bool, typer.Option("--list-cases")] = False,
     list_fields: Annotated[bool, typer.Option("--list-fields")] = False,
     show_manifest: Annotated[bool, typer.Option("--show-manifest")] = False,
+    gallery: Annotated[
+        bool,
+        typer.Option("--gallery", help="Render evaluation figure images."),
+    ] = False,
+    gallery_output: Annotated[
+        Path,
+        typer.Option(
+            "--gallery-output",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="Destination directory for the inspection artifact.",
+        ),
+    ] = DEFAULT_GALLERY_DIR,
+    max_gallery_samples: Annotated[
+        int,
+        typer.Option(
+            "--max-gallery-samples",
+            min=1,
+            help="Number of evaluation batches to render.",
+        ),
+    ] = 8,
+    gallery_roles: Annotated[
+        str,
+        typer.Option(
+            "--gallery-roles",
+            help="Comma-separated figure role names.",
+        ),
+    ] = "prediction_reasoning",
 ) -> None:
-    """Inspect a completed evaluation artifact."""
+    """Inspect a completed evaluation artifact.
+
+    When ``--gallery`` is set, renders evaluation figure images and writes
+    them to ``--gallery-output``.  The library never loads the checkpoint
+    or executes the model.
+    """
+    if gallery:
+        gallery_output.mkdir(parents=True, exist_ok=True)
+
     try:
         result = inspect_evaluation_artifact(
             artifact,
@@ -123,11 +161,34 @@ def inspect(
             list_cases=list_cases,
             list_fields=list_fields,
             include_manifest=show_manifest,
+            gallery=gallery,
+            gallery_output=gallery_output,
+            max_gallery_samples=max_gallery_samples,
+            gallery_roles=tuple(
+                r.strip() for r in gallery_roles.split(",") if r.strip()
+            ),
         )
     except EvaluationArtifactError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=4) from exc
-    typer.echo(format_inspection_text(result))
+
+    text = format_inspection_text(result)
+    typer.echo(text)
+
+    # Gallery summary
+    if gallery and result.gallery is not None:
+        typer.echo("")
+        typer.echo(f"  Gallery output: {result.gallery.output_root}")
+        typer.echo(
+            f"  Rendered roles: {', '.join(result.gallery.rendered_roles)}"
+        )
+        successful = sum(1 for img in result.gallery.images if img.success)
+        typer.echo(f"  Images written: {successful}")
+        if result.gallery.images and successful < len(result.gallery.images):
+            typer.echo(
+                f"  Failed images:  {len(result.gallery.images) - successful}",
+                err=True,
+            )
 
 
 @app.command()
