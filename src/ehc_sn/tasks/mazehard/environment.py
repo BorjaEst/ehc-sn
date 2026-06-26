@@ -2,7 +2,7 @@
 
 This module exposes MazeHard as an interactive environment interface for the
 deferred EnvBase-backed RL path.  The production HRM v2 reasoning path uses
-:class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationACController`
+:class:`~ehc_sn.controllers.deliberation.q_halting.DeliberationQHaltingController`
 with :class:`~ehc_sn.tasks.mazehard.evaluators.step.MazeHardStepEvaluator`
 instead, because MazeHard currently behaves as a fixed-instance deliberation
 task rather than a mutable closed-loop world.
@@ -74,7 +74,7 @@ class MazeHardEnv(EnvBase):
     labels and accuracy tracking are task-owned.
 
     This class is **not** the active HRM v2 deliberation surface. The active
-    training path uses ``DeliberationACController`` with ``MazeHardStepEvaluator``
+    training path uses ``DeliberationQHaltingController`` with ``MazeHardStepEvaluator``
     and does not step through this env.
 
     The environment is batch-locked: all B slots step simultaneously.

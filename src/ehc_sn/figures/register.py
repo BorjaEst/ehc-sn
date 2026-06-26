@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ehc_sn.figures.registry import REGISTRY, FigureSpec
-from ehc_sn.figures.templates import (
+from ehc_sn.figures.templates.evaluation import (
     hidden_norm_histogram,
     mazehard_solution_overlay,
     occupancy_histogram,
@@ -14,27 +14,33 @@ def register_builtin_figures() -> None:
     """Register built-in figure specifications (lazy template imports)."""
     # Templates are imported inside this function so that importing
     # ``ehc_sn.figures`` does not eagerly pull in all template modules.
-    from ehc_sn.figures.templates import (
-        arena_prediction_overlay,
+    from ehc_sn.figures.templates.diagnostics import (
+        hpc_place_metrics,
+        hpc_rate_map_mosaic,
+        lec_content_filtering,
+        lec_content_structure_rsa,
+        mec_autocorr_mosaic,
+        mec_grid_metrics,
+        pfc_latent_dynamics,
+        pfc_path_memory_probe,
+    )
+    from ehc_sn.figures.templates.evaluation import (
         goaltrace_prediction_example,
         h_l_residuals_over_steps,
         halt_logit_evolution,
         halting_timeline,
         hidden_norm_histogram,
-        hpc_place_metrics,
-        hpc_rate_map_mosaic,
-        lec_content_filtering,
-        lec_content_structure_rsa,
-        mazehard_prediction_evolution,
         mazehard_solution_overlay,
-        mec_autocorr_mosaic,
-        mec_grid_metrics,
         occupancy_histogram,
-        pfc_latent_dynamics,
-        pfc_path_memory_probe,
         prediction_accuracy_over_steps,
+        prediction_overlay_arena,
+        prediction_reasoning_goaltrace,
+        prediction_reasoning_mazehard,
+        prediction_reasoning_routebind,
         q_value_evolution,
         reasoning_budget_summary,
+    )
+    from ehc_sn.figures.templates.task import (
         task_overview_arena,
         task_overview_goaltrace,
         task_overview_mazehard,
@@ -70,6 +76,7 @@ def register_builtin_figures() -> None:
         PFC_TRACE_KEY_Z_L,
         ROUTEBIND_META_KEY_CANVAS_HEIGHT,
         ROUTEBIND_META_KEY_CANVAS_WIDTH,
+        ROUTEBIND_META_KEY_CELL_MASK,
         ROUTEBIND_META_KEY_CELL_TYPE,
         ROUTEBIND_META_KEY_GOAL_FLAG,
         ROUTEBIND_META_KEY_N_OBSERVATIONS,
@@ -90,6 +97,10 @@ def register_builtin_figures() -> None:
             FigureSpec(
                 name="mazehard_solution_overlay",
                 description="MazeHard overlays: N samples with GT vs model paths",
+                category="evaluation",
+                role="solution_overlay",
+                source_kind="evaluation_sample",
+                task="mazehard",
                 plot=mazehard_solution_overlay.plot,
                 default_filename="mazehard_solution_overlay",
                 maturity="stable",
@@ -112,6 +123,10 @@ def register_builtin_figures() -> None:
             FigureSpec(
                 name="task_overview_mazehard",
                 description="MazeHard task layout: input grid + target path for case-level orientation",
+                category="task",
+                role="task_overview",
+                source_kind="task_sample",
+                task="mazehard",
                 plot=task_overview_mazehard.plot,
                 default_filename="task_overview_mazehard",
                 maturity="stable",
@@ -126,14 +141,22 @@ def register_builtin_figures() -> None:
             )
         )
 
-    if not REGISTRY.has("mazehard_prediction_evolution"):
+    if not REGISTRY.has("prediction_reasoning_mazehard"):
         REGISTRY.register(
             FigureSpec(
-                name="mazehard_prediction_evolution",
-                description="MazeHard prediction evolution: GT + per-step argmax overlays for one sample",
-                plot=mazehard_prediction_evolution.plot,
-                default_filename="mazehard_prediction_evolution",
-                maturity="experimental",
+                name="prediction_reasoning_mazehard",
+                description=(
+                    "[deprecated] Use prediction_reasoning_mazehard instead. "
+                    "MazeHard prediction evolution: GT + per-step argmax "
+                    "overlays for one sample."
+                ),
+                category="evaluation",
+                role="prediction_reasoning",
+                source_kind="evaluation_sample",
+                task="mazehard",
+                plot=prediction_reasoning_mazehard.plot,
+                default_filename="prediction_reasoning_mazehard",
+                maturity="deprecated",
                 allowed_surfaces={"diagnostic"},
                 input_contract="evaluation_artifact",
                 tags={"mazehard"},
@@ -148,11 +171,118 @@ def register_builtin_figures() -> None:
             )
         )
 
+    if not REGISTRY.has("prediction_reasoning_mazehard"):
+        REGISTRY.register(
+            FigureSpec(
+                name="prediction_reasoning_mazehard",
+                description=(
+                    "MazeHard prediction reasoning: ground-truth path "
+                    "vs. per-deliberation-step prediction mosaic with "
+                    "halt/truncation markers and path-IoU metrics"
+                ),
+                category="evaluation",
+                role="prediction_reasoning",
+                source_kind="evaluation_sample",
+                task="mazehard",
+                plot=prediction_reasoning_mazehard.plot,
+                default_filename="prediction_reasoning_mazehard",
+                maturity="experimental",
+                allowed_surfaces={"diagnostic", "report"},
+                input_contract="evaluation_artifact",
+                tags={"mazehard", "reasoning", "prediction"},
+                trace_keys={
+                    MAZEHARD_TRACE_KEY_HALTED,
+                    MAZEHARD_TRACE_KEY_PRED_OVERLAY,
+                },
+                meta_keys={
+                    MAZEHARD_META_KEY_INPUT_IDS,
+                    MAZEHARD_META_KEY_GT_OVERLAY,
+                },
+            )
+        )
+
+    if not REGISTRY.has("prediction_reasoning_goaltrace"):
+        REGISTRY.register(
+            FigureSpec(
+                name="prediction_reasoning_goaltrace",
+                description=(
+                    "Goaltrace prediction reasoning: target firing field "
+                    "vs. per-deliberation-step prediction mosaic with "
+                    "halt markers and field-MSE metrics"
+                ),
+                category="evaluation",
+                role="prediction_reasoning",
+                source_kind="evaluation_sample",
+                task="goaltrace",
+                plot=prediction_reasoning_goaltrace.plot,
+                default_filename="prediction_reasoning_goaltrace",
+                maturity="experimental",
+                allowed_surfaces={"diagnostic", "report"},
+                input_contract="evaluation_artifact",
+                tags={"goaltrace", "reasoning", "prediction"},
+                trace_keys={
+                    GOALTRACE_TRACE_KEY_FIRING_FIELD,
+                },
+                meta_keys=frozenset(
+                    {
+                        GOALTRACE_META_KEY_OBSERVATION_ID,
+                        GOALTRACE_META_KEY_WEIGHT,
+                        GOALTRACE_META_KEY_CURRENT_FLAG,
+                        GOALTRACE_META_KEY_GOAL_FLAG,
+                        GOALTRACE_META_KEY_NODE_MASK,
+                        GOALTRACE_META_KEY_TARGET_FIELD,
+                        GOALTRACE_META_KEY_SUCCESSOR_INDICES,
+                        GOALTRACE_META_KEY_SUCCESSOR_MASK,
+                    }
+                ),
+            )
+        )
+
+    if not REGISTRY.has("prediction_reasoning_routebind"):
+        REGISTRY.register(
+            FigureSpec(
+                name="prediction_reasoning_routebind",
+                description=(
+                    "Routebind prediction reasoning: target trajectory field "
+                    "vs. per-deliberation-step prediction mosaic with "
+                    "halt markers and field-MSE metrics"
+                ),
+                category="evaluation",
+                role="prediction_reasoning",
+                source_kind="evaluation_sample",
+                task="routebind",
+                plot=prediction_reasoning_routebind.plot,
+                default_filename="prediction_reasoning_routebind",
+                maturity="experimental",
+                allowed_surfaces={"diagnostic", "report"},
+                input_contract="evaluation_artifact",
+                tags={"routebind", "reasoning", "prediction"},
+                trace_keys={
+                    "routebind/trajectory_field",
+                },
+                meta_keys=frozenset(
+                    {
+                        ROUTEBIND_META_KEY_CELL_TYPE,
+                        ROUTEBIND_META_KEY_OBSERVATION_ID,
+                        ROUTEBIND_META_KEY_START_FLAG,
+                        ROUTEBIND_META_KEY_GOAL_FLAG,
+                        ROUTEBIND_META_KEY_CELL_MASK,
+                        ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
+                        ROUTEBIND_META_KEY_TARGET_WAYPOINT,
+                    }
+                ),
+            )
+        )
+
     if not REGISTRY.has("prediction_accuracy_over_steps"):
         REGISTRY.register(
             FigureSpec(
                 name="prediction_accuracy_over_steps",
                 description="MazeHard prediction accuracy and target-path recall over recurrent rollout steps",
+                category="evaluation",
+                role="accuracy_over_steps",
+                source_kind="evaluation_sample",
+                task="mazehard",
                 plot=prediction_accuracy_over_steps.plot,
                 default_filename="prediction_accuracy_over_steps",
                 maturity="experimental",
@@ -178,6 +308,10 @@ def register_builtin_figures() -> None:
                     "z_H and z_L across recurrent steps — "
                     "probe-backed evidence for working memory content"
                 ),
+                category="diagnostic",
+                role="pfc_path_memory_probe",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=pfc_path_memory_probe.plot,
                 default_filename="pfc_path_memory_probe",
                 maturity="experimental",
@@ -189,10 +323,10 @@ def register_builtin_figures() -> None:
             )
         )
 
-    if not REGISTRY.has("arena_prediction_overlay"):
+    if not REGISTRY.has("prediction_overlay_arena"):
         REGISTRY.register(
             FigureSpec(
-                name="arena_prediction_overlay",
+                name="prediction_overlay_arena",
                 description=(
                     "Per-step argmax prediction overlay: GT vs predicted "
                     "observation IDs (inference / retrieved / ancestral) "
@@ -201,8 +335,12 @@ def register_builtin_figures() -> None:
                     "and EHP-style Arena traces. Does NOT show confidence "
                     "or pathway uncertainty."
                 ),
-                plot=arena_prediction_overlay.plot,
-                default_filename="arena_prediction_overlay",
+                category="evaluation",
+                role="solution_overlay",
+                source_kind="evaluation_sample",
+                task="arena",
+                plot=prediction_overlay_arena.plot,
+                default_filename="prediction_overlay_arena",
                 maturity="stable",
                 allowed_surfaces={"diagnostic", "report"},
                 input_contract="evaluation_artifact",
@@ -225,6 +363,10 @@ def register_builtin_figures() -> None:
                     "trajectory, and revisit markers. "
                     "Not a model diagnostic."
                 ),
+                category="task",
+                role="task_overview",
+                source_kind="task_sample",
+                task="arena",
                 plot=task_overview_arena.plot,
                 default_filename="task_overview_arena",
                 maturity="stable",
@@ -246,6 +388,10 @@ def register_builtin_figures() -> None:
             FigureSpec(
                 name="halting_timeline",
                 description="Binary halting signal heatmap over time",
+                category="evaluation",
+                role="halting_timeline",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=halting_timeline.plot,
                 default_filename="halting_timeline",
                 maturity="stable",
@@ -262,6 +408,10 @@ def register_builtin_figures() -> None:
             FigureSpec(
                 name="q_value_evolution",
                 description="Q-values over rollout steps (RL/EHP-reason/HRM-v2)",
+                category="evaluation",
+                role="q_value_evolution",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=q_value_evolution.plot,
                 default_filename="q_value_evolution",
                 maturity="experimental",
@@ -278,6 +428,10 @@ def register_builtin_figures() -> None:
             FigureSpec(
                 name="halt_logit_evolution",
                 description="Halt/continue logits over rollout steps (ACT/HRM-v1)",
+                category="evaluation",
+                role="halt_logit_evolution",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=halt_logit_evolution.plot,
                 default_filename="halt_logit_evolution",
                 maturity="experimental",
@@ -297,6 +451,10 @@ def register_builtin_figures() -> None:
                     "HRM H/L latent dynamics: state norm and delta "
                     "over rollout time"
                 ),
+                category="diagnostic",
+                role="pfc_latent_dynamics",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=pfc_latent_dynamics.plot,
                 default_filename="pfc_latent_dynamics",
                 maturity="stable",
@@ -317,6 +475,10 @@ def register_builtin_figures() -> None:
                     "cosine similarity, and H/L separation over "
                     "fixed-budget recurrent rollout steps"
                 ),
+                category="evaluation",
+                role="residuals_over_steps",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=h_l_residuals_over_steps.plot,
                 default_filename="h_l_residuals_over_steps",
                 maturity="experimental",
@@ -336,6 +498,10 @@ def register_builtin_figures() -> None:
                     "MazeHard reasoning budget: recurrent budget ruler, "
                     "termination event marker, and computation policy summary"
                 ),
+                category="evaluation",
+                role="reasoning_budget",
+                source_kind="evaluation_run",
+                task=None,
                 plot=reasoning_budget_summary.plot,
                 default_filename="reasoning_budget_summary",
                 maturity="stable",
@@ -355,6 +521,10 @@ def register_builtin_figures() -> None:
                     "Occupancy histogram — reducer-summary diagnostic "
                     "(TensorBoard path only; not compatible with FigureGenerationCallback)"
                 ),
+                category="evaluation",
+                role="occupancy_histogram",
+                source_kind="evaluation_run",
+                task=None,
                 plot=occupancy_histogram.plot,
                 default_filename="occupancy_histogram",
                 maturity="stable",
@@ -374,6 +544,10 @@ def register_builtin_figures() -> None:
                     "Hidden-state norm histogram — reducer-summary diagnostic "
                     "(TensorBoard path only; not compatible with FigureGenerationCallback)"
                 ),
+                category="evaluation",
+                role="hidden_norm_histogram",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=hidden_norm_histogram.plot,
                 default_filename="hidden_norm_histogram",
                 maturity="experimental",
@@ -399,6 +573,10 @@ def register_builtin_figures() -> None:
                     "Mechanism diagnostic for the sensory/content stream, "
                     "not a spatial-cell diagnostic."
                 ),
+                category="diagnostic",
+                role="lec_content_filtering",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=lec_content_filtering.plot,
                 default_filename="lec_content_filtering",
                 maturity="experimental",
@@ -423,6 +601,10 @@ def register_builtin_figures() -> None:
                     "Replaces qualitative autocorrelogram inspection with "
                     "per-cell metric distributions."
                 ),
+                category="diagnostic",
+                role="mec_grid_metrics",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=mec_grid_metrics.plot,
                 default_filename="mec_grid_metrics",
                 maturity="experimental",
@@ -443,6 +625,10 @@ def register_builtin_figures() -> None:
                     "periodicity across many MEC cells, ordered by gridness "
                     "score per frequency band."
                 ),
+                category="diagnostic",
+                role="mec_autocorr_mosaic",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=mec_autocorr_mosaic.plot,
                 default_filename="mec_autocorr_mosaic",
                 maturity="experimental",
@@ -463,6 +649,10 @@ def register_builtin_figures() -> None:
                     "distribution, field-center coverage, and top place-like "
                     "rate-map examples."
                 ),
+                category="diagnostic",
+                role="hpc_place_metrics",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=hpc_place_metrics.plot,
                 default_filename="hpc_place_metrics",
                 maturity="experimental",
@@ -483,6 +673,10 @@ def register_builtin_figures() -> None:
                     "spatial information descending.  Shows place-like rate "
                     "maps across many cells."
                 ),
+                category="diagnostic",
+                role="hpc_rate_map_mosaic",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=hpc_rate_map_mosaic.plot,
                 default_filename="hpc_rate_map_mosaic",
                 maturity="experimental",
@@ -504,6 +698,10 @@ def register_builtin_figures() -> None:
                     "by observation identity, MEC by location identity, "
                     "and HPC shows mixed / conjunctive organization."
                 ),
+                category="diagnostic",
+                role="lec_content_structure_rsa",
+                source_kind="evaluation_sample",
+                task=None,
                 plot=lec_content_structure_rsa.plot,
                 default_filename="lec_content_structure_rsa",
                 maturity="experimental",
@@ -530,6 +728,10 @@ def register_builtin_figures() -> None:
                     "trajectory field. Task-context figure only; no "
                     "dense model trace required."
                 ),
+                category="task",
+                role="task_overview",
+                source_kind="task_sample",
+                task="routebind",
                 plot=task_overview_routebind.plot,
                 default_filename="task_overview_routebind",
                 maturity="experimental",
@@ -559,6 +761,10 @@ def register_builtin_figures() -> None:
                     "prospective firing field transformation.  Task-context "
                     "figure only; no dense model trace required."
                 ),
+                category="task",
+                role="task_overview",
+                source_kind="task_sample",
+                task="goaltrace",
                 plot=task_overview_goaltrace.plot,
                 default_filename="task_overview_goaltrace",
                 maturity="experimental",
@@ -590,6 +796,10 @@ def register_builtin_figures() -> None:
                     "field, and predicted field rendered on the same DAG "
                     "topology with panel-level diagnostics."
                 ),
+                category="evaluation",
+                role="prediction_example",
+                source_kind="evaluation_sample",
+                task="goaltrace",
                 plot=goaltrace_prediction_example.plot,
                 default_filename="goaltrace_prediction_example",
                 maturity="experimental",

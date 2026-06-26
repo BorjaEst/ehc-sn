@@ -9,7 +9,7 @@ The hybrid RL path is a **learner-owned batch-loss path**, not a rollout-scoring
 objective.  These routes are consumed by
 :func:`~ehc_sn.metrics.rollout.update_metric_collection_from_evaluated_chunk`
 for both training and validation (where the scorer is
-:class:`~ehc_sn.training.actor_critic.ZeroBootstrapActorCriticValidationScorer`).
+:class:`~ehc_sn.training.q_halting.ZeroBootstrapQHaltingValidationScorer`).
 """
 
 from ehc_sn.metrics.adapter import Route

@@ -14,7 +14,7 @@ from ehc_sn.traces.keys import MAZEHARD_META_KEY_GT_OVERLAY
 from ehc_sn.types import Batch
 
 # =============================================================================
-# Minimal typed context for MazeHard+EHP actor-critic trace getters
+# Minimal typed context for MazeHard+EHP Q-halting trace getters
 # =============================================================================
 
 
@@ -22,12 +22,12 @@ class _MazeHardTaskLogits(Protocol):
     task_logits: Tensor
 
 
-class _MazeHardEHCActorCriticTraceOutputs(Protocol):
+class _MazeHardEHCQHaltingTraceOutputs(Protocol):
     task_output: _MazeHardTaskLogits
 
 
-class _MazeHardEHCActorCriticTraceContext(Protocol):
-    outputs: _MazeHardEHCActorCriticTraceOutputs
+class _MazeHardEHCQHaltingTraceContext(Protocol):
+    outputs: _MazeHardEHCQHaltingTraceOutputs
 
 
 # =============================================================================
@@ -40,8 +40,8 @@ def _solution_overlay_from_task_logits(task_logits: Tensor) -> TraceValue:
     return (pred == _O_ID).to(torch.uint8)
 
 
-def _get_maze_hard_solution_overlay_actor_critic(
-    ctx: _MazeHardEHCActorCriticTraceContext,
+def _get_maze_hard_solution_overlay_q_halting(
+    ctx: _MazeHardEHCQHaltingTraceContext,
 ) -> TraceValue:
     return _solution_overlay_from_task_logits(
         ctx.outputs.task_output.task_logits
@@ -62,13 +62,13 @@ def build_mazehard_ehc_trace_meta(batch: Batch) -> dict[str, object]:
 # Named field objects
 # =============================================================================
 
-_MAZE_HARD_EHP_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC = TraceField(
+_MAZE_HARD_EHP_TRACE_SOLUTION_OVERLAY_Q_HALTING = TraceField(
     name="pred/solution_overlay",
-    get=_get_maze_hard_solution_overlay_actor_critic,
+    get=_get_maze_hard_solution_overlay_q_halting,
 )
 
-MAZE_HARD_EHP_ACTOR_CRITIC_TRACE_FIELDS: tuple[TraceField, ...] = (
-    _MAZE_HARD_EHP_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC,
+MAZE_HARD_EHP_Q_HALTING_TRACE_FIELDS: tuple[TraceField, ...] = (
+    _MAZE_HARD_EHP_TRACE_SOLUTION_OVERLAY_Q_HALTING,
 )
 
 
@@ -171,7 +171,7 @@ def select_arena_ehc_trace_fields(
 # =============================================================================
 __all__ = [
     "build_mazehard_ehc_trace_meta",
-    "MAZE_HARD_EHP_ACTOR_CRITIC_TRACE_FIELDS",
+    "MAZE_HARD_EHP_Q_HALTING_TRACE_FIELDS",
     "ARENA_EHP_TRACE_FIELDS",
     "ARENA_EHP_TRACE_WORLD_OBS_ID",
     "ARENA_EHP_TRACE_IS_REVISIT",

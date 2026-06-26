@@ -95,6 +95,9 @@ class InspectionGalleryImage:
     role: str
     path: Path  # relative to gallery output root
     success: bool
+    missing_trace_keys: tuple[str, ...] = ()
+    missing_meta_keys: tuple[str, ...] = ()
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +108,7 @@ class InspectionGallery:
     rendered_roles: tuple[str, ...]
     sample_count: int
     images: tuple[InspectionGalleryImage, ...]
+    role_errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -557,6 +561,8 @@ def _build_gallery(
     image_records: list[InspectionGalleryImage] = []
     rendered_roles: set[str] = set()
 
+    role_error_records: list[str] = []
+
     for role in roles:
         # Resolve figure spec for this task + role.
         try:
@@ -565,7 +571,8 @@ def _build_gallery(
                 role=role,  # type: ignore[arg-type]
                 task=task,
             )
-        except KeyError:
+        except KeyError as exc:
+            role_error_records.append(str(exc))
             continue
 
         rendered_roles.add(role)
@@ -573,16 +580,23 @@ def _build_gallery(
         for i in range(n_to_render):
             trace = loaded[i].trace
             # Validate required fields are present.
-            missing = (spec.trace_keys - set(trace.path_strs)) | {
-                mk for mk in spec.meta_keys if not trace.has_meta_path(mk)
-            }
-            if missing:
+            missing_trace = tuple(
+                sorted(spec.trace_keys - set(trace.path_strs))
+            )
+            missing_meta = tuple(
+                sorted(
+                    mk for mk in spec.meta_keys if not trace.has_meta_path(mk)
+                )
+            )
+            if missing_trace or missing_meta:
                 image_records.append(
                     InspectionGalleryImage(
                         sample_index=i,
                         role=role,
                         path=Path(),
                         success=False,
+                        missing_trace_keys=missing_trace,
+                        missing_meta_keys=missing_meta,
                     )
                 )
                 continue
@@ -608,13 +622,14 @@ def _build_gallery(
                         success=True,
                     )
                 )
-            except Exception:
+            except Exception as exc:
                 image_records.append(
                     InspectionGalleryImage(
                         sample_index=i,
                         role=role,
                         path=Path(),
                         success=False,
+                        error=str(exc),
                     )
                 )
 
@@ -632,6 +647,9 @@ def _build_gallery(
                 "role": img.role,
                 "path": str(img.path) if img.path else None,
                 "success": img.success,
+                "missing_trace_keys": list(img.missing_trace_keys),
+                "missing_meta_keys": list(img.missing_meta_keys),
+                "error": img.error,
             }
             for img in image_records
         ],
@@ -646,6 +664,7 @@ def _build_gallery(
         rendered_roles=tuple(sorted(rendered_roles)),
         sample_count=n_to_render,
         images=tuple(image_records),
+        role_errors=tuple(role_error_records),
     )
 
 

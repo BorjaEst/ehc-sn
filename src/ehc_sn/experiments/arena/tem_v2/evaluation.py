@@ -33,6 +33,7 @@ def build_arena_tem_v2_evaluation_experiment(
             profile_version=config.capture.profile_version,
             include=config.capture.include,
             exclude=config.capture.exclude,
+            extra_fields=executor._bindings.trace_fields,
         )
         if config.capture.profile != "metrics_only"
         else None

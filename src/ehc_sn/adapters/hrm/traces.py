@@ -7,13 +7,13 @@ boundary while the generic trace infrastructure stays model-agnostic.
 Usage
 -----
     from ehc_sn.adapters.mazehard.hrm import (
-        MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
+        MAZE_HARD_HRM_Q_HALTING_TRACE_FIELDS,
         MAZE_HARD_HRM_ACT_TRACE_FIELDS,
     )
     self.trace_spec = build_trace_spec("act", extra_fields=MAZE_HARD_HRM_ACT_TRACE_FIELDS)
     self.trace_spec = build_trace_spec(
-        "actor_critic",
-        extra_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
+        "rl",
+        extra_fields=MAZE_HARD_HRM_Q_HALTING_TRACE_FIELDS,
     )
 """
 
@@ -79,16 +79,16 @@ class _MazeHardHRMACTTraceContext(Protocol):
     outputs: _MazeHardHRMACTTraceOutputs
 
 
-class _MazeHardHRMActorCriticTraceOutputs(Protocol):
-    """Minimal actor-critic record surface consumed by MazeHard+HRM trace getters."""
+class _MazeHardHRMQHaltingTraceOutputs(Protocol):
+    """Minimal Q-halting record surface consumed by MazeHard+HRM trace getters."""
 
     task_output: _MazeHardTaskLogits
 
 
-class _MazeHardHRMActorCriticTraceContext(Protocol):
-    """Trace context expected by MazeHard+HRM actor-critic trace fields."""
+class _MazeHardHRMQHaltingTraceContext(Protocol):
+    """Trace context expected by MazeHard+HRM Q-halting trace fields."""
 
-    outputs: _MazeHardHRMActorCriticTraceOutputs
+    outputs: _MazeHardHRMQHaltingTraceOutputs
 
 
 # =============================================================================
@@ -109,10 +109,10 @@ def _get_maze_hard_solution_overlay_act(
     return _solution_overlay_from_task_logits(ctx.outputs.task.task_logits)
 
 
-def _get_maze_hard_solution_overlay_actor_critic(
-    ctx: _MazeHardHRMActorCriticTraceContext,
+def _get_maze_hard_solution_overlay_q_halting(
+    ctx: _MazeHardHRMQHaltingTraceContext,
 ) -> TraceValue:
-    """Read MazeHard solution-overlay traces from actor-critic task output logits."""
+    """Read MazeHard solution-overlay traces from Q-halting task output logits."""
     return _solution_overlay_from_task_logits(
         ctx.outputs.task_output.task_logits
     )
@@ -142,13 +142,13 @@ MAZE_HARD_HRM_ACT_TRACE_FIELDS: tuple[TraceField, ...] = (
     MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY,
 )
 
-_MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC = TraceField(
+_MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY_Q_HALTING = TraceField(
     name="pred/solution_overlay",
-    get=_get_maze_hard_solution_overlay_actor_critic,
+    get=_get_maze_hard_solution_overlay_q_halting,
 )
 
-MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS: tuple[TraceField, ...] = (
-    _MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY_ACTOR_CRITIC,
+MAZE_HARD_HRM_Q_HALTING_TRACE_FIELDS: tuple[TraceField, ...] = (
+    _MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY_Q_HALTING,
 )
 
 
@@ -218,10 +218,10 @@ def build_seqmaze_hrm_trace_meta(batch: Batch) -> dict[str, object]:
 
 
 # =============================================================================
-# SeqMaze HRM v2 actor-critic trace fields
+# SeqMaze HRM v2 Q-halting trace fields
 # =============================================================================
 
-SEQMAZE_HRM_ACTOR_CRITIC_TRACE_FIELDS: tuple[str, ...] = (
+SEQMAZE_HRM_Q_HALTING_TRACE_FIELDS: tuple[str, ...] = (
     "reward",
     "state_value",
     "q_values",
@@ -231,10 +231,10 @@ SEQMAZE_HRM_ACTOR_CRITIC_TRACE_FIELDS: tuple[str, ...] = (
 )
 
 
-def build_seqmaze_hrm_actor_critic_trace_meta(
+def build_seqmaze_hrm_q_halting_trace_meta(
     batch: Batch,
 ) -> dict[str, object]:
-    """Return out-of-band trace metadata for SeqMaze HRM v2 actor-critic figures."""
+    """Return out-of-band trace metadata for SeqMaze HRM v2 Q-halting figures."""
     return {
         SEQMAZE_META_KEY_N_NODES: int(batch["node_mask"].sum()),
         SEQMAZE_META_KEY_TARGET_PATH_LEN: (
@@ -364,15 +364,15 @@ def build_routebind_hrm_trace_meta(batch: dict) -> dict:
 __all__ = [
     "build_mazehard_hrm_trace_meta",
     "build_seqmaze_hrm_trace_meta",
-    "build_seqmaze_hrm_actor_critic_trace_meta",
+    "build_seqmaze_hrm_q_halting_trace_meta",
     "build_goaltrace_hrm_trace_meta",
     "build_routebind_hrm_trace_meta",
-    "MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS",
+    "MAZE_HARD_HRM_Q_HALTING_TRACE_FIELDS",
     "MAZE_HARD_HRM_ACT_TRACE_FIELDS",
     "MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY",
     "ROUTEBIND_HRM_ACT_TRACE_FIELDS",
     "ROUTEBIND_HRM_ACT_TRAJECTORY_FIELD",
-    "SEQMAZE_HRM_ACTOR_CRITIC_TRACE_FIELDS",
+    "SEQMAZE_HRM_Q_HALTING_TRACE_FIELDS",
     "MAZEHARD_META_KEY_GT_OVERLAY",
     "MAZEHARD_META_KEY_INPUT_IDS",
 ]

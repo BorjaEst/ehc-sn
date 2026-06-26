@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ehc_sn.data.datamodules import Datamodule, DatamoduleConfig
-from ehc_sn.lightning.modules.actor_critic import ActorCriticTrainingConfig
+from ehc_sn.lightning.modules.q_halting import QHaltingTrainingConfig
 from ehc_sn.tasks.seqmaze.reward import SeqMazeRewardConfig
 from ehc_sn.training.runner import TrainingExperiment
 
@@ -18,7 +18,7 @@ def build_seqmaze_hrm_v2_training_experiment(
     module = build_seqmaze_hrm_v2_model(
         config.model,
         execution=config.execution.to_runtime_config(),
-        training_config=ActorCriticTrainingConfig(
+        training_config=QHaltingTrainingConfig(
             optimizer_supervised=config.training.optimizer_supervised,
             optimizer_rl=config.training.optimizer_rl,
             optimizer_qv=config.training.optimizer_qv,

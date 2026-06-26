@@ -6,12 +6,12 @@ Hierarchy (training):
     ├── model: MazeHardHRMV2ModelConfig
     │   └── components: MazeHardHRMV2ComponentConfigs
     │       ├── adapter: MazeHardHRMAdapterSettings
-    │       ├── controller: DeliberationACControllerConfig | None
+    │       ├── controller: DeliberationQHaltingControllerConfig | None
     │       └── objective: HybridRLLossConfig
     ├── execution: MazeHardDeliberationConfig
     │   ├── halt_action
     │   └── episode_horizon
-    ├── training: ActorCriticTrainingConfig
+    ├── training: QHaltingTrainingConfig
     │   ├── optimizer
     │   └── runtime
     ├── data: DatamoduleConfig
@@ -34,8 +34,8 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from ehc_sn.adapters.hrm import MazeHardHRMAdapterSettings
-from ehc_sn.controllers.deliberation.actor_critic import (
-    DeliberationACControllerConfig,
+from ehc_sn.controllers.deliberation.q_halting import (
+    DeliberationQHaltingControllerConfig,
 )
 from ehc_sn.data.datamodules import DatamoduleConfig
 from ehc_sn.experiments._infra import (
@@ -45,8 +45,8 @@ from ehc_sn.experiments._infra import (
     RegimeConfig,
     TrainerConfig,
 )
-from ehc_sn.lightning.modules.actor_critic import (
-    ActorCriticTrainingConfig,
+from ehc_sn.lightning.modules.q_halting import (
+    QHaltingTrainingConfig,
 )
 from ehc_sn.logging.tensorboard import LoggerSettings
 from ehc_sn.objectives.composites.hybrid_rl import HybridRLLossConfig
@@ -103,7 +103,7 @@ class MazeHardHRMV2ComponentConfigs(BaseModel, extra="forbid"):
         ...,
         description="MazeHard adapter settings for HRM v2.",
     )
-    controller: DeliberationACControllerConfig | None = Field(
+    controller: DeliberationQHaltingControllerConfig | None = Field(
         default=None,
         description="Deliberation actor-critic controller configuration. "
         "None disables the controller during evaluation.",
@@ -144,7 +144,7 @@ class MazeHardHRMV2TrainingExperimentConfig(BaseModel, extra="forbid"):
         ...,
         description="Model structure (components + architecture path).",
     )
-    training: ActorCriticTrainingConfig = Field(
+    training: QHaltingTrainingConfig = Field(
         ...,
         description="Actor-critic training configuration (optimizers, reward). "
         "Runtime/execution policy moved to deliberation.validation.",

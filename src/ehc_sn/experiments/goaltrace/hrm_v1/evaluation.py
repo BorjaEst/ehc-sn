@@ -49,6 +49,7 @@ def build_goaltrace_hrm_v1_evaluation_experiment(
                 if config.capture.profile != "metrics_only"
                 else None
             ),
+            extra_fields=executor._bindings.trace_fields,
         )
         if config.capture.profile != "metrics_only"
         else None

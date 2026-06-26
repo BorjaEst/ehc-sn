@@ -22,7 +22,7 @@ from .traces import (
     ARENA_EHP_TRACE_PRED_POST,
     ARENA_EHP_TRACE_PRED_RECALL,
     ARENA_EHP_TRACE_WORLD_OBS_ID,
-    MAZE_HARD_EHP_ACTOR_CRITIC_TRACE_FIELDS,
+    MAZE_HARD_EHP_Q_HALTING_TRACE_FIELDS,
     build_mazehard_ehc_trace_meta,
     select_arena_ehc_trace_fields,
 )
@@ -36,7 +36,7 @@ __all__ = [
     "MazeHardEHCV1Encoder",
     "MazeHardEHCV1PolicyOutput",
     "MazeHardEHCV1TaskDecoder",
-    "MAZE_HARD_EHP_ACTOR_CRITIC_TRACE_FIELDS",
+    "MAZE_HARD_EHP_Q_HALTING_TRACE_FIELDS",
     "build_mazehard_ehc_trace_meta",
     "ArenaEHCAdapterSettings",
     "ArenaEHCBridgeOutput",

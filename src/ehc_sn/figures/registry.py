@@ -31,6 +31,73 @@ Supported keys:
 _TemporalConstraint: TypeAlias = dict[str, object]
 """A dictionary of required temporal-semantics field values."""
 
+# ── Figure category / role / source taxonomy ────────────────────────────────
+
+FigureCategory: TypeAlias = Literal["task", "evaluation", "diagnostic"]
+"""Scientific question category for a figure.
+
+``"task"``
+    Shows the task contract — input, target, environment.
+    Consumes a corpus sample.  Used by data-gen inspect.
+``"evaluation"``
+    Shows what the model predicted relative to the task contract.
+    Consumes an evaluation artifact.  Used by eval inspect.
+``"diagnostic"``
+    Shows internal model behavior or mechanism.
+    Consumes traces, diagnostic artifacts, or an active model run.
+"""
+
+FigureRole: TypeAlias = Literal[
+    "task_overview",
+    "prediction_example",
+    "prediction_reasoning",
+    "prediction_errors",
+    "solution_overlay",
+    "accuracy_over_steps",
+    "q_value_evolution",
+    "halt_logit_evolution",
+    "halting_timeline",
+    "reasoning_budget",
+    "residuals_over_steps",
+    "hidden_norm_histogram",
+    "occupancy_histogram",
+    "hpc_place_metrics",
+    "hpc_rate_map_mosaic",
+    "mec_grid_metrics",
+    "mec_autocorr_mosaic",
+    "lec_content_filtering",
+    "lec_content_structure_rsa",
+    "pfc_latent_dynamics",
+    "pfc_path_memory_probe",
+    "cell_activity",
+]
+"""Canonical figure role — the visual family a figure implements.
+
+Distinct from the concrete implementation (``registry key``), which
+combines role + task.  Multiple figures can share the same role for
+different tasks (e.g. ``prediction_reasoning`` for mazehard vs
+goaltrace).
+"""
+
+FigureSourceKind: TypeAlias = Literal[
+    "task_sample",
+    "evaluation_sample",
+    "evaluation_run",
+    "diagnostic_result",
+]
+"""Kind of source data a figure consumes.
+
+``"task_sample"``
+    A single corpus sample (dataset batch row).  No model involved.
+``"evaluation_sample"``
+    A single evaluated sample from an evaluation artifact trace.
+``"evaluation_run"``
+    Aggregate metrics or summary data for a complete evaluation run.
+``"diagnostic_result"``
+    Output from a separate diagnostic analysis.
+"""
+
+
 FigureMaturity: TypeAlias = Literal["experimental", "stable", "deprecated"]
 """Implementation stability of a figure.
 
@@ -119,6 +186,16 @@ class FigureSpec:
     name: str
     plot: Callable[[TraceTree, FigureContext], mpl_figure.Figure]
     default_filename: str
+
+    # ── Semantic taxonomy ───────────────────────────────────────────────
+    category: FigureCategory
+    role: FigureRole
+    source_kind: FigureSourceKind
+    task: str | None = None
+    """Task name when figure is task-specific (``None`` = any task)."""
+    model_family: str | None = None
+    """Model-family identifier when figure is model-specific (``None`` = any)."""
+
     maturity: FigureMaturity = "experimental"
     allowed_surfaces: set[FigureSurface] = field(
         default_factory=lambda: {"diagnostic"}
@@ -233,6 +310,113 @@ class Registry:
         if tags is not None:
             specs = [s for s in specs if tags.issubset(s.tags)]
         return sorted(specs, key=lambda s: s.name)
+
+    # ── New category/role/task filtering ─────────────────────────────────
+
+    def list_by_category(
+        self,
+        category: FigureCategory,
+        *,
+        role: FigureRole | None = None,
+        task: str | None = None,
+        source_kind: FigureSourceKind | None = None,
+        maturity: FigureMaturity | None = None,
+    ) -> list[FigureSpec]:
+        """Return specs matching *category* and optional filters.
+
+        Parameters
+        ----------
+        category:
+            Required category.
+        role:
+            If set, only specs with this role.
+        task:
+            If set, only specs whose ``task`` matches (``None``-task specs
+            match any task).
+        source_kind:
+            If set, only specs with this source kind.
+        maturity:
+            If set, only specs with this maturity.
+
+        Returns
+        -------
+        List of ``FigureSpec`` objects sorted by name.
+        """
+        specs: list[FigureSpec] = []
+        for s in self._specs.values():
+            if s.category != category:
+                continue
+            if role is not None and s.role != role:
+                continue
+            if task is not None and s.task is not None and s.task != task:
+                continue
+            if source_kind is not None and s.source_kind != source_kind:
+                continue
+            if maturity is not None and s.maturity != maturity:
+                continue
+            specs.append(s)
+        return sorted(specs, key=lambda s: s.name)
+
+    def resolve(
+        self,
+        *,
+        category: FigureCategory,
+        role: FigureRole,
+        task: str,
+    ) -> FigureSpec:
+        """Return exactly one spec matching *category*, *role*, and *task*.
+
+        When multiple specs match (e.g. a deprecated figure alongside a
+        current figure with the same role), the non-deprecated spec is
+        preferred.  Raises ``KeyError`` if no spec matches.
+
+        Raises
+        ------
+        KeyError
+            If no spec matches the combination.
+        """
+        candidates: list[FigureSpec] = []
+        for s in self._specs.values():
+            if s.category == category and s.role == role and s.task == task:
+                candidates.append(s)
+        if not candidates:
+            raise KeyError(
+                f"No figure for category={category!r}, role={role!r}, "
+                f"task={task!r}. "
+                f"Available: {sorted(self._specs)}."
+            )
+        # Prefer non-deprecated over deprecated when multiple match.
+        non_deprecated = [c for c in candidates if c.maturity != "deprecated"]
+        return non_deprecated[0] if non_deprecated else candidates[0]
+
+    def available_roles(
+        self,
+        category: FigureCategory,
+        *,
+        task: str | None = None,
+    ) -> set[str]:
+        """Return the set of roles for a given *category* and optional *task*.
+
+        Parameters
+        ----------
+        category:
+            Required category.
+        task:
+            If set, only roles for specs whose ``task`` matches
+            (``None``-task specs are always included).
+
+        Returns
+        -------
+        Set of role strings.
+        """
+        roles: set[str] = set()
+        for s in self._specs.values():
+            if s.category != category:
+                continue
+            if task is not None and s.task is not None and s.task != task:
+                continue
+            roles.add(s.role)
+        return roles
 
     def required_meta_keys(  # ------------------------------------------------
         self,

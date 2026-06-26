@@ -12,7 +12,7 @@ Critic surface:
     EHCControlV1.reward_prediction is the STR V(s) scalar.  STR is the
     canonical V(s) owner in this repo (see ehc_sn.modules.str.__init__).
     The bridge re-exposes it as critic.state_value with shape (B, 1) to
-    satisfy the neutral ActorCriticCriticOutput protocol.
+    satisfy the neutral QHaltingCriticOutput protocol.
 """
 
 from __future__ import annotations

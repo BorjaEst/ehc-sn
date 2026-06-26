@@ -189,6 +189,10 @@ def inspect(
                 f"  Failed images:  {len(result.gallery.images) - successful}",
                 err=True,
             )
+        if result.gallery.role_errors:
+            typer.echo("  Role errors:", err=True)
+            for err in result.gallery.role_errors:
+                typer.echo(f"    {err}", err=True)
 
 
 @app.command()

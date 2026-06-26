@@ -14,7 +14,7 @@ regime_ids = ["arena_n1"]
 [figures]
 figures = [
     "task_overview_arena",
-    "arena_prediction_overlay",
+    "prediction_overlay_arena",
     "mec_grid_metrics",
     "mec_autocorr_mosaic",
     "hpc_place_metrics",

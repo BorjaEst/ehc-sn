@@ -7,7 +7,7 @@ from ehc_sn.experiments._infra import (
     EvaluationIdentity,
     ProviderSpec,
 )
-from ehc_sn.lightning.modules.actor_critic import ActorCriticModule
+from ehc_sn.lightning.modules.q_halting import QHaltingModule
 from ehc_sn.tasks.seqmaze.runtime import SeqMazeRuntimeConfig
 from ehc_sn.traces import resolve_capture_profile
 
@@ -32,6 +32,7 @@ def build_seqmaze_hrm_v2_evaluation_experiment(
             profile_version=config.capture.profile_version,
             include=config.capture.include,
             exclude=config.capture.exclude,
+            extra_fields=executor._bindings.trace_fields,
         )
         if config.capture.profile != "metrics_only"
         else None

@@ -12,15 +12,19 @@ Sub-modules:
 from ehc_sn.training.rollout import (
     CapturedRolloutResult,
     StreamingRolloutResult,
+    StreamingRolloutResultWithTrace,
     run_captured_rollout,
     score_captured_rollout,
     score_rollout_streaming,
+    score_rollout_streaming_with_trace,
 )
 
 __all__ = [
     "CapturedRolloutResult",
     "StreamingRolloutResult",
+    "StreamingRolloutResultWithTrace",
     "run_captured_rollout",
     "score_captured_rollout",
     "score_rollout_streaming",
+    "score_rollout_streaming_with_trace",
 ]

@@ -21,8 +21,8 @@ from torch.optim import Optimizer
 from torchmetrics import MetricCollection
 
 from ehc_sn import utils
-from ehc_sn.controllers.deliberation.actor_critic import (
-    DeliberationACControllerConfig,
+from ehc_sn.controllers.deliberation.q_halting import (
+    DeliberationQHaltingControllerConfig,
 )
 from ehc_sn.data.datasets import ProcessedDataset
 from ehc_sn.data.episode_sources import ShuffledEpisodeSource
@@ -60,7 +60,7 @@ from ehc_sn.types import Batch
 # =============================================================================
 class RuntimeConfigLike(Protocol):
     """Protocol for deliberation/execution policy configs consumed by
-    :class:`ActorCriticModule`.
+    :class:`QHaltingModule`.
 
     Both :class:`~ehc_sn.tasks.mazehard.runtime.MazeHardRuntimeConfig` and
     :class:`~ehc_sn.tasks.seqmaze.runtime.SeqMazeRuntimeConfig` satisfy this
@@ -91,7 +91,7 @@ def _payload_width(batch: Batch) -> int:
 
 # =============================================================================
 @dataclass(frozen=True, slots=True, eq=False)
-class ActorCriticBindings:
+class QHaltingBindings:
     """Immutable experiment-to-module bindings for actor-critic regimes."""
 
     # eq=False: fields include callables and classes; structural equality
@@ -132,7 +132,7 @@ class ActorCriticBindings:
     """
 
 
-class ActorCriticTrainingConfig(BaseModel, extra="forbid"):
+class QHaltingTrainingConfig(BaseModel, extra="forbid"):
     """Training-only configuration for an actor-critic experiment.
 
     Not required for evaluation — only used to construct optimizers
@@ -175,7 +175,7 @@ class ActorCriticTrainingConfig(BaseModel, extra="forbid"):
     )
 
 
-class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
+class QHaltingComponentConfigs(BaseModel, extra="forbid"):
     """Concrete component configs for an actor-critic experiment.
 
     Validated and populated by the experiment builder, consumed by
@@ -183,14 +183,14 @@ class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
     concrete Pydantic types are determined by the experiment builder.
     Contains only the configs needed to construct the computational
     graph — optimizers and training-only settings live in
-    :class:`ActorCriticTrainingConfig`.
+    :class:`QHaltingTrainingConfig`.
     """
 
     adapter: BaseModel = Field(
         ...,
         description="Adapter settings (task-specific, validated by experiment builder).",
     )
-    controller: DeliberationACControllerConfig = Field(
+    controller: DeliberationQHaltingControllerConfig = Field(
         default_factory=lambda: None,
         description="Deliberation AC controller configuration.",
     )
@@ -201,12 +201,12 @@ class ActorCriticComponentConfigs(BaseModel, extra="forbid"):
     )
 
 
-class ActorCriticConfig(BaseModel, extra="forbid"):
+class QHaltingConfig(BaseModel, extra="forbid"):
     """Regime-owned settings for an actor-critic Lightning experiment.
 
     Contains only fields the regime module can validate without knowing
     the concrete experiment.  Component-specific configs live in
-    :class:`ActorCriticComponentConfigs`, validated by the
+    :class:`QHaltingComponentConfigs`, validated by the
     experiment builder.
 
     ``num_slots`` is passed as a separate constructor argument,
@@ -224,21 +224,21 @@ class ActorCriticConfig(BaseModel, extra="forbid"):
     )
 
 
-class ActorCriticModule(L.LightningModule):
+class QHaltingModule(L.LightningModule):
     """Generic LightningModule for actor-critic deliberation training.
 
-    Accepts an :class:`ActorCriticConfig`, an
-    :class:`ActorCriticComponentConfigs`, and an
-    :class:`ActorCriticBindings` bundle.  Features three-optimizer
+    Accepts an :class:`QHaltingConfig`, an
+    :class:`QHaltingComponentConfigs`, and an
+    :class:`QHaltingBindings` bundle.  Features three-optimizer
     training, partial-reset batching, and warmup gating.
     """
 
     def __init__(  # ----------------------------------------------------------
         self,
-        config: ActorCriticConfig,
-        component_configs: ActorCriticComponentConfigs,
-        bindings: ActorCriticBindings,
-        training_config: ActorCriticTrainingConfig | None = None,
+        config: QHaltingConfig,
+        component_configs: QHaltingComponentConfigs,
+        bindings: QHaltingBindings,
+        training_config: QHaltingTrainingConfig | None = None,
         *,
         execution: RuntimeConfigLike | None = None,
     ) -> None:
@@ -296,7 +296,7 @@ class ActorCriticModule(L.LightningModule):
         return _loader(self.model, path, groups)
 
     @property
-    def config(self) -> ActorCriticConfig:
+    def config(self) -> QHaltingConfig:
         return self._config
 
     def validate_run_plan(  # -------------------------------------------------
@@ -315,7 +315,7 @@ class ActorCriticModule(L.LightningModule):
         if self._training_config is None:
             raise RuntimeError(
                 "validate_run_plan: training_config is None. "
-                "Training requires a full ActorCriticTrainingConfig."
+                "Training requires a full QHaltingTrainingConfig."
             )
         rp = self._num_slots
         if rp is not None and rp <= 0:
@@ -419,7 +419,7 @@ class ActorCriticModule(L.LightningModule):
             if tc.num_slots is None:
                 raise RuntimeError(
                     "num_slots is required for training. "
-                    "Set it via ActorCriticTrainingConfig.num_slots."
+                    "Set it via QHaltingTrainingConfig.num_slots."
                 )
             self._num_slots = tc.num_slots
 
@@ -871,8 +871,8 @@ class ActorCriticModule(L.LightningModule):
 
 
 __all__ = [
-    "ActorCriticBindings",
-    "ActorCriticComponentConfigs",
-    "ActorCriticConfig",
-    "ActorCriticModule",
+    "QHaltingBindings",
+    "QHaltingComponentConfigs",
+    "QHaltingConfig",
+    "QHaltingModule",
 ]

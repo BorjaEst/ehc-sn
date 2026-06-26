@@ -13,7 +13,6 @@ from ehc_sn.experiments._infra import (
 from ehc_sn.lightning.modules.act_supervised import (
     ACTSupervisedModule,
 )
-from ehc_sn.tasks.mazehard.traces import trace_task_fields
 from ehc_sn.traces import resolve_capture_profile
 
 from .config import MazeHardHRMV1EvaluationExperimentConfig
@@ -37,7 +36,7 @@ def build_mazehard_hrm_v1_evaluation_experiment(
             profile_version=config.capture.profile_version,
             include=config.capture.include,
             exclude=config.capture.exclude,
-            extra_fields=trace_task_fields(),
+            extra_fields=executor._bindings.trace_fields,
         )
         if config.capture.profile != "metrics_only"
         else None

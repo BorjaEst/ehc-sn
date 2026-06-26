@@ -107,7 +107,7 @@ class OpenReport:
         only entries with matching values are considered.
 
         Args:
-            figure_id: The figure identifier (e.g. ``\"arena_prediction_overlay\"``).
+            figure_id: The figure identifier (e.g. ``\"prediction_overlay_arena\"``).
             preferred_format: Preferred output format (``\"png\"`` or ``\"pdf\"``).
             task: Optional task filter.
             regime_id: Optional regime-id filter.

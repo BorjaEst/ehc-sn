@@ -1,27 +1,14 @@
-"""Routebind task-overview figure selector.
+"""Routebind figure selectors.
 
-Reads ``routebind/*`` meta keys from a persisted eval artifact and produces
-a typed data object for the overview template.
-
-Required meta keys (always checked):
-    - ``routebind/cell_type`` ``(S,)`` int32 — 0=WALL, 1=FREE, 2=OBSERVATION
-    - ``routebind/observation_id`` ``(S,)`` int32 — observation ID or sentinel
-    - ``routebind/start_flag`` ``(S,)`` bool — True at start position
-    - ``routebind/goal_flag`` ``(S,)`` bool — True at goal positions
-    - ``routebind/target_trajectory`` ``(S,)`` float32 — oracle trajectory field
-
-Optional meta keys (read when present, fallback to array-derived estimates):
-    - ``routebind/n_observations`` — corpus-wide observation vocabulary size.
-    - ``routebind/canvas_width`` — grid width in cells.
-    - ``routebind/canvas_height`` — grid height in cells (must equal width).
-    - ``routebind/target_waypoint`` — oracle semantic waypoint field (for
-      waypoint observation sequence rendering).
+Provides semantic sample types and adapters for task and evaluation
+figures.  The task-overview selector consumes a ``RoutebindTaskSample``
+built from a ``TraceTree`` via ``build_routebind_task_sample``.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
@@ -39,6 +26,78 @@ from ehc_sn.traces.keys import (
     ROUTEBIND_META_KEY_TARGET_WAYPOINT,
 )
 from ehc_sn.traces.trace_tree import TraceTree
+
+# =============================================================================
+# Semantic source views
+# =============================================================================
+
+
+@dataclass
+class RoutebindTaskSample:
+    """One Routebind dataset sample without model involvement."""
+
+    cell_type: NDArray  # (S,) int32
+    observation_id: NDArray  # (S,) int32
+    start_flag: NDArray  # (S,) bool
+    goal_flag: NDArray  # (S,) bool
+    target_trajectory: NDArray  # (S,) float32
+    target_waypoint: NDArray  # (S,) float32
+    grid_width: int = 30
+    sample_id: str = ""
+
+
+@dataclass
+class RoutebindEvaluationSample:
+    """One Routebind evaluated sample with batch dim already indexed out."""
+
+    task: RoutebindTaskSample
+    prediction_trajectory: NDArray  # (T, S,) float32
+    prediction_waypoint: NDArray  # (T, S,) float32
+    halted: NDArray  # (T,) bool
+    steps: NDArray  # (T,)
+    halt_step: int | None = None
+    truncated: bool = False
+    metrics: dict[str, float] = field(default_factory=dict)
+
+
+def build_routebind_task_sample(
+    trace: TraceTree, *, sample_idx: int = 0
+) -> RoutebindTaskSample:
+    """Build a Routebind task sample from a TraceTree."""
+    from ehc_sn.traces.keys import (
+        ROUTEBIND_META_KEY_CANVAS_HEIGHT,
+        ROUTEBIND_META_KEY_CANVAS_WIDTH,
+        ROUTEBIND_META_KEY_CELL_TYPE,
+        ROUTEBIND_META_KEY_GOAL_FLAG,
+        ROUTEBIND_META_KEY_OBSERVATION_ID,
+        ROUTEBIND_META_KEY_START_FLAG,
+        ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
+        ROUTEBIND_META_KEY_TARGET_WAYPOINT,
+    )
+
+    def _sample(key: str) -> np.ndarray:
+        arr = np.asarray(trace.get_meta_path(key))
+        if arr.ndim >= 2:
+            arr = arr[sample_idx]
+        while arr.ndim > 1:
+            arr = arr.squeeze(0)
+        return arr
+
+    width = (
+        int(_sample(ROUTEBIND_META_KEY_CANVAS_WIDTH))
+        if trace.has(ROUTEBIND_META_KEY_CANVAS_WIDTH)
+        else 30
+    )
+
+    return RoutebindTaskSample(
+        cell_type=_sample(ROUTEBIND_META_KEY_CELL_TYPE),
+        observation_id=_sample(ROUTEBIND_META_KEY_OBSERVATION_ID),
+        start_flag=_sample(ROUTEBIND_META_KEY_START_FLAG),
+        goal_flag=_sample(ROUTEBIND_META_KEY_GOAL_FLAG),
+        target_trajectory=_sample(ROUTEBIND_META_KEY_TARGET_TRAJECTORY),
+        target_waypoint=_sample(ROUTEBIND_META_KEY_TARGET_WAYPOINT),
+        grid_width=width,
+    )
 
 
 # =============================================================================

@@ -1,11 +1,14 @@
 """Selectors for MazeHard figures.
 
-Reads ``target/solution_overlay`` from trace metadata — no adapter imports.
+All selectors consume semantic dataclasses (``MazehardTaskSample``,
+``MazehardEvaluationSample``), not raw ``TraceTree`` or batch dicts.
+Storage-level access (trace keys, CPU conversion, axis squeezing) is
+handled by the ``build_*`` adapter functions.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from numpy.typing import NDArray
@@ -25,9 +28,166 @@ from ehc_sn.traces.trace_tree import TraceTree
 _DEFAULT_MAX_MAZES = 10
 
 
+# ── Semantic source views ───────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class MazehardTaskSample:
+    """One MazeHard dataset sample — no model involved.
+
+    Attributes:
+        input_grid: ``(N,)`` int — token IDs for one maze.
+        target_solution: ``(N,)`` bool — oracle solution path.
+        sample_id: Unique sample identifier.
+    """
+
+    input_grid: NDArray  # (N,)
+    target_solution: NDArray  # (N,) bool
+    sample_id: str
+
+
+@dataclass(frozen=True)
+class MazehardEvaluationSample:
+    """One MazeHard evaluated sample — batch-dim already indexed out.
+
+    Attributes:
+        input_grid: ``(N,)`` int — token IDs.
+        prediction_steps: ``(T, N)`` uint8 — predicted overlay per step.
+        halted: ``(T,)`` bool — halt signal per reasoning step.
+        steps: ``(T,)`` int — step indices.
+        gt_overlay: ``(N,)`` bool — oracle solution overlay.
+        halt_step: ``int | None`` — index of first halt, or None.
+        truncated: ``bool`` — whether the run was truncated.
+        metrics: ``dict[str, float]`` — per-sample metrics.
+    """
+
+    input_grid: NDArray  # (N,)
+    prediction_steps: NDArray  # (T, N) uint8
+    halted: NDArray  # (T,) bool
+    steps: NDArray  # (T,)
+    gt_overlay: NDArray  # (N,) bool
+    halt_step: int | None = None
+    truncated: bool = False
+    metrics: dict[str, float] = field(default_factory=dict)
+
+
+# ── Adapter functions (storage → semantic) ──────────────────────────────
+
+
 def _to_cpu(value: object) -> object:
     """Move a tensor to CPU if needed; return other values unchanged."""
     return value.cpu() if hasattr(value, "cpu") else value  # type: ignore[union-attr]
+
+
+def build_mazehard_task_sample(batch: dict) -> MazehardTaskSample:
+    """Build a task sample from a raw dataset batch row.
+
+    Parameters
+    ----------
+    batch:
+        A single sample dict from a MazeHard ``ProcessedDataset`` or
+        ``DataLoader``.  Expected keys: ``"input_ids"``, ``"labels"``
+        or ``"solution"``.
+
+    Returns
+    -------
+    MazehardTaskSample
+
+    Raises
+    ------
+    KeyError
+        If any required key is missing.
+    """
+    import numpy as np
+
+    input_ids = np.asarray(_to_cpu(batch["input_ids"]))
+    labels = np.asarray(_to_cpu(batch.get("labels", batch.get("solution"))))
+    return MazehardTaskSample(
+        input_grid=input_ids,
+        target_solution=labels.astype(bool),
+        sample_id=str(batch.get("sample_id", "")),
+    )
+
+
+def build_mazehard_evaluation_sample(
+    trace: TraceTree,
+    *,
+    sample_idx: int = 0,
+) -> MazehardEvaluationSample:
+    """Build an evaluation sample from a persisted ``TraceTree``.
+
+    Parameters
+    ----------
+    trace:
+        Trace tree with mazehard keys populated.
+    sample_idx:
+        Which sample within the batch to extract (default 0).
+
+    Returns
+    -------
+    MazehardEvaluationSample
+
+    Raises
+    ------
+    KeyError
+        If any required trace key is missing.
+    """
+    input_ids = np.asarray(
+        _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_INPUT_IDS))
+    )
+    gt_raw = np.asarray(
+        _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_GT_OVERLAY))
+    )
+    halted_raw = np.asarray(_to_cpu(trace.get(MAZEHARD_TRACE_KEY_HALTED)))
+    pred_raw = np.asarray(_to_cpu(trace.get(MAZEHARD_TRACE_KEY_PRED_OVERLAY)))
+
+    # Normalise shapes — squeeze trailing single dims
+    while halted_raw.ndim > 2:
+        halted_raw = halted_raw.squeeze(-1)
+    while pred_raw.ndim > 3:
+        pred_raw = pred_raw.squeeze(-1)
+
+    # Index sample from batch dim
+    halted = halted_raw[:, sample_idx] if halted_raw.ndim == 2 else halted_raw
+    pred = pred_raw[:, sample_idx] if pred_raw.ndim == 3 else pred_raw
+    grid = input_ids[sample_idx] if input_ids.ndim >= 2 else input_ids
+    gt = (
+        gt_raw[sample_idx].astype(bool)
+        if gt_raw.ndim >= 2
+        else gt_raw.astype(bool)
+    )
+
+    # Reshape flat spatial arrays to square grid for imshow rendering.
+    # MazeHard canvases are always square (30×30 = 900 cells).
+    if grid.ndim == 1:
+        side = int(np.sqrt(grid.size))
+        if side * side == grid.size:
+            grid = grid.reshape(side, side)
+    if gt.ndim == 1:
+        side = int(np.sqrt(gt.size))
+        if side * side == gt.size:
+            gt = gt.reshape(side, side)
+    if pred.ndim == 2 and grid.ndim == 2:
+        side = grid.shape[0]
+        pred = pred.reshape(pred.shape[0], side, side)
+
+    # Steps
+    steps = np.arange(len(halted), dtype=np.int64)
+
+    # Halt detection
+    halt_indices = np.where(halted)[0]
+    halt_step = int(halt_indices[0]) if len(halt_indices) > 0 else None
+    truncated = halt_step is None
+
+    return MazehardEvaluationSample(
+        input_grid=grid,
+        prediction_steps=pred,
+        halted=halted,
+        steps=steps,
+        gt_overlay=gt,
+        halt_step=halt_step,
+        truncated=truncated,
+    )
 
 
 @dataclass
@@ -41,7 +201,7 @@ class MazehardSolutionOverlayFigureData:
 
 @dataclass
 class MazehardPredictionEvolutionFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.mazehard_prediction_evolution.MazehardPredictionEvolutionFigure`."""
+    """Prepared data for :class:`~ehc_sn.figures.templates.prediction_reasoning_mazehard.MazehardPredictionEvolutionFigure`."""
 
     input_ids: NDArray  # (B, N)
     gt_overlay: NDArray  # (N,) bool — single sample
@@ -53,72 +213,53 @@ class MazehardPredictionEvolutionFigureData:
 
 
 def select_overlay(
-    trace: TraceTree, ctx: FigureContext
+    sample: MazehardEvaluationSample, ctx: FigureContext
 ) -> MazehardSolutionOverlayFigureData:
-    """Extract mazehard_solution_overlay data from the trace, respecting ctx selection policy."""
-    input_ids = np.asarray(
-        _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_INPUT_IDS))
-    )
-    gt_raw = np.asarray(
-        _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_GT_OVERLAY))
-    )
-    halted = np.asarray(_to_cpu(trace.get(MAZEHARD_TRACE_KEY_HALTED)))
-    pred_is_o = np.asarray(_to_cpu(trace.get(MAZEHARD_TRACE_KEY_PRED_OVERLAY)))
+    """Extract mazehard_solution_overlay data from a single evaluated sample."""
+    grid = sample.input_grid  # (N,)
+    gt = sample.gt_overlay  # (N,) bool
+    pred = sample.prediction_steps  # (T, N)
 
-    if halted.ndim != 2:
-        raise ValueError(f"{MAZEHARD_TRACE_KEY_HALTED} must have shape [T, B]")
-    if pred_is_o.ndim != 3:
-        raise ValueError(
-            f"{MAZEHARD_TRACE_KEY_PRED_OVERLAY} must have shape [T, B, N]"
-        )
+    # The overlay figure shows final predictions for comparison.
+    halt_idx = sample.halt_step
+    final_step = pred[-1] if halt_idx is None else pred[halt_idx]
 
-    batch_size = halted.shape[1]
-    start = ctx.sample_idx
-    cap = ctx.max_items if ctx.max_items is not None else _DEFAULT_MAX_MAZES
-    n = min(cap, batch_size - start)
-    if n <= 0:
-        n = min(_DEFAULT_MAX_MAZES, batch_size)
-        start = 0
-
-    end = start + n
-    model_overlays = np.stack(
-        [
-            pred_is_o[first_halt_index(halted[:, b]), b]
-            for b in range(start, end)
-        ],
-        axis=0,
-    )
+    # Expand back to (1, N) for the FigureData contract (single-sample batch).
     return MazehardSolutionOverlayFigureData(
-        input_ids=input_ids[start:end],
-        gt_overlays=gt_raw[start:end].astype(bool),
-        model_overlays=model_overlays,
+        input_ids=grid[np.newaxis, :],
+        gt_overlays=gt[np.newaxis, :],
+        model_overlays=final_step[np.newaxis, :],
     )
 
 
 def select_evolution(
-    trace: TraceTree, ctx: FigureContext, k_max: int = 16
+    sample: MazehardEvaluationSample, ctx: FigureContext, k_max: int = 16
 ) -> MazehardPredictionEvolutionFigureData:
-    """Extract evolution data from the trace for the sample chosen by ctx."""
-    input_ids = np.asarray(
-        _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_INPUT_IDS))
-    )
-    gt_raw = np.asarray(
-        _to_cpu(trace.get_meta_path(MAZEHARD_META_KEY_GT_OVERLAY))
-    )
-    pred_is_o = np.asarray(_to_cpu(trace.get(MAZEHARD_TRACE_KEY_PRED_OVERLAY)))
-    halted = np.asarray(_to_cpu(trace.get(MAZEHARD_TRACE_KEY_HALTED)))
+    """Extract evolution data from an evaluated sample.
 
-    batch_size = halted.shape[1] if halted.ndim == 2 else 1
-    sample_idx = ctx.sample_idx if ctx.sample_idx < batch_size else 0
-    t_halt = first_halt_index(halted[:, sample_idx])
+    Uses the sample's halted/reasoning steps and expands batch-dim arrays
+    back to the existing ``MazehardPredictionEvolutionFigureData`` contract.
+    """
+    # The sample is already single-sample — replicate to (B, ...) shape.
+    B = 1
+    N = sample.input_grid.shape[-1]
+    T = len(sample.halted)
+
+    pred_is_o = sample.prediction_steps[np.newaxis, :, :]  # (1, T, N)
+    halted = sample.halted[np.newaxis, :]  # (1, T)
+
+    # Reshape input_grid to (B, N) for FigureData contract.
+    input_grid = sample.input_grid.reshape(B, N)
+
+    t_halt = int(sample.halt_step) if sample.halt_step is not None else T - 1
     t_indices = _select_timesteps(t_halt, k_max)
 
     return MazehardPredictionEvolutionFigureData(
-        input_ids=input_ids,
-        gt_overlay=gt_raw[sample_idx].astype(bool),
+        input_ids=input_grid,
+        gt_overlay=sample.gt_overlay.astype(bool),
         pred_is_o=pred_is_o,
         halted=halted,
-        sample_idx=sample_idx,
+        sample_idx=0,
         t_halt=t_halt,
         t_indices=t_indices,
     )
@@ -301,13 +442,14 @@ def select_task_layout(
 
 
 def _select_timesteps(t_halt: int, k_max: int) -> list[int]:
-    if t_halt < 0:
-        return [0]
-    if t_halt + 1 <= k_max:
-        return list(range(t_halt + 1))
-    indices = np.linspace(0, t_halt, num=k_max, dtype=int)
-    t_indices = sorted({int(idx) for idx in indices})
-    if t_halt not in t_indices:
-        t_indices.append(t_halt)
-        t_indices.sort()
-    return t_indices
+    """Thin wrapper around :func:`select_reasoning_snapshots` for backward compat.
+
+    The hybrid-sampling logic has moved to
+    ``ehc_sn.figures.selectors._reasoning_steps`` — this function delegates
+    to the shared implementation.
+    """
+    from ehc_sn.figures.selectors._reasoning_steps import (
+        select_reasoning_snapshots,
+    )
+
+    return select_reasoning_snapshots(t_halt, max_snapshots=k_max)

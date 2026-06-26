@@ -239,7 +239,7 @@ class MazeHardRuntime(TaskRuntime["_MazeHardRuntimeState"]):
     """MazeHard implementation of :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`.
 
     Owned by the task layer; injected into
-    :class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationACController`
+    :class:`~ehc_sn.controllers.deliberation.q_halting.DeliberationQHaltingController`
     at wiring time.
 
     Responsibilities:

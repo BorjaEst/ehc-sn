@@ -2,7 +2,7 @@
 
 This module exposes SeqMaze as an interactive environment interface for the
 deferred EnvBase-backed RL path.  The production HRM v2 reasoning path uses
-:class:`~ehc_sn.controllers.deliberation.actor_critic.DeliberationACController`
+    :class:`~ehc_sn.controllers.deliberation.q_halting.DeliberationQHaltingController`
 with :class:`~ehc_sn.tasks.seqmaze.runtime.SeqMazeRuntime` instead, because
 SeqMaze behaves as a fixed-instance deliberation task rather than a mutable
 closed-loop world.
@@ -72,7 +72,7 @@ class SeqMazeEnv(EnvBase):
     labels and accuracy tracking are task-owned.
 
     This class is **not** the active HRM v2 deliberation surface. The active
-    training path uses ``DeliberationACController`` with ``SeqMazeRuntime``
+    training path uses ``DeliberationQHaltingController`` with ``SeqMazeRuntime``
     and does not step through this env.
 
     The environment is batch-locked: all B slots step simultaneously.

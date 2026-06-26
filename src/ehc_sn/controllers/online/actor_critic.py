@@ -2,7 +2,7 @@
 
 The RL controller owns rollout-state transitions, policy-driven action
 selection, and environment stepping.  It emits one
-:class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord`
+:class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`
 per step.
 
 Neutral actor-critic contracts live in
@@ -16,8 +16,8 @@ Canonical import path::
         RLController, RLControllerConfig, RLRolloutState,
     )
     from ehc_sn.controllers.contracts.actor_critic import (
-        ActorCriticInteractionRecord, ActorCriticBackboneOutput,
-        ActorCriticPolicyOutput, ActorCriticCriticOutput, ActorCriticRolloutBackbone,
+        QHaltingInteractionRecord, QHaltingBackboneOutput,
+        QHaltingPolicyOutput, QHaltingCriticOutput, QHaltingRolloutBackbone,
     )
 """
 
@@ -36,12 +36,12 @@ from ehc_sn.contracts.task_environment import TaskEnvironmentAdapter
 from ehc_sn.controllers._base import BaseController, RolloutState
 from ehc_sn.controllers._env_rollout import initial_env_reset
 from ehc_sn.controllers.contracts.actor_critic import (
-    ActorCriticBackboneOutput,
-    ActorCriticCriticOutput,
-    ActorCriticInteractionRecord,
-    ActorCriticPolicyOutput,
-    ActorCriticRolloutBackbone,
     OnlineBootstrapCarry,
+    QHaltingBackboneOutput,
+    QHaltingCriticOutput,
+    QHaltingInteractionRecord,
+    QHaltingPolicyOutput,
+    QHaltingRolloutBackbone,
 )
 from ehc_sn.policies._base import PolicyDecision
 from ehc_sn.policies.categorical import (
@@ -76,7 +76,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
 
     def __init__(  # ----------------------------------------------------------
         self,
-        backbone: ActorCriticRolloutBackbone[ModelState],
+        backbone: QHaltingRolloutBackbone[ModelState],
         env: EnvBase,
         config: RLControllerConfig,
         runtime: TaskEnvironmentAdapter,
@@ -88,9 +88,9 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         self._runtime = runtime
 
     @property
-    def backbone(self) -> ActorCriticRolloutBackbone[ModelState]:
+    def backbone(self) -> QHaltingRolloutBackbone[ModelState]:
         """Return the wrapped RL backbone typed to the local protocol."""
-        return cast(ActorCriticRolloutBackbone[ModelState], super().backbone)
+        return cast(QHaltingRolloutBackbone[ModelState], super().backbone)
 
     @property
     def environment(self) -> EnvBase:
@@ -127,9 +127,9 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
         allow_halt: bool = True,
         explore: bool = True,
         **_: Any,
-    ) -> tuple[RLRolloutState[ModelState], ActorCriticInteractionRecord]:
+    ) -> tuple[RLRolloutState[ModelState], QHaltingInteractionRecord]:
         """Advance the controller by one step and emit an
-        :class:`~ehc_sn.controllers.contracts.actor_critic.ActorCriticInteractionRecord`.
+        :class:`~ehc_sn.controllers.contracts.actor_critic.QHaltingInteractionRecord`.
         """
         data = self.refresh_slot_data(batch, state)
         model_state = self.backbone.reset_state(state.halted, state.model_state)
@@ -156,7 +156,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
             data=data,
             env_td=env_td,
         )
-        record = ActorCriticInteractionRecord(
+        record = QHaltingInteractionRecord(
             observation_used_for_decision=data,
             policy_logits=backbone_output.policy.policy_logits,
             sampled_action=action,
@@ -172,7 +172,7 @@ class RLController[ModelState](BaseController[ModelState, RLControllerConfig]):
 
     def _select_action_and_done(  # -------------------------------------------
         self,
-        backbone_output: ActorCriticBackboneOutput,
+        backbone_output: QHaltingBackboneOutput,
         steps: Tensor,
         data: Batch,
         env_td: TensorDictBase,

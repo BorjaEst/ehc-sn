@@ -1,6 +1,6 @@
-"""Deliberation value-control rollout controller — canonical owner.
+"""Deliberation Q-halting rollout controller — canonical owner.
 
-This controller drives an actor-critic backbone through slot-based deliberation
+This controller drives a value-control backbone through slot-based deliberation
 steps.  Reward, termination, and observation dynamics are delegated to an
 injected :class:`~ehc_sn.contracts.task_runtime.TaskRuntime`, keeping the
 controller generic over task semantics.
@@ -12,9 +12,9 @@ no TorchRL dependency.
 
 Canonical import path::
 
-    from ehc_sn.controllers.deliberation.actor_critic import (
-        DeliberationACController, DeliberationACControllerConfig,
-        DeliberationACRolloutState,
+    from ehc_sn.controllers.deliberation.q_halting import (
+        DeliberationQHaltingController, DeliberationQHaltingControllerConfig,
+        DeliberationQHaltingRolloutState,
     )
 """
 
@@ -49,8 +49,8 @@ _RuntimeStateT = TypeVar("_RuntimeStateT")
 
 
 # =============================================================================
-class DeliberationACControllerConfig(BaseModel, extra="forbid"):
-    """Configuration for :class:`DeliberationACController`.
+class DeliberationQHaltingControllerConfig(BaseModel, extra="forbid"):
+    """Configuration for :class:`DeliberationQHaltingController`.
 
     Attributes:
         policy: Configuration for the categorical action policy.
@@ -64,10 +64,10 @@ class DeliberationACControllerConfig(BaseModel, extra="forbid"):
 
 # =============================================================================
 @dataclass
-class DeliberationACRolloutState[ModelState, RuntimeStateT](
+class DeliberationQHaltingRolloutState[ModelState, RuntimeStateT](
     RolloutState[ModelState]
 ):
-    """Controller carry/state for deliberation actor-critic rollouts.
+    """Controller carry/state for deliberation Q-halting rollouts.
 
     Does not contain ``env_td`` and does not depend on
     :class:`~ehc_sn.contracts.task_environment.TaskEnvironmentAdapter` or
@@ -82,10 +82,10 @@ class DeliberationACRolloutState[ModelState, RuntimeStateT](
 
 
 # =============================================================================
-class DeliberationACController[ModelState, RuntimeStateT](
-    BaseController[ModelState, DeliberationACControllerConfig]
+class DeliberationQHaltingController[ModelState, RuntimeStateT](
+    BaseController[ModelState, DeliberationQHaltingControllerConfig]
 ):
-    """Runtime-backed deliberation value-control controller.
+    """Runtime-backed deliberation Q-halting value-control controller.
 
     The controller:
         - maintains per-slot buffers across steps via the inherited slot lifecycle
@@ -106,10 +106,10 @@ class DeliberationACController[ModelState, RuntimeStateT](
     def __init__(  # ----------------------------------------------------------
         self,
         backbone: ValueControlRolloutBackbone[ModelState],
-        config: DeliberationACControllerConfig,
+        config: DeliberationQHaltingControllerConfig,
         runtime: TaskRuntime[RuntimeStateT],
     ) -> None:
-        """Create a deliberation actor-critic controller.
+        """Create a deliberation Q-halting controller.
 
         Args:
             backbone: The value-control backbone (task-agnostic).
@@ -134,7 +134,7 @@ class DeliberationACController[ModelState, RuntimeStateT](
     def initial_state(  # -----------------------------------------------------
         self,
         batch_sample: Batch,
-    ) -> DeliberationACRolloutState[ModelState, RuntimeStateT]:
+    ) -> DeliberationQHaltingRolloutState[ModelState, RuntimeStateT]:
         """Build an initial rollout state from a batch sample.
 
         Delegates initial observation and runtime state to
@@ -142,7 +142,7 @@ class DeliberationACController[ModelState, RuntimeStateT](
         """
         reset_result = self._runtime.reset(batch_sample)
         slots = self.initial_slots(reset_result.observation)
-        return DeliberationACRolloutState(
+        return DeliberationQHaltingRolloutState(
             model_state=slots.model_state,
             steps=slots.steps,
             halted=slots.halted,
@@ -152,14 +152,14 @@ class DeliberationACController[ModelState, RuntimeStateT](
 
     def step(  # ----------------------------------------------------------
         self,
-        state: DeliberationACRolloutState[ModelState, RuntimeStateT],
+        state: DeliberationQHaltingRolloutState[ModelState, RuntimeStateT],
         batch: Batch,
         *,
         allow_halt: bool = True,
         explore: bool = True,
         **options: Any,
     ) -> tuple[
-        DeliberationACRolloutState[ModelState, RuntimeStateT],
+        DeliberationQHaltingRolloutState[ModelState, RuntimeStateT],
         ValueControlInteractionRecord,
     ]:
         """Advance the controller by one step.
@@ -269,7 +269,7 @@ class DeliberationACController[ModelState, RuntimeStateT](
             done = truncated
 
         # 8. Build next state and emit record
-        new_state = DeliberationACRolloutState(
+        new_state = DeliberationQHaltingRolloutState(
             model_state=model_state,
             steps=steps,
             halted=done,
@@ -292,7 +292,7 @@ class DeliberationACController[ModelState, RuntimeStateT](
 
 # =============================================================================
 __all__ = [
-    "DeliberationACController",
-    "DeliberationACControllerConfig",
-    "DeliberationACRolloutState",
+    "DeliberationQHaltingController",
+    "DeliberationQHaltingControllerConfig",
+    "DeliberationQHaltingRolloutState",
 ]

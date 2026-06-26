@@ -6,21 +6,21 @@ Shared by both training and evaluation paths.
 from __future__ import annotations
 
 from ehc_sn.adapters.hrm import (
-    MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
+    MAZE_HARD_HRM_Q_HALTING_TRACE_FIELDS,
     MazeHardHRMAdapterSettings,
     MazeHardHRMV2BridgeAdapter,
     build_mazehard_hrm_trace_meta,
 )
-from ehc_sn.controllers.deliberation.actor_critic import (
-    DeliberationACController,
-    DeliberationACControllerConfig,
+from ehc_sn.controllers.deliberation.q_halting import (
+    DeliberationQHaltingController,
+    DeliberationQHaltingControllerConfig,
 )
-from ehc_sn.lightning.modules.actor_critic import (
-    ActorCriticBindings,
-    ActorCriticComponentConfigs,
-    ActorCriticConfig,
-    ActorCriticModule,
-    ActorCriticTrainingConfig,
+from ehc_sn.lightning.modules.q_halting import (
+    QHaltingBindings,
+    QHaltingComponentConfigs,
+    QHaltingConfig,
+    QHaltingModule,
+    QHaltingTrainingConfig,
 )
 from ehc_sn.metrics.routes.rl import RL_EPISODE_ROUTES, RL_STEP_ROUTES
 from ehc_sn.models.hrm.hrm_v2 import HRModelV2, ModelSettingsV2
@@ -41,11 +41,11 @@ from ehc_sn.tasks.mazehard.supervision import (
     build_mazehard_weights,
 )
 from ehc_sn.traces.specs import HRM_HIDDEN_STATE_FIELDS
-from ehc_sn.training.actor_critic import (
-    TD0ActorCriticBatchBuilder,
-    ZeroBootstrapActorCriticValidationScorer,
-)
 from ehc_sn.training.optim import AdamATan2, AdamATan2Config
+from ehc_sn.training.q_halting import (
+    TD0QHaltingBatchBuilder,
+    ZeroBootstrapQHaltingValidationScorer,
+)
 
 from .config import MazeHardHRMV2ModelConfig
 
@@ -53,10 +53,10 @@ from .config import MazeHardHRMV2ModelConfig
 def build_mazehard_hrm_v2_model(
     config: MazeHardHRMV2ModelConfig,
     *,
-    training_config: ActorCriticTrainingConfig | None = None,
+    training_config: QHaltingTrainingConfig | None = None,
     execution: MazeHardRuntimeConfig | None = None,
-) -> ActorCriticModule:
-    """Construct an ActorCriticModule for MazeHard × HRM-v2.
+) -> QHaltingModule:
+    """Construct an QHaltingModule for MazeHard × HRM-v2.
 
     Parameters
     ----------
@@ -70,26 +70,26 @@ def build_mazehard_hrm_v2_model(
         evaluation-only construction.  When provided, ``num_slots`` is
         read from ``training_config.num_slots`` in ``setup()``.
     """
-    components: ActorCriticComponentConfigs = config.components  # type: ignore[assignment]
+    components: QHaltingComponentConfigs = config.components  # type: ignore[assignment]
 
-    bindings = ActorCriticBindings(
+    bindings = QHaltingBindings(
         model_cls=HRModelV2,
         model_settings_cls=ModelSettingsV2,
         adapter_cls=MazeHardHRMV2BridgeAdapter,
         adapter_settings_cls=MazeHardHRMAdapterSettings,
-        controller_cls=DeliberationACController,
-        controller_config_cls=DeliberationACControllerConfig,
+        controller_cls=DeliberationQHaltingController,
+        controller_config_cls=DeliberationQHaltingControllerConfig,
         objective_cls=HybridRLObjective,
         objective_config_cls=HybridRLLossConfig,
-        learner_cls=TD0ActorCriticBatchBuilder,
-        val_scorer_cls=ZeroBootstrapActorCriticValidationScorer,
+        learner_cls=TD0QHaltingBatchBuilder,
+        val_scorer_cls=ZeroBootstrapQHaltingValidationScorer,
         optimizer_cls=AdamATan2,
         optimizer_config_cls=AdamATan2Config,
         runtime_config_cls=MazeHardRuntimeConfig,
         reward_config_cls=MazeHardRewardConfig,
         runtime_cls=MazeHardRuntime,
         reward_projector_cls=MazeHardRewardProjector,
-        trace_fields=MAZE_HARD_HRM_ACTOR_CRITIC_TRACE_FIELDS,
+        trace_fields=MAZE_HARD_HRM_Q_HALTING_TRACE_FIELDS,
         build_trace_meta_fn=build_mazehard_hrm_trace_meta,
         step_routes=RL_STEP_ROUTES,
         episode_routes=RL_EPISODE_ROUTES,
@@ -97,8 +97,8 @@ def build_mazehard_hrm_v2_model(
         supervision_builder=build_mazehard_supervision,
         token_weight_builder=build_mazehard_weights,
     )
-    return ActorCriticModule(
-        config=ActorCriticConfig(
+    return QHaltingModule(
+        config=QHaltingConfig(
             model_config_path=config.model_config_path,
             halt_disabled_steps=(
                 training_config.halt_disabled_steps if training_config else 0

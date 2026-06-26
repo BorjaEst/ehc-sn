@@ -6,7 +6,7 @@ metadata and dense prediction traces.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 import numpy as np
@@ -26,6 +26,143 @@ from ehc_sn.traces.keys import (
 )
 from ehc_sn.traces.trace_tree import TraceTree
 from ehc_sn.utils.graph import compute_layered_dag_positions
+
+# =============================================================================
+# Semantic source views
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class GoaltraceTaskSample:
+    """One Goaltrace dataset sample — no model involved."""
+
+    observation_id: NDArray  # (N,) int
+    weight: NDArray  # (N,) float32
+    target_field: NDArray  # (N,) float32
+    node_mask: NDArray  # (N,) bool
+    current_flag: NDArray  # (N,) bool
+    goal_flag: NDArray  # (N,) bool
+    successor_indices: NDArray  # (N, K) int
+    successor_mask: NDArray  # (N, K) bool
+    sample_id: str = ""
+
+
+@dataclass(frozen=True)
+class GoaltraceEvaluationSample:
+    """One Goaltrace evaluated sample — batch-dim already indexed out."""
+
+    task: GoaltraceTaskSample
+    prediction_steps: NDArray  # (T, N) float32 — firing field over steps
+    halted: NDArray  # (T,) bool
+    steps: NDArray  # (T,)
+    halt_step: int | None = None
+    truncated: bool = False
+    metrics: dict[str, float] = field(default_factory=dict)
+
+
+# =============================================================================
+# Adapter functions
+# =============================================================================
+
+
+def _to_np(value: object) -> np.ndarray:
+    """Return a numpy array, moving from CPU if needed."""
+    return value.cpu().numpy() if hasattr(value, "cpu") else np.asarray(value)
+
+
+def _require_meta(trace: TraceTree, key: str) -> np.ndarray:
+    """Fetch a required meta key or raise."""
+    return np.asarray(_to_np(trace.get_meta_path(key)))
+
+
+def _sample_arr(trace: TraceTree, key: str, sample_idx: int = 0) -> np.ndarray:
+    """Extract and squeeze a per-sample 1D array from trace metadata."""
+    arr = _require_meta(trace, key)
+    if arr.ndim >= 2:
+        arr = arr[sample_idx]
+    while arr.ndim > 1:
+        arr = arr.squeeze(0)
+    return arr
+
+
+def build_goaltrace_task_sample(
+    trace: TraceTree,
+    *,
+    sample_idx: int = 0,
+) -> GoaltraceTaskSample:
+    """Build a Goaltrace task sample from a TraceTree."""
+    return GoaltraceTaskSample(
+        observation_id=_sample_arr(
+            trace, GOALTRACE_META_KEY_OBSERVATION_ID, sample_idx
+        ),
+        weight=_sample_arr(trace, GOALTRACE_META_KEY_WEIGHT, sample_idx),
+        target_field=_sample_arr(
+            trace, GOALTRACE_META_KEY_TARGET_FIELD, sample_idx
+        ),
+        node_mask=_sample_arr(trace, GOALTRACE_META_KEY_NODE_MASK, sample_idx),
+        current_flag=_sample_arr(
+            trace, GOALTRACE_META_KEY_CURRENT_FLAG, sample_idx
+        ),
+        goal_flag=_sample_arr(trace, GOALTRACE_META_KEY_GOAL_FLAG, sample_idx),
+        successor_indices=_sample_arr(
+            trace, GOALTRACE_META_KEY_SUCCESSOR_INDICES, sample_idx
+        ),
+        successor_mask=_sample_arr(
+            trace, GOALTRACE_META_KEY_SUCCESSOR_MASK, sample_idx
+        ),
+    )
+
+
+def build_goaltrace_evaluation_sample(
+    trace: TraceTree,
+    *,
+    sample_idx: int = 0,
+) -> GoaltraceEvaluationSample:
+    """Build a Goaltrace evaluation sample from a TraceTree."""
+    task = build_goaltrace_task_sample(trace, sample_idx=sample_idx)
+
+    firing_raw = np.asarray(_to_np(trace.get(GOALTRACE_TRACE_KEY_FIRING_FIELD)))
+    while firing_raw.ndim > 3:
+        firing_raw = firing_raw.squeeze(0)
+    # Normalize to (T, B, N)
+    if firing_raw.ndim == 2:
+        # (B, N) — single step
+        pred = (
+            firing_raw[sample_idx] if firing_raw.shape[0] > 1 else firing_raw[0]
+        )
+    else:
+        # (T, B, N)
+        pred = (
+            firing_raw[:, sample_idx]
+            if firing_raw.shape[1] > 1
+            else firing_raw[:, 0]
+        )
+
+    # Halt
+    halt_step = None
+    truncated = False
+    if trace.has("act/halted"):
+        halt_arr = np.asarray(_to_np(trace.get("act/halted")))
+        while halt_arr.ndim > 2:
+            halt_arr = halt_arr.squeeze(-1)
+        halted = halt_arr[:, sample_idx] if halt_arr.ndim == 2 else halt_arr
+        halt_indices = np.where(halted)[0]
+        halt_step = int(halt_indices[0]) if len(halt_indices) > 0 else None
+        truncated = halt_step is None
+    else:
+        halted = np.array([], dtype=bool)
+        truncated = True
+
+    steps = np.arange(len(halted) if len(halted) > 0 else 1, dtype=np.int64)
+
+    return GoaltraceEvaluationSample(
+        task=task,
+        prediction_steps=pred,
+        halted=halted,
+        steps=steps,
+        halt_step=halt_step,
+        truncated=truncated,
+    )
 
 
 # =============================================================================
@@ -218,28 +355,25 @@ def select_task_overview_goaltrace(
     trace: TraceTree,
     ctx: FigureContext,
 ) -> GoaltraceTaskOverviewFigureData:
-    """Extract task-overview data from a goaltrace trace (meta keys only).
+    """Extract task-overview data from a goaltrace trace (meta keys only)."""
+    sample = build_goaltrace_task_sample(trace, sample_idx=ctx.sample_idx)
+    return _select_task_overview_goaltrace(sample, ctx)
 
-    Args:
-        trace: Trace tree with all goaltrace meta keys populated.
-        ctx: Figure context (``sample_idx`` selects the batch element).
 
-    Returns:
-        Prepared figure data with geometry and scalar arrays.
-
-    Raises:
-        ValueError: If any required meta key is absent.
-    """
-    arrays = _select_sample_arrays_1d(trace, ctx)
+def _select_task_overview_goaltrace(
+    sample: GoaltraceTaskSample,
+    ctx: FigureContext,
+) -> GoaltraceTaskOverviewFigureData:
+    """Build task-overview data from a semantic goaltrace sample."""
     geometry = _build_geometry(
-        arrays["observation_id"],
-        arrays["node_mask"],
-        arrays["successor_indices"],
-        arrays["successor_mask"],
-        arrays["current_flag"],
-        arrays["goal_flag"],
+        sample.observation_id,
+        sample.node_mask,
+        sample.successor_indices,
+        sample.successor_mask,
+        sample.current_flag,
+        sample.goal_flag,
     )
-    compact = _compact_arrays(arrays, geometry)
+    compact = _compact_2(sample, geometry)
     n_valid = len(geometry.observation_ids)
     return GoaltraceTaskOverviewFigureData(
         geometry=geometry,
@@ -249,28 +383,23 @@ def select_task_overview_goaltrace(
     )
 
 
+def _compact_2(
+    arrays: GoaltraceTaskSample, geometry: GoaltraceGraphGeometry
+) -> dict[str, np.ndarray]:
+    """Slice per-node arrays from padded to compact valid-node space."""
+    valid_indices = np.where(arrays.node_mask)[0]
+    return {
+        "weight": arrays.weight[valid_indices],
+        "target_field": arrays.target_field[valid_indices],
+    }
+
+
 # =============================================================================
 def select_goaltrace_prediction_example(
     trace: TraceTree,
     ctx: FigureContext,
 ) -> GoaltracePredictionExampleFigureData:
-    """Extract prediction-example data from a goaltrace evaluation trace.
-
-    Reads both meta keys and the dense ``goaltrace/firing_field`` trace.
-    Normalises the predicted field to ``[trace_step, batch, node]`` and
-    selects the halting or final step.
-
-    Args:
-        trace: Trace tree with goaltrace meta keys and ``goaltrace/firing_field``.
-        ctx: Figure context (``sample_idx`` selects the batch element).
-
-    Returns:
-        Prepared figure data with geometry, scalar arrays, and diagnostics.
-
-    Raises:
-        ValueError: If ``goaltrace/firing_field`` or any required meta key
-            is absent.
-    """
+    """Extract prediction-example data from a goaltrace evaluation trace."""
     arrays = _select_sample_arrays_1d(trace, ctx)
 
     geometry = _build_geometry(

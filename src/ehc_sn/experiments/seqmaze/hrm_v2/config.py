@@ -6,9 +6,9 @@ Hierarchy (training):
     ├── model: SeqMazeHRMV2ModelConfig
     │   └── components: SeqMazeHRMV2ComponentConfigs
     │       ├── adapter: SeqMazeAdapterSettings
-    │       ├── controller: DeliberationACControllerConfig
+    │       ├── controller: DeliberationQHaltingControllerConfig
     │       └── objective: HybridRLLossConfig
-    ├── training: ActorCriticTrainingConfig
+    ├── training: QHaltingTrainingConfig
     ├── data: DatamoduleConfig
     ├── trainer: TrainerConfig
     ├── checkpointing: CheckpointingConfig
@@ -28,8 +28,8 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 from ehc_sn.adapters.hrm import SeqMazeAdapterSettings
-from ehc_sn.controllers.deliberation.actor_critic import (
-    DeliberationACControllerConfig,
+from ehc_sn.controllers.deliberation.q_halting import (
+    DeliberationQHaltingControllerConfig,
 )
 from ehc_sn.data.datamodules import DatamoduleConfig
 from ehc_sn.experiments._infra import (
@@ -39,7 +39,7 @@ from ehc_sn.experiments._infra import (
     RegimeConfig,
     TrainerConfig,
 )
-from ehc_sn.lightning.modules.actor_critic import ActorCriticTrainingConfig
+from ehc_sn.lightning.modules.q_halting import QHaltingTrainingConfig
 from ehc_sn.logging.tensorboard import LoggerSettings
 from ehc_sn.objectives.composites.hybrid_rl import HybridRLLossConfig
 from ehc_sn.tasks.seqmaze.runtime import SeqMazeRuntimeConfig
@@ -57,7 +57,7 @@ class SeqMazeHRMV2ComponentConfigs(BaseModel, extra="forbid"):
         ...,
         description="SeqMaze adapter settings for HRM v2.",
     )
-    controller: DeliberationACControllerConfig = Field(
+    controller: DeliberationQHaltingControllerConfig = Field(
         ...,
         description="Deliberation actor-critic controller configuration.",
     )
@@ -139,7 +139,7 @@ class SeqMazeHRMV2TrainingExperimentConfig(BaseModel, extra="forbid"):
         default_factory=SeqMazeDeliberationConfig,
         description="Deliberation execution policy (halt_action, episode_horizon).",
     )
-    training: ActorCriticTrainingConfig = Field(
+    training: QHaltingTrainingConfig = Field(
         ...,
         description="Actor-critic training configuration.",
     )

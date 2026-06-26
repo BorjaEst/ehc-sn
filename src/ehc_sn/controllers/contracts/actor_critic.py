@@ -17,12 +17,12 @@ creating a training→controller import inversion.
 Canonical import path::
 
     from ehc_sn.controllers.contracts.actor_critic import (
-        ActorCriticInteractionRecord,
-        ActorCriticRolloutBackbone,
-        ActorCriticBackboneOutput,
-        ActorCriticPolicyOutput,
-        ActorCriticCriticOutput,
-        ActorCriticExecutionSnapshot,
+        QHaltingInteractionRecord,
+        QHaltingRolloutBackbone,
+        QHaltingBackboneOutput,
+        QHaltingPolicyOutput,
+        QHaltingCriticOutput,
+        QHaltingExecutionSnapshot,
         OnlineBootstrapCarry,
         OnlineBootstrapRuntime,
     )
@@ -42,20 +42,20 @@ from ehc_sn.utils.detach import DetachMixin
 
 
 # =============================================================================
-class ActorCriticPolicyOutput(Protocol):
+class QHaltingPolicyOutput(Protocol):
     """Policy payload produced by the actor head of a backbone step."""
 
     policy_logits: Tensor
     valid_action_mask: Tensor | None
 
 
-class ActorCriticCriticOutput(Protocol):
+class QHaltingCriticOutput(Protocol):
     """Critic payload produced by the value head of a backbone step."""
 
     state_value: Tensor  # (B, 1)
 
 
-class ActorCriticBackboneOutput(Protocol):
+class QHaltingBackboneOutput(Protocol):
     """Named backbone output split into task, policy, and critic surfaces.
 
     All actor-critic backbones **must** return a non-None critic output.
@@ -63,19 +63,19 @@ class ActorCriticBackboneOutput(Protocol):
     """
 
     task: object
-    policy: ActorCriticPolicyOutput
-    critic: ActorCriticCriticOutput
+    policy: QHaltingPolicyOutput
+    critic: QHaltingCriticOutput
 
 
 # =============================================================================
-class ActorCriticRolloutBackbone[ModelState](
-    RolloutBackbone[ModelState, ActorCriticBackboneOutput], Protocol
+class QHaltingRolloutBackbone[ModelState](
+    RolloutBackbone[ModelState, QHaltingBackboneOutput], Protocol
 ):
     """Backbone protocol required by any actor-critic controller."""
 
 
 # =============================================================================
-class ActorCriticExecutionSnapshot(Protocol):
+class QHaltingExecutionSnapshot(Protocol):
     """Minimal execution context required by the generic TD(0) batch assembler.
 
     Any rollout state that carries per-slot step counters and halt flags
@@ -87,10 +87,10 @@ class ActorCriticExecutionSnapshot(Protocol):
 
 
 # =============================================================================
-class OnlineBootstrapCarry(ActorCriticExecutionSnapshot, Protocol):
+class OnlineBootstrapCarry(QHaltingExecutionSnapshot, Protocol):
     """Minimal online rollout carry required for TD(0) bootstrap value computation.
 
-    Extends :class:`ActorCriticExecutionSnapshot` (``steps``, ``halted``) with
+    Extends :class:`QHaltingExecutionSnapshot` (``steps``, ``halted``) with
     ``model_state``, which is the only additional field accessed during online
     bootstrap value computation.
 
@@ -119,7 +119,7 @@ class OnlineBootstrapRuntime(Protocol):
 
 # =============================================================================
 @dataclass
-class ActorCriticInteractionRecord(DetachMixin):
+class QHaltingInteractionRecord(DetachMixin):
     """Neutral controller-to-learner interaction record emitted per rollout step.
 
     This is a **controller-level public contract**, not an online-RL-specific
@@ -148,12 +148,12 @@ class ActorCriticInteractionRecord(DetachMixin):
 
 # =============================================================================
 __all__ = [
-    "ActorCriticBackboneOutput",
-    "ActorCriticCriticOutput",
-    "ActorCriticExecutionSnapshot",
-    "ActorCriticInteractionRecord",
-    "ActorCriticPolicyOutput",
-    "ActorCriticRolloutBackbone",
+    "QHaltingBackboneOutput",
+    "QHaltingCriticOutput",
+    "QHaltingExecutionSnapshot",
+    "QHaltingInteractionRecord",
+    "QHaltingPolicyOutput",
+    "QHaltingRolloutBackbone",
     "OnlineBootstrapCarry",
     "OnlineBootstrapRuntime",
 ]

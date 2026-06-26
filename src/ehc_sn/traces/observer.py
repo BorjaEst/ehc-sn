@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import (
-    Callable,
     Generic,
     Literal,
-    Mapping,
     Protocol,
-    Sequence,
     TypeAlias,
     TypeVar,
 )
@@ -17,7 +15,7 @@ from typing import (
 import numpy as np
 import torch
 
-from ehc_sn.traces.trace_tree import TraceTree
+from ehc_sn.traces.sink import TraceSink
 
 
 # =============================================================================
@@ -52,7 +50,7 @@ class TraceField(Generic[Context]):
 # =============================================================================
 @dataclass(frozen=True)
 class TraceSpec(Generic[Context]):
-    """Specification describing which values to collect into a :class:`TraceTree`."""
+    """Specification describing which values to collect into a trace."""
 
     fields: Sequence[TraceField[Context]]
 
@@ -71,40 +69,53 @@ class TraceSpec(Generic[Context]):
 
 # =============================================================================
 class TraceObserver(Generic[Context]):
-    """Observe indexed execution contexts into a :class:`TraceTree`."""
+    """Extract trace field values from indexed execution contexts.
+
+    Unlike the original implementation, the observer no longer owns a
+    ``TraceTree``.  Instead it writes extracted step payloads into a
+    caller-supplied :class:`TraceSink`, decoupling extraction from
+    retention policy.
+    """
 
     def __init__(  # ----------------------------------------------------------
         self,
-        tree: TraceTree,
         spec: TraceSpec[Context],
     ) -> None:
-        """Initialize a trace observer with a target tree and trace specification."""
-        self.tree = tree
+        """Initialize a trace observer from a trace specification.
+
+        Args:
+            spec: Trace specification defining the expected fields.
+        """
         self.spec = spec
-        self.tree.config.metadata_paths.update(
-            (field.name,) for field in spec.fields if field.storage == "meta"
-        )
 
     def observe(  # -----------------------------------------------------------
         self,
         ctx: Context,
         *,
         step_index: int,
+        sink: TraceSink,
     ) -> None:
-        """Append one timestep payload extracted from the given context."""
+        """Extract one timestep payload and write it to *sink*.
+
+        Args:
+            ctx: Execution context (e.g. a ``StepRecord``).
+            step_index: Rollout step index for the ``"t"`` field.
+            sink: Target sink that receives the extracted payload.
+        """
         payload: dict[str, TraceValue] = {"t": step_index}
         payload.update(
             {field.name: field.get(ctx) for field in self.spec.fields}
         )
-        self.tree.append(payload)
+        sink.append(payload)
 
     def observe_records(  # ---------------------------------------------------
         self,
         records: Sequence[Context],
+        sink: TraceSink,
     ) -> None:
-        """Append an ordered sequence of execution records."""
+        """Extract an ordered sequence of execution records into *sink*."""
         for record in records:
-            self.observe(record, step_index=record.index)
+            self.observe(record, step_index=record.index, sink=sink)
 
 
 # =============================================================================

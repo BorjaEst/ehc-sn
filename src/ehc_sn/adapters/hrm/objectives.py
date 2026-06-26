@@ -119,8 +119,8 @@ class MazeHardHRMV2HybridTaskBinding:
     task output on the interaction record and supervision labels from the
     observation dict used for the decision.
 
-    Injected into :class:`~ehc_sn.training.actor_critic.TD0ActorCriticBatchBuilder`
-    and :class:`~ehc_sn.training.actor_critic.ZeroBootstrapActorCriticValidationScorer`
+    Injected into :class:`~ehc_sn.training.q_halting.TD0QHaltingBatchBuilder`
+    and :class:`~ehc_sn.training.q_halting.ZeroBootstrapQHaltingValidationScorer`
     at wiring time in the Lightning module.
     """
 
@@ -320,8 +320,8 @@ class SeqMazeHRMV2HybridTaskBinding:
     task output on the interaction record and supervision labels from the
     observation dict used for the decision.
 
-    Injected into :class:`~ehc_sn.training.actor_critic.TD0ActorCriticBatchBuilder`
-    and :class:`~ehc_sn.training.actor_critic.ZeroBootstrapActorCriticValidationScorer`
+    Injected into :class:`~ehc_sn.training.q_halting.TD0QHaltingBatchBuilder`
+    and :class:`~ehc_sn.training.q_halting.ZeroBootstrapQHaltingValidationScorer`
     at wiring time in the Lightning module.
     """
 

@@ -3,5 +3,5 @@
 Canonical leaf modules:
 
 - :mod:`ehc_sn.controllers.deliberation.act` — ACT controller.
-- :mod:`ehc_sn.controllers.deliberation.actor_critic` — deliberation AC controller.
+- :mod:`ehc_sn.controllers.deliberation.q_halting` — deliberation Q-halting controller.
 """
