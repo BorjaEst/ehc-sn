@@ -28,6 +28,10 @@ from ehc_sn.traces.trace_tree import TraceTree
 _GOALTRACE_NORM = PowerNorm(gamma=0.2, vmin=0.0, vmax=1.0)
 _GOALTRACE_CMAP = cm.Blues
 
+# Title font sizes — GT is full-width, snapshots are miniature cells.
+_GT_TITLE_FONTSIZE: float = 7.0
+_SNAPSHOT_TITLE_FONTSIZE: float = 5.5
+
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
     """Render the Goaltrace prediction-reasoning figure."""
@@ -45,9 +49,12 @@ class GoaltracePredictionReasoningFigure(PredictionReasoningTemplate):
             np.asarray(self.data.target_field),
             cmap=_GOALTRACE_CMAP,
             norm=_GOALTRACE_NORM,
-            title="(a) Target field",
+            title="Target — Prospective field",
+            title_fontsize=_GT_TITLE_FONTSIZE,
             node_size=320.0,
             label_fontsize=5.5,
+            mark_current=True,
+            mark_goal=True,
         )
 
     def render_snapshot(
@@ -57,28 +64,22 @@ class GoaltracePredictionReasoningFigure(PredictionReasoningTemplate):
         *,
         step_label: str,
         metric_label: str | None,
-    ) -> None:
-        render_goaltrace_field(
+    ) -> ScalarMappable:
+        return render_goaltrace_field(
             ax,
             self.data.geometry,
             np.asarray(snapshot_data),
             cmap=_GOALTRACE_CMAP,
             norm=_GOALTRACE_NORM,
             title=step_label,
+            title_fontsize=_SNAPSHOT_TITLE_FONTSIZE,
             node_size=220.0,
             label_fontsize=4.5,
         )
 
     def annotation_for_gt(self) -> ContinuousScale:
         return ContinuousScale(
-            label="Target activation",
-            vmin=0.0,
-            vmax=1.0,
-        )
-
-    def annotation_for_evolution(self) -> ContinuousScale:
-        return ContinuousScale(
-            label="Predicted activation",
+            label="Activation",
             vmin=0.0,
             vmax=1.0,
         )

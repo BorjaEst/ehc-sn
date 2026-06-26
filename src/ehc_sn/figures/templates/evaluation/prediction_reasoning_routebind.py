@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 
@@ -26,6 +27,10 @@ from ehc_sn.traces.trace_tree import TraceTree
 _ROUTEBIND_NORM = Normalize(vmin=0.0, vmax=1.0)
 _ROUTEBIND_CMAP = "Blues"
 
+# Title font sizes — GT is full-width, snapshots are miniature cells.
+_GT_TITLE_FONTSIZE: float = 7.0
+_SNAPSHOT_TITLE_FONTSIZE: float = 5.5
+
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
     """Render the Routebind prediction-reasoning figure."""
@@ -36,14 +41,18 @@ def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
 class RoutebindPredictionReasoningFigure(PredictionReasoningTemplate):
     """Routebind prediction-reasoning: target trajectory field → per-step mosaic."""
 
-    def render_ground_truth(self, ax: Axes) -> None:
-        render_routebind_trajectory(
+    def render_ground_truth(self, ax: Axes) -> ScalarMappable:
+        return render_routebind_trajectory(
             ax,
             self.data.target_trajectory,
             self.data.task_sample.grid_width,
-            title="(a) Target — Oracle trajectory",
+            title="Target — Oracle trajectory",
+            title_fontsize=_GT_TITLE_FONTSIZE,
             cmap=_ROUTEBIND_CMAP,
             norm=_ROUTEBIND_NORM,
+            cell_type=self.data.task_sample.cell_type,
+            start_flag=self.data.task_sample.start_flag,
+            goal_flag=self.data.task_sample.goal_flag,
         )
 
     def render_snapshot(
@@ -53,26 +62,20 @@ class RoutebindPredictionReasoningFigure(PredictionReasoningTemplate):
         *,
         step_label: str,
         metric_label: str | None,
-    ) -> None:
-        render_routebind_trajectory(
+    ) -> ScalarMappable:
+        return render_routebind_trajectory(
             ax,
             np.asarray(snapshot_data),
             self.data.task_sample.grid_width,
             title=step_label,
+            title_fontsize=_SNAPSHOT_TITLE_FONTSIZE,
             cmap=_ROUTEBIND_CMAP,
             norm=_ROUTEBIND_NORM,
         )
 
     def annotation_for_gt(self) -> ContinuousScale:
         return ContinuousScale(
-            label="Target activation",
-            vmin=0.0,
-            vmax=1.0,
-        )
-
-    def annotation_for_evolution(self) -> ContinuousScale:
-        return ContinuousScale(
-            label="Predicted activation",
+            label="Activation",
             vmin=0.0,
             vmax=1.0,
         )

@@ -20,6 +20,10 @@ from ehc_sn.figures.selectors.mazehard_prediction_reasoning import (
 )
 from ehc_sn.traces.trace_tree import TraceTree
 
+# Title font sizes — GT is full-width, snapshots are miniature cells.
+_GT_TITLE_FONTSIZE: float = 7.0
+_SNAPSHOT_TITLE_FONTSIZE: float = 5.5
+
 
 def plot(trace: TraceTree, ctx: FigureContext) -> Figure:
     """Render the MazeHard prediction-reasoning figure."""
@@ -34,7 +38,9 @@ class MazehardPredictionReasoningFigure(PredictionReasoningTemplate):
         render_maze_path_field(
             ax,
             self.data.gt_overlay,
-            title="(a) Ground truth",
+            title="Target — Solution path",
+            title_fontsize=_GT_TITLE_FONTSIZE,
+            input_ids=self.data.input_ids,
         )
 
     def render_snapshot(
@@ -49,12 +55,10 @@ class MazehardPredictionReasoningFigure(PredictionReasoningTemplate):
             ax,
             snapshot_data,
             title=step_label,
+            title_fontsize=_SNAPSHOT_TITLE_FONTSIZE,
         )
 
-    def annotation_for_gt(self) -> None:
-        return None
-
-    def annotation_for_evolution(self) -> CategoricalLegend:
+    def annotation_for_gt(self) -> CategoricalLegend:
         return CategoricalLegend(
             entries=[
                 ("Background", "#f0f0f0"),

@@ -1,20 +1,21 @@
 """Shared prediction-reasoning figure template.
 
 Two-row mosaic (``(a)`` ground truth | ``(b)`` reasoning evolution) with a
-2-row × up-to-8-column snapshot grid inside the evolution panel.
+2-row × up-to-8-column snapshot grid inside the evolution panel and a shared
+legend slot under the GT panel.
 
 Subclasses override:
 
 * ``render_ground_truth(ax)`` — draw the oracle target on *ax*.
-* ``render_snapshot(ax, index_data, metric_str, step_label)`` — draw one
-  snapshot with optional metric text.
-* ``annotation_for_gt()`` — return ``PanelAnnotation`` for GT annotation slot.
-* ``annotation_for_evolution()`` — return ``PanelAnnotation`` for evolution
-  annotation slot.
-* ``snapshot_title(step, metric_str)`` — title string for each mini-panel.
+* ``render_snapshot(ax, snapshot_data, *, step_label, metric_label)`` —
+  draw one snapshot with optional metric text.
+* ``annotation_for_gt()`` — return ``PanelAnnotation`` for the shared
+  legend slot (target and predictions use the same units/scale).
+* ``_metric_for_snapshot(index)`` — return a per-step metric string or
+  ``None``.
 
 The template owns layout, mosaic construction, snapshot selection, iteration
-labels, halt/truncation decoration, the annotation row, equal-snapshot
+labels, halt/truncation decoration, the shared legend, equal-snapshot
 geometry, shared-scale enforcement, and per-step metric typography.
 """
 
@@ -40,9 +41,9 @@ from ehc_sn.figures.utils.axes import subdivide_axes
 
 # ── Geometry constants ──────────────────────────────────────────────────────
 
-_ANNOTATION_HEIGHT_RATIO: float = 0.12
+_ANNOTATION_HEIGHT_RATIO: float = 0.10
 _GT_WIDTH_RATIO: float = 1.0
-_EVOLUTION_WIDTH_RATIO: float = 2.1
+_EVOLUTION_WIDTH_RATIO: float = 2.6
 _SNAPSHOT_ROWS: int = 2
 _SNAPSHOT_COLS: int = 8
 _MAX_SNAPSHOTS: int = _SNAPSHOT_ROWS * _SNAPSHOT_COLS
@@ -68,9 +69,12 @@ class PredictionReasoningTemplate(BaseFigureTemplate, ABC):
         ┌─────────────┬───────────────────────────────────┐
         │ (a) GT panel│ (b) Reasoning evolution mosaic    │
         │    1×       │    2 rows × 8 cols (max 16 snaps) │
-        ├─────────────┼───────────────────────────────────┤
-        │ GT annot.   │ Evolution annotation              │
+        ├─────────────┤                                   │
+        │   Legend    │                                   │
         └─────────────┴───────────────────────────────────┘
+
+    The legend sits under the GT panel.  Target and predictions share
+    the same units/scale, so one legend serves the whole figure.
 
     Width ratio: ``1.0 : 2.1``.  Height ratio: ``1.0 : 0.12``.
     """
@@ -80,13 +84,13 @@ class PredictionReasoningTemplate(BaseFigureTemplate, ABC):
 
     MOSAIC = [
         ["gt", "evolution"],
-        ["gt_key", "evolution_key"],
+        ["legend", "evolution"],
     ]
     MOSAIC_KWARGS: dict = {
         "gridspec_kw": {
             "height_ratios": [
                 1.0,  # row 0: visual comparison
-                _ANNOTATION_HEIGHT_RATIO,  # row 1: annotation
+                _ANNOTATION_HEIGHT_RATIO,  # row 1: shared legend
             ],
             "width_ratios": [
                 _GT_WIDTH_RATIO,
@@ -94,6 +98,10 @@ class PredictionReasoningTemplate(BaseFigureTemplate, ABC):
             ],
         },
     }
+
+    def __init__(self, data: Any, ctx: Any) -> None:
+        super().__init__(data, ctx)
+        self._gt_mappable: object | None = None
 
     # ── Subclass override points ────────────────────────────────────────
 
@@ -117,14 +125,10 @@ class PredictionReasoningTemplate(BaseFigureTemplate, ABC):
         )
 
     def annotation_for_gt(self) -> PanelAnnotation | None:
-        """Return annotation spec for the GT annotation slot.
+        """Return annotation spec for the shared legend slot under the GT panel.
 
-        Default: ``None`` (slot hidden).
-        """
-        return None
-
-    def annotation_for_evolution(self) -> PanelAnnotation | None:
-        """Return annotation spec for the evolution annotation slot.
+        Since target and predictions share the same units and scale, one
+        legend (categorical or continuous) serves the whole figure.
 
         Default: ``None`` (slot hidden).
         """
@@ -172,7 +176,7 @@ class PredictionReasoningTemplate(BaseFigureTemplate, ABC):
     @panel(slots=["gt"], order=0)
     def _gt_panel(self, ax: Axes) -> None:
         """Panel (a): delegate to ``render_ground_truth``."""
-        self.render_ground_truth(ax)
+        self._gt_mappable = self.render_ground_truth(ax)
 
     @panel(slots=["evolution"], order=1)
     def _evolution_panel(self, ax: Axes) -> None:
@@ -215,7 +219,7 @@ class PredictionReasoningTemplate(BaseFigureTemplate, ABC):
             metric_str = self._metric_for_snapshot(j)
             label = f"{step_str}\n{metric_str}" if metric_str else step_str
 
-            self.render_snapshot(
+            mappable = self.render_snapshot(
                 axs[j], snapshots[j], step_label=label, metric_label=metric_str
             )
 
@@ -242,28 +246,20 @@ class PredictionReasoningTemplate(BaseFigureTemplate, ABC):
         for j in range(n_snapshots, _MAX_SNAPSHOTS):
             axs[j].axis("off")
 
-        # Directional arrow above the mosaic
-        ax.text(
-            0.98,
-            1.05,
-            "reasoning time →",
-            transform=ax.transAxes,
-            fontsize=5.0,
-            ha="right",
-            va="bottom",
-            fontstyle="italic",
-            alpha=0.6,
-        )
+    @panel(slots=["legend"], order=2)
+    def _legend(self, ax: Axes) -> None:
+        """Shared legend slot under the GT panel."""
+        spec = self.annotation_for_gt()
+        self._bind_mappable(spec, self._gt_mappable)
+        self._render_annotation(ax, spec)
 
-    @panel(slots=["gt_key"], order=2)
-    def _gt_key(self, ax: Axes) -> None:
-        """GT annotation slot."""
-        self._render_annotation(ax, self.annotation_for_gt())
+    # ── Mappable binding ───────────────────────────────────────────────
 
-    @panel(slots=["evolution_key"], order=3)
-    def _evolution_key(self, ax: Axes) -> None:
-        """Evolution annotation slot."""
-        self._render_annotation(ax, self.annotation_for_evolution())
+    @staticmethod
+    def _bind_mappable(spec: PanelAnnotation, mappable: object | None) -> None:
+        """If *spec* is a ``ContinuousScale`` with no mappable, bind one."""
+        if isinstance(spec, ContinuousScale) and spec.mappable is None:
+            spec.mappable = mappable
 
     # ── Annotation rendering ────────────────────────────────────────────
 
