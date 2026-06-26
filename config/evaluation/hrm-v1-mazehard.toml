@@ -25,6 +25,7 @@ experiment_id = "hrm-v1-mazehard"
 
 [provider]
     ref = "ehc_sn.tasks.mazehard.providers.MazeHardReplayProvider"
+    batch_size = 1
     [provider.settings]
         dataset_path = "data/processed/mazehard/default/v1"
         split = "val"

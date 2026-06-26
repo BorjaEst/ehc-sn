@@ -36,7 +36,6 @@
 
 [regime]
     halt_disabled_steps = 500
-    single_step = true
 
 [execution.validation]
     max_rollout_steps = 16

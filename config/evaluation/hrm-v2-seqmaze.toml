@@ -32,6 +32,7 @@ experiment_id = "hrm-v2-seqmaze"
 
 [provider]
     ref = "ehc_sn.tasks.seqmaze.providers.SeqMazeReplayProvider"
+    batch_size = 1
     [provider.settings]
         dataset_path = "data/processed/seqmaze/default/v1"
         split = "val"

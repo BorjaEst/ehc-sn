@@ -92,7 +92,7 @@
     non_finite_policy   = "raise"
 
 [checkpointing.checkpoint]
-    dirpath             = "checkpoints/tem-v1-arena"
+    dirpath             = "checkpoints/tem-v2-arena"
     filename            = "{step:06d}"
     every_n_train_steps = 1000
     save_top_k          = -1

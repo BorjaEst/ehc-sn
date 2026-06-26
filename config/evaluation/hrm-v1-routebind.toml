@@ -28,6 +28,7 @@ experiment_id = "hrm-v1-routebind"
 
 [provider]
     ref = "ehc_sn.tasks.routebind.providers.RoutebindReplayProvider"
+    batch_size = 1
     [provider.settings]
         dataset_path = "data/processed/routebind/default/v1"
         split = "val"
