@@ -834,6 +834,7 @@ def validate_support_channels(
         for ch in (
             "trajectory_support",
             "trajectory_forward_depth",
+            "trajectory_remaining_cost",
             "waypoint_support",
             "waypoint_semantic_depth",
             "target_optimal_directions",
@@ -845,10 +846,12 @@ def validate_support_channels(
 
     ts = np.asarray(data["trajectory_support"])
     td = np.asarray(data["trajectory_forward_depth"])
+    trc = np.asarray(data["trajectory_remaining_cost"])
     ws = np.asarray(data["waypoint_support"])
     wd = np.asarray(data["waypoint_semantic_depth"])
     tf = np.asarray(data["target_trajectory"])
     wf = np.asarray(data["target_waypoint"])
+    gvf = tf  # alias for backward compat during migration
     dir_mask = np.asarray(data["target_optimal_directions"])
     obs_mask = np.asarray(data["target_optimal_next_observations"])
     n_obs = obs_mask.shape[0]
@@ -985,6 +988,32 @@ def validate_support_channels(
                         split,
                         idx,
                         f"Pos {p}: trajectory_support on cell_type={c}",
+                    )
+                )
+
+        # Remaining cost sentinel
+        if not ts[p]:
+            if trc[p] != -1:
+                issues.append(
+                    _si(
+                        "ERROR",
+                        "remaining_cost_invalid",
+                        split,
+                        idx,
+                        f"Pos {p}: trajectory_support False but "
+                        f"remaining_cost={int(trc[p])} (expected -1)",
+                    )
+                )
+        else:
+            if trc[p] < 0:
+                issues.append(
+                    _si(
+                        "ERROR",
+                        "remaining_cost_invalid",
+                        split,
+                        idx,
+                        f"Pos {p}: trajectory_support True but "
+                        f"remaining_cost={int(trc[p])} (expected >=0)",
                     )
                 )
 
@@ -1344,6 +1373,16 @@ def check_oracle_optimal_subgraph(
             E(
                 "trajectory_optimal_support_mismatch",
                 f"{n_diff} positions differ from oracle trajectory_forward_depth",
+            )
+        )
+    # Trajectory remaining cost
+    stored_trc = np.asarray(data.get("trajectory_remaining_cost", stored_td))
+    if not np.array_equal(stored_trc, expected.trajectory_remaining_cost):
+        n_diff = int(np.sum(stored_trc != expected.trajectory_remaining_cost))
+        issues.append(
+            E(
+                "trajectory_optimal_support_mismatch",
+                f"{n_diff} positions differ from oracle trajectory_remaining_cost",
             )
         )
 

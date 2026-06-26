@@ -158,6 +158,48 @@ def extract_waypoint_sequence(
     return seq
 
 
+def extract_waypoint_events_from_support(
+    waypoint_support: np.ndarray,
+    waypoint_semantic_depth: np.ndarray,
+    observation_id: np.ndarray,
+) -> list[tuple[int, int, int]]:
+    """Extract waypoint events from support channels without a physical route.
+
+    Returns ``(position, observation_id, semantic_depth)`` tuples sorted
+    by ascending semantic depth.  When multiple positions share the same
+    semantic depth (ambiguous optimal acceptance), all are included.
+
+    Unlike :func:`extract_waypoint_sequence`, this function does not
+    require a physically extracted route — it reads directly from the
+    oracle's waypoint support channels.
+
+    Args:
+        waypoint_support: ``(S,)`` bool — ``True`` for positions where an
+            optimal semantic acceptance occurs (plus the start position).
+        waypoint_semantic_depth: ``(S,)`` int16 — minimum number of
+            semantic-acceptance events from start per waypoint position.
+            Sentinel ``-1`` for unsupported positions.
+        observation_id: ``(S,)`` int32 — observation identity per position.
+
+    Returns:
+        List of ``(position, observation_id, semantic_depth)`` tuples
+        sorted by ascending semantic depth.
+    """
+    if waypoint_support.shape != waypoint_semantic_depth.shape:
+        raise ValueError(
+            f"waypoint_support shape {waypoint_support.shape} does not match "
+            f"waypoint_semantic_depth shape {waypoint_semantic_depth.shape}."
+        )
+    events: list[tuple[int, int, int]] = []
+    for p in range(len(waypoint_support)):
+        if waypoint_support[p]:
+            sd = int(waypoint_semantic_depth[p])
+            if sd >= 0:
+                events.append((p, int(observation_id[p]), sd))
+    events.sort(key=lambda x: x[2])
+    return events
+
+
 # =============================================================================
 # Direction decoding
 # =============================================================================
@@ -180,6 +222,7 @@ def decode_next_direction(
 __all__ = [
     "decode_next_direction",
     "extract_route_from_trajectory_field",
+    "extract_waypoint_events_from_support",
     "extract_waypoint_sequence",
     "extract_waypoints_from_field",
 ]

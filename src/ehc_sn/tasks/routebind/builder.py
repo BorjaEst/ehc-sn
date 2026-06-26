@@ -1663,6 +1663,7 @@ def build_routebind_task_corpus(
                     "target_waypoint": target_waypoint,
                     "trajectory_support": sup.trajectory_support,
                     "trajectory_forward_depth": sup.trajectory_forward_depth,
+                    "trajectory_remaining_cost": sup.trajectory_remaining_cost,
                     "waypoint_support": sup.waypoint_support,
                     "waypoint_semantic_depth": sup.waypoint_semantic_depth,
                     "target_optimal_directions": target_optimal_directions,

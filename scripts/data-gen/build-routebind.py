@@ -902,6 +902,19 @@ def _build_trace_for_sample(
             "cell_mask": np.expand_dims(cm, 0),
         }
     }
+
+    # Attach waypoint support channels for direct waypoint extraction
+    # (figure selector falls back to greedy-route extraction when absent).
+    wp_sup = sample.get("waypoint_support")
+    wp_sd = sample.get("waypoint_semantic_depth")
+    if wp_sup is not None:
+        meta["routebind"]["waypoint_support"] = np.expand_dims(  # type: ignore[index]
+            np.asarray(wp_sup, dtype=bool), 0
+        )
+    if wp_sd is not None:
+        meta["routebind"]["waypoint_semantic_depth"] = np.expand_dims(  # type: ignore[index]
+            np.asarray(wp_sd, dtype=np.int16), 0
+        )
     if n_observations is not None:
         meta["routebind"]["n_observations"] = n_observations  # type: ignore[index]
     if canvas_width is not None:

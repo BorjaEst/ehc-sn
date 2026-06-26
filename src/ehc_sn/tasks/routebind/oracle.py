@@ -58,6 +58,9 @@ class OptimalSupportResult:
         trajectory_forward_depth: ``(n_slots,)`` int16 — minimum physical
             depth (steps from start) for each supported position.  0 for
             unsupported positions.
+        trajectory_remaining_cost: ``(n_slots,)`` int16 — minimum remaining
+            physical cost to goal over query-reachable optimal product
+            states projecting to each position.  -1 for unsupported.
         waypoint_support: ``(n_slots,)`` bool — ``True`` for every
             position that is accepted as a waypoint in at least one optimal
             solution (start position is always a waypoint).
@@ -76,6 +79,7 @@ class OptimalSupportResult:
 
     trajectory_support: np.ndarray  # (n_slots,) bool
     trajectory_forward_depth: np.ndarray  # (n_slots,) int16
+    trajectory_remaining_cost: np.ndarray  # (n_slots,) int16
     waypoint_support: np.ndarray  # (n_slots,) bool
     waypoint_semantic_depth: np.ndarray  # (n_slots,) int16
     target_optimal_directions: np.ndarray  # (4,) bool
@@ -678,6 +682,7 @@ def traverse_optimal_subgraph(
 
     traj_support = np.zeros(n_slots, dtype=bool)
     traj_depth = np.full(n_slots, 32767, dtype=np.int16)
+    traj_remaining = np.full(n_slots, 32767, dtype=np.int16)
     wp_support = np.zeros(n_slots, dtype=bool)
     wp_depth = np.full(n_slots, 32767, dtype=np.int16)
 
@@ -690,6 +695,7 @@ def traverse_optimal_subgraph(
 
     traj_support[start_pos] = True
     traj_depth[start_pos] = 0
+    traj_remaining[start_pos] = np.int16(total_cost)
     wp_support[start_pos] = True
     wp_depth[start_pos] = 0
 
@@ -726,9 +732,12 @@ def traverse_optimal_subgraph(
         o = s % n_obs
 
         k = total_cost - int(distance[s])
+        rc = int(distance[s])
         traj_support[p] = True
         if k < int(traj_depth[p]):
             traj_depth[p] = np.int16(k)
+        if rc < int(traj_remaining[p]):
+            traj_remaining[p] = np.int16(rc)
 
         # Physical optimal successors
         pmask = int(physical_optimal_mask[s])
@@ -764,12 +773,14 @@ def traverse_optimal_subgraph(
     for p in range(n_slots):
         if not traj_support[p]:
             traj_depth[p] = -1
+            traj_remaining[p] = -1
         if not wp_support[p]:
             wp_depth[p] = -1
 
     return OptimalSupportResult(
         trajectory_support=traj_support,
         trajectory_forward_depth=traj_depth,
+        trajectory_remaining_cost=traj_remaining,
         waypoint_support=wp_support,
         waypoint_semantic_depth=wp_depth,
         target_optimal_directions=dir_mask,

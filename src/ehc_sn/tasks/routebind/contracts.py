@@ -118,6 +118,7 @@ class RoutebindCorpusSchema:
     # Optimal-support channels (canonical oracle projection)
     trajectory_support: str = "trajectory_support"
     trajectory_forward_depth: str = "trajectory_forward_depth"
+    trajectory_remaining_cost: str = "trajectory_remaining_cost"
     waypoint_support: str = "waypoint_support"
     waypoint_semantic_depth: str = "waypoint_semantic_depth"
     target_optimal_directions: str = "target_optimal_directions"
@@ -153,6 +154,7 @@ class RoutebindCorpusSchema:
             self.target_waypoint,
             self.trajectory_support,
             self.trajectory_forward_depth,
+            self.trajectory_remaining_cost,
             self.waypoint_support,
             self.waypoint_semantic_depth,
             self.target_optimal_directions,
@@ -166,6 +168,7 @@ class RoutebindCorpusSchema:
         return (
             self.trajectory_support,
             self.trajectory_forward_depth,
+            self.trajectory_remaining_cost,
             self.waypoint_support,
             self.waypoint_semantic_depth,
             self.target_optimal_directions,
@@ -189,6 +192,7 @@ class RoutebindCorpusSchema:
             self.target_waypoint,
             self.trajectory_support,
             self.trajectory_forward_depth,
+            self.trajectory_remaining_cost,
             self.waypoint_support,
             self.waypoint_semantic_depth,
             self.target_optimal_directions,
@@ -212,6 +216,7 @@ class RoutebindCorpusSchema:
             self.target_waypoint: np.dtype(np.float32),
             self.trajectory_support: np.dtype(bool),
             self.trajectory_forward_depth: np.dtype(np.int16),
+            self.trajectory_remaining_cost: np.dtype(np.int16),
             self.waypoint_support: np.dtype(bool),
             self.waypoint_semantic_depth: np.dtype(np.int16),
             self.target_optimal_directions: np.dtype(bool),

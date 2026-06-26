@@ -16,6 +16,7 @@ from numpy.typing import NDArray
 from ehc_sn.tasks.routebind.contracts import CELL_OBSERVATION, CELL_WALL
 from ehc_sn.tasks.routebind.decoding import (
     extract_route_from_trajectory_field,
+    extract_waypoint_events_from_support,
     extract_waypoint_sequence,
 )
 
@@ -62,6 +63,20 @@ class RoutebindSampleInspection:
 
     # Non-fatal anomalies collected during preparation
     warnings: list[str] = field(default_factory=list)
+
+
+# =============================================================================
+def waypoint_support_from_field(
+    waypoint_field: np.ndarray,
+    threshold: float = 1e-6,
+) -> np.ndarray:
+    """Derive a boolean waypoint support mask from a decayed waypoint field.
+
+    Returns ``True`` where ``waypoint_field[p] > threshold``.
+    This is a convenience for consumers that receive a sample dict
+    containing only the decayed field and not the raw support channel.
+    """
+    return np.asarray(waypoint_field) > threshold
 
 
 # =============================================================================
@@ -144,6 +159,24 @@ def prepare_sample_inspection(
         )
         if route:
             physical_route = route
+
+    # Waypoints from support channels (independent of greedy route).
+    # Uses `target_waypoint` field as the support indicator when
+    # `waypoint_support` is not available directly from the sample dict.
+    wp_field = np.asarray(sample.get("target_waypoint", wf))
+    wp_support_arr = waypoint_support_from_field(wp_field, threshold=1e-6)
+    if wp_support_arr.sum() > 0:
+        # Use semantic-depth ordering
+        wd_arr = np.asarray(
+            sample.get(
+                "waypoint_semantic_depth", np.full_like(oid, -1, dtype=np.int16)
+            )
+        )
+        raw = extract_waypoint_events_from_support(wp_support_arr, wd_arr, oid)
+        waypoint_events = [(p, obs, float(wf[p])) for p, obs, _ in raw]
+    else:
+        # Fallback: scan the greedy route
+        if route:
             waypoint_events = extract_waypoint_sequence(wf, route, oid)
 
     route_length = len(physical_route)
@@ -215,4 +248,5 @@ def prepare_sample_inspection(
 __all__ = [
     "RoutebindSampleInspection",
     "prepare_sample_inspection",
+    "waypoint_support_from_field",
 ]

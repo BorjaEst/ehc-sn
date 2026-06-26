@@ -70,6 +70,7 @@ from .corpus import (
 from .decoding import (
     decode_next_direction,
     extract_route_from_trajectory_field,
+    extract_waypoint_events_from_support,
     extract_waypoint_sequence,
     extract_waypoints_from_field,
 )
@@ -87,6 +88,7 @@ from .inspection import (
     prepare_sample_inspection,
 )
 from .oracle import (
+    OptimalSupportResult,
     OracleResult,
     compute_goal_distance_table,
     reconstruct_from_policy,
@@ -131,6 +133,7 @@ __all__ = [
     "DIRECTION_DELTA",
     "Direction",
     "GenerationFunnel",
+    "OptimalSupportResult",
     "OracleResult",
     "PolicyTransition",
     "QuerySelectionProfile",
@@ -170,6 +173,7 @@ __all__ = [
     "extract_route_from_trajectory_field",
     "extract_routebind_targets",
     "extract_routebind_task_input",
+    "extract_waypoint_events_from_support",
     "extract_waypoint_sequence",
     "extract_waypoints_from_field",
     "load_sample",

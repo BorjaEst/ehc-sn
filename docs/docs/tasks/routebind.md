@@ -207,6 +207,8 @@ differs from an arbitrary tie-break selection.
 | target_waypoint                  | support × γ_semantic^{semantic_depth} over optimal subgraph                 |
 | trajectory_support               | bool mask — positions on any optimal route                                  |
 | trajectory_forward_depth         | int16 — earliest physical depth per supported position (-1 if unsupported)  |
+| trajectory_remaining_cost        | int16 — minimum remaining physical cost over query-reachable optimal        |
+|                                  | product states (-1 if unsupported), diagnostic only                         |
 | waypoint_support                 | bool mask — waypoint event positions                                        |
 | waypoint_semantic_depth          | int16 — earliest acceptance depth per waypoint position (-1 if unsupported) |
 | target_optimal_directions        | bool[4] — multi-label optimal first directions                              |
@@ -214,7 +216,8 @@ differs from an arbitrary tie-break selection.
 
 The decayed fields (`target_trajectory`, `target_waypoint`) are derived
 from the support and depth arrays: `field[p] = support[p] × γ^{depth[p]}`
-when `support[p]` is True, 0 otherwise.
+when `support[p]` is True, 0 otherwise. `trajectory_remaining_cost` is a
+diagnostic channel (not used for loss or decoding).
 
 ## Parent requirements
 
@@ -319,7 +322,10 @@ col_offset.
 
 **Target channels:** target_trajectory (float32[S]),
 target_waypoint (float32[S]), trajectory_support (bool[S]),
-trajectory_forward_depth (int16[S], sentinel -1), waypoint_support (bool[S]),
+trajectory_forward_depth (int16[S], sentinel -1),
+trajectory_remaining_cost (int16[S], sentinel -1, diagnostic),
+waypoint_support (bool[S]),
+waypoint_support (bool[S]),
 waypoint_semantic_depth (int16[S], sentinel -1), target_optimal_directions (bool[4]),
 target_optimal_next_observations (bool[N_obs]), total_physical_cost (int16 scalar).
 
@@ -344,11 +350,13 @@ target_optimal_next_observations (bool[N_obs]), total_physical_cost (int16 scala
   action — no arbitrary tie-breaking among equal-cost alternatives.
 - Depth channels use sentinel -1 for unsupported positions:
   `trajectory_forward_depth[p] == -1` iff `trajectory_support[p] == False`;
+  `trajectory_remaining_cost[p] == -1` iff `trajectory_support[p] == False`;
   `waypoint_semantic_depth[p] == -1` iff `waypoint_support[p] == False`.
   Supported positions have `depth >= 0`.
 - Crossed but unaccepted observation cells are excluded from the waypoint field.
 - The trajectory and waypoint fields follow their respective decay rules
   derived from support × γ^{depth}.
+- Padding positions (spatial_mask == False) have zero-valued target fields.
 - Regeneration with the same substrates, task seed, and query produces
   identical tensors.
 - Padding positions (spatial_mask == False) have zero-valued target fields.
