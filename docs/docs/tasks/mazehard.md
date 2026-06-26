@@ -242,7 +242,7 @@ Consumes only meta keys (`input_ids`, `target/solution_overlay`) and works
 directly from the corpus without requiring an evaluation trace.
 
 The remaining MazeHard figures (`mazehard_solution_overlay`,
-`mazehard_prediction_evolution`, `prediction_accuracy_over_steps`) require
+`prediction_reasoning_mazehard`, `prediction_accuracy_over_steps`) require
 evaluation trace keys and are available through the report pipeline, not
 through corpus inspection.
 
