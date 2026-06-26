@@ -117,10 +117,10 @@ class RoutebindTaskOverviewFigure(TaskOverviewTemplate):
 
     def objective_text(self) -> list[str]:
         return [
-            "Spatial layout + goal",
-            "\u2192 two discounted fields:",
-            "  spatial trajectory",
-            "  semantic waypoints",
+            "Spatial layout + semantic",
+            "goal observation \u2192 predict:",
+            "  spatial trajectory field",
+            "  semantic waypoint field",
         ]
 
     def sample_rows(self) -> list[tuple[str, str]]:
@@ -129,9 +129,15 @@ class RoutebindTaskOverviewFigure(TaskOverviewTemplate):
         sp_pos = int(np.argmax(data.start_flag))
         start_r, start_c = divmod(sp_pos, W)
         start_obs = int(data.observation_id[sp_pos])
+        goal_positions = np.where(data.goal_flag)[0]
+        goal_obs = (
+            int(data.observation_id[goal_positions[0]])
+            if len(goal_positions) > 0
+            else -1
+        )
         waypoints = data.waypoint_obs_sequence
         ids = [str(o) for o in waypoints]
-        if len(ids) > 8:
+        if len(ids) > 5:
             waypoint_str = f"[{', '.join(ids[:5])}, …({len(ids)})]"
         else:
             waypoint_str = f"[{', '.join(ids)}]"
@@ -143,23 +149,16 @@ class RoutebindTaskOverviewFigure(TaskOverviewTemplate):
                 f"{int((data.cell_type==1).sum())}F "
                 f"{int((data.cell_type==2).sum())}O",
             ),
-            ("N Obs. Ids:", str(data.n_observations)),
-            (
-                "Start:",
-                f"({start_r},{start_c}) obs={start_obs}"
-                f", goals={int(data.goal_flag.sum())}",
-            ),
-            (
-                "Active:",
-                str(int((data.target_trajectory > 0.01).sum())),
-            ),
+            ("Obs. vocab:", str(data.n_observations)),
+            ("Start obs:", f"id {start_obs} ({start_r},{start_c})"),
+            ("Goal obs:", f"id {goal_obs}"),
             ("Waypoints:", waypoint_str),
         ]
 
     def contract_notation(self) -> str:
         return (
             r"$(\mathbf{X}_{\mathrm{space}},"
-            r"\mathbf{G}_{\mathrm{semantic}}, s, g)"
+            r"\mathbf{G}_{\mathrm{semantic}}, s, o_g)"
             r"\;\longrightarrow\; \mathbf{f}_{\mathrm{trajectory}}$"
         )
 
