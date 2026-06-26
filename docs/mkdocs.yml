@@ -23,6 +23,11 @@ nav:
       - Architecture: architecture.md
       - EHP Model: models/ehp.md
       - Model Family Selection: model-family-selection.md
+      - Training Regimes:
+          - Overview: regimes/_index.md
+          - Supervised ACT: regimes/supervised-act.md
+          - Supervised Q-halting: regimes/supervised-q-halting.md
+          - Variational Replay: regimes/variational-replay.md
   - Usage:
       - Data and Paths: data-and-paths.md
       - Data Generation: data-generation.md
