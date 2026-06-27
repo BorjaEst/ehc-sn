@@ -20,15 +20,15 @@ def plot_maze_with_overlay(  # ------------------------------------------------
     *,
     title: Optional[str] = None,
 ) -> tuple[AxesImage, AxesImage]:
-    """Render maze inputs with a semi-transparent mazehard_solution_overlay mask.
+    """Render maze inputs with a semi-transparent mazehard_prediction_overlay mask.
 
     The maze grid uses image/grid coordinates with row 0 displayed at the top,
     matching the processed-dataset and environment-map figure conventions.
 
-    Returns the base and mazehard_solution_overlay images for downstream composition.
+    Returns the base and mazehard_prediction_overlay images for downstream composition.
     """
     base = np.asarray(inputs_grid)
-    mazehard_solution_overlay = np.asarray(overlay_mask).astype(float)
+    mazehard_prediction_overlay = np.asarray(overlay_mask).astype(float)
 
     base_img = ax.imshow(
         base,
@@ -39,7 +39,7 @@ def plot_maze_with_overlay(  # ------------------------------------------------
         origin="upper",
     )
     overlay_img = ax.imshow(
-        mazehard_solution_overlay,
+        mazehard_prediction_overlay,
         cmap=ListedColormap(["none", "#e53e3e"]),
         alpha=0.6,
         interpolation="nearest",

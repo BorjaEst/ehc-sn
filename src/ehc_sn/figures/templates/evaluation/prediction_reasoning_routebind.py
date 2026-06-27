@@ -44,7 +44,7 @@ class RoutebindPredictionReasoningFigure(PredictionReasoningTemplate):
     def render_ground_truth(self, ax: Axes) -> ScalarMappable:
         return render_routebind_trajectory(
             ax,
-            self.data.target_trajectory,
+            self.data.task_sample.target_trajectory,
             self.data.task_sample.grid_width,
             title="Target — Oracle trajectory",
             title_fontsize=_GT_TITLE_FONTSIZE,

@@ -17,12 +17,8 @@ from matplotlib.figure import Figure
 from ehc_sn.figures.core.base import BaseFigureTemplate
 from ehc_sn.figures.core.panels import panel
 from ehc_sn.figures.registry import FigureContext
+from ehc_sn.traces.keys import PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L
 from ehc_sn.traces.trace_tree import TraceTree
-
-# ── Canonical trace path constants ───────────────────────────────────────────
-
-TRACE_KEY_Z_H = "pfc/z_H"
-TRACE_KEY_Z_L = "pfc/z_L"
 
 # Colour scheme — consistent with h_l_residuals_over_steps.
 H_COLOR = "tab:blue"
@@ -163,8 +159,8 @@ class PFCLatentDynamicsData:
 # =============================================================================
 def _extract_data(trace: TraceTree) -> PFCLatentDynamicsData:
     """Extract and compute norm/delta metrics from the trace."""
-    z_H = _validate_extract(trace, TRACE_KEY_Z_H)
-    z_L = _validate_extract(trace, TRACE_KEY_Z_L)
+    z_H = _validate_extract(trace, PFC_TRACE_KEY_Z_H)
+    z_L = _validate_extract(trace, PFC_TRACE_KEY_Z_L)
 
     T, B, S, D = z_H.shape
 

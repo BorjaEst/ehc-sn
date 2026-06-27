@@ -1,4 +1,4 @@
-"""Selectors for Arena TEM prediction-mazehard_solution_overlay figures.
+"""Selectors for Arena TEM prediction figures.
 
 Reads ``target/observation_id`` from trace metadata — no adapter imports.
 """
@@ -20,14 +20,14 @@ from ehc_sn.traces.keys import (
 from ehc_sn.traces.trace_tree import TraceTree
 from ehc_sn.utils import to_cpu
 
-# Default cap on mazehard_solution_overlay items when ctx.max_items is not set.
+# Default cap on items when ctx.max_items is not set.
 _DEFAULT_MAX_SAMPLES = 10
 
 
 # =============================================================================
 @dataclass
 class TEMOverlayData:
-    """Prepared data for the per-step argmax prediction mazehard_solution_overlay figure.
+    """Prepared data for the per-step argmax prediction figure.
 
     All fields have shape ``(n_cases, T)`` where *T* is the aligned sequence
     length (min of trace steps and GT steps).
@@ -43,7 +43,7 @@ class TEMOverlayData:
 def select_tem_prediction_overlay(
     trace: TraceTree, ctx: FigureContext
 ) -> TEMOverlayData:
-    """Extract per-step argmax prediction-mazehard_solution_overlay data from the trace.
+    """Extract per-step argmax prediction data from the trace.
 
     Selects N samples (bounded by ``ctx.max_items``) and reads per-step
     predictions for all three pathways (inference, retrieved, ancestral),

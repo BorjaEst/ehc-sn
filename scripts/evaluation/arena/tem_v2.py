@@ -143,7 +143,7 @@ def inspect(
             "--gallery-roles",
             help="Comma-separated figure role names.",
         ),
-    ] = "solution_overlay",
+    ] = "prediction_overlay",
 ) -> None:
     """Inspect a completed evaluation artifact.
 

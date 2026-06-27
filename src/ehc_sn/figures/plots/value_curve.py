@@ -1,6 +1,4 @@
-"""Value-curve plot helper shared by ``q_value_evolution`` and
-``halt_logit_evolution`` figure templates.
-"""
+"""Value-curve plot helper functions."""
 
 from __future__ import annotations
 

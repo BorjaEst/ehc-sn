@@ -24,7 +24,7 @@ from ehc_sn.traces.keys import (
 )
 from ehc_sn.traces.trace_tree import TraceTree
 
-# Default cap on mazehard_solution_overlay items when ctx.max_items is not set.
+# Default cap on items when ctx.max_items is not set.
 _DEFAULT_MAX_MAZES = 10
 
 
@@ -192,7 +192,9 @@ def build_mazehard_evaluation_sample(
 
 @dataclass
 class MazehardSolutionOverlayFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.mazehard_solution_overlay.MazehardSolutionOverlayFigure`."""
+    """Prepared data for :class:`~ehc_sn.figures.templates.
+    mazehard_prediction_overlay.MazehardSolutionOverlayFigure`.
+    """
 
     input_ids: NDArray  # (n, N)
     gt_overlays: NDArray  # (n, N) bool
@@ -201,7 +203,9 @@ class MazehardSolutionOverlayFigureData:
 
 @dataclass
 class MazehardPredictionEvolutionFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.prediction_reasoning_mazehard.MazehardPredictionEvolutionFigure`."""
+    """Prepared data for :class:`~ehc_sn.figures.templates.
+    prediction_reasoning_mazehard.MazehardPredictionEvolutionFigure`.
+    """
 
     input_ids: NDArray  # (B, N)
     gt_overlay: NDArray  # (N,) bool — single sample
@@ -215,7 +219,7 @@ class MazehardPredictionEvolutionFigureData:
 def select_overlay(
     sample: MazehardEvaluationSample, ctx: FigureContext
 ) -> MazehardSolutionOverlayFigureData:
-    """Extract mazehard_solution_overlay data from a single evaluated sample."""
+    """Extract mazehard prediction overlay data from a single evaluated sample."""
     grid = sample.input_grid  # (N,)
     gt = sample.gt_overlay  # (N,) bool
     pred = sample.prediction_steps  # (T, N)
@@ -267,7 +271,9 @@ def select_evolution(
 
 @dataclass
 class MazehardPredictionAccuracyFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.prediction_accuracy_over_steps.MazehardPredictionAccuracyFigure`."""
+    """Prepared data for :class:`~ehc_sn.figures.templates.
+    prediction_accuracy_over_steps.MazehardPredictionAccuracyFigure`.
+    """
 
     token_accuracy: NDArray  # (T, B) — per-step token accuracy
     path_recall: NDArray  # (T, B) — per-step target-path recall
@@ -284,7 +290,9 @@ class MazehardPredictionAccuracyFigureData:
 
 @dataclass
 class MazehardTaskLayoutFigureData:
-    """Prepared data for :class:`~ehc_sn.figures.templates.task_overview_mazehard.MazehardTaskLayoutFigure`."""
+    """Prepared data for :class:`~ehc_sn.figures.templates.
+    task_overview_mazehard.MazehardTaskLayoutFigure`.
+    """
 
     input_ids: NDArray  # (side, side) — categorical input grid
     target_overlay: NDArray  # (side, side) — float32 target path

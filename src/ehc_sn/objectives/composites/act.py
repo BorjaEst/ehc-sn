@@ -57,6 +57,31 @@ from ehc_sn.utils.detach import DetachMixin
 
 
 # =============================================================================
+def _validate_ratio_extras(  # -------------------------------------------------
+    extras: Mapping[str, RatioStat],
+) -> None:
+    """Validate task-provided ratio extras for structural correctness.
+
+    Raises ``ValueError`` if:
+    - a key is empty,
+    - a value has non-scalar ``numerator_sum`` or ``denominator_sum``.
+    """
+    for name, stat in extras.items():
+        if not name:
+            raise ValueError("Task extra names must be non-empty")
+        if stat.numerator_sum.ndim != 0:
+            raise ValueError(
+                f"Task extra {name!r} numerator must be scalar, "
+                f"got shape {tuple(stat.numerator_sum.shape)}"
+            )
+        if stat.denominator_sum.ndim != 0:
+            raise ValueError(
+                f"Task extra {name!r} denominator must be scalar, "
+                f"got shape {tuple(stat.denominator_sum.shape)}"
+            )
+
+
+# =============================================================================
 class ACTSupervisedScorerConfig(BaseModel, extra="forbid", frozen=True):
     """Configuration for generic ACT loss composition.
 
@@ -252,31 +277,42 @@ class ACTSupervisedScorer(nn.Module):
         if losses.continue_sum is not None:
             signals["act_loss_q_continue"] = losses.continue_sum.detach()
 
-        # Build StepMetrics — use task accuracy stats when available
-        # (token tasks), fall back to zeros for non-token tasks (field).
+        # Build StepMetrics — structural forwarding of task extras
+        # plus scorer-owned objective/controller metrics.
         B = max(task.completion_target.shape[0], 1)
         bc = torch.tensor(float(B))
         device = task.completion_target.device
-        task_metrics = task.metrics if isinstance(task.metrics, dict) else {}
-        extras: dict[str, RatioStat] = {}
-        extras["loss_token"] = RatioStat(
-            numerator_sum=task_metrics.get(
-                "token_ce_sum", losses.halt_sum.new_zeros(())
+
+        # --- Validate and forward task-provided extras ----------------------
+        task_extras = (
+            task.task_extras if isinstance(task.task_extras, dict) else {}
+        )
+        _validate_ratio_extras(task_extras)
+
+        extras: dict[str, RatioStat] = dict(task_extras)
+
+        # --- Scorer-owned extras (collision-checked) ------------------------
+        scorer_extras: dict[str, RatioStat] = {
+            ACT_LOSS_Q_DONE: RatioStat(
+                numerator_sum=losses.halt_sum.detach(),
+                denominator_sum=bc,
             ),
-            denominator_sum=task_metrics.get("token_ce_count", bc),
-        )
-        extras[ACT_LOSS_Q_DONE] = RatioStat(
-            numerator_sum=losses.halt_sum.detach(),
-            denominator_sum=bc,
-        )
-        extras[ACT_LOSS_Q_CONTINUE] = RatioStat(
-            numerator_sum=(
-                losses.continue_sum.detach()
-                if losses.continue_sum is not None
-                else losses.halt_sum.new_zeros(())
+            ACT_LOSS_Q_CONTINUE: RatioStat(
+                numerator_sum=(
+                    losses.continue_sum.detach()
+                    if losses.continue_sum is not None
+                    else losses.halt_sum.new_zeros(())
+                ),
+                denominator_sum=bc,
             ),
-            denominator_sum=bc,
-        )
+        }
+        collisions = extras.keys() & scorer_extras.keys()
+        if collisions:
+            raise ValueError(
+                f"Task evaluator extras collide with scorer-owned keys: "
+                f"{sorted(collisions)}"
+            )
+        extras.update(scorer_extras)
 
         if task.accuracy_stats is not None:
             metrics = build_token_step_metrics(

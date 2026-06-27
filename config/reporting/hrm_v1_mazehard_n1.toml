@@ -17,9 +17,6 @@ figures = [
     "prediction_reasoning_mazehard",
     "pfc_latent_dynamics",
     "h_l_residuals_over_steps",
-    "prediction_accuracy_over_steps",
-    "halting_timeline",
-    # "halt_logit_evolution",  # requires value/q_logits trace
     # "pfc_path_memory_probe",  # requires separate probe evaluation
 ]
 formats = ["png", "pdf"]

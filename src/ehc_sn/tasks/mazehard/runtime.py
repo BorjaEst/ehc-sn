@@ -92,7 +92,7 @@ WALL_ID: int = 1
 EMPTY_ID: int = 2
 START_ID: int = 3
 GOAL_ID: int = 4
-PATH_ID: int = 5  # solution-mazehard_solution_overlay label token
+PATH_ID: int = 5  # solution label token
 SEM_VOCAB_SIZE: int = 5  # base semantic vocabulary (PAD..GOAL)
 MAZE_HARD_VOCAB_SIZE: int = PATH_ID + 1  # full vocab including PATH
 

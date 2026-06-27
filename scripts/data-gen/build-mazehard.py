@@ -390,7 +390,7 @@ def _build_trace_for_sample(
     """Build a minimal TraceTree with mazehard meta keys from a corpus sample.
 
     Converts corpus channels (topology, start, goals, solution) into the
-    ``input_ids`` / ``target/solution_overlay`` meta keys that the
+    ``input_ids`` / ``target/prediction_overlay`` meta keys that the
     ``task_overview_mazehard`` figure selector expects.
 
     Args:

@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from torch import Tensor, nn
 
 from ehc_sn.objectives.contracts import (
+    RatioStat,
     TaskStepEvaluation,
     TaskStepEvaluator,
 )
@@ -96,8 +97,14 @@ class GoaltraceFieldEvaluator:
             )
         )
         per_sample = result.terms["field_per_sample"]
+        per_element_sum = result.terms["field_per_element"].sum()
         loss_sum = per_sample.sum()
-        count = supervision.mask.sum().clamp(min=1)
+        valid_count = supervision.mask.sum()
+
+        if valid_count.item() == 0:
+            raise ValueError(
+                "Field evaluation received no valid spatial elements"
+            )
 
         completion_target = self._completion.build(
             pred_field=task_output.firing_field,
@@ -107,12 +114,18 @@ class GoaltraceFieldEvaluator:
 
         return TaskStepEvaluation(
             task_loss_sum=loss_sum,
-            task_loss_count=count,
+            task_loss_count=valid_count,
             completion_target=completion_target,
-            continuation_target=None,
+            continuation_target=1.0 - completion_target,
             metrics={
                 "field_mse_sum": loss_sum.detach(),
-                "field_mse_count": count.detach(),
+                "field_mse_count": valid_count.detach(),
+            },
+            task_extras={
+                "field_mse": RatioStat(
+                    numerator_sum=per_element_sum.detach(),
+                    denominator_sum=valid_count.detach(),
+                ),
             },
         )
 

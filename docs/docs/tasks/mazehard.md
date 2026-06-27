@@ -238,13 +238,8 @@ python scripts/data-gen/build-mazehard.py inspect \
 
 `task_overview_mazehard` (registry name) — three-panel horizontal figure showing
 the input token grid, the target solution path, and task metadata summary.
-Consumes only meta keys (`input_ids`, `target/solution_overlay`) and works
+Consumes only meta keys (`input_ids`, `target/prediction_overlay`) and works
 directly from the corpus without requiring an evaluation trace.
-
-The remaining MazeHard figures (`mazehard_solution_overlay`,
-`prediction_reasoning_mazehard`, `prediction_accuracy_over_steps`) require
-evaluation trace keys and are available through the report pipeline, not
-through corpus inspection.
 
 ## Manifest
 

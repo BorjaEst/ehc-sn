@@ -112,7 +112,7 @@ def apply_mazehard_trace_supplements(  # --------------------------------------
 # =============================================================================
 
 
-def _get_pred_solution_overlay(ctx) -> TraceValue:
+def _get_pred_prediction_overlay(ctx) -> TraceValue:
     """Decoded solution overlay from model task logits.
 
     Reads ``task_logits`` from the controller output surface.
@@ -142,7 +142,7 @@ def _get_pred_solution_overlay(ctx) -> TraceValue:
     return None
 
 
-def _get_target_solution_overlay(ctx) -> TraceValue:
+def _get_target_prediction_overlay(ctx) -> TraceValue:
     """Oracle solution overlay from the batch labels.
 
     Labels are sample-constant and held in ``ctx.carry.data["labels"]``
@@ -165,13 +165,13 @@ def trace_task_fields() -> tuple[TraceField, ...]:
     """Return TraceField objects for shared vocabulary names with MazeHard getters."""
     return (
         TraceField(
-            name="pred/solution_overlay",
-            get=_get_pred_solution_overlay,
+            name="pred/prediction_overlay",
+            get=_get_pred_prediction_overlay,
             storage="dense",
         ),
         TraceField(
-            name="target/solution_overlay",
-            get=_get_target_solution_overlay,
+            name="target/prediction_overlay",
+            get=_get_target_prediction_overlay,
             storage="meta",
         ),
     )

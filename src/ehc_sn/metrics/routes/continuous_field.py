@@ -17,7 +17,11 @@ Route categories
 """
 
 from ehc_sn.metrics.adapter import Route
-from ehc_sn.metrics.keys import extra_ratio_paths
+from ehc_sn.metrics.keys import (
+    ACT_LOSS_Q_CONTINUE,
+    ACT_LOSS_Q_DONE,
+    extra_ratio_paths,
+)
 from ehc_sn.metrics.routes.act import _with_namespace
 
 # =============================================================================
@@ -45,6 +49,14 @@ CONTINUOUS_FIELD_STEP_ROUTES: tuple[Route, ...] = (
     Route(
         "accuracy/q_done",
         *extra_ratio_paths("q_done_accuracy"),
+    ),
+    Route(
+        "loss/q_done",
+        *extra_ratio_paths(ACT_LOSS_Q_DONE),
+    ),
+    Route(
+        "loss/q_continue",
+        *extra_ratio_paths(ACT_LOSS_Q_CONTINUE),
     ),
 )
 

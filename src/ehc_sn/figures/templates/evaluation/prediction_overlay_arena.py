@@ -1,4 +1,4 @@
-"""Arena TEM prediction-mazehard_solution_overlay figure template.
+"""Arena TEM prediction figure template.
 
 Ground-truth vs predicted observation IDs for N samples at the final rollout
 step.  Each sample shows a horizontal bar: GT on the left, then the three

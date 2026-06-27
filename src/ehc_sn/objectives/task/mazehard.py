@@ -22,6 +22,7 @@ from ehc_sn.metrics.token import (
     compute_accuracy_stats,
 )
 from ehc_sn.objectives.contracts import (
+    RatioStat,
     TaskStepEvaluation,
     TaskStepEvaluator,
 )
@@ -120,9 +121,15 @@ class MazeHardTokenEvaluator:
             task_loss_sum=loss_sum,
             task_loss_count=count,
             completion_target=completion_target,
-            continuation_target=None,
+            continuation_target=1.0 - completion_target,
             accuracy_stats=stats,
             metrics=metrics,
+            task_extras={
+                "loss_token": RatioStat(
+                    numerator_sum=loss_sum.detach(),
+                    denominator_sum=count.detach(),
+                ),
+            },
         )
 
 

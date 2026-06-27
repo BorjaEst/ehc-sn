@@ -3,11 +3,6 @@
 from __future__ import annotations
 
 from ehc_sn.figures.registry import REGISTRY, FigureSpec
-from ehc_sn.figures.templates.evaluation import (
-    hidden_norm_histogram,
-    mazehard_solution_overlay,
-    occupancy_histogram,
-)
 
 
 def register_builtin_figures() -> None:
@@ -15,6 +10,7 @@ def register_builtin_figures() -> None:
     # Templates are imported inside this function so that importing
     # ``ehc_sn.figures`` does not eagerly pull in all template modules.
     from ehc_sn.figures.templates.diagnostics import (
+        h_l_residuals_over_steps,
         hpc_place_metrics,
         hpc_rate_map_mosaic,
         lec_content_filtering,
@@ -25,20 +21,10 @@ def register_builtin_figures() -> None:
         pfc_path_memory_probe,
     )
     from ehc_sn.figures.templates.evaluation import (
-        goaltrace_prediction_example,
-        h_l_residuals_over_steps,
-        halt_logit_evolution,
-        halting_timeline,
-        hidden_norm_histogram,
-        mazehard_solution_overlay,
-        occupancy_histogram,
-        prediction_accuracy_over_steps,
         prediction_overlay_arena,
         prediction_reasoning_goaltrace,
         prediction_reasoning_mazehard,
         prediction_reasoning_routebind,
-        q_value_evolution,
-        reasoning_budget_summary,
     )
     from ehc_sn.figures.templates.task import (
         task_overview_arena,
@@ -61,7 +47,6 @@ def register_builtin_figures() -> None:
         GOALTRACE_META_KEY_WEIGHT,
         GOALTRACE_TRACE_KEY_FIRING_FIELD,
         HPC_TRACE_KEY_CELLS,
-        HPC_TRACE_KEY_MEMORY,
         LEC_META_KEY_ALPHA,
         LEC_META_KEY_WF,
         LEC_TRACE_KEY_CELLS,
@@ -92,32 +77,6 @@ def register_builtin_figures() -> None:
         WORLD_TRACE_KEY_OBSERVATION,
     )
 
-    if not REGISTRY.has("mazehard_solution_overlay"):
-        REGISTRY.register(
-            FigureSpec(
-                name="mazehard_solution_overlay",
-                description="MazeHard overlays: N samples with GT vs model paths",
-                category="evaluation",
-                role="solution_overlay",
-                source_kind="evaluation_sample",
-                task="mazehard",
-                plot=mazehard_solution_overlay.plot,
-                default_filename="mazehard_solution_overlay",
-                maturity="stable",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="offline_artifact",
-                tags={"paper", "mazehard"},
-                trace_keys={
-                    MAZEHARD_TRACE_KEY_HALTED,
-                    MAZEHARD_TRACE_KEY_PRED_OVERLAY,
-                },
-                meta_keys={
-                    MAZEHARD_META_KEY_INPUT_IDS,
-                    MAZEHARD_META_KEY_GT_OVERLAY,
-                },
-            )
-        )
-
     if not REGISTRY.has("task_overview_mazehard"):
         REGISTRY.register(
             FigureSpec(
@@ -134,36 +93,6 @@ def register_builtin_figures() -> None:
                 input_contract="offline_artifact",
                 tags={"mazehard", "task-context"},
                 trace_keys=set(),
-                meta_keys={
-                    MAZEHARD_META_KEY_INPUT_IDS,
-                    MAZEHARD_META_KEY_GT_OVERLAY,
-                },
-            )
-        )
-
-    if not REGISTRY.has("prediction_reasoning_mazehard"):
-        REGISTRY.register(
-            FigureSpec(
-                name="prediction_reasoning_mazehard",
-                description=(
-                    "[deprecated] Use prediction_reasoning_mazehard instead. "
-                    "MazeHard prediction evolution: GT + per-step argmax "
-                    "overlays for one sample."
-                ),
-                category="evaluation",
-                role="prediction_reasoning",
-                source_kind="evaluation_sample",
-                task="mazehard",
-                plot=prediction_reasoning_mazehard.plot,
-                default_filename="prediction_reasoning_mazehard",
-                maturity="deprecated",
-                allowed_surfaces={"diagnostic"},
-                input_contract="evaluation_artifact",
-                tags={"mazehard"},
-                trace_keys={
-                    MAZEHARD_TRACE_KEY_HALTED,
-                    MAZEHARD_TRACE_KEY_PRED_OVERLAY,
-                },
                 meta_keys={
                     MAZEHARD_META_KEY_INPUT_IDS,
                     MAZEHARD_META_KEY_GT_OVERLAY,
@@ -274,31 +203,6 @@ def register_builtin_figures() -> None:
             )
         )
 
-    if not REGISTRY.has("prediction_accuracy_over_steps"):
-        REGISTRY.register(
-            FigureSpec(
-                name="prediction_accuracy_over_steps",
-                description="MazeHard prediction accuracy and target-path recall over recurrent rollout steps",
-                category="evaluation",
-                role="accuracy_over_steps",
-                source_kind="evaluation_sample",
-                task="mazehard",
-                plot=prediction_accuracy_over_steps.plot,
-                default_filename="prediction_accuracy_over_steps",
-                maturity="experimental",
-                allowed_surfaces={"diagnostic"},
-                input_contract="evaluation_artifact",
-                tags={"mazehard"},
-                trace_keys={
-                    MAZEHARD_TRACE_KEY_HALTED,
-                    MAZEHARD_TRACE_KEY_PRED_OVERLAY,
-                },
-                meta_keys={
-                    MAZEHARD_META_KEY_GT_OVERLAY,
-                },
-            )
-        )
-
     if not REGISTRY.has("pfc_path_memory_probe"):
         REGISTRY.register(
             FigureSpec(
@@ -336,7 +240,7 @@ def register_builtin_figures() -> None:
                     "or pathway uncertainty."
                 ),
                 category="evaluation",
-                role="solution_overlay",
+                role="prediction_overlay",
                 source_kind="evaluation_sample",
                 task="arena",
                 plot=prediction_overlay_arena.plot,
@@ -383,66 +287,6 @@ def register_builtin_figures() -> None:
             )
         )
 
-    if not REGISTRY.has("halting_timeline"):
-        REGISTRY.register(
-            FigureSpec(
-                name="halting_timeline",
-                description="Binary halting signal heatmap over time",
-                category="evaluation",
-                role="halting_timeline",
-                source_kind="evaluation_sample",
-                task=None,
-                plot=halting_timeline.plot,
-                default_filename="halting_timeline",
-                maturity="stable",
-                allowed_surfaces={"training", "diagnostic"},
-                input_contract="bounded_trace",
-                tags={"hrm", "ehp", "reasoning", "halting"},
-                trace_keys={"act/halted"},
-                meta_keys=set(),
-            )
-        )
-
-    if not REGISTRY.has("q_value_evolution"):
-        REGISTRY.register(
-            FigureSpec(
-                name="q_value_evolution",
-                description="Q-values over rollout steps (RL/EHP-reason/HRM-v2)",
-                category="evaluation",
-                role="q_value_evolution",
-                source_kind="evaluation_sample",
-                task=None,
-                plot=q_value_evolution.plot,
-                default_filename="q_value_evolution",
-                maturity="experimental",
-                allowed_surfaces={"training", "diagnostic"},
-                input_contract="bounded_trace",
-                tags={"hrm", "ehp", "rl", "reasoning", "value"},
-                trace_keys={"value/q_values"},
-                meta_keys=set(),
-            )
-        )
-
-    if not REGISTRY.has("halt_logit_evolution"):
-        REGISTRY.register(
-            FigureSpec(
-                name="halt_logit_evolution",
-                description="Halt/continue logits over rollout steps (ACT/HRM-v1)",
-                category="evaluation",
-                role="halt_logit_evolution",
-                source_kind="evaluation_sample",
-                task=None,
-                plot=halt_logit_evolution.plot,
-                default_filename="halt_logit_evolution",
-                maturity="experimental",
-                allowed_surfaces={"training", "diagnostic"},
-                input_contract="bounded_trace",
-                tags={"hrm", "act", "reasoning", "halting"},
-                trace_keys={"value/q_logits"},
-                meta_keys=set(),
-            )
-        )
-
     if not REGISTRY.has("pfc_latent_dynamics"):
         REGISTRY.register(
             FigureSpec(
@@ -475,89 +319,17 @@ def register_builtin_figures() -> None:
                     "cosine similarity, and H/L separation over "
                     "fixed-budget recurrent rollout steps"
                 ),
-                category="evaluation",
+                category="diagnostic",
                 role="residuals_over_steps",
                 source_kind="evaluation_sample",
                 task=None,
                 plot=h_l_residuals_over_steps.plot,
                 default_filename="h_l_residuals_over_steps",
                 maturity="experimental",
-                allowed_surfaces={"diagnostic"},
+                allowed_surfaces={"diagnostic", "report"},
                 input_contract="offline_artifact",
                 tags={"hrm", "dynamics", "latent"},
                 trace_keys={PFC_TRACE_KEY_Z_H, PFC_TRACE_KEY_Z_L},
-                meta_keys=set(),
-            )
-        )
-
-    if not REGISTRY.has("reasoning_budget_summary"):
-        REGISTRY.register(
-            FigureSpec(
-                name="reasoning_budget_summary",
-                description=(
-                    "MazeHard reasoning budget: recurrent budget ruler, "
-                    "termination event marker, and computation policy summary"
-                ),
-                category="evaluation",
-                role="reasoning_budget",
-                source_kind="evaluation_run",
-                task=None,
-                plot=reasoning_budget_summary.plot,
-                default_filename="reasoning_budget_summary",
-                maturity="stable",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="offline_artifact",
-                tags={"hrm", "reasoning"},
-                trace_keys={"act/halted"},
-                meta_keys=set(),
-            )
-        )
-
-    if not REGISTRY.has("occupancy_histogram"):
-        REGISTRY.register(
-            FigureSpec(
-                name="occupancy_histogram",
-                description=(
-                    "Occupancy histogram — reducer-summary diagnostic "
-                    "(TensorBoard path only; not compatible with FigureGenerationCallback)"
-                ),
-                category="evaluation",
-                role="occupancy_histogram",
-                source_kind="evaluation_run",
-                task=None,
-                plot=occupancy_histogram.plot,
-                default_filename="occupancy_histogram",
-                maturity="stable",
-                allowed_surfaces={"training", "diagnostic"},
-                input_contract="evaluation_artifact",
-                tags={"tem", "ehp", "spatial", "summary"},
-                trace_keys={"diagnostic/occupancy"},
-                meta_keys=set(),
-            )
-        )
-
-    if not REGISTRY.has("hidden_norm_histogram"):
-        REGISTRY.register(
-            FigureSpec(
-                name="hidden_norm_histogram",
-                description=(
-                    "Hidden-state norm histogram — reducer-summary diagnostic "
-                    "(TensorBoard path only; not compatible with FigureGenerationCallback)"
-                ),
-                category="evaluation",
-                role="hidden_norm_histogram",
-                source_kind="evaluation_sample",
-                task=None,
-                plot=hidden_norm_histogram.plot,
-                default_filename="hidden_norm_histogram",
-                maturity="experimental",
-                allowed_surfaces={"training", "diagnostic"},
-                input_contract="evaluation_artifact",
-                tags={"tem", "ehp", "spatial", "summary"},
-                trace_keys={
-                    "diagnostic/hidden_norms",
-                    "diagnostic/hidden_norms_density",
-                },
                 meta_keys=set(),
             )
         )
@@ -772,45 +544,6 @@ def register_builtin_figures() -> None:
                 input_contract="offline_artifact",
                 tags={"goaltrace", "task-context"},
                 trace_keys=frozenset(),
-                meta_keys=frozenset(
-                    {
-                        GOALTRACE_META_KEY_OBSERVATION_ID,
-                        GOALTRACE_META_KEY_WEIGHT,
-                        GOALTRACE_META_KEY_CURRENT_FLAG,
-                        GOALTRACE_META_KEY_GOAL_FLAG,
-                        GOALTRACE_META_KEY_NODE_MASK,
-                        GOALTRACE_META_KEY_TARGET_FIELD,
-                        GOALTRACE_META_KEY_SUCCESSOR_INDICES,
-                        GOALTRACE_META_KEY_SUCCESSOR_MASK,
-                    }
-                ),
-            )
-        )
-
-    if not REGISTRY.has("goaltrace_prediction_example"):
-        REGISTRY.register(
-            FigureSpec(
-                name="goaltrace_prediction_example",
-                description=(
-                    "Goaltrace prediction example: input weights, target "
-                    "field, and predicted field rendered on the same DAG "
-                    "topology with panel-level diagnostics."
-                ),
-                category="evaluation",
-                role="prediction_example",
-                source_kind="evaluation_sample",
-                task="goaltrace",
-                plot=goaltrace_prediction_example.plot,
-                default_filename="goaltrace_prediction_example",
-                maturity="experimental",
-                allowed_surfaces={"diagnostic", "report"},
-                input_contract="evaluation_artifact",
-                tags={"goaltrace", "prediction"},
-                trace_keys=frozenset(
-                    {
-                        GOALTRACE_TRACE_KEY_FIRING_FIELD,
-                    }
-                ),
                 meta_keys=frozenset(
                     {
                         GOALTRACE_META_KEY_OBSERVATION_ID,

@@ -21,12 +21,22 @@ from torch import Tensor
 if TYPE_CHECKING:
     from ehc_sn.metrics.token import AccuracyStats
 
+# TODO: Relocate RatioStat to a neutral contracts module
+# (e.g. src/ehc_sn/contracts/metrics.py) to avoid coupling
+# objective contracts to the full step-metrics transport layer.
+from ehc_sn.metrics.step_metrics import RatioStat  # noqa: TCH
+
 TaskOutputT = TypeVar("TaskOutputT", contravariant=True)
 SupervisionT = TypeVar("SupervisionT", contravariant=True)
 
 
 def _empty_metrics() -> dict[str, Tensor]:
     """Return an empty metrics dict — default factory for frozen dataclass."""
+    return {}
+
+
+def _empty_task_extras() -> dict[str, RatioStat]:
+    """Return an empty task-extras dict — default factory for frozen dataclass."""
     return {}
 
 
@@ -59,7 +69,16 @@ class TaskStepEvaluation:
     continuation_target: Tensor | None = None
     accuracy_stats: AccuracyStats | None = None
     metrics: Mapping[str, Tensor] = field(default_factory=_empty_metrics)
-    # fmt: skip
+    """Raw evaluator diagnostics. Not automatically routed or reduced."""
+
+    task_extras: Mapping[str, RatioStat] = field(
+        default_factory=_empty_task_extras
+    )
+    """Canonical aggregation-ready ratio statistics for inclusion in
+    ``StepMetrics.extras``.  Keys must match route-table entries for the
+    active metric profile (e.g. ``"field_mse"``, ``"loss_token"``).
+    The ACT scorer forwards these structurally — it does not interpret
+    individual key names."""
 
     def __post_init__(self) -> None:
         _validate_completion_target(self.completion_target)

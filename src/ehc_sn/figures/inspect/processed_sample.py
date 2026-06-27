@@ -6,7 +6,6 @@ Renders a single sample's channels grouped into semantically coherent panels:
 - **Structure** — ``topology`` + ``regions``, ``landmarks``
 - **Perception** — ``topology`` + ``observations``, ``mask_valid``
 
-Panels whose mazehard_solution_overlay channels are all absent are omitted automatically.
 """
 
 from __future__ import annotations
