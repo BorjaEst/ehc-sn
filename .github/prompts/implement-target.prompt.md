@@ -48,19 +48,18 @@ ${input:ValidationOverride:optional}
 8. If validation fails but still points to the same slice, repair that same slice and rerun the same validation before expanding scope.
 9. If validation falsifies the current hypothesis, move one nearby hop to the code that more directly controls the behavior. Do not reopen broad exploration.
 10. Treat new wrappers, helpers, files, and public APIs as disallowed by default. Add one only with a concrete justification: boundary translation, second real consumer, compatibility surface, or explicit isolation need.
-11. Prefer removal, simplification, and reuse over new code.
+11. Apply the deletion and legacy-removal principles from `core.instructions.md`.
 12. Implement the general solution. Do not hard-code to the visible tests or add one-off workarounds.
 13. Stop as soon as the acceptance criteria are satisfied or a concrete blocker remains.
 
 ## Execution Rules
 
-- Do not reinterpret the Final Target into a broader redesign.
-- Do not reopen decisions already fixed in the Final Target unless verified repo facts directly contradict them.
-- Do not continue searching once you know the owning abstraction and the cheapest discriminating check.
-- When two nearby approaches both look plausible, choose one and commit. Revisit only if validation falsifies it.
-- Do not convert the task into a handoff prompt, a new plan, or a speculative todo list.
-- Do not create scratch scripts or temporary helper files unless they are clearly necessary for validation; remove them before finishing.
-- Do not stop early because the task feels large or the conversation is long. Stop only at done or blocked.
+- Do not reinterpret the Final Target into a broader redesign or reopen settled decisions.
+- Do not continue searching once you know the owning abstraction and the cheapest check.
+- When two approaches both look plausible, choose one; revisit only if validation falsifies it.
+- Do not convert the task into a handoff prompt, plan, or speculative todo list.
+- Do not create scratch scripts or temp files unless needed for validation; remove them after.
+- Stop only at done or blocked.
 
 ## Output Expectations
 

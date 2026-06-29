@@ -19,14 +19,14 @@ Every prompt file should include YAML frontmatter with the following fields:
 
 ### Required/Recommended Fields
 
-| Field           | Required    | Description                                                                                 |
-| --------------- | ----------- | ------------------------------------------------------------------------------------------- |
-| `description`   | Recommended | A short description of the prompt (single sentence, actionable outcome)                     |
-| `name`          | Optional    | The name shown after typing `/` in chat. Defaults to filename if not specified              |
-| `agent`         | Recommended | The agent to use: `ask`, `edit`, `agent`, or a custom agent name. Defaults to current agent |
-| `model`         | Optional    | The language model to use. Defaults to the currently selected model                         |
-| `tools`         | Optional    | List of tool/tool set names available for this prompt                                       |
-| `argument-hint` | Optional    | Hint text shown in chat input to guide user interaction                                     |
+| Field           | Required    | Description                                                  |
+| --------------- | ----------- | ------------------------------------------------------------ |
+| `description`   | Recommended | Single-sentence, actionable outcome                          |
+| `name`          | Optional    | Name shown after `/` in chat; defaults to filename           |
+| `agent`         | Recommended | `ask`, `edit`, `agent`, or custom agent; defaults to current |
+| `model`         | Optional    | Language model; defaults to current selection                |
+| `tools`         | Optional    | Tool/tool set names available for this prompt                |
+| `argument-hint` | Optional    | Hint text shown in chat input                                |
 
 ### Guidelines
 
@@ -79,12 +79,10 @@ Every prompt file should include YAML frontmatter with the following fields:
 ## Quality Assurance Checklist
 
 - [ ] Frontmatter fields are complete, accurate, and least-privilege.
-- [ ] Inputs include placeholders, default behaviours, and fallbacks.
-- [ ] Workflow covers preparation, execution, and post-processing without gaps.
-- [ ] Output expectations include formatting and storage details.
+- [ ] Inputs include placeholders, defaults, and fallbacks.
+- [ ] Workflow covers preparation, execution, and post-processing.
+- [ ] Output expectations include format, structure, and storage.
 - [ ] Validation steps are actionable (commands, diff checks, review prompts).
-- [ ] Security, compliance, and privacy policies referenced by the prompt are current.
-- [ ] Prompt executes successfully in VS Code (`Chat: Run Prompt`) using representative scenarios.
 
 ## Maintenance Guidance
 

@@ -32,23 +32,13 @@ ${input:RoughRequest:paste the rough task, goal, or change request}
 2. Identify the smallest concrete anchors needed to remove ambiguity: file, symbol, API surface, neighboring helper, test, or command.
 3. Read only enough local context to confirm ownership, boundaries, and terminology.
 4. Rewrite vague goals into explicit end-state language. Replace words like "clean up", "improve", "support", or "refactor" with observable target behavior.
-5. Define the exact API target when relevant:
-   - public names,
-   - inputs and outputs,
-   - types or shape expectations,
-   - validation and error behavior,
-   - compatibility expectations.
-6. Define the naming-refactor surface when relevant:
-   - current names,
-   - target names,
-   - affected files or call sites,
-   - explicit non-goals.
-7. Define module and helper interactions when relevant:
-   - owning module,
-   - reused helpers,
-   - helper additions or removals,
-   - boundaries that must remain unchanged,
-   - wiring changes versus logic changes.
+5. Define the exact API target when relevant: public names, inputs and outputs,
+   types or shape expectations, validation and error behavior, compatibility.
+6. Define the naming-refactor surface when relevant: current names, target names,
+   affected files or call sites, explicit non-goals.
+7. Define module and helper interactions when relevant: owning module, reused
+   helpers, helper additions or removals, boundaries that must remain unchanged,
+   wiring changes versus logic changes.
 8. State concrete behavioral rules and invariants that must hold after the work is done.
 9. Write acceptance criteria that are specific and falsifiable.
 10. If ambiguity remains, surface it explicitly as a blocking question or clearly labeled assumption. Never hide ambiguity behind generic prose.

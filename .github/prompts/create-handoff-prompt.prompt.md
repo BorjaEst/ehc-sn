@@ -70,16 +70,16 @@ Make it ready to copy and paste.
 Use this exact section structure inside the generated prompt:
 
 ```text
-You are taking over one bounded implementation task in /home/borja/ehc-sn.
+You are taking over one bounded implementation task in /home/borja/ehp-sn.
 
 Task
-<one short paragraph describing only the remaining delta to target, or "validation only" when Gap to target is none.>
+<one short paragraph; or "validation only" when Gap to target is none.>
 
 Current status
-<2 to 4 lines covering: what was verified to already exist, what is still missing or uncertain, and the verdict: done, partially done, or not done. Name the observed file, symbol, test, or command used for the status check.>
+<2-4 lines: what was verified, what is missing, verdict. Name file, symbol, test, or command used.>
 
 Gap to target
-<one short paragraph describing the remaining delta from the verified current state to the target; use "none - validation only" when the target is already reached.>
+<remaining delta; "none - validation only" when target already reached.>
 
 Primary anchor
 <file, symbol, failing test, or command>
@@ -94,21 +94,21 @@ Owning abstraction
 <module, class, function, or explicit placeholder>
 
 Abstraction gate
-<state whether a new wrapper, helper, file, or public API is needed; if yes, justify it>
+<whether a new wrapper/helper/file/public API is needed; justify if yes>
 
 Workflow
-1. Verify spec/spec-manifest.toml exists and that every required spec file exists before doing any design or code work.
-2. Start from the Primary anchor and do one cheap freshness check against the provided Current status and Gap to target. Do not redo broad status discovery unless that check disagrees.
-3. Before the first edit, identify the Owning abstraction and state whether the provided status appears to match current repo state.
-4. If the freshness check matches and Gap to target is none - validation only, do not edit code. Run the cheapest relevant validation and stop.
-5. If the freshness check differs, report the drift briefly, update your local understanding from the verified delta, and continue without widening scope.
-6. If the cheapest local patch would place logic in the wrong layer, move one hop to the owning abstraction instead of adding another wrapper.
-7. Treat new wrappers, helpers, files, and public APIs as disallowed by default. Only add one if the Abstraction gate has a concrete justification: boundary translation, second real consumer, compatibility surface, or explicit isolation need.
-8. If changes are needed, make the smallest local edit in the owning abstraction that closes the provided Gap to target.
+1. Verify spec/spec-manifest.toml and all required spec files exist.
+2. Start from Primary anchor; do one cheap freshness check against Current status and Gap to target.
+3. Before first edit, identify Owning abstraction; state whether status matches.
+4. If freshness matches and Gap is "none - validation only": do not edit, run validation, stop.
+5. If freshness differs: report drift, update from verified delta, continue without widening scope.
+6. If the cheapest patch would put logic in the wrong layer, move one hop to the owning abstraction.
+7. New wrappers, helpers, files, public APIs disallowed by default. Add only with concrete justification.
+8. If changes needed: smallest local edit in owning abstraction that closes the Gap.
 9. Prefer removal, simplification, and reuse over adding code.
-10. After the first substantive edit, run the narrowest available validation before doing more reading or patching.
-11. If validation fails, repair the same slice and rerun the same validation before expanding scope.
-12. Stop when the definition of done is met or when a concrete blocker remains.
+10. After first edit, run narrowest validation before more reading or patching.
+11. If validation fails, repair same slice and rerun same validation before expanding scope.
+12. Stop when definition of done is met or a concrete blocker remains.
 
 Validation
 <test, command, or explicit placeholder>
@@ -123,7 +123,7 @@ Reporting format
 - Status evidence: observed file, symbol, test, or command from this run
 - Drift: brief mismatch summary or none
 - Validation: what ran or why it could not run
-- Result: whether the definition of done was met
+- Result: definition of done met or not
 - Blockers: only if not done
 ```
 

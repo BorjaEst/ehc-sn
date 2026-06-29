@@ -38,11 +38,6 @@ language-agnostic rules in `.github/instructions/core.coding.instructions.md`.
 
 ## Testing
 
-- If the repository already has a test harness, add or update unit tests for
-  changed behavior.
+- Add or update unit tests for changed behavior within the existing test harness.
 - Do not introduce a new test framework or large test scaffolding unless the
   task explicitly requires it.
-
-1. **Ask User**: "Would you like me to generate test scripts for this implementation?"
-2. **Provide Summary**: Brief overview of implementation and any caveats
-3. **Validate Solution**: Ensure code actually runs and produces expected results

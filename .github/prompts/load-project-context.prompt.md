@@ -58,36 +58,30 @@ Before any design, coding, or advice, return:
 
 ### Papers Read
 
-- citation key
-- task-relevant claim
-- mechanism
-- limitation or uncertainty
+- citation key, task-relevant claim, mechanism, limitation or uncertainty
 
 ### Code Read
 
-- file
-- owning symbol or module
-- behavior it controls
+- file, owning symbol or module, behavior it controls
 
 ### Mappings
 
-- for each relevant family, map paper concept -> legacy code surface -> relevance to Current Focus
+- for each family: paper concept -> legacy code surface -> relevance to Current Focus
 
 ### Gaps
 
-- anything not yet grounded, ambiguous, contradictory, or missing from the sources above
+- anything not yet grounded, ambiguous, contradictory, or missing
 
-Only make claims that can be tied to a bibliography key and a concrete code surface read in this run.
+Only claim what can be tied to a bibliography key and a concrete code surface read in this run.
 
 ## Stop Conditions
 
-Stop and report the gap instead of giving advice or implementation guidance if:
+Stop and report the gap instead of giving advice if:
 
-- any listed paper was not read
-- any listed code source was not read
-- any claim cannot be tied to a bibliography key
-- any code statement cannot be tied to a concrete file and owning symbol or module
-- any required mapping cannot be made from the sources above
+- any listed paper or code source was not read,
+- any claim cannot be tied to a bibliography key,
+- any code statement cannot be tied to a concrete file and owning symbol,
+- any required mapping cannot be made from the sources above.
 
 ## Output Expectations
 

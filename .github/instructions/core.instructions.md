@@ -30,9 +30,24 @@ Topic routing:
 
 If the user request conflicts with canonical specs, surface the conflict and ask for a decision before proceeding.
 
+## Instruction File Precedence
+
+`core.instructions.md` is the single source of truth for engineering principles.
+Other instruction files (`core.coding.instructions.md`, `python.instructions.md`,
+etc.) elaborate mechanics and must not restate or contradict principles defined
+here. If a narrower instruction file appears to conflict, `core.instructions.md`
+takes precedence.
+
 ## Principles
 
-Your primary goal is to shorten, simplify, and clarify code. Prefer deletion over addition.
+Your primary goal is to shorten, simplify, and clarify code. Prefer deletion over
+addition.
+
+- Remove legacy code when touching an owning abstraction; do not work around it.
+- Follow existing repository patterns and contracts. Study neighboring modules
+  before introducing new abstractions, types, or wiring.
+- For documentation, prefer deleting stale or conflicting content over adding new
+  content alongside it.
 
 When optimizing code, follow this process:
 
@@ -47,6 +62,3 @@ style:
 - No filler language.
 - No expanding the code unless needed for correctness.
 - Prioritize simplicity over architecture.
-
-Output:
-Return only the optimized code and a brief rationale.
