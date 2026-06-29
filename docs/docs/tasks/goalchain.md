@@ -196,7 +196,7 @@ target sequences ($x'[0:n]$, $g'[0:n]$) representing the shortest walk.
 ```bash
 # Requires a trained arena model checkpoint:
 python scripts/data-gen/build-goalchain.py build-all \
-    --arena-checkpoint checkpoints/arena/eval-weights-only.pt
+    --arena-checkpoint artifacts/models/tem-v1-arena/run-000001
 ```
 
 Output path: `data/processed/goalchain/<corpus>/v<version>/`
