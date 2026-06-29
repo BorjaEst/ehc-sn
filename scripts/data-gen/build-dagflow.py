@@ -55,7 +55,6 @@ Inspect manifest::
 
 from __future__ import annotations
 
-import json
 import shutil
 from pathlib import Path
 from typing import Annotated
@@ -66,7 +65,6 @@ from ehc_sn.data.lifecycle import validate_version_root
 from ehc_sn.data.substrate.dagflow import (
     _SPAN_PROFILES,
     DAGFLOW_PRESETS,
-    LAYOUT_FAMILY,
     build_dagflow_layouts,
     validate_dagflow_layout_root,
 )

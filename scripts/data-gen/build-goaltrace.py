@@ -71,23 +71,21 @@ For static-weight corpora, a larger dagflow substrate can be built with::
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
 import numpy as np
 import typer
 
+from ehc_sn.data.manifest import read_manifest
+from ehc_sn.data.validation.reporting import write_validation_bundle
 from ehc_sn.figures import FigureContext, render
-from ehc_sn.reporting.goaltrace import (
-    format_validation_summary,
-    serialize_validation_result,
-    write_validation_bundle,
-)
 from ehc_sn.tasks.goaltrace import (
     TASK_FAMILY,
     build_goaltrace_task_corpus,
 )
-from ehc_sn.tasks.goaltrace.corpus import load_sample, load_split_arrays
+from ehc_sn.tasks.goaltrace.corpus import load_sample
 from ehc_sn.tasks.goaltrace.diagnostics import (
     compute_corpus_statistics,
     select_samples,
@@ -358,8 +356,6 @@ def validate(
     ] = Path("outputs/goaltrace-validation"),
 ) -> None:
     """Validate a goaltrace task-corpus version root with structured reports."""
-    from ehc_sn.data.manifest import read_manifest
-
     root = root.resolve()
     manifest = read_manifest(root)
     all_splits = list(manifest.get("n_samples", {}).keys())
@@ -470,7 +466,6 @@ def inspect(
     ] = Path("outputs/goaltrace-inspection"),
 ) -> None:
     """Inspect a Goaltrace corpus — metadata, samples, diagnostics, figures."""
-    from ehc_sn.data.manifest import read_manifest
 
     root = root.resolve()
     manifest = read_manifest(root)
@@ -579,9 +574,7 @@ def inspect(
 
     if json_out is not None:
         stats = compute_corpus_statistics(root, manifest, all_splits)
-        import json as _json
-
-        _json.dump(stats, json_out.open("w"), indent=2, default=str)
+        json.dump(stats, json_out.open("w"), indent=2, default=str)
 
     if show:
         try:

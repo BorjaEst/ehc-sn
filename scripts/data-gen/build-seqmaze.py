@@ -48,27 +48,22 @@ Build it first::
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
-import numpy as np
 import typer
 
-from ehc_sn.data.lifecycle import validate_version_root
-from ehc_sn.data.manifest import read_manifest
-from ehc_sn.figures import FigureContext, render
+from ehc_sn.data.validation.reporting import write_validation_bundle
 from ehc_sn.tasks.seqmaze import (
     TASK_FAMILY,
     build_seqmaze_task_corpus,
     validate_seqmaze_root,
 )
-from ehc_sn.tasks.seqmaze.corpus import load_sample, load_split_arrays
+from ehc_sn.tasks.seqmaze.corpus import load_sample
 from ehc_sn.tasks.seqmaze.diagnostics import compute_corpus_statistics
 from ehc_sn.tasks.seqmaze.inspection import prepare_sample_inspection
-from ehc_sn.tasks.seqmaze.validation import (
-    SeqMazeValidationIssue,
-    validate_all_samples,
-)
+from ehc_sn.tasks.seqmaze.validation import validate_all_samples
 
 # ---------------------------------------------------------------------------
 _DEFAULT_VERSION = 1
@@ -212,16 +207,16 @@ def validate(
     stats["corpus"] = manifest.get("corpus", "?")
     stats["version"] = manifest.get("version", "?")
 
-    # Write report bundle
-    output_dir.mkdir(parents=True, exist_ok=True)
-    _write_validation_bundle(issues, stats, sample_counts, output_dir)
+    paths = write_validation_bundle(
+        issues, stats, sample_counts, output_dir=output_dir
+    )
 
     errors = [i for i in issues if i.severity == "ERROR"]
     n_err = len(errors)
     typer.echo(f"SeqMaze corpus validation: {root}")
-    typer.echo(f"  Validation report: {output_dir / 'validation_report.txt'}")
-    typer.echo(f"  Diagnostics:       {output_dir / 'diagnostics.txt'}")
-    typer.echo(f"  Summary:           {output_dir / 'summary.txt'}")
+    typer.echo(f"  Validation report: {paths['validation']}")
+    typer.echo(f"  Diagnostics:       {paths['diagnostics']}")
+    typer.echo(f"  Summary:           {paths['summary']}")
     typer.echo(f"Validated {sum(sample_counts.values())} samples")
     typer.echo(
         f"  Errors: {n_err}  Warnings: "
@@ -397,63 +392,7 @@ def inspect(
 
     if json_out is not None:
         stats = compute_corpus_statistics(root, manifest, all_splits)
-        import json as _json
-
-        _json.dump(stats, json_out.open("w"), indent=2, default=str)
-
-
-# =============================================================================
-# Report bundle helpers
-# =============================================================================
-
-
-def _write_validation_bundle(
-    issues: list,
-    stats: dict,
-    sample_counts: dict[str, int],
-    output_dir: Path,
-) -> None:
-    """Write validation report, diagnostics, and summary to *output_dir*."""
-    errors = [i for i in issues if i.severity == "ERROR"]
-    warnings = [i for i in issues if i.severity == "WARNING"]
-
-    # Validation report
-    report_path = output_dir / "validation_report.txt"
-    with report_path.open("w") as f:
-        f.write(f"SeqMaze corpus validation: {stats.get('corpus', '?')}\n")
-        f.write(f"  Version: {stats.get('version', '?')}\n")
-        f.write(f"  Validated splits: {list(sample_counts.keys())}\n")
-        f.write(f"  Errors: {len(errors)}\n")
-        f.write(f"  Warnings: {len(warnings)}\n")
-        for i in issues:
-            f.write(
-                f"  [{i.split}/{i.sample_index}] " f"{i.code}: {i.message}\n"
-            )
-
-    # Diagnostics
-    diag_path = output_dir / "diagnostics.txt"
-    with diag_path.open("w") as f:
-        f.write("Corpus diagnostics\n")
-        f.write("==================\n")
-        for split_name in sample_counts:
-            f.write(f"\n{split_name}:\n")
-            pl = stats.get("path_length", {}).get(split_name, {})
-            if pl:
-                f.write(f"  path_length: {pl}\n")
-            na = stats.get("n_actual", {}).get(split_name, {})
-            if na:
-                f.write(f"  n_actual: {na}\n")
-
-    # Summary
-    summary_path = output_dir / "summary.txt"
-    with summary_path.open("w") as f:
-        f.write(f"Corpus: {stats.get('corpus', '?')}\n")
-        f.write(f"Version: {stats.get('version', '?')}\n")
-        f.write(f"N_max: {stats.get('n_max', '?')}\n")
-        f.write(f"T_max: {stats.get('t_max', '?')}\n")
-        f.write(f"Total samples: {sum(sample_counts.values())}\n")
-        f.write(f"Errors: {len(errors)}\n")
-        f.write(f"Warnings: {len(warnings)}\n")
+        json.dump(stats, json_out.open("w"), indent=2, default=str)
 
 
 # =============================================================================

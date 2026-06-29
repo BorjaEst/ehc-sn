@@ -51,11 +51,13 @@ import shutil
 from pathlib import Path
 from typing import Annotated
 
-import numpy as np
 import typer
 
 from ehc_sn.data.layout import SpatialLayout
 from ehc_sn.data.layout.io import write_layout_dataset
+from ehc_sn.data.layout.observation_placement import (
+    ObservationPlacementConfig,
+)
 from ehc_sn.data.layout.openfield import (
     OPENFIELD_PRESETS,
     enrich_layout_with_sensory,
@@ -504,10 +506,6 @@ def _materialize_layouts(  # ---------------------------------------------------
                 sensory_seed = topology_seed + spec["seed_offset"] + inst_idx
                 obs_placement_cfg = None
                 if observation_policy != "dense_uniform":
-                    from ehc_sn.data.layout.observation_placement import (
-                        ObservationPlacementConfig,
-                    )
-
                     obs_placement_cfg = ObservationPlacementConfig(
                         policy=observation_policy,
                         max_occurrences=observation_max_occurrences,

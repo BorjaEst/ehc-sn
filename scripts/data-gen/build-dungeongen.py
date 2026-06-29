@@ -45,6 +45,9 @@ from typing import Annotated
 
 import typer
 
+from ehc_sn.data.layout.observation_placement import (
+    ObservationPlacementConfig,
+)
 from ehc_sn.data.lifecycle import validate_version_root
 from ehc_sn.data.substrate.dungeongen import (
     DUNGEONGEN_PRESETS,
@@ -379,10 +382,6 @@ def _materialize_layouts(  # ---------------------------------------------------
 
     obs_placement_cfg = None
     if observation_policy != "dense_uniform":
-        from ehc_sn.data.layout.observation_placement import (
-            ObservationPlacementConfig,
-        )
-
         obs_placement_cfg = ObservationPlacementConfig(
             policy=observation_policy,
             max_occurrences=observation_max_occurrences,

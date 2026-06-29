@@ -22,7 +22,6 @@ Usage
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -33,12 +32,12 @@ from ehc_sn.data.layout.io import load_layout_dataset
 from ehc_sn.data.manifest import read_manifest
 from ehc_sn.data.substrate.dagflow import validate_dagflow_layout_sample
 from ehc_sn.data.substrate.reader import find_artifact_by_id
-from ehc_sn.figures import FigureContext, render
-from ehc_sn.reporting.routebind import (
+from ehc_sn.data.validation.reporting import (
     format_validation_summary,
     serialize_validation_result,
     write_validation_bundle,
 )
+from ehc_sn.figures import FigureContext, render
 from ehc_sn.tasks.routebind import (
     ROUTEBIND_PRESETS,
     TASK_FAMILY,
@@ -58,13 +57,6 @@ from ehc_sn.tasks.routebind.validation import (
     validate_corpus_root,
     validate_stored_sample,
     validate_support_channels,
-)
-from ehc_sn.traces.keys import (
-    ROUTEBIND_META_KEY_CELL_TYPE,
-    ROUTEBIND_META_KEY_GOAL_FLAG,
-    ROUTEBIND_META_KEY_OBSERVATION_ID,
-    ROUTEBIND_META_KEY_START_FLAG,
-    ROUTEBIND_META_KEY_TARGET_TRAJECTORY,
 )
 from ehc_sn.traces.trace_tree import TraceTree
 
@@ -98,11 +90,6 @@ def _emit_validation_results(
     stats: dict | None = None,
 ) -> int:
     """Write validation bundle, print summary, return exit code."""
-    from ehc_sn.reporting.routebind import (
-        format_validation_summary,
-        serialize_validation_result,
-        write_validation_bundle,
-    )
 
     if stats is None:
         stats = {

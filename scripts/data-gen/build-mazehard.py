@@ -52,25 +52,27 @@ Or, with explicit version::
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
 import numpy as np
 import typer
 
+from ehc_sn.data.validation.reporting import write_validation_bundle
 from ehc_sn.figures import FigureContext, render
 from ehc_sn.tasks.mazehard import (
-    MAZEHARD_TASK_CHANNELS,
     TASK_FAMILY,
     build_mazehard_task_corpus,
     validate_mazehard_root,
 )
-from ehc_sn.tasks.mazehard.corpus import load_sample, load_split_arrays
+from ehc_sn.tasks.mazehard.corpus import load_sample
 from ehc_sn.tasks.mazehard.diagnostics import (
     compute_corpus_statistics,
     select_samples,
 )
 from ehc_sn.tasks.mazehard.inspection import prepare_sample_inspection
+from ehc_sn.tasks.mazehard.validation import validate_all_samples
 
 # ---------------------------------------------------------------------------
 _DEFAULT_TASK_VERSION = 1
@@ -188,8 +190,6 @@ def validate(
     ] = _DEFAULT_OUTPUT_DIR,
 ) -> None:
     """Validate a MazeHard task-corpus root with structured reports."""
-    from ehc_sn.reporting.mazehard import write_validation_bundle
-    from ehc_sn.tasks.mazehard.validation import validate_all_samples
 
     root = root.resolve()
     manifest = validate_mazehard_root(root)
@@ -372,9 +372,7 @@ def inspect(
 
     if json_out is not None:
         stats = compute_corpus_statistics(root, manifest, all_splits)
-        import json as _json
-
-        _json.dump(stats, json_out.open("w"), indent=2, default=str)
+        json.dump(stats, json_out.open("w"), indent=2, default=str)
 
 
 # =============================================================================

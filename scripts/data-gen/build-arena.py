@@ -44,17 +44,13 @@ import numpy as np
 import typer
 
 from ehc_sn.data.layout.io import load_layout_dataset
+from ehc_sn.data.manifest import read_manifest
+from ehc_sn.data.validation.reporting import write_validation_bundle
 from ehc_sn.figures import FigureContext, render
-from ehc_sn.reporting.arena import (
-    format_validation_summary,
-    serialize_validation_result,
-    write_validation_bundle,
-)
 from ehc_sn.tasks.arena import (
     build_arena_task_corpus,
-    validate_arena_task_root,
 )
-from ehc_sn.tasks.arena.corpus import load_sample, load_split_arrays
+from ehc_sn.tasks.arena.corpus import load_sample
 from ehc_sn.tasks.arena.diagnostics import compute_corpus_statistics
 from ehc_sn.tasks.arena.inspection import prepare_sample_inspection
 from ehc_sn.tasks.arena.validation import (
@@ -191,8 +187,6 @@ def validate(
     ] = Path("outputs/arena-validation"),
 ) -> None:
     """Validate an Arena task-corpus root with structured reports."""
-    from ehc_sn.data.manifest import read_manifest
-
     root = root.resolve()
     manifest = read_manifest(root)
     all_splits = list(manifest.get("n_samples", {}).keys())
@@ -278,8 +272,6 @@ def inspect_command(
     ] = Path("outputs/arena-inspection"),
 ) -> None:
     """Inspect an Arena corpus — metadata, samples, diagnostics, figures."""
-    from ehc_sn.data.manifest import read_manifest
-
     root = root.resolve()
     manifest = read_manifest(root)
     all_splits = list(manifest.get("n_samples", {}).keys())
