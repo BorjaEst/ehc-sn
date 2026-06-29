@@ -1,0 +1,43 @@
+# =============================================================================
+# Arena × TEM-v1 recipe definition.
+# =============================================================================
+
+schema_version = 1
+alias = "arena-tem-v1"
+
+task = "arena"
+model_family = "tem-v1"
+
+primary_metric = "accuracy_revisit"
+required_capabilities = [
+    "recurrent-step",
+    "spatial-latents",
+    "episodic-memory",
+]
+
+[cases]
+split = "test"
+count = 128
+seed = 0
+
+[cases.dataset]
+uri = "data/processed/arena/default/v1"
+
+[evaluation]
+rollout_steps = 250
+
+[capture]
+profile = "diagnostic"
+max_cases = 16
+max_units_per_field = 512
+
+[inspection]
+enabled = true
+figures = [
+    "task_overview_arena",
+    "prediction_overlay_arena",
+    "lec_content_filtering",
+    "mec_grid_metrics",
+    "hpc_place_metrics",
+]
+formats = ["png"]

@@ -1,0 +1,36 @@
+# =============================================================================
+# SeqMaze × HRM-v1 recipe definition.
+# =============================================================================
+
+schema_version = 1
+alias = "seqmaze-hrm-v1"
+
+task = "seqmaze"
+model_family = "hrm-v1"
+
+primary_metric = "sequence_exact"
+required_capabilities = []
+
+[cases]
+split = "test"
+count = 128
+seed = 0
+
+[cases.dataset]
+uri = "data/processed/seqmaze/default/v1"
+
+[evaluation]
+# SeqMazeHRMV1EvaluationOptions is empty — no pair-specific options.
+
+[capture]
+profile = "diagnostic"
+max_cases = 16
+
+[inspection]
+enabled = true
+figures = [
+    "pfc_path_memory_probe",
+    "h_l_residuals_over_steps",
+    "pfc_latent_dynamics",
+]
+formats = ["png"]

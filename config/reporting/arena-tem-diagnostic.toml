@@ -1,0 +1,22 @@
+schema = "ehp_sn.report.request.v1"
+name = "arena-tem-diagnostic"
+
+[source]
+uri = "artifacts/eval/tem-v2-arena"
+regime = "diagnostic"
+
+[selection]
+strategy = "balanced"
+max_cases = 8
+case_ids = []
+
+[resources]
+metrics = true
+validations = true
+cases = true
+predictions = true
+traces = true
+derived = ["pathway_metrics"]
+
+[materialization]
+mode = "copy"

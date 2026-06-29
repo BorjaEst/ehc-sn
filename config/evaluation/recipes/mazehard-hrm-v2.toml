@@ -1,0 +1,39 @@
+# =============================================================================
+# MazeHard × HRM-v2 recipe definition.
+# =============================================================================
+
+schema_version = 1
+alias = "mazehard-hrm-v2"
+
+task = "mazehard"
+model_family = "hrm-v2"
+
+primary_metric = "sequences_exact"
+required_capabilities = [
+    "deliberative",
+    "analytic-future-state",
+]
+
+[cases]
+split = "test"
+count = 128
+seed = 0
+
+[cases.dataset]
+uri = "data/processed/mazehard/default/v1"
+
+[evaluation]
+max_deliberation_steps = 16
+
+[capture]
+profile = "diagnostic"
+max_cases = 16
+
+[inspection]
+enabled = true
+figures = [
+    "task_overview_mazehard",
+    "prediction_reasoning_mazehard",
+    "pfc_latent_dynamics",
+]
+formats = ["png"]

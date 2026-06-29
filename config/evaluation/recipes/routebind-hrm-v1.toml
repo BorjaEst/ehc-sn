@@ -1,0 +1,35 @@
+# =============================================================================
+# Routebind × HRM-v1 recipe definition.
+# =============================================================================
+
+schema_version = 1
+alias = "routebind-hrm-v1"
+
+task = "routebind"
+model_family = "hrm-v1"
+
+primary_metric = "valid_semantic_spatial_route_rate"
+required_capabilities = []
+
+[cases]
+split = "test"
+count = 128
+seed = 0
+
+[cases.dataset]
+uri = "data/processed/routebind/default/v1"
+
+[evaluation]
+max_deliberation_steps = 16
+
+[capture]
+profile = "diagnostic"
+max_cases = 16
+
+[inspection]
+enabled = true
+figures = [
+    "task_overview_routebind",
+    "prediction_reasoning_routebind",
+]
+formats = ["png"]

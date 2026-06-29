@@ -1,0 +1,17 @@
+# =============================================================================
+# Example invocation: Arena × TEM-v1 local evaluation.
+# =============================================================================
+
+schema_version = 1
+alias = "arena-tem-v1"
+
+[model]
+uri = "checkpoints/tem-v1-arena/best.ckpt"
+
+[runtime]
+device = "auto"
+batch_size = 8
+
+[cases]
+count = 32
+seed = 7
