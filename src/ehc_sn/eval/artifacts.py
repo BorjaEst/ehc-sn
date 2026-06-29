@@ -10,7 +10,7 @@ import importlib
 import json
 import re
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, is_dataclass
 from numbers import Real
 from pathlib import Path
@@ -24,46 +24,124 @@ from pydantic import BaseModel, Field, model_validator
 from ehc_sn.eval.contracts import (
     EvaluationCaseResult,
     EvaluationRegimeResult,
-    EvaluationTraceRequest,
+    ProducedArtifact,
 )
-from ehc_sn.eval.executor import iter_evaluation_regime
 from ehc_sn.figures import REGISTRY, list_figures
-from ehc_sn.traces import build_trace_spec
 from ehc_sn.traces.observer import TraceSpec
 from ehc_sn.traces.trace_tree import TraceTree
 
-_ARTIFACT_SCHEMA = "ehc_sn.eval.artifact.v3"
+_ARTIFACT_SCHEMA = "ehc_sn.eval.artifact.v1"
 _MANIFEST_FILENAME = "manifest.json"
+_METRICS_FILENAME = "metrics.json"
 _SUCCESS_FILENAME = "_SUCCESS"
 
 
 # =============================================================================
-class EvalArtifactExecutorRef(BaseModel, extra="forbid"):
-    """Typed artifact metadata used to reconstruct an evaluation executor."""
+class UnsupportedEvaluationArtifactSchema(ValueError):
+    """Raised when an eval artifact manifest has a missing or mismatched schema."""
 
-    schema_version: str = "1"
-    artifact_type: Literal["evaluation_executor"] = "evaluation_executor"
-    experiment_id: str = Field(..., min_length=1)
-    executor_config_path: Path
-    checkpoint_path: Path
-    checkpoint_format: Literal["weights_only"] = "weights_only"
-
-    @model_validator(mode="after")
-    def _validate_experiment_id(self) -> "EvalArtifactExecutorRef":
-        from ehc_sn.eval.registry import (
-            get_evaluation_experiment_registration,
-            list_experiment_ids,
+    def __init__(self, expected: str, actual: object, path: Path) -> None:
+        self.expected = expected
+        self.actual = actual
+        self.path = path
+        super().__init__(
+            f"Unsupported eval artifact schema: {actual!r}. "
+            f"Expected {expected!r} at {path}."
         )
 
-        self.experiment_id = self.experiment_id.strip().lower()
+
+# =============================================================================
+class ZarrArtifactWriter:
+    """Persist compact NumPy arrays as chunked Zarr groups.
+
+    Writes each key in a ``data`` dict as a separate Zarr array under
+    ``root/{name}/{key}``.  Skips fields whose values are not NumPy arrays
+    (supports scalar metadata via ``.zattrs``).
+
+    Requires ``zarr>=2.17``.  Raises ``ImportError`` at call time if ``zarr``
+    is not installed.
+
+    Usage::
+
+        writer = ZarrArtifactWriter()
+        writer.write("mec_grid_analysis", {"rate_maps": arr}, root)
+    """
+
+    @staticmethod
+    def write(
+        name: str,
+        data: dict[str, np.ndarray],
+        root: Path,
+        *,
+        chunks: tuple[int, ...] | None = None,
+    ) -> None:
+        """Write each array in *data* as a Zarr group under ``root/{name}/``.
+
+        Args:
+            name: Artifact name, used as the Zarr group directory name.
+            data: Dict of array-name → NumPy array.  Non-array values are
+                skipped silently.
+            root: Parent directory for the artifact group.  Created if needed.
+            chunks: Per-array chunk sizes.  When ``None``, defaults to spatial
+                dims together and the unit axis chunked to min(64, last dim).
+
+        Raises:
+            ImportError: If ``zarr`` is not installed.
+        """
         try:
-            get_evaluation_experiment_registration(self.experiment_id)
-        except KeyError:
-            raise ValueError(
-                f"Unsupported experiment_id {self.experiment_id!r}. "
-                f"Available: {list_experiment_ids()}."
-            ) from None
-        return self
+            import numcodecs
+            import zarr
+        except ImportError as exc:
+            raise ImportError(
+                "zarr is required for ZarrArtifactWriter. "
+                "Install with: pip install 'ehp-sn[eval]'"
+            ) from exc
+
+        group_dir = root / name
+        group_dir.mkdir(parents=True, exist_ok=True)
+
+        compressor = numcodecs.Blosc(cname="zstd", clevel=3)
+
+        for key, arr in data.items():
+            if not isinstance(arr, np.ndarray):
+                continue
+
+            arr = np.ascontiguousarray(arr)
+            ndim = arr.ndim
+            shape = arr.shape
+
+            # Default chunking: spatial dims together, unit axis chunked.
+            if chunks is not None:
+                use_chunks = chunks
+            elif ndim <= 1:
+                use_chunks = shape
+            elif ndim == 2:
+                use_chunks = (shape[0], min(shape[1], 64))
+            elif ndim == 3:
+                use_chunks = (shape[0], shape[1], min(shape[2], 64))
+            else:
+                use_chunks = tuple(
+                    min(s, 64) if i == ndim - 1 else s
+                    for i, s in enumerate(shape)
+                )
+
+            arr_path = group_dir / key
+            arr_path.mkdir(parents=True, exist_ok=True)
+
+            z = zarr.open_array(
+                str(arr_path),
+                mode="w",
+                shape=shape,
+                chunks=use_chunks,
+                dtype=arr.dtype,
+                compressor=compressor,
+                zarr_format=2,
+                fill_value=None,
+            )
+            z[:] = arr
+
+        # Write _SUCCESS sentinel.
+        (group_dir / _SUCCESS_FILENAME).write_text("", encoding="utf-8")
 
 
 # =============================================================================
@@ -152,29 +230,119 @@ def _atomic_write_directory(
 
 
 # =============================================================================
-# Per-step metric extraction (duck-typed — no imports from lightning/)
+# Streaming per-step metric accumulator (EvaluationConsumer)
 # =============================================================================
 
 
-def _extract_step_metric_increments(
-    result: EvaluationCaseResult,
+class ArtifactMetricAccumulator:
+    """Streaming per-step metric accumulator for artifact manifest production.
+
+    Accumulates ``episode``, ``episode_tokens``, and ``extras`` RatioStat
+    values from per-step ``ObservedStep`` objects during evaluation and
+    returns compact CPU scalar dicts on ``finalize()``.
+
+    This replaces the former post-hoc ``_extract_step_metric_increments``
+    which iterated fully materialized ``EvaluatedChunk.steps``.
+    """
+
+    def __init__(self) -> None:
+        self._completed_count: float = 0.0
+        self._eligible_count: float = 0.0
+        self._accuracy_sum: float = 0.0
+        self._exact_sum: float = 0.0
+        self._token_correct_sum: float = 0.0
+        self._token_count_sum: float = 0.0
+        self._has_data: bool = False
+
+    def observe_step(self, step: object) -> None:
+        """Accumulate metric increments from one observed step.
+
+        Args:
+            step: An ``ObservedStep`` whose ``outputs.metrics`` field
+                contains ``episode``, ``episode_tokens``, and ``extras``
+                with per-step increment semantics.  Silently skips when
+                ``outputs.metrics`` is absent or ``None``.
+        """
+        outputs = getattr(step, "outputs", None)
+        if outputs is None:
+            return
+        metrics = getattr(outputs, "metrics", None)
+        if metrics is None:
+            return
+
+        ep = getattr(metrics, "episode", None)
+        if ep is not None:
+            self._completed_count += float(getattr(ep, "completed_count", 0.0))
+            self._eligible_count += float(getattr(ep, "eligible_count", 0.0))
+            self._accuracy_sum += float(getattr(ep, "accuracy_sum", 0.0))
+            self._exact_sum += float(getattr(ep, "exact_sum", 0.0))
+            self._has_data = True
+
+        et = getattr(metrics, "episode_tokens", None)
+        if et is not None:
+            self._token_correct_sum += float(
+                getattr(et, "token_correct_sum", 0.0)
+            )
+            self._token_count_sum += float(getattr(et, "token_count_sum", 0.0))
+            self._has_data = True
+
+    def finalize(self) -> dict[str, float | int]:
+        """Return accumulated metric totals and reset internal state.
+
+        Returns an empty dict when no metric data was observed (early
+        exit or objective without episode/token metrics).
+        """
+        result: dict[str, float | int] = {}
+        if not self._has_data:
+            return result
+        if self._completed_count > 0 or self._eligible_count > 0:
+            result["completed_count"] = int(self._completed_count)
+            result["eligible_count"] = int(self._eligible_count)
+            result["accuracy_sum"] = self._accuracy_sum
+            result["exact_sum"] = self._exact_sum
+        if self._token_correct_sum > 0 or self._token_count_sum > 0:
+            result["token_correct_sum"] = int(self._token_correct_sum)
+            result["token_count_sum"] = int(self._token_count_sum)
+        return result
+
+    def reset(self) -> None:
+        """Reset all accumulated state (for reuse across cases)."""
+        self._completed_count = 0.0
+        self._eligible_count = 0.0
+        self._accuracy_sum = 0.0
+        self._exact_sum = 0.0
+        self._token_correct_sum = 0.0
+        self._token_count_sum = 0.0
+        self._has_data = False
+
+
+# =============================================================================
+# Streamed per-step metric extraction (backward-compatible helper)
+# =============================================================================
+
+
+def _accumulate_step_metric_increments(
+    steps: tuple[Any, ...],
 ) -> dict[str, float | int]:
-    """Extract per-step metric increments from *result* via duck-typing.
+    """Accumulate per-step metric increments from an iterable of steps.
 
-    Returns a dict of scalar sums for this case.  Callers accumulate
-    the returned values across cases and compute derived ratios from
-    the running totals.
+    Duck-types ``step.outputs.metrics`` for ``episode`` and
+    ``episode_tokens`` fields.  Matching the same field names as
+    the former ``_extract_step_metric_increments``.
 
-    Mirrors the logic in ``ACTSupervisedModule.aggregate_evaluation_case_metrics``
-    without importing from ``lightning/``.
+    Args:
+        steps: Iterable of objects with ``outputs.metrics`` containing
+            ``episode`` and ``episode_tokens`` aggregations.
+
+    Returns:
+        Dict of summed metric increments.
     """
     inc: dict[str, float | int] = {}
-    evaluated = result.evaluated
-    steps = getattr(evaluated, "steps", None)
-    if steps is None:
-        return inc
     for step in steps:
-        metrics = getattr(step.outputs, "metrics", None)
+        outputs = getattr(step, "outputs", None)
+        if outputs is None:
+            continue
+        metrics = getattr(outputs, "metrics", None)
         if metrics is None:
             continue
         ep = getattr(metrics, "episode", None)
@@ -265,25 +433,22 @@ def collect_regime_artifact_bundle(
     epoch: int = 0,
     step: int = 0,
     provenance_overrides: dict[str, Any] | None = None,
+    analysis_artifact_descriptors: list[dict[str, object]] | None = None,
+    produced_artifacts: Sequence[ProducedArtifact] = (),
 ) -> EvaluationRegimeResult:
     """Collect one evaluation regime and persist it as an artifact bundle.
 
-    Accepts an optional ``case_results`` iterable.  When provided,
-    the function streams over that iterable rather than constructing
-    its own ``iter_evaluation_regime`` loop — the caller owns
-    device placement, trace requests, and batch preparation.
+    ``case_results`` is required — the caller owns device placement and
+    batch preparation.  ``produced_artifacts`` are typed artifacts from
+    consumer ``finalize()`` recorded in the manifest's ``"artifacts"``
+    dict.
 
-    When ``case_results`` is ``None`` (legacy path), the function
-    falls back to iterating ``provider`` through ``iter_evaluation_regime``
-    internally.  This is deprecated.
-
-    The provider and trace specification must already be resolved by the
-    caller (typically an experiment-specific builder).  The old signature
-    (accepting ``task``, ``provider_ref``, ``provider_settings``,
-    ``trace_keys``, ``figure_names``) is removed — use
-    :func:`collect_regime_artifact_bundle_from_ref` for artifact
-    reconstruction or switch to the new ``EvaluationExperiment`` flow.
+    ``analysis_artifact_descriptors`` are passed through to the manifest as
+    ``"analysis_artifacts"`` entries.
     """
+    if case_results is None:
+        raise ValueError("case_results is required.")
+
     run_dir = Path(run_dir)
     model_family = _extract_model_family(executor)
     trace_paradigm = getattr(executor, "_trace_paradigm", None)
@@ -294,11 +459,6 @@ def collect_regime_artifact_bundle(
     resolved_task: str = prov.get(
         "task", _extract_model_family(executor) or "unknown"
     )
-
-    # Build trace request from the pre-resolved trace spec.
-    trace_request: EvaluationTraceRequest | None = None
-    if trace_spec is not None:
-        trace_request = EvaluationTraceRequest(trace_spec=trace_spec)
 
     # Write to temporary directory for atomic commit.
     tmp_dir = run_dir.with_suffix(".tmp")
@@ -326,21 +486,7 @@ def collect_regime_artifact_bundle(
     total_token_count: int = 0
     total_samples: int = 0
 
-    # Determine the iteration source.
-    # When the caller provides case_results, stream it (new path).
-    # Otherwise, iterate internally (legacy path).
-    iterable: Iterable[EvaluationCaseResult]
-    if case_results is not None:
-        iterable = case_results
-    else:
-        iterable = iter_evaluation_regime(
-            provider,
-            executor,
-            max_batches=max_batches,
-            trace_request=trace_request,
-        )
-
-    for idx, result in enumerate(iterable):
+    for idx, result in enumerate(case_results):
         row = _persist_regime_case(
             run_dir=tmp_dir,
             result=result,
@@ -361,14 +507,19 @@ def collect_regime_artifact_bundle(
             loss_sum += float(loss)
             loss_count += 1
 
-        # Extract per-step metric increments before the case is released.
-        inc = _extract_step_metric_increments(result)
-        total_completed_count += int(inc.get("completed_count", 0))
-        total_eligible_count += int(inc.get("eligible_count", 0))
-        total_accuracy_sum += float(inc.get("accuracy_sum", 0.0))
-        total_exact_sum += float(inc.get("exact_sum", 0.0))
-        total_token_correct += int(inc.get("token_correct_sum", 0))
-        total_token_count += int(inc.get("token_count_sum", 0))
+        # Extract per-step metric increments from each observed step.
+        # The result may contain 0 or 1 steps (streaming path); iterate
+        # whatever is available.
+        evaluated = result.evaluated
+        steps = getattr(evaluated, "steps", None)
+        if steps:
+            inc = _accumulate_step_metric_increments(steps)
+            total_completed_count += int(inc.get("completed_count", 0))
+            total_eligible_count += int(inc.get("eligible_count", 0))
+            total_accuracy_sum += float(inc.get("accuracy_sum", 0.0))
+            total_exact_sum += float(inc.get("exact_sum", 0.0))
+            total_token_correct += int(inc.get("token_correct_sum", 0))
+            total_token_count += int(inc.get("token_count_sum", 0))
         total_samples += result.n_samples
 
         lightweight_case_results.append(
@@ -401,8 +552,30 @@ def collect_regime_artifact_bundle(
     if total_token_count > 0:
         summary["token_accuracy"] = total_token_correct / total_token_count
 
-    # Optional model-family aggregation hook.  The executor method receives
-    # lightweight case results (traces stripped, only scalar loss retained).
+    # ── Produced artifact persistence ───────────────────────────────────
+    for artifact in produced_artifacts:
+        artifact_path = tmp_dir / artifact.path
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        # Copy staged consumer output into the temp directory for atomic commit.
+        if artifact.source_path is not None and artifact.source_path.exists():
+            if artifact.source_path.is_dir():
+                import shutil
+
+                shutil.copytree(
+                    str(artifact.source_path),
+                    str(artifact_path),
+                    dirs_exist_ok=True,
+                )
+            else:
+                import shutil
+
+                shutil.copy2(str(artifact.source_path), str(artifact_path))
+        elif not artifact_path.exists():
+            # No source path and no existing copy — producer may have written
+            # directly.  That is deprecated; warn once.
+            pass
+
+    # Optional model-family aggregation hook.
     aggregate = getattr(executor, "aggregate_evaluation_case_metrics", None)
     if aggregate is not None:
         try:
@@ -417,6 +590,29 @@ def collect_regime_artifact_bundle(
         else:
             validated = _validate_hook_metrics(task_summary)
             summary.update(validated)
+
+    # ── Patch manifest rows with trace_ref from Zarr index (if available) ──
+    trace_index_path = tmp_dir / "traces" / "trace_index.json"
+    if trace_index_path.exists():
+        try:
+            trace_index = json.loads(
+                trace_index_path.read_text(encoding="utf-8")
+            )
+            index_cases = trace_index.get("cases", [])
+            # Build case_id -> entry lookup.
+            case_to_idx: dict[str, dict[str, object]] = {
+                entry["case_id"]: entry for entry in index_cases
+            }
+            for row in manifest_rows:
+                cid = row.get("case_id")
+                if cid in case_to_idx:
+                    row["trace_ref"] = {
+                        "archive": "traces/behavioral.zarr",
+                        "case_id": cid,
+                    }
+                    row["has_trace"] = True
+        except Exception:
+            pass
 
     _write_regime_bundle_manifest(
         run_dir=tmp_dir,
@@ -448,6 +644,10 @@ def collect_regime_artifact_bundle(
             if trace_spec is not None
             else None
         ),
+        analysis_artifacts=analysis_artifact_descriptors,
+        produced_artifacts=produced_artifacts,
+        checkpoint_sha256=str(prov.get("checkpoint_sha256", "")),
+        plan_digest=str(prov.get("plan_digest", "")),
     )
     _atomic_write_directory(tmp_dir, run_dir)
     return EvaluationRegimeResult(
@@ -458,135 +658,6 @@ def collect_regime_artifact_bundle(
 
 
 # =============================================================================
-def collect_regime_artifact_bundle_from_ref(
-    *,
-    artifact: EvalArtifactExecutorRef,
-    task: str,
-    provider_ref: str,
-    provider_settings: dict[str, Any],
-    run_dir: Path,
-    regime_id: str,
-    regime_kind: Literal["diagnostic", "benchmark"] = "diagnostic",
-    max_batches: int = 0,
-    trace_keys: list[str] | None = None,
-    figure_names: list[str] | None = None,
-    trigger_kind: str = "manual",
-    epoch: int = 0,
-    step: int = 0,
-) -> EvaluationRegimeResult:
-    """Collect and persist one artifact bundle from a typed executor ref.
-
-    .. deprecated::
-        Use the new ``EvaluationExperiment`` flow instead.  This function
-        delegates to the new ``collect_regime_artifact_bundle`` with a
-        resolved provider and trace spec.
-    """
-    executor = load_executor_from_artifact(artifact)
-    trace_paradigm = getattr(executor, "_trace_paradigm", None)
-
-    # Build trace request from keys (backward-compat path).
-    trace_spec: TraceSpec | None = None
-    all_keys: list[str] = list(trace_keys or [])
-    if figure_names:
-        from ehc_sn.figures import REGISTRY, list_figures
-
-        list_figures()
-        for name in figure_names:
-            spec = REGISTRY.get(name)
-            all_keys.extend(spec.trace_keys)
-            all_keys.extend(spec.meta_keys)
-    if all_keys and trace_paradigm is not None:
-        from ehc_sn.traces.specs import build_trace_spec
-
-        trace_spec = build_trace_spec(
-            trace_paradigm, include_keys=set(all_keys)
-        )
-
-    provider = resolve_provider(provider_ref, provider_settings)
-
-    return collect_regime_artifact_bundle(
-        executor=executor,
-        provider=provider,
-        regime_id=regime_id,
-        regime_kind=regime_kind,
-        run_dir=run_dir,
-        trace_spec=trace_spec,
-        max_batches=max_batches,
-        trigger_kind=trigger_kind,
-        epoch=epoch,
-        step=step,
-        provenance_overrides={
-            "task": task,
-            "model_family": artifact.model_family,
-            "trace_paradigm": trace_paradigm,
-        },
-    )
-
-
-# =============================================================================
-def load_executor_from_artifact(artifact: EvalArtifactExecutorRef) -> Any:
-    """Construct and hydrate one family-specific evaluation executor."""
-    config_path = Path(artifact.executor_config_path)
-    checkpoint_path = Path(artifact.checkpoint_path)
-    if not config_path.exists():
-        raise FileNotFoundError(
-            f"Executor config path does not exist: {config_path}"
-        )
-    if not checkpoint_path.exists():
-        raise FileNotFoundError(
-            f"Checkpoint path does not exist: {checkpoint_path}"
-        )
-
-    config_map = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    executor = _build_executor_from_family_artifact(
-        experiment_id=artifact.experiment_id,
-        config_map=config_map,
-    )
-    _hydrate_executor_from_checkpoint(executor, checkpoint_path)
-    _initialize_eval_runtime(executor)
-    return executor
-
-
-# =============================================================================
-# =============================================================================
-# Family registry access — dispatch lives in eval.registry
-# =============================================================================
-
-
-def _build_executor_from_family_artifact(
-    *,
-    experiment_id: str,
-    config_map: dict[str, Any],
-) -> Any:
-    """Instantiate one evaluation executor from a resolved experiment_id.
-
-    Dispatches through the experiment registry in :mod:`ehc_sn.eval.registry`.
-    The config class validates the full TOML dict with ``model_validate``,
-    eliminating manual key-by-key extraction.
-
-    The executor's ``_trace_paradigm`` is read from the module itself,
-    which every ``LightningModule`` subclass sets in ``__init__``.
-    """
-    from ehc_sn.eval.registry import get_evaluation_experiment_registration
-
-    config_cls, build_fn = get_evaluation_experiment_registration(experiment_id)
-
-    eval_config = config_cls.model_validate(config_map)
-    built = build_fn(eval_config)
-
-    # The builder now returns EvaluationExperiment; extract executor.
-    from ehc_sn.experiments._infra import EvaluationExperiment as _EvalExp
-
-    if isinstance(built, _EvalExp):
-        executor = built.executor
-    else:
-        executor = built
-
-    # Tag the executor so _build_trace_request can construct a trace spec
-    # without calling set_eval_trace_keys.  Every LightningModule subclass
-    # already sets _trace_paradigm in __init__.
-    executor._trace_paradigm = getattr(executor, "_trace_paradigm", experiment_id.split("-")[0])  # type: ignore[attr-defined]
-    return executor
 
 
 # =============================================================================
@@ -643,8 +714,12 @@ def _extract_case_metadata(
 def _hydrate_executor_from_checkpoint(
     executor: Any, checkpoint_path: Path
 ) -> None:
-    """Load executor weights from a weights-only checkpoint artifact."""
-    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    """Load executor weights from a weights-only checkpoint artifact.
+
+    Uses ``strict=True`` — any key mismatch raises ``RuntimeError``
+    to prevent silent architecture/checkpoint incompatibility.
+    """
+    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     if isinstance(raw, dict):
         if {
             "optimizer_states",
@@ -672,9 +747,41 @@ def _hydrate_executor_from_checkpoint(
             f"executor for checkpoint {checkpoint_path!r}."
         )
 
-    executor.load_state_dict(state_dict, strict=False)
+    missing, unexpected = executor.load_state_dict(state_dict, strict=True)
+    if missing or unexpected:
+        raise RuntimeError(
+            f"Strict state-dict loading failed for checkpoint "
+            f"{checkpoint_path}:\n"
+            f"  Missing keys: {sorted(missing)[:10]}\n"
+            f"  Unexpected keys: {sorted(unexpected)[:10]}"
+        )
     if hasattr(executor, "eval") and callable(executor.eval):
         executor.eval()
+
+
+def _hydrate_executor_from_source(executor: Any, resolved_source: str) -> None:
+    """Load executor weights from an artifact directory or legacy checkpoint.
+
+    Detects whether *resolved_source* is a model-artifact directory
+    (has ``manifest.json``) and delegates accordingly.  This helper
+    is the single dispatch point used by ``run_offline_eval`` so that
+    ``offline.py`` does not need to import from ``models/``.
+
+    Parameters
+    ----------
+    executor:
+        Already-constructed model or executor whose weights are loaded.
+    resolved_source:
+        Path to an artifact directory or a legacy checkpoint file.
+    """
+    source = Path(resolved_source)
+    if source.is_dir() and (source / "manifest.json").is_file():
+        from ehc_sn.model_artifacts import ModelArtifact
+
+        artifact = ModelArtifact.open(source)
+        artifact.load_state_into(executor)
+    else:
+        _hydrate_executor_from_checkpoint(executor, source)
 
 
 # =============================================================================
@@ -783,10 +890,16 @@ def _persist_regime_case(
     result: EvaluationCaseResult,
     index: int,
 ) -> dict[str, Any]:
-    """Persist one case payload and return one manifest-ready case row."""
+    """Persist one case payload and return one manifest-ready case row.
+
+    Always writes a per-case ``.summary.json`` file with case metadata.
+    When ``result.trace`` is a ``TraceTree`` (legacy path), additionally
+    writes per-case ``.dense.npz`` and ``.meta.json`` files.
+    """
     source_context = _to_jsonable(result.source_context)
     loss = _extract_loss_scalar(result.evaluated)
     has_trace = result.trace is not None
+    stem = f"{index:04d}-{_sanitize_filename_component(result.case_id)}"
     row: dict[str, Any] = {
         "case_id": result.case_id,
         "n_samples": result.n_samples,
@@ -794,10 +907,18 @@ def _persist_regime_case(
         "loss": loss,
         "has_trace": has_trace,
     }
+
+    # Write per-case JSON summary unconditionally.
+    summary_rel = Path("cases") / f"{stem}.summary.json"
+    (run_dir / summary_rel).write_text(
+        json.dumps(row, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    row["summary_artifact"] = str(summary_rel)
+
     if not has_trace:
         return row
 
-    stem = f"{index:04d}-{_sanitize_filename_component(result.case_id)}"
     dense_rel = Path("cases") / f"{stem}.dense.npz"
     meta_rel = Path("cases") / f"{stem}.meta.json"
     dense = result.trace.export()
@@ -829,8 +950,16 @@ def _write_regime_bundle_manifest(
     trace_paradigm: str | None = None,
     temporal_semantics: dict[str, object] | None = None,
     capture_info: dict[str, object] | None = None,
+    analysis_artifacts: list[dict[str, object]] | None = None,
+    produced_artifacts: Sequence[ProducedArtifact] = (),
+    checkpoint_sha256: str = "",
+    plan_digest: str = "",
 ) -> None:
-    """Write canonical manifest payloads."""
+    """Write canonical manifest payloads.
+
+    Publishes ``"schema": _ARTIFACT_SCHEMA`` with typed ``"artifacts"`` dict
+    keyed by ``ArtifactKey.manifest_key()``.
+    """
     provenance: dict[str, object] = {}
     if model_family is not None:
         provenance["model_family"] = model_family
@@ -838,18 +967,137 @@ def _write_regime_bundle_manifest(
         provenance["trace_paradigm"] = trace_paradigm
     provenance["global_step"] = step
     provenance["epoch"] = epoch
+    if checkpoint_sha256:
+        provenance["checkpoint_sha256"] = checkpoint_sha256
+    if plan_digest:
+        provenance["plan_digest"] = plan_digest
 
+    # Build the artifacts inventory from ProducedArtifact records.
+    artifacts_dict: dict[str, dict[str, object]] = {}
+    for artifact in produced_artifacts:
+        key = artifact.key.manifest_key()
+        artifacts_dict[key] = {
+            "schema_version": artifact.schema_version,
+            "path": str(artifact.path),
+            "media_type": artifact.media_type,
+            "producer_digest": artifact.producer_digest,
+            "content_digest": artifact.content_digest,
+            "metadata": dict(artifact.metadata),
+        }
+
+    # Build dependency lineage from produced-artifact records.
+    dependencies: dict[str, list[dict[str, object]]] = {}
+    for artifact in produced_artifacts:
+        dep_key = artifact.key.manifest_key()
+        deps: list[dict[str, object]] = []
+        metadata = artifact.metadata or {}
+        upstream_keys = metadata.get("upstream_artifact_keys")
+        if isinstance(upstream_keys, (list, tuple)):
+            for up_key in upstream_keys:
+                if isinstance(up_key, dict):
+                    deps.append({
+                        "key": str(up_key.get("key", "")),
+                        "schema_version": up_key.get("schema_version", 1),
+                        "content_digest": str(up_key.get("content_digest", "")),
+                    })
+        if deps:
+            dependencies[dep_key] = deps
+
+    if dependencies:
+        provenance["dependencies"] = dependencies
+
+    manifest = build_evaluation_artifact_manifest(
+        task=task,
+        regime_id=regime_id,
+        regime_kind=regime_kind,
+        phase_kind="diag" if regime_kind == "diagnostic" else "bench",
+        trigger_kind=trigger_kind,
+        epoch=epoch,
+        step=step,
+        evaluation=provenance,
+        temporal_semantics=temporal_semantics,
+        summary=dict(regime_summary),
+        cases=manifest_rows,
+        artifacts=artifacts_dict,
+        capture=capture_info,
+        analysis_artifacts=analysis_artifacts,
+    )
+    (run_dir / _MANIFEST_FILENAME).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+    # Write metrics.json — scalar measurements only, not operational counts.
+    _write_regime_metrics(run_dir, regime_summary)
+
+
+def _write_regime_metrics(
+    run_dir: Path,
+    summary: dict[str, object],
+) -> None:
+    """Extract scalar scientific metrics from *summary* and write ``metrics.json``.
+
+    Operational counts (``n_cases``, ``n_samples``, etc.) stay in
+    ``manifest.summary``.  Only float-compatible values that are not
+    operational counts are written to ``metrics.json``.
+    """
+    _COUNT_KEYS = frozenset(
+        {
+            "n_cases",
+            "n_samples",
+            "n_sequence_completed",
+            "n_sequence_eligible",
+            "n_token_correct",
+            "n_token_total",
+            "n_traced_cases",
+        }
+    )
+    metrics: dict[str, float] = {}
+    for k, v in summary.items():
+        if k in _COUNT_KEYS:
+            continue
+        if isinstance(v, (int, float)):
+            metrics[k] = float(v)
+    (run_dir / _METRICS_FILENAME).write_text(
+        json.dumps(metrics, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+# =============================================================================
+def build_evaluation_artifact_manifest(
+    *,
+    task: str,
+    regime_id: str,
+    regime_kind: str,
+    phase_kind: str,
+    trigger_kind: str,
+    epoch: int,
+    step: int,
+    evaluation: dict[str, object],
+    temporal_semantics: dict[str, object] | None = None,
+    summary: dict[str, object],
+    cases: list[dict[str, Any]],
+    artifacts: dict[str, dict[str, object]] | None = None,
+    capture: dict[str, object] | None = None,
+    analysis_artifacts: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """Build a canonical evaluation artifact manifest dict.
+
+    This is the single place where the top-level manifest structure is
+    assembled.  Callers may add extra keys after calling this function.
+    """
     manifest: dict[str, object] = {
         "schema": _ARTIFACT_SCHEMA,
         "status": "complete",
         "task": task,
         "regime_id": regime_id,
         "regime_kind": regime_kind,
-        "phase_kind": "diag" if regime_kind == "diagnostic" else "bench",
+        "phase_kind": phase_kind,
         "trigger_kind": trigger_kind,
         "epoch": epoch,
         "step": step,
-        "provenance": provenance,
+        "evaluation": evaluation,
         "temporal_semantics": temporal_semantics
         or {
             "rollout_mode": "unknown",
@@ -857,39 +1105,85 @@ def _write_regime_bundle_manifest(
             "bptt_chunk_size": None,
             "teacher_forcing": None,
         },
-        "summary": _to_jsonable(dict(regime_summary)),
-        "cases": manifest_rows,
+        "summary": _to_jsonable(dict(summary)),
+        "cases": cases,
+        "artifacts": artifacts or {},
     }
-    if capture_info is not None:
-        manifest["capture"] = capture_info
-    (run_dir / _MANIFEST_FILENAME).write_text(
-        json.dumps(manifest, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    if capture is not None:
+        manifest["capture"] = capture
+    if analysis_artifacts:
+        manifest["analysis_artifacts"] = analysis_artifacts
+    return manifest
+
+
+# =============================================================================
+def load_evaluation_artifact_manifest(
+    root: Path,
+) -> dict[str, object]:
+    """Load and validate one eval artifact manifest from *root*.
+
+    This is the **single canonical reader** for eval artifact manifests.
+    Every consumer (case loading, inspection, reuse, reporting, MLflow)
+    **must** route through this function.
+
+    Parameters
+    ----------
+    root:
+        Path to an eval artifact directory containing ``manifest.json``
+        and ``_SUCCESS``.
+
+    Returns
+    -------
+    dict
+        The validated manifest payload.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``manifest.json`` is missing.
+    RuntimeError
+        If ``_SUCCESS`` is missing.
+    UnsupportedEvaluationArtifactSchema
+        If ``schema`` is absent or does not match ``_ARTIFACT_SCHEMA``.
+    RuntimeError
+        If ``status != "complete"``.
+    """
+    root = Path(root)
+    manifest_path = root / _MANIFEST_FILENAME
+    success_path = root / _SUCCESS_FILENAME
+
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Missing {_MANIFEST_FILENAME} under {root}.")
+    if not success_path.exists():
+        raise RuntimeError(
+            f"Eval artifact at {root} is missing {_SUCCESS_FILENAME} "
+            f"sentinel (possibly incomplete or corrupted write)."
+        )
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    actual_schema = manifest.get("schema")
+    if actual_schema != _ARTIFACT_SCHEMA:
+        raise UnsupportedEvaluationArtifactSchema(
+            expected=_ARTIFACT_SCHEMA,
+            actual=actual_schema,
+            path=manifest_path,
+        )
+
+    status = manifest.get("status", "complete")
+    if status != "complete":
+        raise RuntimeError(
+            f"Eval artifact at {root} has status={status!r} "
+            f"(expected 'complete')."
+        )
+
+    return manifest
 
 
 # =============================================================================
 def load_artifact_run_cases(run_dir: Path) -> list[LoadedArtifactCase]:
     """Load trace-bearing cases from a persisted artifact run directory."""
-    run_dir = Path(run_dir)
-    success_path = run_dir / _SUCCESS_FILENAME
-    manifest_path = run_dir / _MANIFEST_FILENAME
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"Missing manifest.json under {run_dir}.")
-    if not success_path.exists():
-        raise RuntimeError(
-            f"Artifact at {run_dir} is missing _SUCCESS sentinel."
-        )
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schema") != _ARTIFACT_SCHEMA:
-        raise ValueError(
-            f"Unsupported artifact schema: {manifest.get('schema')!r}. "
-            f"Expected {_ARTIFACT_SCHEMA!r}."
-        )
-    if manifest.get("status", "complete") != "complete":
-        raise RuntimeError(
-            f"Artifact at {run_dir} has status!=complete in manifest."
-        )
+    manifest = load_evaluation_artifact_manifest(run_dir)
     return _load_manifest_cases(run_dir, manifest)
 
 
@@ -930,107 +1224,81 @@ def _load_manifest_cases(
     manifest: dict[str, Any],
 ) -> list[LoadedArtifactCase]:
     """Load trace-bearing cases from canonical manifest bundle payloads."""
+    from ehc_sn.eval.trace_artifacts import open_trace_reader
+
     cases = manifest.get("cases")
     if not isinstance(cases, list):
         raise ValueError("manifest.json must contain a list under key 'cases'.")
+
+    # Resolve a trace reader for this artifact.
+    reader = open_trace_reader(run_dir)
 
     loaded_cases: list[LoadedArtifactCase] = []
     for row in cases:
         if not isinstance(row, dict):
             raise ValueError("manifest.json case rows must be dictionaries.")
         case_id = row.get("case_id")
-        has_trace = bool(row.get("has_trace", False))
         if not isinstance(case_id, str) or not case_id:
             raise ValueError(
                 "manifest.json case rows require a non-empty case_id."
             )
-        if not has_trace:
-            continue
 
-        dense_rel = row.get("dense_artifact")
-        meta_rel = row.get("meta_artifact")
-        if not isinstance(dense_rel, str) or not dense_rel:
-            raise ValueError(
-                f"Case {case_id!r} missing dense_artifact in manifest."
-            )
-        if not isinstance(meta_rel, str) or not meta_rel:
-            raise ValueError(
-                f"Case {case_id!r} missing meta_artifact in manifest."
-            )
-
-        dense = _read_dense_npz(run_dir / dense_rel)
-        meta_raw = json.loads((run_dir / meta_rel).read_text(encoding="utf-8"))
-        if meta_raw is None:
-            meta_raw = {}
-        if not isinstance(meta_raw, dict):
-            raise ValueError(
-                f"Case {case_id!r} meta artifact must decode to a dict."
-            )
-
-        # Merge optional task-evidence sidecar into the dense dict so that
-        # arena/* keys are available via TraceTree.get() after rehydration.
-        task_arrays_rel = row.get("task_arrays_path")
-        if isinstance(task_arrays_rel, str):
-            task_dense = _read_dense_npz(run_dir / task_arrays_rel)
-            # Model trace keys take precedence on collision.
-            dense = {**task_dense, **dense}
-
+        trace: TraceTree | None = None
         temporal_semantics = manifest.get("temporal_semantics")
+
+        # Try loading from reader (supports both Zarr and legacy NPZ).
+        if reader is not None and reader.has_case(case_id):
+            try:
+                trace = reader.load_case(case_id)
+            except Exception:
+                # If reader fails, fall through to legacy NPZ path.
+                pass
+
+        # Legacy NPZ path (backward compat: direct dense/meta artifact fields).
+        if trace is None:
+            has_trace = bool(row.get("has_trace", False))
+            if not has_trace:
+                continue
+
+            dense_rel = row.get("dense_artifact")
+            meta_rel = row.get("meta_artifact")
+            if not isinstance(dense_rel, str) or not dense_rel:
+                raise ValueError(
+                    f"Case {case_id!r} missing dense_artifact in manifest."
+                )
+            if not isinstance(meta_rel, str) or not meta_rel:
+                raise ValueError(
+                    f"Case {case_id!r} missing meta_artifact in manifest."
+                )
+
+            dense = _read_dense_npz(run_dir / dense_rel)
+            meta_raw = json.loads(
+                (run_dir / meta_rel).read_text(encoding="utf-8")
+            )
+            if meta_raw is None:
+                meta_raw = {}
+            if not isinstance(meta_raw, dict):
+                raise ValueError(
+                    f"Case {case_id!r} meta artifact must decode to a dict."
+                )
+
+            # Merge optional task-evidence sidecar.
+            task_arrays_rel = row.get("task_arrays_path")
+            if isinstance(task_arrays_rel, str):
+                task_dense = _read_dense_npz(run_dir / task_arrays_rel)
+                dense = {**task_dense, **dense}
+
+            trace = _rehydrate_trace_tree(dense=dense, meta=meta_raw)
 
         loaded_cases.append(
             LoadedArtifactCase(
                 case_id=case_id,
                 source_context=row.get("source_context"),
-                trace=_rehydrate_trace_tree(dense=dense, meta=meta_raw),
+                trace=trace,
                 temporal_semantics=temporal_semantics,
             )
         )
     return loaded_cases
-
-
-# =============================================================================
-def _build_trace_request(
-    *,
-    executor: Any,
-    trace_keys: list[str],
-    figure_names: list[str],
-) -> EvaluationTraceRequest:
-    """Build trace request for collection using figure trace vocabulary.
-
-    Trace keys are accumulated from explicit keys and figure requirements,
-    then used to build a trace spec directly.  Does **not** call
-    ``set_eval_trace_keys()`` on the executor — the executor's trace
-    production is configured through its own ``diagnostic_trace_spec`` or
-    through the model-family-aware ``build_trace_spec`` helper.
-    """
-    requested_trace_keys = set(trace_keys)
-    if figure_names:
-        # Force figures-package bootstrap so built-in names resolve in fresh processes.
-        list_figures()
-    for name in figure_names:
-        spec = REGISTRY.get(name)
-        requested_trace_keys.update(spec.trace_keys)
-        requested_trace_keys.update(spec.meta_keys)
-
-    paradigm = getattr(executor, "_trace_paradigm", None)
-    if paradigm is not None and requested_trace_keys:
-        return EvaluationTraceRequest(
-            trace_spec=build_trace_spec(
-                paradigm, include_keys=requested_trace_keys
-            ),
-            trace_meta=None,
-        )
-
-    trace_spec = getattr(executor, "trace_spec", None)
-    if trace_spec is not None:
-        return EvaluationTraceRequest(
-            trace_spec=trace_spec,
-            trace_meta=None,
-        )
-    raise ValueError(
-        "Cannot build trace request: executor has no _trace_paradigm or trace_spec. "
-        "Provide explicit trace_keys or figure_names."
-    )
 
 
 # =============================================================================
@@ -1200,12 +1468,13 @@ def _split_nested_keys(
 
 
 __all__ = [
-    "EvalArtifactExecutorRef",
+    "_ARTIFACT_SCHEMA",
     "LoadedArtifactCase",
+    "UnsupportedEvaluationArtifactSchema",
+    "build_evaluation_artifact_manifest",
     "collect_regime_artifact_bundle",
-    "collect_regime_artifact_bundle_from_ref",
     "load_artifact_run_cases",
-    "load_executor_from_artifact",
+    "load_evaluation_artifact_manifest",
     "persist_regime_artifact_bundle",
     "resolve_provider",
 ]
