@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Protocol
+from typing import Iterable
 
 import torch
 from torch import Tensor
@@ -11,40 +11,24 @@ from ehc_sn.tasks.arena.evaluation import coerce_observation_ids
 from ehc_sn.tasks.mazehard.runtime import PATH_ID as _O_ID
 from ehc_sn.traces import TraceField, TraceValue
 from ehc_sn.traces.keys import MAZEHARD_META_KEY_GT_OVERLAY
+from ehc_sn.traces.observer import StepContext
 from ehc_sn.types import Batch
-
-# =============================================================================
-# Minimal typed context for MazeHard+EHP Q-halting trace getters
-# =============================================================================
-
-
-class _MazeHardTaskLogits(Protocol):
-    task_logits: Tensor
-
-
-class _MazeHardEHCQHaltingTraceOutputs(Protocol):
-    task_output: _MazeHardTaskLogits
-
-
-class _MazeHardEHCQHaltingTraceContext(Protocol):
-    outputs: _MazeHardEHCQHaltingTraceOutputs
-
 
 # =============================================================================
 # Getter functions
 # =============================================================================
 
 
-def _solution_overlay_from_task_logits(task_logits: Tensor) -> TraceValue:
-    pred = torch.argmax(task_logits.detach(), dim=-1)  # (B, S)
+def _prediction_overlay_from_task_logits(task_logits: Tensor) -> TraceValue:
+    pred = torch.argmax(task_logits, dim=-1)  # (B, S)
     return (pred == _O_ID).to(torch.uint8)
 
 
-def _get_maze_hard_solution_overlay_q_halting(
-    ctx: _MazeHardEHCQHaltingTraceContext,
+def _get_maze_hard_prediction_overlay_q_halting(
+    ctx: StepContext,
 ) -> TraceValue:
-    return _solution_overlay_from_task_logits(
-        ctx.outputs.task_output.task_logits
+    return _prediction_overlay_from_task_logits(
+        ctx.record.outputs.task_output.task_logits
     )
 
 
@@ -62,63 +46,40 @@ def build_mazehard_ehc_trace_meta(batch: Batch) -> dict[str, object]:
 # Named field objects
 # =============================================================================
 
-_MAZE_HARD_EHP_TRACE_SOLUTION_OVERLAY_Q_HALTING = TraceField(
-    name="pred/solution_overlay",
-    get=_get_maze_hard_solution_overlay_q_halting,
+_MAZE_HARD_EHP_TRACE_PREDICTION_OVERLAY_Q_HALTING = TraceField(
+    name="pred/prediction_overlay",
+    get=_get_maze_hard_prediction_overlay_q_halting,
 )
 
 MAZE_HARD_EHP_Q_HALTING_TRACE_FIELDS: tuple[TraceField, ...] = (
-    _MAZE_HARD_EHP_TRACE_SOLUTION_OVERLAY_Q_HALTING,
+    _MAZE_HARD_EHP_TRACE_PREDICTION_OVERLAY_Q_HALTING,
 )
 
 
 # =============================================================================
-class _ArenaEHCCarryData(Protocol):
-    def __getitem__(self, key: str) -> Tensor: ...
-    def get(self, key: str, default: Tensor | None = None) -> Tensor | None: ...
+
+def _get_world_observation_id(ctx: StepContext) -> TraceValue:
+    obs_id: Tensor = ctx.record.batch["observation_id"]
+    return coerce_observation_ids(obs_id)
 
 
-class _ArenaEHCCarry(Protocol):
-    data: _ArenaEHCCarryData
-
-
-class _ArenaEHCBackboneOutputs(Protocol):
-    obs_logits: tuple[Tensor, Tensor, Tensor]
-
-
-class _ArenaEHCOutputs(Protocol):
-    backbone_output: _ArenaEHCBackboneOutputs
-
-
-class _ArenaEHCTraceContext(Protocol):
-    carry: _ArenaEHCCarry
-    outputs: _ArenaEHCOutputs
-    batch: Mapping[str, Tensor]
-
-
-# =============================================================================
-def _get_world_observation_id(ctx: _ArenaEHCTraceContext) -> TraceValue:
-    obs_id: Tensor = ctx.batch["observation_id"]
-    return coerce_observation_ids(obs_id).detach()
-
-
-def _get_is_revisit(ctx: _ArenaEHCTraceContext) -> TraceValue:
-    is_revisit: Tensor | None = ctx.batch.get("is_revisit")
+def _get_is_revisit(ctx: StepContext) -> TraceValue:
+    is_revisit: Tensor | None = ctx.record.batch.get("is_revisit")
     if is_revisit is None:
         return None
-    return is_revisit.view(-1).bool().detach()
+    return is_revisit.view(-1).bool()
 
 
-def _get_pred_obs_id_post(ctx: _ArenaEHCTraceContext) -> TraceValue:
-    return ctx.outputs.backbone_output.obs_logits[0].detach().argmax(dim=-1)
+def _get_pred_obs_id_post(ctx: StepContext) -> TraceValue:
+    return ctx.record.outputs.backbone_output.obs_logits[0].argmax(dim=-1)
 
 
-def _get_pred_obs_id_recall(ctx: _ArenaEHCTraceContext) -> TraceValue:
-    return ctx.outputs.backbone_output.obs_logits[1].detach().argmax(dim=-1)
+def _get_pred_obs_id_recall(ctx: StepContext) -> TraceValue:
+    return ctx.record.outputs.backbone_output.obs_logits[1].argmax(dim=-1)
 
 
-def _get_pred_obs_id_path(ctx: _ArenaEHCTraceContext) -> TraceValue:
-    return ctx.outputs.backbone_output.obs_logits[2].detach().argmax(dim=-1)
+def _get_pred_obs_id_path(ctx: StepContext) -> TraceValue:
+    return ctx.record.outputs.backbone_output.obs_logits[2].argmax(dim=-1)
 
 
 # =============================================================================

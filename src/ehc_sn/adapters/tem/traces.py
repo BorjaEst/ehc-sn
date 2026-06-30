@@ -2,13 +2,13 @@
 
 These fields bind Arena task semantics to TEM-specific output surfaces.
 They live here — in the shared Arena+TEM bridge namespace — because they
-read from the replay controller wrapper (``ctx.outputs.backbone_output``) and
-from the executed step payload (``ctx.batch``), both of which carry
+read from the replay controller wrapper (``ctx.record.outputs.backbone_output``)
+and from the executed step payload (``ctx.record.batch``), both of which carry
 task-model coupling that belongs at the adapter boundary.
 
-World-step fields (observation_id, is_revisit) read ``ctx.batch``, which is
+World-step fields (observation_id, is_revisit) read ``ctx.record.batch``, which is
 the executed_frame alias populated by the runner from carry-owned step data.
-Prediction fields read ``ctx.outputs`` directly.
+Prediction fields read ``ctx.record.outputs`` directly.
 
 Usage
 -----
@@ -21,90 +21,64 @@ Usage
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping, Protocol
+from typing import Iterable
 
 from torch import Tensor
 
 from ehc_sn.tasks.arena.evaluation import coerce_observation_ids
 from ehc_sn.traces import TraceField, TraceValue
 from ehc_sn.traces.keys import TEM_META_KEY_TARGET_OBS_ID
+from ehc_sn.traces.observer import StepContext
 from ehc_sn.traces.specs import (
     TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM,
+    TRACE_DIAGNOSTIC_LEC_CELLS_TEM,
+    TRACE_DIAGNOSTIC_LEC_FILTERED_TEM,
     TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
+    TRACE_LEC_FILTER_ALPHA_SIGMOID_TEM,
+    TRACE_LEC_W_F_SIGMOID_TEM,
+    TRACE_WORLD_LOCATION_IDS_TEM,
+    TRACE_WORLD_OBSERVATION_TEM,
 )
 from ehc_sn.types import Batch
 
 
 # =============================================================================
-class _ArenaTEMCarryData(Protocol):
-    def __getitem__(  # -------------------------------------------------------
-        self,
-        key: str,
-    ) -> Tensor: ...
-
-    def get(  # ---------------------------------------------------------------
-        self,
-        key: str,
-        default: Tensor | None = None,
-    ) -> Tensor | None: ...
-
-
-class _ArenaTEMCarry(Protocol):
-    data: _ArenaTEMCarryData
-    model_state: Any  # Needed when diagnostic trace fields are exported
-
-
-class _ArenaTEMBackboneOutputs(Protocol):
-    obs_logits: tuple[Tensor, Tensor, Tensor]
-
-
-class _ArenaTEMOutputs(Protocol):
-    backbone_output: _ArenaTEMBackboneOutputs
-
-
-class _ArenaTEMTraceContext(Protocol):
-    carry: _ArenaTEMCarry
-    outputs: _ArenaTEMOutputs
-    batch: Mapping[str, Tensor]
-
-
-# =============================================================================
 def _get_world_observation_id(  # ---------------------------------------------
-    ctx: _ArenaTEMTraceContext,
+    ctx: StepContext,
 ) -> TraceValue:
-    obs_id: Tensor = ctx.batch["observation_id"]
-    return coerce_observation_ids(obs_id).detach()
+    obs_id: Tensor = ctx.record.batch["observation_id"]
+    return coerce_observation_ids(obs_id)
 
 
 # =============================================================================
 def _get_is_revisit(  # -------------------------------------------------------
-    ctx: _ArenaTEMTraceContext,
+    ctx: StepContext,
 ) -> TraceValue:
-    is_revisit: Tensor | None = ctx.batch.get("is_revisit")
+    is_revisit: Tensor | None = ctx.record.batch.get("is_revisit")
     if is_revisit is None:
         return None
-    return is_revisit.view(-1).bool().detach()
+    return is_revisit.view(-1).bool()
 
 
 # =============================================================================
 def _get_pred_obs_id_post(  # -------------------------------------------------
-    ctx: _ArenaTEMTraceContext,
+    ctx: StepContext,
 ) -> TraceValue:
-    return ctx.outputs.backbone_output.obs_logits[0].detach().argmax(dim=-1)
+    return ctx.record.outputs.backbone_output.obs_logits[0].argmax(dim=-1)
 
 
 # =============================================================================
 def _get_pred_obs_id_recall(  # -----------------------------------------------
-    ctx: _ArenaTEMTraceContext,
+    ctx: StepContext,
 ) -> TraceValue:
-    return ctx.outputs.backbone_output.obs_logits[1].detach().argmax(dim=-1)
+    return ctx.record.outputs.backbone_output.obs_logits[1].argmax(dim=-1)
 
 
 # =============================================================================
 def _get_pred_obs_id_path(  # -------------------------------------------------
-    ctx: _ArenaTEMTraceContext,
+    ctx: StepContext,
 ) -> TraceValue:
-    return ctx.outputs.backbone_output.obs_logits[2].detach().argmax(dim=-1)
+    return ctx.record.outputs.backbone_output.obs_logits[2].argmax(dim=-1)
 
 
 # =============================================================================
@@ -139,8 +113,14 @@ ARENA_TEM_TRACE_FIELDS: tuple[TraceField, ...] = (
     ARENA_TEM_TRACE_PRED_POST,
     ARENA_TEM_TRACE_PRED_RECALL,
     ARENA_TEM_TRACE_PRED_PATH,
+    TRACE_DIAGNOSTIC_LEC_CELLS_TEM,
+    TRACE_DIAGNOSTIC_LEC_FILTERED_TEM,
     TRACE_DIAGNOSTIC_MEC_LOCATION_MEAN_TEM,
     TRACE_DIAGNOSTIC_HPC_LOCATION_MEAN_TEM,
+    TRACE_WORLD_OBSERVATION_TEM,
+    TRACE_WORLD_LOCATION_IDS_TEM,
+    TRACE_LEC_FILTER_ALPHA_SIGMOID_TEM,
+    TRACE_LEC_W_F_SIGMOID_TEM,
 )
 """All Arena TEM trace fields in canonical order."""
 
@@ -176,7 +156,7 @@ def build_arena_tem_trace_meta(  # --------------------------------------------
     root_key, leaf_key = TEM_META_KEY_TARGET_OBS_ID.split("/", maxsplit=1)
     return {
         root_key: {
-            leaf_key: batch["trajectory_observation_id"].detach().cpu(),
+            leaf_key: batch["trajectory_observation_id"].detach(),
         },
     }
 

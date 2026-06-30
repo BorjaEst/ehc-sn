@@ -19,7 +19,7 @@ Usage
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Iterable
 
 import torch
 from torch import Tensor
@@ -54,41 +54,8 @@ from ehc_sn.traces.keys import (  # fmt: skip
     SEQMAZE_META_KEY_TARGET_PATH,
     SEQMAZE_META_KEY_TARGET_PATH_LEN,
 )
+from ehc_sn.traces.observer import StepContext
 from ehc_sn.types import Batch
-
-# =============================================================================
-# Minimal typed context for MazeHard+HRM ACT trace getters
-# =============================================================================
-
-
-class _MazeHardTaskLogits(Protocol):
-    """Minimal task payload exposing MazeHard supervised logits."""
-
-    task_logits: Tensor
-
-
-class _MazeHardHRMACTTraceOutputs(Protocol):
-    """Minimal raw ACT controller-step output consumed by MazeHard+HRM trace getters."""
-
-    task: _MazeHardTaskLogits
-
-
-class _MazeHardHRMACTTraceContext(Protocol):
-    """Trace context expected by MazeHard+HRM ACT trace fields."""
-
-    outputs: _MazeHardHRMACTTraceOutputs
-
-
-class _MazeHardHRMQHaltingTraceOutputs(Protocol):
-    """Minimal Q-halting record surface consumed by MazeHard+HRM trace getters."""
-
-    task_output: _MazeHardTaskLogits
-
-
-class _MazeHardHRMQHaltingTraceContext(Protocol):
-    """Trace context expected by MazeHard+HRM Q-halting trace fields."""
-
-    outputs: _MazeHardHRMQHaltingTraceOutputs
 
 
 # =============================================================================
@@ -96,25 +63,25 @@ class _MazeHardHRMQHaltingTraceContext(Protocol):
 # =============================================================================
 
 
-def _solution_overlay_from_task_logits(task_logits: Tensor) -> TraceValue:
+def _prediction_overlay_from_task_logits(task_logits: Tensor) -> TraceValue:
     """Return a binary overlay for the MazeHard solution-path token."""
-    pred = torch.argmax(task_logits.detach(), dim=-1)  # (B, S)
+    pred = torch.argmax(task_logits, dim=-1)  # (B, S)
     return (pred == O_ID).to(torch.uint8)
 
 
-def _get_maze_hard_solution_overlay_act(
-    ctx: _MazeHardHRMACTTraceContext,
+def _get_maze_hard_prediction_overlay_act(
+    ctx: StepContext,
 ) -> TraceValue:
     """Read MazeHard solution-overlay traces from ACT backbone task logits."""
-    return _solution_overlay_from_task_logits(ctx.outputs.task.task_logits)
+    return _prediction_overlay_from_task_logits(ctx.record.outputs.task.task_logits)
 
 
-def _get_maze_hard_solution_overlay_q_halting(
-    ctx: _MazeHardHRMQHaltingTraceContext,
+def _get_maze_hard_prediction_overlay_q_halting(
+    ctx: StepContext,
 ) -> TraceValue:
     """Read MazeHard solution-overlay traces from Q-halting task output logits."""
-    return _solution_overlay_from_task_logits(
-        ctx.outputs.task_output.task_logits
+    return _prediction_overlay_from_task_logits(
+        ctx.record.outputs.task_output.task_logits
     )
 
 
@@ -133,22 +100,22 @@ def build_mazehard_hrm_trace_meta(batch: Batch) -> dict[str, object]:
 # Named field objects
 # =============================================================================
 
-MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY = TraceField(
-    name="pred/solution_overlay",
-    get=_get_maze_hard_solution_overlay_act,
+MAZE_HARD_HRM_TRACE_PREDICTION_OVERLAY = TraceField(
+    name="pred/prediction_overlay",
+    get=_get_maze_hard_prediction_overlay_act,
 )
 
 MAZE_HARD_HRM_ACT_TRACE_FIELDS: tuple[TraceField, ...] = (
-    MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY,
+    MAZE_HARD_HRM_TRACE_PREDICTION_OVERLAY,
 )
 
-_MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY_Q_HALTING = TraceField(
-    name="pred/solution_overlay",
-    get=_get_maze_hard_solution_overlay_q_halting,
+_MAZE_HARD_HRM_TRACE_PREDICTION_OVERLAY_Q_HALTING = TraceField(
+    name="pred/prediction_overlay",
+    get=_get_maze_hard_prediction_overlay_q_halting,
 )
 
 MAZE_HARD_HRM_Q_HALTING_TRACE_FIELDS: tuple[TraceField, ...] = (
-    _MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY_Q_HALTING,
+    _MAZE_HARD_HRM_TRACE_PREDICTION_OVERLAY_Q_HALTING,
 )
 
 
@@ -157,29 +124,11 @@ MAZE_HARD_HRM_Q_HALTING_TRACE_FIELDS: tuple[TraceField, ...] = (
 # =============================================================================
 
 
-class _GoaltraceACTTraceTaskOutput(Protocol):
-    """Minimal task payload exposing goaltrace firing field."""
-
-    firing_field: Tensor
-
-
-class _GoaltraceACTTraceOutputs(Protocol):
-    """Minimal raw ACT controller-step output consumed by goaltrace trace getters."""
-
-    task: _GoaltraceACTTraceTaskOutput
-
-
-class _GoaltraceACTTraceContext(Protocol):
-    """Trace context expected by goaltrace ACT trace fields."""
-
-    outputs: _GoaltraceACTTraceOutputs
-
-
 def _get_goaltrace_firing_field_act(
-    ctx: _GoaltraceACTTraceContext,
+    ctx: StepContext,
 ) -> TraceValue:
     """Read goaltrace firing field from ACT backbone bridge output."""
-    return ctx.outputs.task.firing_field.detach().cpu()
+    return ctx.record.outputs.task.firing_field
 
 
 GOALTRACE_HRM_ACT_FIRING_FIELD: TraceField = TraceField(
@@ -256,36 +205,30 @@ def build_goaltrace_hrm_trace_meta(
 
     Extracts all sample-constant metadata fields (input channels, targets,
     topology) from the collated batch and returns them as a flat dict of
-    numpy arrays ready for insertion into ``TraceTree.attached_meta``.
+    tensors ready for insertion into ``TraceTree.attached_meta``.
 
     The model-input keys (observation_id, weight, current_flag, goal_flag,
     node_mask) are projected explicitly.  Extra batch keys are ignored
     unless they are recognised target or topology keys.
     """
-    import numpy as np
-
-    def _to_np(key: str) -> np.ndarray:
-        val = batch[key]
-        return val.cpu().numpy() if hasattr(val, "cpu") else np.asarray(val)
-
     # Model input channels
-    meta: dict[str, np.ndarray] = {
-        GOALTRACE_META_KEY_OBSERVATION_ID: _to_np("observation_id"),
-        GOALTRACE_META_KEY_WEIGHT: _to_np("weight"),
-        GOALTRACE_META_KEY_CURRENT_FLAG: _to_np("current_flag"),
-        GOALTRACE_META_KEY_GOAL_FLAG: _to_np("goal_flag"),
-        GOALTRACE_META_KEY_NODE_MASK: _to_np("node_mask"),
+    meta: dict[str, object] = {
+        GOALTRACE_META_KEY_OBSERVATION_ID: batch["observation_id"],
+        GOALTRACE_META_KEY_WEIGHT: batch["weight"],
+        GOALTRACE_META_KEY_CURRENT_FLAG: batch["current_flag"],
+        GOALTRACE_META_KEY_GOAL_FLAG: batch["goal_flag"],
+        GOALTRACE_META_KEY_NODE_MASK: batch["node_mask"],
     }
 
     # Target channel
     if "target_field" in batch:
-        meta[GOALTRACE_META_KEY_TARGET_FIELD] = _to_np("target_field")
+        meta[GOALTRACE_META_KEY_TARGET_FIELD] = batch["target_field"]
 
     # Topology channels (evaluation metadata, not model input)
     if "successor_indices" in batch:
-        meta[GOALTRACE_META_KEY_SUCCESSOR_INDICES] = _to_np("successor_indices")
+        meta[GOALTRACE_META_KEY_SUCCESSOR_INDICES] = batch["successor_indices"]
     if "successor_mask" in batch:
-        meta[GOALTRACE_META_KEY_SUCCESSOR_MASK] = _to_np("successor_mask")
+        meta[GOALTRACE_META_KEY_SUCCESSOR_MASK] = batch["successor_mask"]
 
     return meta
 
@@ -295,29 +238,11 @@ def build_goaltrace_hrm_trace_meta(
 # =============================================================================
 
 
-class _RoutebindACTTraceTaskOutput(Protocol):
-    """Minimal task payload exposing routebind trajectory field."""
-
-    trajectory_field: Tensor
-
-
-class _RoutebindACTTraceOutputs(Protocol):
-    """Minimal raw ACT controller-step output consumed by routebind trace getters."""
-
-    task: _RoutebindACTTraceTaskOutput
-
-
-class _RoutebindACTTraceContext(Protocol):
-    """Trace context expected by routebind ACT trace fields."""
-
-    outputs: _RoutebindACTTraceOutputs
-
-
 def _get_routebind_trajectory_field_act(
-    ctx: _RoutebindACTTraceContext,
+    ctx: StepContext,
 ) -> TraceValue:
     """Read routebind trajectory field from ACT backbone bridge output."""
-    return ctx.outputs.task.trajectory_field.detach().cpu()
+    return ctx.record.outputs.task.trajectory_field
 
 
 ROUTEBIND_HRM_ACT_TRAJECTORY_FIELD: TraceField = TraceField(
@@ -335,27 +260,21 @@ def build_routebind_hrm_trace_meta(batch: dict) -> dict:
     """Build trace metadata for routebind evaluation traces from a batch dict.
 
     Extracts all sample-constant metadata fields (input channels, targets)
-    from the collated batch and returns them as a flat dict of numpy arrays
+    from the collated batch and returns them as a flat dict of tensors
     ready for insertion into ``TraceTree.attached_meta``.
     """
-    import numpy as np
-
-    def _to_np(key: str) -> np.ndarray:
-        val = batch[key]
-        return val.cpu().numpy() if hasattr(val, "cpu") else np.asarray(val)
-
-    meta: dict[str, np.ndarray] = {
-        ROUTEBIND_META_KEY_CELL_TYPE: _to_np("cell_type"),
-        ROUTEBIND_META_KEY_OBSERVATION_ID: _to_np("observation_id"),
-        ROUTEBIND_META_KEY_START_FLAG: _to_np("start_flag"),
-        ROUTEBIND_META_KEY_GOAL_FLAG: _to_np("goal_flag"),
-        ROUTEBIND_META_KEY_CELL_MASK: _to_np("spatial_mask"),
+    meta: dict[str, object] = {
+        ROUTEBIND_META_KEY_CELL_TYPE: batch["cell_type"],
+        ROUTEBIND_META_KEY_OBSERVATION_ID: batch["observation_id"],
+        ROUTEBIND_META_KEY_START_FLAG: batch["start_flag"],
+        ROUTEBIND_META_KEY_GOAL_FLAG: batch["goal_flag"],
+        ROUTEBIND_META_KEY_CELL_MASK: batch["spatial_mask"],
     }
 
     if "target_trajectory" in batch:
-        meta[ROUTEBIND_META_KEY_TARGET_TRAJECTORY] = _to_np("target_trajectory")
+        meta[ROUTEBIND_META_KEY_TARGET_TRAJECTORY] = batch["target_trajectory"]
     if "target_waypoint" in batch:
-        meta[ROUTEBIND_META_KEY_TARGET_WAYPOINT] = _to_np("target_waypoint")
+        meta[ROUTEBIND_META_KEY_TARGET_WAYPOINT] = batch["target_waypoint"]
 
     return meta
 
@@ -369,7 +288,7 @@ __all__ = [
     "build_routebind_hrm_trace_meta",
     "MAZE_HARD_HRM_Q_HALTING_TRACE_FIELDS",
     "MAZE_HARD_HRM_ACT_TRACE_FIELDS",
-    "MAZE_HARD_HRM_TRACE_SOLUTION_OVERLAY",
+    "MAZE_HARD_HRM_TRACE_PREDICTION_OVERLAY",
     "ROUTEBIND_HRM_ACT_TRACE_FIELDS",
     "ROUTEBIND_HRM_ACT_TRAJECTORY_FIELD",
     "SEQMAZE_HRM_Q_HALTING_TRACE_FIELDS",
