@@ -1,7 +1,7 @@
 # Tasks CLI — `ehp tasks`
 
 > Lifecycle-oriented CLI for generating, validating, and inspecting
-> processed task corpora.  Operation-first design: the verb is the
+> processed task corpora. Operation-first design: the verb is the
 > command, the task family is the argument.
 
 ---
@@ -42,13 +42,13 @@ ehp tasks inspect CORPUS [--split SPLIT] [--sample INDEX]
 
 ### Exit codes
 
-| Code | Meaning |
-|------|---------|
-| `0`  | Success |
-| `1`  | Generation or validation failure |
-| `2`  | Invalid CLI usage or configuration |
+| Code | Meaning                                               |
+| ---- | ----------------------------------------------------- |
+| `0`  | Success                                               |
+| `1`  | Generation or validation failure                      |
+| `2`  | Invalid CLI usage or configuration                    |
 | `3`  | Existing immutable output (use `--force` to override) |
-| `4`  | Missing or incompatible input artifact |
+| `4`  | Missing or incompatible input artifact                |
 
 ---
 
@@ -75,7 +75,7 @@ routebind    topology + DAG      default           experimental
 ```
 
 The task registry is defined programmatically in
-[`src/ehc_sn/tasks/registry.py`][src].  Every task plugin exports
+[`src/ehc_sn/tasks/registry.py`][src]. Every task plugin exports
 a `registered_name`, a `config_type` (Pydantic model), and a
 `description` string.
 
@@ -96,7 +96,7 @@ ehp tasks describe routebind --show-schema
 
 When `--show-schema` is passed the command prints the full Pydantic
 configuration schema for the task, including field types, defaults,
-and documentation strings.  This is the canonical reference for
+and documentation strings. This is the canonical reference for
 authoring task generation TOML files.
 
 The plain-text output summarises:
@@ -113,7 +113,7 @@ The plain-text output summarises:
 ### `ehp tasks plan TASK`
 
 Resolve generation configuration and display intended output without
-writing any artifacts.  A dry run for task corpus generation.
+writing any artifacts. A dry run for task corpus generation.
 
 ```
 ehp tasks plan arena \
@@ -181,19 +181,19 @@ ehp tasks build mazehard \
 
 #### Parameters
 
-| Option | Description |
-|--------|-------------|
-| `TASK` | Registered task-family name (positional argument). |
-| `--config PATH` | Path to a TOML generation configuration (required). |
-| `--output PATH` | Override the configured output directory. |
-| `--set KEY=VALUE` | Override a single config value (repeatable). |
-| `--dry-run` | Resolve configuration and inputs only; do not write. |
-| `--non-interactive` | Fail instead of prompting on conflicts. |
+| Option              | Description                                          |
+| ------------------- | ---------------------------------------------------- |
+| `TASK`              | Registered task-family name (positional argument).   |
+| `--config PATH`     | Path to a TOML generation configuration (required).  |
+| `--output PATH`     | Override the configured output directory.            |
+| `--set KEY=VALUE`   | Override a single config value (repeatable).         |
+| `--dry-run`         | Resolve configuration and inputs only; do not write. |
+| `--non-interactive` | Fail instead of prompting on conflicts.              |
 
 #### Configuration file
 
 Task-specific parameters live in typed TOML configuration files, not
-on the command line.  Example for Arena:
+on the command line. Example for Arena:
 
 ```toml
 # config/tasks/arena/default.toml
@@ -247,13 +247,13 @@ test = 240
 
 #### Behavioural guarantees
 
-| Property | Implementation |
-|----------|---------------|
-| **Determinism** | Same config + seed + parent fingerprints → identical output. |
-| **Atomic publication** | Write to staging directory; rename only after successful validation. |
-| **Immutability** | Refuse to overwrite an existing version root by default. |
-| **Provenance** | Record parent artifacts, config fingerprint, schema version, seed in manifest. |
-| **Machine-readable output** | `--format json` supported for CI consumption. |
+| Property                    | Implementation                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------ |
+| **Determinism**             | Same config + seed + parent fingerprints → identical output.                   |
+| **Atomic publication**      | Write to staging directory; rename only after successful validation.           |
+| **Immutability**            | Refuse to overwrite an existing version root by default.                       |
+| **Provenance**              | Record parent artifacts, config fingerprint, schema version, seed in manifest. |
+| **Machine-readable output** | `--format json` supported for CI consumption.                                  |
 
 On success the command prints:
 
@@ -281,16 +281,16 @@ ehp tasks validate data/processed/arena/default/v2 --format json
 ```
 
 The task family is read from the corpus `manifest.json` — users never
-repeat the task name.  This prevents contradictory invocations such
+repeat the task name. This prevents contradictory invocations such
 as validating an Arena corpus through MazeHard validation logic.
 
 #### Validation levels
 
-| Level | Checks |
-|-------|--------|
-| `manifest` | Manifest fields, path grammar, channel declarations |
-| `sample` | Manifest-level + per-sample structural invariants (shapes, dtypes, sentinels) |
-| `full` | Sample-level + task-specific semantic invariants (oracle consistency, revisit validity, support channel correctness) |
+| Level      | Checks                                                                                                               |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- |
+| `manifest` | Manifest fields, path grammar, channel declarations                                                                  |
+| `sample`   | Manifest-level + per-sample structural invariants (shapes, dtypes, sentinels)                                        |
+| `full`     | Sample-level + task-specific semantic invariants (oracle consistency, revisit validity, support channel correctness) |
 
 On success:
 
@@ -462,7 +462,7 @@ TASK_PLUGINS: Final[Mapping[str, TaskPlugin]] = {
 }
 ```
 
-The CLI never contains `if task == "arena"` branching.  Every command
+The CLI never contains `if task == "arena"` branching. Every command
 resolves `registry.require(task_name)` and dispatches through the
 plugin interface.
 
@@ -477,12 +477,12 @@ data/processed/<task>/<corpus>/v<version>/
 ```
 
 The logical identity (`task`, `corpus`, `version`) is declared in the
-configuration file.  A resolver computes the physical path.  Users may
+configuration file. A resolver computes the physical path. Users may
 override the output root with `--output PATH`.
 
 ### Immutability
 
-Corpus roots are immutable after publication.  A second build with the
+Corpus roots are immutable after publication. A second build with the
 same identity refuses with exit code 3 unless `--force` is passed
 (which is exceptional and should never be used for released versions).
 
@@ -500,12 +500,18 @@ and inspection dispatch:
   "schema_version": 1,
   "builder_version": "1.0.0",
   "channels": [
-    "trajectory_row", "trajectory_col",
-    "trajectory_observation_id", "trajectory_previous_action",
-    "trajectory_landmark_id", "trajectory_is_revisit",
-    "trajectory_episode_start", "trajectory_valid_step",
-    "trajectory_length", "topology",
-    "observations", "mask_valid"
+    "trajectory_row",
+    "trajectory_col",
+    "trajectory_observation_id",
+    "trajectory_previous_action",
+    "trajectory_landmark_id",
+    "trajectory_is_revisit",
+    "trajectory_episode_start",
+    "trajectory_valid_step",
+    "trajectory_length",
+    "topology",
+    "observations",
+    "mask_valid"
   ],
   "inputs": [
     {
@@ -533,13 +539,13 @@ and inspection dispatch:
 
 ## Task families
 
-| Task | Family | Status | Input substrate | Primary metric |
-|------|--------|--------|-----------------|----------------|
-| `arena` | structural navigation | `stable` | spatial-layout (`dungeongen` / `openfield`) | `accuracy_revisit` |
-| `mazehard` | batch token prediction | `stable` | maze shared substrate (`maze-nd`) | `token_accuracy` |
-| `seqmaze` | graph path prediction | `experimental` | DAG layout (`dagflow`) | `sequence_exact` |
-| `goaltrace` | prospective field (HRM) | `experimental` | DAG layout (`dagflow`) | `field_mse` |
-| `routebind` | spatial route binding | `experimental` | topology layout + DAG (`dungeongen` / `openfield` + `dagflow`) | `balanced_trajectory_field_error` |
+| Task        | Family                  | Status         | Input substrate                                                | Primary metric                    |
+| ----------- | ----------------------- | -------------- | -------------------------------------------------------------- | --------------------------------- |
+| `arena`     | structural navigation   | `stable`       | spatial-layout (`dungeongen` / `openfield`)                    | `accuracy_revisit`                |
+| `mazehard`  | batch token prediction  | `stable`       | maze shared substrate (`maze-nd`)                              | `token_accuracy`                  |
+| `seqmaze`   | graph path prediction   | `experimental` | DAG layout (`dagflow`)                                         | `sequence_exact`                  |
+| `goaltrace` | prospective field (HRM) | `experimental` | DAG layout (`dagflow`)                                         | `field_mse`                       |
+| `routebind` | spatial route binding   | `experimental` | topology layout + DAG (`dungeongen` / `openfield` + `dagflow`) | `balanced_trajectory_field_error` |
 
 ---
 
@@ -548,16 +554,16 @@ and inspection dispatch:
 The earlier `scripts/data-gen/build-<family>.py` scripts served the
 same purpose but violated three principles this CLI enforces:
 
-1. **Single entry point.**  Users no longer need to remember which
-   script lives where.  `ehp tasks build arena` is discoverable through
+1. **Single entry point.** Users no longer need to remember which
+   script lives where. `ehp tasks build arena` is discoverable through
    `ehp tasks --help`.
-2. **Operation-first hierarchy.**  `build`, `validate`, and `inspect`
-   apply uniformly across all families.  New task families add one
+2. **Operation-first hierarchy.** `build`, `validate`, and `inspect`
+   apply uniformly across all families. New task families add one
    plugin, not three CLI branches.
-3. **Configuration-driven generation.**  Builder parameters live in
+3. **Configuration-driven generation.** Builder parameters live in
    typed TOML files, not as CLI flags with inconsistent defaults.
 
 The standalone scripts are retained during a deprecation period and
-then removed.  All builder, validator, and inspector functions remain
+then removed. All builder, validator, and inspector functions remain
 importable Python APIs — the CLI is an orchestration adapter, not a
 replacement.

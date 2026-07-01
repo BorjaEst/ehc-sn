@@ -17,12 +17,12 @@ artifact set through separate APIs.
 
 ## Commands
 
-| Command | Purpose |
-|---|---|
-| [`run`](#run) | Execute an evaluation and commit its artifact set |
-| [`plan`](#plan) | Resolve and display an evaluation without executing it |
+| Command                 | Purpose                                                     |
+| ----------------------- | ----------------------------------------------------------- |
+| [`run`](#run)           | Execute an evaluation and commit its artifact set           |
+| [`plan`](#plan)         | Resolve and display an evaluation without executing it      |
 | [`validate`](#validate) | Preflight validation of evaluation inputs and compatibility |
-| [`recipes`](#recipes) | Discover registered evaluation recipes |
+| [`recipes`](#recipes)   | Discover registered evaluation recipes                      |
 
 ---
 
@@ -36,38 +36,38 @@ Execute a resolved evaluation recipe and commit a canonical artifact set.
 
 ### Positional arguments
 
-| Argument | Description |
-|---|---|
+| Argument | Description                                                                |
+| -------- | -------------------------------------------------------------------------- |
 | `RECIPE` | Registered evaluation recipe name (e.g. `arena-tem-v1`, `mazehard-hrm-v1`) |
 
 ### Principal options
 
-| Option | Description | Default |
-|---|---|---|
-| `--model` `MODEL_REF` | **Required.** Checkpoint path, run URI, or registered model reference | — |
-| `--dataset` `DATASET_REF` | Override the dataset declared by the recipe | recipe default |
-| `--split` `SPLIT` | Override the evaluation split | recipe default |
-| `--output` / `-o` `DIR` | Destination for the committed evaluation artifact set | `artifacts/evaluations/<alias>/<evaluation_id>/` |
+| Option                    | Description                                                           | Default                                          |
+| ------------------------- | --------------------------------------------------------------------- | ------------------------------------------------ |
+| `--model` `MODEL_REF`     | **Required.** Checkpoint path, run URI, or registered model reference | —                                                |
+| `--dataset` `DATASET_REF` | Override the dataset declared by the recipe                           | recipe default                                   |
+| `--split` `SPLIT`         | Override the evaluation split                                         | recipe default                                   |
+| `--output` / `-o` `DIR`   | Destination for the committed evaluation artifact set                 | `artifacts/evaluations/<alias>/<evaluation_id>/` |
 
 ### Execution policy options
 
-| Option | Description | Default |
-|---|---|---|
-| `--regime` `NAME` | Run only the named regime. Repeatable (`--regime diagnostic --regime test`) | all regimes |
-| `--device` `DEVICE` | Execution device or accelerator selector | `auto` |
-| `--precision` `PRECISION` | Runtime precision override (e.g. `16-mixed`, `bf16-mixed`) | recipe default |
-| `--seed` `INT` | Evaluation seed override | recipe default |
-| `--determinism` `MODE` | Deterministic-execution enforcement level. One of `off`, `warn`, `strict` | `warn` |
-| `--capture-profile` `PROFILE` | Override the recipe trace-capture profile | recipe default |
-| `--max-cases` `INT` | Bound the number of evaluated cases (≥ 1) | recipe default |
-| `--existing` `POLICY` | Policy when the target evaluation already exists. One of `error`, `resume`, `replace` | `error` |
-| `--publish` / `--no-publish` | Publish the committed artifact set to configured tracking | `True` |
+| Option                        | Description                                                                           | Default        |
+| ----------------------------- | ------------------------------------------------------------------------------------- | -------------- |
+| `--regime` `NAME`             | Run only the named regime. Repeatable (`--regime diagnostic --regime test`)           | all regimes    |
+| `--device` `DEVICE`           | Execution device or accelerator selector                                              | `auto`         |
+| `--precision` `PRECISION`     | Runtime precision override (e.g. `16-mixed`, `bf16-mixed`)                            | recipe default |
+| `--seed` `INT`                | Evaluation seed override                                                              | recipe default |
+| `--determinism` `MODE`        | Deterministic-execution enforcement level. One of `off`, `warn`, `strict`             | `warn`         |
+| `--capture-profile` `PROFILE` | Override the recipe trace-capture profile                                             | recipe default |
+| `--max-cases` `INT`           | Bound the number of evaluated cases (≥ 1)                                             | recipe default |
+| `--existing` `POLICY`         | Policy when the target evaluation already exists. One of `error`, `resume`, `replace` | `error`        |
+| `--publish` / `--no-publish`  | Publish the committed artifact set to configured tracking                             | `True`         |
 
 ### Output formatting options
 
-| Option | Description | Default |
-|---|---|---|
-| `--format` `FORMAT` | Terminal result format. One of `text`, `json` | `text` |
+| Option              | Description                                   | Default |
+| ------------------- | --------------------------------------------- | ------- |
+| `--format` `FORMAT` | Terminal result format. One of `text`, `json` | `text`  |
 
 ### Examples
 
@@ -129,24 +129,24 @@ inspectable object.
 Accepts the same `--model`, `--dataset`, `--split`, `--regime`, `--seed`,
 `--capture-profile`, `--max-cases`, and `--device` options as [`run`](#run).
 
-| Option | Description | Default |
-|---|---|---|
-| `--format` `FORMAT` | Output format. One of `text`, `json` | `text` |
+| Option              | Description                          | Default |
+| ------------------- | ------------------------------------ | ------- |
+| `--format` `FORMAT` | Output format. One of `text`, `json` | `text`  |
 
 ### Plan contents
 
-| Field | Description |
-|---|---|
-| Recipe ID and version | Canonical recipe alias and schema version |
-| Model reference and digest | Resolved path, model family, checkpoint digest |
-| Dataset URI, split, and digest | Resolved dataset identity |
-| Evaluation regimes | Regime IDs, kinds, and capture profiles |
-| Metric set and primary metric | Full metric key set plus designated primary metric |
-| Case-selection policy | Split, count, seed, batch size |
-| Trace-capture profile | Profile name, field list, max cases |
-| Expected output location | Target artifact directory |
-| Collision policy | What happens if `--existing` triggers |
-| Reproducibility warnings | Missing seeds, non-deterministic ops, etc. |
+| Field                          | Description                                        |
+| ------------------------------ | -------------------------------------------------- |
+| Recipe ID and version          | Canonical recipe alias and schema version          |
+| Model reference and digest     | Resolved path, model family, checkpoint digest     |
+| Dataset URI, split, and digest | Resolved dataset identity                          |
+| Evaluation regimes             | Regime IDs, kinds, and capture profiles            |
+| Metric set and primary metric  | Full metric key set plus designated primary metric |
+| Case-selection policy          | Split, count, seed, batch size                     |
+| Trace-capture profile          | Profile name, field list, max cases                |
+| Expected output location       | Target artifact directory                          |
+| Collision policy               | What happens if `--existing` triggers              |
+| Reproducibility warnings       | Missing seeds, non-deterministic ops, etc.         |
 
 ### Examples
 
@@ -176,26 +176,26 @@ Accepts the same `--model`, `--dataset`, `--split`, `--regime`, `--seed`,
 
 ### Validation scope
 
-| Category | Checks |
-|---|---|
-| **Recipe** | Schema validity, registration completeness |
-| **Model** | Checkpoint readability, metadata compatibility, model-family match |
-| **Task** | Task/model/evaluator compatibility, adapter resolution |
-| **Dataset** | Existence, schema, split availability, digest match |
-| **Trace** | Required trace fields, capture profile validity |
-| **Metrics** | Metric availability, scoring-spec compatibility |
-| **Figures** | Figure-plan compatibility, registered figure names |
-| **Runtime** | Device availability, output writability, dependency availability |
+| Category    | Checks                                                             |
+| ----------- | ------------------------------------------------------------------ |
+| **Recipe**  | Schema validity, registration completeness                         |
+| **Model**   | Checkpoint readability, metadata compatibility, model-family match |
+| **Task**    | Task/model/evaluator compatibility, adapter resolution             |
+| **Dataset** | Existence, schema, split availability, digest match                |
+| **Trace**   | Required trace fields, capture profile validity                    |
+| **Metrics** | Metric availability, scoring-spec compatibility                    |
+| **Figures** | Figure-plan compatibility, registered figure names                 |
+| **Runtime** | Device availability, output writability, dependency availability   |
 
 ### Exit codes
 
-| Code | Meaning |
-|---|---|
-| `0` | All checks passed |
-| `2` | CLI usage or parsing error |
-| `3` | Configuration or recipe error |
-| `4` | Reference resolution error |
-| `5` | Compatibility or validation failure |
+| Code | Meaning                             |
+| ---- | ----------------------------------- |
+| `0`  | All checks passed                   |
+| `2`  | CLI usage or parsing error          |
+| `3`  | Configuration or recipe error       |
+| `4`  | Reference resolution error          |
+| `5`  | Compatibility or validation failure |
 
 ### Example
 
@@ -231,9 +231,9 @@ ehp-sn evaluate recipes list
 # goaltrace-hrm-v1   goaltrace × hrm-v1
 ```
 
-| Option | Description | Default |
-|---|---|---|
-| `--format` `FORMAT` | Output format. One of `text`, `json` | `text` |
+| Option              | Description                          | Default |
+| ------------------- | ------------------------------------ | ------- |
+| `--format` `FORMAT` | Output format. One of `text`, `json` | `text`  |
 
 ### `evaluate recipes show`
 
@@ -247,24 +247,24 @@ Show full details of one registered evaluation recipe.
 ehp-sn evaluate recipes show arena-tem-v1
 ```
 
-| Option | Description | Default |
-|---|---|---|
-| `--format` `FORMAT` | Output format. One of `text`, `json` | `text` |
+| Option              | Description                          | Default |
+| ------------------- | ------------------------------------ | ------- |
+| `--format` `FORMAT` | Output format. One of `text`, `json` | `text`  |
 
 ### Recipe display contents
 
-| Field | Description |
-|---|---|
-| `alias` | Canonical recipe alias |
-| `task` | Task-family identifier |
-| `model_family` | Model-family identifier |
-| `primary_metric` | Canonical primary metric name |
-| `required_capabilities` | Model capabilities the artifact must satisfy |
-| `cases` | Default case-selection policy (split, count, seed) |
-| `dataset` | Default dataset URI |
-| `evaluation` | Task-specific evaluation parameters |
-| `capture` | Trace-capture profile name and limits |
-| `figures` | Default inspection figure names |
+| Field                   | Description                                        |
+| ----------------------- | -------------------------------------------------- |
+| `alias`                 | Canonical recipe alias                             |
+| `task`                  | Task-family identifier                             |
+| `model_family`          | Model-family identifier                            |
+| `primary_metric`        | Canonical primary metric name                      |
+| `required_capabilities` | Model capabilities the artifact must satisfy       |
+| `cases`                 | Default case-selection policy (split, count, seed) |
+| `dataset`               | Default dataset URI                                |
+| `evaluation`            | Task-specific evaluation parameters                |
+| `capture`               | Trace-capture profile name and limits              |
+| `figures`               | Default inspection figure names                    |
 
 ---
 
@@ -346,13 +346,13 @@ evaluation_id = hash(
 )
 ```
 
-| Input change | Identity change |
-|---|---|
-| Different model checkpoint | Different ID |
-| Different dataset version | Different ID |
-| Different dataset split | Different ID |
+| Input change                    | Identity change                                  |
+| ------------------------------- | ------------------------------------------------ |
+| Different model checkpoint      | Different ID                                     |
+| Different dataset version       | Different ID                                     |
+| Different dataset split         | Different ID                                     |
 | Device change (cuda:0 → cuda:1) | **Same** ID (device is placement, not semantics) |
-| Capture profile change | Same or different per contract |
+| Capture profile change          | Same or different per contract                   |
 
 The timestamp is metadata, not identity.
 
@@ -364,12 +364,12 @@ The timestamp is metadata, not identity.
 
 ### Supported syntaxes
 
-| Syntax | Example | Resolver |
-|---|---|---|
-| Local path | `./checkpoints/best.ckpt` | Local checkpoint loader |
-| Run artifact | `runs:/01J.../checkpoints/best.ckpt` | MLflow run artifact resolver |
-| Registered model | `models:/arena-tem-v1@production` | MLflow model registry resolver |
-| Content-addressed | `sha256:a18d...` | Content-addressable store resolver |
+| Syntax            | Example                              | Resolver                           |
+| ----------------- | ------------------------------------ | ---------------------------------- |
+| Local path        | `./checkpoints/best.ckpt`            | Local checkpoint loader            |
+| Run artifact      | `runs:/01J.../checkpoints/best.ckpt` | MLflow run artifact resolver       |
+| Registered model  | `models:/arena-tem-v1@production`    | MLflow model registry resolver     |
+| Content-addressed | `sha256:a18d...`                     | Content-addressable store resolver |
 
 ### Resolved model
 
@@ -388,16 +388,16 @@ class ResolvedModel:
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Success |
-| `2` | CLI usage or parsing error |
-| `3` | Configuration or recipe error |
-| `4` | Reference resolution error (model, dataset) |
-| `5` | Compatibility or validation failure |
-| `6` | Evaluation execution failure |
-| `7` | Artifact commit or publication failure |
-| `8` | Threshold or gate failure (future) |
+| Code | Meaning                                     |
+| ---- | ------------------------------------------- |
+| `0`  | Success                                     |
+| `2`  | CLI usage or parsing error                  |
+| `3`  | Configuration or recipe error               |
+| `4`  | Reference resolution error (model, dataset) |
+| `5`  | Compatibility or validation failure         |
+| `6`  | Evaluation execution failure                |
+| `7`  | Artifact commit or publication failure      |
+| `8`  | Threshold or gate failure (future)          |
 
 ---
 
@@ -459,13 +459,13 @@ ehp-sn evaluate recipes show arena-tem-v1
 
 ## Related commands
 
-| Command | Relationship |
-|---|---|
-| [`ehp-sn train run`](train.md) | Produces the checkpoints that `evaluate run` consumes |
-| `ehp-sn evaluation show` | Inspect a completed evaluation artifact (separate concern) |
-| `ehp-sn evaluation compare` | Compare results across evaluation artifacts (separate concern) |
-| `ehp-sn figures render` | Generate publication/report figures from evaluation artifacts (separate concern) |
-| `ehp-sn report build` | Produce report-data packages from evaluation artifacts (separate concern) |
+| Command                        | Relationship                                                                     |
+| ------------------------------ | -------------------------------------------------------------------------------- |
+| [`ehp-sn train run`](train.md) | Produces the checkpoints that `evaluate run` consumes                            |
+| `ehp-sn evaluation show`       | Inspect a completed evaluation artifact (separate concern)                       |
+| `ehp-sn evaluation compare`    | Compare results across evaluation artifacts (separate concern)                   |
+| `ehp-sn figures render`        | Generate publication/report figures from evaluation artifacts (separate concern) |
+| `ehp-sn report build`          | Produce report-data packages from evaluation artifacts (separate concern)        |
 
 ---
 

@@ -7,7 +7,7 @@ description: ehp-sn data — lifecycle commands for interim-data substrates
 
 The `data` CLI manages **interim-data substrates** — versioned, immutable
 artefacts that describe world topologies without task-specific protocol
-(trajectories, episodes, supervision).  Task-ready corpora belong under
+(trajectories, episodes, supervision). Task-ready corpora belong under
 [`ehp-sn tasks`](tasks.md).
 
 ## Ownership boundary
@@ -49,16 +49,16 @@ data/processed/<task>/<corpus>/v<N>/    task corpus
 
 ## Stable commands
 
-| Command | Operates on | Purpose |
-|---|---|---|
-| `list` | — | List registered substrate generators |
-| `show` | target | Describe a generator and its configuration contract |
-| `plan` | target | Resolve configuration and display a build plan without writing data |
-| `build` | target | Materialise one immutable interim-data artefact |
-| `validate` | artefact | Validate an already-materialised artefact |
-| `inspect` | artefact | Display metadata and bounded samples from an artefact |
-| `clean` | target | Remove temporary or failed build state (optional) |
-| `migrate` | artefact | Schema migration — creates a new artefact (future) |
+| Command    | Operates on | Purpose                                                             |
+| ---------- | ----------- | ------------------------------------------------------------------- |
+| `list`     | —           | List registered substrate generators                                |
+| `show`     | target      | Describe a generator and its configuration contract                 |
+| `plan`     | target      | Resolve configuration and display a build plan without writing data |
+| `build`    | target      | Materialise one immutable interim-data artefact                     |
+| `validate` | artefact    | Validate an already-materialised artefact                           |
+| `inspect`  | artefact    | Display metadata and bounded samples from an artefact               |
+| `clean`    | target      | Remove temporary or failed build state (optional)                   |
+| `migrate`  | artefact    | Schema migration — creates a new artefact (future)                  |
 
 ## Registered substrate generators
 
@@ -66,12 +66,12 @@ data/processed/<task>/<corpus>/v<N>/    task corpus
 ehp-sn data list
 ```
 
-| Target | Kind | Default config | Description |
-|---|---|---|---|
-| `dagflow` | synthetic | `config/data/dagflow/default.toml` | Directed acyclic graph substrates |
+| Target       | Kind      | Default config                        | Description                          |
+| ------------ | --------- | ------------------------------------- | ------------------------------------ |
+| `dagflow`    | synthetic | `config/data/dagflow/default.toml`    | Directed acyclic graph substrates    |
 | `dungeongen` | synthetic | `config/data/dungeongen/default.toml` | Dungeon topology and sensory layouts |
-| `maze-nd` | imported | `config/data/maze-nd/default.toml` | Shared N-dimensional maze substrate |
-| `openfield` | synthetic | `config/data/openfield/default.toml` | Open-field spatial layouts |
+| `maze-nd`    | imported  | `config/data/maze-nd/default.toml`    | Shared N-dimensional maze substrate  |
+| `openfield`  | synthetic | `config/data/openfield/default.toml`  | Open-field spatial layouts           |
 
 ```
 $ ehp-sn data list
@@ -196,7 +196,7 @@ A successful build must never leave a partially published version root.
 
 ### Configuration-first interface
 
-Generator parameters are **not** first-class CLI flags.  They live in
+Generator parameters are **not** first-class CLI flags. They live in
 version-controlled TOML configuration files under `config/data/`.
 
 ```
@@ -237,17 +237,17 @@ max_occurrences = 4
 
 The CLI exposes a deliberately small override surface:
 
-| Option | Purpose |
-|---|---|
-| `--config`, `-c <PATH>` | Generator configuration file |
-| `--set <KEY>=<VALUE>` | Override a single configuration value |
-| `--output-root <PATH>` | Override the configured interim-data root |
-| `--seed <INT>` | Override the base seed |
-| `--force` | Replace an existing equivalent artefact |
-| `--dry-run` | Print what would happen without building |
-| `--json` | Emit the build result as machine-readable JSON |
-| `--quiet` | Suppress informational output |
-| `--verbose` | Show detailed progress |
+| Option                  | Purpose                                        |
+| ----------------------- | ---------------------------------------------- |
+| `--config`, `-c <PATH>` | Generator configuration file                   |
+| `--set <KEY>=<VALUE>`   | Override a single configuration value          |
+| `--output-root <PATH>`  | Override the configured interim-data root      |
+| `--seed <INT>`          | Override the base seed                         |
+| `--force`               | Replace an existing equivalent artefact        |
+| `--dry-run`             | Print what would happen without building       |
+| `--json`                | Emit the build result as machine-readable JSON |
+| `--quiet`               | Suppress informational output                  |
+| `--verbose`             | Show detailed progress                         |
 
 The guiding principle:
 
@@ -329,14 +329,14 @@ Validation covers:
 
 ### Validation levels
 
-| Level | Scope |
-|---|---|
-| `quick` | Manifest schema, file existence, top-level invariants |
-| `full` (default) | All checks including data-intensive traversals |
+| Level            | Scope                                                 |
+| ---------------- | ----------------------------------------------------- |
+| `quick`          | Manifest schema, file existence, top-level invariants |
+| `full` (default) | All checks including data-intensive traversals        |
 
 ## `data inspect ARTEFACT`
 
-Displays artefact metadata and bounded samples.  Human-oriented:
+Displays artefact metadata and bounded samples. Human-oriented:
 
 ```
 ehp-sn data inspect data/interim/dagflow/default/v1
@@ -388,17 +388,17 @@ ehp-sn data migrate data/interim/dungeongen/v1 \
 
 ## Internal Python API
 
-The CLI is a thin adapter.  It delegates to a registry-driven internal API
+The CLI is a thin adapter. It delegates to a registry-driven internal API
 in `ehc_sn.data.api`:
 
-| Function | Purpose |
-|---|---|
-| `list_generators() -> tuple[GeneratorInfo, ...]` | Registered generator catalogue |
-| `describe_generator(target) -> GeneratorInfo` | Single generator metadata |
-| `plan_build(request: DataBuildRequest) -> DataBuildPlan` | Resolve and preview a build |
-| `build_data(request: DataBuildRequest) -> DataBuildResult` | Execute a build |
-| `validate_data(request: DataValidationRequest) -> ValidationReport` | Validate an artefact |
-| `inspect_data(request: DataInspectionRequest) -> DataInspection` | Inspect an artefact |
+| Function                                                            | Purpose                        |
+| ------------------------------------------------------------------- | ------------------------------ |
+| `list_generators() -> tuple[GeneratorInfo, ...]`                    | Registered generator catalogue |
+| `describe_generator(target) -> GeneratorInfo`                       | Single generator metadata      |
+| `plan_build(request: DataBuildRequest) -> DataBuildPlan`            | Resolve and preview a build    |
+| `build_data(request: DataBuildRequest) -> DataBuildResult`          | Execute a build                |
+| `validate_data(request: DataValidationRequest) -> ValidationReport` | Validate an artefact           |
+| `inspect_data(request: DataInspectionRequest) -> DataInspection`    | Inspect an artefact            |
 
 Core request types:
 
@@ -459,40 +459,40 @@ DATA_GENERATORS.register(DagFlowGenerator())
 
 ## Behavioural guarantees
 
-| Property | Requirement |
-|---|---|
-| **Determinism** | Same code version + same resolved config + same input fingerprints → same logical artefact |
-| **Immutability** | A published version root is never silently modified |
-| **Idempotence** | Re-running an equivalent build reuses the artefact or reports it already exists |
-| **Atomic publication** | Generate and validate in staging, then atomic rename into place |
-| **Explicit replacement** | `--force` is never implicit; operates only after destination identity is resolved |
-| **Machine-readable output** | Every informational command supports `--json` |
-| **Stable exit codes** | 0=success, 1=build failure, 2=bad invocation, 3=validation failure, 4=not found, 5=conflict |
-| **No tracebacks by default** | Concise domain errors; `--verbose` or `EHP_DEBUG=1` for Python tracebacks |
-| **No CI prompts** | All commands support deterministic noninteractive execution |
-| **Bounded inspection** | `inspect` never dumps entire datasets |
+| Property                     | Requirement                                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------------- |
+| **Determinism**              | Same code version + same resolved config + same input fingerprints → same logical artefact  |
+| **Immutability**             | A published version root is never silently modified                                         |
+| **Idempotence**              | Re-running an equivalent build reuses the artefact or reports it already exists             |
+| **Atomic publication**       | Generate and validate in staging, then atomic rename into place                             |
+| **Explicit replacement**     | `--force` is never implicit; operates only after destination identity is resolved           |
+| **Machine-readable output**  | Every informational command supports `--json`                                               |
+| **Stable exit codes**        | 0=success, 1=build failure, 2=bad invocation, 3=validation failure, 4=not found, 5=conflict |
+| **No tracebacks by default** | Concise domain errors; `--verbose` or `EHP_DEBUG=1` for Python tracebacks                   |
+| **No CI prompts**            | All commands support deterministic noninteractive execution                                 |
+| **Bounded inspection**       | `inspect` never dumps entire datasets                                                       |
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Success / valid |
-| `1` | Operational build failure |
-| `2` | Invalid CLI invocation or configuration error |
-| `3` | Validation failure |
-| `4` | Target or artefact not found |
-| `5` | Artefact conflict (version root already exists without `--force`) |
+| Code | Meaning                                                           |
+| ---- | ----------------------------------------------------------------- |
+| `0`  | Success / valid                                                   |
+| `1`  | Operational build failure                                         |
+| `2`  | Invalid CLI invocation or configuration error                     |
+| `3`  | Validation failure                                                |
+| `4`  | Target or artefact not found                                      |
+| `5`  | Artefact conflict (version root already exists without `--force`) |
 
 ## Comparison: registry-driven vs. sub-Typer-per-generator
 
-| Concern | Registry-driven (adopted) | Sub-Typer per generator (alternative) |
-|---|---|---|
-| **Command grammar** | Stable: `data build TARGET` | Changes when generators are added or renamed |
-| **Lifecycle consistency** | One set of verbs (`build`, `validate`, `inspect`) shared across all generators | Each generator can drift to different verb sets |
-| **Parameter surface** | Config-first; CLI stays small | Generator flags proliferate on CLI |
-| **Extensibility** | Register a new class; no CLI changes | Add a new Typer sub-app |
-| **Machine-readable automation** | Uniform `--json` on all commands | JSON must be reimplemented per sub-app |
-| **Discoverability** | `data list` shows all generators | Must inspect repo to find sub-apps |
+| Concern                         | Registry-driven (adopted)                                                      | Sub-Typer per generator (alternative)           |
+| ------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------- |
+| **Command grammar**             | Stable: `data build TARGET`                                                    | Changes when generators are added or renamed    |
+| **Lifecycle consistency**       | One set of verbs (`build`, `validate`, `inspect`) shared across all generators | Each generator can drift to different verb sets |
+| **Parameter surface**           | Config-first; CLI stays small                                                  | Generator flags proliferate on CLI              |
+| **Extensibility**               | Register a new class; no CLI changes                                           | Add a new Typer sub-app                         |
+| **Machine-readable automation** | Uniform `--json` on all commands                                               | JSON must be reimplemented per sub-app          |
+| **Discoverability**             | `data list` shows all generators                                               | Must inspect repo to find sub-apps              |
 
 ## See also
 

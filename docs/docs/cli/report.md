@@ -6,7 +6,7 @@ description: ehp-sn report — build, validate, inspect, render, and export repo
 # `ehp-sn report` — Report Package Generation
 
 The `report` CLI transforms **existing evaluation artifacts** into validated,
-portable, presentation-ready **report packages**.  It does **not** evaluate
+portable, presentation-ready **report packages**. It does **not** evaluate
 models, rerun inference, select checkpoints, or recompute primary scientific
 results.
 
@@ -49,15 +49,15 @@ notebooks / exports / publications
 
 ## Stable commands
 
-| Command | Operates on | Purpose |
-|---|---|---|
-| `build` | artifact source | Build a canonical report package from evaluation artifacts |
-| `validate` | report package | Validate structure, references, and semantic content |
-| `inspect` | report package | Display metadata, metrics, resources, figures, or provenance |
-| `render` | report package | Render or re-render presentation resources (figures) |
-| `export` | report package | Produce a delivery artifact for humans or external systems |
-| `schema` | — | Print the canonical report package schema |
-| `list-profiles` | — | List registered report profiles |
+| Command         | Operates on     | Purpose                                                      |
+| --------------- | --------------- | ------------------------------------------------------------ |
+| `build`         | artifact source | Build a canonical report package from evaluation artifacts   |
+| `validate`      | report package  | Validate structure, references, and semantic content         |
+| `inspect`       | report package  | Display metadata, metrics, resources, figures, or provenance |
+| `render`        | report package  | Render or re-render presentation resources (figures)         |
+| `export`        | report package  | Produce a delivery artifact for humans or external systems   |
+| `schema`        | —               | Print the canonical report package schema                    |
+| `list-profiles` | —               | List registered report profiles                              |
 
 ---
 
@@ -83,24 +83,24 @@ ehp-sn report build SOURCE \
 
 ### Arguments
 
-| Argument | Description |
-|---|---|
+| Argument | Description                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------------- |
 | `SOURCE` | Evaluation artifact path or supported artifact URI (local path, `runs:/<id>/<path>`). Positional. |
 
 ### Options
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `--output`, `-o` | `PATH` | *required* | Destination directory for the report package. |
-| `--request`, `-r` | `PATH` | `None` | TOML or YAML report request file (overrides `--profile` defaults). |
-| `--profile` | `str` | `None` | Named report profile selecting resources, views, and default figures. |
-| `--figure` | `list[str]` | `[]` | Figure ID(s) to render; repeatable. |
-| `--all-figures` | flag | `False` | Render every compatible registered figure for the profile. |
-| `--render` / `--no-render` | flag | `True` | Enable or disable figure rendering during build. |
-| `--format` | `list[str]` | `[]` | Render format(s): `png`, `svg`, `pdf`; repeatable. |
-| `--overwrite` | flag | `False` | Replace an existing destination package atomically. |
-| `--dry-run` | flag | `False` | Resolve and validate the request without writing files. |
-| `--json` | flag | `False` | Emit a machine-readable result to stdout. |
+| Option                     | Type        | Default    | Description                                                           |
+| -------------------------- | ----------- | ---------- | --------------------------------------------------------------------- |
+| `--output`, `-o`           | `PATH`      | _required_ | Destination directory for the report package.                         |
+| `--request`, `-r`          | `PATH`      | `None`     | TOML or YAML report request file (overrides `--profile` defaults).    |
+| `--profile`                | `str`       | `None`     | Named report profile selecting resources, views, and default figures. |
+| `--figure`                 | `list[str]` | `[]`       | Figure ID(s) to render; repeatable.                                   |
+| `--all-figures`            | flag        | `False`    | Render every compatible registered figure for the profile.            |
+| `--render` / `--no-render` | flag        | `True`     | Enable or disable figure rendering during build.                      |
+| `--format`                 | `list[str]` | `[]`       | Render format(s): `png`, `svg`, `pdf`; repeatable.                    |
+| `--overwrite`              | flag        | `False`    | Replace an existing destination package atomically.                   |
+| `--dry-run`                | flag        | `False`    | Resolve and validate the request without writing files.               |
+| `--json`                   | flag        | `False`    | Emit a machine-readable result to stdout.                             |
 
 ### Behaviour
 
@@ -147,12 +147,12 @@ The defaults are conservative:
 
 ### Error handling
 
-| Condition | Exit code | Behaviour |
-|---|---|---|
-| Source not found or incompatible | 3 | Error message on stderr. |
-| Output path already exists (no `--overwrite`) | 5 | Error message on stderr. |
-| Unknown `--profile` or `--figure` | 6 | Error message on stderr. |
-| Partial render failure | 7 | Warnings on stderr; package still published. |
+| Condition                                     | Exit code | Behaviour                                    |
+| --------------------------------------------- | --------- | -------------------------------------------- |
+| Source not found or incompatible              | 3         | Error message on stderr.                     |
+| Output path already exists (no `--overwrite`) | 5         | Error message on stderr.                     |
+| Unknown `--profile` or `--figure`             | 6         | Error message on stderr.                     |
+| Partial render failure                        | 7         | Warnings on stderr; package still published. |
 
 ### Examples
 
@@ -202,32 +202,32 @@ ehp-sn report validate REPORT \
 
 ### Arguments
 
-| Argument | Description |
-|---|---|
+| Argument | Description                           |
+| -------- | ------------------------------------- |
 | `REPORT` | Report package directory. Positional. |
 
 ### Options
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `--level` | `str` | `content` | Validation depth. |
-| `--strict` | flag | `False` | Treat warnings as validation failures. |
-| `--json` | flag | `False` | Emit validation results as JSON. |
+| Option     | Type  | Default   | Description                            |
+| ---------- | ----- | --------- | -------------------------------------- |
+| `--level`  | `str` | `content` | Validation depth.                      |
+| `--strict` | flag  | `False`   | Treat warnings as validation failures. |
+| `--json`   | flag  | `False`   | Emit validation results as JSON.       |
 
 ### Validation levels
 
-| Level | Checks |
-|---|---|
-| `structure` | Package root exists, `_SUCCESS` sentinel present, `datapackage.json` decodes, schema version is supported, required top-level keys present. |
-| `references` | Everything in `structure` + every declared resource and figure file exists on disk, no duplicate resource or figure IDs, no paths escaping the report root. |
-| `content` | Everything in `references` + metric records parse correctly, schemas match resource formats, provenance fields are internally consistent, selected case IDs exist in the source artifact, figure-index entries point to real files with correct formats, primary metrics are registered for the declared task, required resources for the profile are present. |
+| Level        | Checks                                                                                                                                                                                                                                                                                                                                                         |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `structure`  | Package root exists, `_SUCCESS` sentinel present, `datapackage.json` decodes, schema version is supported, required top-level keys present.                                                                                                                                                                                                                    |
+| `references` | Everything in `structure` + every declared resource and figure file exists on disk, no duplicate resource or figure IDs, no paths escaping the report root.                                                                                                                                                                                                    |
+| `content`    | Everything in `references` + metric records parse correctly, schemas match resource formats, provenance fields are internally consistent, selected case IDs exist in the source artifact, figure-index entries point to real files with correct formats, primary metrics are registered for the declared task, required resources for the profile are present. |
 
 ### Exit codes
 
-| Code | Meaning |
-|---|---|
-| 0 | All checks passed (warnings may exist unless `--strict`). |
-| 4 | Validation failure — at least one check failed. |
+| Code | Meaning                                                   |
+| ---- | --------------------------------------------------------- |
+| 0    | All checks passed (warnings may exist unless `--strict`). |
+| 4    | Validation failure — at least one check failed.           |
 
 ### Examples
 
@@ -253,27 +253,27 @@ ehp-sn report inspect REPORT \
 
 ### Arguments
 
-| Argument | Description |
-|---|---|
+| Argument | Description                           |
+| -------- | ------------------------------------- |
 | `REPORT` | Report package directory. Positional. |
 
 ### Options
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `--section` | `str` | `summary` | Section to display. |
-| `--metric` | `str` | `None` | Filter to a specific metric name (only with `--section metrics`). |
-| `--json` | flag | `False` | Emit the selected section as JSON. |
+| Option      | Type  | Default   | Description                                                       |
+| ----------- | ----- | --------- | ----------------------------------------------------------------- |
+| `--section` | `str` | `summary` | Section to display.                                               |
+| `--metric`  | `str` | `None`    | Filter to a specific metric name (only with `--section metrics`). |
+| `--json`    | flag  | `False`   | Emit the selected section as JSON.                                |
 
 ### Sections
 
-| Section | Output |
-|---|---|
-| `summary` | Report root, schema version, task, model family, source URI, metric count, primary metric, case count, figure count, validation status. |
-| `metrics` | All metric records, or a single metric with `--metric`. |
-| `resources` | Declared resources with name, format, path, and size. |
-| `figures` | Figure-index entries with ID, format, path, title, and description. |
-| `provenance` | Full provenance record. |
+| Section      | Output                                                                                                                                  |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `summary`    | Report root, schema version, task, model family, source URI, metric count, primary metric, case count, figure count, validation status. |
+| `metrics`    | All metric records, or a single metric with `--metric`.                                                                                 |
+| `resources`  | Declared resources with name, format, path, and size.                                                                                   |
+| `figures`    | Figure-index entries with ID, format, path, title, and description.                                                                     |
+| `provenance` | Full provenance record.                                                                                                                 |
 
 ### Example output (`--section summary`)
 
@@ -302,7 +302,7 @@ ehp-sn report inspect artifacts/reports/tem-v2-arena --section metrics --metric 
 
 ## `report render REPORT`
 
-Render or re-render presentation resources (figures) from an existing canonical report package.  Does **not** recompute metrics or re-extract data.
+Render or re-render presentation resources (figures) from an existing canonical report package. Does **not** recompute metrics or re-extract data.
 
 ### Synopsis
 
@@ -319,21 +319,21 @@ ehp-sn report render REPORT \
 
 ### Arguments
 
-| Argument | Description |
-|---|---|
+| Argument | Description                        |
+| -------- | ---------------------------------- |
 | `REPORT` | Source report package. Positional. |
 
 ### Options
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `--output`, `-o` | `PATH` | *required* | Destination for the rendered report package (new or updated). |
-| `--figure` | `list[str]` | `[]` | Figure ID(s) to render; repeatable. |
-| `--all` | flag | `False` | Render every compatible figure registered in the package profile. |
-| `--format` | `list[str]` | `[]` | Render format(s); repeatable. |
-| `--dpi` | `int` | `150` | Output DPI for raster formats. |
-| `--overwrite` | flag | `False` | Replace an existing destination. |
-| `--json` | flag | `False` | Emit machine-readable result to stdout. |
+| Option           | Type        | Default    | Description                                                       |
+| ---------------- | ----------- | ---------- | ----------------------------------------------------------------- |
+| `--output`, `-o` | `PATH`      | _required_ | Destination for the rendered report package (new or updated).     |
+| `--figure`       | `list[str]` | `[]`       | Figure ID(s) to render; repeatable.                               |
+| `--all`          | flag        | `False`    | Render every compatible figure registered in the package profile. |
+| `--format`       | `list[str]` | `[]`       | Render format(s); repeatable.                                     |
+| `--dpi`          | `int`       | `150`      | Output DPI for raster formats.                                    |
+| `--overwrite`    | flag        | `False`    | Replace an existing destination.                                  |
+| `--json`         | flag        | `False`    | Emit machine-readable result to stdout.                           |
 
 ### Behaviour
 
@@ -360,7 +360,7 @@ report render REPORT
 
 ### Notes
 
-- `render` writes to a **new** output directory by default.  Use `--overwrite` to replace an existing destination.
+- `render` writes to a **new** output directory by default. Use `--overwrite` to replace an existing destination.
 - Renderer version and rendering parameters are recorded in the output package's provenance.
 - Partial failures (some figures fail) produce exit code 7; successfully rendered figures are still written.
 
@@ -382,7 +382,7 @@ ehp-sn report render artifacts/reports/tem-v2-arena \
 
 ## `report export REPORT`
 
-Produce a delivery artifact for humans or external systems.  An export is a **projection** of the canonical report package — never the canonical representation itself.
+Produce a delivery artifact for humans or external systems. An export is a **projection** of the canonical report package — never the canonical representation itself.
 
 ### Synopsis
 
@@ -397,28 +397,28 @@ ehp-sn report export REPORT \
 
 ### Arguments
 
-| Argument | Description |
-|---|---|
+| Argument | Description                           |
+| -------- | ------------------------------------- |
 | `REPORT` | Report package directory. Positional. |
 
 ### Options
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `--format` | `str` | *required* | Export format: `html`, `pdf`, `json`, or `csv`. |
-| `--output`, `-o` | `PATH` | *required* | Destination export file or directory. |
-| `--template` | `str` | `None` | Named export template (format-specific). |
-| `--title` | `str` | package name | Document title for HTML/PDF exports. |
-| `--overwrite` | flag | `False` | Replace an existing export destination. |
+| Option           | Type   | Default      | Description                                     |
+| ---------------- | ------ | ------------ | ----------------------------------------------- |
+| `--format`       | `str`  | _required_   | Export format: `html`, `pdf`, `json`, or `csv`. |
+| `--output`, `-o` | `PATH` | _required_   | Destination export file or directory.           |
+| `--template`     | `str`  | `None`       | Named export template (format-specific).        |
+| `--title`        | `str`  | package name | Document title for HTML/PDF exports.            |
+| `--overwrite`    | flag   | `False`      | Replace an existing export destination.         |
 
 ### Format notes
 
-| Format | Output | Description |
-|---|---|---|
-| `html` | single `.html` file | Self-contained HTML report with embedded figures and tables. |
-| `pdf` | single `.pdf` file | Print-ready PDF (requires a LaTeX or headless-browser renderer). |
-| `json` | single `.json` file | Machine-readable projection of all report resources. |
-| `csv` | directory of `.csv` files | Tabular projections of metrics, cases, and derived views. |
+| Format | Output                    | Description                                                      |
+| ------ | ------------------------- | ---------------------------------------------------------------- |
+| `html` | single `.html` file       | Self-contained HTML report with embedded figures and tables.     |
+| `pdf`  | single `.pdf` file        | Print-ready PDF (requires a LaTeX or headless-browser renderer). |
+| `json` | single `.json` file       | Machine-readable projection of all report resources.             |
+| `csv`  | directory of `.csv` files | Tabular projections of metrics, cases, and derived views.        |
 
 ### Examples
 
@@ -520,12 +520,12 @@ Every `report build` produces one canonical package layout:
       "mediatype": "application/json",
       "schema": {
         "fields": [
-          {"name": "metric", "type": "string"},
-          {"name": "value", "type": "number"},
-          {"name": "unit", "type": "string"},
-          {"name": "higher_is_better", "type": "boolean"},
-          {"name": "is_primary", "type": "boolean"},
-          {"name": "role", "type": "string"}
+          { "name": "metric", "type": "string" },
+          { "name": "value", "type": "number" },
+          { "name": "unit", "type": "string" },
+          { "name": "higher_is_better", "type": "boolean" },
+          { "name": "is_primary", "type": "boolean" },
+          { "name": "role", "type": "string" }
         ]
       }
     },
@@ -534,14 +534,14 @@ Every `report build` produces one canonical package layout:
       "path": "metrics/headline.parquet",
       "format": "parquet",
       "mediatype": "application/vnd.apache.parquet",
-      "ehp": {"kind": "derived", "task": "arena"}
+      "ehp": { "kind": "derived", "task": "arena" }
     },
     {
       "name": "figures_index",
       "path": "figures/index.json",
       "format": "json",
       "mediatype": "application/json",
-      "ehp": {"kind": "figure-index"}
+      "ehp": { "kind": "figure-index" }
     }
   ],
   "ehp": {
@@ -557,7 +557,7 @@ Every `report build` produces one canonical package layout:
 
 ## Reusable Python API
 
-The Typer commands are thin adapters over a stable Python API defined by `ReportService`.  Consumers (notebooks, CI scripts, library code) should use this API directly:
+The Typer commands are thin adapters over a stable Python API defined by `ReportService`. Consumers (notebooks, CI scripts, library code) should use this API directly:
 
 ```python
 from ehc_sn.reporting import ReportService, BuildReportRequest
@@ -605,34 +605,34 @@ report.figure_entry("arena-task-layout", preferred_format="png")
 
 ## Design rules
 
-1. **`report` consumes artifacts.**  It never evaluates models, runs inference, or selects checkpoints.
+1. **`report` consumes artifacts.** It never evaluates models, runs inference, or selects checkpoints.
 
-2. **One canonical contract.**  Every CLI command operates on the same report package format (`datapackage.json` + resources).  Internal representations (legacy loaders, raw artifact readers) are never exposed through the CLI.
+2. **One canonical contract.** Every CLI command operates on the same report package format (`datapackage.json` + resources). Internal representations (legacy loaders, raw artifact readers) are never exposed through the CLI.
 
-3. **Metric semantics belong to `TaskScoringSpec`, not to hardcoded metric-name conventions.**  Derived views (headline metrics, pathway metrics) are computed via the task scoring registry, not by prefix matching on metric names.
+3. **Metric semantics belong to `TaskScoringSpec`, not to hardcoded metric-name conventions.** Derived views (headline metrics, pathway metrics) are computed via the task scoring registry, not by prefix matching on metric names.
 
-4. **The package is the interface.**  Notebooks and exports consume the package through `open_report_view()` or export tools.  They do not access evaluation artifacts directly.
+4. **The package is the interface.** Notebooks and exports consume the package through `open_report_view()` or export tools. They do not access evaluation artifacts directly.
 
-5. **Separation of extraction and rendering.**  `build` extracts data and produces figures by default, but `--no-render` defers rendering to a separate `render` step.  This accommodates slower or GPU-dependent figure generators.
+5. **Separation of extraction and rendering.** `build` extracts data and produces figures by default, but `--no-render` defers rendering to a separate `render` step. This accommodates slower or GPU-dependent figure generators.
 
-6. **Atomic writes.**  Every command that writes uses a temp directory + final rename.  Partial failures never leave a corrupted package.
+6. **Atomic writes.** Every command that writes uses a temp directory + final rename. Partial failures never leave a corrupted package.
 
-7. **Conservative defaults.**  No overwrite, no implicit deletion, deterministic case selection, validation before commit.
+7. **Conservative defaults.** No overwrite, no implicit deletion, deterministic case selection, validation before commit.
 
 ---
 
 ## Exit code contract
 
-| Code | Meaning | Commands |
-|---|---|---|
-| 0 | Success | all |
-| 1 | Unexpected internal failure | all |
-| 2 | CLI usage error (reserved by Click/Typer) | all |
-| 3 | Invalid or incompatible source artifact | `build` |
-| 4 | Invalid report package or validation failure | `validate`, `build` |
-| 5 | Output conflict (destination exists, no `--overwrite`) | `build`, `render`, `export` |
-| 6 | Unsupported schema, task, profile, figure, or export format | `build`, `validate`, `render`, `export` |
-| 7 | Partial render/export failure | `render`, `export` |
+| Code | Meaning                                                     | Commands                                |
+| ---- | ----------------------------------------------------------- | --------------------------------------- |
+| 0    | Success                                                     | all                                     |
+| 1    | Unexpected internal failure                                 | all                                     |
+| 2    | CLI usage error (reserved by Click/Typer)                   | all                                     |
+| 3    | Invalid or incompatible source artifact                     | `build`                                 |
+| 4    | Invalid report package or validation failure                | `validate`, `build`                     |
+| 5    | Output conflict (destination exists, no `--overwrite`)      | `build`, `render`, `export`             |
+| 6    | Unsupported schema, task, profile, figure, or export format | `build`, `validate`, `render`, `export` |
+| 7    | Partial render/export failure                               | `render`, `export`                      |
 
 Machine-readable JSON output uses these error codes:
 

@@ -15,7 +15,7 @@
 
 The `train` command group replaces eight family-specific entry-point scripts
 (`scripts/training/tem_v1_arena.py`, `hrm_v1_mazehard.py`, …) with a single
-dispatch surface.  It owns **selection, resolution, validation, and execution**
+dispatch surface. It owns **selection, resolution, validation, and execution**
 of training runs; it does not own model construction, checkpoint I/O, or
 artifact publishing — those are delegated to the training application service
 (`ehp_sn.training.service`) and downstream packages.
@@ -51,30 +51,30 @@ Resolve a configuration, validate it, and execute one training run.
 ehp-sn train run [RECIPE] [OPTIONS]
 ```
 
-| Argument | Description |
-|---|---|
+| Argument | Description                                                                                     |
+| -------- | ----------------------------------------------------------------------------------------------- |
 | `RECIPE` | Registered training recipe (e.g. `tem-v1-arena`). Optional when `--config` declares the recipe. |
 
-| Option | Description |
-|---|---|
-| `-c, --config PATH` | Additional or standalone training configuration TOML. |
-| `--profile NAME` | Execution profile layered over the recipe (e.g. `gpu-8gb`). |
-| `--set PATH=VALUE` | Repeatable typed configuration override. |
-| `--resume PATH` | Resume complete training state from a checkpoint. |
-| `--init-from PATH` | Initialize model weights for a new run from a checkpoint. |
-| `--init-group NAME` | Repeatable semantic parameter group to load (e.g. `pfc_core`, `all`). |
-| `--output-dir PATH` | Explicit run output root. |
-| `--run-id TEXT` | Explicit run identifier. |
-| `--tag KEY=VALUE` | Repeatable run metadata tag. |
-| `--note TEXT` | Human-readable run annotation. |
-| `--seed INTEGER` | Explicit global seed (overrides config). |
-| `--device TEXT` | Runtime device: `auto`, `cpu`, `cuda`, `cuda:0`, `mps`. |
-| `--precision TEXT` | Precision policy (e.g. `16-mixed`, `bf16-mixed`, `32-true`). |
-| `--dry-run` | Resolve and validate without constructing models or training. |
-| `--print-config` | Print the effective resolved configuration to stdout. |
-| `--explain` | Print provenance for every resolved configuration field. |
-| `--yes` | Accept explicitly defined destructive actions (e.g. overwriting output). |
-| `--debug` | Enable repository-defined debug behaviour (full tracebacks). |
+| Option              | Description                                                              |
+| ------------------- | ------------------------------------------------------------------------ |
+| `-c, --config PATH` | Additional or standalone training configuration TOML.                    |
+| `--profile NAME`    | Execution profile layered over the recipe (e.g. `gpu-8gb`).              |
+| `--set PATH=VALUE`  | Repeatable typed configuration override.                                 |
+| `--resume PATH`     | Resume complete training state from a checkpoint.                        |
+| `--init-from PATH`  | Initialize model weights for a new run from a checkpoint.                |
+| `--init-group NAME` | Repeatable semantic parameter group to load (e.g. `pfc_core`, `all`).    |
+| `--output-dir PATH` | Explicit run output root.                                                |
+| `--run-id TEXT`     | Explicit run identifier.                                                 |
+| `--tag KEY=VALUE`   | Repeatable run metadata tag.                                             |
+| `--note TEXT`       | Human-readable run annotation.                                           |
+| `--seed INTEGER`    | Explicit global seed (overrides config).                                 |
+| `--device TEXT`     | Runtime device: `auto`, `cpu`, `cuda`, `cuda:0`, `mps`.                  |
+| `--precision TEXT`  | Precision policy (e.g. `16-mixed`, `bf16-mixed`, `32-true`).             |
+| `--dry-run`         | Resolve and validate without constructing models or training.            |
+| `--print-config`    | Print the effective resolved configuration to stdout.                    |
+| `--explain`         | Print provenance for every resolved configuration field.                 |
+| `--yes`             | Accept explicitly defined destructive actions (e.g. overwriting output). |
+| `--debug`           | Enable repository-defined debug behaviour (full tracebacks).             |
 
 #### Examples
 
@@ -118,14 +118,14 @@ ehp-sn train run --config config/training/custom-arena.toml
 
 #### Behaviour
 
-| Condition | Behaviour |
-|---|---|
-| `RECIPE` and `--config` both present | Recipe selects schema and builder; config TOML overlays defaults. The recipe must match the config's declared recipe field (if any). |
-| Only `--config` present | Config TOML must declare `recipe = "..."` to identify the schema. |
-| Only `RECIPE` present | Default recipe configuration is loaded. |
-| Neither present | Error — at least one is required. |
-| `--resume` and `--init-from` both present | Error — mutually exclusive. |
-| `--dry-run` | Resolution and validation run to completion; training is skipped. |
+| Condition                                 | Behaviour                                                                                                                            |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `RECIPE` and `--config` both present      | Recipe selects schema and builder; config TOML overlays defaults. The recipe must match the config's declared recipe field (if any). |
+| Only `--config` present                   | Config TOML must declare `recipe = "..."` to identify the schema.                                                                    |
+| Only `RECIPE` present                     | Default recipe configuration is loaded.                                                                                              |
+| Neither present                           | Error — at least one is required.                                                                                                    |
+| `--resume` and `--init-from` both present | Error — mutually exclusive.                                                                                                          |
+| `--dry-run`                               | Resolution and validation run to completion; training is skipped.                                                                    |
 
 ---
 
@@ -137,11 +137,11 @@ List registered training recipes.
 ehp-sn train list [OPTIONS]
 ```
 
-| Option | Description |
-|---|---|
-| `--task TEXT` | Filter by task name (e.g. `arena`, `mazehard`). |
-| `--model-family TEXT` | Filter by model family (e.g. `tem-v1`, `hrm-v2`). |
-| `--format table\|json` | Output format. Default: `table`. |
+| Option                 | Description                                       |
+| ---------------------- | ------------------------------------------------- |
+| `--task TEXT`          | Filter by task name (e.g. `arena`, `mazehard`).   |
+| `--model-family TEXT`  | Filter by model family (e.g. `tem-v1`, `hrm-v2`). |
+| `--format table\|json` | Output format. Default: `table`.                  |
 
 #### Example output (table)
 
@@ -168,12 +168,12 @@ constructing datasets, models, or a Trainer.
 ehp-sn train show [RECIPE] [OPTIONS]
 ```
 
-| Option | Description |
-|---|---|
-| `-c, --config PATH` | Additional or standalone configuration TOML. |
-| `--profile NAME` | Execution profile. |
-| `--set PATH=VALUE` | Repeatable typed configuration override. |
-| `--format toml\|json` | Output format. Default: `toml`. |
+| Option                | Description                                  |
+| --------------------- | -------------------------------------------- |
+| `-c, --config PATH`   | Additional or standalone configuration TOML. |
+| `--profile NAME`      | Execution profile.                           |
+| `--set PATH=VALUE`    | Repeatable typed configuration override.     |
+| `--format toml\|json` | Output format. Default: `toml`.              |
 
 This is useful for:
 
@@ -185,27 +185,27 @@ This is useful for:
 
 ### `train validate`
 
-Validate a training configuration and runtime prerequisites.  Three
+Validate a training configuration and runtime prerequisites. Three
 validation levels with escalating cost.
 
 ```
 ehp-sn train validate [RECIPE] [OPTIONS]
 ```
 
-| Option | Description |
-|---|---|
-| `-c, --config PATH` | Additional or standalone configuration TOML. |
-| `--profile NAME` | Execution profile. |
-| `--set PATH=VALUE` | Repeatable typed configuration override. |
-| `--level config\|resources\|build` | Validation depth. Default: `resources`. |
+| Option                             | Description                                  |
+| ---------------------------------- | -------------------------------------------- |
+| `-c, --config PATH`                | Additional or standalone configuration TOML. |
+| `--profile NAME`                   | Execution profile.                           |
+| `--set PATH=VALUE`                 | Repeatable typed configuration override.     |
+| `--level config\|resources\|build` | Validation depth. Default: `resources`.      |
 
 #### Validation levels
 
-| Level | Checks |
-|---|---|
-| `config` | Parse, compose, and schema-validate the effective configuration. |
+| Level       | Checks                                                                                                                                                                                        |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config`    | Parse, compose, and schema-validate the effective configuration.                                                                                                                              |
 | `resources` | All of `config`, plus: dataset paths exist, model checkpoint is accessible, accelerator is available, checkpoint compatibility, output directory is writable, `--resume` checkpoint is valid. |
-| `build` | All of `resources`, plus: construct the Lightning experiment (module + datamodule) and verify forward pass runs on a single batch. |
+| `build`     | All of `resources`, plus: construct the Lightning experiment (module + datamodule) and verify forward pass runs on a single batch.                                                            |
 
 ---
 
@@ -217,16 +217,16 @@ lives in the existing `config/training/*.toml` files.
 
 ### Registered recipes
 
-| Name | Task | Model | Objective |
-|---|---|---|---|
-| `tem-v1-arena` | arena | tem-v1 | variational-replay |
-| `tem-v2-arena` | arena | tem-v2 | variational-replay |
-| `hrm-v1-mazehard` | mazehard | hrm-v1 | supervised-act |
-| `hrm-v1-routebind` | routebind | hrm-v1 | supervised-act |
-| `hrm-v1-seqmaze` | seqmaze | hrm-v1 | supervised-act |
-| `hrm-v1-goaltrace` | goaltrace | hrm-v1 | supervised-act |
-| `hrm-v2-mazehard` | mazehard | hrm-v2 | actor-critic |
-| `hrm-v2-seqmaze` | seqmaze | hrm-v2 | actor-critic |
+| Name               | Task      | Model  | Objective          |
+| ------------------ | --------- | ------ | ------------------ |
+| `tem-v1-arena`     | arena     | tem-v1 | variational-replay |
+| `tem-v2-arena`     | arena     | tem-v2 | variational-replay |
+| `hrm-v1-mazehard`  | mazehard  | hrm-v1 | supervised-act     |
+| `hrm-v1-routebind` | routebind | hrm-v1 | supervised-act     |
+| `hrm-v1-seqmaze`   | seqmaze   | hrm-v1 | supervised-act     |
+| `hrm-v1-goaltrace` | goaltrace | hrm-v1 | supervised-act     |
+| `hrm-v2-mazehard`  | mazehard  | hrm-v2 | actor-critic       |
+| `hrm-v2-seqmaze`   | seqmaze   | hrm-v2 | actor-critic       |
 
 ### Recipe entry structure
 
@@ -244,7 +244,7 @@ class TrainingRecipe:
 ```
 
 Recipes are registered in a lazy-populated catalogue (`TrainingRecipeCatalogue`)
-inside `ehp_sn.training.recipes`.  The catalogue is intentionally closed;
+inside `ehp_sn.training.recipes`. The catalogue is intentionally closed;
 adding a new recipe requires a code change.
 
 ---
@@ -252,7 +252,7 @@ adding a new recipe requires a code change.
 ## Configuration precedence
 
 The final effective configuration is resolved by layering sources in strict
-order.  Later sources override earlier ones.
+order. Later sources override earlier ones.
 
 ```
  1. Schema defaults              ConfigType field defaults
@@ -265,13 +265,13 @@ order.  Later sources override earlier ones.
 
 Dedicated flags (`--seed`, `--device`, `--precision`, `--output-dir`,
 `--run-id`, `--resume`, `--init-from`) override equivalent configuration
-fields.  The resolved configuration records that the value originated from
+fields. The resolved configuration records that the value originated from
 the command line.
 
 ### `--set` override syntax
 
-Overrides use a repeatable `--set PATH=VALUE` syntax.  The path is a
-dot-separated key into the configuration hierarchy.  Values are parsed using
+Overrides use a repeatable `--set PATH=VALUE` syntax. The path is a
+dot-separated key into the configuration hierarchy. Values are parsed using
 TOML scalar syntax:
 
 ```bash
@@ -306,11 +306,11 @@ These are separate contracts with different semantics.
 ehp-sn train run tem-v1-arena --resume checkpoints/run-abc/last.ckpt
 ```
 
-| Property | Value |
-|---|---|
+| Property         | Value                                                                                                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | What is restored | Model parameters, optimizer state, scheduler state, step counters, gradient scaler, callback state, RNG state (where supported), data/rollout state (where supported). |
-| New run identity | No — the same logical training lineage continues. |
-| Configuration | Loaded from the original run manifest; `--config` and `--set` are validated for compatibility. |
+| New run identity | No — the same logical training lineage continues.                                                                                                                      |
+| Configuration    | Loaded from the original run manifest; `--config` and `--set` are validated for compatibility.                                                                         |
 
 ### Initialisation (`--init-from`)
 
@@ -320,12 +320,12 @@ ehp-sn train run tem-v1-arena \
     --init-group all
 ```
 
-| Property | Value |
-|---|---|
-| What is restored | Selected model parameter groups only. |
-| New run identity | Yes — a new training lineage starts. |
-| Configuration | Resolved normally from recipe and overrides. |
-| Semantic groups | `all`, `pfc_core`, `striatum` (HRM); family-specific groups defined by model contracts. |
+| Property         | Value                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| What is restored | Selected model parameter groups only.                                                   |
+| New run identity | Yes — a new training lineage starts.                                                    |
+| Configuration    | Resolved normally from recipe and overrides.                                            |
+| Semantic groups  | `all`, `pfc_core`, `striatum` (HRM); family-specific groups defined by model contracts. |
 
 `--resume` and `--init-from` are mutually exclusive.
 
@@ -367,16 +367,16 @@ separate `jobs` or `launch` surface.
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Success. |
-| `2` | CLI usage or parsing error. |
-| `3` | Configuration resolution or validation failure. |
-| `4` | Missing resource or incompatible artifact. |
-| `5` | Experiment construction failure. |
-| `6` | Training execution failure. |
-| `7` | Artifact publication failure. |
-| `130` | Interrupted by user (SIGINT). |
+| Code  | Meaning                                         |
+| ----- | ----------------------------------------------- |
+| `0`   | Success.                                        |
+| `2`   | CLI usage or parsing error.                     |
+| `3`   | Configuration resolution or validation failure. |
+| `4`   | Missing resource or incompatible artifact.      |
+| `5`   | Experiment construction failure.                |
+| `6`   | Training execution failure.                     |
+| `7`   | Artifact publication failure.                   |
+| `130` | Interrupted by user (SIGINT).                   |
 
 Errors identify: what failed, which source introduced the value, the
 invalid value, the expected form, and the probable correction.
@@ -438,7 +438,7 @@ value = "tem-v1-arena-baseline"
 ```
 
 When `--config` is supplied without a positional recipe, the `recipe` field
-identifies the schema and builder.  When both are supplied, the CLI verifies
+identifies the schema and builder. When both are supplied, the CLI verifies
 they match.
 
 ---
@@ -446,7 +446,7 @@ they match.
 ## Hardware profiles
 
 Hardware profiles separate environment-dependent settings from experiment
-semantics.  They live in `config/training/profiles/`.
+semantics. They live in `config/training/profiles/`.
 
 ```
 config/training/profiles/
@@ -466,14 +466,14 @@ precision = "16-mixed"
 enable_progress_bar = true
 ```
 
-Selected via `--profile gpu-8gb`.  When no profile is given, the recipe's
+Selected via `--profile gpu-8gb`. When no profile is given, the recipe's
 default profile is used.
 
 ---
 
 ## Underlying Python API
 
-The CLI is a thin adapter around the training application service.  The
+The CLI is a thin adapter around the training application service. The
 same API can be called from tests, notebooks, SLURM entry points, and
 automated experiment agents.
 
@@ -588,7 +588,7 @@ if __name__ == "__main__":
 ```
 
 These wrappers are preserved for backward compatibility and scheduled
-for removal in a future release.  New tooling and documentation should
+for removal in a future release. New tooling and documentation should
 use the CLI surface.
 
 ---
@@ -614,8 +614,8 @@ src/ehp_sn/training/
 
 ## Related documentation
 
-| Document | Description |
-|---|---|
+| Document                                      | Description                                                                 |
+| --------------------------------------------- | --------------------------------------------------------------------------- |
 | [`design/training.md`](../design/training.md) | Internal design — training execution policy, contracts, and layer ownership |
-| [`cli/index.md`](index.md) | CLI overview and conventions |
-| [`cli/evaluate.md`](evaluate.md) | Evaluation CLI — companion to training |
+| [`cli/index.md`](index.md)                    | CLI overview and conventions                                                |
+| [`cli/evaluate.md`](evaluate.md)              | Evaluation CLI — companion to training                                      |
